@@ -49,6 +49,7 @@ def _initial_input() -> InitialAgentInput:
 def _send(message: str) -> TurnDecision:
     return TurnDecision(
         rankings=[MessageScore(message_id="101", score=10, reasoning="direct")],
+        response_language="english",
         response=ResponseBody(
             target_message_id="101",
             reply_directly=False,

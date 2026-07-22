@@ -63,6 +63,7 @@ def _send(
                 reasoning="test fixture: assumed direct engagement",
             )
         ],
+        response_language="english",
         response=ResponseBody(
             target_message_id=target_message_id,
             reply_directly=reply_directly,
@@ -91,6 +92,7 @@ def _no_send(
                 reasoning="test fixture: assumed bystander",
             )
         ],
+        response_language="english",
         response=None,
         topic=topic,
         continue_watching=continue_watching,
@@ -713,6 +715,7 @@ def test_turn_decision_rejects_response_without_qualifying_score():
             rankings=[
                 MessageScore(message_id="1", score=2, reasoning="bystander")
             ],
+            response_language="english",
             response=ResponseBody(target_message_id="1", message="hi"),
             topic="x",
         )
@@ -725,6 +728,7 @@ def test_turn_decision_rejects_response_pointing_at_unscored_message():
             rankings=[
                 MessageScore(message_id="1", score=10, reasoning="direct")
             ],
+            response_language="english",
             response=ResponseBody(target_message_id="999", message="hi"),
             topic="x",
         )
@@ -736,7 +740,71 @@ def test_turn_decision_allows_no_response():
         rankings=[
             MessageScore(message_id="1", score=3, reasoning="not for me")
         ],
+        response_language="english",
         response=None,
         topic="x",
     )
     assert decision.response is None
+
+
+def test_turn_decision_requires_response_language():
+    with pytest.raises(ValueError):
+        TurnDecision(
+            rankings=[
+                MessageScore(message_id="1", score=10, reasoning="direct")
+            ],
+            response=ResponseBody(target_message_id="1", message="hi"),
+            topic="x",
+        )
+
+
+def test_turn_decision_allows_non_english_redirect():
+    decision = TurnDecision(
+        rankings=[MessageScore(message_id="1", score=10, reasoning="direct")],
+        response_language=" Spanish ",
+        response=ResponseBody(
+            target_message_id="1",
+            message="Please use English so I can help.",
+        ),
+        topic="x",
+    )
+
+    assert decision.response_language == "spanish"
+
+
+def test_turn_decision_allows_silence_after_non_english_warning():
+    decision = TurnDecision(
+        rankings=[MessageScore(message_id="1", score=10, reasoning="direct")],
+        response_language="spanish",
+        response=None,
+        topic="x",
+    )
+
+    assert decision.response is None
+
+
+@pytest.mark.parametrize(
+    ("message", "voice_summary"),
+    [
+        ("Here is how to fix the KeyError.", None),
+        ("Please use English. " + "x" * 230, None),
+        ("Please use English.", "Please use English."),
+    ],
+)
+def test_turn_decision_rejects_invalid_non_english_response(
+    message: str,
+    voice_summary: str | None,
+):
+    with pytest.raises(ValueError):
+        TurnDecision(
+            rankings=[
+                MessageScore(message_id="1", score=10, reasoning="direct")
+            ],
+            response_language="spanish",
+            response=ResponseBody(
+                target_message_id="1",
+                message=message,
+                voice_summary=voice_summary,
+            ),
+            topic="x",
+        )
