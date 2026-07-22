@@ -9,6 +9,7 @@
 import datetime
 
 BUMP_CHANNEL = {{cfg.bump_channel_id}}
+BUMP_KING_ANNOUNCEMENT_CHANNEL = {{cfg.bump_king_announcement_channel_id}}
 REMINDER_PING_ROLE = {{cfg.reminder_ping_role_id}}
 DISBOARD_ID = "302050872383242240"
 REMINDER_DELAY_SECONDS = 7200
@@ -41,9 +42,9 @@ def top_bumper(bumps):
 
 async def send_reminder():
     text = "It's been 2 hours since the last bump — run /bump to keep us at the top of Disboard!"
-    if REMINDER_PING_ROLE:
-        return await send_message(text, BUMP_CHANNEL, REMINDER_PING_ROLE)
-    return await send_message(text, BUMP_CHANNEL)
+    return await send_message(
+        f"<@&{REMINDER_PING_ROLE}> {text}", BUMP_CHANNEL, REMINDER_PING_ROLE
+    )
 
 
 async def run():
@@ -109,7 +110,10 @@ async def run():
             await remove_role(previous_king, {{cfg.bump_king_role_id}})
         await add_role(new_king, {{cfg.bump_king_role_id}})
         await guild_memory_set("disboard_king_id", new_king)
-        await send_message(f"👑 <@{new_king}> is the new Bump King!", BUMP_CHANNEL)
+        await send_message(
+            f"👑 <@{new_king}> is the new Bump King!",
+            BUMP_KING_ANNOUNCEMENT_CHANNEL,
+        )
 
     # Arm the one-shot reminder for 2 hours after this bump.
     await schedule_timer(REMINDER_DELAY_SECONDS, {"bump_at": now})
