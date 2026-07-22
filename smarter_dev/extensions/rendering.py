@@ -18,19 +18,16 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC
+from datetime import datetime
 
-from smarter_dev.extensions.schema import (
-    ConfigField,
-    ExtensionManifest,
-    HandlerTemplate,
-)
+from smarter_dev.extensions.schema import ConfigField
+from smarter_dev.extensions.schema import ExtensionManifest
+from smarter_dev.extensions.schema import HandlerTemplate
 from smarter_dev.web.handler_lint import lint_script
-from smarter_dev.web.handler_schedule import (
-    ScheduleError,
-    first_fire_at,
-    validate_interval,
-)
+from smarter_dev.web.handler_schedule import ScheduleError
+from smarter_dev.web.handler_schedule import first_fire_at
+from smarter_dev.web.handler_schedule import validate_time_trigger_settings
 
 # A Discord snowflake: 15–20 digits, nothing else. This is the injection guard
 # for ids emitted as quoted literals.
@@ -149,9 +146,7 @@ def _literal(field_type: str, value: str | int | bool) -> str:
     return "True" if value else "False"
 
 
-def render_script(
-    template: str, manifest: ExtensionManifest, config: dict
-) -> str:
+def render_script(template: str, manifest: ExtensionManifest, config: dict) -> str:
     """Substitute every ``{{cfg.*}}`` in a script with a typed literal token."""
     fields = _fields_by_name(manifest)
 
@@ -199,18 +194,14 @@ def _render_string_value(
         name = exact.group(1)
         field = fields.get(name)
         if field is None:
-            raise RenderError(
-                f"settings reference undeclared config field {name!r}"
-            )
+            raise RenderError(f"settings reference undeclared config field {name!r}")
         return config[name]
 
     def _replace(match: re.Match) -> str:
         name = match.group(1)
         field = fields.get(name)
         if field is None:
-            raise RenderError(
-                f"settings reference undeclared config field {name!r}"
-            )
+            raise RenderError(f"settings reference undeclared config field {name!r}")
         return str(config[name])
 
     return _PLACEHOLDER_RE.sub(_replace, value)
@@ -294,7 +285,11 @@ def _check_rendered(item: RenderedHandler) -> None:
 
 def _check_schedule(item: RenderedHandler) -> None:
     try:
-        first_fire_at(item.trigger_type, item.settings, datetime.now(timezone.utc))
-        validate_interval(item.settings, uses_agent=_AGENT_TOKEN in item.script)
+        validate_time_trigger_settings(
+            item.trigger_type,
+            item.settings,
+            uses_agent=_AGENT_TOKEN in item.script,
+        )
+        first_fire_at(item.trigger_type, item.settings, datetime.now(UTC))
     except ScheduleError as exc:
         raise RenderError(f"handler {item.key!r} schedule invalid: {exc}") from exc

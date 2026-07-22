@@ -27,29 +27,39 @@ bodies via :func:`errors.plain_error`; malformed ``handler_id`` answers 422 via
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from uuid import UUID, uuid4
+from datetime import UTC
+from datetime import datetime
+from uuid import UUID
+from uuid import uuid4
 
-from litestar import Controller, delete, get, post, put
-from litestar.status_codes import HTTP_200_OK, HTTP_201_CREATED
-from pydantic import BaseModel, Field
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from skrift.auth.guards import APIKeyOnly, Permission
+from litestar import Controller
+from litestar import delete
+from litestar import get
+from litestar import post
+from litestar import put
+from litestar.status_codes import HTTP_200_OK
+from litestar.status_codes import HTTP_201_CREATED
+from pydantic import BaseModel
+from pydantic import Field
+from skrift.auth.guards import APIKeyOnly
+from skrift.auth.guards import Permission
 from skrift.workers import get_handle
 from skrift.workers import submit as worker_submit
+from sqlalchemy import func
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
-from smarter_dev.web.api_native.errors import (
-    BOT_API_EXCEPTION_HANDLERS,
-    parse_uuid_path,
-    plain_error,
-)
+from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
+from smarter_dev.web.api_native.errors import parse_uuid_path
+from smarter_dev.web.api_native.errors import plain_error
 from smarter_dev.web.handler_caps import MAX_ADMIN_HANDLERS_PER_GUILD
-from smarter_dev.web.handler_schedule import ScheduleError, first_fire_at
-from smarter_dev.web.models import ADMIN_HANDLER_TRIGGER_TYPES, AdminHandler
+from smarter_dev.web.handler_schedule import ScheduleError
+from smarter_dev.web.handler_schedule import first_fire_at
+from smarter_dev.web.handler_schedule import validate_time_trigger_settings
+from smarter_dev.web.models import ADMIN_HANDLER_TRIGGER_TYPES
+from smarter_dev.web.models import AdminHandler
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +159,11 @@ async def _name_taken(
 
 async def _reschedule(record: AdminHandler) -> None:
     """Cancel any pending fire and schedule the first fire from current settings."""
+    validate_time_trigger_settings(
+        record.trigger_type,
+        record.settings or {},
+        uses_agent="spawn_agent" in record.script,
+    )
     if record.scheduled_job_id:
         try:
             await get_handle(record.scheduled_job_id).cancel()
@@ -156,7 +171,7 @@ async def _reschedule(record: AdminHandler) -> None:
             logger.warning("could not cancel job %s", record.scheduled_job_id)
         record.scheduled_job_id = None
     fire_at = first_fire_at(
-        record.trigger_type, record.settings or {}, datetime.now(timezone.utc)
+        record.trigger_type, record.settings or {}, datetime.now(UTC)
     )
     job_id = uuid4().hex
     await worker_submit(
@@ -224,7 +239,7 @@ class AdminHandlerController(Controller):
             try:
                 await _reschedule(record)
             except ScheduleError as exc:
-                raise plain_error(422, str(exc))
+                raise plain_error(422, str(exc)) from exc
 
         await db_session.commit()
         await db_session.refresh(record)
@@ -246,7 +261,9 @@ class AdminHandlerController(Controller):
 
         if data.name is not None:
             name = _normalized_name(data.name)
-            if await _name_taken(db_session, record.guild_id, name, exclude_id=record.id):
+            if await _name_taken(
+                db_session, record.guild_id, name, exclude_id=record.id
+            ):
                 raise plain_error(
                     409,
                     f"an admin handler named {name!r} already exists in this guild",
@@ -263,7 +280,7 @@ class AdminHandlerController(Controller):
             try:
                 await _reschedule(record)
             except ScheduleError as exc:
-                raise plain_error(422, str(exc))
+                raise plain_error(422, str(exc)) from exc
 
         await db_session.commit()
         await db_session.refresh(record)
@@ -279,10 +296,14 @@ class AdminHandlerController(Controller):
         """List a guild's admin handlers; ``include_scripts`` adds the script
         bodies (used by the admin author to decide edit-vs-create)."""
         rows = (
-            await db_session.execute(
-                select(AdminHandler).where(AdminHandler.guild_id == guild_id)
+            (
+                await db_session.execute(
+                    select(AdminHandler).where(AdminHandler.guild_id == guild_id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         if include_scripts:
             return [
                 AdminHandlerDetail(**_to_response(r).model_dump(), script=r.script)

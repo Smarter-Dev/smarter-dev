@@ -11,12 +11,16 @@ not this API.)
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC
+from datetime import datetime
 
 import pytest
 from litestar.di import Provide
 from litestar.plugins.pydantic import PydanticPlugin
-from litestar.testing import TestClient, create_test_client
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from litestar.testing import TestClient
+from litestar.testing import create_test_client
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from smarter_dev.shared.database import Base
@@ -129,8 +133,12 @@ def test_create_admin_handler_rejects_include_bot_messages_on_non_message(client
 def test_update_admin_handler_rejects_include_bot_messages_on_non_message(client):
     created = client.post(
         "/api/admin/handlers",
-        json=_body(name="stat-counter", trigger_type="schedule",
-                   settings={"interval_seconds": 600}, script="pass\n"),
+        json=_body(
+            name="stat-counter",
+            trigger_type="schedule",
+            settings={"interval_seconds": 600},
+            script="pass\n",
+        ),
     )
     handler_id = created.json()["handler_id"]
     resp = client.put(
@@ -235,7 +243,12 @@ def test_edit_admin_rename_collision_is_conflict(client):
 def test_edit_unknown_admin_handler_is_404(client):
     resp = client.put(
         "/api/admin/handlers/00000000-0000-0000-0000-000000000000",
-        json={"description": "d", "script": "pass\n", "settings": {}, "channel_ids": []},
+        json={
+            "description": "d",
+            "script": "pass\n",
+            "settings": {},
+            "channel_ids": [],
+        },
     )
     assert resp.status_code == 404
     assert resp.json() == {"detail": "admin handler not found"}
@@ -283,6 +296,21 @@ def test_create_scheduled_admin_handler_schedules_fire(client):
     resp = client.post("/api/admin/handlers", json=body)
     assert resp.status_code == 201
     assert resp.json()["channel_ids"] == ["MODCHAT"]
+
+
+def test_admin_schedule_start_at_is_persisted_and_used_for_first_fire(client):
+    start_at = "2099-08-01T14:30:00+00:00"
+    body = _body(
+        trigger_type="schedule",
+        settings={"interval_seconds": 3600, "start_at": start_at},
+        channel_ids=["MODCHAT"],
+        script='await send_message("tick", "MODCHAT")\n',
+    )
+    resp = client.post("/api/admin/handlers", json=body)
+    assert resp.status_code == 201
+    assert resp.json()["settings"]["start_at"] == start_at
+    _, kwargs = client.submitted[0]  # type: ignore[attr-defined]
+    assert kwargs["scheduled_for"] == datetime(2099, 8, 1, 14, 30, tzinfo=UTC)
 
 
 @pytest.mark.parametrize(

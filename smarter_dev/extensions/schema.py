@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel
+from pydantic import ConfigDict
+from pydantic import field_validator
+from pydantic import model_validator
 
 from smarter_dev.web.models import ADMIN_HANDLER_TRIGGER_TYPES
 
@@ -29,6 +32,7 @@ _SCHEDULE_TIMING_KEYS = {
     "schedule": {"interval_seconds": "int", "daily_time": "string"},
     "timer": {"delay_seconds": "int", "fire_at": "string"},
 }
+_SCHEDULE_OPTIONAL_KEYS = {"schedule": {"start_at": "string"}, "timer": {}}
 _TIME_TRIGGERS = tuple(_SCHEDULE_TIMING_KEYS)
 
 _CONFIG_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
@@ -83,19 +87,13 @@ class ConfigField(BaseModel):
         # bool is an int subclass — check it first so a bool never satisfies int.
         if self.type in ("channel_id", "role_id", "string"):
             if not isinstance(self.default, str):
-                raise ValueError(
-                    f"config field {self.name!r} default must be a string"
-                )
+                raise ValueError(f"config field {self.name!r} default must be a string")
         elif self.type == "int":
             if isinstance(self.default, bool) or not isinstance(self.default, int):
-                raise ValueError(
-                    f"config field {self.name!r} default must be an int"
-                )
+                raise ValueError(f"config field {self.name!r} default must be an int")
         elif self.type == "bool":
             if not isinstance(self.default, bool):
-                raise ValueError(
-                    f"config field {self.name!r} default must be a bool"
-                )
+                raise ValueError(f"config field {self.name!r} default must be a bool")
         return self
 
 
@@ -226,8 +224,22 @@ class ExtensionManifest(BaseModel):
                 f"handler {handler.key!r}: a {handler.trigger_type} handler's "
                 f"settings must contain exactly one of {tuple(allowed)}"
             )
-        key = present[0]
-        expected = allowed[key]
+        ExtensionManifest._check_timing_value(
+            handler, present[0], allowed[present[0]], field_types
+        )
+        for key, expected in _SCHEDULE_OPTIONAL_KEYS[handler.trigger_type].items():
+            if key in handler.settings:
+                ExtensionManifest._check_timing_value(
+                    handler, key, expected, field_types
+                )
+
+    @staticmethod
+    def _check_timing_value(
+        handler: HandlerTemplate,
+        key: str,
+        expected: str,
+        field_types: dict[str, str],
+    ) -> None:
         value = handler.settings[key]
         if isinstance(value, str):
             referenced = _exact_placeholder(value)

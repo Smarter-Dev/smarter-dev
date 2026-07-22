@@ -5,13 +5,20 @@ Author and judge are injected, so these run with no model calls.
 
 from __future__ import annotations
 
-from smarter_dev.bot.agents.handler_authoring import (
-    HandlerPlan,
-    JudgeVerdict,
-    describe_trigger,
-    run_creation_pipeline,
-    script_uses_agent,
-)
+from datetime import UTC
+from datetime import datetime
+
+from smarter_dev.bot.agents.handler_authoring import AdminHandlerPlan
+from smarter_dev.bot.agents.handler_authoring import HandlerPlan
+from smarter_dev.bot.agents.handler_authoring import JudgeVerdict
+from smarter_dev.bot.agents.handler_authoring import _build_admin_author_prompt
+from smarter_dev.bot.agents.handler_authoring import _build_author_prompt
+from smarter_dev.bot.agents.handler_authoring import checklist_failures
+from smarter_dev.bot.agents.handler_authoring import describe_trigger
+from smarter_dev.bot.agents.handler_authoring import run_admin_creation_pipeline
+from smarter_dev.bot.agents.handler_authoring import run_creation_pipeline
+from smarter_dev.bot.agents.handler_authoring import script_uses_agent
+from smarter_dev.bot.agents.handler_authoring import strictest_verdict
 
 GOOD_SCRIPT = 'if "huzzah" in context["message_content"].lower():\n    await add_reaction(context["message_id"], "🎉")\n'
 
@@ -33,6 +40,8 @@ EXISTING = [
         "script": 'await send_message("digest")\n',
     },
 ]
+
+NOW_UTC = datetime(2026, 7, 22, 18, 30, tzinfo=UTC)
 
 
 def _plan(**over):
@@ -65,6 +74,7 @@ def _verdict(approved=True, reason="ok", **overrides):
         "agent_verdict_safe": True,
         "actions_appropriate": True,
         "transparent": True,
+        "schedule_reasonable": True,
         "approved": approved,
         "reason": reason,
     }
@@ -143,7 +153,9 @@ async def test_edit_targets_existing_handler():
 
 
 async def test_edit_of_unknown_target_is_rejected():
-    plan = _plan(action="edit", target_handler_id="99999999-9999-9999-9999-999999999999")
+    plan = _plan(
+        action="edit", target_handler_id="99999999-9999-9999-9999-999999999999"
+    )
     result = await run_creation_pipeline(
         request="x",
         trigger_type="message",
@@ -281,18 +293,63 @@ async def test_judge_receives_trigger_cadence():
     await run_creation_pipeline(
         request="post fib",
         trigger_type="schedule",
-        settings={"interval_seconds": 300},
+        settings={"interval_seconds": 300, "start_at": "2026-07-22T19:00:00Z"},
         existing_handlers=[],
         author=_author_returning(
             _plan(
                 trigger_type="schedule",
-                settings={"interval_seconds": 300},
+                settings={
+                    "interval_seconds": 300,
+                    "start_at": "2026-07-22T19:00:00Z",
+                },
                 script='await send_message("0,1,1,2")\n',
             )
         ),
         judge=judge,
+        now_utc=NOW_UTC,
     )
     assert "every 5 minutes" in seen["ctx"]
+    assert NOW_UTC.isoformat() in seen["ctx"]
+    assert "Candidate action: create" in seen["ctx"]
+    assert '"start_at": "2026-07-22T19:00:00Z"' in seen["ctx"]
+    assert "post fib" in seen["ctx"]
+
+
+def test_author_prompts_receive_trusted_current_utc():
+    standard = _build_author_prompt("post later", "schedule", {}, [], NOW_UTC)
+    admin = _build_admin_author_prompt("post later", [], NOW_UTC)
+    assert f"Trusted current UTC date and time: {NOW_UTC.isoformat()}" in standard
+    assert f"Trusted current UTC date and time: {NOW_UTC.isoformat()}" in admin
+
+
+async def test_schedule_reasonable_failure_blocks_installation():
+    async def judge(script, trigger_context):
+        return _verdict(
+            approved=True,
+            schedule_reasonable=False,
+            reason="the requested start is implausibly far in the future",
+        )
+
+    result = await run_creation_pipeline(
+        request="post soon",
+        trigger_type="schedule",
+        settings={},
+        existing_handlers=[],
+        author=_author_returning(
+            _plan(
+                trigger_type="schedule",
+                settings={
+                    "interval_seconds": 300,
+                    "start_at": "2099-01-01T00:00:00Z",
+                },
+                script='await send_message("later")\n',
+            )
+        ),
+        judge=judge,
+        now_utc=NOW_UTC,
+    )
+    assert not result.ok
+    assert "schedule_reasonable" in result.error
 
 
 def test_describe_trigger_dm_message():
@@ -332,7 +389,11 @@ def test_describe_trigger_cadence_phrasing():
 def test_describe_trigger_timer_mentions_self_rearm():
     # The timer cadence line must surface schedule_timer self re-arm and the
     # timer-context branch, since ANY trigger can receive a self-armed re-fire.
-    for settings in ({"delay_seconds": 120}, {"fire_at": "2026-06-27T08:00:00+00:00"}, {}):
+    for settings in (
+        {"delay_seconds": 120},
+        {"fire_at": "2026-06-27T08:00:00+00:00"},
+        {},
+    ):
         copy = describe_trigger("timer", settings)
         assert "schedule_timer" in copy
         assert "timer context" in copy
@@ -352,11 +413,6 @@ def test_describe_trigger_member_and_thread_cadence():
 
 
 # -- admin creation pipeline ---------------------------------------------------
-
-from smarter_dev.bot.agents.handler_authoring import (
-    AdminHandlerPlan,
-    run_admin_creation_pipeline,
-)
 
 ADMIN_SCRIPT = (
     'if context.get("author_joined_at"):\n'
@@ -522,6 +578,36 @@ async def test_admin_pipeline_accepts_member_trigger():
     assert "EVERY member join" in seen["ctx"]
 
 
+async def test_admin_schedule_reviewer_receives_current_utc_and_start():
+    seen = {}
+
+    async def judge(script, trigger_context):
+        seen["ctx"] = trigger_context
+        return _verdict(reason="ok")
+
+    result = await run_admin_creation_pipeline(
+        request="post an hourly audit starting tonight",
+        existing_handlers=[],
+        author=_admin_author_returning(
+            _admin_plan(
+                trigger_type="schedule",
+                name="hourly-audit",
+                settings={
+                    "interval_seconds": 3600,
+                    "start_at": "2026-07-22T23:00:00+00:00",
+                },
+                script='await send_message("audit", "MODCHAT")\n',
+            )
+        ),
+        judge=judge,
+        now_utc=NOW_UTC,
+    )
+    assert result.ok
+    assert NOW_UTC.isoformat() in seen["ctx"]
+    assert "2026-07-22T23:00:00+00:00" in seen["ctx"]
+    assert "post an hourly audit starting tonight" in seen["ctx"]
+
+
 async def test_admin_pipeline_accepts_message_edit_trigger():
     # message_edit is in the admin vocabulary; a create plan on it is accepted
     # and its edit-frequency cadence reaches the judge.
@@ -567,11 +653,6 @@ async def test_standard_pipeline_rejects_admin_only_trigger():
 
 
 # -- checklist verdict + dual-judge merge --------------------------------------
-
-from smarter_dev.bot.agents.handler_authoring import (
-    checklist_failures,
-    strictest_verdict,
-)
 
 
 def test_checklist_failures_names_failing_categories():
@@ -684,7 +765,7 @@ _TIMER_NO_BRANCH_SCRIPT = (
 _TIMER_WITH_BRANCH_SCRIPT = (
     'if context["trigger_type"] == "timer":\n'
     '    await remove_role(context["payload"]["user_id"], "888160821673349140")\n'
-    'else:\n'
+    "else:\n"
     '    await add_role(context["member_id"], "888160821673349140", reason="sus")\n'
     '    await schedule_timer(86400, {"user_id": context["member_id"]})\n'
 )

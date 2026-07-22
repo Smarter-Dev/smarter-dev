@@ -33,58 +33,57 @@ unchanged.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from uuid import UUID, uuid4
+from datetime import UTC
+from datetime import datetime
+from uuid import UUID
+from uuid import uuid4
 
-from litestar import Controller, delete, get, post, put
-from litestar.status_codes import HTTP_200_OK, HTTP_201_CREATED
-from pydantic import BaseModel, Field
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from skrift.auth.guards import APIKeyOnly, Permission
+from litestar import Controller
+from litestar import delete
+from litestar import get
+from litestar import post
+from litestar import put
+from litestar.status_codes import HTTP_200_OK
+from litestar.status_codes import HTTP_201_CREATED
+from pydantic import BaseModel
+from pydantic import Field
+from skrift.auth.guards import APIKeyOnly
+from skrift.auth.guards import Permission
 from skrift.workers import get_handle
 from skrift.workers import submit as worker_submit
+from sqlalchemy import func
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
-from smarter_dev.web.api_native.errors import (
-    BOT_API_EXCEPTION_HANDLERS,
-    parse_uuid_path,
-    plain_error,
-)
-from smarter_dev.web.handler_caps import (
-    ADMIN_FIRES_PER_MIN,
-    DM_FIRES_PER_AUTHOR_PER_MIN,
-    GUILD_MEMBER_EVENTS_PER_MIN,
-    MAX_HANDLERS_PER_CHANNEL,
-    WindowedLimiter,
-    dm_trigger_author_key,
-    fires_per_min_for_trigger,
-    guild_member_events_key,
-    handler_fire_key,
-)
-from smarter_dev.web.handler_schedule import (
-    ScheduleError,
-    first_fire_at,
-    validate_interval,
-)
+from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
+from smarter_dev.web.api_native.errors import parse_uuid_path
+from smarter_dev.web.api_native.errors import plain_error
+from smarter_dev.web.handler_caps import ADMIN_FIRES_PER_MIN
+from smarter_dev.web.handler_caps import DM_FIRES_PER_AUTHOR_PER_MIN
+from smarter_dev.web.handler_caps import GUILD_MEMBER_EVENTS_PER_MIN
+from smarter_dev.web.handler_caps import MAX_HANDLERS_PER_CHANNEL
+from smarter_dev.web.handler_caps import WindowedLimiter
+from smarter_dev.web.handler_caps import dm_trigger_author_key
+from smarter_dev.web.handler_caps import fires_per_min_for_trigger
+from smarter_dev.web.handler_caps import guild_member_events_key
+from smarter_dev.web.handler_caps import handler_fire_key
+from smarter_dev.web.handler_schedule import ScheduleError
+from smarter_dev.web.handler_schedule import first_fire_at
+from smarter_dev.web.handler_schedule import validate_time_trigger_settings
 from smarter_dev.web.handlers_jobs import HandlerFirePayload
-from smarter_dev.web.member_activity import (
-    activity_facts,
-    get_activity,
-    record_activity,
-)
-from smarter_dev.web.models import (
-    ADMIN_HANDLER_EVENT_TRIGGERS,
-    ADMIN_ONLY_TRIGGER_TYPES,
-    ADMIN_SYNTHETIC_TRIGGER_TYPES,
-    HANDLER_EVENT_TRIGGERS,
-    HANDLER_TRIGGER_TYPES,
-    AdminHandler,
-    ChannelHandler,
-)
+from smarter_dev.web.member_activity import activity_facts
+from smarter_dev.web.member_activity import get_activity
+from smarter_dev.web.member_activity import record_activity
+from smarter_dev.web.models import ADMIN_HANDLER_EVENT_TRIGGERS
+from smarter_dev.web.models import ADMIN_ONLY_TRIGGER_TYPES
+from smarter_dev.web.models import ADMIN_SYNTHETIC_TRIGGER_TYPES
+from smarter_dev.web.models import HANDLER_EVENT_TRIGGERS
+from smarter_dev.web.models import HANDLER_TRIGGER_TYPES
+from smarter_dev.web.models import AdminHandler
+from smarter_dev.web.models import ChannelHandler
 
 logger = logging.getLogger(__name__)
 
@@ -218,9 +217,13 @@ async def _name_taken(
 
 async def _schedule_first_fire(record: ChannelHandler) -> None:
     """For a time trigger, validate the floor and enqueue the first fire."""
-    validate_interval(record.settings or {}, uses_agent="spawn_agent" in record.script)
+    validate_time_trigger_settings(
+        record.trigger_type,
+        record.settings or {},
+        uses_agent="spawn_agent" in record.script,
+    )
     fire_at = first_fire_at(
-        record.trigger_type, record.settings or {}, datetime.now(timezone.utc)
+        record.trigger_type, record.settings or {}, datetime.now(UTC)
     )
     job_id = uuid4().hex
     await worker_submit(
@@ -295,7 +298,7 @@ class HandlerController(Controller):
             try:
                 await _schedule_first_fire(record)
             except ScheduleError as exc:
-                raise plain_error(422, str(exc))
+                raise plain_error(422, str(exc)) from exc
 
         await db_session.commit()
         await db_session.refresh(record)
@@ -317,7 +320,9 @@ class HandlerController(Controller):
 
         if data.name is not None:
             name = _normalized_name(data.name)
-            if await _name_taken(db_session, record.channel_id, name, exclude_id=record.id):
+            if await _name_taken(
+                db_session, record.channel_id, name, exclude_id=record.id
+            ):
                 raise plain_error(
                     409,
                     f"a handler named {name!r} already exists in this channel",
@@ -330,6 +335,14 @@ class HandlerController(Controller):
         record.enabled = True
 
         if record.trigger_type not in HANDLER_EVENT_TRIGGERS:
+            try:
+                validate_time_trigger_settings(
+                    record.trigger_type,
+                    record.settings or {},
+                    uses_agent="spawn_agent" in record.script,
+                )
+            except ScheduleError as exc:
+                raise plain_error(422, str(exc)) from exc
             # Timing may have changed: cancel the pending fire and schedule afresh.
             if record.scheduled_job_id:
                 await _cancel_scheduled_job(record)
@@ -337,7 +350,7 @@ class HandlerController(Controller):
             try:
                 await _schedule_first_fire(record)
             except ScheduleError as exc:
-                raise plain_error(422, str(exc))
+                raise plain_error(422, str(exc)) from exc
 
         await db_session.commit()
         await db_session.refresh(record)
@@ -353,10 +366,16 @@ class HandlerController(Controller):
         """List a channel's handlers; ``include_scripts`` adds the script bodies
         (used by the authoring agent to decide edit-vs-create)."""
         rows = (
-            await db_session.execute(
-                select(ChannelHandler).where(ChannelHandler.channel_id == channel_id)
+            (
+                await db_session.execute(
+                    select(ChannelHandler).where(
+                        ChannelHandler.channel_id == channel_id
+                    )
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         if include_scripts:
             return [
                 HandlerDetailResponse(**_to_response(r).model_dump(), script=r.script)
@@ -430,7 +449,7 @@ class HandlerController(Controller):
         # human-shaped activity facts for it (the bot-side batcher skips them for
         # the same reason).
         if data.trigger_type == "message" and author_id and not author_is_bot:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             row = await get_activity(db_session, data.guild_id, str(author_id))
             trigger_context.update(activity_facts(row, now))
             await record_activity(db_session, data.guild_id, str(author_id), now)
@@ -442,14 +461,18 @@ class HandlerController(Controller):
         # them (no ChannelHandler can match).
         if not is_admin_only:
             standard_rows = (
-                await db_session.execute(
-                    select(ChannelHandler).where(
-                        ChannelHandler.channel_id == data.channel_id,
-                        ChannelHandler.trigger_type == data.trigger_type,
-                        ChannelHandler.enabled.is_(True),
+                (
+                    await db_session.execute(
+                        select(ChannelHandler).where(
+                            ChannelHandler.channel_id == data.channel_id,
+                            ChannelHandler.trigger_type == data.trigger_type,
+                            ChannelHandler.enabled.is_(True),
+                        )
                     )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
             for standard in standard_rows:
                 if author_is_bot and not (standard.settings or {}).get(
                     "include_bot_messages"
@@ -473,14 +496,18 @@ class HandlerController(Controller):
         # alone. Every other trigger (including thread_create, dispatched with the
         # parent channel) matches when its scope includes the channel ([] = all).
         admin_rows = (
-            await db_session.execute(
-                select(AdminHandler).where(
-                    AdminHandler.guild_id == data.guild_id,
-                    AdminHandler.trigger_type == data.trigger_type,
-                    AdminHandler.enabled.is_(True),
+            (
+                await db_session.execute(
+                    select(AdminHandler).where(
+                        AdminHandler.guild_id == data.guild_id,
+                        AdminHandler.trigger_type == data.trigger_type,
+                        AdminHandler.enabled.is_(True),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         for admin_handler in admin_rows:
             if author_is_bot and not (admin_handler.settings or {}).get(
                 "include_bot_messages"

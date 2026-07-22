@@ -652,7 +652,12 @@ async def test_schedule_row_scheduled_fire_reschedules(monkeypatch):
     # A genuine scheduled fire of a "schedule" row enqueues the next occurrence.
     record = SimpleNamespace(
         enabled=True, script="pass", channel_id="C1", guild_id="G1",
-        trigger_type="schedule", settings={"interval_seconds": 300}, memory={},
+        trigger_type="schedule",
+        settings={
+            "interval_seconds": 300,
+            "start_at": "2099-01-01T00:00:00Z",
+        },
+        memory={},
     )
     submits, limiter_kwargs = [], []
 
@@ -669,8 +674,9 @@ async def test_schedule_row_scheduled_fire_reschedules(monkeypatch):
         )
     )
     assert len(submits) == 1
-    payload, _, _ = submits[0]
+    payload, scheduled_for, _ = submits[0]
     assert payload.trigger_context == {"trigger_type": "schedule"}
+    assert scheduled_for.isoformat() == "2099-01-01T00:00:00+00:00"
 
 
 async def test_schedule_row_timer_refire_does_not_reschedule(monkeypatch):
@@ -740,7 +746,12 @@ def _patch_admin_reschedule_job(monkeypatch, record, submits):
 async def test_admin_schedule_row_scheduled_fire_reschedules(monkeypatch):
     record = SimpleNamespace(
         enabled=True, script="pass", guild_id="G1", trigger_type="schedule",
-        channel_ids=["C1"], settings={"interval_seconds": 300}, memory={},
+        channel_ids=["C1"],
+        settings={
+            "interval_seconds": 300,
+            "start_at": "2099-01-01T00:00:00Z",
+        },
+        memory={},
     )
     submits: list = []
     _patch_admin_reschedule_job(monkeypatch, record, submits)
@@ -751,8 +762,9 @@ async def test_admin_schedule_row_scheduled_fire_reschedules(monkeypatch):
         )
     )
     assert len(submits) == 1
-    payload, _, _ = submits[0]
+    payload, scheduled_for, _ = submits[0]
     assert payload.trigger_context == {"trigger_type": "schedule"}
+    assert scheduled_for.isoformat() == "2099-01-01T00:00:00+00:00"
 
 
 async def test_admin_schedule_row_timer_refire_does_not_reschedule(monkeypatch):
