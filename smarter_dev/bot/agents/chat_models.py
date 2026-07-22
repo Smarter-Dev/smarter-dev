@@ -9,7 +9,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel
+from pydantic import Field
+from pydantic import field_validator
+from pydantic import model_validator
 
 
 class Author(BaseModel):
@@ -299,13 +302,31 @@ class TurnDecision(BaseModel):
             "only; the response decision flows from it."
         ),
     )
+    response_language: str = Field(
+        description=(
+            "Lowercase English name of the predominant natural language "
+            "used by the highest-scoring NEW message driving this turn, "
+            "not the language of your reply. Set exactly `english` when "
+            "that message is English, including English with incidental "
+            "foreign text, code, or logs. A normal content answer is only "
+            "allowed when this field is `english`. For any other value, "
+            "do not answer the content or call tools. If the message "
+            "scored >= 5, send only a short English redirect asking the "
+            "user to use English, or set response=None only if visible "
+            "history contains an earlier English-only redirect from you "
+            "to that same user."
+        ),
+    )
     response: ResponseBody | None = Field(
         default=None,
         description=(
             "Populate to speak; None to stay silent. Must be None when "
             "every ranking scored < 5; when the top NEW message scored "
             ">= 5 it was directed at you — respond unless you're "
-            "deliberately letting off-topic chatter pass (system prompt)."
+            "deliberately letting off-topic chatter pass (system prompt). "
+            "For a non-English prompting message scored >= 5, populate "
+            "this with the required English-only redirect unless visible "
+            "history proves that same user already received one."
         ),
     )
     continue_watching: bool = Field(
@@ -336,6 +357,14 @@ class TurnDecision(BaseModel):
             "the rules; the schema doesn't bias the count."
         ),
     )
+
+    @field_validator("response_language")
+    @classmethod
+    def _normalize_response_language(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not normalized:
+            raise ValueError("TurnDecision.response_language cannot be empty.")
+        return normalized
 
     @model_validator(mode="after")
     def _validate_response_against_rankings(self) -> "TurnDecision":
@@ -370,6 +399,23 @@ class TurnDecision(BaseModel):
                 f"refers to a message scored {match.score} (<5). Pick a "
                 f"target that scored >= 5, or set response=None."
             )
+        if self.response_language != "english":
+            message = (self.response.message or "").strip()
+            if not message or "english" not in message.lower():
+                raise ValueError(
+                    "A non-English prompting message may only receive a "
+                    "text redirect that explicitly asks for English."
+                )
+            if len(message) > 240:
+                raise ValueError(
+                    "A non-English prompting message's English redirect "
+                    "must be no longer than 240 characters."
+                )
+            if self.response.voice_summary is not None:
+                raise ValueError(
+                    "A non-English prompting message's English redirect "
+                    "must be text-only."
+                )
         return self
 
 

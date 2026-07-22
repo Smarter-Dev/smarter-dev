@@ -51,6 +51,7 @@ def _decision(rankings: list[tuple[str, int]]) -> TurnDecision:
             MessageScore(message_id=mid, score=score, reasoning="structural")
             for mid, score in rankings
         ],
+        response_language="english",
         response=ResponseBody(
             target_message_id=target_id,
             reply_directly=False,
