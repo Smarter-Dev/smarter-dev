@@ -1,0 +1,99 @@
+judge_scale:
+  grounding: "0-5: every claim supported by the frozen source; no outside facts"
+  instruction: "0-5: follows requested focus, format, and length"
+  coverage: "0-5: includes the case-specific critical points"
+  clarity: "0-5: concise, well organized, and preserves qualifications"
+
+cases:
+  - id: asyncio_cancellation
+    title: "Coroutines and Tasks"
+    url: "https://docs.python.org/3/library/asyncio-task.html"
+    content_file: "python_asyncio_tasks.md"
+    instruction: >-
+      In two short paragraphs, explain the cancellation guidance an application
+      developer needs when using TaskGroup. Cover cleanup and propagation,
+      why swallowing CancelledError is dangerous, the narrow uncancel exception,
+      and what TaskGroup does after a child fails. Do not discuss unrelated task APIs.
+    critical_points:
+      - "CancelledError is raised at the next opportunity and normally propagated after try/finally cleanup."
+      - "CancelledError subclasses BaseException."
+      - "Swallowing it can break TaskGroup/timeout structured concurrency."
+      - "Suppressing it intentionally also requires uncancel(), though this is discouraged."
+      - "A non-cancellation child failure cancels siblings and ultimately raises grouped exceptions."
+      - "Cancellation used to interrupt the containing task does not bubble out of the async-with block."
+    disallowed_claims:
+      - "Task.cancel() guarantees immediate cancellation."
+      - "Every child cancellation cancels all siblings."
+
+  - id: postgres_isolation
+    title: "PostgreSQL Transaction Isolation"
+    url: "https://www.postgresql.org/docs/current/transaction-iso.html"
+    content_file: "postgresql_transaction_isolation.md"
+    instruction: >-
+      In at most 180 words, compare PostgreSQL Read Committed, Repeatable Read,
+      and Serializable for an engineer choosing an isolation level. Focus on
+      snapshot timing, anomalies or consistency guarantees, blocking, and retry
+      obligations. Preserve important qualifications instead of declaring one
+      level universally best.
+    critical_points:
+      - "Read Committed takes a new snapshot per command, so successive SELECTs can differ."
+      - "A single Read Committed update can observe an inconsistent snapshot."
+      - "Repeatable Read keeps a transaction-level snapshot but can still permit serialization anomalies."
+      - "Repeatable Read transactions must be retried after serialization failures."
+      - "Serializable monitors dependencies, adds overhead but no blocking beyond Repeatable Read, and can abort transactions."
+      - "Serializable failures require whole-transaction retry and use SQLSTATE 40001."
+    disallowed_claims:
+      - "Repeatable Read guarantees serial execution."
+      - "Serializable prevents all transaction errors or never blocks."
+
+  - id: kubernetes_rollout_math
+    title: "Kubernetes Deployments"
+    url: "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/"
+    content_file: "kubernetes_deployment_rollouts.md"
+    instruction: >-
+      A Deployment has 10 desired replicas and uses the default RollingUpdate
+      percentages. Give a compact operational explanation of the resulting
+      maxUnavailable and maxSurge counts, including rounding. Then explain what
+      the default progress deadline does, what kubectl rollout status reports,
+      and whether the controller stops retrying. Mention the terminating-Pod
+      resource caveat. Use no more than six bullets.
+    critical_points:
+      - "25% maxUnavailable rounds down to 2."
+      - "25% maxSurge rounds up to 3."
+      - "The default progress deadline is 600 seconds."
+      - "Exceeded deadline yields Progressing=False / ProgressDeadlineExceeded and rollout status exits non-zero."
+      - "The Deployment controller continues retrying."
+      - "Terminating Pods can temporarily push resource use above replicas plus maxSurge."
+    disallowed_claims:
+      - "The controller automatically rolls back or stops after 600 seconds."
+      - "Both percentages use the same rounding direction."
+
+  - id: absent_postgres_detail
+    title: "PostgreSQL Transaction Isolation"
+    url: "https://www.postgresql.org/docs/current/transaction-iso.html"
+    content_file: "postgresql_transaction_isolation.md"
+    instruction: >-
+      According to this page, what is the default value of PostgreSQL's
+      deadlock_timeout setting, and what formula computes it? Answer in two
+      sentences.
+    critical_points:
+      - "States that the supplied page does not contain the requested value or formula."
+      - "Does not answer from outside knowledge."
+    disallowed_claims:
+      - "Provides any numeric deadlock_timeout default."
+      - "Invents a formula."
+
+  - id: kubernetes_exact_extraction
+    title: "Kubernetes Deployments"
+    url: "https://kubernetes.io/docs/concepts/workloads/controllers/deployment/"
+    content_file: "kubernetes_deployment_rollouts.md"
+    instruction: >-
+      Find and report how percentage values are converted to absolute numbers
+      for maxUnavailable and maxSurge. Keep the answer to two sentences.
+    critical_points:
+      - "Quotes the source wording that maxUnavailable percentages are rounded down."
+      - "Quotes the source wording that maxSurge percentages are rounded up."
+      - "Uses no more than two sentences."
+    disallowed_claims:
+      - "Only paraphrases the two rounding rules without any exact quotation."
+      - "Adds rollout advice that was not requested."

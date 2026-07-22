@@ -9,12 +9,17 @@ calling the (paid) summarizer.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
+from unittest.mock import MagicMock
+from unittest.mock import patch
 
 import pytest
 
-from smarter_dev.bot.agents import chat_tools, web_summarizer
-from smarter_dev.bot.agents.chat_tools import MAX_READ_CHARS, ChatDeps, web_read
+from smarter_dev.bot.agents import chat_tools
+from smarter_dev.bot.agents import web_summarizer
+from smarter_dev.bot.agents.chat_tools import MAX_READ_CHARS
+from smarter_dev.bot.agents.chat_tools import ChatDeps
+from smarter_dev.bot.agents.chat_tools import web_read
 
 
 def _ctx() -> SimpleNamespace:
@@ -22,6 +27,43 @@ def _ctx() -> SimpleNamespace:
     bot.rest = MagicMock()
     bot.rest.create_message = AsyncMock()
     return SimpleNamespace(deps=ChatDeps(bot=bot, channel_id=1, guild_id=2))
+
+
+def test_web_summarizer_prompt_favors_quotes_for_extraction():
+    assert "default to brief verbatim excerpts" in web_summarizer.SYSTEM_PROMPT
+    assert "enclosed in quotation marks" in web_summarizer.SYSTEM_PROMPT
+    assert "Do not silently paraphrase" in web_summarizer.SYSTEM_PROMPT
+    assert "MUST contain at least one relevant" in web_summarizer.SYSTEM_PROMPT
+    assert "without quotation marks does not satisfy" in (web_summarizer.SYSTEM_PROMPT)
+    assert "find, extract, identify, or report specific details" in (
+        web_summarizer.SYSTEM_PROMPT
+    )
+    assert "explicitly asks for a summary" in web_summarizer.SYSTEM_PROMPT
+
+
+def test_web_summarizer_uses_laguna_primary_and_low_thinking_gemini_fallback():
+    primary = MagicMock()
+    fallback = MagicMock()
+    with (
+        patch.object(
+            web_summarizer, "build_model_for", side_effect=[primary, fallback]
+        ),
+        patch.object(web_summarizer, "Agent") as agent_class,
+    ):
+        web_summarizer._build_agent(web_summarizer.PRIMARY_MODEL_KEY)
+        web_summarizer._build_agent(
+            web_summarizer.FALLBACK_MODEL_KEY,
+            reasoning_level=web_summarizer.ReasoningLevel.LOW,
+        )
+
+    assert primary is not fallback
+    primary_call, fallback_call = agent_class.call_args_list
+    assert primary_call.args == (primary,)
+    assert primary_call.kwargs["model_settings"] is None
+    assert fallback_call.args == (fallback,)
+    assert fallback_call.kwargs["model_settings"]["google_thinking_config"] == {
+        "thinking_level": "LOW"
+    }
 
 
 @pytest.mark.asyncio
@@ -63,7 +105,12 @@ async def test_web_read_truncates_over_limit():
             chat_tools.web_fetch,
             "fetch_via_jina",
             AsyncMock(
-                return_value={"title": "", "description": "", "content": big, "url": "u"}
+                return_value={
+                    "title": "",
+                    "description": "",
+                    "content": big,
+                    "url": "u",
+                }
             ),
         ),
         patch.object(
@@ -84,7 +131,12 @@ async def test_web_read_at_limit_not_truncated():
             chat_tools.web_fetch,
             "fetch_via_jina",
             AsyncMock(
-                return_value={"title": "", "description": "", "content": exact, "url": "u"}
+                return_value={
+                    "title": "",
+                    "description": "",
+                    "content": exact,
+                    "url": "u",
+                }
             ),
         ),
         patch.object(
@@ -120,7 +172,12 @@ async def test_web_read_empty_content_skips_summary():
             chat_tools.web_fetch,
             "fetch_via_jina",
             AsyncMock(
-                return_value={"title": "T", "description": "", "content": "   ", "url": "u"}
+                return_value={
+                    "title": "T",
+                    "description": "",
+                    "content": "   ",
+                    "url": "u",
+                }
             ),
         ),
         patch.object(chat_tools, "summarize_web_content", AsyncMock()) as summ,
@@ -258,7 +315,9 @@ async def test_web_read_audio_routes_to_media_reader():
             chat_tools, "describe_media", AsyncMock(return_value="someone says hi")
         ) as dm,
     ):
-        out = await web_read(ctx, "https://cdn.discord/x/voice-message.ogg?ex=1", "transcribe")
+        out = await web_read(
+            ctx, "https://cdn.discord/x/voice-message.ogg?ex=1", "transcribe"
+        )
 
     assert out["kind"] == "audio"
     assert out["summary"] == "someone says hi"
@@ -304,9 +363,7 @@ async def test_web_read_media_type_falls_back_to_extension():
         patch.object(
             chat_tools.web_fetch, "fetch_bytes", AsyncMock(return_value=(b"x", ""))
         ),
-        patch.object(
-            chat_tools, "describe_media", AsyncMock(return_value="ok")
-        ) as dm,
+        patch.object(chat_tools, "describe_media", AsyncMock(return_value="ok")) as dm,
     ):
         await web_read(ctx, "https://x/pic.jpg", "i")
 
@@ -329,3 +386,37 @@ async def test_summarize_web_content_builds_prompt_and_calls_agent():
     assert "look for prices" in prompt
     assert "BODY" in prompt
     assert "U" in prompt
+
+
+@pytest.mark.asyncio
+async def test_summarize_web_content_fails_over_to_gemini_and_logs_critical(caplog):
+    primary_agent = MagicMock()
+    primary_agent.run = AsyncMock(side_effect=RuntimeError("Laguna unavailable"))
+    fallback_agent = MagicMock()
+    fallback_agent.run = AsyncMock(return_value=SimpleNamespace(output="FALLBACK"))
+
+    with (
+        patch.object(
+            web_summarizer, "get_web_summarizer_agent", return_value=primary_agent
+        ),
+        patch.object(
+            web_summarizer,
+            "get_web_summarizer_fallback_agent",
+            return_value=fallback_agent,
+        ),
+        caplog.at_level("CRITICAL", logger=web_summarizer.__name__),
+    ):
+        result = await web_summarizer.summarize_web_content(
+            instruction="summarize",
+            content="BODY",
+            title="Example",
+            url="https://e.test",
+        )
+
+    assert result == "FALLBACK"
+    fallback_agent.run.assert_awaited_once_with(primary_agent.run.call_args.args[0])
+    assert "WEB SUMMARIZER FAILOVER" in caplog.text
+    assert "Laguna S 2.1 failed" in caplog.text
+    assert "using Gemini 3.1 Flash Lite" in caplog.text
+    assert "https://e.test" in caplog.text
+    assert "Laguna unavailable" in caplog.text
