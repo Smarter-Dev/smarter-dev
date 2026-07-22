@@ -70,6 +70,11 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: openai-api-key
+                  - name: OPENROUTER_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: openrouter-api-key
                   - name: DIGITALOCEAN_INFERENCE_API_KEY
                     valueFrom:
                       secretKeyRef:

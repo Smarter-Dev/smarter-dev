@@ -2,21 +2,18 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
+from unittest.mock import patch
 
 import pytest
 
 from smarter_dev.bot.agents import model_router
-from smarter_dev.shared.model_catalog import (
-    CatalogModel,
-    ModelProvider,
-    ReasoningLevel,
-    get_model,
-)
-from smarter_dev.bot.agents.model_router import (
-    build_model_for,
-    model_settings_for,
-)
+from smarter_dev.bot.agents.model_router import build_model_for
+from smarter_dev.bot.agents.model_router import model_settings_for
+from smarter_dev.shared.model_catalog import CatalogModel
+from smarter_dev.shared.model_catalog import ModelProvider
+from smarter_dev.shared.model_catalog import ReasoningLevel
+from smarter_dev.shared.model_catalog import get_model
 
 _DO_MODEL = get_model("kimi-k2-6")  # open weights, no reasoning knob
 _DO_REASONING_MODEL = get_model("glm-5-2")  # open weights with reasoning knob
@@ -24,6 +21,7 @@ _GOOGLE_MODEL = get_model("gemini-3-1-flash-lite")
 _OPENAI_MODEL = get_model("gpt-5-4")
 _ANTHROPIC_MODEL = get_model("claude-sonnet-5")
 _ANTHROPIC_NO_REASONING_MODEL = get_model("claude-haiku-4-5")
+_OPENROUTER_MODEL = get_model("poolside-laguna-xs-2-1")
 
 
 def test_digitalocean_threads_base_url_and_key(monkeypatch):
@@ -122,6 +120,33 @@ def test_anthropic_model_reads_anthropic_key(monkeypatch):
     )
 
 
+def test_openrouter_model_reads_standard_key(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-secret")
+    monkeypatch.setenv("OPEN_ROUTER", "legacy-secret")
+    with (
+        patch.object(model_router, "OpenAIChatModel") as chat_model,
+        patch.object(model_router, "OpenRouterProvider") as provider,
+    ):
+        build_model_for(_OPENROUTER_MODEL)
+
+    provider.assert_called_once_with(api_key="or-secret")
+    chat_model.assert_called_once_with(
+        _OPENROUTER_MODEL.model_id, provider=provider.return_value
+    )
+
+
+def test_openrouter_model_accepts_local_legacy_key(monkeypatch):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("OPEN_ROUTER", "legacy-secret")
+    with (
+        patch.object(model_router, "OpenAIChatModel"),
+        patch.object(model_router, "OpenRouterProvider") as provider,
+    ):
+        build_model_for(_OPENROUTER_MODEL)
+
+    provider.assert_called_once_with(api_key="legacy-secret")
+
+
 def test_unhandled_provider_raises():
     bogus = CatalogModel(
         key="x",
@@ -152,6 +177,8 @@ def test_model_settings_per_provider_uses_model_default():
     assert anthropic_settings["anthropic_effort"] == "high"
     # Claude Haiku 4.5 has no effort knob -> no settings at all.
     assert model_settings_for(_ANTHROPIC_NO_REASONING_MODEL) is None
+    # Poolside does not publish a reasoning-effort contract for these models.
+    assert model_settings_for(_OPENROUTER_MODEL) is None
 
 
 def test_model_settings_applies_selected_reasoning_level():

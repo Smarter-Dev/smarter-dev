@@ -2,20 +2,18 @@
 
 from __future__ import annotations
 
-from smarter_dev.shared.model_catalog import (
-    ALL_REASONING_LEVELS,
-    MODEL_CATALOG,
-    MODEL_FAMILIES,
-    CatalogModel,
-    ModelProvider,
-    ReasoningLevel,
-    catalog_by_key,
-    get_model,
-    is_valid_model_key,
-    models_by_family,
-    parse_reasoning_level,
-    resolve_reasoning_level,
-)
+from smarter_dev.shared.model_catalog import ALL_REASONING_LEVELS
+from smarter_dev.shared.model_catalog import MODEL_CATALOG
+from smarter_dev.shared.model_catalog import MODEL_FAMILIES
+from smarter_dev.shared.model_catalog import CatalogModel
+from smarter_dev.shared.model_catalog import ModelProvider
+from smarter_dev.shared.model_catalog import ReasoningLevel
+from smarter_dev.shared.model_catalog import catalog_by_key
+from smarter_dev.shared.model_catalog import get_model
+from smarter_dev.shared.model_catalog import is_valid_model_key
+from smarter_dev.shared.model_catalog import models_by_family
+from smarter_dev.shared.model_catalog import parse_reasoning_level
+from smarter_dev.shared.model_catalog import resolve_reasoning_level
 
 _DIGITALOCEAN_FAMILIES = {"Kimi", "GLM", "DeepSeek", "Gemma", "Qwen"}
 
@@ -93,6 +91,20 @@ def test_gemini_lineup_reflects_current_releases():
     assert get_model("gemini-3-1-flash-lite").model_id == "gemini-3.1-flash-lite"
 
 
+def test_poolside_models_route_through_openrouter():
+    expected = {
+        "poolside-laguna-xs-2-1": "poolside/laguna-xs-2.1",
+        "poolside-laguna-s-2-1": "poolside/laguna-s-2.1",
+    }
+    for key, model_id in expected.items():
+        model = get_model(key)
+        assert model is not None
+        assert model.model_id == model_id
+        assert model.family == "Poolside"
+        assert model.provider is ModelProvider.OPENROUTER
+        assert model.supports_reasoning is False
+
+
 def test_keys_are_unique():
     keys = [model.key for model in MODEL_CATALOG]
     assert len(keys) == len(set(keys))
@@ -133,6 +145,8 @@ def test_provider_routing_by_family():
             assert model.provider is ModelProvider.OPENAI
         elif model.family == "Claude":
             assert model.provider is ModelProvider.ANTHROPIC
+        elif model.family == "Poolside":
+            assert model.provider is ModelProvider.OPENROUTER
         elif model.family in _DIGITALOCEAN_FAMILIES:
             assert model.provider is ModelProvider.DIGITALOCEAN
         else:  # pragma: no cover - guarded by test_catalog_entries_are_well_formed

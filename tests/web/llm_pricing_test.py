@@ -10,7 +10,8 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
-from smarter_dev.web.llm_pricing import calc_cost, calc_session_cost
+from smarter_dev.web.llm_pricing import calc_cost
+from smarter_dev.web.llm_pricing import calc_session_cost
 
 
 class TestDigitalOceanPricing:
@@ -92,6 +93,28 @@ class TestDigitalOceanPricing:
             cache_read_tokens=600_000,
         )
         assert cost == Decimal("0.418")
+
+
+class TestOpenRouterPricing:
+    def test_laguna_s_rates(self):
+        assert calc_cost(
+            1_000_000, 1_000_000, "poolside/laguna-s-2.1"
+        ) == Decimal("0.30")
+
+    def test_laguna_xs_rates(self):
+        assert calc_cost(
+            1_000_000, 1_000_000, "poolside/laguna-xs-2.1"
+        ) == Decimal("0.18")
+
+    def test_laguna_cache_rate(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=600_000,
+            cache_write_tokens=0,
+            model_name="openrouter:poolside/laguna-xs-2.1",
+        )
+        assert cost == Decimal("0.042")
 
 
 class TestUnknownModelFallback:
