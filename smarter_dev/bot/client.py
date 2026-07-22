@@ -24,8 +24,11 @@ from smarter_dev.bot.audit_logger import log_message_edit
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.shared.config import Settings
 from smarter_dev.shared.config import get_settings
+from smarter_dev.shared.observability import configure_observability
 
 logger = logging.getLogger(__name__)
+
+configure_observability("smarter-dev-bot")
 
 
 async def start_health_server(bot: lightbulb.BotApp, port: int = 8080) -> web.AppRunner:

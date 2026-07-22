@@ -42,6 +42,7 @@ dependencies = [
     "skrift[passkeys]>=0.2.0a7",
     "pydantic-monty>=0.0.18",
     "polar-sdk>=0.31.7",
+    "logfire>=4.27.0,<5.0.0",
 ]
 
 [dependency-groups]
