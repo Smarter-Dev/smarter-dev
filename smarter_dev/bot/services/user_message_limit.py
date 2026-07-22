@@ -29,6 +29,7 @@ from redis.asyncio import Redis
 
 USER_MESSAGE_LIMIT = 60
 LIMIT_WINDOW_SECONDS = 4 * 60 * 60
+USAGE_WARNING_PERCENTAGES = (80, 90)
 
 # Mirrors the response gate in ``chat_models.TurnDecision``: a ranked message
 # scoring >= 5 was directed at the bot and is eligible for a reply, so it is
@@ -41,6 +42,11 @@ DIRECTED_SCORE_THRESHOLD = 5
 _OVER_LIMIT_NOTICE_TEMPLATE = (
     "> -# <@{user_id}> you've sent {limit} messages to the bot in the last "
     "{span}, you can try again {retry_tag}"
+)
+
+_USAGE_WARNING_NOTICE_TEMPLATE = (
+    "-# <@{user_id}> you've used {percentage}% of your 4hr chat bot limit, "
+    "resets <t:{reset_epoch}:R>"
 )
 
 # Below this many minutes the notice span reads in minutes; from here up it
@@ -70,23 +76,33 @@ class OverLimitStatus:
     retry_epoch: int
 
 
+@dataclass(frozen=True)
+class UsageWarning:
+    """A newly claimed usage threshold and when it falls below that level."""
+
+    percentage: int
+    reset_epoch: int
+
+
 async def record_directed_messages(
     redis: Redis, user_id: str, message_epochs: dict[str, float]
-) -> None:
+) -> list[UsageWarning]:
     """Count ``message_epochs`` (message id → send epoch) against ``user_id``.
 
     ``ZADD`` treats members as a set, so re-recording a message id only
     updates its score — never inflates the count. The key's TTL is refreshed
     to one full window on every write since the newest entry is what keeps
-    the set relevant; an idle user's set simply expires.
+    the set relevant; an idle user's set simply expires. Newly reached usage
+    thresholds are returned to the caller so it can notify the user.
     """
     if not message_epochs:
-        return
+        return []
     key = limit_key(user_id)
     async with redis.pipeline(transaction=True) as pipe:
         pipe.zadd(key, message_epochs)
         pipe.expire(key, LIMIT_WINDOW_SECONDS)
         await pipe.execute()
+    return await claim_usage_warnings(redis, user_id)
 
 
 async def _trimmed_count(redis: Redis, key: str, now_epoch: float) -> int:
@@ -96,6 +112,63 @@ async def _trimmed_count(redis: Redis, key: str, now_epoch: float) -> int:
         pipe.zcard(key)
         _, counted = await pipe.execute()
     return counted
+
+
+def usage_warning_key(user_id: str, percentage: int) -> str:
+    """Redis marker suppressing repeats for one user's threshold episode."""
+    return f"chatlimit-warning:{user_id}:{percentage}"
+
+
+async def claim_usage_warnings(redis: Redis, user_id: str) -> list[UsageWarning]:
+    """Claim and return newly reached 80%/90% usage thresholds.
+
+    A marker lives until enough of the currently counted messages age out for
+    usage to fall below its threshold. Continued usage moves that moment later,
+    so an existing marker's TTL is refreshed even though no second warning is
+    returned. ``SET NX`` ensures concurrent charging paths can only ping once.
+    """
+    now_epoch = datetime.now(UTC).timestamp()
+    key = limit_key(user_id)
+    counted = await _trimmed_count(redis, key, now_epoch)
+    warnings: list[UsageWarning] = []
+    for percentage in USAGE_WARNING_PERCENTAGES:
+        threshold = ceil(USER_MESSAGE_LIMIT * percentage / 100)
+        if counted < threshold:
+            continue
+        # With usage above the threshold, this is the entry whose expiry
+        # brings the live count below it.
+        freeing_index = counted - threshold
+        entries = await redis.zrange(
+            key, freeing_index, freeing_index, withscores=True
+        )
+        if not entries:
+            continue
+        _, freeing_epoch = entries[0]
+        reset_epoch = int(freeing_epoch) + LIMIT_WINDOW_SECONDS
+        ttl_seconds = max(60, reset_epoch - int(now_epoch))
+        warning_key = usage_warning_key(user_id, percentage)
+        claimed = await redis.set(
+            warning_key, "1", nx=True, ex=ttl_seconds
+        )
+        if claimed:
+            warnings.append(
+                UsageWarning(percentage=percentage, reset_epoch=reset_epoch)
+            )
+        else:
+            # New messages move the rolling threshold's reset later. Keep the
+            # marker alive until that updated moment to avoid repeat warnings.
+            # GT prevents an older concurrent charge from shortening the TTL.
+            await redis.expire(warning_key, ttl_seconds, gt=True)
+    return warnings
+
+
+def format_usage_warning_notice(user_id: str, warning: UsageWarning) -> str:
+    """Render a compact Discord subtext warning that explicitly pings a user."""
+    return _USAGE_WARNING_NOTICE_TEMPLATE.format(
+        user_id=user_id,
+        percentage=warning.percentage,
+        reset_epoch=warning.reset_epoch,
+    )
 
 
 async def counted_messages(redis: Redis, user_id: str) -> tuple[int, float | None]:
