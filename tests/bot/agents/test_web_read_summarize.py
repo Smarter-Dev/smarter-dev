@@ -404,6 +404,7 @@ async def test_summarize_web_content_fails_over_to_gemini_and_logs_critical(capl
             "get_web_summarizer_fallback_agent",
             return_value=fallback_agent,
         ),
+        patch.object(web_summarizer, "record_llm_failover") as record_failover,
         caplog.at_level("CRITICAL", logger=web_summarizer.__name__),
     ):
         result = await web_summarizer.summarize_web_content(
@@ -420,3 +421,10 @@ async def test_summarize_web_content_fails_over_to_gemini_and_logs_critical(capl
     assert "using Gemini 3.1 Flash Lite" in caplog.text
     assert "https://e.test" in caplog.text
     assert "Laguna unavailable" in caplog.text
+    record_failover.assert_called_once()
+    assert record_failover.call_args.kwargs == {
+        "operation": "web_summarizer",
+        "primary_model": "poolside/laguna-s-2.1",
+        "fallback_model": "gemini-3.1-flash-lite",
+        "error": primary_agent.run.side_effect,
+    }

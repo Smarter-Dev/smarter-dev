@@ -8,7 +8,11 @@ The bot API at /api is served by the native Litestar controllers in
 smarter_dev.web.api_native, registered in the app yamls.
 """
 
-from skrift.asgi import app  # noqa: F401
+from smarter_dev.shared.observability import configure_observability
+
+configure_observability("smarter-dev-web")
+
+from skrift.asgi import app  # noqa: E402,F401
 
 if __name__ == "__main__":
     import subprocess

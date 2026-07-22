@@ -24,6 +24,7 @@ from smarter_dev.bot.agents.model_router import model_settings_for
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import get_model
+from smarter_dev.shared.observability import record_llm_failover
 
 logger = logging.getLogger(__name__)
 
@@ -115,13 +116,19 @@ async def summarize_web_content(
     )
     try:
         result = await agent.run(prompt)
-    except Exception:
+    except Exception as exc:
         logger.critical(
             "WEB SUMMARIZER FAILOVER: Laguna S 2.1 failed; using Gemini 3.1 "
             "Flash Lite for url=%s title=%r",
             url,
             title,
             exc_info=True,
+        )
+        record_llm_failover(
+            operation="web_summarizer",
+            primary_model="poolside/laguna-s-2.1",
+            fallback_model="gemini-3.1-flash-lite",
+            error=exc,
         )
         result = await get_web_summarizer_fallback_agent().run(prompt)
     return result.output

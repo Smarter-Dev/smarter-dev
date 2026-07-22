@@ -213,6 +213,7 @@ workers:
   # pulls pydantic-ai into the web pods; execution, however, is now fully
   # off the web tier.)
   imports:
+    - smarter_dev.shared.worker_observability
     - smarter_dev.web.resources_agent
     - smarter_dev.web.resources_jobs
     - smarter_dev.web.title_agent

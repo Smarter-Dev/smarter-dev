@@ -145,6 +145,16 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: anthropic-api-key
+                  - name: LOGFIRE_TOKEN
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: logfire-token
+                        optional: true
+                  - name: LOGFIRE_SERVICE_NAME
+                    value: "smarter-dev-agent-worker"
+                  - name: LOGFIRE_SERVICE_VERSION
+                    value: "<IMAGE_VERSION>"
                   # Research/blogging agent tool credentials.
                   - name: JINA_API_KEY
                     valueFrom:

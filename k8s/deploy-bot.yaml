@@ -75,6 +75,16 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: openrouter-api-key
+                  - name: LOGFIRE_TOKEN
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: logfire-token
+                        optional: true
+                  - name: LOGFIRE_SERVICE_NAME
+                    value: "smarter-dev-bot"
+                  - name: LOGFIRE_SERVICE_VERSION
+                    value: "<IMAGE_VERSION>"
                   - name: DIGITALOCEAN_INFERENCE_API_KEY
                     valueFrom:
                       secretKeyRef:
