@@ -24,11 +24,9 @@ rather than a separate polling schedule handler (see the module docstring notes)
 
 from __future__ import annotations
 
-from smarter_dev.extensions.schema import (
-    ConfigField,
-    ExtensionManifest,
-    HandlerTemplate,
-)
+from smarter_dev.extensions.schema import ConfigField
+from smarter_dev.extensions.schema import ExtensionManifest
+from smarter_dev.extensions.schema import HandlerTemplate
 
 MANIFEST = ExtensionManifest(
     slug="disboard-bumping",
@@ -38,7 +36,7 @@ MANIFEST = ExtensionManifest(
         "Bump King role, reminds the server every 2 hours, and answers !bumpers "
         "/ !bumps."
     ),
-    version=1,
+    version=2,
     config=[
         ConfigField(
             name="bump_channel_id",
@@ -61,6 +59,12 @@ MANIFEST = ExtensionManifest(
             ),
         ),
         ConfigField(
+            name="bump_king_announcement_channel_id",
+            type="channel_id",
+            label="Bump King announcement channel",
+            help="Where new Bump King announcements are posted.",
+        ),
+        ConfigField(
             name="commands_channel_id",
             type="channel_id",
             label="Bump commands channel",
@@ -71,13 +75,10 @@ MANIFEST = ExtensionManifest(
         ),
         ConfigField(
             name="reminder_ping_role_id",
-            type="string",
-            required=False,
-            default="",
-            label="Reminder ping role id (optional)",
+            type="role_id",
+            label="Reminder ping role",
             help=(
-                "A role id to ping on the 2-hour reminder (e.g. a bump-squad "
-                "role). Leave blank for a silent reminder."
+                "The role pinged on every 2-hour reminder, such as a bump-squad role."
             ),
         ),
     ],
@@ -116,5 +117,6 @@ MANIFEST = ExtensionManifest(
         "bump_king_role_id": "222222222222222222",
         "commands_channel_id": "333333333333333333",
         "reminder_ping_role_id": "444444444444444444",
+        "bump_king_announcement_channel_id": "555555555555555555",
     },
 )
