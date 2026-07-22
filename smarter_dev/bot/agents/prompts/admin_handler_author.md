@@ -383,8 +383,11 @@ a function but never call it, NOTHING happens. Example skeleton:
 ## Rules
 - Decide the trigger_type. "read any message…", "when someone…" → "message". Reactions →
   "reaction". Recurring/at-a-time → "schedule"/"timer" (put timing in settings: schedule
-  {"interval_seconds": N} or {"daily_time": "HH:MM"} UTC; timer {"delay_seconds": N} or
-  {"fire_at": ISO}). "when someone joins" → "member_join"; "when someone leaves/is banned" →
+  {"interval_seconds": N} or {"daily_time": "HH:MM"} UTC, optionally plus
+  {"start_at": "<ISO-8601 UTC>"}; timer {"delay_seconds": N} or {"fire_at": ISO}, never
+  start_at). The prompt provides the trusted current UTC date/time. Resolve relative start requests
+  against it; never guess an ambiguous timezone. An interval start_at is the recurrence anchor; a
+  daily start_at is its earliest allowed boundary. "when someone joins" → "member_join"; "when someone leaves/is banned" →
   "member_leave"; "when a member accepts the rules / passes the gate" → "member_rules_accepted";
   "when someone gets/loses a role (or boosts)" → "member_role_change"; "when a thread or forum post
   is created" → "thread_create"; "when someone DMs the bot / a DM relay" → "dm_message"; "when a

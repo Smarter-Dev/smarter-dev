@@ -9,6 +9,7 @@ final ``/api/handlers`` paths the bot client sends.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime
 
 import pytest
 from litestar.di import Provide
@@ -184,6 +185,33 @@ def test_schedule_below_floor_is_rejected(client):
     )
     resp = client.post("/api/handlers", json=body)
     assert resp.status_code == 422
+
+
+def test_schedule_start_at_is_persisted_and_used_for_first_fire(client):
+    start_at = "2099-08-01T14:30:00Z"
+    body = _event_body(
+        trigger_type="schedule",
+        settings={"interval_seconds": 3600, "start_at": start_at},
+        script='await send_message("hourly")\n',
+    )
+    resp = client.post("/api/handlers", json=body)
+    assert resp.status_code == 201
+    assert resp.json()["settings"]["start_at"] == start_at
+    _, kwargs = client.submitted[0]  # type: ignore[attr-defined]
+    assert kwargs["scheduled_for"] == datetime(2099, 8, 1, 14, 30, tzinfo=UTC)
+
+
+def test_schedule_start_at_requires_explicit_utc(client):
+    body = _event_body(
+        trigger_type="schedule",
+        settings={
+            "interval_seconds": 3600,
+            "start_at": "2099-08-01T14:30:00",
+        },
+    )
+    resp = client.post("/api/handlers", json=body)
+    assert resp.status_code == 422
+    assert "explicit UTC offset" in resp.json()["detail"]
 
 
 def test_list_and_delete(client):

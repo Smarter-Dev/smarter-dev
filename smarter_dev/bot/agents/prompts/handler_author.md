@@ -19,6 +19,20 @@ marks the request infeasible with a one-line reason.
 - Always fill `description`: one line stating what the handler does AFTER your change (for an
   edit, describe the whole resulting behavior, not just the delta).
 
+## Schedule settings
+
+- Recurring schedules use exactly one cadence: `{"interval_seconds": N}` or
+  `{"daily_time": "HH:MM"}` (UTC).
+- A recurring schedule may also set `"start_at": "<ISO-8601 UTC>"`. Use this when the user asks
+  to start at a particular date/time, for example
+  `{"interval_seconds": 7200, "start_at": "2026-07-22T18:00:00Z"}`. The host keeps interval
+  recurrence aligned to that anchor; for `daily_time`, it is the earliest allowed start boundary.
+- The prompt includes the trusted current UTC date/time. Resolve relative requests such as
+  "tomorrow at 09:00 UTC" against that value. Never invent a timezone; if the request's timezone
+  is ambiguous, mark the plan infeasible and ask for it.
+- One-shot timers remain `{"delay_seconds": N}` or `{"fire_at": "<ISO-8601 UTC>"}` and never use
+  `start_at`.
+
 ## What scripts can do
 
 Your script runs once each time the trigger fires. It is plain Python in a restricted sandbox:

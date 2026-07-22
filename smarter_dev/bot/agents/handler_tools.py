@@ -18,13 +18,13 @@ from typing import Any
 
 from pydantic_ai import RunContext
 
-from smarter_dev.bot.agents.chat_tools import ChatDeps, _post_status
-from smarter_dev.bot.agents.handler_authoring import (
-    run_creation_pipeline,
-    script_uses_agent,
-)
+from smarter_dev.bot.agents.chat_tools import ChatDeps
+from smarter_dev.bot.agents.chat_tools import _post_status
+from smarter_dev.bot.agents.handler_authoring import run_creation_pipeline
+from smarter_dev.bot.agents.handler_authoring import script_uses_agent
 from smarter_dev.shared.config import get_settings
-from smarter_dev.web.handler_schedule import ScheduleError, validate_interval
+from smarter_dev.web.handler_schedule import ScheduleError
+from smarter_dev.web.handler_schedule import validate_time_trigger_settings
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +46,22 @@ _TRIGGER_ALIASES = {
 # trigger is unknown — it exists, it's just not theirs to register.
 _ADMIN_ONLY_TRIGGERS = frozenset(
     {
-        "member_join", "member join", "member joins",
-        "member_leave", "member leave", "member leaves",
-        "member_rules_accepted", "member rules accepted", "rules accepted",
-        "member_role_change", "member role change", "role change",
-        "thread_create", "thread create", "new thread", "forum post",
+        "member_join",
+        "member join",
+        "member joins",
+        "member_leave",
+        "member leave",
+        "member leaves",
+        "member_rules_accepted",
+        "member rules accepted",
+        "rules accepted",
+        "member_role_change",
+        "member role change",
+        "role change",
+        "thread_create",
+        "thread create",
+        "new thread",
+        "forum post",
     }
 )
 
@@ -110,8 +121,9 @@ async def register_handler(
     (someone joins, leaves, a role changes, a thread is created) are
     admin-only — they need /adminhandler, not this tool. Put timing in
     ``settings`` — schedule: {"interval_seconds": N} or {"daily_time":
-    "HH:MM"} (UTC); timer: {"delay_seconds": N} or {"fire_at": "<ISO-8601
-    UTC>"}. Returns a success summary naming the handler, or an error to
+    "HH:MM"} (UTC), optionally with {"start_at": "<ISO-8601 UTC>"}; timer:
+    {"delay_seconds": N} or {"fire_at": "<ISO-8601 UTC>"}. Returns a success
+    summary naming the handler, or an error to
     relay plainly.
     """
     if _admin_only_trigger(trigger_type):
@@ -142,8 +154,10 @@ async def register_handler(
 
     if result.trigger_type in ("schedule", "timer"):
         try:
-            validate_interval(
-                result.settings or {}, uses_agent=script_uses_agent(result.script)
+            validate_time_trigger_settings(
+                result.trigger_type,
+                result.settings or {},
+                uses_agent=script_uses_agent(result.script),
             )
         except ScheduleError as exc:
             return f"error: {exc}"
@@ -184,7 +198,9 @@ async def register_handler(
     )
 
 
-async def list_handlers(ctx: RunContext[ChatDeps], channel_id: str | None = None) -> str:
+async def list_handlers(
+    ctx: RunContext[ChatDeps], channel_id: str | None = None
+) -> str:
     """List the handlers active in a channel, with their names, ids and triggers."""
     channel = str(channel_id or ctx.deps.channel_id)
     api = _api_client(ctx)

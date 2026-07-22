@@ -43,8 +43,11 @@ Codebase facts this design is built on (verified on this branch):
   `add_role`/`remove_role` and hardcoded `delete_thread` targets.
 - Schedules are the explicit vocabulary in `handler_schedule.py` — NOT cron:
   `schedule` = `{"interval_seconds": int}` or `{"daily_time": "HH:MM"}` (UTC),
-  `timer` = `{"delay_seconds": int}` or `{"fire_at": ISO}`. Recurrence floors
-  `MIN_INTERVAL_SECONDS`/`MIN_INTERVAL_WITH_AGENT_SECONDS`.
+  optionally with `{"start_at": ISO-8601 UTC}`; `timer` =
+  `{"delay_seconds": int}` or `{"fire_at": ISO}`. For interval schedules,
+  `start_at` anchors the recurrence; for daily schedules it is a lower bound.
+  Recurrence floors are `MIN_INTERVAL_SECONDS` and
+  `MIN_INTERVAL_WITH_AGENT_SECONDS`.
 - The bot needs **no push** on install: `plugins/handler_events.py` polls
   `GET /api/handlers/active-channels` on a refresh loop and picks up new
   enabled rows/triggers.
@@ -153,7 +156,10 @@ the registry converts to a startup failure):
 - `schedule`/`timer` handlers: `settings` template must contain exactly one of
   the `handler_schedule` keys (`interval_seconds`/`daily_time` resp.
   `delay_seconds`/`fire_at`); values may be placeholders of a matching-typed
-  field (`int` for the numeric keys, `string` for `daily_time`/`fire_at`).
+  field (`int` for the numeric keys, `string` for `daily_time`/`fire_at`). A
+  schedule may additionally contain `start_at`; it must be a literal string or
+  a placeholder for a `string` config field and render to an ISO-8601 timestamp
+  with an explicit UTC offset.
 - handler `name` ≤ 64 after strip (mirror of `_normalized_name`).
 
 Schedule example (a nightly digest handler):
@@ -346,11 +352,13 @@ def extract_granted_role_literals(script: str) -> set[str]:
 4. Role-grant allowlist closure: for each handler,
    `extract_granted_role_literals(script) ⊆ rendered settings["allowed_role_ids"]`
    (and the settings key must exist if the set is non-empty).
-5. `schedule`/`timer` handlers: `handler_schedule.first_fire_at(trigger_type,
-   rendered_settings, now)` does not raise, and
-   `validate_interval(rendered_settings, uses_agent="spawn_agent(" in script)`
-   passes — the recurrence floors hold for the *actual* config values. (The
-   agent-spawn token is `spawn_agent(`, the name the handler runtime exposes.)
+5. `schedule`/`timer` handlers:
+   `handler_schedule.validate_time_trigger_settings(trigger_type,
+   rendered_settings, uses_agent="spawn_agent(" in script)` passes and
+   `first_fire_at(trigger_type, rendered_settings, now)` does not raise. This
+   validates the rendered `start_at` UTC timestamp and recurrence floors against
+   the *actual* config values. (The agent-spawn token is `spawn_agent(`, the
+   name the handler runtime exposes.)
 6. Registry-declared static checks already passed at import (§4); these five
    run again per-install because config values change the rendered output.
 

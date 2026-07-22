@@ -10,19 +10,15 @@ from __future__ import annotations
 
 import pytest
 
-from smarter_dev.extensions.rendering import (
-    RenderError,
-    extract_granted_role_literals,
-    render_bundle,
-    render_script,
-    render_settings,
-    validate_config_values,
-)
-from smarter_dev.extensions.schema import (
-    ConfigField,
-    ExtensionManifest,
-    HandlerTemplate,
-)
+from smarter_dev.extensions.rendering import RenderError
+from smarter_dev.extensions.rendering import extract_granted_role_literals
+from smarter_dev.extensions.rendering import render_bundle
+from smarter_dev.extensions.rendering import render_script
+from smarter_dev.extensions.rendering import render_settings
+from smarter_dev.extensions.rendering import validate_config_values
+from smarter_dev.extensions.schema import ConfigField
+from smarter_dev.extensions.schema import ExtensionManifest
+from smarter_dev.extensions.schema import HandlerTemplate
 
 
 def _manifest(config, handlers, example_config=None):
@@ -289,11 +285,7 @@ def test_render_bundle_role_grant_not_in_allowlist():
 def test_render_bundle_role_grant_in_allowlist_passes():
     manifest = _manifest(
         [ConfigField(name="role", type="role_id", label="R")],
-        [
-            _message_handler(
-                settings={"allowed_role_ids": ["{{cfg.role}}"]}
-            )
-        ],
+        [_message_handler(settings={"allowed_role_ids": ["{{cfg.role}}"]})],
     )
     scripts = {"h1": 'await add_role(context["author_id"], "333333333333333333")\n'}
     bundle = render_bundle(manifest, {"role": "333333333333333333"}, scripts)
@@ -317,6 +309,76 @@ def test_render_bundle_schedule_below_floor():
     scripts = {"sch": "pass\n"}
     with pytest.raises(RenderError, match="schedule invalid"):
         render_bundle(manifest, {"every": 5}, scripts)
+
+
+def test_render_bundle_schedule_start_at_from_string_config():
+    manifest = _manifest(
+        [
+            ConfigField(name="every", type="int", label="E"),
+            ConfigField(name="start", type="string", label="Start UTC"),
+        ],
+        [
+            HandlerTemplate(
+                key="sch",
+                name="test-sch",
+                trigger_type="schedule",
+                description="d",
+                script_file="sch.monty",
+                settings={
+                    "interval_seconds": "{{cfg.every}}",
+                    "start_at": "{{cfg.start}}",
+                },
+            )
+        ],
+    )
+    scripts = {"sch": "pass\n"}
+    bundle = render_bundle(
+        manifest,
+        {"every": 300, "start": "2099-01-01T00:00:00Z"},
+        scripts,
+    )
+    assert bundle[0].settings == {
+        "interval_seconds": 300,
+        "start_at": "2099-01-01T00:00:00Z",
+    }
+
+
+def test_render_bundle_rejects_non_utc_schedule_start():
+    manifest = _manifest(
+        [ConfigField(name="start", type="string", label="Start UTC")],
+        [
+            HandlerTemplate(
+                key="sch",
+                name="test-sch",
+                trigger_type="schedule",
+                description="d",
+                script_file="sch.monty",
+                settings={"interval_seconds": 300, "start_at": "{{cfg.start}}"},
+            )
+        ],
+    )
+    with pytest.raises(RenderError, match="explicit UTC offset"):
+        render_bundle(manifest, {"start": "2099-01-01T00:00:00"}, {"sch": "pass\n"})
+
+
+def test_schedule_start_placeholder_requires_string_config():
+    with pytest.raises(ValueError, match="start_at"):
+        _manifest(
+            [ConfigField(name="start", type="int", label="Start UTC")],
+            [
+                HandlerTemplate(
+                    key="sch",
+                    name="test-sch",
+                    trigger_type="schedule",
+                    description="d",
+                    script_file="sch.monty",
+                    settings={
+                        "interval_seconds": 300,
+                        "start_at": "{{cfg.start}}",
+                    },
+                )
+            ],
+        )
 
 
 def test_render_bundle_schedule_at_floor_passes():
