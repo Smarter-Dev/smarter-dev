@@ -17,6 +17,7 @@ from smarter_dev.bot.plugins.mention import _reject_when_over_limit
 from smarter_dev.bot.services.user_message_limit import LIMIT_WINDOW_SECONDS
 from smarter_dev.bot.services.user_message_limit import OverLimitStatus
 from smarter_dev.bot.services.user_message_limit import USER_MESSAGE_LIMIT
+from smarter_dev.bot.services.user_message_limit import UsageWarning
 
 
 def _bot(redis) -> SimpleNamespace:
@@ -138,6 +139,25 @@ async def test_engaged_message_is_charged_to_its_author():
     assert list(message_epochs) == ["555"]
     assert message_epochs["555"] == pytest.approx(
         event.message.created_at.timestamp()
+    )
+
+
+@pytest.mark.asyncio
+async def test_engaged_message_pings_for_a_new_usage_warning():
+    bot = _bot(MagicMock())
+    event = _event(user_id=200, message_id=555)
+    warning = UsageWarning(percentage=80, reset_epoch=1_800_000_000)
+    with patch(
+        "smarter_dev.bot.plugins.mention.record_directed_messages",
+        new=AsyncMock(return_value=[warning]),
+    ):
+        await _record_engaged_message(bot, event)
+
+    bot.rest.create_message.assert_awaited_once_with(
+        42,
+        "-# <@200> you've used 80% of your 4hr chat bot limit, "
+        "resets <t:1800000000:R>",
+        user_mentions=[200],
     )
 
 

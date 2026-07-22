@@ -27,6 +27,7 @@ from smarter_dev.bot.services.chat_memory import get_chat_memory
 from smarter_dev.bot.services.rate_limiter import rate_limiter
 from smarter_dev.bot.services.user_message_limit import claim_notice_throttle
 from smarter_dev.bot.services.user_message_limit import format_over_limit_notice
+from smarter_dev.bot.services.user_message_limit import format_usage_warning_notice
 from smarter_dev.bot.services.user_message_limit import over_limit_status
 from smarter_dev.bot.services.user_message_limit import record_directed_messages
 from smarter_dev.bot.utils.stop_detection import (
@@ -154,7 +155,7 @@ async def _record_engaged_message(bot: Any, event: hikari.MessageCreateEvent) ->
     if redis is None:
         return
     try:
-        await record_directed_messages(
+        warnings = await record_directed_messages(
             redis,
             str(event.message.author.id),
             {str(event.message.id): event.message.created_at.timestamp()},
@@ -165,6 +166,22 @@ async def _record_engaged_message(bot: Any, event: hikari.MessageCreateEvent) ->
             event.message.author.id,
             exc_info=True,
         )
+        return
+    for warning in warnings or ():
+        try:
+            await bot.rest.create_message(
+                event.channel_id,
+                format_usage_warning_notice(
+                    str(event.message.author.id), warning
+                ),
+                user_mentions=[event.message.author.id],
+            )
+        except Exception:
+            logger.exception(
+                "Failed to send %s%% message-limit warning to user %s",
+                warning.percentage,
+                event.message.author.id,
+            )
 
 
 def _model_override_service(bot: Any) -> Any | None:

@@ -73,6 +73,7 @@ from smarter_dev.bot.services.chat_conversation_persistence import persist_turn
 from smarter_dev.bot.services.chat_conversation_persistence import start_engagement
 from smarter_dev.bot.services.chat_memory import get_chat_memory
 from smarter_dev.bot.services.user_message_limit import DIRECTED_SCORE_THRESHOLD
+from smarter_dev.bot.services.user_message_limit import format_usage_warning_notice
 from smarter_dev.bot.services.user_message_limit import record_directed_messages
 from smarter_dev.bot.utils.messages import fetch_channel_info
 from smarter_dev.bot.utils.stop_detection import is_stop_request
@@ -1426,13 +1427,29 @@ class ChannelEngine:
             charges_by_user.setdefault(user_id, {})[ranking.message_id] = sent_epoch
         for user_id, message_epochs in charges_by_user.items():
             try:
-                await record_directed_messages(redis, user_id, message_epochs)
+                warnings = await record_directed_messages(
+                    redis, user_id, message_epochs
+                )
             except RedisError:
                 logger.warning(
                     "Failed to record message-limit charges for user %s",
                     user_id,
                     exc_info=True,
                 )
+                continue
+            for warning in warnings or ():
+                try:
+                    await self.bot.rest.create_message(
+                        self.channel_id,
+                        content=format_usage_warning_notice(user_id, warning),
+                        user_mentions=[int(user_id)],
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to send %s%% message-limit warning to user %s",
+                        warning.percentage,
+                        user_id,
+                    )
 
     async def _maybe_notice_budget_exhausted(
         self,

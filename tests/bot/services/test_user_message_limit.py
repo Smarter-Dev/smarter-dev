@@ -13,10 +13,12 @@ from smarter_dev.bot.services.user_message_limit import (
     counted_messages,
     format_counted_window,
     format_over_limit_notice,
+    format_usage_warning_notice,
     limit_key,
     notice_throttle_key,
     over_limit_status,
     record_directed_messages,
+    usage_warning_key,
 )
 
 
@@ -103,6 +105,11 @@ class _FakeRedis:
             self.expiries[key] = ex
         return True
 
+    async def expire(self, key, seconds, gt=False):
+        if not gt or seconds > self.expiries.get(key, -1):
+            self.expiries[key] = seconds
+        return key in self.strings or key in self.zsets
+
 
 async def _seed_messages(redis, user_id: str, epochs: list[float]) -> None:
     await record_directed_messages(
@@ -135,6 +142,62 @@ async def test_record_empty_mapping_is_noop():
     redis = _FakeRedis()
     await record_directed_messages(redis, "u1", {})
     assert redis.zsets == {}
+
+
+@pytest.mark.asyncio
+async def test_record_returns_one_time_80_and_90_percent_warnings():
+    redis = _FakeRedis()
+    now = time.time()
+
+    warnings = await record_directed_messages(
+        redis,
+        "u1",
+        {f"msg-{i}": now + i / 100 for i in range(48)},
+    )
+    assert [warning.percentage for warning in warnings] == [80]
+    assert warnings[0].reset_epoch == int(now) + LIMIT_WINDOW_SECONDS
+
+    warnings = await record_directed_messages(
+        redis,
+        "u1",
+        {f"msg-{i}": now + i / 100 for i in range(48, 54)},
+    )
+    assert [warning.percentage for warning in warnings] == [90]
+
+    warnings = await record_directed_messages(
+        redis, "u1", {"msg-54": now + 0.54}
+    )
+    assert warnings == []
+
+
+def test_usage_warning_notice_matches_discord_message_format():
+    from smarter_dev.bot.services.user_message_limit import UsageWarning
+
+    notice = format_usage_warning_notice(
+        "42", UsageWarning(percentage=80, reset_epoch=1_800_000_000)
+    )
+    assert notice == (
+        "-# <@42> you've used 80% of your 4hr chat bot limit, "
+        "resets <t:1800000000:R>"
+    )
+
+
+@pytest.mark.asyncio
+async def test_warning_marker_ttl_moves_with_rolling_threshold_reset():
+    redis = _FakeRedis()
+    now = time.time()
+    await record_directed_messages(
+        redis,
+        "u1",
+        {f"msg-{i}": now + i for i in range(48)},
+    )
+    warning_key = usage_warning_key("u1", 80)
+    first_ttl = redis.expiries[warning_key]
+
+    assert await record_directed_messages(
+        redis, "u1", {"msg-48": now + 60}
+    ) == []
+    assert redis.expiries[warning_key] > first_ttl
 
 
 @pytest.mark.asyncio

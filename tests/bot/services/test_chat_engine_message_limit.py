@@ -26,6 +26,7 @@ from smarter_dev.bot.agents.chat_models import (
     TurnDecision,
 )
 from smarter_dev.bot.services.chat_engine import ChannelEngine, _QueuedMessage
+from smarter_dev.bot.services.user_message_limit import UsageWarning
 
 
 def _initial_input() -> InitialAgentInput:
@@ -235,3 +236,28 @@ async def test_redis_error_never_breaks_the_turn():
 
     # The response still went out despite the failed charge.
     engine.bot.rest.create_message.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ranked_message_pings_for_a_new_usage_warning():
+    fake_redis = MagicMock()
+    engine = _make_engine(fake_redis)
+    warning = UsageWarning(percentage=90, reset_epoch=1_800_000_000)
+    record_mock = AsyncMock(return_value=[warning])
+
+    with patch(
+        "smarter_dev.bot.services.chat_engine.record_directed_messages",
+        new=record_mock,
+    ):
+        await engine._charge_directed_messages(
+            _decision([("101", 10)]), [], first_activation=True
+        )
+
+    engine.bot.rest.create_message.assert_awaited_once_with(
+        42,
+        content=(
+            "-# <@200> you've used 90% of your 4hr chat bot limit, "
+            "resets <t:1800000000:R>"
+        ),
+        user_mentions=[200],
+    )
