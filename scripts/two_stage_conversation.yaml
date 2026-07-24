@@ -1,0 +1,41 @@
+# A sustained 20-turn 1:1 help session in a bot-help channel. Every turn is
+# addressed to the bot (mentions_bot) so BOTH modes respond on all 20 turns —
+# a clean per-turn cost comparison. Many turns deliberately back-reference
+# earlier ones ("that load function", "the formatter you wrote", "what you
+# showed me earlier") to exercise conversation history and the context brief.
+name: build-a-habit-cli
+
+me:
+  user_id: "bot"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "dev-help"
+  description: "Ask the bot for programming help"
+
+authors:
+  - user_id: "1"
+    username: "alice"
+
+turns:
+  - "@smarterbot I want to build a small CLI in Python to track my daily habits. Where should I start?"
+  - "what should I use to parse the command-line arguments?"
+  - "ok argparse it is. how do I set up subcommands for 'add' and 'list'?"
+  - "for the 'add' subcommand I want it to take a habit name and an optional note. show me."
+  - "where should I store the data? I don't want to run a whole database for this."
+  - "JSON's fine. how do I load it when the file doesn't exist yet?"
+  - "make that load function return an empty list if the file is missing instead of crashing."
+  - "now write the matching save function that writes the list back to that same JSON file."
+  - "how do I timestamp each entry at the moment it's added?"
+  - "use UTC, not local time — does that change the add code you showed me?"
+  - "the 'list' subcommand should print each habit with its timestamp. format it nicely."
+  - "can you make those timestamps human-readable, like '2 hours ago'?"
+  - "I'm getting a KeyError on 'note' for older entries that never had one. how do I fix that?"
+  - "right, .get with a default. update the list formatter you wrote to use that."
+  - "how would I add a 'streak' count — how many days in a row I logged a given habit?"
+  - "that streak logic looks dense. can you walk me through just the date-math part?"
+  - "let's make the whole thing installable as a real command. what do I need?"
+  - "add a console entry point in pyproject.toml called 'habits'."
+  - "last code question — how do I write a quick test for that load function from earlier?"
+  - "thanks! can you summarize everything we built as a short README?"

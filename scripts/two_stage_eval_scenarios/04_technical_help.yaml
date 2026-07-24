@@ -1,0 +1,28 @@
+name: technical-help
+note: A frustrated debugging question with context — tests substantive answering.
+
+me:
+  user_id: "bot"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "python-help"
+
+authors:
+  - user_id: "4"
+    username: "dave"
+
+history:
+  - id: "40"
+    from: "4"
+    body: "my asyncio script just hangs forever and never prints anything"
+  - id: "41"
+    from: "4"
+    body: "no error, no traceback, it just sits there"
+
+trigger:
+  id: "42"
+  from: "4"
+  body: "@smarterbot any idea what would make an asyncio program hang silently like that?"
+  mentions_bot: true

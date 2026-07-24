@@ -1,0 +1,22 @@
+name: casual-greeting
+note: Light social banter directed at the bot — should stay warm and brief.
+
+me:
+  user_id: "bot"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "lounge"
+
+authors:
+  - user_id: "2"
+    username: "bob"
+
+history: []
+
+trigger:
+  id: "20"
+  from: "2"
+  body: "@smarterbot good morning!! how are you today"
+  mentions_bot: true
