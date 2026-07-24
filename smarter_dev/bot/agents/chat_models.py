@@ -157,45 +157,6 @@ class FollowupAgentInput(BaseModel):
     notes: str | None = None
 
 
-class BlogTopicCandidate(BaseModel):
-    """A claim from this conversation a post could be built on — strictly
-    observational, no angle or thesis (see the system prompt's blog
-    section for the full rules)."""
-
-    headline: str = Field(
-        description=(
-            "One descriptive, non-editorial line naming the topic — no "
-            "take, no clickbait."
-        ),
-    )
-    observation: str = Field(
-        description=(
-            "What was actually said / asked / surfaced, 2-4 sentences, "
-            "quoted or paraphrased faithfully — no interpretation, no "
-            "side-taking."
-        ),
-    )
-    scope: str = Field(
-        description=(
-            "Neutral 1-3 sentences: the territory a post would cover, "
-            "not the take."
-        ),
-    )
-    evidence: list[str] = Field(
-        default_factory=list,
-        description=(
-            "Discord message ids/links or URLs grounding the observation; "
-            "empty is fine."
-        ),
-    )
-    category: Literal["concept", "misconception", "news"] | None = Field(
-        default=None,
-        description=(
-            "concept | misconception | news; None if it doesn't cleanly fit."
-        ),
-    )
-
-
 class MessageScore(BaseModel):
     """DIRECTEDNESS score for one new `<message>` — direction only, not
     whether the content deserves an answer (that's `response`)."""
@@ -348,13 +309,6 @@ class TurnDecision(BaseModel):
             "…'. Accumulate, don't replace; drop only concluded threads. "
             "Durable memory of WHO is asking about WHAT — not a summary "
             "of what was said. None = keep existing notes unchanged."
-        ),
-    )
-    blog_topic_candidates: list[BlogTopicCandidate] = Field(
-        default_factory=list,
-        description=(
-            "Blog-post ideas filed this turn. See the system prompt for "
-            "the rules; the schema doesn't bias the count."
         ),
     )
 
