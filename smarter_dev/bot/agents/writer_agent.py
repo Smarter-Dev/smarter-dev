@@ -78,6 +78,24 @@ def _writer_settings_for(
     return model_settings_for(catalog_model, parse_reasoning_level(reasoning_level))
 
 
+def _identity_directive(model_id: str) -> str:
+    """A system-prompt addendum telling the writer its own model identity.
+
+    The tool-less writer answers from its system prompt + the drafter's brief; it
+    never sees the ``<your-model>`` metadata the drafter does, and the small
+    drafter can't be relied on to relay the model name through the brief. So the
+    writer carries its own identity: the catalog label for ``model_id`` (its wire
+    id as a fallback for ad-hoc ids). Phrased to surface only when asked, mirroring
+    the worker/drafter prompt's "never volunteer it" rule.
+    """
+    catalog_model = _catalog_model_for_id(model_id)
+    name = catalog_model.label if catalog_model is not None else model_id
+    return (
+        f"\n\nYour underlying model is {name}. If someone directly asks what model "
+        f"or AI you are, tell them {name}. Never bring it up otherwise."
+    )
+
+
 def build_writer_prompt(brief: WriterBrief) -> str:
     """Render ``brief`` into the writer's user message (pure function).
 
@@ -140,7 +158,7 @@ def get_writer_agent(
         agent = Agent(
             build_agent_model(model_id),
             output_type=_output_type_for(model_id),
-            system_prompt=WRITER_SYSTEM_PROMPT,
+            system_prompt=WRITER_SYSTEM_PROMPT + _identity_directive(model_id),
             model_settings=_writer_settings_for(model_id, reasoning_level),
         )
         _writer_agents[cache_key] = agent
