@@ -1,0 +1,32 @@
+# The same user keeps speaking Spanish AFTER a visible earlier English-only
+# redirect from the bot. Expected: NoResponse (response=None) — it already said
+# its piece and must not re-warn every message. response_language is still the
+# non-English value.
+
+kind: followup
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "dev-help"
+
+authors:
+  - user_id: "1"
+    username: "carlos"
+
+history:
+  - id: "80"
+    from: "1"
+    body: "@smarterbot por qué mi webhook de Stripe devuelve un error 400?"
+    mentions_bot: true
+  - id: "81"
+    from: "999"
+    body: "gonna need that in english — it's the only language i speak"
+
+trigger:
+  id: "82"
+  from: "1"
+  body: "pero necesito ayuda ahora, es urgente por favor"

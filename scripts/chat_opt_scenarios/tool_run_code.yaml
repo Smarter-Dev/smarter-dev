@@ -1,0 +1,24 @@
+# Directed coding question that requires a precise computation the model must
+# NOT do in its head. Expected: SendResponse that uses run_code, then reports
+# the result. Probes whether a trimmed run_code description still triggers use.
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "dev-help"
+
+authors:
+  - user_id: "1"
+    username: "devon"
+
+trigger:
+  id: "70"
+  from: "1"
+  body: >-
+    @smarterbot my token bucket refills 7 tokens every 90 seconds and I need
+    exactly 5000 tokens — how many whole minutes until it's full if it starts
+    empty? need the exact number.
+  mentions_bot: true

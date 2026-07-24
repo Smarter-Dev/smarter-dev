@@ -1,0 +1,24 @@
+# A member asks for a member-JOIN-triggered handler — a member/thread lifecycle
+# event, which is admin-only. Expected: SendResponse that redirects them to
+# /adminhandler and does NOT claim it was set up. Guards the admin-only scope
+# boundary the minimizer dropped.
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "welcome"
+
+authors:
+  - user_id: "1"
+    username: "hana"
+
+trigger:
+  id: "a2"
+  from: "1"
+  body: >-
+    @smarterbot set something up so that whenever a new member joins the server
+    they get a welcome message posted in here
+  mentions_bot: true

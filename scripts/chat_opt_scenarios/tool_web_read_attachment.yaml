@@ -1,0 +1,26 @@
+# Directed question whose whole point is a screenshot the model can't see
+# inline. Expected: SendResponse that first calls web_read on the attachment
+# URL to read it, then answers from the summary. Probes whether a trimmed
+# web_read / attachment description still triggers the read.
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "dev-help"
+
+authors:
+  - user_id: "1"
+    username: "mira"
+
+trigger:
+  id: "71"
+  from: "1"
+  body: "@smarterbot whats causing this traceback? cant figure it out"
+  mentions_bot: true
+  attachments:
+    - url: "https://cdn.example.com/uploads/traceback.png"
+      media_type: "image/png"
+      filename: "traceback.png"

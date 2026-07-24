@@ -161,23 +161,14 @@ class MessageScore(BaseModel):
     """DIRECTEDNESS score for one new `<message>` — direction only, not
     whether the content deserves an answer (that's `response`)."""
 
-    message_id: str = Field(
-        description="Id of a `<message>` in this turn's input.",
-    )
+    message_id: str
     score: int = Field(
         ge=1,
         le=10,
-        description=(
-            "1-10: how directly this message was aimed at YOU, judged from "
-            "structural attributes only — see the system prompt's anchors "
-            "(10 = @mention/reply-to-self … 1-2 = clearly not for you)."
-        ),
+        description="1-10, direction only: how directly this message was aimed at YOU (10 = mention/reply-to-you, 1-2 = not for you). Exception: non-English from a user you already redirected to English scores 1-2, even on a mention or reply-to-you.",
     )
     reasoning: str = Field(
-        description=(
-            "ONE sentence citing the structural attribute(s) that set the "
-            "score — not what you'd say back."
-        ),
+        description="One sentence citing the structural attribute(s) behind the score.",
     )
 
 
@@ -186,57 +177,27 @@ class ResponseBody(BaseModel):
     or ``voice_summary`` must be non-empty."""
 
     target_message_id: str = Field(
-        description=(
-            "Id of the message this answers — MUST match a ranking with "
-            "`score >= 5` (highest when several qualify)."
-        ),
+        description="Id of the message being answered — must have scored >= 5.",
     )
     reply_directly: bool = Field(
         default=False,
-        description=(
-            "True → send as a visible Discord reply to `target_message_id` "
-            "(use when the conversation drifted past it). Default False: "
-            "plain channel message."
-        ),
+        description="True to send as a visible Discord reply (when the conversation drifted past the target). Default False.",
     )
     message: str | None = Field(
         default=None,
-        description=(
-            "Plain-text reply to post — ONLY the prose meant for the user. "
-            "Never echo other schema fields, their values, or any JSON/"
-            "key-value structure into this string; that leaks raw schema "
-            "into chat. None if the user only wanted voice."
-        ),
+        description="The reply text — prose only, never schema fields or JSON.",
     )
     voice_summary: str | None = Field(
         default=None,
-        description=(
-            "Short spoken-style TTS summary, a few sentences max — never "
-            "paragraphs or code. Default None. Set ONLY when (a) the user "
-            "asked for voice in the message you're answering RIGHT NOW "
-            "(doesn't carry forward), (b) voice is genuinely the better "
-            "medium (pronunciation, intonation), or (c) a one-line zinger "
-            "lands better spoken (then send ONLY voice, no message). If "
-            "detail is needed AND voice was asked for, set both: full text "
-            "in `message`, 1-3 sentence digest here."
-        ),
+        description="Short spoken TTS digest, few sentences max. Only when the user asked for voice this turn or it clearly lands better spoken. Default None.",
     )
     voice_instruction: str | None = Field(
         default=None,
-        description=(
-            "TTS stage direction — tone / pace / emotion / persona (e.g. "
-            "\"mock-serious deadpan\"). Only meaningful with "
-            "voice_summary; None = default warm casual voice."
-        ),
+        description="TTS tone/pace direction; only meaningful with voice_summary.",
     )
     not_cs_topic_brief_answer: bool = Field(
         default=False,
-        description=(
-            "True when the question is OUTSIDE software/CS (banter, trivia, "
-            "life advice; borderline community/career counts too) — caps "
-            "`message` at 2 sentences. False for coding questions, which "
-            "get the depth they warrant."
-        ),
+        description="True for non-CS topics (caps reply at 2 sentences); False for coding questions, which get real depth.",
     )
 
     @model_validator(mode="after")
@@ -258,58 +219,25 @@ class TurnDecision(BaseModel):
     field you forget to fill."""
 
     rankings: list[MessageScore] = Field(
-        description=(
-            "One MessageScore per NEW `<message>` this turn. Direction "
-            "only; the response decision flows from it."
-        ),
+        description="One MessageScore per NEW <message> this turn.",
     )
     response_language: str = Field(
-        description=(
-            "Lowercase English name of the predominant natural language "
-            "used by the highest-scoring NEW message driving this turn, "
-            "not the language of your reply. Set exactly `english` when "
-            "that message is English, including English with incidental "
-            "foreign text, code, or logs. A normal content answer is only "
-            "allowed when this field is `english`. For any other value, "
-            "do not answer the content or call tools. If the message "
-            "scored >= 5, send only a short English redirect asking the "
-            "user to use English, or set response=None only if visible "
-            "history contains an earlier English-only redirect from you "
-            "to that same user."
-        ),
+        description="Lowercase language name of the highest-scoring NEW message. Exactly `english` for English, including English with incidental foreign text, code, or logs.",
     )
     response: ResponseBody | None = Field(
         default=None,
-        description=(
-            "Populate to speak; None to stay silent. Must be None when "
-            "every ranking scored < 5; when the top NEW message scored "
-            ">= 5 it was directed at you — respond unless you're "
-            "deliberately letting off-topic chatter pass (system prompt). "
-            "For a non-English prompting message scored >= 5, populate "
-            "this with the required English-only redirect unless visible "
-            "history proves that same user already received one."
-        ),
+        description="Populate to speak; None to stay silent. Must be None when every ranking scored < 5, and ALWAYS None for continued non-English from a user you already redirected to English — no second warning, no answer.",
     )
     continue_watching: bool = Field(
         default=True,
-        description=(
-            "Stay engaged for follow-ups. Set False only when the "
-            "engagement is genuinely over (user dismissed you, "
-            "conversation ran its course, continuing would be "
-            "intrusive)."
-        ),
+        description="Set False only when the engagement is genuinely over.",
     )
     topic: str = Field(
         description="1-2 sentence summary of the current conversation topic.",
     )
     notes: str | None = Field(
         default=None,
-        description=(
-            "Per-person thread tracker: 'alice: <thread + status>; bob: "
-            "…'. Accumulate, don't replace; drop only concluded threads. "
-            "Durable memory of WHO is asking about WHAT — not a summary "
-            "of what was said. None = keep existing notes unchanged."
-        ),
+        description="Per-person thread tracker ('alice: …; bob: …'). Accumulate, don't replace; None = keep existing notes.",
     )
 
     @field_validator("response_language")

@@ -1,0 +1,22 @@
+# A member asks for a spammy, annoying handler (react to EVERY message).
+# Expected: SendResponse that pushes back and suggests a saner version (a
+# keyword/condition guard, a longer interval) rather than registering the spam
+# as-is. Guards the handler anti-spam curation the minimizer dropped.
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "general"
+
+authors:
+  - user_id: "1"
+    username: "milo"
+
+trigger:
+  id: "a4"
+  from: "1"
+  body: "@smarterbot can you react with 👍 to literally every single message anyone posts in this channel?"
+  mentions_bot: true

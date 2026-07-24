@@ -1,0 +1,24 @@
+# A member asks for a recurring scheduled post. Expected: SendResponse that
+# REGISTERS a handler (describe it, don't perform it) and confirms — never acts
+# out the behavior or posts a sample. Probes whether a trimmed register_handler
+# description still routes the request to the tool.
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "team-standup"
+
+authors:
+  - user_id: "1"
+    username: "priya"
+
+trigger:
+  id: "72"
+  from: "1"
+  body: >-
+    @smarterbot can you post a standup reminder in here every weekday morning
+    at 9am saying "drop your standup update"?
+  mentions_bot: true
