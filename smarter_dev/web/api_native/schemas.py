@@ -675,6 +675,27 @@ class ChatAgentEngagementEnd(BaseAPIModel):
     )
 
 
+class ChatAgentErrorCreate(BaseAPIModel):
+    engagement_id: Optional[UUID] = None
+    request_id: str
+    guild_id: str
+    channel_id: str
+    model_name: Optional[str] = None
+    reasoning_level: Optional[str] = None
+    error_type: str
+    error_message: str
+    traceback: str
+    provider_status_code: Optional[int] = None
+    provider_body: Optional[str] = None
+    error_context: dict = Field(default_factory=dict)
+
+
+class ChatAgentErrorCreateResponse(BaseAPIModel):
+    id: UUID
+    occurred_at: datetime
+    admin_url: str
+
+
 class ChatAgentCompactionEventCreate(BaseAPIModel):
     event_kind: str
     tool_name: Optional[str] = None

@@ -8,10 +8,12 @@ mocked so failures and missing clients are exercised cleanly.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
-from uuid import UUID, uuid4
+from unittest.mock import AsyncMock
+from unittest.mock import MagicMock
+from uuid import uuid4
 
 import pytest
+from pydantic_ai.exceptions import ModelHTTPError
 
 from smarter_dev.bot.agents.chat_compaction import CompactionEvent
 from smarter_dev.bot.services import chat_conversation_persistence as ccp
@@ -108,6 +110,72 @@ async def test_end_engagement_posts_reason():
     args, kwargs = post.call_args
     assert args[0] == f"/chat-conversations/engagements/{eng_id}/end"
     assert kwargs["json_data"] == {"deactivation_reason": "stop_phrase"}
+
+
+@pytest.mark.asyncio
+async def test_persist_error_posts_full_diagnostics_and_returns_admin_url():
+    error_id = uuid4()
+    admin_url = f"https://smarter.dev/admin/chat-errors/{error_id}"
+    post = AsyncMock(
+        return_value=SimpleNamespace(
+            status_code=201,
+            json=lambda: {"id": str(error_id), "admin_url": admin_url},
+        )
+    )
+    bot = _bot_with_api_client(post)
+    engagement_id = uuid4()
+    try:
+        raise ModelHTTPError(
+            status_code=503,
+            model_name="kimi-k2.6",
+            body={"error": {"message": "upstream overloaded"}},
+        )
+    except ModelHTTPError as error:
+        result = await ccp.persist_error(
+            bot=bot,
+            error=error,
+            engagement_id=engagement_id,
+            request_id="abcd1234",
+            guild_id=111,
+            channel_id=222,
+            model_name="kimi-k2.6",
+            reasoning_level="medium",
+            error_context={"first_activation": True},
+        )
+
+    assert result == admin_url
+    post.assert_awaited_once()
+    args, kwargs = post.call_args
+    assert args[0] == "/chat-conversations/errors"
+    payload = kwargs["json_data"]
+    assert payload["engagement_id"] == str(engagement_id)
+    assert payload["request_id"] == "abcd1234"
+    assert payload["guild_id"] == "111"
+    assert payload["channel_id"] == "222"
+    assert payload["model_name"] == "kimi-k2.6"
+    assert payload["reasoning_level"] == "medium"
+    assert payload["error_type"].endswith(".ModelHTTPError")
+    assert payload["provider_status_code"] == 503
+    assert "upstream overloaded" in payload["provider_body"]
+    assert "ModelHTTPError" in payload["traceback"]
+    assert payload["error_context"] == {"first_activation": True}
+
+
+@pytest.mark.asyncio
+async def test_persist_error_returns_none_when_api_unavailable():
+    bot = MagicMock()
+    bot.d = {}
+    result = await ccp.persist_error(
+        bot=bot,
+        error=RuntimeError("boom"),
+        engagement_id=None,
+        request_id="abcd1234",
+        guild_id=111,
+        channel_id=222,
+        model_name=None,
+        reasoning_level=None,
+    )
+    assert result is None
 
 
 @pytest.mark.asyncio

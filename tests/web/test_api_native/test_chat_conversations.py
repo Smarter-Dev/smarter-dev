@@ -38,6 +38,7 @@ from smarter_dev.web.models import (
     CandidateBlogTopic,
     ChatAgentCompactionEvent,
     ChatAgentEngagement,
+    ChatAgentError,
     ChatAgentTurn,
 )
 
@@ -161,6 +162,47 @@ class TestEndEngagement:
             json={"deactivation_reason": "inactivity"},
         )
         assert response.status_code == 422
+
+
+class TestCreateError:
+    async def test_persists_full_error_and_returns_admin_url(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+        response = await client.post(
+            "/api/chat-conversations/errors",
+            json={
+                "engagement_id": str(engagement.id),
+                "request_id": "err-1234",
+                "guild_id": _GUILD,
+                "channel_id": _CHANNEL,
+                "model_name": "kimi-k2.6",
+                "reasoning_level": "medium",
+                "error_type": "pydantic_ai.exceptions.ModelHTTPError",
+                "error_message": "status_code: 503",
+                "traceback": "Traceback (most recent call last):\\n...",
+                "provider_status_code": 503,
+                "provider_body": '{"error":{"message":"overloaded"}}',
+                "error_context": {"first_activation": True},
+            },
+        )
+
+        assert response.status_code == 201
+        body = response.json()
+        assert body["id"]
+        assert body["occurred_at"]
+        assert body["admin_url"].endswith(f"/admin/chat-errors/{body['id']}")
+
+        errors = (await session.execute(select(ChatAgentError))).scalars().all()
+        assert len(errors) == 1
+        error = errors[0]
+        assert error.engagement_id == engagement.id
+        assert error.request_id == "err-1234"
+        assert error.model_name == "kimi-k2.6"
+        assert error.reasoning_level == "medium"
+        assert error.provider_status_code == 503
+        assert "overloaded" in (error.provider_body or "")
+        assert error.error_context == {"first_activation": True}
 
 
 class TestCreateTurn:

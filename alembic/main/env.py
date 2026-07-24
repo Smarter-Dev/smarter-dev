@@ -52,6 +52,7 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "channel_model_overrides",
     "chat_agent_compaction_events",
     "chat_agent_engagements",
+    "chat_agent_errors",
     "chat_agent_turns",
     "daily_quests",
     "extension_installs",

@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import json
 import logging
+import traceback
 from typing import Any
 from uuid import UUID
 
+from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 from smarter_dev.bot.agents.chat_compaction import CompactionEvent
@@ -32,6 +34,7 @@ _TURNS_PATH = "/admin/chat-conversations/turns"
 # (Actual router is at /chat-conversations, NOT /admin/chat-conversations.)
 _ENGAGEMENTS_PATH = "/chat-conversations/engagements"
 _END_PATH_TMPL = "/chat-conversations/engagements/{id}/end"
+_ERRORS_PATH = "/chat-conversations/errors"
 _TURNS_PATH = "/chat-conversations/turns"
 
 
@@ -103,6 +106,70 @@ async def end_engagement(
             )
     except Exception:
         logger.exception("Failed to end chat conversation engagement")
+
+
+async def persist_error(
+    *,
+    bot: Any,
+    error: Exception,
+    engagement_id: UUID | None,
+    request_id: str,
+    guild_id: int,
+    channel_id: int,
+    model_name: str | None,
+    reasoning_level: str | None,
+    error_context: dict[str, Any] | None = None,
+) -> str | None:
+    """Persist a failed agent run and return its protected admin URL.
+
+    This is best-effort like turn persistence. If the website API is
+    unavailable the caller still posts its generic Discord error, just without
+    a diagnostic link.
+    """
+    api_client = _get_api_client(bot)
+    if api_client is None:
+        return None
+
+    provider_body = getattr(error, "body", None)
+    if provider_body is not None and not isinstance(provider_body, str):
+        provider_body = json.dumps(
+            provider_body, ensure_ascii=False, default=str
+        )
+    context = json.loads(
+        json.dumps(error_context or {}, ensure_ascii=False, default=str)
+    )
+    payload = {
+        "engagement_id": str(engagement_id) if engagement_id is not None else None,
+        "request_id": request_id,
+        "guild_id": str(guild_id),
+        "channel_id": str(channel_id),
+        "model_name": model_name,
+        "reasoning_level": reasoning_level,
+        "error_type": f"{type(error).__module__}.{type(error).__qualname__}",
+        "error_message": str(error),
+        "traceback": "".join(
+            traceback.format_exception(type(error), error, error.__traceback__)
+        ),
+        "provider_status_code": (
+            error.status_code if isinstance(error, ModelHTTPError) else None
+        ),
+        "provider_body": provider_body,
+        "error_context": context,
+    }
+    try:
+        response = await api_client.post(_ERRORS_PATH, json_data=payload)
+        if response.status_code not in (200, 201):
+            logger.warning(
+                "chat error persist failed: HTTP %s — %s",
+                response.status_code,
+                response.text[:200] if hasattr(response, "text") else "",
+            )
+            return None
+        admin_url = response.json().get("admin_url")
+        return str(admin_url) if admin_url else None
+    except Exception:
+        logger.exception("Failed to persist chat agent error")
+        return None
 
 
 async def persist_turn(

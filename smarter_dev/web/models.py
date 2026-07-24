@@ -3937,6 +3937,52 @@ class ChatAgentEngagement(Base):
         )
 
 
+class ChatAgentError(Base):
+    """One failed Discord chat-agent run, retained for admin diagnostics."""
+
+    __tablename__ = "chat_agent_errors"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    engagement_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("chat_agent_engagements.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    request_id: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    guild_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    channel_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    model_name: Mapped[str | None] = mapped_column(String(120), nullable=True, index=True)
+    reasoning_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    error_type: Mapped[str] = mapped_column(String(255), nullable=False)
+    error_message: Mapped[str] = mapped_column(Text, nullable=False)
+    traceback: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_status_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    provider_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_context: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        index=True,
+    )
+
+    __table_args__ = (
+        Index("ix_chat_agent_errors_guild_occurred", "guild_id", "occurred_at"),
+        Index("ix_chat_agent_errors_model_occurred", "model_name", "occurred_at"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ChatAgentError(id='{self.id}', type='{self.error_type}', "
+            f"model='{self.model_name}')>"
+        )
+
+
 class ChatAgentTurn(Base):
     """One row per chat-agent fire (SendResponse OR NoResponse)."""
 

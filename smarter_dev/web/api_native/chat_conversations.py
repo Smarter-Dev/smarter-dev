@@ -10,6 +10,7 @@ changes:
 
 - ``POST /api/chat-conversations/engagements`` → 201, engagement id + started_at.
 - ``POST /api/chat-conversations/engagements/{engagement_id}/end`` → 200 or 404.
+- ``POST /api/chat-conversations/errors`` → 201, error id + admin detail URL.
 - ``POST /api/chat-conversations/turns`` → 201, turn id + cost breakdown.
 - ``GET  /api/chat-conversations/usage-leaderboard`` → 200, per-channel token totals.
 
@@ -47,7 +48,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from skrift.auth.guards import APIKeyOnly, Permission
 
+from smarter_dev.shared.config import get_settings
 from smarter_dev.web.api_native.schemas import (
+    ChatAgentErrorCreate,
+    ChatAgentErrorCreateResponse,
     ChatAgentEngagementEnd,
     ChatAgentEngagementStart,
     ChatAgentEngagementStartResponse,
@@ -66,6 +70,7 @@ from smarter_dev.web.models import (
     CandidateBlogTopic,
     ChatAgentCompactionEvent,
     ChatAgentEngagement,
+    ChatAgentError,
     ChatAgentTurn,
 )
 
@@ -216,6 +221,39 @@ class ChatConversationController(Controller):
             raise plain_error(404, "Engagement not found")
         await db_session.commit()
         return {"id": str(parsed_engagement_id), "ended_at": now.isoformat()}
+
+    @post("/errors", status_code=HTTP_201_CREATED, guards=BOT_API_ADMIN_GUARDS)
+    async def create_error(
+        self,
+        db_session: AsyncSession,
+        data: ChatAgentErrorCreate,
+    ) -> ChatAgentErrorCreateResponse:
+        """Persist a failed chat run and return its protected admin URL."""
+        error = ChatAgentError(
+            engagement_id=data.engagement_id,
+            request_id=data.request_id,
+            guild_id=data.guild_id,
+            channel_id=data.channel_id,
+            model_name=data.model_name,
+            reasoning_level=data.reasoning_level,
+            error_type=data.error_type,
+            error_message=data.error_message,
+            traceback=data.traceback,
+            provider_status_code=data.provider_status_code,
+            provider_body=data.provider_body,
+            error_context=data.error_context,
+        )
+        db_session.add(error)
+        await db_session.commit()
+        await db_session.refresh(error)
+        admin_url = (
+            f"{get_settings().site_base_url.rstrip('/')}/admin/chat-errors/{error.id}"
+        )
+        return ChatAgentErrorCreateResponse(
+            id=error.id,
+            occurred_at=error.occurred_at,
+            admin_url=admin_url,
+        )
 
     @post("/turns", status_code=HTTP_201_CREATED, guards=BOT_API_ADMIN_GUARDS)
     async def create_turn(

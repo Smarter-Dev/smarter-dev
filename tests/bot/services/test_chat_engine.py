@@ -23,6 +23,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelRequest
 
 from smarter_dev.bot.agents.chat_models import (
@@ -698,6 +699,49 @@ async def test_agent_run_failure_posts_error_message(fake_bot, fake_memory):
     fake_bot.rest.create_message.assert_awaited()
     posted = fake_bot.rest.create_message.await_args.kwargs.get("content", "")
     assert "couldn't" in posted.lower() or "could not" in posted.lower()
+
+
+@pytest.mark.asyncio
+async def test_inference_http_error_posts_generic_admin_link(fake_bot, fake_memory):
+    """Members see no provider detail; admins get the protected diagnostic URL."""
+
+    async def fake_run(*, user_prompt, message_history, deps):
+        raise ModelHTTPError(
+            status_code=503,
+            model_name="kimi-k2.6",
+            body={"error": {"message": "upstream model is overloaded"}},
+        )
+
+    error_url = "https://smarter.dev/admin/chat-errors/error-id"
+    persist = AsyncMock(return_value=error_url)
+    patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patch(
+            "smarter_dev.bot.services.chat_engine.persist_error",
+            new=persist,
+        ),
+    ):
+        engine, _ = await _build_engine(fake_bot)
+        engine.start()
+        engine.trigger_initial(_fake_trigger_message())
+        await asyncio.sleep(0.05)
+        await engine.shutdown()
+
+    posted = fake_bot.rest.create_message.await_args.kwargs.get("content", "")
+    assert "couldn't generate a reply" in posted
+    assert "Admin diagnostics" in posted
+    assert error_url in posted
+    assert "kimi-k2.6" not in posted
+    assert "HTTP 503" not in posted
+    assert "upstream model is overloaded" not in posted
+    persist.assert_awaited_once()
+    persisted = persist.await_args.kwargs
+    assert isinstance(persisted["error"], ModelHTTPError)
+    assert persisted["model_name"] == "kimi-k2.6"
 
 
 def test_response_body_requires_message_or_voice():

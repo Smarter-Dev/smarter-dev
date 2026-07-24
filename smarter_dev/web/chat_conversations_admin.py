@@ -39,6 +39,7 @@ from smarter_dev.shared.config import get_settings
 from smarter_dev.web.models import (
     ChatAgentCompactionEvent,
     ChatAgentEngagement,
+    ChatAgentError,
     ChatAgentTurn,
 )
 
@@ -162,6 +163,97 @@ class ChatConversationsAdminController(Controller):
             context={
                 "engagement": engagement,
                 "turns": engagement.turns,
+                "flash_messages": get_flash_messages(request),
+                **ctx,
+            },
+        )
+
+    @get(
+        "/chat-errors",
+        tags=[ADMIN_NAV_TAG],
+        guards=[auth_guard, Permission("manage-bot")],
+        opt={
+            "label": "Chat Errors",
+            "icon": "alert-triangle",
+            "order": 66,
+        },
+    )
+    async def list_errors(
+        self,
+        request: Request,
+        db_session: AsyncSession,
+        guild_id: Annotated[str | None, Parameter(query="guild_id")] = None,
+        model_name: Annotated[str | None, Parameter(query="model_name")] = None,
+        page: Annotated[int, Parameter(query="page")] = 1,
+    ) -> TemplateResponse:
+        """Paginated operator log of failed Discord chat-agent runs."""
+        ctx = await get_admin_context(request, db_session)
+        page_size = 50
+        filters = []
+        if guild_id:
+            filters.append(ChatAgentError.guild_id == guild_id)
+        if model_name:
+            filters.append(ChatAgentError.model_name == model_name)
+
+        stmt = select(ChatAgentError).order_by(
+            ChatAgentError.occurred_at.desc()
+        )
+        count_stmt = select(func.count(ChatAgentError.id))
+        if filters:
+            stmt = stmt.where(*filters)
+            count_stmt = count_stmt.where(*filters)
+        offset = max(0, (page - 1) * page_size)
+        errors = (
+            await db_session.execute(stmt.limit(page_size).offset(offset))
+        ).scalars().all()
+        total = int((await db_session.execute(count_stmt)).scalar() or 0)
+
+        guild_rows = await db_session.execute(
+            select(distinct(ChatAgentError.guild_id)).order_by(
+                ChatAgentError.guild_id
+            )
+        )
+        model_rows = await db_session.execute(
+            select(distinct(ChatAgentError.model_name))
+            .where(ChatAgentError.model_name.is_not(None))
+            .order_by(ChatAgentError.model_name)
+        )
+        return TemplateResponse(
+            "admin/chat-errors/list.html",
+            context={
+                "errors": errors,
+                "guild_ids": [row[0] for row in guild_rows.all()],
+                "model_names": [row[0] for row in model_rows.all()],
+                "selected_guild_id": guild_id or "",
+                "selected_model_name": model_name or "",
+                "page": page,
+                "page_size": page_size,
+                "total": total,
+                "total_pages": max(1, (total + page_size - 1) // page_size),
+                "flash_messages": get_flash_messages(request),
+                **ctx,
+            },
+        )
+
+    @get(
+        "/chat-errors/{error_id:uuid}",
+        guards=[auth_guard, Permission("manage-bot")],
+    )
+    async def error_detail(
+        self,
+        request: Request,
+        db_session: AsyncSession,
+        error_id: UUID,
+    ) -> TemplateResponse:
+        """Full exception and run context for one protected diagnostic link."""
+        ctx = await get_admin_context(request, db_session)
+        error = await db_session.get(ChatAgentError, error_id)
+        if error is None:
+            raise NotFoundException(detail="Chat error not found")
+        return TemplateResponse(
+            "admin/chat-errors/detail.html",
+            context={
+                "error": error,
                 "flash_messages": get_flash_messages(request),
                 **ctx,
             },

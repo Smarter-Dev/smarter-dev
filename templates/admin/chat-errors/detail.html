@@ -1,0 +1,92 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Chat Error {{ error.request_id }} - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<style nonce="{{ csp_nonce() }}">
+    .ce-back { display: inline-block; margin-bottom: 1rem; }
+    .ce-meta {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: .75rem;
+        margin: 1rem 0;
+    }
+    .ce-card {
+        background: var(--sk-color-surface);
+        border: 1px solid var(--sk-color-border);
+        border-radius: .5rem;
+        padding: .75rem 1rem;
+    }
+    .ce-card dt {
+        color: var(--sk-color-muted);
+        font-size: .75rem;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+    }
+    .ce-card dd { margin: .15rem 0 .6rem; overflow-wrap: anywhere; }
+    .ce-dump {
+        max-height: 36rem;
+        overflow: auto;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        background: rgba(0, 0, 0, .25);
+        border: 1px solid var(--sk-color-border);
+        border-radius: .375rem;
+        padding: .75rem;
+        font-size: .8rem;
+    }
+    @media (max-width: 850px) {
+        .ce-meta { grid-template-columns: 1fr; }
+    }
+</style>
+
+<a class="ce-back" href="/admin/chat-errors">&larr; Chat error log</a>
+
+<hgroup>
+    <h1>{{ error.error_type.rsplit('.', 1)[-1] }}</h1>
+    <p>Request <code>{{ error.request_id }}</code> · {{ error.occurred_at.strftime('%Y-%m-%d %H:%M:%S %Z') }}</p>
+</hgroup>
+
+<section class="ce-meta">
+    <dl class="ce-card">
+        <dt>Model</dt>
+        <dd>{{ error.model_name or '—' }}</dd>
+        <dt>Reasoning</dt>
+        <dd>{{ error.reasoning_level or '—' }}</dd>
+        <dt>Provider status</dt>
+        <dd>{{ error.provider_status_code or '—' }}</dd>
+    </dl>
+    <dl class="ce-card">
+        <dt>Guild</dt>
+        <dd>{{ error.guild_id }}</dd>
+        <dt>Channel</dt>
+        <dd>{{ error.channel_id }}</dd>
+        <dt>Engagement</dt>
+        <dd>
+            {% if error.engagement_id %}
+            <a href="/admin/chat-conversations/{{ error.engagement_id }}">{{ error.engagement_id }}</a>
+            {% else %}—{% endif %}
+        </dd>
+    </dl>
+    <dl class="ce-card">
+        <dt>Error type</dt>
+        <dd><code>{{ error.error_type }}</code></dd>
+        <dt>Error ID</dt>
+        <dd><code>{{ error.id }}</code></dd>
+    </dl>
+</section>
+
+<h2>Message</h2>
+<pre class="ce-dump">{{ error.error_message }}</pre>
+
+{% if error.provider_body %}
+<h2>Provider response</h2>
+<pre class="ce-dump">{{ error.provider_body }}</pre>
+{% endif %}
+
+<h2>Run context</h2>
+<pre class="ce-dump">{{ error.error_context | tojson(indent=2) }}</pre>
+
+<h2>Traceback</h2>
+<pre class="ce-dump">{{ error.traceback }}</pre>
+{% endblock %}

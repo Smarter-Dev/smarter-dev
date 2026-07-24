@@ -1,0 +1,121 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Chat Errors - Admin - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<hgroup>
+    <h1>Chat Errors</h1>
+    <p>{{ total }} failed chat-agent run{{ 's' if total != 1 else '' }}</p>
+</hgroup>
+
+<style nonce="{{ csp_nonce() }}">
+    .ce-filters {
+        display: flex;
+        gap: .75rem;
+        align-items: flex-end;
+        flex-wrap: wrap;
+        margin-bottom: 1rem;
+    }
+    .ce-filters label { display: block; }
+    .ce-filters span {
+        display: block;
+        color: var(--sk-color-muted);
+        font-size: .8rem;
+        margin-bottom: .15rem;
+    }
+    .ce-filters select {
+        min-width: 14rem;
+        background: var(--sk-color-surface);
+        color: var(--sk-color-text);
+        border: 1px solid var(--sk-color-border);
+        border-radius: .375rem;
+        padding: .4rem .6rem;
+    }
+    .ce-error {
+        color: var(--sk-color-danger, #ef4444);
+        font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+    }
+    .ce-pagination {
+        display: flex;
+        gap: .5rem;
+        align-items: center;
+        margin-top: 1rem;
+    }
+</style>
+
+<form method="get" action="/admin/chat-errors" class="ce-filters">
+    <label>
+        <span>Guild</span>
+        <select name="guild_id">
+            <option value="">All</option>
+            {% for guild_id in guild_ids %}
+            <option value="{{ guild_id }}" {{ 'selected' if guild_id == selected_guild_id else '' }}>
+                {{ guild_id }}
+            </option>
+            {% endfor %}
+        </select>
+    </label>
+    <label>
+        <span>Model</span>
+        <select name="model_name">
+            <option value="">All</option>
+            {% for model_name in model_names %}
+            <option value="{{ model_name }}" {{ 'selected' if model_name == selected_model_name else '' }}>
+                {{ model_name }}
+            </option>
+            {% endfor %}
+        </select>
+    </label>
+    <button type="submit" class="sk-btn sk-btn-outline">Filter</button>
+    <a role="button" href="/admin/chat-errors" class="sk-btn sk-btn-outline">Reset</a>
+</form>
+
+{% if errors %}
+<table class="sk-admin-table">
+    <thead>
+        <tr>
+            <th>Occurred</th>
+            <th>Model</th>
+            <th>Error</th>
+            <th>Guild / channel</th>
+            <th>Request</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for error in errors %}
+        <tr>
+            <td><small>{{ error.occurred_at.strftime('%Y-%m-%d %H:%M:%S') }}</small></td>
+            <td>
+                {{ error.model_name or '—' }}
+                {% if error.provider_status_code %}
+                <br><small class="sk-text-muted">HTTP {{ error.provider_status_code }}</small>
+                {% endif %}
+            </td>
+            <td>
+                <span class="ce-error">{{ error.error_type.rsplit('.', 1)[-1] }}</span>
+                <br><small class="sk-text-muted">{{ error.error_message[:120] }}{% if error.error_message|length > 120 %}&hellip;{% endif %}</small>
+            </td>
+            <td><small>{{ error.guild_id }} / {{ error.channel_id }}</small></td>
+            <td><code>{{ error.request_id }}</code></td>
+            <td><a href="/admin/chat-errors/{{ error.id }}">Details</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="sk-text-muted">No chat errors match these filters.</p>
+{% endif %}
+
+{% if total_pages > 1 %}
+<nav class="ce-pagination" aria-label="Pagination">
+    {% if page > 1 %}
+    <a class="sk-btn sk-btn-outline" href="?page={{ page - 1 }}&guild_id={{ selected_guild_id }}&model_name={{ selected_model_name }}">Previous</a>
+    {% endif %}
+    <span>Page {{ page }} of {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a class="sk-btn sk-btn-outline" href="?page={{ page + 1 }}&guild_id={{ selected_guild_id }}&model_name={{ selected_model_name }}">Next</a>
+    {% endif %}
+</nav>
+{% endif %}
+{% endblock %}
