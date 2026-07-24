@@ -1,8 +1,15 @@
 """Tests for the chat agent's search-to-read research contract."""
 
 from smarter_dev.bot.agents.chat_agent import SYSTEM_PROMPT
+from smarter_dev.bot.agents.chat_models import TurnDecision
 from smarter_dev.bot.agents.chat_tools import web_read
 from smarter_dev.bot.agents.chat_tools import web_search
+
+
+def test_chat_agent_has_no_blog_functionality():
+    assert "Smarter Dev blog" not in SYSTEM_PROMPT
+    assert "blog_topic_candidates" not in SYSTEM_PROMPT
+    assert "blog_topic_candidates" not in TurnDecision.model_fields
 
 
 def test_system_prompt_distinguishes_search_from_reading():
