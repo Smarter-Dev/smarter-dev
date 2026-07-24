@@ -179,3 +179,19 @@ def test_digitalocean_writer_agent_uses_prompted_output_and_no_tools():
     agent = get_writer_agent("glm-5.2")
     assert isinstance(agent.output_type, PromptedOutput)
     assert list(agent._function_toolset.tools.keys()) == []
+
+
+def test_writer_system_prompt_carries_model_identity():
+    """The writer answers 'what model are you?' from its own system prompt (the
+    drafter can't be relied on to relay it), so the catalog label is injected."""
+    _reset_cache()
+    agent = get_writer_agent("gpt-5.6-terra")
+    prompt = agent._system_prompts[0]
+    assert "GPT-5.6 Terra" in prompt
+    assert "Never bring it up otherwise" in prompt
+
+
+def test_writer_identity_falls_back_to_model_id_for_adhoc():
+    _reset_cache()
+    agent = get_writer_agent("some-unlisted-model")
+    assert "some-unlisted-model" in agent._system_prompts[0]
