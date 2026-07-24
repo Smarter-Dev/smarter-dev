@@ -4766,3 +4766,7 @@ class ChannelModelOverride(Base):
     # Free-text instructions describing which messages deserve a response, or NULL
     # to respond without a content filter.
     response_filter: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A stable catalog ``key`` for the two-stage WRITER model. When set/non-empty
+    # the channel runs the worker+writer two-stage chat mode (``model_key`` names
+    # the WORKER); NULL keeps today's single-agent behaviour.
+    writer_model: Mapped[str | None] = mapped_column(String(64), nullable=True)

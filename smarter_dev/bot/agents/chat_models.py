@@ -302,3 +302,155 @@ class TurnDecision(BaseModel):
 
 
 AgentReturn = TurnDecision
+
+
+class WriterBrief(BaseModel):
+    """Context the WORKER hands to the WRITER in two-stage chat mode.
+
+    Instead of writing the final reply, the worker distills the turn into
+    attributed message summaries, summarized tool/search findings, and the
+    verbatim question(s) being answered. The writer — a tool-less large model
+    that IS the bot — turns this into a friendly Discord message."""
+
+    message_summaries: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Attributed summaries of every message the reply depends on — the "
+            "ones being answered and anything they reference (an earlier line, "
+            "the bot's own prior reply, a quoted snippet), e.g. 'Alice asked "
+            "whether X', 'smarterbot earlier said: \"...\"'. Quote exact text the "
+            "reply must reuse; the writer never sees the raw history."
+        ),
+    )
+    search_findings: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Summarized relevant tool/search results the writer should use. "
+            "May be empty when no tools were needed."
+        ),
+    )
+    questions: list[str] = Field(
+        default_factory=list,
+        description="The verbatim question(s) being answered, quoted exactly.",
+    )
+    response_language: str = Field(
+        description=(
+            "Lowercase language name the reply should be written in. Exactly "
+            "`english` for English, including English with incidental foreign "
+            "text, code, or logs."
+        ),
+    )
+    send_voice: bool = Field(
+        default=False,
+        description="True ONLY when the user explicitly asked for a voice message.",
+    )
+    reply_directly: bool = Field(
+        default=False,
+        description=(
+            "True to send as a visible Discord reply (when the conversation "
+            "drifted past the target). Default False."
+        ),
+    )
+
+    @field_validator("response_language")
+    @classmethod
+    def _normalize_response_language(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not normalized:
+            raise ValueError("WriterBrief.response_language cannot be empty.")
+        return normalized
+
+    @model_validator(mode="after")
+    def _require_content(self) -> "WriterBrief":
+        if not (self.message_summaries or self.search_findings or self.questions):
+            raise ValueError(
+                "WriterBrief requires at least one of `message_summaries`, "
+                "`search_findings`, or `questions` to be non-empty."
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _non_english_is_text_only(self) -> "WriterBrief":
+        # Parity with TurnDecision's "English redirect must be text-only" rule:
+        # a non-English turn is only ever a text redirect, never a voice reply.
+        if self.response_language != "english" and self.send_voice:
+            raise ValueError(
+                "A non-English turn must be text-only — `send_voice` may not "
+                "be True when `response_language` is not `english`."
+            )
+        return self
+
+
+class BriefingDecision(BaseModel):
+    """The WORKER's structured output in two-stage chat mode.
+
+    Mirrors TurnDecision's orchestration fields — rankings, continue_watching,
+    topic/notes — but replaces the written response with a WriterBrief. Silence
+    is a choice you make by setting `brief = None`, never a field you forget to
+    fill."""
+
+    rankings: list[MessageScore] = Field(
+        description="One MessageScore per NEW <message> this turn.",
+    )
+    brief: WriterBrief | None = Field(
+        default=None,
+        description=(
+            "Populate to speak; None to stay silent. Must be None when every "
+            "ranking scored < 5, and ALWAYS None for continued non-English "
+            "from a user you already redirected to English."
+        ),
+    )
+    continue_watching: bool = Field(
+        default=True,
+        description="Set False only when the engagement is genuinely over.",
+    )
+    topic: str = Field(
+        description="1-2 sentence summary of the current conversation topic.",
+    )
+    notes: str | None = Field(
+        default=None,
+        description=(
+            "Per-person thread tracker ('alice: …; bob: …'). Accumulate, "
+            "don't replace; None = keep existing notes."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _validate_brief_against_rankings(self) -> "BriefingDecision":
+        if not self.rankings:
+            raise ValueError(
+                "BriefingDecision.rankings must contain at least one entry — "
+                "every turn delivers at least one new <message> to score."
+            )
+        if self.brief is None:
+            return self
+        max_score = max(r.score for r in self.rankings)
+        if max_score < 5:
+            raise ValueError(
+                f"BriefingDecision.brief is populated but every ranking "
+                f"scored below 5 (max={max_score}). Brief only when a new "
+                f"message scored >= 5, otherwise set brief=None."
+            )
+        return self
+
+
+class WriterOutput(BaseModel):
+    """The WRITER's structured output: the final Discord message text and an
+    optional spoken digest."""
+
+    message: str = Field(
+        description="The reply text — prose only, never schema fields or JSON.",
+    )
+    voice_summary: str | None = Field(
+        default=None,
+        description=(
+            "Short spoken TTS digest, few sentences max. Only when the user "
+            "asked for voice this turn. Default None."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _require_message(self) -> "WriterOutput":
+        if not (self.message and self.message.strip()):
+            raise ValueError("WriterOutput.message must be a non-empty string.")
+        return self

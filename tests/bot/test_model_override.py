@@ -41,6 +41,7 @@ from smarter_dev.bot.views.model_override_views import create_settings_panel
 from smarter_dev.bot.views.model_override_views import encode_panel_state
 from smarter_dev.bot.views.model_override_views import parse_budget
 from smarter_dev.bot.views.model_override_views import parse_panel_state
+from smarter_dev.bot.views.model_override_views import parse_writer_model
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import get_model
 
@@ -55,6 +56,8 @@ NO_REASONING_KEY = "kimi-k2-6"
 REASONING_KEY = "glm-5-2"
 # A second reasoning-capable model used as a fallback target in tests.
 FALLBACK_KEY = "deepseek-v4"
+# A catalog model used as the two-stage writer target in tests.
+WRITER_KEY = "gemini-3-6-flash"
 
 
 def _override(
@@ -65,6 +68,7 @@ def _override(
     auto_respond: bool = False,
     fallback_model_key: str | None = None,
     response_filter: str | None = None,
+    writer_model: str | None = None,
 ):
     return ChannelModelOverride(
         guild_id="G",
@@ -76,6 +80,7 @@ def _override(
         auto_respond=auto_respond,
         fallback_model_key=fallback_model_key,
         response_filter=response_filter,
+        writer_model=writer_model,
     )
 
 
@@ -154,6 +159,25 @@ def test_parse_budget_accepts_maximum():
 def test_parse_budget_rejects_over_limit():
     with pytest.raises(ValueError, match="too large"):
         parse_budget(str(MAX_TOKEN_BUDGET + 1))
+
+
+# --------------------------------------------------------------------------- #
+# Pure helpers — writer-model parsing
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("raw", ["", None, "   "])
+def test_parse_writer_model_blank_means_single_stage(raw):
+    assert parse_writer_model(raw) is None
+
+
+def test_parse_writer_model_accepts_catalog_key():
+    assert parse_writer_model(f"  {WRITER_KEY}  ") == WRITER_KEY
+
+
+def test_parse_writer_model_rejects_unknown_key():
+    with pytest.raises(ValueError, match="not a known model"):
+        parse_writer_model("not-a-real-model")
 
 
 # --------------------------------------------------------------------------- #
@@ -406,15 +430,24 @@ def test_create_settings_modal_encodes_full_state():
     )
 
 
-def test_create_settings_modal_has_budget_and_filter_inputs():
+def test_create_settings_modal_has_budget_filter_and_writer_inputs():
     modal = create_settings_modal(_panel_state(), None)
     inputs = _row_components(modal.components)
     ids = [component.custom_id for component in inputs]
-    assert ids == ["daily_budget", "hourly_budget", "response_filter"]
-    response_filter_input = inputs[-1]
+    assert ids == [
+        "daily_budget",
+        "hourly_budget",
+        "response_filter",
+        "writer_model",
+    ]
+    response_filter_input = inputs[2]
     assert response_filter_input.style == hikari.TextInputStyle.PARAGRAPH
     assert response_filter_input.is_required is False
     assert response_filter_input.max_length == 4000
+    writer_input = inputs[-1]
+    assert writer_input.style == hikari.TextInputStyle.SHORT
+    assert writer_input.is_required is False
+    assert writer_input.max_length == 64
 
 
 def test_create_settings_modal_text_inputs_fit_discord_limits():
@@ -430,24 +463,37 @@ def test_create_settings_modal_text_inputs_fit_discord_limits():
 def test_create_settings_modal_omits_prefill_without_override():
     modal = create_settings_modal(_panel_state(), None)
     values = [component.value for component in _row_components(modal.components)]
-    assert values == [hikari.UNDEFINED, hikari.UNDEFINED, hikari.UNDEFINED]
+    assert values == [
+        hikari.UNDEFINED,
+        hikari.UNDEFINED,
+        hikari.UNDEFINED,
+        hikari.UNDEFINED,
+    ]
 
 
 def test_create_settings_modal_prefills_from_override():
     modal = create_settings_modal(
         _panel_state(),
-        _override(daily=1500, hourly=200, response_filter="only questions"),
+        _override(
+            daily=1500,
+            hourly=200,
+            response_filter="only questions",
+            writer_model=WRITER_KEY,
+        ),
     )
     values = [component.value for component in _row_components(modal.components)]
-    assert values == ["1500", "200", "only questions"]
+    assert values == ["1500", "200", "only questions", WRITER_KEY]
 
 
-def test_create_settings_modal_omits_empty_filter_prefill():
+def test_create_settings_modal_omits_empty_filter_and_writer_prefill():
     modal = create_settings_modal(
-        _panel_state(), _override(daily=10, hourly=10, response_filter=None)
+        _panel_state(),
+        _override(daily=10, hourly=10, response_filter=None, writer_model=None),
     )
     values = [component.value for component in _row_components(modal.components)]
-    assert values[-1] is hikari.UNDEFINED
+    # response_filter (index 2) and writer_model (index 3) both left unset.
+    assert values[2] is hikari.UNDEFINED
+    assert values[3] is hikari.UNDEFINED
 
 
 # --------------------------------------------------------------------------- #
@@ -931,7 +977,10 @@ async def test_continue_opens_modal_carrying_state():
 async def test_save_persists_panel_state_without_modal_and_keeps_advanced_fields():
     service = AsyncMock()
     service.get_override.return_value = _override(
-        daily=1500, hourly=200, response_filter="Only programming questions"
+        daily=1500,
+        hourly=200,
+        response_filter="Only programming questions",
+        writer_model=WRITER_KEY,
     )
     event = _component_event(
         [],
@@ -951,6 +1000,7 @@ async def test_save_persists_panel_state_without_modal_and_keeps_advanced_fields
         auto_respond=True,
         fallback_model_key=FALLBACK_KEY,
         response_filter="Only programming questions",
+        writer_model=WRITER_KEY,
     )
     event.interaction.create_modal_response.assert_not_called()
     args, kwargs = event.interaction.create_initial_response.call_args
@@ -977,6 +1027,7 @@ async def test_save_new_override_uses_unlimited_budgets_and_no_filter():
         auto_respond=False,
         fallback_model_key=None,
         response_filter=None,
+        writer_model=None,
     )
 
 
@@ -1002,6 +1053,7 @@ def _modal_event(custom_id: str, fields: dict[str, str], service: AsyncMock):
         [_text_input("daily_budget", fields.get("daily_budget", ""))],
         [_text_input("hourly_budget", fields.get("hourly_budget", ""))],
         [_text_input("response_filter", fields.get("response_filter", ""))],
+        [_text_input("writer_model", fields.get("writer_model", ""))],
     ]
     interaction.create_initial_response = AsyncMock()
     event = Mock()
@@ -1035,6 +1087,7 @@ async def test_modal_submit_persists_all_fields():
         auto_respond=True,
         fallback_model_key=FALLBACK_KEY,
         response_filter="Only respond to programming questions",
+        writer_model=None,
     )
     event.interaction.create_initial_response.assert_awaited_once()
 
@@ -1059,6 +1112,7 @@ async def test_modal_submit_persists_minimal_state():
         auto_respond=False,
         fallback_model_key=None,
         response_filter=None,
+        writer_model=None,
     )
 
 
@@ -1074,6 +1128,58 @@ async def test_modal_submit_empty_filter_persists_none():
 
     _, kwargs = service.set_override.call_args
     assert kwargs["response_filter"] is None
+
+
+async def test_modal_submit_persists_writer_model_for_two_stage():
+    service = AsyncMock()
+    event = _modal_event(
+        f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}",
+        {"daily_budget": "0", "hourly_budget": "0", "writer_model": WRITER_KEY},
+        service,
+    )
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.handle_model_override_modal_submit(event)
+
+    _, kwargs = service.set_override.call_args
+    assert kwargs["writer_model"] == WRITER_KEY
+    _, response_kwargs = event.interaction.create_initial_response.call_args
+    content = response_kwargs["content"]
+    assert "two-stage" in content.lower()
+    assert get_model(WRITER_KEY).label in content
+
+
+async def test_modal_submit_blank_writer_model_persists_none():
+    service = AsyncMock()
+    event = _modal_event(
+        f"{MODAL_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0:",
+        {"daily_budget": "0", "hourly_budget": "0", "writer_model": "   "},
+        service,
+    )
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.handle_model_override_modal_submit(event)
+
+    _, kwargs = service.set_override.call_args
+    assert kwargs["writer_model"] is None
+
+
+async def test_modal_submit_rejects_unknown_writer_model():
+    service = AsyncMock()
+    event = _modal_event(
+        f"{MODAL_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0:",
+        {
+            "daily_budget": "0",
+            "hourly_budget": "0",
+            "writer_model": "not-a-real-model",
+        },
+        service,
+    )
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.handle_model_override_modal_submit(event)
+
+    service.set_override.assert_not_called()
+    event.interaction.create_initial_response.assert_awaited_once()
+    _, kwargs = event.interaction.create_initial_response.call_args
+    assert "not a known model" in kwargs["content"].lower()
 
 
 async def test_modal_submit_confirmation_lists_all_settings():

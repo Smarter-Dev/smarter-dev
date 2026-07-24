@@ -31,6 +31,7 @@ from pydantic_ai.settings import ModelSettings
 
 from smarter_dev.bot.agents.chat_compaction import compact_history
 from smarter_dev.bot.agents.chat_models import AgentReturn
+from smarter_dev.bot.agents.chat_models import BriefingDecision
 from smarter_dev.bot.agents.chat_tools import ChatDeps
 from smarter_dev.bot.agents.chat_tools import chat_tool_functions
 from smarter_dev.bot.agents.handler_tools import handler_tool_functions
@@ -49,6 +50,12 @@ MODEL_ENV_VAR = "CHAT_AGENT_MODEL"
 
 SYSTEM_PROMPT = (
     Path(__file__).parent / "prompts" / "chat_agent.md"
+).read_text(encoding="utf-8")
+
+# Two-stage WORKER prompt: same decision funnel as the chat agent, but the
+# final step authors a context brief instead of writing the reply.
+WORKER_SYSTEM_PROMPT = (
+    Path(__file__).parent / "prompts" / "worker_agent.md"
 ).read_text(encoding="utf-8")
 
 
@@ -87,21 +94,24 @@ def build_agent_model(model_id: str) -> Model:
     return GoogleModel(model_id, provider=GoogleProvider(api_key=api_key))
 
 
-def _output_type_for(model_id: str) -> type[AgentReturn] | PromptedOutput:
-    """Structured-output mode for ``model_id``.
+def _output_type_for(
+    model_id: str, output_type: type = AgentReturn
+) -> type | PromptedOutput:
+    """Structured-output mode for ``model_id`` returning ``output_type``.
 
-    Gemini/OpenAI models return ``AgentReturn`` via pydantic_ai's default
+    Gemini/OpenAI models return ``output_type`` via pydantic_ai's default
     tool-call output. DigitalOcean-hosted models get ``PromptedOutput`` (schema
     in the prompt, JSON text back): DO's OpenAI-compatible endpoint is uneven —
     tool_choice="required" 500s on Kimi/GLM and stalls Qwen, and with "auto"
     the reasoning models answer in plain text instead of calling the output
     tool; ``response_format`` json_schema is likewise only partially supported.
-    Prompted JSON is the one mode every hosted model handles.
+    Prompted JSON is the one mode every hosted model handles. The chat agent
+    passes ``AgentReturn``; the worker agent passes ``BriefingDecision``.
     """
     catalog_model = _catalog_model_for_id(model_id)
     if catalog_model is not None and catalog_model.provider is ModelProvider.DIGITALOCEAN:
-        return PromptedOutput(AgentReturn)
-    return AgentReturn
+        return PromptedOutput(output_type)
+    return output_type
 
 
 def _model_settings_for(
@@ -184,4 +194,41 @@ def get_chat_agent(
             history_processors=[compact_history],
         )
         _chat_agents[cache_key] = agent
+    return agent
+
+
+# The two-stage WORKER agent, cached per resolved (model id, reasoning level)
+# just like the chat agent. Kept in a separate cache because the worker and the
+# chat agent can share a wire model id yet differ in output type and prompt.
+_worker_agents: dict[tuple[str, str | None], Agent[ChatDeps, BriefingDecision]] = {}
+
+
+def get_worker_agent(
+    model_id: str | None = None, reasoning_level: str | None = None
+) -> Agent[ChatDeps, BriefingDecision]:
+    """Return (building on first use) the two-stage WORKER agent for ``model_id``.
+
+    The worker runs the same agentic turn as :func:`get_chat_agent` — same tools,
+    same history processors, same model resolution and DigitalOcean
+    ``PromptedOutput`` handling — but emits a :class:`BriefingDecision` (a context
+    brief for the writer stage) instead of writing the reply itself, and loads its
+    system prompt from ``prompts/worker_agent.md``. ``model_id`` is the WORKER wire
+    id (the channel override's small model); ``None`` uses the env/default. Agents
+    are cached per resolved (id, reasoning) pair, independent of the chat-agent
+    cache.
+    """
+    resolved_id = model_id or _model_id()
+    cache_key = (resolved_id, reasoning_level)
+    agent = _worker_agents.get(cache_key)
+    if agent is None:
+        agent = Agent(
+            build_agent_model(resolved_id),
+            output_type=_output_type_for(resolved_id, BriefingDecision),
+            deps_type=ChatDeps,
+            system_prompt=WORKER_SYSTEM_PROMPT,
+            tools=chat_tool_functions() + handler_tool_functions(),
+            model_settings=_model_settings_for(resolved_id, reasoning_level),
+            history_processors=[compact_history],
+        )
+        _worker_agents[cache_key] = agent
     return agent

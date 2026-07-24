@@ -45,6 +45,7 @@ from redis.exceptions import RedisError
 from smarter_dev.bot.agents.chat_agent import DEFAULT_MODEL as CHAT_DEFAULT_MODEL
 from smarter_dev.bot.agents.chat_agent import MODEL_ENV_VAR as CHAT_MODEL_ENV_VAR
 from smarter_dev.bot.agents.chat_agent import get_chat_agent
+from smarter_dev.bot.agents.chat_agent import get_worker_agent
 from smarter_dev.bot.agents.chat_agent import resolved_reasoning_level
 from smarter_dev.bot.agents.chat_compaction import drain_collection
 from smarter_dev.bot.agents.chat_compaction import set_last_model_call
@@ -54,10 +55,14 @@ from smarter_dev.bot.agents.chat_context import build_initial_input
 from smarter_dev.bot.agents.chat_input_format import build_agent_call
 from smarter_dev.bot.agents.message_gate import GateMessage
 from smarter_dev.bot.agents.message_gate import filter_messages
+from smarter_dev.bot.agents.chat_models import BriefingDecision
 from smarter_dev.bot.agents.chat_models import ResponseBody
 from smarter_dev.bot.agents.chat_models import TurnDecision
+from smarter_dev.bot.agents.writer_agent import build_writer_prompt
+from smarter_dev.bot.agents.writer_agent import get_writer_agent
 from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
 from smarter_dev.bot.agents.response_fitting import fit_overlong_response
+from smarter_dev.bot.agents.response_fitting import fit_writer_message
 from smarter_dev.bot.agents.response_fitting import split_for_discord
 from smarter_dev.bot.agents.chat_tools import ChatDeps
 from smarter_dev.bot.agents.chat_tools import GeneratedImage
@@ -633,7 +638,19 @@ class ChannelEngine:
                     activation_message_id=int(trigger.id) if trigger else 0,
                 )
 
-            agent = get_chat_agent(override_model_id, override_reasoning)
+            # Two-stage mode selection. When the override names a WRITER model,
+            # the small WORKER runs the agentic turn (same tools/history) and
+            # emits a brief, then a tool-less large WRITER writes the reply. An
+            # unset/empty (or stale) writer_model keeps today's single-agent path
+            # exactly — the WORKER still runs on the model the budget/fallback/
+            # temp-default logic above already resolved.
+            writer_model_id = self._resolve_writer_model_id(override)
+            two_stage = writer_model_id is not None
+            agent = (
+                get_worker_agent(override_model_id, override_reasoning)
+                if two_stage
+                else get_chat_agent(override_model_id, override_reasoning)
+            )
             deps = ChatDeps(
                 bot=self.bot,
                 channel_id=self.channel_id,
@@ -652,12 +669,25 @@ class ChannelEngine:
                 model_name=resolved_model_name,
                 reasoning_level=resolved_reasoning_wire,
             )
+            # The WRITER's token spend. Folded into this turn's persisted totals
+            # alongside the WORKER's, and — in two-stage mode — it is the ONLY
+            # spend metered against the channel token budget (both zero in
+            # single-stage).
+            writer_extra_input = 0
+            writer_extra_output = 0
+            two_stage_output: TurnDecision | None = None
             try:
                 result = await agent.run(
                     user_prompt=user_prompt,
                     message_history=message_history,
                     deps=deps,
                 )
+                if two_stage:
+                    (
+                        two_stage_output,
+                        writer_extra_input,
+                        writer_extra_output,
+                    ) = await self._run_writer_stage(result.output, writer_model_id)
             except Exception as error:
                 # Even a failed run (probably) hit the model — later turns
                 # inside the cache TTL should read warm.
@@ -709,13 +739,25 @@ class ChannelEngine:
             self._last_model_call_at = datetime.now(UTC)
             compaction_events = drain_collection()
 
-            output = result.output
-            tokens = _extract_tokens(result.usage())
+            output = two_stage_output if two_stage else result.output
+            # Tokens charged against the channel's enforced token budget. In
+            # two-stage mode ONLY the large WRITER counts toward the limit — the
+            # cheap WORKER runs the agentic turn but never consumes the channel's
+            # token budget (its spend is still recorded per-turn on the dashboard
+            # via persist_turn). Single-stage meters its one model's full spend.
+            if two_stage:
+                tokens = writer_extra_input + writer_extra_output
+            else:
+                tokens = _extract_tokens(result.usage())
             # A reply too long to send in two messages gets rewritten before
-            # dispatch: the agent shortens its own draft (context-aware),
-            # falling back to a Luna summary, then truncation. The
-            # shorten re-run spends chat-model tokens, so they're folded into
-            # this turn's metering and persisted totals.
+            # dispatch, otherwise ``split_for_discord`` would silently drop its
+            # tail. Single-stage first asks the agent to shorten its own draft
+            # (context-aware), falling back to a Luna summary, then truncation;
+            # the shorten re-run spends chat-model tokens, so they're folded into
+            # this turn's metering and persisted totals. Two-stage's tool-less
+            # WRITER has no ``response``-shaped agent to re-run, so it goes
+            # straight to the Luna summarizer (then truncation) — Luna's spend is
+            # logged but not metered, so it adds no extra tokens.
             fit_extra_input = 0
             fit_extra_output = 0
             if (
@@ -723,12 +765,15 @@ class ChannelEngine:
                 and output.response.message
                 and len(output.response.message) > SUMMARIZE_THRESHOLD
             ):
-                fit = await fit_overlong_response(
-                    output.response.message,
-                    agent=agent,
-                    deps=deps,
-                    message_history=list(result.all_messages()),
-                )
+                if two_stage:
+                    fit = await fit_writer_message(output.response.message)
+                else:
+                    fit = await fit_overlong_response(
+                        output.response.message,
+                        agent=agent,
+                        deps=deps,
+                        message_history=list(result.all_messages()),
+                    )
                 logger.info(
                     "[%s] Overlong reply (%d chars) fitted via %s to %d chars",
                     request_id,
@@ -748,11 +793,13 @@ class ChannelEngine:
                 tokens += fit_extra_input + fit_extra_output
             # Meter this turn's chat tokens against the channel's usage windows.
             # Every channel is metered (so ``/bot-usage`` always has numbers);
-            # the budgets that *enforce* only exist on override channels.
-            # Compaction runs on its own summarizer model and its tokens are not
-            # in ``result.usage()``, so they are not counted here. A free-fallback
-            # turn meters into display-only windows so its spend still shows in
-            # ``/bot-usage`` but never counts toward the enforced budget.
+            # the budgets that *enforce* only exist on override channels. In
+            # two-stage mode ``tokens`` already excludes the WORKER, so only the
+            # large WRITER's spend is metered here. Compaction runs on its own
+            # summarizer model and its tokens are not in ``result.usage()``, so
+            # they are not counted here. A free-fallback turn meters into
+            # display-only windows so its spend still shows in ``/bot-usage`` but
+            # never counts toward the enforced budget.
             if budget_redis is not None:
                 await self._record_budget_usage(
                     budget_redis, tokens, fallback_active=fallback_active
@@ -795,10 +842,12 @@ class ChannelEngine:
                 chat_in = (
                     int(getattr(chat_usage, "input_tokens", 0) or 0)
                     + fit_extra_input
+                    + writer_extra_input
                 )
                 chat_out = (
                     int(getattr(chat_usage, "output_tokens", 0) or 0)
                     + fit_extra_output
+                    + writer_extra_output
                 )
                 chat_cache_read = int(
                     getattr(chat_usage, "cache_read_tokens", 0) or 0
@@ -1168,6 +1217,79 @@ class ChannelEngine:
             )
             return None
         return catalog_model.model_id
+
+    def _resolve_writer_model_id(self, override: Any | None) -> str | None:
+        """Wire model id of the override's two-stage WRITER, or None for the
+        single-agent path.
+
+        A ``None``/empty ``writer_model`` means single-stage (today's behaviour).
+        A stored key the catalog no longer knows (stale) degrades to single-stage
+        with a warning rather than crashing the turn, mirroring
+        :meth:`_resolve_override_model_id`.
+        """
+        writer_key = (
+            getattr(override, "writer_model", None) if override is not None else None
+        )
+        if writer_key is None or not writer_key.strip():
+            return None
+        catalog_model = get_model(writer_key.strip())
+        if catalog_model is None:
+            logger.warning(
+                "Channel %s writer_model names unknown model_key %r — "
+                "running single-stage",
+                self.channel_id,
+                writer_key,
+            )
+            return None
+        return catalog_model.model_id
+
+    async def _run_writer_stage(
+        self, briefing: BriefingDecision, writer_model_id: str
+    ) -> tuple[TurnDecision, int, int]:
+        """Assemble a two-stage turn's output: run the tool-less WRITER on the
+        WORKER's brief and fold its message into a ``TurnDecision`` the existing
+        send/persist path consumes.
+
+        Returns ``(decision, writer_input_tokens, writer_output_tokens)``. When
+        the worker stayed silent (``briefing.brief`` is None) the writer is never
+        called, the decision carries ``response=None``, and both token counts are
+        zero. The decision is assembled from already-validated parts via
+        ``model_construct``: ``TurnDecision``'s cross-field validators encode the
+        single-agent English-redirect policy, which the WORKER already enforced on
+        the ``BriefingDecision`` — re-running them on the assembled container would
+        be wrong, not safer.
+        """
+        brief = briefing.brief
+        response: ResponseBody | None = None
+        writer_input = 0
+        writer_output = 0
+        response_language = "english"
+        if brief is not None:
+            response_language = brief.response_language
+            writer_agent = get_writer_agent(writer_model_id)
+            writer_result = await writer_agent.run(build_writer_prompt(brief))
+            writer_output_body = writer_result.output
+            writer_usage = writer_result.usage()
+            writer_input = int(getattr(writer_usage, "input_tokens", 0) or 0)
+            writer_output = int(getattr(writer_usage, "output_tokens", 0) or 0)
+            top_ranked = max(briefing.rankings, key=lambda ranking: ranking.score)
+            response = ResponseBody(
+                target_message_id=top_ranked.message_id,
+                reply_directly=brief.reply_directly,
+                message=writer_output_body.message,
+                voice_summary=(
+                    writer_output_body.voice_summary if brief.send_voice else None
+                ),
+            )
+        decision = TurnDecision.model_construct(
+            rankings=briefing.rankings,
+            response_language=response_language,
+            response=response,
+            continue_watching=briefing.continue_watching,
+            topic=briefing.topic,
+            notes=briefing.notes,
+        )
+        return decision, writer_input, writer_output
 
     async def _resolve_temporary_default(
         self, redis: Any

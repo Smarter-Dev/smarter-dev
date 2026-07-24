@@ -95,6 +95,7 @@ class ChannelModelOverrideController(Controller):
             auto_respond=data.auto_respond,
             fallback_model_key=data.fallback_model_key,
             response_filter=data.response_filter,
+            writer_model=data.writer_model,
         )
         # Serialize before commit to avoid session-detachment issues with the
         # Skrift-injected session (mirrors the legacy router's ordering).

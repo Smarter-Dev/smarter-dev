@@ -202,3 +202,25 @@ async def fit_overlong_response(
         output_tokens,
         "truncated",
     )
+
+
+async def fit_writer_message(message: str) -> FitResult:
+    """Bring an overlong two-stage WRITER reply down to a sendable size.
+
+    The tool-less WRITER has no context-aware ``response``-shaped agent to
+    re-run, so this skips the agent-shorten tier: it condenses the reply with
+    the Luna summarizer, then hard-truncates as a last resort so a reply is
+    always delivered. Like single-stage's summarizer tier, Luna's spend is
+    logged but not metered against the channel budget, so the returned
+    extra-token counts are always zero.
+    """
+    summary = await _summarize_with_luna(message)
+    if summary is not None and len(summary) <= SUMMARIZE_THRESHOLD:
+        return FitResult(summary, 0, 0, "summarized")
+
+    return FitResult(
+        message[: DISCORD_MESSAGE_LIMIT - 1].rstrip() + "…",
+        0,
+        0,
+        "truncated",
+    )

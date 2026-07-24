@@ -805,6 +805,12 @@ class ChannelModelOverrideWrite(BaseAPIModel):
         max_length=4000,
         description="Free-text instructions for which messages deserve a response",
     )
+    writer_model: str | None = Field(
+        None,
+        description="Catalog key for the two-stage WRITER model; when set the "
+        "channel runs worker+writer mode (model_key is the worker), null for "
+        "single-agent mode",
+    )
 
     @field_validator("model_key")
     @classmethod
@@ -818,6 +824,15 @@ class ChannelModelOverrideWrite(BaseAPIModel):
     @field_validator("fallback_model_key")
     @classmethod
     def _fallback_model_key_in_catalog(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if not is_valid_model_key(value):
+            raise ValueError(f"unknown model key: {value!r}")
+        return value
+
+    @field_validator("writer_model")
+    @classmethod
+    def _writer_model_in_catalog(cls, value: str | None) -> str | None:
         if value is None:
             return None
         if not is_valid_model_key(value):
@@ -858,6 +873,10 @@ class ChannelModelOverrideRead(BaseAPIModel):
     )
     response_filter: str | None = Field(
         None, description="Instructions for which messages deserve a response, or null"
+    )
+    writer_model: str | None = Field(
+        None,
+        description="Two-stage WRITER model catalog key, or null for single-agent mode",
     )
     created_at: datetime = Field(description="Override creation timestamp")
     updated_at: datetime = Field(description="Last update timestamp")

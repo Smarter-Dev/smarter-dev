@@ -37,6 +37,7 @@ import hikari
 
 from smarter_dev.bot.services.models import ChannelModelOverride
 from smarter_dev.shared.model_catalog import CatalogModel
+from smarter_dev.shared.model_catalog import is_valid_model_key
 from smarter_dev.shared.model_catalog import models_by_family
 from smarter_dev.shared.model_catalog import parse_reasoning_level
 
@@ -355,12 +356,15 @@ def create_settings_modal(
     state: PanelState,
     current: ChannelModelOverride | None,
 ) -> hikari.api.InteractionModalBuilder:
-    """Build the budgets + response-filter modal carrying the full panel state.
+    """Build the budgets + response-filter + writer-model modal carrying the full
+    panel state.
 
     The ``custom_id`` encodes ``state`` so the submit handler persists model,
-    reasoning, auto-respond and fallback alongside the free-text inputs. Budget
-    and filter inputs prefill from ``current`` when present so reopening reflects
-    the stored values.
+    reasoning, auto-respond and fallback alongside the free-text inputs. Budget,
+    filter, and writer-model inputs prefill from ``current`` when present so
+    reopening reflects the stored values. A non-empty writer model switches the
+    channel to two-stage mode (the panel's model gathers context, the writer
+    model writes the reply); blank keeps single-stage mode.
     """
     modal = hikari.impl.InteractionModalBuilder(
         title="Channel Budgets & Filter",
@@ -380,6 +384,11 @@ def create_settings_modal(
     filter_prefill = (
         current.response_filter
         if current is not None and current.response_filter
+        else hikari.UNDEFINED
+    )
+    writer_prefill = (
+        current.writer_model
+        if current is not None and current.writer_model
         else hikari.UNDEFINED
     )
     modal.add_component(
@@ -424,6 +433,22 @@ def create_settings_modal(
             )
         )
     )
+    modal.add_component(
+        hikari.impl.ModalActionRowBuilder().add_component(
+            hikari.impl.TextInputBuilder(
+                custom_id="writer_model",
+                label="Writer model (optional, enables 2-stage)",
+                style=hikari.TextInputStyle.SHORT,
+                placeholder=(
+                    "Catalog model key that writes the reply — "
+                    "empty keeps single-stage mode."
+                ),
+                value=writer_prefill,
+                required=False,
+                max_length=64,
+            )
+        )
+    )
     return modal
 
 
@@ -451,3 +476,24 @@ def parse_budget(raw: str | None) -> int:
             f"{MAX_TOKEN_BUDGET:,} tokens (0 = unlimited)."
         )
     return value
+
+
+def parse_writer_model(raw: str | None) -> str | None:
+    """Parse the writer-model text input into a catalog key or ``None``.
+
+    Empty/whitespace/``None`` means "unset" -> single-stage mode (``None``). A
+    non-empty value must be a known catalog model key — it names the reply-writing
+    model of the two-stage mode; anything else raises ``ValueError`` (surfaced by
+    the handler as an ephemeral error).
+    """
+    if raw is None:
+        return None
+    text = raw.strip()
+    if not text:
+        return None
+    if not is_valid_model_key(text):
+        raise ValueError(
+            f"'{raw}' is not a known model — enter a catalog model key for the "
+            f"writer, or leave it blank to keep single-stage mode."
+        )
+    return text

@@ -5517,6 +5517,7 @@ async def upsert_channel_model_override(
     auto_respond: bool = False,
     fallback_model_key: str | None = None,
     response_filter: str | None = None,
+    writer_model: str | None = None,
 ) -> ChannelModelOverride:
     """Insert or update the single override row for ``channel_id``.
 
@@ -5537,6 +5538,7 @@ async def upsert_channel_model_override(
             auto_respond=auto_respond,
             fallback_model_key=fallback_model_key,
             response_filter=response_filter,
+            writer_model=writer_model,
         )
         session.add(record)
     else:
@@ -5548,6 +5550,7 @@ async def upsert_channel_model_override(
         record.auto_respond = auto_respond
         record.fallback_model_key = fallback_model_key
         record.response_filter = response_filter
+        record.writer_model = writer_model
     await session.flush()
     # Load server-generated timestamps (created_at/updated_at) now, so callers can
     # serialize the row without triggering a lazy load outside the async context.
