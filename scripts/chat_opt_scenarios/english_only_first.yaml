@@ -1,0 +1,22 @@
+# A directed coding question written in Spanish, with NO prior English-only
+# redirect from the bot in history. Expected: SendResponse that is ONLY a short
+# English redirect (response_language != english), with no content answer and
+# no tool calls.
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "dev-help"
+
+authors:
+  - user_id: "1"
+    username: "carlos"
+
+trigger:
+  id: "80"
+  from: "1"
+  body: "@smarterbot por qué mi webhook de Stripe devuelve un error 400 al verificar la firma?"
+  mentions_bot: true

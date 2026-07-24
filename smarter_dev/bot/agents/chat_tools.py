@@ -133,14 +133,7 @@ async def _post_status(ctx: RunContext[ChatDeps], text: str) -> None:
 
 
 async def web_search(ctx: RunContext[ChatDeps], query: str) -> list[dict[str, str]]:
-    """Discover web sources via Brave Search and return up to 5 result snippets.
-
-    This is the first stage of web research. Snippets are enough for quick,
-    low-stakes answers and broad summaries. For accurate or deep answers,
-    precise technical guidance, nuanced comparisons, quotations, verification,
-    or source-specific claims, choose the best result URLs and call ``web_read``
-    before replying.
-    """
+    """Search the web; returns up to 5 result snippets. For accurate or deep answers, follow up with web_read on the best result."""
     logger.info("web_search: %r (channel=%s)", query, ctx.deps.channel_id)
     await _post_status(ctx, f'Searching the web: "{query}"')
     async with httpx.AsyncClient(timeout=15.0) as client:
@@ -157,18 +150,7 @@ async def web_search(ctx: RunContext[ChatDeps], query: str) -> list[dict[str, st
 async def web_read(
     ctx: RunContext[ChatDeps], url: str, instruction: str
 ) -> dict[str, str]:
-    """Read a URL and return an instruction-guided summary of its content.
-
-    This is the evidence stage after ``web_search`` when an answer must be
-    accurate, deep, precise, nuanced, verified, or grounded in a source. It
-    also handles direct URLs and ``<attachment>`` URLs for web pages, PDFs,
-    YouTube links, and image/audio files. A fast model condenses the content
-    per ``instruction`` — you get the summary back, never the raw file — so
-    say what to look for, what to ignore, quote-vs-paraphrase, and how much
-    detail (keep it small; ~5 paragraphs max). If the page lacks what you
-    asked for, the summary says so instead of guessing. Returns ``url``,
-    ``title``, and ``summary`` (or ``error`` on fetch failure).
-    """
+    """Read a URL — web page, PDF, YouTube, image/audio, or a message <attachment> — and get a summary guided by `instruction`; say what to look for."""
     # Attachment URLs are rendered into XML attributes (``&`` -> ``&amp;``), and
     # the model copies them back escaped. Resolve only URLs we actually escaped
     # back to their exact original — URLs from search/users pass through
@@ -254,7 +236,7 @@ async def web_read(
 
 
 async def list_available_reactions(ctx: RunContext[ChatDeps]) -> list[dict[str, str]]:
-    """List emojis the bot can use with ``add_reaction``: guild custom + unicode."""
+    """List emojis usable with add_reaction (guild custom + unicode)."""
     bot = ctx.deps.bot
     out: list[dict[str, str]] = []
     try:
@@ -274,11 +256,7 @@ async def add_reaction(
     message_id: str,
     emoji: str,
 ) -> dict[str, Any]:
-    """Add an emoji reaction to a specific message in the current channel.
-
-    For custom emojis, pass ``name:id`` (e.g. ``thinking:123456789``).
-    For unicode, pass the emoji character directly.
-    """
+    """React to a message with an emoji (unicode char, or name:id for custom)."""
     bot = ctx.deps.bot
     if not message_id or not str(message_id).isdigit():
         logger.warning(
@@ -331,18 +309,7 @@ async def report_behavior(
     ctx: RunContext[ChatDeps],
     classification: str,
 ) -> dict[str, str]:
-    """Report problematic user behaviour.
-
-    Use sparingly — only when a user is genuinely trying to provoke, rage-bait,
-    or repeatedly disrupt. The call is logged for moderator review.
-
-    Args:
-        classification: short label, e.g. "rage_bait", "spam", "trolling".
-
-    Returns:
-        A guidance string the agent should reflect in its response (e.g. acknowledge
-        the behaviour was noted) — the agent may then choose to disengage.
-    """
+    """Log genuinely disruptive behavior (trolling, rage-bait, spam) for moderator review. Use sparingly."""
     logger.info(
         "report_behavior fired: channel=%s guild=%s classification=%r",
         ctx.deps.channel_id,
@@ -363,17 +330,7 @@ async def report_behavior(
 
 
 async def run_code(ctx: RunContext[ChatDeps], reason: str, code: str) -> str:
-    """Run Python in a secure sandbox (Pydantic Monty) and return its output.
-
-    Use for any real computation (arithmetic, date math, regex, parsing,
-    counting) instead of head-math. Returns stdout plus the final
-    expression's value (like a notebook cell), or the error. ``reason`` is a
-    short human status line (5-10 words) shown in-channel, e.g.
-    "Calculating the 30-day total". RESTRICTED Python subset: allowed
-    stdlib only (sys, os, typing, asyncio, re, datetime, json), no
-    third-party packages, no ``class``/``match``, no filesystem/network/env
-    access, a few seconds of runtime — pure computation only.
-    """
+    """Run Python in a restricted sandbox (small stdlib subset; no packages, filesystem, or network). Use for any real computation — arithmetic, dates, regex, parsing — instead of head-math. `reason` is a short status line shown in-channel."""
     await _post_status(ctx, reason)
     logger.info(
         "run_code: reason=%r (channel=%s)", reason, ctx.deps.channel_id
@@ -457,20 +414,7 @@ def _format_remaining(status: dict) -> str:
 
 
 async def generate_image(ctx: RunContext[ChatDeps], prompt: str) -> str:
-    """Generate an image and attach it to your reply this turn.
-
-    STRICT policy: only diagrams whose SUBJECT is SOFTWARE, CS, or MATH
-    (data structures, algorithms, architecture/protocol diagrams, state
-    machines, DB schemas, UML, math figures, complexity curves; charts only
-    when plotting code/CS/math data). NEVER other-science diagrams,
-    non-technical charts, politics, off-topic subjects, art/memes/logos, or
-    real people. ``prompt`` is a detailed illustrator brief, reviewed
-    before generation — a rejection returns an explanation, spends no
-    quota, and must not be retried verbatim. Rate-limited per server; the
-    return value says how many images remain (once it says 0, don't call
-    again until the stated time). On success the image attaches to this
-    turn's message — introduce it in your reply.
-    """
+    """Generate an image attached to this turn's reply. ONLY diagrams whose subject is software, CS, or math — nothing else. `prompt` is a detailed illustrator brief, reviewed before drawing; rate-limited per server — when metadata shows quota remaining 0, don't call until it resets, say images are rate-limited and answer in text."""
     guild_id = str(ctx.deps.guild_id)
     async with _quota_api(ctx) as api:
         # 1. Cheap gate: if the hour's budget is already spent, don't spend a

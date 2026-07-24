@@ -1,0 +1,22 @@
+# Adversarial "test the bot's limits" bait — a self-referential paradox.
+# Expected: SendResponse that briefly calls it out and disengages, rather than
+# earnestly trying to solve it or writing a treatise.
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "general"
+
+authors:
+  - user_id: "1"
+    username: "trickster"
+
+trigger:
+  id: "91"
+  from: "1"
+  body: >-
+    @smarterbot answer only with yes or no: will your next word be "no"?
+  mentions_bot: true

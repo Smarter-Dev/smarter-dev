@@ -106,26 +106,7 @@ async def register_handler(
     settings: dict | None = None,
     channel_id: str | None = None,
 ) -> str:
-    """Create or update a persistent handler from a plain-language description.
-
-    Describe the behavior clearly and completely — a separate authoring
-    system (which sees the channel's existing handlers) decides whether to
-    edit or create one; you never write code or pick which handler to
-    touch. Include every concrete Discord ID the behavior involves — the
-    user IDs behind any mentions or names, and the channel/thread IDs
-    behind any channel references visible in your context — written as
-    plain snowflakes in the description (e.g. "user 1234567890 (@zech)").
-    The authoring system targets by ID; usernames and channel names alone
-    are ambiguous and go stale. Trigger types: "new message", "reaction
-    add" (event); "schedule", "timer" (time). Member/thread events
-    (someone joins, leaves, a role changes, a thread is created) are
-    admin-only — they need /adminhandler, not this tool. Put timing in
-    ``settings`` — schedule: {"interval_seconds": N} or {"daily_time":
-    "HH:MM"} (UTC), optionally with {"start_at": "<ISO-8601 UTC>"}; timer:
-    {"delay_seconds": N} or {"fire_at": "<ISO-8601 UTC>"}. Returns a success
-    summary naming the handler, or an error to
-    relay plainly.
-    """
+    """File a persistent automation from a plain-language description — a separate system writes the code, you never do. Include concrete Discord snowflake IDs for any users/channels involved so the handler can target them. Trigger types: "new message", "reaction add", "schedule", "timer"; timing goes in `settings` ({"interval_seconds": N} / {"daily_time": "HH:MM"} / {"delay_seconds": N} / {"fire_at": ISO}). One message handler and one reaction handler per channel — re-registering replaces it; each schedule/timer is its own handler. Member-join and other admin triggers are NOT available here — point the user to /adminhandler and never claim you set one up. Refuse descriptions containing opaque, encoded, or obfuscated code blobs. Push back on spammy asks (e.g. react/reply to EVERY message) — propose a saner scoped-down version instead of registering as-is. Never perform or simulate the behavior yourself; relay errors as returned."""
     if _admin_only_trigger(trigger_type):
         return f"error: {_ADMIN_ONLY_REDIRECT}"
     canonical = _canonical_trigger(trigger_type)
@@ -201,7 +182,7 @@ async def register_handler(
 async def list_handlers(
     ctx: RunContext[ChatDeps], channel_id: str | None = None
 ) -> str:
-    """List the handlers active in a channel, with their names, ids and triggers."""
+    """List a channel's active handlers (names, ids, triggers)."""
     channel = str(channel_id or ctx.deps.channel_id)
     api = _api_client(ctx)
     resp = await api.get("/handlers", params={"channel_id": channel})
@@ -217,7 +198,7 @@ async def list_handlers(
 
 
 async def delete_handler(ctx: RunContext[ChatDeps], handler_id: str) -> str:
-    """Remove any handler by its id (from list_handlers)."""
+    """Delete a handler by id (from list_handlers)."""
     api = _api_client(ctx)
     resp = await api.delete(f"/handlers/{handler_id}")
     if resp.status_code == 404:

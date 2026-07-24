@@ -1,0 +1,27 @@
+# THE KEY QUALITY PROBE (from the reported issue). A pointed question about a
+# SPECIFIC contradiction: Guido favors explicit-over-implicit, yet resisted
+# optional type hints for years. Expected: SendResponse that engages THAT exact
+# tension and gives Guido's actual reasons — not a deflection into the generic
+# "enterprises made Python messy / how type hints got bolted on" narrative.
+# Coding/CS topic, so a full-depth answer (not_cs_topic_brief_answer=False).
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "python-general"
+
+authors:
+  - user_id: "1"
+    username: "jokerhut"
+
+trigger:
+  id: "90"
+  from: "1"
+  body: >-
+    @smarterbot if Guido likes explicit over implicit, why was he resistant to
+    adding optional type hints for so long? i'm asking specifically why *he*
+    was opposed, not how they eventually got added.
+  mentions_bot: true

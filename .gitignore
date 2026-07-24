@@ -69,3 +69,7 @@ scripts/.capability_results.json
 # Any environment-specific secrets file (prod.env, staging.env, …)
 *.env
 reports/image_prompt_review/
+
+# chat prompt-optimization scratch (scripts/prompt_opt_eval.py)
+scripts/.opt_run/
+scripts/.opt_baseline_descriptions.json
