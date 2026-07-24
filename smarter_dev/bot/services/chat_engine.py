@@ -662,12 +662,24 @@ class ChannelEngine:
             start_collection()
             set_last_model_call(self._last_model_call_at)
             image_quota = await self._fetch_image_quota()
+            # The ``<your-model>`` metadata advertises the model that actually
+            # authors the reply so "what model are you?" answers correctly. In
+            # two-stage mode that is the WRITER, not the cheap WORKER running
+            # this turn — the worker only relays the identity into the brief when
+            # asked, so it must be told the writer's. Single-stage advertises the
+            # one model that both reasons and writes.
+            advertised_model_name = writer_model_id if two_stage else resolved_model_name
+            advertised_reasoning_wire = (
+                resolved_reasoning_level(writer_model_id, None)
+                if two_stage
+                else resolved_reasoning_wire
+            )
             user_prompt, message_history = build_agent_call(
                 agent_input,
                 history,
                 image_quota=image_quota,
-                model_name=resolved_model_name,
-                reasoning_level=resolved_reasoning_wire,
+                model_name=advertised_model_name,
+                reasoning_level=advertised_reasoning_wire,
             )
             # The WRITER's token spend. Folded into this turn's persisted totals
             # alongside the WORKER's, and — in two-stage mode — it is the ONLY
