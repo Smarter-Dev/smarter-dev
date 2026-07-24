@@ -31,10 +31,13 @@ from smarter_dev.bot.views.model_override_views import SAVE_CUSTOM_ID_PREFIX
 from smarter_dev.bot.views.model_override_views import SENTINEL_DEFAULT
 from smarter_dev.bot.views.model_override_views import SENTINEL_MODEL_DEFAULT
 from smarter_dev.bot.views.model_override_views import SENTINEL_NO_FALLBACK
+from smarter_dev.bot.views.model_override_views import SENTINEL_NO_WRITER
+from smarter_dev.bot.views.model_override_views import WRITER_SELECT_CUSTOM_ID_PREFIX
 from smarter_dev.bot.views.model_override_views import PanelState
 from smarter_dev.bot.views.model_override_views import build_fallback_options
 from smarter_dev.bot.views.model_override_views import build_model_options
 from smarter_dev.bot.views.model_override_views import build_reasoning_options
+from smarter_dev.bot.views.model_override_views import build_writer_model_options
 from smarter_dev.bot.views.model_override_views import create_model_select_message
 from smarter_dev.bot.views.model_override_views import create_settings_modal
 from smarter_dev.bot.views.model_override_views import create_settings_panel
@@ -239,48 +242,90 @@ def test_build_fallback_options_marks_current_fallback_default():
 
 
 # --------------------------------------------------------------------------- #
+# Pure helpers — writer-model options
+# --------------------------------------------------------------------------- #
+
+
+def test_build_writer_model_options_excludes_primary_and_offers_sentinel():
+    options = build_writer_model_options(
+        primary_key=REASONING_KEY, current_writer_key=None
+    )
+    values = [opt.value for opt in options]
+
+    assert values[0] == SENTINEL_NO_WRITER
+    # The chosen primary is never offered as its own writer.
+    assert REASONING_KEY not in values
+    # Every other catalog model is offered.
+    for model in MODEL_CATALOG:
+        if model.key != REASONING_KEY:
+            assert model.key in values
+    # sentinel + (catalog - primary), within Discord's 25-option limit
+    assert len(options) == len(MODEL_CATALOG)
+    assert len(options) <= 25
+    # No stored writer -> the "no writer" sentinel is preselected.
+    defaults = [opt.value for opt in options if opt.is_default]
+    assert defaults == [SENTINEL_NO_WRITER]
+
+
+def test_build_writer_model_options_marks_current_writer_default():
+    options = build_writer_model_options(
+        primary_key=REASONING_KEY, current_writer_key=WRITER_KEY
+    )
+    defaults = [opt.value for opt in options if opt.is_default]
+    assert defaults == [WRITER_KEY]
+
+
+# --------------------------------------------------------------------------- #
 # Pure helpers — panel state encode/parse
 # --------------------------------------------------------------------------- #
 
 
 def test_encode_panel_state_full():
     assert (
-        encode_panel_state(REASONING_KEY, "high", True, FALLBACK_KEY)
-        == f"{REASONING_KEY}:high:1:{FALLBACK_KEY}"
+        encode_panel_state(REASONING_KEY, "high", True, FALLBACK_KEY, WRITER_KEY)
+        == f"{REASONING_KEY}:high:1:{FALLBACK_KEY}:{WRITER_KEY}"
     )
 
 
 def test_encode_panel_state_empties():
     assert (
-        encode_panel_state(NO_REASONING_KEY, None, False, None)
-        == f"{NO_REASONING_KEY}::0:"
+        encode_panel_state(NO_REASONING_KEY, None, False, None, None)
+        == f"{NO_REASONING_KEY}::0::"
     )
 
 
 def test_parse_panel_state_roundtrip():
-    custom_id = f"{AUTO_TOGGLE_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}"
+    custom_id = (
+        f"{AUTO_TOGGLE_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:"
+        f"{FALLBACK_KEY}:{WRITER_KEY}"
+    )
     state = parse_panel_state(custom_id, AUTO_TOGGLE_CUSTOM_ID_PREFIX)
     assert state == PanelState(
         model_key=REASONING_KEY,
         reasoning_level="high",
         auto_respond=True,
         fallback_model_key=FALLBACK_KEY,
+        writer_model_key=WRITER_KEY,
     )
 
 
 def test_parse_panel_state_empties():
-    custom_id = f"{CONTINUE_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0:"
+    custom_id = f"{CONTINUE_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0::"
     state = parse_panel_state(custom_id, CONTINUE_CUSTOM_ID_PREFIX)
     assert state == PanelState(
         model_key=NO_REASONING_KEY,
         reasoning_level=None,
         auto_respond=False,
         fallback_model_key=None,
+        writer_model_key=None,
     )
 
 
 def test_parse_panel_state_wrong_prefix_returns_none():
-    custom_id = f"{AUTO_TOGGLE_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}"
+    custom_id = (
+        f"{AUTO_TOGGLE_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:"
+        f"{FALLBACK_KEY}:{WRITER_KEY}"
+    )
     assert parse_panel_state(custom_id, CONTINUE_CUSTOM_ID_PREFIX) is None
 
 
@@ -300,30 +345,32 @@ def test_parse_panel_state_wrong_field_count_returns_none():
 
 def test_create_settings_panel_reasoning_model_has_reasoning_row():
     model = get_model(REASONING_KEY)
-    rows = create_settings_panel(model, None, False, None)
-    # reasoning select + fallback select + button row
-    assert len(rows) == 3
-    prefixes = [row.components[0].custom_id.split(":")[0] for row in rows[:2]]
+    rows = create_settings_panel(model, None, False, None, None)
+    # reasoning select + fallback select + writer select + button row
+    assert len(rows) == 4
+    prefixes = [row.components[0].custom_id.split(":")[0] for row in rows[:3]]
     assert prefixes == [
         REASONING_SELECT_CUSTOM_ID_PREFIX,
         FALLBACK_SELECT_CUSTOM_ID_PREFIX,
+        WRITER_SELECT_CUSTOM_ID_PREFIX,
     ]
 
 
 def test_create_settings_panel_no_reasoning_model_omits_reasoning_row():
     model = get_model(NO_REASONING_KEY)
-    rows = create_settings_panel(model, None, False, None)
-    # No reasoning knob -> fallback select + button row only.
-    assert len(rows) == 2
-    assert (
-        rows[0].components[0].custom_id.split(":")[0]
-        == FALLBACK_SELECT_CUSTOM_ID_PREFIX
-    )
+    rows = create_settings_panel(model, None, False, None, None)
+    # No reasoning knob -> fallback select + writer select + button row.
+    assert len(rows) == 3
+    prefixes = [row.components[0].custom_id.split(":")[0] for row in rows[:2]]
+    assert prefixes == [
+        FALLBACK_SELECT_CUSTOM_ID_PREFIX,
+        WRITER_SELECT_CUSTOM_ID_PREFIX,
+    ]
 
 
 def test_create_settings_panel_buttons_carry_auto_continue_save_and_reset():
     model = get_model(NO_REASONING_KEY)
-    rows = create_settings_panel(model, None, False, None)
+    rows = create_settings_panel(model, None, False, None, None)
     buttons = rows[-1].components
     button_prefixes = [button.custom_id.split(":")[0] for button in buttons]
     assert AUTO_TOGGLE_CUSTOM_ID_PREFIX in button_prefixes
@@ -334,19 +381,19 @@ def test_create_settings_panel_buttons_carry_auto_continue_save_and_reset():
 
 
 def test_create_settings_panel_server_default_omits_reasoning_row():
-    rows = create_settings_panel(None, None, False, None)
+    rows = create_settings_panel(None, None, False, None, None)
     custom_ids = [component.custom_id for component in _row_components(rows)]
     assert not any(
         custom_id.startswith(REASONING_SELECT_CUSTOM_ID_PREFIX)
         for custom_id in custom_ids
     )
-    state = encode_panel_state(SENTINEL_DEFAULT, None, False, None)
+    state = encode_panel_state(SENTINEL_DEFAULT, None, False, None, None)
     assert f"{SAVE_CUSTOM_ID_PREFIX}:{state}" in custom_ids
     assert RESET_CUSTOM_ID in custom_ids
 
 
 def test_create_settings_panel_server_default_offers_every_fallback():
-    rows = create_settings_panel(None, None, False, None)
+    rows = create_settings_panel(None, None, False, None, None)
     fallback_menu = next(
         component
         for component in _row_components(rows)
@@ -358,7 +405,7 @@ def test_create_settings_panel_server_default_offers_every_fallback():
 
 def test_create_settings_panel_auto_button_reflects_off_state():
     model = get_model(NO_REASONING_KEY)
-    rows = create_settings_panel(model, None, False, None)
+    rows = create_settings_panel(model, None, False, None, None)
     auto_button = next(
         button
         for button in rows[-1].components
@@ -370,7 +417,7 @@ def test_create_settings_panel_auto_button_reflects_off_state():
 
 def test_create_settings_panel_auto_button_reflects_on_state():
     model = get_model(NO_REASONING_KEY)
-    rows = create_settings_panel(model, None, True, None)
+    rows = create_settings_panel(model, None, True, None, None)
     auto_button = next(
         button
         for button in rows[-1].components
@@ -382,8 +429,8 @@ def test_create_settings_panel_auto_button_reflects_on_state():
 
 def test_create_settings_panel_custom_ids_carry_state_and_stay_short():
     model = get_model(REASONING_KEY)
-    rows = create_settings_panel(model, "high", True, FALLBACK_KEY)
-    state = encode_panel_state(REASONING_KEY, "high", True, FALLBACK_KEY)
+    rows = create_settings_panel(model, "high", True, FALLBACK_KEY, WRITER_KEY)
+    state = encode_panel_state(REASONING_KEY, "high", True, FALLBACK_KEY, WRITER_KEY)
     for component in _row_components(rows):
         # The reset button is stateless — it deletes the row outright.
         if component.custom_id == RESET_CUSTOM_ID:
@@ -392,15 +439,18 @@ def test_create_settings_panel_custom_ids_carry_state_and_stay_short():
         assert len(component.custom_id) < 100
 
 
-def test_create_settings_panel_prefills_reasoning_and_fallback():
+def test_create_settings_panel_prefills_reasoning_fallback_and_writer():
     model = get_model(REASONING_KEY)
-    rows = create_settings_panel(model, "high", False, FALLBACK_KEY)
+    rows = create_settings_panel(model, "high", False, FALLBACK_KEY, WRITER_KEY)
     reasoning_select = rows[0].components[0]
     fallback_select = rows[1].components[0]
+    writer_select = rows[2].components[0]
     reasoning_defaults = [o.value for o in reasoning_select.options if o.is_default]
     fallback_defaults = [o.value for o in fallback_select.options if o.is_default]
+    writer_defaults = [o.value for o in writer_select.options if o.is_default]
     assert reasoning_defaults == ["high"]
     assert fallback_defaults == [FALLBACK_KEY]
+    assert writer_defaults == [WRITER_KEY]
 
 
 # --------------------------------------------------------------------------- #
@@ -413,41 +463,39 @@ def _panel_state(
     reasoning_level: str | None = None,
     auto_respond: bool = False,
     fallback_model_key: str | None = None,
+    writer_model_key: str | None = None,
 ) -> PanelState:
     return PanelState(
         model_key=model_key,
         reasoning_level=reasoning_level,
         auto_respond=auto_respond,
         fallback_model_key=fallback_model_key,
+        writer_model_key=writer_model_key,
     )
 
 
 def test_create_settings_modal_encodes_full_state():
-    state = _panel_state(REASONING_KEY, "high", True, FALLBACK_KEY)
+    state = _panel_state(REASONING_KEY, "high", True, FALLBACK_KEY, WRITER_KEY)
     modal = create_settings_modal(state, None)
     assert modal.custom_id == (
-        f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}"
+        f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}:{WRITER_KEY}"
     )
 
 
-def test_create_settings_modal_has_budget_filter_and_writer_inputs():
+def test_create_settings_modal_has_budget_and_filter_inputs():
     modal = create_settings_modal(_panel_state(), None)
     inputs = _row_components(modal.components)
     ids = [component.custom_id for component in inputs]
+    # The writer model is now chosen on the panel's select, not in the modal.
     assert ids == [
         "daily_budget",
         "hourly_budget",
         "response_filter",
-        "writer_model",
     ]
     response_filter_input = inputs[2]
     assert response_filter_input.style == hikari.TextInputStyle.PARAGRAPH
     assert response_filter_input.is_required is False
     assert response_filter_input.max_length == 4000
-    writer_input = inputs[-1]
-    assert writer_input.style == hikari.TextInputStyle.SHORT
-    assert writer_input.is_required is False
-    assert writer_input.max_length == 64
 
 
 def test_create_settings_modal_text_inputs_fit_discord_limits():
@@ -467,7 +515,6 @@ def test_create_settings_modal_omits_prefill_without_override():
         hikari.UNDEFINED,
         hikari.UNDEFINED,
         hikari.UNDEFINED,
-        hikari.UNDEFINED,
     ]
 
 
@@ -482,18 +529,18 @@ def test_create_settings_modal_prefills_from_override():
         ),
     )
     values = [component.value for component in _row_components(modal.components)]
-    assert values == ["1500", "200", "only questions", WRITER_KEY]
+    # The writer model is no longer a modal input, so it's not prefilled here.
+    assert values == ["1500", "200", "only questions"]
 
 
-def test_create_settings_modal_omits_empty_filter_and_writer_prefill():
+def test_create_settings_modal_omits_empty_filter_prefill():
     modal = create_settings_modal(
         _panel_state(),
         _override(daily=10, hourly=10, response_filter=None, writer_model=None),
     )
     values = [component.value for component in _row_components(modal.components)]
-    # response_filter (index 2) and writer_model (index 3) both left unset.
+    # response_filter (index 2) left unset.
     assert values[2] is hikari.UNDEFINED
-    assert values[3] is hikari.UNDEFINED
 
 
 # --------------------------------------------------------------------------- #
@@ -700,7 +747,7 @@ async def test_select_sentinel_drops_stored_reasoning_from_panel_state():
         await model_override.handle_model_override_select(event)
 
     _, kwargs = event.interaction.create_initial_response.call_args
-    state = encode_panel_state(SENTINEL_DEFAULT, None, True, None)
+    state = encode_panel_state(SENTINEL_DEFAULT, None, True, None, None)
     save_ids = [
         c.custom_id
         for c in _row_components(kwargs["components"])
@@ -714,7 +761,7 @@ async def test_save_sentinel_persists_null_model_key():
     behaviour apply while the channel keeps the default model."""
     service = AsyncMock()
     service.get_override.return_value = _override(daily=500, hourly=100)
-    state = encode_panel_state(SENTINEL_DEFAULT, None, True, None)
+    state = encode_panel_state(SENTINEL_DEFAULT, None, True, None, None)
     event = _component_event(
         [], service, custom_id=f"{SAVE_CUSTOM_ID_PREFIX}:{state}"
     )
@@ -792,8 +839,8 @@ async def test_select_reasoning_model_renders_panel_with_reasoning_row():
     event.interaction.create_initial_response.assert_awaited_once()
     _, kwargs = event.interaction.create_initial_response.call_args
     rows = kwargs["components"]
-    # reasoning select + fallback select + buttons
-    assert len(rows) == 3
+    # reasoning select + fallback select + writer select + buttons
+    assert len(rows) == 4
 
 
 async def test_select_panel_prefills_from_current_override():
@@ -810,7 +857,7 @@ async def test_select_panel_prefills_from_current_override():
 
     _, kwargs = event.interaction.create_initial_response.call_args
     rows = kwargs["components"]
-    state = encode_panel_state(REASONING_KEY, "high", True, FALLBACK_KEY)
+    state = encode_panel_state(REASONING_KEY, "high", True, FALLBACK_KEY, None)
     assert rows[0].components[0].custom_id.endswith(state)
 
 
@@ -850,7 +897,7 @@ async def test_reasoning_select_rerenders_panel_with_new_level():
     event = _component_event(
         ["high"],
         service,
-        custom_id=f"{REASONING_SELECT_CUSTOM_ID_PREFIX}:{REASONING_KEY}::0:",
+        custom_id=f"{REASONING_SELECT_CUSTOM_ID_PREFIX}:{REASONING_KEY}::0::",
     )
     with patch(PERMS_TARGET, return_value=ADMIN):
         await model_override.handle_model_override_reasoning_select(event)
@@ -859,7 +906,7 @@ async def test_reasoning_select_rerenders_panel_with_new_level():
     event.interaction.create_initial_response.assert_awaited_once()
     args, kwargs = event.interaction.create_initial_response.call_args
     assert args[0] == hikari.ResponseType.MESSAGE_UPDATE
-    state = encode_panel_state(REASONING_KEY, "high", False, None)
+    state = encode_panel_state(REASONING_KEY, "high", False, None, None)
     assert kwargs["components"][0].components[0].custom_id.endswith(state)
 
 
@@ -868,14 +915,14 @@ async def test_reasoning_select_sentinel_maps_to_model_default():
     event = _component_event(
         [SENTINEL_MODEL_DEFAULT],
         service,
-        custom_id=f"{REASONING_SELECT_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:0:",
+        custom_id=f"{REASONING_SELECT_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:0::",
     )
     with patch(PERMS_TARGET, return_value=ADMIN):
         await model_override.handle_model_override_reasoning_select(event)
 
     _, kwargs = event.interaction.create_initial_response.call_args
     # Sentinel -> empty reasoning segment (the model default).
-    state = encode_panel_state(REASONING_KEY, None, False, None)
+    state = encode_panel_state(REASONING_KEY, None, False, None, None)
     assert kwargs["components"][0].components[0].custom_id.endswith(state)
 
 
@@ -884,13 +931,13 @@ async def test_fallback_select_rerenders_with_new_fallback():
     event = _component_event(
         [FALLBACK_KEY],
         service,
-        custom_id=f"{FALLBACK_SELECT_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:0:",
+        custom_id=f"{FALLBACK_SELECT_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:0::",
     )
     with patch(PERMS_TARGET, return_value=ADMIN):
         await model_override.handle_model_override_fallback_select(event)
 
     _, kwargs = event.interaction.create_initial_response.call_args
-    state = encode_panel_state(REASONING_KEY, "high", False, FALLBACK_KEY)
+    state = encode_panel_state(REASONING_KEY, "high", False, FALLBACK_KEY, None)
     assert kwargs["components"][0].components[0].custom_id.endswith(state)
 
 
@@ -899,13 +946,47 @@ async def test_fallback_select_sentinel_clears_fallback():
     event = _component_event(
         [SENTINEL_NO_FALLBACK],
         service,
-        custom_id=f"{FALLBACK_SELECT_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:0:{FALLBACK_KEY}",
+        custom_id=f"{FALLBACK_SELECT_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:0:{FALLBACK_KEY}:",
     )
     with patch(PERMS_TARGET, return_value=ADMIN):
         await model_override.handle_model_override_fallback_select(event)
 
     _, kwargs = event.interaction.create_initial_response.call_args
-    state = encode_panel_state(REASONING_KEY, "high", False, None)
+    state = encode_panel_state(REASONING_KEY, "high", False, None, None)
+    assert kwargs["components"][0].components[0].custom_id.endswith(state)
+
+
+async def test_writer_select_rerenders_with_new_writer():
+    service = AsyncMock()
+    event = _component_event(
+        [WRITER_KEY],
+        service,
+        custom_id=f"{WRITER_SELECT_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:0:{FALLBACK_KEY}:",
+    )
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.handle_model_override_writer_select(event)
+
+    event.interaction.create_modal_response.assert_not_called()
+    _, kwargs = event.interaction.create_initial_response.call_args
+    state = encode_panel_state(REASONING_KEY, "high", False, FALLBACK_KEY, WRITER_KEY)
+    assert kwargs["components"][0].components[0].custom_id.endswith(state)
+
+
+async def test_writer_select_sentinel_clears_writer():
+    service = AsyncMock()
+    event = _component_event(
+        [SENTINEL_NO_WRITER],
+        service,
+        custom_id=(
+            f"{WRITER_SELECT_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:0:"
+            f"{FALLBACK_KEY}:{WRITER_KEY}"
+        ),
+    )
+    with patch(PERMS_TARGET, return_value=ADMIN):
+        await model_override.handle_model_override_writer_select(event)
+
+    _, kwargs = event.interaction.create_initial_response.call_args
+    state = encode_panel_state(REASONING_KEY, "high", False, FALLBACK_KEY, None)
     assert kwargs["components"][0].components[0].custom_id.endswith(state)
 
 
@@ -914,14 +995,14 @@ async def test_auto_toggle_flips_state_off_to_on():
     event = _component_event(
         [],
         service,
-        custom_id=f"{AUTO_TOGGLE_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:0:{FALLBACK_KEY}",
+        custom_id=f"{AUTO_TOGGLE_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:0:{FALLBACK_KEY}:",
     )
     with patch(PERMS_TARGET, return_value=ADMIN):
         await model_override.handle_model_override_auto_toggle(event)
 
     args, kwargs = event.interaction.create_initial_response.call_args
     assert args[0] == hikari.ResponseType.MESSAGE_UPDATE
-    state = encode_panel_state(REASONING_KEY, "high", True, FALLBACK_KEY)
+    state = encode_panel_state(REASONING_KEY, "high", True, FALLBACK_KEY, None)
     for component in _row_components(kwargs["components"]):
         if component.custom_id == RESET_CUSTOM_ID:
             continue
@@ -933,13 +1014,13 @@ async def test_auto_toggle_flips_state_on_to_off():
     event = _component_event(
         [],
         service,
-        custom_id=f"{AUTO_TOGGLE_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}",
+        custom_id=f"{AUTO_TOGGLE_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}:",
     )
     with patch(PERMS_TARGET, return_value=ADMIN):
         await model_override.handle_model_override_auto_toggle(event)
 
     _, kwargs = event.interaction.create_initial_response.call_args
-    state = encode_panel_state(REASONING_KEY, "high", False, FALLBACK_KEY)
+    state = encode_panel_state(REASONING_KEY, "high", False, FALLBACK_KEY, None)
     assert kwargs["components"][0].components[0].custom_id.endswith(state)
 
 
@@ -948,7 +1029,7 @@ async def test_auto_toggle_denies_non_admin():
     event = _component_event(
         [],
         service,
-        custom_id=f"{AUTO_TOGGLE_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:0:",
+        custom_id=f"{AUTO_TOGGLE_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:0::",
     )
     with patch(PERMS_TARGET, return_value=NONE):
         await model_override.handle_model_override_auto_toggle(event)
@@ -964,28 +1045,34 @@ async def test_continue_opens_modal_carrying_state():
     event = _component_event(
         [],
         service,
-        custom_id=f"{CONTINUE_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}",
+        custom_id=f"{CONTINUE_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}:",
     )
     with patch(PERMS_TARGET, return_value=ADMIN):
         await model_override.handle_model_override_continue(event)
 
     event.interaction.create_modal_response.assert_awaited_once()
     args, _ = event.interaction.create_modal_response.call_args
-    assert args[1] == f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}"
+    assert args[1] == f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}:"
 
 
 async def test_save_persists_panel_state_without_modal_and_keeps_advanced_fields():
     service = AsyncMock()
+    # The stored writer differs from the panel's chosen writer — the panel state
+    # (carried in the save custom_id) is the source of truth for the writer, so
+    # the panel value must win. Budgets and filter are still retained from store.
     service.get_override.return_value = _override(
         daily=1500,
         hourly=200,
         response_filter="Only programming questions",
-        writer_model=WRITER_KEY,
+        writer_model=None,
     )
     event = _component_event(
         [],
         service,
-        custom_id=f"{SAVE_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}",
+        custom_id=(
+            f"{SAVE_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:"
+            f"{FALLBACK_KEY}:{WRITER_KEY}"
+        ),
     )
     with patch(PERMS_TARGET, return_value=ADMIN):
         await model_override.handle_model_override_save(event)
@@ -1012,7 +1099,7 @@ async def test_save_new_override_uses_unlimited_budgets_and_no_filter():
     service = AsyncMock()
     service.get_override.return_value = None
     event = _component_event(
-        [], service, custom_id=f"{SAVE_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0:"
+        [], service, custom_id=f"{SAVE_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0::"
     )
     with patch(PERMS_TARGET, return_value=ADMIN):
         await model_override.handle_model_override_save(event)
@@ -1053,7 +1140,6 @@ def _modal_event(custom_id: str, fields: dict[str, str], service: AsyncMock):
         [_text_input("daily_budget", fields.get("daily_budget", ""))],
         [_text_input("hourly_budget", fields.get("hourly_budget", ""))],
         [_text_input("response_filter", fields.get("response_filter", ""))],
-        [_text_input("writer_model", fields.get("writer_model", ""))],
     ]
     interaction.create_initial_response = AsyncMock()
     event = Mock()
@@ -1066,7 +1152,7 @@ def _modal_event(custom_id: str, fields: dict[str, str], service: AsyncMock):
 async def test_modal_submit_persists_all_fields():
     service = AsyncMock()
     event = _modal_event(
-        f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}",
+        f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}:{WRITER_KEY}",
         {
             "daily_budget": "1500",
             "hourly_budget": "200",
@@ -1087,7 +1173,8 @@ async def test_modal_submit_persists_all_fields():
         auto_respond=True,
         fallback_model_key=FALLBACK_KEY,
         response_filter="Only respond to programming questions",
-        writer_model=None,
+        # The writer model rides in the modal custom_id from the panel select.
+        writer_model=WRITER_KEY,
     )
     event.interaction.create_initial_response.assert_awaited_once()
 
@@ -1095,7 +1182,7 @@ async def test_modal_submit_persists_all_fields():
 async def test_modal_submit_persists_minimal_state():
     service = AsyncMock()
     event = _modal_event(
-        f"{MODAL_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0:",
+        f"{MODAL_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0::",
         {"daily_budget": "0", "hourly_budget": "0"},
         service,
     )
@@ -1119,7 +1206,7 @@ async def test_modal_submit_persists_minimal_state():
 async def test_modal_submit_empty_filter_persists_none():
     service = AsyncMock()
     event = _modal_event(
-        f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}",
+        f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}:",
         {"daily_budget": "0", "hourly_budget": "0", "response_filter": "   "},
         service,
     )
@@ -1130,11 +1217,13 @@ async def test_modal_submit_empty_filter_persists_none():
     assert kwargs["response_filter"] is None
 
 
-async def test_modal_submit_persists_writer_model_for_two_stage():
+async def test_modal_submit_persists_panel_writer_model_for_two_stage():
+    """The writer model chosen on the panel rides in the modal custom_id, so the
+    submit persists it (and confirms two-stage) without any writer text input."""
     service = AsyncMock()
     event = _modal_event(
-        f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}",
-        {"daily_budget": "0", "hourly_budget": "0", "writer_model": WRITER_KEY},
+        f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}:{WRITER_KEY}",
+        {"daily_budget": "0", "hourly_budget": "0"},
         service,
     )
     with patch(PERMS_TARGET, return_value=ADMIN):
@@ -1148,11 +1237,11 @@ async def test_modal_submit_persists_writer_model_for_two_stage():
     assert get_model(WRITER_KEY).label in content
 
 
-async def test_modal_submit_blank_writer_model_persists_none():
+async def test_modal_submit_blank_panel_writer_model_persists_none():
     service = AsyncMock()
     event = _modal_event(
-        f"{MODAL_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0:",
-        {"daily_budget": "0", "hourly_budget": "0", "writer_model": "   "},
+        f"{MODAL_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0::",
+        {"daily_budget": "0", "hourly_budget": "0"},
         service,
     )
     with patch(PERMS_TARGET, return_value=ADMIN):
@@ -1162,30 +1251,10 @@ async def test_modal_submit_blank_writer_model_persists_none():
     assert kwargs["writer_model"] is None
 
 
-async def test_modal_submit_rejects_unknown_writer_model():
-    service = AsyncMock()
-    event = _modal_event(
-        f"{MODAL_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0:",
-        {
-            "daily_budget": "0",
-            "hourly_budget": "0",
-            "writer_model": "not-a-real-model",
-        },
-        service,
-    )
-    with patch(PERMS_TARGET, return_value=ADMIN):
-        await model_override.handle_model_override_modal_submit(event)
-
-    service.set_override.assert_not_called()
-    event.interaction.create_initial_response.assert_awaited_once()
-    _, kwargs = event.interaction.create_initial_response.call_args
-    assert "not a known model" in kwargs["content"].lower()
-
-
 async def test_modal_submit_confirmation_lists_all_settings():
     service = AsyncMock()
     event = _modal_event(
-        f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}",
+        f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}:",
         {
             "daily_budget": "1500",
             "hourly_budget": "200",
@@ -1208,7 +1277,7 @@ async def test_modal_submit_confirmation_lists_all_settings():
 async def test_modal_submit_confirmation_reports_no_fallback_and_no_filter():
     service = AsyncMock()
     event = _modal_event(
-        f"{MODAL_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0:",
+        f"{MODAL_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0::",
         {"daily_budget": "0", "hourly_budget": "0"},
         service,
     )
@@ -1226,7 +1295,7 @@ async def test_modal_submit_save_failure_reports_to_admin():
     service = AsyncMock()
     service.set_override.side_effect = APIError("boom", status_code=500)
     event = _modal_event(
-        f"{MODAL_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0:",
+        f"{MODAL_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0::",
         {"daily_budget": "1500", "hourly_budget": "0"},
         service,
     )
@@ -1241,7 +1310,7 @@ async def test_modal_submit_save_failure_reports_to_admin():
 async def test_modal_submit_rejects_invalid_budget():
     service = AsyncMock()
     event = _modal_event(
-        f"{MODAL_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0:",
+        f"{MODAL_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0::",
         {"daily_budget": "-5", "hourly_budget": "0"},
         service,
     )
@@ -1255,7 +1324,7 @@ async def test_modal_submit_rejects_invalid_budget():
 async def test_modal_submit_denies_non_admin():
     service = AsyncMock()
     event = _modal_event(
-        f"{MODAL_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0:",
+        f"{MODAL_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0::",
         {"daily_budget": "10", "hourly_budget": "10"},
         service,
     )
@@ -1269,7 +1338,7 @@ async def test_modal_submit_denies_non_admin():
 async def test_modal_submit_rejects_unknown_model():
     service = AsyncMock()
     event = _modal_event(
-        f"{MODAL_CUSTOM_ID_PREFIX}:not-a-real-model::0:",
+        f"{MODAL_CUSTOM_ID_PREFIX}:not-a-real-model::0::",
         {"daily_budget": "10", "hourly_budget": "10"},
         service,
     )
