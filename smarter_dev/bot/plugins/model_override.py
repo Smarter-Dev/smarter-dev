@@ -60,6 +60,7 @@ from smarter_dev.bot.views.model_override_views import create_settings_modal
 from smarter_dev.bot.views.model_override_views import create_settings_panel
 from smarter_dev.bot.views.model_override_views import parse_budget
 from smarter_dev.bot.views.model_override_views import parse_panel_state
+from smarter_dev.bot.views.model_override_views import parse_writer_model
 from smarter_dev.shared.model_catalog import ALL_REASONING_LEVELS
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
@@ -145,12 +146,26 @@ def _render_fallback(fallback_model_key: str | None) -> str:
     return fallback.label if fallback is not None else fallback_model_key
 
 
+def _render_writer_model(writer_model: str | None) -> str:
+    """Human-render the two-stage writer model for the confirmation message.
+
+    ``None`` means single-stage mode; a set value names the reply-writing model
+    that runs after the panel's model gathers context.
+    """
+    if writer_model is None:
+        return "single-stage (no writer model)"
+    writer = get_model(writer_model)
+    label = writer.label if writer is not None else writer_model
+    return f"two-stage — writer {label}"
+
+
 def _confirmation_message(
     model: CatalogModel | None,
     state: PanelState,
     response_filter: str | None,
     daily_budget: int,
     hourly_budget: int,
+    writer_model: str | None,
 ) -> str:
     """Render the saved-settings confirmation (``model`` None = server default)."""
     model_line = (
@@ -168,6 +183,7 @@ def _confirmation_message(
         f"• Reasoning: {reasoning}\n"
         f"• Auto-respond: {'on' if state.auto_respond else 'off'}\n"
         f"• Fallback model: {_render_fallback(state.fallback_model_key)}\n"
+        f"• Chat mode: {_render_writer_model(writer_model)}\n"
         f"• Response filter: {'set' if response_filter else 'none'}\n"
         f"• Daily budget: {_render_budget(daily_budget)}\n"
         f"• Hourly budget: {_render_budget(hourly_budget)}"
@@ -615,6 +631,7 @@ async def handle_model_override_save(
         daily_budget = current.daily_token_budget if current is not None else 0
         hourly_budget = current.hourly_token_budget if current is not None else 0
         response_filter = current.response_filter if current is not None else None
+        writer_model = current.writer_model if current is not None else None
         await service.set_override(
             guild_id,
             channel_id,
@@ -625,6 +642,7 @@ async def handle_model_override_save(
             auto_respond=state.auto_respond,
             fallback_model_key=state.fallback_model_key,
             response_filter=response_filter,
+            writer_model=writer_model,
         )
     except APIError as exc:
         logger.error(
@@ -640,7 +658,7 @@ async def handle_model_override_save(
     await interaction.create_initial_response(
         hikari.ResponseType.MESSAGE_UPDATE,
         content=_confirmation_message(
-            model, state, response_filter, daily_budget, hourly_budget
+            model, state, response_filter, daily_budget, hourly_budget, writer_model
         ),
         components=[],
     )
@@ -718,6 +736,7 @@ async def handle_model_override_modal_submit(
     try:
         daily_budget = parse_budget(values.get("daily_budget"))
         hourly_budget = parse_budget(values.get("hourly_budget"))
+        writer_model = parse_writer_model(values.get("writer_model"))
     except ValueError as exc:
         await interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
@@ -741,6 +760,7 @@ async def handle_model_override_modal_submit(
             auto_respond=state.auto_respond,
             fallback_model_key=state.fallback_model_key,
             response_filter=response_filter,
+            writer_model=writer_model,
         )
     except APIError as exc:
         # Without this, the failure surfaces as Discord's generic
@@ -761,7 +781,7 @@ async def handle_model_override_modal_submit(
     await interaction.create_initial_response(
         hikari.ResponseType.MESSAGE_CREATE,
         content=_confirmation_message(
-            model, state, response_filter, daily_budget, hourly_budget
+            model, state, response_filter, daily_budget, hourly_budget, writer_model
         ),
         flags=hikari.MessageFlag.EPHEMERAL,
     )

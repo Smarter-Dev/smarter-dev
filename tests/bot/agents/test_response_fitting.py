@@ -15,6 +15,7 @@ from smarter_dev.bot.agents.response_fitting import SPLIT_TARGET
 from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
 from smarter_dev.bot.agents.response_fitting import _shorten_with_agent
 from smarter_dev.bot.agents.response_fitting import fit_overlong_response
+from smarter_dev.bot.agents.response_fitting import fit_writer_message
 from smarter_dev.bot.agents.response_fitting import split_for_discord
 
 # --------------------------------------------------------------------------- #
@@ -188,4 +189,51 @@ async def test_fit_truncates_when_everything_fails(monkeypatch):
 
     assert fit.method == "truncated"
     assert fit.text.endswith("…")
+    assert len(fit.text) <= DISCORD_MESSAGE_LIMIT
+
+
+# --------------------------------------------------------------------------- #
+# fit_writer_message (two-stage, summarizer-only)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_fit_writer_message_uses_summarizer_when_it_fits(monkeypatch):
+    summarize = AsyncMock(return_value="a tidy summary")
+    monkeypatch.setattr(response_fitting, "_summarize_with_luna", summarize)
+
+    fit = await fit_writer_message(LONG)
+
+    assert fit.text == "a tidy summary"
+    assert fit.method == "summarized"
+    # Luna's spend is not metered against the channel budget.
+    assert (fit.extra_input_tokens, fit.extra_output_tokens) == (0, 0)
+    summarize.assert_awaited_once_with(LONG)
+
+
+@pytest.mark.asyncio
+async def test_fit_writer_message_truncates_when_summarizer_fails(monkeypatch):
+    monkeypatch.setattr(
+        response_fitting, "_summarize_with_luna", AsyncMock(return_value=None)
+    )
+
+    fit = await fit_writer_message(LONG)
+
+    assert fit.method == "truncated"
+    assert fit.text.endswith("…")
+    assert len(fit.text) <= DISCORD_MESSAGE_LIMIT
+    assert (fit.extra_input_tokens, fit.extra_output_tokens) == (0, 0)
+
+
+@pytest.mark.asyncio
+async def test_fit_writer_message_truncates_when_summary_still_too_long(monkeypatch):
+    monkeypatch.setattr(
+        response_fitting,
+        "_summarize_with_luna",
+        AsyncMock(return_value="q" * (SUMMARIZE_THRESHOLD + 1)),
+    )
+
+    fit = await fit_writer_message(LONG)
+
+    assert fit.method == "truncated"
     assert len(fit.text) <= DISCORD_MESSAGE_LIMIT

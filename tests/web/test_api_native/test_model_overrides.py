@@ -36,6 +36,7 @@ def _record(**overrides) -> SimpleNamespace:
         "auto_respond": False,
         "fallback_model_key": None,
         "response_filter": None,
+        "writer_model": None,
         "created_at": datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
         "updated_at": datetime(2026, 1, 2, 12, 0, tzinfo=timezone.utc),
     }
@@ -60,6 +61,7 @@ class TestGetModelOverride:
         assert body["auto_respond"] is False
         assert body["fallback_model_key"] is None
         assert body["response_filter"] is None
+        assert body["writer_model"] is None
         assert body["created_at"] == "2026-01-01T12:00:00+00:00"
         assert body["updated_at"] == "2026-01-02T12:00:00+00:00"
 
@@ -109,6 +111,7 @@ class TestPutModelOverride:
         assert kwargs["auto_respond"] is False
         assert kwargs["fallback_model_key"] is None
         assert kwargs["response_filter"] is None
+        assert kwargs["writer_model"] is None
 
     def test_upsert_accepts_null_model_key_for_server_default(
         self, model_override_client: TestClient, model_override_crud_mock, session_mock
@@ -165,6 +168,28 @@ class TestPutModelOverride:
         assert kwargs["auto_respond"] is True
         assert kwargs["fallback_model_key"] == "kimi-k2-6"
         assert kwargs["response_filter"] == "Only coding questions."
+
+    def test_writer_model_passed_through(
+        self, model_override_client: TestClient, model_override_crud_mock
+    ):
+        model_override_crud_mock.upsert.return_value = _record(writer_model="kimi-k2-6")
+
+        response = model_override_client.put(
+            _url(),
+            json={"model_key": "glm-5-2", "writer_model": "kimi-k2-6"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["writer_model"] == "kimi-k2-6"
+        _, kwargs = model_override_crud_mock.upsert.call_args
+        assert kwargs["writer_model"] == "kimi-k2-6"
+
+    def test_unknown_writer_model_is_422(self, model_override_client: TestClient):
+        response = model_override_client.put(
+            _url(),
+            json={"model_key": "glm-5-2", "writer_model": "not-a-real-model"},
+        )
+        assert response.status_code == 422
 
     def test_unknown_fallback_model_key_is_422(self, model_override_client: TestClient):
         response = model_override_client.put(
