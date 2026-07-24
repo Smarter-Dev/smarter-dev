@@ -805,11 +805,11 @@ class ChannelModelOverrideWrite(BaseAPIModel):
         max_length=4000,
         description="Free-text instructions for which messages deserve a response",
     )
-    writer_model: str | None = Field(
+    drafter_model: str | None = Field(
         None,
-        description="Catalog key for the two-stage WRITER model; when set the "
-        "channel runs worker+writer mode (model_key is the worker), null for "
-        "single-agent mode",
+        description="Catalog key for the cheap two-stage DRAFTER (worker) model; "
+        "when set the channel runs drafter+writer mode (model_key is the "
+        "answering writer), null for single-agent mode",
     )
 
     @field_validator("model_key")
@@ -830,9 +830,9 @@ class ChannelModelOverrideWrite(BaseAPIModel):
             raise ValueError(f"unknown model key: {value!r}")
         return value
 
-    @field_validator("writer_model")
+    @field_validator("drafter_model")
     @classmethod
-    def _writer_model_in_catalog(cls, value: str | None) -> str | None:
+    def _drafter_model_in_catalog(cls, value: str | None) -> str | None:
         if value is None:
             return None
         if not is_valid_model_key(value):
@@ -874,9 +874,10 @@ class ChannelModelOverrideRead(BaseAPIModel):
     response_filter: str | None = Field(
         None, description="Instructions for which messages deserve a response, or null"
     )
-    writer_model: str | None = Field(
+    drafter_model: str | None = Field(
         None,
-        description="Two-stage WRITER model catalog key, or null for single-agent mode",
+        description="Cheap two-stage DRAFTER (worker) model catalog key, or null "
+        "for single-agent mode",
     )
     created_at: datetime = Field(description="Override creation timestamp")
     updated_at: datetime = Field(description="Last update timestamp")

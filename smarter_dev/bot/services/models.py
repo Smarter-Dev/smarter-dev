@@ -614,7 +614,7 @@ class ChannelModelOverride:
     auto_respond: bool = False
     fallback_model_key: str | None = None
     response_filter: str | None = None
-    writer_model: str | None = None
+    drafter_model: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 
@@ -631,7 +631,7 @@ class ChannelModelOverride:
             auto_respond=data.get("auto_respond", False),
             fallback_model_key=data.get("fallback_model_key"),
             response_filter=data.get("response_filter"),
-            writer_model=data.get("writer_model"),
+            drafter_model=data.get("drafter_model"),
             created_at=_parse_iso_datetime(data.get("created_at")),
             updated_at=_parse_iso_datetime(data.get("updated_at")),
         )

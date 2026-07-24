@@ -638,16 +638,18 @@ class ChannelEngine:
                     activation_message_id=int(trigger.id) if trigger else 0,
                 )
 
-            # Two-stage mode selection. When the override names a WRITER model,
-            # the small WORKER runs the agentic turn (same tools/history) and
-            # emits a brief, then a tool-less large WRITER writes the reply. An
-            # unset/empty (or stale) writer_model keeps today's single-agent path
-            # exactly — the WORKER still runs on the model the budget/fallback/
-            # temp-default logic above already resolved.
-            writer_model_id = self._resolve_writer_model_id(override)
-            two_stage = writer_model_id is not None
+            # Two-stage mode selection. When the override names a DRAFTER model,
+            # the cheap DRAFTER (worker) runs the agentic turn (same tools/history)
+            # and emits a brief, then the tool-less primary WRITER answers. An
+            # unset/empty (or stale) drafter_model keeps today's single-agent path
+            # exactly — the single agent still runs on the model the budget/
+            # fallback/temp-default logic above already resolved (the primary).
+            # The DRAFTER runs at its own default reasoning (None); only the
+            # answering primary honours the admin-chosen reasoning.
+            drafter_model_id = self._resolve_drafter_model_id(override)
+            two_stage = drafter_model_id is not None
             agent = (
-                get_worker_agent(override_model_id, override_reasoning)
+                get_worker_agent(drafter_model_id, None)
                 if two_stage
                 else get_chat_agent(override_model_id, override_reasoning)
             )
@@ -663,26 +665,20 @@ class ChannelEngine:
             set_last_model_call(self._last_model_call_at)
             image_quota = await self._fetch_image_quota()
             # The ``<your-model>`` metadata advertises the model that actually
-            # authors the reply so "what model are you?" answers correctly. In
-            # two-stage mode that is the WRITER, not the cheap WORKER running
-            # this turn — the worker only relays the identity into the brief when
-            # asked, so it must be told the writer's. Single-stage advertises the
-            # one model that both reasons and writes.
-            advertised_model_name = writer_model_id if two_stage else resolved_model_name
-            advertised_reasoning_wire = (
-                resolved_reasoning_level(writer_model_id, None)
-                if two_stage
-                else resolved_reasoning_wire
-            )
+            # authors the reply so "what model are you?" answers correctly. The
+            # primary is the answerer in BOTH modes now (it is the single agent in
+            # single-stage and the WRITER in two-stage; the cheap DRAFTER only
+            # relays the identity into the brief when asked), so both stages
+            # advertise the resolved primary model + reasoning.
             user_prompt, message_history = build_agent_call(
                 agent_input,
                 history,
                 image_quota=image_quota,
-                model_name=advertised_model_name,
-                reasoning_level=advertised_reasoning_wire,
+                model_name=resolved_model_name,
+                reasoning_level=resolved_reasoning_wire,
             )
             # The WRITER's token spend. Folded into this turn's persisted totals
-            # alongside the WORKER's, and — in two-stage mode — it is the ONLY
+            # alongside the DRAFTER's, and — in two-stage mode — it is the ONLY
             # spend metered against the channel token budget (both zero in
             # single-stage).
             writer_extra_input = 0
@@ -699,7 +695,9 @@ class ChannelEngine:
                         two_stage_output,
                         writer_extra_input,
                         writer_extra_output,
-                    ) = await self._run_writer_stage(result.output, writer_model_id)
+                    ) = await self._run_writer_stage(
+                        result.output, override_model_id, override_reasoning
+                    )
             except Exception as error:
                 # Even a failed run (probably) hit the model — later turns
                 # inside the cache TTL should read warm.
@@ -753,10 +751,11 @@ class ChannelEngine:
 
             output = two_stage_output if two_stage else result.output
             # Tokens charged against the channel's enforced token budget. In
-            # two-stage mode ONLY the large WRITER counts toward the limit — the
-            # cheap WORKER runs the agentic turn but never consumes the channel's
-            # token budget (its spend is still recorded per-turn on the dashboard
-            # via persist_turn). Single-stage meters its one model's full spend.
+            # two-stage mode ONLY the answering WRITER (the primary) counts toward
+            # the limit — the cheap DRAFTER runs the agentic turn but never
+            # consumes the channel's token budget (its spend is still recorded
+            # per-turn on the dashboard via persist_turn). Single-stage meters its
+            # one model's full spend.
             if two_stage:
                 tokens = writer_extra_input + writer_extra_output
             else:
@@ -767,7 +766,7 @@ class ChannelEngine:
             # (context-aware), falling back to a Luna summary, then truncation;
             # the shorten re-run spends chat-model tokens, so they're folded into
             # this turn's metering and persisted totals. Two-stage's tool-less
-            # WRITER has no ``response``-shaped agent to re-run, so it goes
+            # primary WRITER has no ``response``-shaped agent to re-run, so it goes
             # straight to the Luna summarizer (then truncation) — Luna's spend is
             # logged but not metered, so it adds no extra tokens.
             fit_extra_input = 0
@@ -806,8 +805,8 @@ class ChannelEngine:
             # Meter this turn's chat tokens against the channel's usage windows.
             # Every channel is metered (so ``/bot-usage`` always has numbers);
             # the budgets that *enforce* only exist on override channels. In
-            # two-stage mode ``tokens`` already excludes the WORKER, so only the
-            # large WRITER's spend is metered here. Compaction runs on its own
+            # two-stage mode ``tokens`` already excludes the DRAFTER, so only the
+            # answering WRITER's spend is metered here. Compaction runs on its own
             # summarizer model and its tokens are not in ``result.usage()``, so
             # they are not counted here. A free-fallback turn meters into
             # display-only windows so its spend still shows in ``/bot-usage`` but
@@ -1230,46 +1229,51 @@ class ChannelEngine:
             return None
         return catalog_model.model_id
 
-    def _resolve_writer_model_id(self, override: Any | None) -> str | None:
-        """Wire model id of the override's two-stage WRITER, or None for the
-        single-agent path.
+    def _resolve_drafter_model_id(self, override: Any | None) -> str | None:
+        """Wire model id of the override's cheap two-stage DRAFTER, or None for
+        the single-agent path.
 
-        A ``None``/empty ``writer_model`` means single-stage (today's behaviour).
+        A ``None``/empty ``drafter_model`` means single-stage (today's behaviour).
         A stored key the catalog no longer knows (stale) degrades to single-stage
         with a warning rather than crashing the turn, mirroring
         :meth:`_resolve_override_model_id`.
         """
-        writer_key = (
-            getattr(override, "writer_model", None) if override is not None else None
+        drafter_key = (
+            getattr(override, "drafter_model", None) if override is not None else None
         )
-        if writer_key is None or not writer_key.strip():
+        if drafter_key is None or not drafter_key.strip():
             return None
-        catalog_model = get_model(writer_key.strip())
+        catalog_model = get_model(drafter_key.strip())
         if catalog_model is None:
             logger.warning(
-                "Channel %s writer_model names unknown model_key %r — "
+                "Channel %s drafter_model names unknown model_key %r — "
                 "running single-stage",
                 self.channel_id,
-                writer_key,
+                drafter_key,
             )
             return None
         return catalog_model.model_id
 
     async def _run_writer_stage(
-        self, briefing: BriefingDecision, writer_model_id: str
+        self,
+        briefing: BriefingDecision,
+        primary_model_id: str | None,
+        primary_reasoning: str | None,
     ) -> tuple[TurnDecision, int, int]:
-        """Assemble a two-stage turn's output: run the tool-less WRITER on the
-        WORKER's brief and fold its message into a ``TurnDecision`` the existing
-        send/persist path consumes.
+        """Assemble a two-stage turn's output: run the tool-less primary WRITER on
+        the DRAFTER's brief and fold its message into a ``TurnDecision`` the
+        existing send/persist path consumes.
 
-        Returns ``(decision, writer_input_tokens, writer_output_tokens)``. When
-        the worker stayed silent (``briefing.brief`` is None) the writer is never
-        called, the decision carries ``response=None``, and both token counts are
-        zero. The decision is assembled from already-validated parts via
-        ``model_construct``: ``TurnDecision``'s cross-field validators encode the
-        single-agent English-redirect policy, which the WORKER already enforced on
-        the ``BriefingDecision`` — re-running them on the assembled container would
-        be wrong, not safer.
+        ``primary_model_id`` / ``primary_reasoning`` are the channel's primary
+        model (the answerer) and its admin-chosen reasoning level. Returns
+        ``(decision, writer_input_tokens, writer_output_tokens)``. When the drafter
+        stayed silent (``briefing.brief`` is None) the writer is never called, the
+        decision carries ``response=None``, and both token counts are zero. The
+        decision is assembled from already-validated parts via ``model_construct``:
+        ``TurnDecision``'s cross-field validators encode the single-agent
+        English-redirect policy, which the DRAFTER already enforced on the
+        ``BriefingDecision`` — re-running them on the assembled container would be
+        wrong, not safer.
         """
         brief = briefing.brief
         response: ResponseBody | None = None
@@ -1278,7 +1282,7 @@ class ChannelEngine:
         response_language = "english"
         if brief is not None:
             response_language = brief.response_language
-            writer_agent = get_writer_agent(writer_model_id)
+            writer_agent = get_writer_agent(primary_model_id, primary_reasoning)
             writer_result = await writer_agent.run(build_writer_prompt(brief))
             writer_output_body = writer_result.output
             writer_usage = writer_result.usage()

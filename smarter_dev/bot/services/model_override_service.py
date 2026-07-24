@@ -89,7 +89,7 @@ class ModelOverrideService(BaseService):
         auto_respond: bool = False,
         fallback_model_key: str | None = None,
         response_filter: str | None = None,
-        writer_model: str | None = None,
+        drafter_model: str | None = None,
     ) -> ChannelModelOverride:
         """Upsert the channel's override and return the stored value.
 
@@ -98,8 +98,9 @@ class ModelOverrideService(BaseService):
         ``None`` means "use the model's default level". ``auto_respond`` makes
         the bot reply to any message, not just @mentions;
         ``fallback_model_key`` and ``response_filter`` default to "unset".
-        A non-empty ``writer_model`` selects the two-stage worker+writer chat
-        mode (``model_key`` is the worker); ``None`` keeps single-agent mode.
+        A non-empty ``drafter_model`` selects the two-stage drafter+writer chat
+        mode (``model_key`` is the answering writer); ``None`` keeps single-agent
+        mode.
         """
         response = await self._api_client.put(
             self._path(guild_id, channel_id),
@@ -111,7 +112,7 @@ class ModelOverrideService(BaseService):
                 "auto_respond": auto_respond,
                 "fallback_model_key": fallback_model_key,
                 "response_filter": response_filter,
-                "writer_model": writer_model,
+                "drafter_model": drafter_model,
             },
         )
         self._invalidate_override(guild_id, channel_id)

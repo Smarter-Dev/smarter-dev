@@ -24,7 +24,7 @@ from smarter_dev.bot.plugins.model_override import (
 from smarter_dev.bot.plugins.model_override import handle_model_override_reset
 from smarter_dev.bot.plugins.model_override import handle_model_override_save
 from smarter_dev.bot.plugins.model_override import handle_model_override_select
-from smarter_dev.bot.plugins.model_override import handle_model_override_writer_select
+from smarter_dev.bot.plugins.model_override import handle_model_override_drafter_select
 from smarter_dev.bot.views.beacon_views import handle_beacon_modal_submit
 
 logger = logging.getLogger(__name__)
@@ -267,8 +267,8 @@ async def handle_component_interaction(event: hikari.InteractionCreateEvent) -> 
             await handle_model_override_reasoning_select(event)
         elif custom_id.startswith("cbs_fallback:"):
             await handle_model_override_fallback_select(event)
-        elif custom_id.startswith("cbs_writer:"):
-            await handle_model_override_writer_select(event)
+        elif custom_id.startswith("cbs_drafter:"):
+            await handle_model_override_drafter_select(event)
         elif custom_id.startswith("cbs_auto:"):
             await handle_model_override_auto_toggle(event)
         elif custom_id.startswith("cbs_continue:"):
