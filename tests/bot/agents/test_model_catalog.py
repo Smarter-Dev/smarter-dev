@@ -91,6 +91,33 @@ def test_gemini_lineup_reflects_current_releases():
     assert get_model("gemini-3-1-flash-lite").model_id == "gemini-3.1-flash-lite"
 
 
+def test_gpt_5_6_lineup_is_selectable():
+    expected = {
+        "gpt-5-6-luna": "gpt-5.6-luna",
+        "gpt-5-6-sol": "gpt-5.6-sol",
+        "gpt-5-6-terra": "gpt-5.6-terra",
+    }
+    for key, model_id in expected.items():
+        model = get_model(key)
+        assert model is not None, f"missing {key}"
+        assert model.model_id == model_id
+        assert model.family == "GPT"
+        assert model.provider is ModelProvider.OPENAI
+        assert model.default_reasoning in model.reasoning_levels
+
+
+def test_claude_opus_5_is_selectable():
+    opus = get_model("claude-opus-5")
+    assert opus is not None
+    assert opus.label == "Claude Opus 5"
+    assert opus.family == "Claude"
+    assert opus.provider is ModelProvider.ANTHROPIC
+    assert opus.model_id == "claude-opus-5"
+    # Flagship Claude exposes the full low→max effort ladder, like Sonnet 5.
+    assert opus.supports_reasoning is True
+    assert opus.default_reasoning in opus.reasoning_levels
+
+
 def test_poolside_models_route_through_openrouter():
     expected = {
         "poolside-laguna-xs-2-1": "poolside/laguna-xs-2.1",

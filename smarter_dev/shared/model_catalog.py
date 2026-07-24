@@ -308,6 +308,15 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
     CatalogModel(
+        key="gpt-5-6-sol",
+        label="GPT-5.6 Sol",
+        family="GPT",
+        provider=ModelProvider.OPENAI,
+        model_id="gpt-5.6-sol",
+        reasoning_levels=_OPENAI_56,
+        default_reasoning=ReasoningLevel.MEDIUM,
+    ),
+    CatalogModel(
         key="gpt-5-6-terra",
         label="GPT-5.6 Terra",
         family="GPT",
@@ -317,6 +326,15 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
     # --- Claude via Anthropic ---
+    CatalogModel(
+        key="claude-opus-5",
+        label="Claude Opus 5",
+        family="Claude",
+        provider=ModelProvider.ANTHROPIC,
+        model_id="claude-opus-5",
+        reasoning_levels=_CLAUDE_EFFORT,
+        default_reasoning=ReasoningLevel.HIGH,
+    ),
     CatalogModel(
         key="claude-haiku-4-5",
         label="Claude Haiku 4.5",
