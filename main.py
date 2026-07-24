@@ -9,8 +9,10 @@ smarter_dev.web.api_native, registered in the app yamls.
 """
 
 from smarter_dev.shared.observability import configure_observability
+from smarter_dev.web.exception_handlers import install_exception_handlers
 
 configure_observability("smarter-dev-web")
+install_exception_handlers()
 
 from skrift.asgi import app  # noqa: E402,F401
 

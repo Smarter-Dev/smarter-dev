@@ -38,6 +38,7 @@ from datetime import timedelta
 from typing import Any
 
 import hikari
+from pydantic_ai.exceptions import ModelAPIError
 from pydantic_ai.usage import RunUsage
 from redis.exceptions import RedisError
 
@@ -69,6 +70,7 @@ from smarter_dev.bot.services.channel_token_budget import fallback_flag_key
 from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.channel_token_budget import over_budget_reset_epoch
 from smarter_dev.bot.services.chat_conversation_persistence import end_engagement
+from smarter_dev.bot.services.chat_conversation_persistence import persist_error
 from smarter_dev.bot.services.chat_conversation_persistence import persist_turn
 from smarter_dev.bot.services.chat_conversation_persistence import start_engagement
 from smarter_dev.bot.services.chat_memory import get_chat_memory
@@ -656,7 +658,7 @@ class ChannelEngine:
                     message_history=message_history,
                     deps=deps,
                 )
-            except Exception:
+            except Exception as error:
                 # Even a failed run (probably) hit the model — later turns
                 # inside the cache TTL should read warm.
                 self._last_model_call_at = datetime.now(UTC)
@@ -668,17 +670,41 @@ class ChannelEngine:
                 drain_collection()  # discard
                 # The run may have crashed *after* generate_image already spent a
                 # quota slot and stashed an image. Salvage it — the user paid for
-                # it — and only show the generic error if nothing was delivered.
-                salvaged = False
+                # it — while still reporting that the overall run failed.
                 if deps.pending_images:
-                    salvaged = await self._post_images(
+                    await self._post_images(
                         list(deps.pending_images), reply_to=error_reply_to
                     )
-                if not salvaged:
-                    await self._post_error(
-                        "Sorry, couldn't generate a reply for that one — try again?",
-                        reply_to=error_reply_to,
+                admin_url = await persist_error(
+                    bot=self.bot,
+                    error=error,
+                    engagement_id=self.engagement_id,
+                    request_id=request_id,
+                    guild_id=self.guild_id,
+                    channel_id=self.channel_id,
+                    model_name=(
+                        error.model_name
+                        if isinstance(error, ModelAPIError)
+                        else resolved_model_name
+                    ),
+                    reasoning_level=resolved_reasoning_wire,
+                    error_context={
+                        "first_activation": first_activation,
+                        "new_message_count": new_count,
+                        "history_message_count": len(history),
+                        "fallback_active": fallback_active,
+                        "trigger_message_id": error_reply_to,
+                    },
+                )
+                message = "Sorry, couldn't generate a reply for that one — try again?"
+                if admin_url is not None:
+                    message += (
+                        f"\n-# Admin diagnostics: [view error details]({admin_url})"
                     )
+                await self._post_error(
+                    message,
+                    reply_to=error_reply_to,
+                )
                 return True
             self._last_model_call_at = datetime.now(UTC)
             compaction_events = drain_collection()
