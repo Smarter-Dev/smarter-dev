@@ -78,10 +78,39 @@ async def test_delete_message():
     assert request.url.path.endswith("/channels/C1/messages/M1")
 
 
-async def test_error_status_raises_admin_action_error():
+@pytest.mark.parametrize(
+    ("invoke", "expected"),
+    [
+        (lambda actor: actor.ban_user("U1"), "ban target U1 already absent"),
+        (lambda actor: actor.kick_user("U1"), "kick target U1 already absent"),
+        (lambda actor: actor.timeout_user("U1"), "timeout target U1 already absent"),
+        (
+            lambda actor: actor.delete_message("C1", "M1"),
+            "message M1 already deleted",
+        ),
+    ],
+)
+async def test_absent_moderation_target_is_successful_noop(invoke, expected):
+    """A 404 means another actor already achieved the handler's end state."""
+    requests: list[httpx.Request] = []
+    assert await invoke(_actor(requests, status_code=404)) == expected
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize(
+    "invoke",
+    [
+        lambda actor: actor.ban_user("U1"),
+        lambda actor: actor.kick_user("U1"),
+        lambda actor: actor.timeout_user("U1"),
+        lambda actor: actor.delete_message("C1", "M1"),
+    ],
+)
+@pytest.mark.parametrize("status_code", [403, 429, 500])
+async def test_moderation_action_non_404_error_still_raises(invoke, status_code):
     requests: list[httpx.Request] = []
     with pytest.raises(AdminActionError):
-        await _actor(requests, status_code=403).kick_user("U1")
+        await invoke(_actor(requests, status_code=status_code))
 
 
 # -- thread operations ------------------------------------------------------

@@ -93,6 +93,13 @@ class AdminActor(DiscordBotClient):
         reason: str | None = None,
         delete_message_seconds: int = 0,
     ) -> str:
+        """Ban a user, treating an already-absent target as a successful no-op.
+
+        A member can leave between a handler fire and this REST call. Discord
+        reports that race as 404, but the handler's immediate goal (the member
+        is no longer in the guild) is already true, so it must not abort the
+        rest of the script. Other failures still raise.
+        """
         # Discord expects the audit-log reason URL-encoded; encoding also keeps
         # non-latin-1 reasons (em dashes, emoji) out of raw header bytes.
         headers = (
@@ -100,12 +107,17 @@ class AdminActor(DiscordBotClient):
         )
         # delete_message_seconds purges the banned member's recent messages (the
         # onboarding auto-ban wants an hour swept); 0 = keep history.
-        await self._request(
-            "PUT",
-            f"/guilds/{self.guild_id}/bans/{user_id}",
-            headers=headers,
-            json={"delete_message_seconds": int(delete_message_seconds)},
-        )
+        try:
+            await self._request(
+                "PUT",
+                f"/guilds/{self.guild_id}/bans/{user_id}",
+                headers=headers,
+                json={"delete_message_seconds": int(delete_message_seconds)},
+            )
+        except AdminActionError as error:
+            if error.status_code == 404:
+                return f"ban target {user_id} already absent"
+            raise
         return f"banned {user_id}"
 
     async def add_role(
@@ -145,24 +157,44 @@ class AdminActor(DiscordBotClient):
         return True
 
     async def kick_user(self, user_id: str) -> str:
-        await self._request("DELETE", f"/guilds/{self.guild_id}/members/{user_id}")
+        """Kick a member; a member who already left is a successful no-op."""
+        try:
+            await self._request(
+                "DELETE", f"/guilds/{self.guild_id}/members/{user_id}"
+            )
+        except AdminActionError as error:
+            if error.status_code == 404:
+                return f"kick target {user_id} already absent"
+            raise
         return f"kicked {user_id}"
 
     async def timeout_user(self, user_id: str, duration_seconds: int = 600) -> str:
+        """Timeout a member; a member who already left is a successful no-op."""
         until = (
             datetime.now(timezone.utc) + timedelta(seconds=int(duration_seconds))
         ).isoformat()
-        await self._request(
-            "PATCH",
-            f"/guilds/{self.guild_id}/members/{user_id}",
-            json={"communication_disabled_until": until},
-        )
+        try:
+            await self._request(
+                "PATCH",
+                f"/guilds/{self.guild_id}/members/{user_id}",
+                json={"communication_disabled_until": until},
+            )
+        except AdminActionError as error:
+            if error.status_code == 404:
+                return f"timeout target {user_id} already absent"
+            raise
         return f"timed out {user_id} for {int(duration_seconds)}s"
 
     async def delete_message(self, channel_id: str, message_id: str) -> str:
-        await self._request(
-            "DELETE", f"/channels/{channel_id}/messages/{message_id}"
-        )
+        """Delete a message; an already-deleted target is a successful no-op."""
+        try:
+            await self._request(
+                "DELETE", f"/channels/{channel_id}/messages/{message_id}"
+            )
+        except AdminActionError as error:
+            if error.status_code == 404:
+                return f"message {message_id} already deleted"
+            raise
         return f"deleted message {message_id}"
 
     async def delete_webhook(self, webhook_url: str) -> bool:

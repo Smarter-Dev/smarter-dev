@@ -182,6 +182,8 @@ Provided async functions — you MUST `await` every call:
       cheap. Use it to double-check evidence before acting.
   MODERATION (admin only):
   await delete_message(message_id: str, channel_id: str = None) -> str
+      A message that another moderator/bot already deleted (404) is a successful no-op; the handler
+      continues. Permission, rate-limit, and server failures still raise.
   await delete_webhook(webhook_url: str) -> bool
       Destroy a leaked Discord webhook (the codes-server webhook-scam response). Pass the FULL
       webhook URL exactly as it appeared in the triggering message — it is validated host-side and
@@ -204,9 +206,12 @@ Provided async functions — you MUST `await` every call:
       every fire. Spends a moderation action; target must be inside channel_ids when set.
   await ban_user(user_id: str, reason: str = None, delete_message_seconds: int = 0) -> str
       delete_message_seconds purges the banned member's recent messages (e.g. 3600 = last hour);
-      use it on bot/raid-account bans to sweep their spam, 0 (default) to keep history.
+      use it on bot/raid-account bans to sweep their spam, 0 (default) to keep history. If the
+      member already left (404), this is a successful no-op and the handler continues.
   await kick_user(user_id: str) -> str
   await timeout_user(user_id: str, duration_seconds: int = 600) -> str
+      For kick/timeout, a member who already left (404) is likewise a successful no-op. Other
+      failures still raise.
   await add_role(user_id: str, role_id: str, reason: str = None) -> bool
   await remove_role(user_id: str, role_id: str, reason: str = None) -> bool
       Grant/revoke ONE role on a member. Returns True when applied, False when the member has
