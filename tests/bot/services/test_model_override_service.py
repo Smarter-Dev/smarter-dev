@@ -24,7 +24,7 @@ def _payload(model_key: str = "kimi-k2", daily: int = 0, hourly: int = 0, **extr
         "auto_respond": False,
         "fallback_model_key": None,
         "response_filter": None,
-        "writer_model": None,
+        "drafter_model": None,
         "created_at": "2026-07-14T00:00:00+00:00",
         "updated_at": "2026-07-14T00:00:00+00:00",
         **extra,
@@ -100,7 +100,7 @@ async def test_set_override_puts_and_returns_dto(service, mock_api_client):
             "auto_respond": False,
             "fallback_model_key": None,
             "response_filter": None,
-            "writer_model": None,
+            "drafter_model": None,
         },
     )
     assert result.model_key == "gpt-5-4"
@@ -170,7 +170,7 @@ async def test_set_override_sends_new_settings(service, mock_api_client):
             "auto_respond": True,
             "fallback_model_key": "glm-4-6",
             "response_filter": "Only coding questions.",
-            "writer_model": None,
+            "drafter_model": None,
         },
     )
     assert result.auto_respond is True
@@ -178,39 +178,39 @@ async def test_set_override_sends_new_settings(service, mock_api_client):
     assert result.response_filter == "Only coding questions."
 
 
-async def test_get_override_parses_writer_model(service, mock_api_client):
+async def test_get_override_parses_drafter_model(service, mock_api_client):
     mock_api_client.get.return_value = create_mock_response(
-        200, _payload(writer_model="glm-4-6")
+        200, _payload(drafter_model="glm-4-6")
     )
 
     result = await service.get_override(GUILD, CHANNEL)
 
-    assert result.writer_model == "glm-4-6"
+    assert result.drafter_model == "glm-4-6"
 
 
-async def test_get_override_defaults_writer_model_when_absent(service, mock_api_client):
-    # An older API response that omits writer_model must degrade to None.
+async def test_get_override_defaults_drafter_model_when_absent(service, mock_api_client):
+    # An older API response that omits drafter_model must degrade to None.
     legacy_payload = _payload()
-    del legacy_payload["writer_model"]
+    del legacy_payload["drafter_model"]
     mock_api_client.get.return_value = create_mock_response(200, legacy_payload)
 
     result = await service.get_override(GUILD, CHANNEL)
 
-    assert result.writer_model is None
+    assert result.drafter_model is None
 
 
-async def test_set_override_sends_writer_model(service, mock_api_client):
+async def test_set_override_sends_drafter_model(service, mock_api_client):
     mock_api_client.put.return_value = create_mock_response(
-        200, _payload(writer_model="glm-4-6")
+        200, _payload(drafter_model="glm-4-6")
     )
 
     result = await service.set_override(
-        GUILD, CHANNEL, "gpt-5-4", 0, 0, writer_model="glm-4-6"
+        GUILD, CHANNEL, "gpt-5-4", 0, 0, drafter_model="glm-4-6"
     )
 
     _, put_kwargs = mock_api_client.put.call_args
-    assert put_kwargs["json_data"]["writer_model"] == "glm-4-6"
-    assert result.writer_model == "glm-4-6"
+    assert put_kwargs["json_data"]["drafter_model"] == "glm-4-6"
+    assert result.drafter_model == "glm-4-6"
 
 
 async def test_set_override_invalidates_cache(service, mock_api_client):

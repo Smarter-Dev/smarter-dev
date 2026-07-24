@@ -1,12 +1,12 @@
 """Tests for two-stage chat mode wiring in ``ChannelEngine._run_once``.
 
-Two-stage mode is selected per channel by the override's ``writer_model``: when
-it is set (and names a known catalog model) the small WORKER runs the agentic
-turn and emits a ``BriefingDecision``, then a tool-less large WRITER writes the
-reply. When it is unset/empty (or stale) the engine keeps today's exact
-single-agent behaviour.
+Two-stage mode is selected per channel by the override's ``drafter_model``: when
+it is set (and names a known catalog model) the cheap DRAFTER (worker) runs the
+agentic turn on the drafter's wire id and emits a ``BriefingDecision``, then the
+tool-less primary WRITER (the channel's ``model_key``) answers. When it is
+unset/empty (or stale) the engine keeps today's exact single-agent behaviour.
 
-The worker/writer agents, memory, input builders, and Redis budget helpers are
+The drafter/writer agents, memory, input builders, and Redis budget helpers are
 all patched — these verify the engine's *wiring*: which agents it builds, when
 the writer runs, how the reply/voice is dispatched, and that BOTH models' tokens
 are metered.
@@ -113,7 +113,7 @@ def _writer_result(output, *, input_tokens=0, output_tokens=0):
 def _override(
     model_key: str,
     *,
-    writer_model: str | None = None,
+    drafter_model: str | None = None,
     daily=1000,
     hourly=0,
     reasoning_level=None,
@@ -122,7 +122,7 @@ def _override(
 ):
     return SimpleNamespace(
         model_key=model_key,
-        writer_model=writer_model,
+        drafter_model=drafter_model,
         daily_token_budget=daily,
         hourly_token_budget=hourly,
         reasoning_level=reasoning_level,
@@ -212,13 +212,13 @@ def _common_patches(*, fake_memory):
 
 
 # --------------------------------------------------------------------------- #
-# Regression: single-stage behaviour is untouched when writer_model is unset
+# Regression: single-stage behaviour is untouched when drafter_model is unset
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.asyncio
-async def test_no_writer_model_runs_single_stage(fake_memory, fake_redis):
-    """An override with no writer_model builds the CHAT agent, never the worker
+async def test_no_drafter_model_runs_single_stage(fake_memory, fake_redis):
+    """An override with no drafter_model builds the CHAT agent, never the worker
     or writer — exactly today's single-agent path."""
     from smarter_dev.bot.agents.chat_models import ResponseBody, TurnDecision
 
@@ -235,7 +235,7 @@ async def test_no_writer_model_runs_single_stage(fake_memory, fake_redis):
             )
         )
     )
-    engine, _ = _make_engine(_override("gpt-5-4", writer_model=None), fake_redis)
+    engine, _ = _make_engine(_override("gpt-5-4", drafter_model=None), fake_redis)
 
     with patch(
         "smarter_dev.bot.services.chat_engine.get_chat_agent",
@@ -266,8 +266,9 @@ async def test_no_writer_model_runs_single_stage(fake_memory, fake_redis):
 async def test_two_stage_worker_briefs_writer_writes_and_sends(
     fake_memory, fake_redis
 ):
-    """writer_model set: the WORKER runs (its wire id), its brief drives the
-    tool-less WRITER (its wire id), and the writer's message is sent."""
+    """drafter_model set: the cheap DRAFTER (worker) runs on the drafter's wire
+    id, its brief drives the tool-less primary WRITER (the channel's model_key),
+    and the writer's message is sent."""
     worker_agent = MagicMock()
     worker_agent.run = AsyncMock(
         return_value=_worker_result(
@@ -283,7 +284,7 @@ async def test_two_stage_worker_briefs_writer_writes_and_sends(
         )
     )
     engine, _ = _make_engine(
-        _override("kimi-k2-6", writer_model="gpt-5-4"), fake_redis
+        _override("kimi-k2-6", drafter_model="gpt-5-4"), fake_redis
     )
 
     with patch(
@@ -302,8 +303,10 @@ async def test_two_stage_worker_briefs_writer_writes_and_sends(
         await engine._run_once(first_activation=True)
 
     get_chat.assert_not_called()
-    get_worker.assert_called_once_with("kimi-k2.6", None)
-    get_writer.assert_called_once_with("gpt-5.4")
+    # The DRAFTER (worker) runs the cheap drafter model; the primary answers as
+    # the WRITER, honouring its reasoning level (None here).
+    get_worker.assert_called_once_with("gpt-5.4", None)
+    get_writer.assert_called_once_with("kimi-k2.6", None)
     worker_agent.run.assert_awaited_once()
     writer_agent.run.assert_awaited_once()
 
@@ -312,16 +315,18 @@ async def test_two_stage_worker_briefs_writer_writes_and_sends(
     content = engine.bot.rest.create_message.await_args.kwargs["content"]
     assert content == "Use asyncio.run(main())."
 
-    # Only the large WRITER counts against the channel token budget (280);
-    # the cheap WORKER's 150 tokens are excluded from the enforced limit.
+    # Only the answering WRITER (the primary) counts against the channel token
+    # budget (280); the cheap DRAFTER's 150 tokens are excluded from the limit.
     add_usage.assert_awaited_once_with(fake_redis, "42", 280)
 
 
 @pytest.mark.asyncio
-async def test_two_stage_advertises_writer_model_not_worker(fake_memory, fake_redis):
-    """The ``<your-model>`` metadata shown to the WORKER names the large WRITER —
-    the model that actually authors the reply — so a "what model are you?" turn
-    resolves to the writer, not the cheap worker running the turn."""
+async def test_two_stage_advertises_primary_answerer_not_drafter(
+    fake_memory, fake_redis
+):
+    """The ``<your-model>`` metadata shown to the DRAFTER names the primary model —
+    the answerer that actually authors the reply — so a "what model are you?" turn
+    resolves to the primary, not the cheap drafter running the turn."""
     worker_agent = MagicMock()
     worker_agent.run = AsyncMock(
         return_value=_worker_result(_briefing(brief=_brief()))
@@ -331,7 +336,7 @@ async def test_two_stage_advertises_writer_model_not_worker(fake_memory, fake_re
         return_value=_writer_result(WriterOutput(message="hi"))
     )
     engine, _ = _make_engine(
-        _override("kimi-k2-6", writer_model="gpt-5-4"), fake_redis
+        _override("kimi-k2-6", drafter_model="gpt-5-4"), fake_redis
     )
 
     with patch(
@@ -350,10 +355,10 @@ async def test_two_stage_advertises_writer_model_not_worker(fake_memory, fake_re
         await engine._run_once(first_activation=True)
 
     user_prompt = worker_agent.run.await_args.kwargs["user_prompt"]
-    # Worker override is Kimi K2.6; writer is GPT-5.4. The metadata advertises
-    # the WRITER, not the worker.
-    assert 'name="GPT-5.4"' in user_prompt
-    assert "Kimi K2.6" not in user_prompt
+    # Primary (answerer) is Kimi K2.6; the cheap drafter is GPT-5.4. The metadata
+    # advertises the primary answerer, not the drafter running the turn.
+    assert "Kimi K2.6" in user_prompt
+    assert "GPT-5.4" not in user_prompt
 
 
 @pytest.mark.asyncio
@@ -372,7 +377,7 @@ async def test_two_stage_persists_combined_token_totals(fake_memory, fake_redis)
         )
     )
     engine, _ = _make_engine(
-        _override("kimi-k2-6", writer_model="gpt-5-4"), fake_redis
+        _override("kimi-k2-6", drafter_model="gpt-5-4"), fake_redis
     )
 
     persist_turn = AsyncMock()
@@ -427,7 +432,7 @@ async def test_two_stage_overlong_writer_reply_is_fitted(fake_memory, fake_redis
         )
     )
     engine, _ = _make_engine(
-        _override("kimi-k2-6", writer_model="gpt-5-4"), fake_redis
+        _override("kimi-k2-6", drafter_model="gpt-5-4"), fake_redis
     )
 
     fit_mock = AsyncMock(return_value=FitResult("fitted reply", 0, 0, "summarized"))
@@ -471,7 +476,7 @@ async def test_two_stage_silent_brief_never_calls_writer(fake_memory, fake_redis
         )
     )
     engine, _ = _make_engine(
-        _override("kimi-k2-6", writer_model="gpt-5-4"), fake_redis
+        _override("kimi-k2-6", drafter_model="gpt-5-4"), fake_redis
     )
 
     with patch(
@@ -516,7 +521,7 @@ async def test_two_stage_voice_request_sends_voice(fake_memory, fake_redis):
     )
     voice_send = AsyncMock(return_value=None)
     engine, _ = _make_engine(
-        _override("kimi-k2-6", writer_model="gpt-5-4"),
+        _override("kimi-k2-6", drafter_model="gpt-5-4"),
         fake_redis,
         voice_send=voice_send,
     )
@@ -554,7 +559,7 @@ async def test_two_stage_no_voice_when_not_requested(fake_memory, fake_redis):
     )
     voice_send = AsyncMock(return_value=None)
     engine, _ = _make_engine(
-        _override("kimi-k2-6", writer_model="gpt-5-4"),
+        _override("kimi-k2-6", drafter_model="gpt-5-4"),
         fake_redis,
         voice_send=voice_send,
     )
@@ -594,7 +599,7 @@ async def test_two_stage_reply_directly_targets_top_ranked_message(
         return_value=_writer_result(WriterOutput(message="Replying directly."))
     )
     engine, _ = _make_engine(
-        _override("kimi-k2-6", writer_model="gpt-5-4"), fake_redis
+        _override("kimi-k2-6", drafter_model="gpt-5-4"), fake_redis
     )
 
     with patch(
@@ -620,10 +625,10 @@ async def test_two_stage_reply_directly_targets_top_ranked_message(
 
 
 @pytest.mark.asyncio
-async def test_stale_writer_model_falls_back_to_single_stage(
+async def test_stale_drafter_model_falls_back_to_single_stage(
     fake_memory, fake_redis
 ):
-    """A writer_model the catalog no longer knows degrades to today's
+    """A drafter_model the catalog no longer knows degrades to today's
     single-agent path (chat agent), never the worker/writer."""
     from smarter_dev.bot.agents.chat_models import ResponseBody, TurnDecision
 
@@ -641,7 +646,7 @@ async def test_stale_writer_model_falls_back_to_single_stage(
         )
     )
     engine, _ = _make_engine(
-        _override("gpt-5-4", writer_model="this-model-was-removed"), fake_redis
+        _override("gpt-5-4", drafter_model="this-model-was-removed"), fake_redis
     )
 
     with patch(

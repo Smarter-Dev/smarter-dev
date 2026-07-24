@@ -31,20 +31,20 @@ from smarter_dev.bot.views.model_override_views import SAVE_CUSTOM_ID_PREFIX
 from smarter_dev.bot.views.model_override_views import SENTINEL_DEFAULT
 from smarter_dev.bot.views.model_override_views import SENTINEL_MODEL_DEFAULT
 from smarter_dev.bot.views.model_override_views import SENTINEL_NO_FALLBACK
-from smarter_dev.bot.views.model_override_views import SENTINEL_NO_WRITER
-from smarter_dev.bot.views.model_override_views import WRITER_SELECT_CUSTOM_ID_PREFIX
+from smarter_dev.bot.views.model_override_views import SENTINEL_NO_DRAFTER
+from smarter_dev.bot.views.model_override_views import DRAFTER_SELECT_CUSTOM_ID_PREFIX
 from smarter_dev.bot.views.model_override_views import PanelState
 from smarter_dev.bot.views.model_override_views import build_fallback_options
 from smarter_dev.bot.views.model_override_views import build_model_options
 from smarter_dev.bot.views.model_override_views import build_reasoning_options
-from smarter_dev.bot.views.model_override_views import build_writer_model_options
+from smarter_dev.bot.views.model_override_views import build_drafter_model_options
 from smarter_dev.bot.views.model_override_views import create_model_select_message
 from smarter_dev.bot.views.model_override_views import create_settings_modal
 from smarter_dev.bot.views.model_override_views import create_settings_panel
 from smarter_dev.bot.views.model_override_views import encode_panel_state
 from smarter_dev.bot.views.model_override_views import parse_budget
 from smarter_dev.bot.views.model_override_views import parse_panel_state
-from smarter_dev.bot.views.model_override_views import parse_writer_model
+from smarter_dev.bot.views.model_override_views import parse_drafter_model
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import get_model
 
@@ -59,8 +59,8 @@ NO_REASONING_KEY = "kimi-k2-6"
 REASONING_KEY = "glm-5-2"
 # A second reasoning-capable model used as a fallback target in tests.
 FALLBACK_KEY = "deepseek-v4"
-# A catalog model used as the two-stage writer target in tests.
-WRITER_KEY = "gemini-3-6-flash"
+# A catalog model used as the two-stage drafter target in tests.
+DRAFTER_KEY = "gemini-3-6-flash"
 
 
 def _override(
@@ -71,7 +71,7 @@ def _override(
     auto_respond: bool = False,
     fallback_model_key: str | None = None,
     response_filter: str | None = None,
-    writer_model: str | None = None,
+    drafter_model: str | None = None,
 ):
     return ChannelModelOverride(
         guild_id="G",
@@ -83,7 +83,7 @@ def _override(
         auto_respond=auto_respond,
         fallback_model_key=fallback_model_key,
         response_filter=response_filter,
-        writer_model=writer_model,
+        drafter_model=drafter_model,
     )
 
 
@@ -165,22 +165,22 @@ def test_parse_budget_rejects_over_limit():
 
 
 # --------------------------------------------------------------------------- #
-# Pure helpers — writer-model parsing
+# Pure helpers — drafter-model parsing
 # --------------------------------------------------------------------------- #
 
 
 @pytest.mark.parametrize("raw", ["", None, "   "])
-def test_parse_writer_model_blank_means_single_stage(raw):
-    assert parse_writer_model(raw) is None
+def test_parse_drafter_model_blank_means_single_stage(raw):
+    assert parse_drafter_model(raw) is None
 
 
-def test_parse_writer_model_accepts_catalog_key():
-    assert parse_writer_model(f"  {WRITER_KEY}  ") == WRITER_KEY
+def test_parse_drafter_model_accepts_catalog_key():
+    assert parse_drafter_model(f"  {DRAFTER_KEY}  ") == DRAFTER_KEY
 
 
-def test_parse_writer_model_rejects_unknown_key():
+def test_parse_drafter_model_rejects_unknown_key():
     with pytest.raises(ValueError, match="not a known model"):
-        parse_writer_model("not-a-real-model")
+        parse_drafter_model("not-a-real-model")
 
 
 # --------------------------------------------------------------------------- #
@@ -242,18 +242,18 @@ def test_build_fallback_options_marks_current_fallback_default():
 
 
 # --------------------------------------------------------------------------- #
-# Pure helpers — writer-model options
+# Pure helpers — drafter-model options
 # --------------------------------------------------------------------------- #
 
 
-def test_build_writer_model_options_excludes_primary_and_offers_sentinel():
-    options = build_writer_model_options(
-        primary_key=REASONING_KEY, current_writer_key=None
+def test_build_drafter_model_options_excludes_primary_and_offers_sentinel():
+    options = build_drafter_model_options(
+        primary_key=REASONING_KEY, current_drafter_key=None
     )
     values = [opt.value for opt in options]
 
-    assert values[0] == SENTINEL_NO_WRITER
-    # The chosen primary is never offered as its own writer.
+    assert values[0] == SENTINEL_NO_DRAFTER
+    # The chosen primary is never offered as its own drafter.
     assert REASONING_KEY not in values
     # Every other catalog model is offered.
     for model in MODEL_CATALOG:
@@ -262,17 +262,17 @@ def test_build_writer_model_options_excludes_primary_and_offers_sentinel():
     # sentinel + (catalog - primary), within Discord's 25-option limit
     assert len(options) == len(MODEL_CATALOG)
     assert len(options) <= 25
-    # No stored writer -> the "no writer" sentinel is preselected.
+    # No stored drafter -> the "no drafter" sentinel is preselected.
     defaults = [opt.value for opt in options if opt.is_default]
-    assert defaults == [SENTINEL_NO_WRITER]
+    assert defaults == [SENTINEL_NO_DRAFTER]
 
 
-def test_build_writer_model_options_marks_current_writer_default():
-    options = build_writer_model_options(
-        primary_key=REASONING_KEY, current_writer_key=WRITER_KEY
+def test_build_drafter_model_options_marks_current_drafter_default():
+    options = build_drafter_model_options(
+        primary_key=REASONING_KEY, current_drafter_key=DRAFTER_KEY
     )
     defaults = [opt.value for opt in options if opt.is_default]
-    assert defaults == [WRITER_KEY]
+    assert defaults == [DRAFTER_KEY]
 
 
 # --------------------------------------------------------------------------- #
@@ -282,8 +282,8 @@ def test_build_writer_model_options_marks_current_writer_default():
 
 def test_encode_panel_state_full():
     assert (
-        encode_panel_state(REASONING_KEY, "high", True, FALLBACK_KEY, WRITER_KEY)
-        == f"{REASONING_KEY}:high:1:{FALLBACK_KEY}:{WRITER_KEY}"
+        encode_panel_state(REASONING_KEY, "high", True, FALLBACK_KEY, DRAFTER_KEY)
+        == f"{REASONING_KEY}:high:1:{FALLBACK_KEY}:{DRAFTER_KEY}"
     )
 
 
@@ -297,7 +297,7 @@ def test_encode_panel_state_empties():
 def test_parse_panel_state_roundtrip():
     custom_id = (
         f"{AUTO_TOGGLE_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:"
-        f"{FALLBACK_KEY}:{WRITER_KEY}"
+        f"{FALLBACK_KEY}:{DRAFTER_KEY}"
     )
     state = parse_panel_state(custom_id, AUTO_TOGGLE_CUSTOM_ID_PREFIX)
     assert state == PanelState(
@@ -305,7 +305,7 @@ def test_parse_panel_state_roundtrip():
         reasoning_level="high",
         auto_respond=True,
         fallback_model_key=FALLBACK_KEY,
-        writer_model_key=WRITER_KEY,
+        drafter_model_key=DRAFTER_KEY,
     )
 
 
@@ -317,14 +317,14 @@ def test_parse_panel_state_empties():
         reasoning_level=None,
         auto_respond=False,
         fallback_model_key=None,
-        writer_model_key=None,
+        drafter_model_key=None,
     )
 
 
 def test_parse_panel_state_wrong_prefix_returns_none():
     custom_id = (
         f"{AUTO_TOGGLE_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:"
-        f"{FALLBACK_KEY}:{WRITER_KEY}"
+        f"{FALLBACK_KEY}:{DRAFTER_KEY}"
     )
     assert parse_panel_state(custom_id, CONTINUE_CUSTOM_ID_PREFIX) is None
 
@@ -346,25 +346,25 @@ def test_parse_panel_state_wrong_field_count_returns_none():
 def test_create_settings_panel_reasoning_model_has_reasoning_row():
     model = get_model(REASONING_KEY)
     rows = create_settings_panel(model, None, False, None, None)
-    # reasoning select + fallback select + writer select + button row
+    # reasoning select + fallback select + drafter select + button row
     assert len(rows) == 4
     prefixes = [row.components[0].custom_id.split(":")[0] for row in rows[:3]]
     assert prefixes == [
         REASONING_SELECT_CUSTOM_ID_PREFIX,
         FALLBACK_SELECT_CUSTOM_ID_PREFIX,
-        WRITER_SELECT_CUSTOM_ID_PREFIX,
+        DRAFTER_SELECT_CUSTOM_ID_PREFIX,
     ]
 
 
 def test_create_settings_panel_no_reasoning_model_omits_reasoning_row():
     model = get_model(NO_REASONING_KEY)
     rows = create_settings_panel(model, None, False, None, None)
-    # No reasoning knob -> fallback select + writer select + button row.
+    # No reasoning knob -> fallback select + drafter select + button row.
     assert len(rows) == 3
     prefixes = [row.components[0].custom_id.split(":")[0] for row in rows[:2]]
     assert prefixes == [
         FALLBACK_SELECT_CUSTOM_ID_PREFIX,
-        WRITER_SELECT_CUSTOM_ID_PREFIX,
+        DRAFTER_SELECT_CUSTOM_ID_PREFIX,
     ]
 
 
@@ -429,8 +429,8 @@ def test_create_settings_panel_auto_button_reflects_on_state():
 
 def test_create_settings_panel_custom_ids_carry_state_and_stay_short():
     model = get_model(REASONING_KEY)
-    rows = create_settings_panel(model, "high", True, FALLBACK_KEY, WRITER_KEY)
-    state = encode_panel_state(REASONING_KEY, "high", True, FALLBACK_KEY, WRITER_KEY)
+    rows = create_settings_panel(model, "high", True, FALLBACK_KEY, DRAFTER_KEY)
+    state = encode_panel_state(REASONING_KEY, "high", True, FALLBACK_KEY, DRAFTER_KEY)
     for component in _row_components(rows):
         # The reset button is stateless — it deletes the row outright.
         if component.custom_id == RESET_CUSTOM_ID:
@@ -439,18 +439,18 @@ def test_create_settings_panel_custom_ids_carry_state_and_stay_short():
         assert len(component.custom_id) < 100
 
 
-def test_create_settings_panel_prefills_reasoning_fallback_and_writer():
+def test_create_settings_panel_prefills_reasoning_fallback_and_drafter():
     model = get_model(REASONING_KEY)
-    rows = create_settings_panel(model, "high", False, FALLBACK_KEY, WRITER_KEY)
+    rows = create_settings_panel(model, "high", False, FALLBACK_KEY, DRAFTER_KEY)
     reasoning_select = rows[0].components[0]
     fallback_select = rows[1].components[0]
-    writer_select = rows[2].components[0]
+    drafter_select = rows[2].components[0]
     reasoning_defaults = [o.value for o in reasoning_select.options if o.is_default]
     fallback_defaults = [o.value for o in fallback_select.options if o.is_default]
-    writer_defaults = [o.value for o in writer_select.options if o.is_default]
+    drafter_defaults = [o.value for o in drafter_select.options if o.is_default]
     assert reasoning_defaults == ["high"]
     assert fallback_defaults == [FALLBACK_KEY]
-    assert writer_defaults == [WRITER_KEY]
+    assert drafter_defaults == [DRAFTER_KEY]
 
 
 # --------------------------------------------------------------------------- #
@@ -463,22 +463,22 @@ def _panel_state(
     reasoning_level: str | None = None,
     auto_respond: bool = False,
     fallback_model_key: str | None = None,
-    writer_model_key: str | None = None,
+    drafter_model_key: str | None = None,
 ) -> PanelState:
     return PanelState(
         model_key=model_key,
         reasoning_level=reasoning_level,
         auto_respond=auto_respond,
         fallback_model_key=fallback_model_key,
-        writer_model_key=writer_model_key,
+        drafter_model_key=drafter_model_key,
     )
 
 
 def test_create_settings_modal_encodes_full_state():
-    state = _panel_state(REASONING_KEY, "high", True, FALLBACK_KEY, WRITER_KEY)
+    state = _panel_state(REASONING_KEY, "high", True, FALLBACK_KEY, DRAFTER_KEY)
     modal = create_settings_modal(state, None)
     assert modal.custom_id == (
-        f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}:{WRITER_KEY}"
+        f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}:{DRAFTER_KEY}"
     )
 
 
@@ -486,7 +486,7 @@ def test_create_settings_modal_has_budget_and_filter_inputs():
     modal = create_settings_modal(_panel_state(), None)
     inputs = _row_components(modal.components)
     ids = [component.custom_id for component in inputs]
-    # The writer model is now chosen on the panel's select, not in the modal.
+    # The drafter model is now chosen on the panel's select, not in the modal.
     assert ids == [
         "daily_budget",
         "hourly_budget",
@@ -525,18 +525,18 @@ def test_create_settings_modal_prefills_from_override():
             daily=1500,
             hourly=200,
             response_filter="only questions",
-            writer_model=WRITER_KEY,
+            drafter_model=DRAFTER_KEY,
         ),
     )
     values = [component.value for component in _row_components(modal.components)]
-    # The writer model is no longer a modal input, so it's not prefilled here.
+    # The drafter model is no longer a modal input, so it's not prefilled here.
     assert values == ["1500", "200", "only questions"]
 
 
 def test_create_settings_modal_omits_empty_filter_prefill():
     modal = create_settings_modal(
         _panel_state(),
-        _override(daily=10, hourly=10, response_filter=None, writer_model=None),
+        _override(daily=10, hourly=10, response_filter=None, drafter_model=None),
     )
     values = [component.value for component in _row_components(modal.components)]
     # response_filter (index 2) left unset.
@@ -839,7 +839,7 @@ async def test_select_reasoning_model_renders_panel_with_reasoning_row():
     event.interaction.create_initial_response.assert_awaited_once()
     _, kwargs = event.interaction.create_initial_response.call_args
     rows = kwargs["components"]
-    # reasoning select + fallback select + writer select + buttons
+    # reasoning select + fallback select + drafter select + buttons
     assert len(rows) == 4
 
 
@@ -956,34 +956,34 @@ async def test_fallback_select_sentinel_clears_fallback():
     assert kwargs["components"][0].components[0].custom_id.endswith(state)
 
 
-async def test_writer_select_rerenders_with_new_writer():
+async def test_drafter_select_rerenders_with_new_drafter():
     service = AsyncMock()
     event = _component_event(
-        [WRITER_KEY],
+        [DRAFTER_KEY],
         service,
-        custom_id=f"{WRITER_SELECT_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:0:{FALLBACK_KEY}:",
+        custom_id=f"{DRAFTER_SELECT_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:0:{FALLBACK_KEY}:",
     )
     with patch(PERMS_TARGET, return_value=ADMIN):
-        await model_override.handle_model_override_writer_select(event)
+        await model_override.handle_model_override_drafter_select(event)
 
     event.interaction.create_modal_response.assert_not_called()
     _, kwargs = event.interaction.create_initial_response.call_args
-    state = encode_panel_state(REASONING_KEY, "high", False, FALLBACK_KEY, WRITER_KEY)
+    state = encode_panel_state(REASONING_KEY, "high", False, FALLBACK_KEY, DRAFTER_KEY)
     assert kwargs["components"][0].components[0].custom_id.endswith(state)
 
 
-async def test_writer_select_sentinel_clears_writer():
+async def test_drafter_select_sentinel_clears_drafter():
     service = AsyncMock()
     event = _component_event(
-        [SENTINEL_NO_WRITER],
+        [SENTINEL_NO_DRAFTER],
         service,
         custom_id=(
-            f"{WRITER_SELECT_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:0:"
-            f"{FALLBACK_KEY}:{WRITER_KEY}"
+            f"{DRAFTER_SELECT_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:0:"
+            f"{FALLBACK_KEY}:{DRAFTER_KEY}"
         ),
     )
     with patch(PERMS_TARGET, return_value=ADMIN):
-        await model_override.handle_model_override_writer_select(event)
+        await model_override.handle_model_override_drafter_select(event)
 
     _, kwargs = event.interaction.create_initial_response.call_args
     state = encode_panel_state(REASONING_KEY, "high", False, FALLBACK_KEY, None)
@@ -1057,21 +1057,21 @@ async def test_continue_opens_modal_carrying_state():
 
 async def test_save_persists_panel_state_without_modal_and_keeps_advanced_fields():
     service = AsyncMock()
-    # The stored writer differs from the panel's chosen writer — the panel state
-    # (carried in the save custom_id) is the source of truth for the writer, so
+    # The stored drafter differs from the panel's chosen drafter — the panel state
+    # (carried in the save custom_id) is the source of truth for the drafter, so
     # the panel value must win. Budgets and filter are still retained from store.
     service.get_override.return_value = _override(
         daily=1500,
         hourly=200,
         response_filter="Only programming questions",
-        writer_model=None,
+        drafter_model=None,
     )
     event = _component_event(
         [],
         service,
         custom_id=(
             f"{SAVE_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:"
-            f"{FALLBACK_KEY}:{WRITER_KEY}"
+            f"{FALLBACK_KEY}:{DRAFTER_KEY}"
         ),
     )
     with patch(PERMS_TARGET, return_value=ADMIN):
@@ -1087,7 +1087,7 @@ async def test_save_persists_panel_state_without_modal_and_keeps_advanced_fields
         auto_respond=True,
         fallback_model_key=FALLBACK_KEY,
         response_filter="Only programming questions",
-        writer_model=WRITER_KEY,
+        drafter_model=DRAFTER_KEY,
     )
     event.interaction.create_modal_response.assert_not_called()
     args, kwargs = event.interaction.create_initial_response.call_args
@@ -1114,7 +1114,7 @@ async def test_save_new_override_uses_unlimited_budgets_and_no_filter():
         auto_respond=False,
         fallback_model_key=None,
         response_filter=None,
-        writer_model=None,
+        drafter_model=None,
     )
 
 
@@ -1152,7 +1152,7 @@ def _modal_event(custom_id: str, fields: dict[str, str], service: AsyncMock):
 async def test_modal_submit_persists_all_fields():
     service = AsyncMock()
     event = _modal_event(
-        f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}:{WRITER_KEY}",
+        f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}:{DRAFTER_KEY}",
         {
             "daily_budget": "1500",
             "hourly_budget": "200",
@@ -1173,8 +1173,8 @@ async def test_modal_submit_persists_all_fields():
         auto_respond=True,
         fallback_model_key=FALLBACK_KEY,
         response_filter="Only respond to programming questions",
-        # The writer model rides in the modal custom_id from the panel select.
-        writer_model=WRITER_KEY,
+        # The drafter model rides in the modal custom_id from the panel select.
+        drafter_model=DRAFTER_KEY,
     )
     event.interaction.create_initial_response.assert_awaited_once()
 
@@ -1199,7 +1199,7 @@ async def test_modal_submit_persists_minimal_state():
         auto_respond=False,
         fallback_model_key=None,
         response_filter=None,
-        writer_model=None,
+        drafter_model=None,
     )
 
 
@@ -1217,12 +1217,12 @@ async def test_modal_submit_empty_filter_persists_none():
     assert kwargs["response_filter"] is None
 
 
-async def test_modal_submit_persists_panel_writer_model_for_two_stage():
-    """The writer model chosen on the panel rides in the modal custom_id, so the
-    submit persists it (and confirms two-stage) without any writer text input."""
+async def test_modal_submit_persists_panel_drafter_model_for_two_stage():
+    """The drafter model chosen on the panel rides in the modal custom_id, so the
+    submit persists it (and confirms two-stage) without any drafter text input."""
     service = AsyncMock()
     event = _modal_event(
-        f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}:{WRITER_KEY}",
+        f"{MODAL_CUSTOM_ID_PREFIX}:{REASONING_KEY}:high:1:{FALLBACK_KEY}:{DRAFTER_KEY}",
         {"daily_budget": "0", "hourly_budget": "0"},
         service,
     )
@@ -1230,14 +1230,14 @@ async def test_modal_submit_persists_panel_writer_model_for_two_stage():
         await model_override.handle_model_override_modal_submit(event)
 
     _, kwargs = service.set_override.call_args
-    assert kwargs["writer_model"] == WRITER_KEY
+    assert kwargs["drafter_model"] == DRAFTER_KEY
     _, response_kwargs = event.interaction.create_initial_response.call_args
     content = response_kwargs["content"]
     assert "two-stage" in content.lower()
-    assert get_model(WRITER_KEY).label in content
+    assert get_model(DRAFTER_KEY).label in content
 
 
-async def test_modal_submit_blank_panel_writer_model_persists_none():
+async def test_modal_submit_blank_panel_drafter_model_persists_none():
     service = AsyncMock()
     event = _modal_event(
         f"{MODAL_CUSTOM_ID_PREFIX}:{NO_REASONING_KEY}::0::",
@@ -1248,7 +1248,7 @@ async def test_modal_submit_blank_panel_writer_model_persists_none():
         await model_override.handle_model_override_modal_submit(event)
 
     _, kwargs = service.set_override.call_args
-    assert kwargs["writer_model"] is None
+    assert kwargs["drafter_model"] is None
 
 
 async def test_modal_submit_confirmation_lists_all_settings():

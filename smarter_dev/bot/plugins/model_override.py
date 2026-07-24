@@ -16,7 +16,7 @@ The interaction handlers here are dispatched from
 :mod:`smarter_dev.bot.plugins.events` by ``custom_id``: the model select
 (``handle_model_override_select``), the panel re-render handlers
 (``handle_model_override_reasoning_select`` / ``_fallback_select`` /
-``_writer_select`` / ``_auto_toggle``), the quick-save handler
+``_drafter_select`` / ``_auto_toggle``), the quick-save handler
 (``handle_model_override_save``), the
 modal opener (``handle_model_override_continue``), and the modal submit
 (``handle_model_override_modal_submit``). The chat runtime consumes the stored settings via
@@ -55,8 +55,8 @@ from smarter_dev.bot.views.model_override_views import SAVE_CUSTOM_ID_PREFIX
 from smarter_dev.bot.views.model_override_views import SENTINEL_DEFAULT
 from smarter_dev.bot.views.model_override_views import SENTINEL_MODEL_DEFAULT
 from smarter_dev.bot.views.model_override_views import SENTINEL_NO_FALLBACK
-from smarter_dev.bot.views.model_override_views import SENTINEL_NO_WRITER
-from smarter_dev.bot.views.model_override_views import WRITER_SELECT_CUSTOM_ID_PREFIX
+from smarter_dev.bot.views.model_override_views import SENTINEL_NO_DRAFTER
+from smarter_dev.bot.views.model_override_views import DRAFTER_SELECT_CUSTOM_ID_PREFIX
 from smarter_dev.bot.views.model_override_views import PanelState
 from smarter_dev.bot.views.model_override_views import create_model_select_message
 from smarter_dev.bot.views.model_override_views import create_settings_modal
@@ -148,17 +148,17 @@ def _render_fallback(fallback_model_key: str | None) -> str:
     return fallback.label if fallback is not None else fallback_model_key
 
 
-def _render_writer_model(writer_model: str | None) -> str:
-    """Human-render the two-stage writer model for the confirmation message.
+def _render_drafter_model(drafter_model: str | None) -> str:
+    """Human-render the cheap two-stage drafter model for the confirmation message.
 
-    ``None`` means single-stage mode; a set value names the reply-writing model
-    that runs after the panel's model gathers context.
+    ``None`` means single-stage mode; a set value names the cheap drafter that
+    gathers context before the channel's primary model writes the answer.
     """
-    if writer_model is None:
-        return "single-stage (no writer model)"
-    writer = get_model(writer_model)
-    label = writer.label if writer is not None else writer_model
-    return f"two-stage — writer {label}"
+    if drafter_model is None:
+        return "single-stage (no drafter model)"
+    drafter = get_model(drafter_model)
+    label = drafter.label if drafter is not None else drafter_model
+    return f"two-stage — drafter {label}"
 
 
 def _confirmation_message(
@@ -167,7 +167,7 @@ def _confirmation_message(
     response_filter: str | None,
     daily_budget: int,
     hourly_budget: int,
-    writer_model: str | None,
+    drafter_model: str | None,
 ) -> str:
     """Render the saved-settings confirmation (``model`` None = server default)."""
     model_line = (
@@ -185,7 +185,7 @@ def _confirmation_message(
         f"• Reasoning: {reasoning}\n"
         f"• Auto-respond: {'on' if state.auto_respond else 'off'}\n"
         f"• Fallback model: {_render_fallback(state.fallback_model_key)}\n"
-        f"• Chat mode: {_render_writer_model(writer_model)}\n"
+        f"• Chat mode: {_render_drafter_model(drafter_model)}\n"
         f"• Response filter: {'set' if response_filter else 'none'}\n"
         f"• Daily budget: {_render_budget(daily_budget)}\n"
         f"• Hourly budget: {_render_budget(hourly_budget)}"
@@ -264,7 +264,7 @@ async def _render_panel(
             state.reasoning_level,
             state.auto_respond,
             state.fallback_model_key,
-            state.writer_model_key,
+            state.drafter_model_key,
         ),
     )
 
@@ -453,12 +453,12 @@ async def _advance_from_model_selection(
     fallback_key = current.fallback_model_key if current is not None else None
     if fallback_key == selected:
         fallback_key = None
-    # A stored writer equal to the newly chosen primary is meaningless (a model
-    # is never its own writer), so drop it — otherwise it would be excluded from
-    # the select yet still ride in the panel state.
-    writer_key = current.writer_model if current is not None else None
-    if writer_key == selected:
-        writer_key = None
+    # A stored drafter equal to the newly chosen primary is meaningless (the
+    # answering model is never its own drafter), so drop it — otherwise it would
+    # be excluded from the select yet still ride in the panel state.
+    drafter_key = current.drafter_model if current is not None else None
+    if drafter_key == selected:
+        drafter_key = None
     # The server default carries no pinned reasoning level: the underlying
     # default model can change, so a stored level would silently stop matching.
     reasoning_level = (
@@ -471,7 +471,7 @@ async def _advance_from_model_selection(
         reasoning_level=reasoning_level,
         auto_respond=current.auto_respond if current is not None else False,
         fallback_model_key=fallback_key,
-        writer_model_key=writer_key,
+        drafter_model_key=drafter_key,
     )
     await _render_panel(interaction, state)
 
@@ -506,7 +506,7 @@ async def handle_model_override_reasoning_select(
             reasoning_level=reasoning_level,
             auto_respond=state.auto_respond,
             fallback_model_key=state.fallback_model_key,
-            writer_model_key=state.writer_model_key,
+            drafter_model_key=state.drafter_model_key,
         ),
     )
 
@@ -541,25 +541,25 @@ async def handle_model_override_fallback_select(
             reasoning_level=state.reasoning_level,
             auto_respond=state.auto_respond,
             fallback_model_key=fallback_model_key,
-            writer_model_key=state.writer_model_key,
+            drafter_model_key=state.drafter_model_key,
         ),
     )
 
 
-async def handle_model_override_writer_select(
+async def handle_model_override_drafter_select(
     event: hikari.InteractionCreateEvent,
 ) -> None:
-    """Handle the writer-model string-select: re-render the panel with the chosen
-    two-stage writer model (or unset for single-stage mode)."""
+    """Handle the drafter-model string-select: re-render the panel with the chosen
+    cheap two-stage drafter model (or unset for single-stage mode)."""
     interaction = event.interaction
     if not isinstance(interaction, hikari.ComponentInteraction):
         return
     if await _deny_interaction_if_not_admin(event):
         return
 
-    state = parse_panel_state(interaction.custom_id, WRITER_SELECT_CUSTOM_ID_PREFIX)
+    state = parse_panel_state(interaction.custom_id, DRAFTER_SELECT_CUSTOM_ID_PREFIX)
     if state is None:
-        logger.error("Invalid writer select custom_id: %s", interaction.custom_id)
+        logger.error("Invalid drafter select custom_id: %s", interaction.custom_id)
         await interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_UPDATE,
             content="❌ Invalid request. Please run `/chat-bot-settings` again.",
@@ -567,8 +567,8 @@ async def handle_model_override_writer_select(
         )
         return
 
-    chosen = interaction.values[0] if interaction.values else SENTINEL_NO_WRITER
-    writer_model_key = None if chosen == SENTINEL_NO_WRITER else chosen
+    chosen = interaction.values[0] if interaction.values else SENTINEL_NO_DRAFTER
+    drafter_model_key = None if chosen == SENTINEL_NO_DRAFTER else chosen
     await _render_panel(
         interaction,
         PanelState(
@@ -576,7 +576,7 @@ async def handle_model_override_writer_select(
             reasoning_level=state.reasoning_level,
             auto_respond=state.auto_respond,
             fallback_model_key=state.fallback_model_key,
-            writer_model_key=writer_model_key,
+            drafter_model_key=drafter_model_key,
         ),
     )
 
@@ -608,7 +608,7 @@ async def handle_model_override_auto_toggle(
             reasoning_level=state.reasoning_level,
             auto_respond=not state.auto_respond,
             fallback_model_key=state.fallback_model_key,
-            writer_model_key=state.writer_model_key,
+            drafter_model_key=state.drafter_model_key,
         ),
     )
 
@@ -679,9 +679,9 @@ async def handle_model_override_save(
         daily_budget = current.daily_token_budget if current is not None else 0
         hourly_budget = current.hourly_token_budget if current is not None else 0
         response_filter = current.response_filter if current is not None else None
-        # The panel's writer-model select is the source of truth, not the stored
+        # The panel's drafter-model select is the source of truth, not the stored
         # value, so a panel change persists even without opening the modal.
-        writer_model = state.writer_model_key
+        drafter_model = state.drafter_model_key
         await service.set_override(
             guild_id,
             channel_id,
@@ -692,7 +692,7 @@ async def handle_model_override_save(
             auto_respond=state.auto_respond,
             fallback_model_key=state.fallback_model_key,
             response_filter=response_filter,
-            writer_model=writer_model,
+            drafter_model=drafter_model,
         )
     except APIError as exc:
         logger.error(
@@ -708,7 +708,7 @@ async def handle_model_override_save(
     await interaction.create_initial_response(
         hikari.ResponseType.MESSAGE_UPDATE,
         content=_confirmation_message(
-            model, state, response_filter, daily_budget, hourly_budget, writer_model
+            model, state, response_filter, daily_budget, hourly_budget, drafter_model
         ),
         components=[],
     )
@@ -796,9 +796,9 @@ async def handle_model_override_modal_submit(
 
     filter_text = (values.get("response_filter") or "").strip()
     response_filter = filter_text or None
-    # The writer model is chosen on the panel and carried in the modal's
-    # custom_id state — the modal has no writer input to read here.
-    writer_model = state.writer_model_key
+    # The drafter model is chosen on the panel and carried in the modal's
+    # custom_id state — the modal has no drafter input to read here.
+    drafter_model = state.drafter_model_key
 
     service = _get_override_service(event.app)
     try:
@@ -812,7 +812,7 @@ async def handle_model_override_modal_submit(
             auto_respond=state.auto_respond,
             fallback_model_key=state.fallback_model_key,
             response_filter=response_filter,
-            writer_model=writer_model,
+            drafter_model=drafter_model,
         )
     except APIError as exc:
         # Without this, the failure surfaces as Discord's generic
@@ -833,7 +833,7 @@ async def handle_model_override_modal_submit(
     await interaction.create_initial_response(
         hikari.ResponseType.MESSAGE_CREATE,
         content=_confirmation_message(
-            model, state, response_filter, daily_budget, hourly_budget, writer_model
+            model, state, response_filter, daily_budget, hourly_budget, drafter_model
         ),
         flags=hikari.MessageFlag.EPHEMERAL,
     )
