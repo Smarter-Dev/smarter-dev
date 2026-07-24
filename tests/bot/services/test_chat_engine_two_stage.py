@@ -318,6 +318,45 @@ async def test_two_stage_worker_briefs_writer_writes_and_sends(
 
 
 @pytest.mark.asyncio
+async def test_two_stage_advertises_writer_model_not_worker(fake_memory, fake_redis):
+    """The ``<your-model>`` metadata shown to the WORKER names the large WRITER —
+    the model that actually authors the reply — so a "what model are you?" turn
+    resolves to the writer, not the cheap worker running the turn."""
+    worker_agent = MagicMock()
+    worker_agent.run = AsyncMock(
+        return_value=_worker_result(_briefing(brief=_brief()))
+    )
+    writer_agent = MagicMock()
+    writer_agent.run = AsyncMock(
+        return_value=_writer_result(WriterOutput(message="hi"))
+    )
+    engine, _ = _make_engine(
+        _override("kimi-k2-6", writer_model="gpt-5-4"), fake_redis
+    )
+
+    with patch(
+        "smarter_dev.bot.services.chat_engine.get_worker_agent",
+        return_value=worker_agent,
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.get_writer_agent",
+        return_value=writer_agent,
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.get_chat_agent"
+    ), _common_patches(fake_memory=fake_memory)[0], _common_patches(
+        fake_memory=fake_memory
+    )[1], _common_patches(fake_memory=fake_memory)[2], _common_patches(
+        fake_memory=fake_memory
+    )[3]:
+        await engine._run_once(first_activation=True)
+
+    user_prompt = worker_agent.run.await_args.kwargs["user_prompt"]
+    # Worker override is Kimi K2.6; writer is GPT-5.4. The metadata advertises
+    # the WRITER, not the worker.
+    assert 'name="GPT-5.4"' in user_prompt
+    assert "Kimi K2.6" not in user_prompt
+
+
+@pytest.mark.asyncio
 async def test_two_stage_persists_combined_token_totals(fake_memory, fake_redis):
     """The persisted turn folds the writer's spend into the chat token totals."""
     worker_agent = MagicMock()
