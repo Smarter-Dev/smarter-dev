@@ -1,0 +1,29 @@
+name: direct-question
+note: A member directly asks the bot for advice — the everyday case.
+
+me:
+  user_id: "bot"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "general"
+
+authors:
+  - user_id: "1"
+    username: "alice"
+    nickname: "Al"
+
+history:
+  - id: "10"
+    from: "1"
+    body: "ugh my motivation is completely gone this week"
+  - id: "11"
+    from: "1"
+    body: "been staring at the same ticket for two days"
+
+trigger:
+  id: "12"
+  from: "1"
+  body: "@smarterbot any tips for staying motivated while coding?"
+  mentions_bot: true

@@ -1,0 +1,27 @@
+name: not-directed
+note: Chatter that never addresses the bot — expected to stay SILENT (brief is None).
+kind: followup
+
+me:
+  user_id: "bot"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "general"
+
+authors:
+  - user_id: "1"
+    username: "alice"
+  - user_id: "2"
+    username: "bob"
+
+history:
+  - id: "60"
+    from: "1"
+    body: "anyone else watching the game tonight"
+
+trigger:
+  id: "61"
+  from: "2"
+  body: "yeah I'll be there around 8, bringing snacks"

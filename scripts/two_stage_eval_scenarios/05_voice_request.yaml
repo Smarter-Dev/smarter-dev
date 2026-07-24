@@ -1,0 +1,34 @@
+name: voice-request
+note: >
+  An explicit voice-message request that REFERENCES the bot's own prior reply
+  ("say that back"). Exercises send_voice AND the comprehensive-brief fix — the
+  worker must carry the referenced prior message into the brief so the writer
+  has something to repeat.
+
+me:
+  user_id: "bot"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "general"
+
+authors:
+  - user_id: "2"
+    username: "bob"
+
+history:
+  - id: "50"
+    from: "2"
+    body: "@smarterbot what's the vibe for today"
+    mentions_bot: true
+  - id: "51"
+    from: "bot"
+    body: "Bright and a little caffeinated — good day to ship something small."
+
+trigger:
+  id: "52"
+  from: "2"
+  body: "@smarterbot haha say that back to me as a voice message"
+  mentions_bot: true
+  reply_to: "51"

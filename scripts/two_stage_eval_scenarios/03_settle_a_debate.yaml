@@ -1,0 +1,33 @@
+name: settle-a-debate
+note: Two users banter, then pull the bot in to weigh in — multi-speaker context.
+
+me:
+  user_id: "bot"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "food-talk"
+
+authors:
+  - user_id: "1"
+    username: "alice"
+  - user_id: "3"
+    username: "carol"
+
+history:
+  - id: "30"
+    from: "1"
+    body: "pineapple on pizza is genuinely elite and I will not apologize"
+  - id: "31"
+    from: "3"
+    body: "that is a crime against italy alice"
+  - id: "32"
+    from: "1"
+    body: "name a better sweet/savory combo. you can't"
+
+trigger:
+  id: "33"
+  from: "3"
+  body: "@smarterbot settle this: is pineapple on pizza acceptable?"
+  mentions_bot: true
