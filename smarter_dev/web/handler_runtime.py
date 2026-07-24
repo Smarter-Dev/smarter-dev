@@ -513,6 +513,7 @@ class HandlerExecution:
     # -- admin-only moderation functions (only present when self.actor is set) --
 
     async def _delete_message(self, message_id: str, channel_id: str | None = None) -> str:
+        """Delete a message; a 404 is an already-deleted successful no-op."""
         self.budget.spend_mod_action()
         target = str(channel_id) if channel_id else self.channel_id
         return await self.actor.delete_message(target, str(message_id))
@@ -619,16 +620,19 @@ class HandlerExecution:
     ) -> str:
         # Bans stay in the mod pool; delete_message_seconds purges the banned
         # member's recent messages (onboarding auto-ban sweeps the last hour).
+        # A 404 means the member already left and is a successful no-op.
         self.budget.spend_mod_action()
         return await self.actor.ban_user(
             str(user_id), reason, int(delete_message_seconds)
         )
 
     async def _kick_user(self, user_id: str) -> str:
+        """Kick a member; a 404 is an already-left successful no-op."""
         self.budget.spend_mod_action()
         return await self.actor.kick_user(str(user_id))
 
     async def _timeout_user(self, user_id: str, duration_seconds: int = 600) -> str:
+        """Timeout a member; a 404 is an already-left successful no-op."""
         self.budget.spend_mod_action()
         return await self.actor.timeout_user(str(user_id), int(duration_seconds))
 
