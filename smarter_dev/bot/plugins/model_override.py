@@ -16,7 +16,8 @@ The interaction handlers here are dispatched from
 :mod:`smarter_dev.bot.plugins.events` by ``custom_id``: the model select
 (``handle_model_override_select``), the panel re-render handlers
 (``handle_model_override_reasoning_select`` / ``_fallback_select`` /
-``_auto_toggle``), the quick-save handler (``handle_model_override_save``), the
+``_writer_select`` / ``_auto_toggle``), the quick-save handler
+(``handle_model_override_save``), the
 modal opener (``handle_model_override_continue``), and the modal submit
 (``handle_model_override_modal_submit``). The chat runtime consumes the stored settings via
 :func:`~smarter_dev.bot.agents.chat_agent.get_chat_agent`.
@@ -54,13 +55,14 @@ from smarter_dev.bot.views.model_override_views import SAVE_CUSTOM_ID_PREFIX
 from smarter_dev.bot.views.model_override_views import SENTINEL_DEFAULT
 from smarter_dev.bot.views.model_override_views import SENTINEL_MODEL_DEFAULT
 from smarter_dev.bot.views.model_override_views import SENTINEL_NO_FALLBACK
+from smarter_dev.bot.views.model_override_views import SENTINEL_NO_WRITER
+from smarter_dev.bot.views.model_override_views import WRITER_SELECT_CUSTOM_ID_PREFIX
 from smarter_dev.bot.views.model_override_views import PanelState
 from smarter_dev.bot.views.model_override_views import create_model_select_message
 from smarter_dev.bot.views.model_override_views import create_settings_modal
 from smarter_dev.bot.views.model_override_views import create_settings_panel
 from smarter_dev.bot.views.model_override_views import parse_budget
 from smarter_dev.bot.views.model_override_views import parse_panel_state
-from smarter_dev.bot.views.model_override_views import parse_writer_model
 from smarter_dev.shared.model_catalog import ALL_REASONING_LEVELS
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
@@ -262,6 +264,7 @@ async def _render_panel(
             state.reasoning_level,
             state.auto_respond,
             state.fallback_model_key,
+            state.writer_model_key,
         ),
     )
 
@@ -450,6 +453,12 @@ async def _advance_from_model_selection(
     fallback_key = current.fallback_model_key if current is not None else None
     if fallback_key == selected:
         fallback_key = None
+    # A stored writer equal to the newly chosen primary is meaningless (a model
+    # is never its own writer), so drop it — otherwise it would be excluded from
+    # the select yet still ride in the panel state.
+    writer_key = current.writer_model if current is not None else None
+    if writer_key == selected:
+        writer_key = None
     # The server default carries no pinned reasoning level: the underlying
     # default model can change, so a stored level would silently stop matching.
     reasoning_level = (
@@ -462,6 +471,7 @@ async def _advance_from_model_selection(
         reasoning_level=reasoning_level,
         auto_respond=current.auto_respond if current is not None else False,
         fallback_model_key=fallback_key,
+        writer_model_key=writer_key,
     )
     await _render_panel(interaction, state)
 
@@ -496,6 +506,7 @@ async def handle_model_override_reasoning_select(
             reasoning_level=reasoning_level,
             auto_respond=state.auto_respond,
             fallback_model_key=state.fallback_model_key,
+            writer_model_key=state.writer_model_key,
         ),
     )
 
@@ -530,6 +541,42 @@ async def handle_model_override_fallback_select(
             reasoning_level=state.reasoning_level,
             auto_respond=state.auto_respond,
             fallback_model_key=fallback_model_key,
+            writer_model_key=state.writer_model_key,
+        ),
+    )
+
+
+async def handle_model_override_writer_select(
+    event: hikari.InteractionCreateEvent,
+) -> None:
+    """Handle the writer-model string-select: re-render the panel with the chosen
+    two-stage writer model (or unset for single-stage mode)."""
+    interaction = event.interaction
+    if not isinstance(interaction, hikari.ComponentInteraction):
+        return
+    if await _deny_interaction_if_not_admin(event):
+        return
+
+    state = parse_panel_state(interaction.custom_id, WRITER_SELECT_CUSTOM_ID_PREFIX)
+    if state is None:
+        logger.error("Invalid writer select custom_id: %s", interaction.custom_id)
+        await interaction.create_initial_response(
+            hikari.ResponseType.MESSAGE_UPDATE,
+            content="❌ Invalid request. Please run `/chat-bot-settings` again.",
+            components=[],
+        )
+        return
+
+    chosen = interaction.values[0] if interaction.values else SENTINEL_NO_WRITER
+    writer_model_key = None if chosen == SENTINEL_NO_WRITER else chosen
+    await _render_panel(
+        interaction,
+        PanelState(
+            model_key=state.model_key,
+            reasoning_level=state.reasoning_level,
+            auto_respond=state.auto_respond,
+            fallback_model_key=state.fallback_model_key,
+            writer_model_key=writer_model_key,
         ),
     )
 
@@ -561,6 +608,7 @@ async def handle_model_override_auto_toggle(
             reasoning_level=state.reasoning_level,
             auto_respond=not state.auto_respond,
             fallback_model_key=state.fallback_model_key,
+            writer_model_key=state.writer_model_key,
         ),
     )
 
@@ -631,7 +679,9 @@ async def handle_model_override_save(
         daily_budget = current.daily_token_budget if current is not None else 0
         hourly_budget = current.hourly_token_budget if current is not None else 0
         response_filter = current.response_filter if current is not None else None
-        writer_model = current.writer_model if current is not None else None
+        # The panel's writer-model select is the source of truth, not the stored
+        # value, so a panel change persists even without opening the modal.
+        writer_model = state.writer_model_key
         await service.set_override(
             guild_id,
             channel_id,
@@ -736,7 +786,6 @@ async def handle_model_override_modal_submit(
     try:
         daily_budget = parse_budget(values.get("daily_budget"))
         hourly_budget = parse_budget(values.get("hourly_budget"))
-        writer_model = parse_writer_model(values.get("writer_model"))
     except ValueError as exc:
         await interaction.create_initial_response(
             hikari.ResponseType.MESSAGE_CREATE,
@@ -747,6 +796,9 @@ async def handle_model_override_modal_submit(
 
     filter_text = (values.get("response_filter") or "").strip()
     response_filter = filter_text or None
+    # The writer model is chosen on the panel and carried in the modal's
+    # custom_id state — the modal has no writer input to read here.
+    writer_model = state.writer_model_key
 
     service = _get_override_service(event.app)
     try:

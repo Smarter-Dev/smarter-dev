@@ -54,6 +54,10 @@ SENTINEL_MODEL_DEFAULT = "__model_default__"
 # distinct from every catalog key.
 SENTINEL_NO_FALLBACK = "__no_fallback__"
 
+# Writer-select value that means "no writer model — single-stage" (stored as
+# NULL). Kept distinct from every catalog key.
+SENTINEL_NO_WRITER = "__no_writer__"
+
 # custom_id constant/prefixes routed in smarter_dev.bot.plugins.events. The
 # panel prefixes are deliberately short (``cbs_`` = chat-bot-settings) so the
 # encoded state still fits inside Discord's 100-char custom_id limit.
@@ -61,6 +65,7 @@ SELECT_CUSTOM_ID = "model_override_select"
 MODEL_NEXT_CUSTOM_ID_PREFIX = "cbs_model_next"
 REASONING_SELECT_CUSTOM_ID_PREFIX = "cbs_reasoning"
 FALLBACK_SELECT_CUSTOM_ID_PREFIX = "cbs_fallback"
+WRITER_SELECT_CUSTOM_ID_PREFIX = "cbs_writer"
 AUTO_TOGGLE_CUSTOM_ID_PREFIX = "cbs_auto"
 CONTINUE_CUSTOM_ID_PREFIX = "cbs_continue"
 SAVE_CUSTOM_ID_PREFIX = "cbs_save"
@@ -92,12 +97,15 @@ class PanelState:
             default.
         auto_respond: Whether the bot replies to any message (not just mentions).
         fallback_model_key: The chosen fallback model's key, or ``None`` for none.
+        writer_model_key: The chosen two-stage writer model's key, or ``None`` for
+            single-stage mode.
     """
 
     model_key: str
     reasoning_level: str | None
     auto_respond: bool
     fallback_model_key: str | None
+    writer_model_key: str | None
 
 
 def encode_panel_state(
@@ -105,13 +113,15 @@ def encode_panel_state(
     reasoning_level: str | None,
     auto_respond: bool,
     fallback_model_key: str | None,
+    writer_model_key: str | None,
 ) -> str:
     """Encode the panel state as a colon-joined ``custom_id`` suffix.
 
-    Empty reasoning/fallback segments mean "model default" / "no fallback"; the
-    auto flag is ``1``/``0``. Guild and channel are deliberately *not* encoded —
-    the panel is ephemeral in the configured channel, so handlers read
-    ``interaction.guild_id`` / ``interaction.channel_id`` directly.
+    Empty reasoning/fallback/writer segments mean "model default" / "no fallback"
+    / "single-stage"; the auto flag is ``1``/``0``. Guild and channel are
+    deliberately *not* encoded — the panel is ephemeral in the configured
+    channel, so handlers read ``interaction.guild_id`` /
+    ``interaction.channel_id`` directly.
     """
     return ":".join(
         (
@@ -119,6 +129,7 @@ def encode_panel_state(
             reasoning_level or "",
             "1" if auto_respond else "0",
             fallback_model_key or "",
+            writer_model_key or "",
         )
     )
 
@@ -130,14 +141,15 @@ def parse_panel_state(custom_id: str, expected_prefix: str) -> PanelState | None
     (a malformed/replayed id), so the caller can reject it cleanly.
     """
     parts = custom_id.split(":")
-    if len(parts) != 5 or parts[0] != expected_prefix:
+    if len(parts) != 6 or parts[0] != expected_prefix:
         return None
-    _, model_key, reasoning, auto, fallback = parts
+    _, model_key, reasoning, auto, fallback, writer = parts
     return PanelState(
         model_key=model_key,
         reasoning_level=reasoning or None,
         auto_respond=auto == "1",
         fallback_model_key=fallback or None,
+        writer_model_key=writer or None,
     )
 
 
@@ -265,11 +277,45 @@ def build_fallback_options(
     return options
 
 
+def build_writer_model_options(
+    primary_key: str, current_writer_key: str | None
+) -> list[hikari.impl.SelectOptionBuilder]:
+    """Build the writer-model-select options: a "no writer" sentinel first, then
+    every catalog model except the chosen ``primary_key`` (a model is never its
+    own writer), grouped by family.
+
+    ``current_writer_key`` (the channel's stored writer, or ``None``) marks the
+    pre-selected default; ``None`` selects the sentinel. Kept within Discord's
+    25-option limit by the catalog being <= 24 entries.
+    """
+    options: list[hikari.impl.SelectOptionBuilder] = [
+        hikari.impl.SelectOptionBuilder(
+            label="No writer (single-stage)",
+            value=SENTINEL_NO_WRITER,
+            description="Reply directly — don't run the two-stage writer",
+            is_default=current_writer_key is None,
+        )
+    ]
+    for family, models in models_by_family().items():
+        for model in models:
+            if model.key == primary_key:
+                continue
+            options.append(
+                hikari.impl.SelectOptionBuilder(
+                    label=f"{family} · {model.label}",
+                    value=model.key,
+                    is_default=model.key == current_writer_key,
+                )
+            )
+    return options
+
+
 def create_settings_panel(
     model: CatalogModel | None,
     reasoning_level: str | None,
     auto_respond: bool,
     fallback_model_key: str | None,
+    writer_model_key: str | None,
 ) -> list[hikari.impl.MessageActionRowBuilder]:
     """Build the ephemeral settings panel for a chosen ``model``.
 
@@ -277,17 +323,18 @@ def create_settings_panel(
     panel then omits the reasoning select (the underlying default model can
     change, so a pinned level would silently stop matching) but still offers
     everything else. Otherwise holds (in order) an optional reasoning select
-    (reasoning-capable models only), a fallback-model select, and a button row
-    with an auto-respond toggle plus "Budgets & filter…", "Save", and
-    "Reset all" buttons. The current panel state is encoded into every
-    component's ``custom_id`` so each interaction can re-render the panel
-    without server-side session state.
+    (reasoning-capable models only), a fallback-model select, a writer-model
+    select, and a button row with an auto-respond toggle plus
+    "Budgets & filter…", "Save", and "Reset all" buttons. The current panel
+    state is encoded into every component's ``custom_id`` so each interaction
+    can re-render the panel without server-side session state.
     """
     state = encode_panel_state(
         model.key if model is not None else SENTINEL_DEFAULT,
         reasoning_level,
         auto_respond,
         fallback_model_key,
+        writer_model_key,
     )
     rows: list[hikari.impl.MessageActionRowBuilder] = []
 
@@ -326,6 +373,24 @@ def create_settings_panel(
         )
     rows.append(fallback_row)
 
+    writer_row = hikari.impl.MessageActionRowBuilder()
+    writer_menu = writer_row.add_text_menu(
+        f"{WRITER_SELECT_CUSTOM_ID_PREFIX}:{state}",
+        placeholder="Choose a writer model (2-stage)",
+        min_values=1,
+        max_values=1,
+    )
+    for option in build_writer_model_options(
+        model.key if model is not None else SENTINEL_DEFAULT, writer_model_key
+    ):
+        writer_menu.add_option(
+            option.label,
+            option.value,
+            description=option.description,
+            is_default=option.is_default,
+        )
+    rows.append(writer_row)
+
     button_row = hikari.impl.MessageActionRowBuilder()
     button_row.add_interactive_button(
         hikari.ButtonStyle.SUCCESS if auto_respond else hikari.ButtonStyle.SECONDARY,
@@ -356,21 +421,19 @@ def create_settings_modal(
     state: PanelState,
     current: ChannelModelOverride | None,
 ) -> hikari.api.InteractionModalBuilder:
-    """Build the budgets + response-filter + writer-model modal carrying the full
-    panel state.
+    """Build the budgets + response-filter modal carrying the full panel state.
 
     The ``custom_id`` encodes ``state`` so the submit handler persists model,
-    reasoning, auto-respond and fallback alongside the free-text inputs. Budget,
-    filter, and writer-model inputs prefill from ``current`` when present so
-    reopening reflects the stored values. A non-empty writer model switches the
-    channel to two-stage mode (the panel's model gathers context, the writer
-    model writes the reply); blank keeps single-stage mode.
+    reasoning, auto-respond, fallback, and the panel-chosen writer model
+    alongside the free-text inputs. Budget and filter inputs prefill from
+    ``current`` when present so reopening reflects the stored values. The writer
+    model is chosen on the panel's select, not here.
     """
     modal = hikari.impl.InteractionModalBuilder(
         title="Channel Budgets & Filter",
         custom_id=(
             f"{MODAL_CUSTOM_ID_PREFIX}:"
-            f"{encode_panel_state(state.model_key, state.reasoning_level, state.auto_respond, state.fallback_model_key)}"
+            f"{encode_panel_state(state.model_key, state.reasoning_level, state.auto_respond, state.fallback_model_key, state.writer_model_key)}"
         ),
     )
     # Discord rejects a text-input value outside 1-4000 chars, so an empty
@@ -384,11 +447,6 @@ def create_settings_modal(
     filter_prefill = (
         current.response_filter
         if current is not None and current.response_filter
-        else hikari.UNDEFINED
-    )
-    writer_prefill = (
-        current.writer_model
-        if current is not None and current.writer_model
         else hikari.UNDEFINED
     )
     modal.add_component(
@@ -430,22 +488,6 @@ def create_settings_modal(
                 value=filter_prefill,
                 required=False,
                 max_length=4000,
-            )
-        )
-    )
-    modal.add_component(
-        hikari.impl.ModalActionRowBuilder().add_component(
-            hikari.impl.TextInputBuilder(
-                custom_id="writer_model",
-                label="Writer model (optional, enables 2-stage)",
-                style=hikari.TextInputStyle.SHORT,
-                placeholder=(
-                    "Catalog model key that writes the reply — "
-                    "empty keeps single-stage mode."
-                ),
-                value=writer_prefill,
-                required=False,
-                max_length=64,
             )
         )
     )
