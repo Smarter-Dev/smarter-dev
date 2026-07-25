@@ -58,20 +58,48 @@
     }
 
     .consent-scopes li {
-        display: flex;
-        align-items: center;
-        gap: .6rem;
         padding: .65rem 0;
         border-bottom: 1px solid rgba(0,212,255,.06);
         font-size: .85rem;
         color: var(--light);
     }
 
-    .consent-scopes li::before {
-        content: "\2713";
+    .consent-scope-option {
+        display: flex;
+        align-items: flex-start;
+        gap: .6rem;
+        cursor: pointer;
+    }
+
+    .consent-scope-option:has(input:disabled) {
+        cursor: default;
+    }
+
+    .consent-scope-option input {
+        flex: none;
+        margin: .2rem 0 0;
+        accent-color: var(--cyan);
+    }
+
+    .consent-scope-text {
+        display: flex;
+        flex-direction: column;
+        gap: .15rem;
+    }
+
+    .consent-scope-label {
+        font-weight: 600;
+    }
+
+    .consent-scope-summary,
+    .consent-scope-required {
+        font-size: .8rem;
+        color: var(--mid);
+    }
+
+    .consent-scope-required-badge {
         color: var(--cyan);
-        font-weight: 700;
-        flex-shrink: 0;
+        font-weight: 600;
     }
 
     .consent-buttons {
@@ -122,24 +150,62 @@
                 wants to access your account.
             </p>
 
-            {% if scope_descriptions %}
-            <p class="consent-lead">This will allow the application to:</p>
-            <ul class="consent-scopes">
-                {% for scope in scope_descriptions %}
-                <li>{{ scope.description }}</li>
-                {% endfor %}
-            </ul>
-            {% elif scopes %}
-            <p class="consent-lead">This will allow the application to:</p>
-            <ul class="consent-scopes">
-                {% for scope in scopes %}
-                <li>{{ scope }}</li>
-                {% endfor %}
-            </ul>
-            {% endif %}
-
             <form method="post" action="/oauth/authorize">
                 {{ csrf_field() }}
+
+                {# Skrift builds the granted scope set from these `scope` fields
+                   and treats an approval that submits none as a denial, so every
+                   scope the user keeps has to ride along with the form. #}
+                {% if scope_descriptions %}
+                <p class="consent-lead">Choose what to allow:</p>
+                <ul class="consent-scopes">
+                    {% for scope in scope_descriptions %}
+                    <li>
+                        <label class="consent-scope-option">
+                            {% if scope.required %}
+                            {# A disabled checkbox submits nothing, so the value
+                               rides in a hidden field; skrift re-asserts required
+                               scopes server-side regardless. #}
+                            <input type="checkbox" checked disabled>
+                            <input type="hidden" name="scope" value="{{ scope.name }}">
+                            {% else %}
+                            <input type="checkbox" name="scope" value="{{ scope.name }}" checked>
+                            {% endif %}
+                            <span class="consent-scope-text">
+                                <span class="consent-scope-label">{{ scope.label or scope.description }}</span>
+                                {% if scope.label %}
+                                <span class="consent-scope-summary">{{ scope.description }}</span>
+                                {% endif %}
+                                {% if scope.details %}
+                                <span class="consent-scope-summary">{{ scope.details }}</span>
+                                {% endif %}
+                                {% if scope.required %}
+                                <span class="consent-scope-required">
+                                    <span class="consent-scope-required-badge">Required</span>
+                                    {%- if scope.required_hint %} — {{ scope.required_hint }}{% endif %}
+                                </span>
+                                {% endif %}
+                            </span>
+                        </label>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% elif scopes %}
+                <p class="consent-lead">Choose what to allow:</p>
+                <ul class="consent-scopes">
+                    {% for scope in scopes %}
+                    <li>
+                        <label class="consent-scope-option">
+                            <input type="checkbox" name="scope" value="{{ scope }}" checked>
+                            <span class="consent-scope-text">
+                                <span class="consent-scope-label">{{ scope }}</span>
+                            </span>
+                        </label>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+
                 <div class="consent-buttons">
                     <button type="submit" name="action" value="deny" class="consent-btn consent-btn-deny">Deny</button>
                     <button type="submit" name="action" value="allow" class="consent-btn consent-btn-allow">Allow</button>
