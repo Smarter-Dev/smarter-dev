@@ -30,6 +30,7 @@ from smarter_dev.bot import spam_engine
 from smarter_dev.web.models import ModerationFilterConfig
 
 HISTORY_PLUGIN_PATH = "smarter_dev.bot.plugins.history"
+RULES_PLUGIN_PATH = "smarter_dev.bot.plugins.rules"
 
 
 class ListenerRecordingBot:
@@ -170,6 +171,29 @@ class TestHistoryPluginLoading:
         history_module = __import__(HISTORY_PLUGIN_PATH, fromlist=["load", "unload"])
         assert callable(history_module.load)
         assert callable(history_module.unload)
+
+
+class TestRulesPluginLoading:
+    """The ``/rule`` plugin is loaded alongside the other moderation commands."""
+
+    def test_load_plugins_loads_the_rules_plugin(self) -> None:
+        bot = make_plugin_loading_bot()
+        client.load_plugins(bot)
+        loaded = [call.args[0] for call in bot.load_extensions.call_args_list]
+        assert RULES_PLUGIN_PATH in loaded
+
+    def test_rules_plugin_is_loaded_next_to_warn_purge_and_history(self) -> None:
+        bot = make_plugin_loading_bot()
+        client.load_plugins(bot)
+        loaded = [call.args[0] for call in bot.load_extensions.call_args_list]
+        assert "smarter_dev.bot.plugins.warn" in loaded
+        assert "smarter_dev.bot.plugins.purge" in loaded
+        assert loaded.index(RULES_PLUGIN_PATH) > loaded.index(HISTORY_PLUGIN_PATH)
+
+    def test_rules_plugin_module_exposes_load_and_unload(self) -> None:
+        rules_module = __import__(RULES_PLUGIN_PATH, fromlist=["load", "unload"])
+        assert callable(rules_module.load)
+        assert callable(rules_module.unload)
 
 
 class TestModerationListenerRegistration:

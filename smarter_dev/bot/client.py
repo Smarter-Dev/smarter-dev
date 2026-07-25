@@ -1290,6 +1290,11 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
         bot.load_extensions("smarter_dev.bot.plugins.history")
         logger.info("✓ Loaded history plugin")
 
+        # Load rule citation command plugin
+        logger.info("Loading rules plugin...")
+        bot.load_extensions("smarter_dev.bot.plugins.rules")
+        logger.info("✓ Loaded rules plugin")
+
         # Load agentic handler plugins (member handlers + admin routines)
         logger.info("Loading handler events plugin...")
         bot.load_extensions("smarter_dev.bot.plugins.handler_events")
