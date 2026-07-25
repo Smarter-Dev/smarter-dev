@@ -67,6 +67,7 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "member_activity",
     "moderation_actions",
     "moderation_configs",
+    "moderation_filter_configs",
     "quest_inputs",
     "quest_progress",
     "quest_submissions",

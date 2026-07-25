@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Optional, List, Dict, Any, Tuple
 from uuid import UUID
-from datetime import datetime, timezone, date
+from datetime import UTC, datetime, timezone, date
 
 from sqlalchemy import select, update, delete, func, desc, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +43,7 @@ from smarter_dev.web.models import (
     AdventOfCodeConfig,
     AdventOfCodeThread,
     AttachmentFilterConfig,
+    ModerationFilterConfig,
     ModerationConfig,
     ModerationAction,
     ChannelModelOverride,
@@ -5278,6 +5279,170 @@ class AttachmentFilterConfigOperations:
             return result.rowcount > 0
         except Exception as e:
             raise DatabaseOperationError(f"Failed to delete attachment filter config: {e}") from e
+
+
+class ModerationFilterConfigOperations:
+    """Database operations for the core moderation filter configuration.
+
+    Handles CRUD for the per-guild content filters (blocked TLDs, invites,
+    webhook killer) and the spam engine thresholds shared by the bot and the
+    admin configuration UI.
+    """
+
+    async def get_config(
+        self,
+        session: AsyncSession,
+        guild_id: str
+    ) -> ModerationFilterConfig | None:
+        """Get the moderation filter configuration for a guild.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+
+        Returns:
+            ModerationFilterConfig or None if not configured
+
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        try:
+            stmt = select(ModerationFilterConfig).where(
+                ModerationFilterConfig.guild_id == guild_id
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get moderation filter config: {e}") from e
+
+    async def get_or_create_config(
+        self,
+        session: AsyncSession,
+        guild_id: str
+    ) -> ModerationFilterConfig:
+        """Get or create the moderation filter configuration for a guild.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+
+        Returns:
+            ModerationFilterConfig: Guild configuration (existing or newly created
+            with the legacy defaults)
+
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        try:
+            config = await self.get_config(session, guild_id)
+            if config is None:
+                config = ModerationFilterConfig(guild_id=guild_id)
+                session.add(config)
+                await session.flush()
+            return config
+        except DatabaseOperationError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to get or create moderation filter config: {e}"
+            ) from e
+
+    async def update_config(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        **updates
+    ) -> ModerationFilterConfig:
+        """Update the moderation filter configuration for a guild.
+
+        Creates the config with legacy defaults first when the guild has none.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            **updates: Fields to update; unknown keys are ignored
+
+        Returns:
+            ModerationFilterConfig: Updated configuration
+
+        Raises:
+            DatabaseOperationError: If update fails
+        """
+        try:
+            config = await self.get_or_create_config(session, guild_id)
+
+            for key, value in updates.items():
+                if hasattr(config, key):
+                    setattr(config, key, value)
+
+            config.updated_at = datetime.now(UTC)
+            await session.flush()
+
+            return config
+        except DatabaseOperationError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to update moderation filter config: {e}"
+            ) from e
+
+    async def get_active_configs(
+        self,
+        session: AsyncSession
+    ) -> list[ModerationFilterConfig]:
+        """Get every config with the content filters or the spam engine enabled.
+
+        Args:
+            session: Database session
+
+        Returns:
+            List of ModerationFilterConfig objects with at least one subsystem on
+
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        try:
+            stmt = select(ModerationFilterConfig).where(
+                or_(
+                    ModerationFilterConfig.content_filter_enabled.is_(True),
+                    ModerationFilterConfig.spam_engine_enabled.is_(True),
+                )
+            )
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to get active moderation filter configs: {e}"
+            ) from e
+
+    async def delete_config(
+        self,
+        session: AsyncSession,
+        guild_id: str
+    ) -> bool:
+        """Delete the moderation filter configuration for a guild.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+
+        Returns:
+            bool: True if deleted, False if not found
+
+        Raises:
+            DatabaseOperationError: If deletion fails
+        """
+        try:
+            result = await session.execute(
+                delete(ModerationFilterConfig).where(
+                    ModerationFilterConfig.guild_id == guild_id
+                )
+            )
+            return result.rowcount > 0
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to delete moderation filter config: {e}"
+            ) from e
 
 
 class ModerationConfigOperations:
