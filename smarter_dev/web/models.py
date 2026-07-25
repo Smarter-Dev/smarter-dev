@@ -3520,6 +3520,87 @@ class ModerationFilterConfig(Base):
         )
 
 
+class GuildRulesConfig(Base):
+    """Per-guild rules, authored as one markdown document by an admin.
+
+    One row per guild. The document is stored verbatim; turning it into the
+    ordered, individually addressable rules the ``/rule`` command cites is the
+    job of :func:`smarter_dev.web.guild_rules.parse_guild_rules`, which owns the
+    format (one markdown heading per rule) and never raises on malformed input.
+    Storing the raw text rather than parsed rows keeps the admin's document the
+    single source of truth and lets the format evolve without a migration.
+    """
+
+    __tablename__ = "guild_rules_configs"
+
+    # Primary key
+    guild_id: Mapped[str] = mapped_column(
+        String,
+        primary_key=True,
+        doc="Discord guild (server) snowflake ID"
+    )
+
+    rules_markdown: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        default="",
+        doc=(
+            "The guild's rules as admin-authored markdown, stored verbatim with "
+            "LF line endings. One heading (e.g. '## No self-promotion') starts "
+            "each rule; text before the first heading is a preamble. Empty means "
+            "the guild has not written any rules yet."
+        )
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        doc="When this config was created"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        doc="When this config was last updated"
+    )
+
+    # Database constraints and indexes
+    __table_args__ = (
+        Index("ix_guild_rules_configs_guild_id", "guild_id"),
+    )
+
+    def __init__(self, **kwargs):
+        """Initialize GuildRulesConfig with an empty rules document."""
+        now = datetime.now(UTC)
+        kwargs.setdefault("created_at", now)
+        kwargs.setdefault("updated_at", now)
+        kwargs.setdefault("rules_markdown", "")
+
+        super().__init__(**kwargs)
+
+    @classmethod
+    def get_defaults(cls, guild_id: str) -> GuildRulesConfig:
+        """Get the default rules configuration for a guild.
+
+        Args:
+            guild_id: Discord guild ID
+
+        Returns:
+            GuildRulesConfig instance with an empty rules document
+        """
+        return cls(guild_id=guild_id)
+
+    def __repr__(self) -> str:
+        """String representation of the guild rules config."""
+        return (
+            f"<GuildRulesConfig(guild_id='{self.guild_id}', "
+            f"markdown_chars={len(self.rules_markdown or '')})>"
+        )
+
+
 class ResearchSession(Base):
     """A research session created by the Scan research agent."""
 

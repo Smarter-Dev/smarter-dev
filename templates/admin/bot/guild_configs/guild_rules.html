@@ -1,0 +1,103 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Server Rules - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Server Rules</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}">&larr; {{ guild.name }}</a></p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Guild</div>
+            <div class="sk-panel-body">
+                <div style="display:flex; align-items:center; gap:1rem;">
+                    {% if guild.icon_url %}
+                    <img src="{{ guild.icon_url }}" alt="{{ guild.name }}" style="width:48px; height:48px; border-radius:50%;">
+                    {% endif %}
+                    <div>
+                        <strong>{{ guild.name }}</strong>
+                        <div class="sk-text-muted"><code>{{ guild.id }}</code></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <form method="post" action="/admin/bot/guilds/{{ guild.id }}/rules">
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Rules Document</div>
+                <div class="sk-panel-body">
+                    <p class="sk-text-muted">
+                        The <code>/rule</code> command quotes one of these rules at a message, so every rule needs
+                        its own number. Numbering is automatic &mdash; it comes from the order below.
+                    </p>
+
+                    <details style="margin-bottom:1rem;">
+                        <summary><strong>How to write the rules</strong></summary>
+                        <ul class="sk-text-muted" style="margin-top:0.5rem;">
+                            <li>Start each rule with a markdown heading holding its short title: <code>## No self-promotion</code>.</li>
+                            <li>Everything under that heading, until the next heading, is the rule's body. Blank lines, lists and <code>**bold**</code> are all fine.</li>
+                            <li><strong>Every</strong> markdown heading starts a new rule, so do not use headings inside a rule's body &mdash; use bold text or a list instead.</li>
+                            <li>Text above the first heading is an intro, not a rule. It is ignored by <code>/rule</code>.</li>
+                            <li>Rules are numbered from 1 in the order they appear, so reordering them renumbers them. Do not number the headings yourself.</li>
+                            <li>A heading with nothing under it is still a rule &mdash; a title with an empty body.</li>
+                        </ul>
+                        <pre class="sk-text-muted" style="white-space:pre-wrap;">Read these before posting.
+
+## No self-promotion
+Keep links to your own projects in #showcase.
+
+## Be kind
+Attack the code, never the coder.</pre>
+                    </details>
+
+                    <label for="rules_markdown">Rules (markdown)</label>
+                    <textarea id="rules_markdown" name="rules_markdown" rows="24" spellcheck="true" placeholder="## No self-promotion&#10;Keep links to your own projects in #showcase.">{{ config.rules_markdown or '' }}</textarea>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Parse Preview</div>
+                <div class="sk-panel-body">
+                    <p{% if not parsed_rules %} class="sk-text-muted"{% endif %}>
+                        We parsed <strong>{{ parsed_rules | length }} rules</strong> from the saved document.
+                    </p>
+                    {% if parsed_rules %}
+                    <ol style="margin:0; padding-left:1.25rem;">
+                        {% for rule in parsed_rules %}
+                        <li value="{{ rule.index }}">
+                            <strong>{{ rule.title }}</strong>
+                            {% if not rule.body %}<span class="sk-text-muted"> &mdash; no body</span>{% endif %}
+                        </li>
+                        {% endfor %}
+                    </ol>
+                    <small class="sk-text-muted">These numbers are what <code>/rule</code> cites. Save to refresh this list.</small>
+                    {% elif config.rules_markdown %}
+                    <div class="sk-flash sk-flash-warning">
+                        The saved document contains text but no markdown headings, so <code>/rule</code> has nothing to cite.
+                        Start each rule with a heading such as <code>## No self-promotion</code>.
+                    </div>
+                    {% else %}
+                    <small class="sk-text-muted">No rules have been written for this server yet.</small>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div style="margin-top:1rem;">
+                <button type="submit" class="sk-btn">Save Rules</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
