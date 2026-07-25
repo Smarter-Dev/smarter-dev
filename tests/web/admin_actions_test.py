@@ -344,7 +344,37 @@ async def test_delete_webhook_accepts_valid_discord_url_returns_true_on_204(url)
 @pytest.mark.parametrize(
     "url",
     [
+        "discord.com/api/webhooks/123456789/abcDEF-_token",  # pasted without a scheme
+        "HTTPS://discord.com/api/webhooks/123456789/abcDEF-_token",  # uppercase scheme
+        "https://DISCORD.com/api/webhooks/123456789/abcDEF-_token",  # uppercase host
+        # ?wait=true is what Discord's own docs emit, so it is the realistic leak shape.
+        "https://discord.com/api/webhooks/123456789/abcDEF-_token?wait=true",
+        "https://discord.com/api/webhooks/123456789/abcDEF-_token#frag",
+    ],
+)
+async def test_delete_webhook_accepts_the_shapes_leaks_actually_arrive_in(url):
+    """Normalization must cover the spellings a leaked webhook is pasted in.
+
+    These all refused to delete while this module carried its own anchored regex
+    without normalization — the leaked webhook stayed live.
+    """
+    requests: list[httpx.Request] = []
+    result = await _webhook_actor(requests).delete_webhook(url)
+    assert result is True
+    assert requests[0].url.path.endswith("/webhooks/123456789/abcDEF-_token")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
         "https://evil.example.com/api/webhooks/1/token",
+        # Case-varied lookalike: normalization lowercases the host, so the anchor
+        # must still reject it rather than letting the casing disguise the domain.
+        "https://DiScOrD.cOm.EvIl.CoM/api/webhooks/1/token",
+        "HTTP://discord.com/api/webhooks/123/token",  # explicit http is never upgraded
+        "https://cdn.discord.com/api/webhooks/1/token",  # wrong Discord subdomain
+        "https://discord.com/api/webhooks/123/token/extra",  # trailing path
+        "https://discord.com/api/webhooks/notanid/token",  # non-numeric id
         "https://discord.com/api/webhooks/123456789",  # missing token
         "https://discord.com/api/webhooks/123/../../users/@me",  # traversal
         "http://discord.com/api/webhooks/123/token",  # not https
