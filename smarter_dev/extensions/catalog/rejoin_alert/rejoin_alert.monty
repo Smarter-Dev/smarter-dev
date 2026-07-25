@@ -1,0 +1,31 @@
+# Tell the mod team when someone with prior moderation history comes back.
+#
+# COST SHAPE (the reason this lives on member_join and nowhere else): the
+# mod-action read is expensive, so it sits behind the join gate — ONE
+# list_mod_actions call and AT MOST one message per join, never anything
+# per-message. Bot joins short-circuit before the lookup, so an integration being
+# added spends nothing. Joins burst during a raid; the dispatcher's
+# member_join fires-per-minute ceiling bounds that, and this script adds no state
+# of its own (no memory reads or writes, so nothing to prune or outgrow).
+#
+# member_join is guild-scoped and has no home channel, so the alert names the
+# mod-log channel constant, baked in at install time — see the extension manifest.
+MOD_LOG_CHANNEL_ID = {{cfg.mod_log_channel_id}}
+HISTORY_DEPTH = 5
+
+if not context["is_bot"]:
+    actions = await list_mod_actions(context["member_id"], HISTORY_DEPTH)
+    if actions:
+        # Rows come back newest-first, so row 0 is the most recent action. The
+        # count is a floor, not a total (the read stops at HISTORY_DEPTH), hence
+        # "n+". created_at is nullable on the row shape.
+        most_recent = actions[0]
+        acted_at = most_recent["created_at"]
+        acted_on = acted_at[:10] if acted_at else "an unknown date"
+        await send_message(
+            "**Member Rejoined** — " + context["username"]
+            + " (" + context["member_id"] + ") has " + str(len(actions))
+            + "+ prior mod actions, most recent: " + most_recent["action_type"]
+            + " on " + acted_on,
+            MOD_LOG_CHANNEL_ID,
+        )

@@ -14,6 +14,8 @@ import hikari
 import lightbulb
 from aiohttp import web
 
+from smarter_dev.bot.agents.streak_agent import StreakCelebrationAgent
+from smarter_dev.bot.attachment_filter import check_attachment_filter
 from smarter_dev.bot.audit_logger import log_member_ban
 from smarter_dev.bot.audit_logger import log_member_join
 from smarter_dev.bot.audit_logger import log_member_leave
@@ -21,7 +23,12 @@ from smarter_dev.bot.audit_logger import log_member_unban
 from smarter_dev.bot.audit_logger import log_member_update
 from smarter_dev.bot.audit_logger import log_message_delete
 from smarter_dev.bot.audit_logger import log_message_edit
+from smarter_dev.bot.content_filter import check_content_filters
 from smarter_dev.bot.services.api_client import APIClient
+from smarter_dev.bot.services.exceptions import ServiceError
+from smarter_dev.bot.spam_engine import check_spam_engine
+from smarter_dev.bot.spam_engine import release_guild_spam_state
+from smarter_dev.bot.utils.embeds import create_error_embed
 from smarter_dev.shared.config import Settings
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.observability import configure_observability
@@ -1107,6 +1114,100 @@ async def cleanup_bot_services(bot: lightbulb.BotApp) -> None:
         logger.error(f"Error cleaning up bot services: {e}")
 
 
+def register_message_moderation_listeners(bot: lightbulb.BotApp) -> None:
+    """Register the per-message content-filter and spam-engine moderation pass.
+
+    Both checks live inside a *single* listener rather than being registered as
+    two independent ones. Hikari dispatches all listeners of an event
+    concurrently, so two registrations would race, and these two checks have a
+    required order:
+
+    1. The content filters run first. They can delete the offending message
+       outright, and their mod-log line needs the original content.
+    2. The spam engine runs second, and it runs *unconditionally* — even when a
+       content filter already deleted the message. The engine's rate, channel
+       spread and duplicate metrics are computed from a rolling buffer that
+       only gets filled by messages it sees, so skipping it would blind those
+       metrics to exactly the messages a raid consists of. A message that both
+       stages want deleted is deleted twice at worst, and both modules treat a
+       404 on delete as success.
+
+    Failure handling distinguishes the two things that can go wrong in a stage:
+
+    * ``hikari.HTTPError`` — Discord refused a call or the connection dropped.
+      That is an expected operational outcome (both modules already handle the
+      403/404 cases they can act on), so it is logged with message context and
+      the next stage still runs.
+    * anything else — a bug or a misconfiguration, e.g. a mute duration that
+      silently disables enforcement. Those are logged with message context and
+      then re-raised as an ``ExceptionGroup`` once every stage has had its turn,
+      so a broken stage stays loud instead of decaying into a log line nobody
+      reads.
+
+    Re-raising is safe at this event-loop boundary:
+    ``hikari.impl.event_manager_base.EventManagerBase._invoke_callback`` catches
+    ``Exception`` out of a listener, logs it at ERROR with the traceback and
+    dispatches an ``ExceptionEvent``. It does not tear down the gateway
+    connection, and every other listener for the event is invoked in its own
+    task, so none of them are affected. Collecting the failures instead of
+    raising immediately keeps the stages isolated from each other as well.
+
+    Both moderation modules re-check their own config toggles, so a guild with
+    no config row or a disabled toggle is a no-op that never reaches Discord.
+    """
+
+    @bot.listen()
+    async def on_message_moderation(event: hikari.GuildMessageCreateEvent) -> None:
+        """Run the content filters and then the spam engine over one message."""
+        if event.is_bot or not event.guild_id:
+            return
+
+        moderation_stages = (
+            ("content filter", check_content_filters),
+            ("spam engine", check_spam_engine),
+        )
+        message_context = (
+            f"guild {event.guild_id}, channel {event.channel_id}, "
+            f"message {event.message_id}"
+        )
+        unexpected_stage_failures: list[Exception] = []
+
+        for stage_name, run_stage in moderation_stages:
+            try:
+                await run_stage(bot, event)
+            except hikari.HTTPError as discord_error:
+                logger.warning(
+                    f"Discord call failed during the {stage_name} check "
+                    f"({message_context}): {discord_error}"
+                )
+            except Exception as unexpected_failure:
+                logger.exception(
+                    f"The {stage_name} check failed unexpectedly ({message_context})"
+                )
+                unexpected_stage_failures.append(unexpected_failure)
+
+        if unexpected_stage_failures:
+            raise ExceptionGroup(
+                f"Message moderation failed ({message_context})",
+                unexpected_stage_failures,
+            )
+
+    @bot.listen()
+    async def on_guild_leave_release_spam_state(event: hikari.GuildLeaveEvent) -> None:
+        """Drop a departed guild's spam-engine state immediately.
+
+        The engine also ages out guilds that go quiet, but that sweep only runs
+        when some *other* guild receives a message and it deliberately waits out
+        the retention and re-offense windows first. Leaving a guild is
+        unambiguous — none of that state can ever be read again — so release it
+        at once rather than holding a raid's worth of buffered messages until
+        the next sweep happens to notice.
+        """
+        released = release_guild_spam_state(str(event.guild_id))
+        if released:
+            logger.info(f"Released spam-engine state for departed guild {event.guild_id}")
+
+
 def load_plugins(bot: lightbulb.BotApp) -> None:
     """Load bot plugins using Lightbulb v2 syntax."""
     try:
@@ -1183,6 +1284,11 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
         logger.info("Loading purge plugin...")
         bot.load_extensions("smarter_dev.bot.plugins.purge")
         logger.info("✓ Loaded purge plugin")
+
+        # Load moderation history command plugin
+        logger.info("Loading history plugin...")
+        bot.load_extensions("smarter_dev.bot.plugins.history")
+        logger.info("✓ Loaded history plugin")
 
         # Load agentic handler plugins (member handlers + admin routines)
         logger.info("Loading handler events plugin...")
@@ -1359,9 +1465,14 @@ async def run_bot() -> None:
                             logger.warning(
                                 "Could not get guild for squad role assignment"
                             )
-                    except Exception as e:
+                    except hikari.HTTPError as discord_error:
+                        # Missing MANAGE_ROLES, role hierarchy, or a role that no
+                        # longer exists: the claim itself already succeeded, so
+                        # the reward stands and only the role sync is lost.
+                        # Anything else is a bug and propagates.
                         logger.error(
-                            f"Failed to assign squad role during daily claim: {e}"
+                            f"Failed to assign squad role during daily claim: "
+                            f"{discord_error}"
                         )
 
                 # Add reaction to the message that earned bytes
@@ -1372,8 +1483,13 @@ async def run_bot() -> None:
                     logger.info(
                         f"✅ Added reaction and awarded daily bytes reward ({result.earned}) to {event.author}"
                     )
-                except Exception as e:
-                    logger.error(f"Failed to add reaction to daily reward message: {e}")
+                except hikari.HTTPError as discord_error:
+                    # A deleted message, a missing ADD_REACTIONS, or an emoji this
+                    # guild cannot use. Purely cosmetic — the bytes were awarded.
+                    logger.error(
+                        f"Failed to add reaction to daily reward message: "
+                        f"{discord_error}"
+                    )
 
                 # Generate celebratory message for streak bonuses
                 if result.streak_bonus and result.streak_bonus > 1:
@@ -1386,10 +1502,6 @@ async def run_bot() -> None:
                             "streak_celebration_agent"
                         )
                         if not streak_agent:
-                            from smarter_dev.bot.agents.streak_agent import (
-                                StreakCelebrationAgent,
-                            )
-
                             streak_agent = StreakCelebrationAgent()
                             if not hasattr(bot, "d"):
                                 bot.d = {}
@@ -1437,9 +1549,14 @@ async def run_bot() -> None:
                                 response_time_ms=response_time_ms,
                             )
 
-                    except Exception as e:
+                    except (hikari.HTTPError, ServiceError) as celebration_error:
+                        # The celebration is a flourish on top of an already
+                        # granted reward: a Discord refusal or an LLM/service
+                        # failure loses the message, never the bytes. Anything
+                        # else is a bug and propagates.
                         logger.error(
-                            f"Failed to generate or post streak celebration message: {e}"
+                            f"Failed to generate or post streak celebration "
+                            f"message: {celebration_error}"
                         )
             else:
                 logger.debug(f"Daily reward not successful for {event.author}")
@@ -1482,13 +1599,28 @@ async def run_bot() -> None:
         if not event.message.attachments:
             return
 
-        # Check attachment filter
-        from smarter_dev.bot.attachment_filter import check_attachment_filter
-
+        # A Discord call the filter could not complete is an expected operational
+        # outcome (a missing permission, a message someone else already deleted),
+        # so it is logged and the message is let through. Anything else is a bug
+        # or a misconfiguration and must stay loud: swallowing it silently is how
+        # attachment filtering stops working with nothing to page on. Hikari
+        # catches, logs at ERROR and dispatches an ExceptionEvent per listener
+        # without tearing down the gateway, so re-raising is safe here.
         try:
             await check_attachment_filter(bot, event)
-        except Exception as e:
-            logger.error(f"Failed to check attachment filter: {e}")
+        except hikari.HTTPError as discord_error:
+            logger.warning(
+                f"Discord call failed during the attachment filter check "
+                f"(guild {event.guild_id}, channel {event.channel_id}, "
+                f"message {event.message_id}): {discord_error}"
+            )
+
+    # Content filters (blocked TLDs, invite links, webhook killer) followed by
+    # the heuristic spam engine. Registered together, in that order, by a
+    # dedicated helper — see its docstring for why the order is load-bearing.
+    # The attachment filter above stays an independent listener: it only fires
+    # on messages that carry attachments and shares no state with these two.
+    register_message_moderation_listeners(bot)
 
     @bot.listen()
     async def on_interaction_create(event: hikari.InteractionCreateEvent) -> None:
@@ -1520,8 +1652,6 @@ async def run_bot() -> None:
                     logger.error(f"Error handling interaction {custom_id}: {e}")
                     # Send error response if the view couldn't handle it
                     try:
-                        from smarter_dev.bot.utils.embeds import create_error_embed
-
                         embed = create_error_embed(
                             "An error occurred while processing your selection."
                         )
@@ -1538,8 +1668,6 @@ async def run_bot() -> None:
                 )
                 # Send timeout message
                 try:
-                    from smarter_dev.bot.utils.embeds import create_error_embed
-
                     embed = create_error_embed(
                         "This interaction has expired. Please try the command again."
                     )
