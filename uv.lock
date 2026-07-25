@@ -1264,6 +1264,18 @@ wheels = [
 ]
 
 [[package]]
+name = "joserfc"
+version = "1.7.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c7/e0/27a6a081ae25420eda6768ceae05d7022a7f2447f420588843f2a44e4298/joserfc-1.7.4.tar.gz", hash = "sha256:b3bc561672ae541b17a9237053b48a03dacddd92d68047b3ecdfb4b5714a88ed", size = 234027 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f9/bf/249dcd99b3376375910b7fa922383b57792975c8758f50d44612e749226c/joserfc-1.7.4-py3-none-any.whl", hash = "sha256:32d46c2cd5e3203c13e87a6c61333cab310b1ba80cd54b4c4f386a848a122463", size = 71000 },
+]
+
+[[package]]
 name = "json-repair"
 version = "0.48.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2814,7 +2826,7 @@ wheels = [
 
 [[package]]
 name = "skrift"
-version = "0.2.0a7"
+version = "0.2.0a16"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "advanced-alchemy" },
@@ -2825,6 +2837,7 @@ dependencies = [
     { name = "fast-query-parsers" },
     { name = "httpx" },
     { name = "hypercorn" },
+    { name = "joserfc" },
     { name = "litestar", extra = ["cryptography", "jinja"] },
     { name = "markdown-it-py" },
     { name = "mdit-py-plugins" },
@@ -2835,9 +2848,9 @@ dependencies = [
     { name = "ruamel-yaml" },
     { name = "sqlalchemy", extra = ["asyncio"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2a/03/58001c7a7f0f6abb9a001b6472cb21e8cd64719609f1e08376e9a23daf01/skrift-0.2.0a7.tar.gz", hash = "sha256:75b8af1b70ed4776a8b4f16c94b065732d36aeab9e83c186cdd89cfaaa5a6509", size = 410939 }
+sdist = { url = "https://files.pythonhosted.org/packages/be/97/b58a92e55e2ad5756ef71e06e7585d5fa435be1a1213f1cf6c204db1d609/skrift-0.2.0a16.tar.gz", hash = "sha256:dbf7c0b3d7466bff9123c278d0b9766604114dbb1ed0fd464c8d8adc2aab6699", size = 455774 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/74/e5/4be7682cc3c21ef5584bfe1f6d59a4bdb087602df22ceec562596d790e01/skrift-0.2.0a7-py3-none-any.whl", hash = "sha256:f520db73ef74fba0243ff604386dc18a80905de55c130a43091ef9711c3acffb", size = 569361 },
+    { url = "https://files.pythonhosted.org/packages/4e/42/f66af34add8c99cb6eb4ecbb78a5c8969af5d824261691825bd15e61b188/skrift-0.2.0a16-py3-none-any.whl", hash = "sha256:13fe3db1e0927dc7c1f29601006799606484f128911d2702addf0c9cf192954f", size = 626960 },
 ]
 
 [package.optional-dependencies]
@@ -2965,7 +2978,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "redis", specifier = ">=6.2.0" },
     { name = "resend", specifier = ">=2.0.0" },
-    { name = "skrift", extras = ["passkeys"], specifier = ">=0.2.0a7" },
+    { name = "skrift", extras = ["passkeys"], specifier = ">=0.2.0a16" },
     { name = "starlette", specifier = ">=0.47.1" },
 ]
 
@@ -3025,7 +3038,7 @@ web = [
     { name = "pdfplumber", specifier = ">=0.11.0" },
     { name = "polar-sdk", specifier = ">=0.31.7" },
     { name = "redis", specifier = ">=5.0.0" },
-    { name = "skrift", extras = ["s3"], specifier = ">=0.2.0a7" },
+    { name = "skrift", extras = ["s3"], specifier = ">=0.2.0a16" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.0" },
 ]
 

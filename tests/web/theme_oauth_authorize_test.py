@@ -77,6 +77,75 @@ def test_renders_allow_and_deny_actions(rendered_consent_page: str):
     assert 'name="action" value="deny"' in rendered_consent_page
 
 
+def test_submits_every_requested_scope_as_a_form_field(rendered_consent_page: str):
+    """Approving must carry the granted scopes, not just ``action=allow``.
+
+    Skrift reads the granted set from ``scope`` form fields and treats an
+    approval that submits none as a denial, so a consent screen that omits
+    them turns "Allow" into "Deny".
+    """
+    for scope_name in ("openid", "profile", "email"):
+        assert f'name="scope" value="{scope_name}"' in rendered_consent_page
+
+
+def test_optional_scopes_are_declinable_checkboxes(rendered_consent_page: str):
+    assert 'type="checkbox" name="scope" value="profile" checked' in rendered_consent_page
+
+
+def test_required_scopes_are_locked_and_still_submitted(template_source: str):
+    """A disabled checkbox submits nothing, so required scopes need a hidden field."""
+    environment = Environment(
+        loader=ChoiceLoader([
+            DictLoader({"base.html": "{% block page_css %}{% endblock %}{% block content %}{% endblock %}"}),
+            FileSystemLoader(THEME_TEMPLATES_DIR),
+        ]),
+        autoescape=True,
+    )
+    environment.globals["csrf_field"] = lambda: ""
+    environment.globals["csp_nonce"] = lambda: "test-nonce"
+    rendered = environment.get_template("oauth/authorize.html").render(
+        client_id="zv-client",
+        display_name="RunHacks.sh",
+        scopes=["openid"],
+        scope_descriptions=[
+            {
+                "name": "openid",
+                "description": "Verify your identity",
+                "required": True,
+                "label": "Sign you in",
+                "details": None,
+                "required_hint": "every other permission builds on it",
+            },
+        ],
+    )
+    assert 'type="hidden" name="scope" value="openid"' in rendered
+    assert "disabled" in rendered
+    assert "Required" in rendered
+    assert "every other permission builds on it" in rendered
+    assert "Sign you in" in rendered
+
+
+def test_scope_checkboxes_present_without_descriptions(template_source: str):
+    """The plain-``scopes`` fallback must submit granted scopes too."""
+    environment = Environment(
+        loader=ChoiceLoader([
+            DictLoader({"base.html": "{% block page_css %}{% endblock %}{% block content %}{% endblock %}"}),
+            FileSystemLoader(THEME_TEMPLATES_DIR),
+        ]),
+        autoescape=True,
+    )
+    environment.globals["csrf_field"] = lambda: ""
+    environment.globals["csp_nonce"] = lambda: "test-nonce"
+    rendered = environment.get_template("oauth/authorize.html").render(
+        client_id="zv-client",
+        display_name="",
+        scopes=["openid", "profile"],
+        scope_descriptions=[],
+    )
+    assert 'name="scope" value="openid"' in rendered
+    assert 'name="scope" value="profile"' in rendered
+
+
 def test_falls_back_to_plain_scopes_without_descriptions(template_source: str):
     stub_base = "{% block page_css %}{% endblock %}{% block content %}{% endblock %}"
     environment = Environment(
