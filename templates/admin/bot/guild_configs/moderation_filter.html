@@ -1,0 +1,185 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Moderation Filter Config - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% macro channel_picker(field_name, label, selected_id, channels, help_text) %}
+<label for="{{ field_name }}">{{ label }}</label>
+<select id="{{ field_name }}" name="{{ field_name }}">
+    <option value="">Disabled</option>
+    {% for channel in channels %}
+    <option value="{{ channel.id }}" {% if selected_id == channel.id %}selected{% endif %}>#{{ channel.name }}</option>
+    {% endfor %}
+</select>
+<small class="sk-text-muted">{{ help_text }}</small>
+{% endmacro %}
+
+{% macro threshold_field(field_name, label, value, help_text, max_value=None) %}
+<label for="{{ field_name }}">{{ label }}</label>
+<input type="number" min="1" step="1" {% if max_value %}max="{{ max_value }}" {% endif %}id="{{ field_name }}" name="{{ field_name }}" value="{{ value }}">
+<small class="sk-text-muted">{{ help_text }}</small>
+{% endmacro %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Moderation Filter Configuration</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}">&larr; {{ guild.name }}</a></p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Guild</div>
+            <div class="sk-panel-body">
+                <div style="display:flex; align-items:center; gap:1rem;">
+                    {% if guild.icon_url %}
+                    <img src="{{ guild.icon_url }}" alt="{{ guild.name }}" style="width:48px; height:48px; border-radius:50%;">
+                    {% endif %}
+                    <div>
+                        <strong>{{ guild.name }}</strong>
+                        <div class="sk-text-muted"><code>{{ guild.id }}</code></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <form method="post" action="/admin/bot/guilds/{{ guild.id }}/moderation-filter">
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Content Filters</div>
+                <div class="sk-panel-body">
+                    <p class="sk-text-muted">Scans message content for blocked top-level domains and Discord invites. Every content filter below is off while this master toggle is unchecked.</p>
+                    <label>
+                        <input type="checkbox" name="content_filter_enabled" {% if config.content_filter_enabled %}checked{% endif %}>
+                        Enable message content filtering
+                    </label>
+
+                    <label for="blocked_tlds" style="margin-top:1rem; display:block;">Blocked Top-Level Domains (one per line or comma-separated)</label>
+                    <textarea id="blocked_tlds" name="blocked_tlds" rows="5" placeholder=".gay&#10;.xxx&#10;.zip">{{ config.blocked_tlds | join('\n') if config.blocked_tlds else '' }}</textarea>
+                    <small class="sk-text-muted">A leading dot is added automatically and entries are lower-cased.</small>
+
+                    <label for="scam_link_domains" style="margin-top:1rem; display:block;">Scam Link Domains (one per line or comma-separated)</label>
+                    <textarea id="scam_link_domains" name="scam_link_domains" rows="6" placeholder="t.me&#10;chat.whatsapp.com">{{ config.scam_link_domains | join('\n') if config.scam_link_domains else '' }}</textarea>
+                    <small class="sk-text-muted">Messaging platforms used as scam landing pages. Use bare hostnames &mdash; a pasted URL is trimmed to its host and entries are lower-cased. A link matches when its domain equals an entry or is a subdomain of one, so <code>t.me</code> also covers <code>x.t.me</code>. Clearing this box disables domain matching; the separate <code>.gift</code> rule is built into the bot.</small>
+
+                    <label style="margin-top:1rem; display:block;">
+                        <input type="checkbox" name="invite_filter_enabled" {% if config.invite_filter_enabled %}checked{% endif %}>
+                        Remove Discord invite links
+                    </label>
+
+                    <label for="invite_filter_exempt_category_ids" style="margin-top:1rem; display:block;">Invite Filter Exempt Categories (channel category IDs, one per line or comma-separated)</label>
+                    <textarea id="invite_filter_exempt_category_ids" name="invite_filter_exempt_category_ids" rows="3" placeholder="123456789012345678">{{ config.invite_filter_exempt_category_ids | join('\n') if config.invite_filter_exempt_category_ids else '' }}</textarea>
+                    {% if category_channels %}
+                    <small class="sk-text-muted">
+                        Available categories:
+                        {% for category in category_channels %}<code>{{ category.id }}</code> {{ category.name }}{% if not loop.last %} &middot; {% endif %}{% endfor %}
+                    </small>
+                    {% else %}
+                    <small class="sk-text-muted">No channel categories were returned by Discord.</small>
+                    {% endif %}
+
+                    <label style="margin-top:1rem; display:block;">
+                        <input type="checkbox" name="webhook_killer_enabled" {% if config.webhook_killer_enabled %}checked{% endif %}>
+                        Delete webhooks that post filtered content
+                    </label>
+
+                    <div style="margin-top:1rem;">
+                        {{ channel_picker("mod_log_channel_id", "Mod Log Channel", config.mod_log_channel_id, text_channels, "Where content-filter hits are reported.") }}
+                    </div>
+
+                    <div style="margin-top:1rem;">
+                        {{ channel_picker("scam_log_channel_id", "Scam Log Channel", config.scam_log_channel_id, text_channels, "Where sanitized scam links are archived.") }}
+                    </div>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Staff Exemptions</div>
+                <div class="sk-panel-body">
+                    <label for="staff_exempt_role_ids">Exempt Role IDs (one per line or comma-separated)</label>
+                    <textarea id="staff_exempt_role_ids" name="staff_exempt_role_ids" rows="3" placeholder="123456789012345678">{{ config.staff_exempt_role_ids | join('\n') if config.staff_exempt_role_ids else '' }}</textarea>
+                    {% if guild_roles %}
+                    <small class="sk-text-muted">
+                        Available roles:
+                        {% for role in guild_roles %}<code>{{ role.id }}</code> {{ role.name }}{% if not loop.last %} &middot; {% endif %}{% endfor %}
+                    </small>
+                    {% else %}
+                    <small class="sk-text-muted">No roles were returned by Discord.</small>
+                    {% endif %}
+                    <p class="sk-text-muted" style="margin-top:0.5rem;">Members with any of these roles bypass every content filter and the spam engine.</p>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Spam Engine</div>
+                <div class="sk-panel-body">
+                    <p class="sk-text-muted">Heuristic spam detection. Thresholds ship with the legacy bot's values; leave a field blank to restore its default.</p>
+                    <label>
+                        <input type="checkbox" name="spam_engine_enabled" {% if config.spam_engine_enabled %}checked{% endif %}>
+                        Enable the spam engine
+                    </label>
+
+                    <div style="margin-top:1rem;">
+                        {{ threshold_field("message_rate_threshold", "Message Rate Threshold", config.message_rate_threshold, "Messages allowed inside the rate window before a violation.") }}
+                    </div>
+                    <div style="margin-top:1rem;">
+                        {{ threshold_field("message_rate_window_seconds", "Message Rate Window (seconds)", config.message_rate_window_seconds, "Sliding window for the message-rate check.") }}
+                    </div>
+                    <div style="margin-top:1rem;">
+                        {{ threshold_field("channel_spread_threshold", "Channel Spread Threshold", config.channel_spread_threshold, "Distinct channels allowed inside the spread window before a violation.") }}
+                    </div>
+                    <div style="margin-top:1rem;">
+                        {{ threshold_field("channel_spread_window_seconds", "Channel Spread Window (seconds)", config.channel_spread_window_seconds, "Sliding window for the channel-spread check.") }}
+                    </div>
+                    <div style="margin-top:1rem;">
+                        {{ threshold_field("duplicate_message_min_length", "Duplicate Message Minimum Length", config.duplicate_message_min_length, "Shorter messages are ignored by the duplicate-message check.") }}
+                    </div>
+                    <div style="margin-top:1rem;">
+                        {{ threshold_field("duplicate_message_window_seconds", "Duplicate Message Window (seconds)", config.duplicate_message_window_seconds, "How far back the duplicate-message check looks.") }}
+                    </div>
+                    <div style="margin-top:1rem;">
+                        {{ threshold_field("mass_mention_window_seconds", "Mass Mention Window (seconds)", config.mass_mention_window_seconds, "Sliding window for the mass-mention check.") }}
+                    </div>
+                </div>
+            </div>
+
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Escalation</div>
+                <div class="sk-panel-body">
+                    {{ threshold_field("warning_reoffense_window_seconds", "Warning Re-offense Window (seconds)", config.warning_reoffense_window_seconds, "A second violation inside this window after a warning escalates to a mute.") }}
+
+                    <div style="margin-top:1rem;">
+                        {{ threshold_field("mute_duration_seconds", "Mute Duration (seconds)", config.mute_duration_seconds, "How long an escalated mute lasts. Discord's hard limit on a member timeout is 28 days (2419200 seconds); a longer value is rejected by Discord and would abort the whole enforcement action.", max_value=2419200) }}
+                    </div>
+
+                    <div style="margin-top:1rem;">
+                        {{ channel_picker("mod_alert_channel_id", "Mod Alert Channel", config.mod_alert_channel_id, text_channels, "Where mute escalations are posted.") }}
+                    </div>
+
+                    <div style="margin-top:1rem;">
+                        <label for="mod_ping_role_id">Mod Ping Role</label>
+                        <select id="mod_ping_role_id" name="mod_ping_role_id">
+                            <option value="">No ping</option>
+                            {% for role in guild_roles %}
+                            <option value="{{ role.id }}" {% if config.mod_ping_role_id == role.id %}selected{% endif %}>@{{ role.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <small class="sk-text-muted">The only role the bot is allowed to ping on escalation.</small>
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-top:1rem;">
+                <button type="submit" class="sk-btn">Save Configuration</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
