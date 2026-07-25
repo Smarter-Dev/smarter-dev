@@ -1,0 +1,158 @@
+# The !sus joke command. !sus grants the sus role and arms a one-shot timer to
+# take it back a day later; the timer re-fires THIS handler, which removes the
+# role (MANDATORY schedule_timer branch). Moderators — holders of the configured
+# moderator role, not a permission bit — may flag mentioned members instead of
+# themselves; everyone else's mentions are ignored and they flag themselves.
+# !list_sus shows who is currently flagged. Role ids are baked in as literals at
+# install time, and only the sus role is in settings["allowed_role_ids"].
+#
+# COST SHAPE: the handler is installed guild-wide, so nearly every fire is
+# ordinary chatter — the prefix guard is the first thing that runs and returns
+# before any read, emit, or memory write. A command fire is bounded by
+# MAX_TARGETS_PER_COMMAND: at most 3 role grants, 3 timers, and 3 messages.
+#
+# MEMORY: one key holding {user_id: expiry_epoch_seconds}. The ROLE is the ground
+# truth — this map only backs !list_sus and the "already flagged?" check that
+# stops a re-sus from extending the timer — so trimming it is always safe. It is
+# pruned of past-due entries and capped at MAX_TRACKED_MEMBERS on every fire,
+# keeping it (~34 bytes an entry) far inside the 16 KB memory ceiling.
+import datetime
+
+MODERATOR_ROLE_ID = {{cfg.moderator_role_id}}
+SUS_DURATION_SECONDS = 86400
+MAX_TARGETS_PER_COMMAND = 3
+MAX_TRACKED_MEMBERS = 300
+# The emitter hard-truncates a message at 2000 chars, and the expiry map holds up
+# to MAX_TRACKED_MEMBERS — at that size the full list is ~14 KB and would be cut
+# mid-mention. Render a bounded page and say how many are hidden.
+MAX_LISTED_MEMBERS = 40
+EXPIRY_MAP_KEY = "sus_expiry"
+
+
+def unexpired(expiries, now):
+    """Return only the entries whose flag has not yet run out (pure)."""
+    live = {}
+    for user_id in expiries:
+        if expiries[user_id] > now:
+            live[user_id] = expiries[user_id]
+    return live
+
+
+def without(expiries, dropped_id):
+    """Return expiries minus one member (pure)."""
+    kept = {}
+    for user_id in expiries:
+        if user_id != dropped_id:
+            kept[user_id] = expiries[user_id]
+    return kept
+
+
+def with_flag(expiries, user_id, expires_at):
+    """Return expiries plus one member's new expiry (pure)."""
+    updated = {}
+    for tracked_id in expiries:
+        updated[tracked_id] = expiries[tracked_id]
+    updated[user_id] = expires_at
+    return updated
+
+
+def soonest_expiring(expiries):
+    """The member whose flag runs out first, or None when there are none (pure)."""
+    soonest = None
+    for user_id in expiries:
+        if soonest is None or expiries[user_id] < expiries[soonest]:
+            soonest = user_id
+    return soonest
+
+
+def trimmed_to_cap(expiries):
+    """Return expiries reduced to the cap, dropping soonest-to-expire first (pure).
+
+    Dropping an entry only forgets it for !list_sus — the member keeps the role
+    and its removal timer is already armed, so nothing leaks."""
+    kept = expiries
+    while len(kept) > MAX_TRACKED_MEMBERS:
+        kept = without(kept, soonest_expiring(kept))
+    return kept
+
+
+def flag_targets(is_moderator, mentioned_user_ids, author_id):
+    """Who this !sus flags: a moderator's mentions, otherwise the author alone (pure)."""
+    if is_moderator and mentioned_user_ids:
+        return mentioned_user_ids[:MAX_TARGETS_PER_COMMAND]
+    return [author_id]
+
+
+async def expire_flag(flagged, user_id):
+    # remove_role yields False when the member has left the guild — an expected
+    # outcome for a day-old timer, never an error, so it is a silent no-op. The
+    # entry goes either way: the flag is over.
+    await remove_role(user_id, {{cfg.sus_role_id}}, reason="sus expired")
+    await memory_set(EXPIRY_MAP_KEY, without(flagged, user_id))
+
+
+async def list_flagged(flagged):
+    # Writing back the already-pruned map is how past-due entries are reaped.
+    await memory_set(EXPIRY_MAP_KEY, flagged)
+    lines = ["🚨 **Sus Members** 🚨"]
+    shown = 0
+    hidden = 0
+    for user_id in flagged:
+        if shown < MAX_LISTED_MEMBERS:
+            lines.append(
+                "<@" + user_id + "> — until <t:" + str(flagged[user_id]) + ":R>"
+            )
+            shown = shown + 1
+        else:
+            hidden = hidden + 1
+    if hidden > 0:
+        lines.append("*…and " + str(hidden) + " more*")
+    if len(lines) == 1:
+        await send_message("*No One Is Sus*")
+    else:
+        await send_message("\n".join(lines))
+
+
+async def flag_members(flagged, now, targets):
+    tracked = flagged
+    for user_id in targets:
+        # Already flagged? Then a re-sus does NOT extend the timer: no role grant
+        # and no second timer, just the reply.
+        if user_id not in tracked:
+            await add_role(user_id, {{cfg.sus_role_id}}, reason="sus")
+            await schedule_timer(SUS_DURATION_SECONDS, {"user_id": user_id})
+            tracked = trimmed_to_cap(
+                with_flag(tracked, user_id, now + SUS_DURATION_SECONDS)
+            )
+        await send_message("🚨 <@" + user_id + "> is sus 🚨")
+    await memory_set(EXPIRY_MAP_KEY, tracked)
+
+
+async def run():
+    now = int(datetime.datetime.now(datetime.timezone.utc).timestamp())
+
+    if context["trigger_type"] == "timer":
+        flagged = unexpired(await memory_get(EXPIRY_MAP_KEY, {}), now)
+        await expire_flag(flagged, context["payload"]["user_id"])
+        return
+
+    # Cheap prefix guard first: every other message in the guild stops here.
+    text = context["message_content"].strip()
+    wants_list = text == "!list_sus"
+    wants_flag = text == "!sus" or text.startswith("!sus ")
+    if not wants_list and not wants_flag:
+        return
+
+    flagged = unexpired(await memory_get(EXPIRY_MAP_KEY, {}), now)
+    if wants_list:
+        await list_flagged(flagged)
+        return
+
+    is_moderator = MODERATOR_ROLE_ID in context["author_role_ids"]
+    targets = flag_targets(
+        is_moderator, context["mentioned_user_ids"], context["author_id"]
+    )
+    await flag_members(flagged, now, targets)
+
+
+await run()
