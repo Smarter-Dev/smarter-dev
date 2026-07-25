@@ -9,7 +9,6 @@ reach any of this.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import datetime
@@ -20,19 +19,10 @@ from urllib.parse import quote
 
 from smarter_dev.web.discord_rest import DiscordBotClient
 from smarter_dev.web.discord_rest import DiscordRestError
+from smarter_dev.web.webhook_urls import parse_discord_webhook_url
 
 # Discord channel types 10/11/12: announcement, public, and private threads.
 _THREAD_CHANNEL_TYPES = frozenset({10, 11, 12})
-
-# The ONLY URL shape delete_webhook will act on. Anchored end-to-end so the
-# sandbox can never turn a webhook delete into an arbitrary-host DELETE: the host
-# must be a real Discord webhook host (optionally a canary/ptb subdomain, with the
-# legacy discordapp.com alias), the path exactly /api/webhooks/<id>/<token>, and
-# nothing after the token. The id is all-digits and the token a url-safe word run.
-_WEBHOOK_URL_RE = re.compile(
-    r"^https://(?:canary\.|ptb\.)?discord(?:app)?\.com/api/webhooks/"
-    r"(?P<id>\d+)/(?P<token>[\w-]+)$"
-)
 
 # A Discord snowflake encodes its creation time in the high bits (ms since the
 # Discord epoch). Used to surface account age without a REST round-trip.
@@ -200,20 +190,23 @@ class AdminActor(DiscordBotClient):
     async def delete_webhook(self, webhook_url: str) -> bool:
         """DELETE a leaked ``discord.com/api/webhooks/<id>/<token>`` URL.
 
-        The URL is validated host-side against :data:`_WEBHOOK_URL_RE` FIRST: an
+        The URL is validated host-side by
+        :func:`~smarter_dev.web.webhook_urls.parse_discord_webhook_url` FIRST: an
         arbitrary host, a path-traversal attempt, or a missing token raises
         :class:`AdminActionError` and issues NO request, so a laundered constant
-        can never become an arbitrary-URL DELETE. A valid URL is deleted via its
-        own token (no bot auth needed, but we keep the bot-token client for its
-        rate-limit handling). Returns ``False`` on 404 (already dead) and ``True``
-        on success.
+        can never become an arbitrary-URL DELETE. That validator normalizes
+        first, so the shapes leaks actually arrive in (no scheme, an uppercase
+        scheme or host, a trailing ``?wait=true``) are killed rather than
+        refused. A valid URL is deleted via its own token (no bot auth needed,
+        but we keep the bot-token client for its rate-limit handling). Returns
+        ``False`` on 404 (already dead) and ``True`` on success.
         """
-        match = _WEBHOOK_URL_RE.match(str(webhook_url))
-        if match is None:
+        webhook = parse_discord_webhook_url(str(webhook_url))
+        if webhook is None:
             raise AdminActionError(
                 f"delete_webhook target is not a Discord webhook URL: {webhook_url!r}"
             )
-        endpoint = f"/webhooks/{match.group('id')}/{match.group('token')}"
+        endpoint = f"/webhooks/{webhook.webhook_id}/{webhook.token}"
         try:
             await self._request("DELETE", endpoint)
         except AdminActionError as error:
