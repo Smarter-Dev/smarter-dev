@@ -1,0 +1,29 @@
+# Catch edit-based mass-ping evasion: a member posts something harmless, then
+# edits @everyone/@here into it once the message has scrolled away. Only the
+# CURRENT text is scanned (the legacy filter did the same) — the dispatcher
+# already drops no-op edits, so every fire here is a real content change.
+#
+# Staff are exempt twice over: anyone holding Manage Messages, and anyone
+# carrying the configured staff role. The role id is baked in as a literal at
+# install time — see the extension manifest. Nothing is read from Discord or the
+# DB, so an ordinary typo fix costs a couple of string scans and nothing else.
+STAFF_ROLE_ID = {{cfg.staff_role_id}}
+
+edited_content = context["message_content"]
+author_is_staff = (
+    context["author_has_manage_messages"]
+    or STAFF_ROLE_ID in context["author_role_ids"]
+)
+
+if not author_is_staff:
+    if "@everyone" in edited_content or "@here" in edited_content:
+        # The notice deliberately does NOT quote the offending text back: echoing
+        # it would put the very mention the handler is policing into the bot's
+        # own message. message_edit is channel-keyed, so both the notice and the
+        # delete land in the channel the edit happened in.
+        await send_message(
+            "<@" + context["author_id"] + "> please don't edit a server-wide "
+            + "mention into a message after posting it — that edit has been "
+            + "removed. Ask a moderator if you need to reach everyone."
+        )
+        await delete_message(context["message_id"])
