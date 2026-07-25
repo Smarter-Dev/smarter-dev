@@ -14,14 +14,16 @@ anything is posted. A hallucinated id, an index that does not exist, or a target
 that is the bot's own message is an ephemeral note to the invoker and nothing
 public. "No rule applies" is a normal outcome, not an error.
 
-**The rendering rail.** A rule's title and body are reproduced verbatim from
-config (mass mentions defanged); the only model-written prose in the public post
-is the explanation. When the post will not fit Discord's 2000-character cap it is
-the *explanation* that gets truncated, never a rule — a half-quoted rule posted
-under the bot's name is worse than no explanation at all. If not even one rule
-fits, or no rule was matched, :func:`render_rule_citation` returns ``None`` and
-nothing public is posted at all: a public reply that pings a member while quoting
-no rule and giving no explanation is worse still.
+**The rendering rail.** The public post is the guild's own rules and nothing
+else: title and body reproduced verbatim from config (mass mentions defanged),
+each line blockquoted. No model-written prose reaches the channel — the model's
+explanation only restated the rule it had just cited, so it stays in the
+invoker's ephemeral reply. A rule is rendered whole or not at all; when the post
+will not fit Discord's 2000-character cap, whole rules are dropped and counted,
+because a half-quoted rule under the bot's name is worse than a missing one. If
+not even one rule fits, or no rule was matched, :func:`render_rule_citation`
+returns ``None`` and nothing public is posted at all. The post replies to the
+offending message but notifies nobody.
 
 Every path out of the command answers the invoker's deferred ephemeral, including
 the Discord failures — a deleted target message, a channel the bot cannot read —
@@ -66,10 +68,6 @@ RULE_COMMAND_TYPE = "rule"
 RULE_CONTEXT_MESSAGE_COUNT = 10
 
 DISCORD_MESSAGE_CHAR_LIMIT = 2000
-
-#: Below this many characters an explanation is an unreadable stub, so it is
-#: dropped whole rather than rendered as a couple of words and an ellipsis.
-MINIMUM_EXPLANATION_CHARS = 40
 
 #: Blank line between the rendered sections of the public post.
 SECTION_SEPARATOR = "\n\n"
@@ -141,20 +139,30 @@ plugin = lightbulb.Plugin("rules")
 # --------------------------------------------------------------------------- #
 
 
+def as_blockquote(text: str) -> str:
+    """Prefix every line of ``text`` with Discord's blockquote marker.
+
+    Pure function. Discord's ``>`` quotes a single line, so every line needs its
+    own marker — including blank ones, which would otherwise close the quote and
+    split one rule into two visually separate blocks.
+    """
+    return "\n".join(f"> {line}" if line else ">" for line in text.split("\n"))
+
+
 def format_rule_block(rule: GuildRule) -> str:
     """Render one rule for the public post: numbered bold title, verbatim body.
 
     Pure function. The title and body are reproduced as the admin wrote them,
     save for ``@everyone``/``@here`` being zero-width-broken: the additions are
-    the rule's number, the bold markers around the title, and nothing else, so a
-    reader can tell the quoted rule apart from the bot's prose. Rule text is
-    defanged here rather than only at the call site because
+    the rule's number, the bold markers around the title, and the blockquote
+    marker on each line, so a reader can tell the quoted rule apart at a glance.
+    Rule text is defanged here rather than only at the call site because
     :func:`post_rule_citation`'s ``allowed_mentions`` kwargs are a single guard,
     and a rule about not pinging the server must not ping the server.
     """
     heading = f"**{rule.index}. {neutralize_mass_mentions(rule.title)}**"
     body = neutralize_mass_mentions(rule.body)
-    return f"{heading}\n{body}" if body else heading
+    return as_blockquote(f"{heading}\n{body}" if body else heading)
 
 
 def omitted_rules_note(omitted_count: int) -> str:
@@ -193,39 +201,23 @@ def fit_rule_blocks(
     return tuple(kept), len(rule_blocks) - len(kept)
 
 
-def truncate_with_ellipsis(text: str, char_limit: int) -> str:
-    """Return ``text`` cut to ``char_limit`` characters, ellipsis included.
-
-    Pure function. A budget of zero or less leaves room for nothing at all, not
-    even the ellipsis, so the result is empty — the return is never longer than
-    ``char_limit``.
-    """
-    if char_limit <= 0:
-        return ""
-    if len(text) <= char_limit:
-        return text
-    return text[: char_limit - 1].rstrip() + "…"
-
-
 def render_rule_citation(
     matched_rules: Sequence[GuildRule],
-    explanation: str,
     char_limit: int = DISCORD_MESSAGE_CHAR_LIMIT,
 ) -> str | None:
-    """Render the public post: the cited rules verbatim, then the explanation.
+    """Render the public post: the cited rules, quoted, and nothing else.
 
-    Pure function. The rules own the character budget — whatever is left over
-    goes to the explanation, which is truncated or dropped entirely rather than
-    ever costing a rule its text. When only some rules fit, the remainder is
-    summarized by :func:`omitted_rules_note` and the explanation is dropped,
-    because at that point there is no budget for it.
+    Pure function. The model's explanation is deliberately absent — it restated
+    in the channel what the quoted rule already says, so the public post carries
+    only the guild's own words. The explanation is still demanded of the model
+    and still validated (a citation without one is rejected), and it is what the
+    invoker is shown when *no* rule matched; it just never reaches the channel.
 
     Returns:
         The message to post, or ``None`` when there is nothing worth posting:
         no rules were matched at all, or not one of them fits in ``char_limit``.
-        A public reply that pings a member while quoting no rule and giving no
-        explanation is worse than staying silent, so the caller answers the
-        invoker privately instead.
+        A public reply quoting no rule is worse than staying silent, so the
+        caller answers the invoker privately instead.
     """
     if not matched_rules:
         return None
@@ -239,18 +231,7 @@ def render_rule_citation(
     sections = list(kept_blocks)
     if omitted_count:
         sections.append(omitted_rules_note(omitted_count))
-    rules_text = SECTION_SEPARATOR.join(sections)
-    if omitted_count:
-        return rules_text
-
-    safe_explanation = neutralize_mass_mentions(explanation.strip())
-    if not safe_explanation:
-        return rules_text
-    explanation_budget = char_limit - len(rules_text) - len(SECTION_SEPARATOR)
-    if explanation_budget < MINIMUM_EXPLANATION_CHARS:
-        return rules_text
-    fitted = truncate_with_ellipsis(safe_explanation, explanation_budget)
-    return f"{rules_text}{SECTION_SEPARATOR}{fitted}"
+    return SECTION_SEPARATOR.join(sections)
 
 
 # --------------------------------------------------------------------------- #
@@ -449,15 +430,17 @@ async def respond_ephemeral(ctx: lightbulb.Context, message: str) -> None:
 async def post_rule_citation(rest, channel_id: int, target_message, content: str) -> None:
     """Post the citation publicly as a reply to the offending message.
 
-    ``mentions_reply`` is the one ping this message is allowed to make: the
-    member being cited is notified, while ``@everyone``/``@here``, roles and any
-    user id interpolated into the text cannot ping anyone.
+    This message pings nobody at all. It still *replies*, so the rule appears
+    attached to the message it is about, but ``mentions_reply`` is off: being
+    cited is not worth a notification, and the reply link already carries the
+    context. ``@everyone``/``@here``, roles and any user id interpolated into
+    the text cannot ping anyone either.
     """
     await rest.create_message(
         channel_id,
         content,
         reply=target_message,
-        mentions_reply=True,
+        mentions_reply=False,
         mentions_everyone=False,
         user_mentions=False,
         role_mentions=False,
@@ -629,7 +612,7 @@ async def rule(ctx: lightbulb.Context) -> None:
         if str(message.id) == validated.target_message_id
     )
 
-    citation_content = render_rule_citation(matched_rules, validated.explanation)
+    citation_content = render_rule_citation(matched_rules)
     if citation_content is None:
         logger.warning(
             "Rule(s) %s in guild %s are too long to quote in one message",

@@ -24,7 +24,6 @@ from smarter_dev.bot.plugins import rules as rules_plugin
 from smarter_dev.bot.plugins.rules import CHARS_PER_TOKEN
 from smarter_dev.bot.plugins.rules import DISCORD_MESSAGE_CHAR_LIMIT
 from smarter_dev.bot.plugins.rules import MAX_RULES_PROMPT_CHARS
-from smarter_dev.bot.plugins.rules import MINIMUM_EXPLANATION_CHARS
 from smarter_dev.bot.plugins.rules import RULE_COMMAND_TYPE
 from smarter_dev.bot.plugins.rules import RULE_CONTEXT_MESSAGE_COUNT
 from smarter_dev.bot.plugins.rules import bot_target_rejection
@@ -38,7 +37,6 @@ from smarter_dev.bot.plugins.rules import render_rule_citation
 from smarter_dev.bot.plugins.rules import rules_within_prompt_budget
 from smarter_dev.bot.plugins.rules import select_candidate_message_ids
 from smarter_dev.bot.plugins.rules import to_rule_match_message
-from smarter_dev.bot.plugins.rules import truncate_with_ellipsis
 from smarter_dev.bot.services.rate_limiter import RateLimiter
 from smarter_dev.web.guild_rules import GuildRule
 from smarter_dev.web.guild_rules import parse_guild_rules
@@ -48,6 +46,10 @@ ZERO_WIDTH_SPACE = "​"
 GUILD_ID = 111
 CHANNEL_ID = 555
 BOT_USER_ID = 42
+
+#: The model prose the matcher returns by default. It reaches the invoker's
+#: ephemeral reply but must never reach the public post.
+DEFAULT_EXPLANATION = "They advertised a paid course without asking."
 INVOKER_ID = 999
 OFFENDER_ID = 222
 BYSTANDER_ID = 333
@@ -87,68 +89,73 @@ def _match_message(
 # --------------------------------------------------------------------------- #
 
 
+def _unquote(text: str) -> str:
+    """Strip the Discord blockquote marker back off every line."""
+    return "\n".join(
+        line[2:] if line.startswith("> ") else line[1:] if line == ">" else line
+        for line in text.split("\n")
+    )
+
+
 def test_format_rule_block_renders_title_and_body_verbatim():
     rule = _rule(body="Do **not** advertise.\n- not even once")
 
     block = format_rule_block(rule)
 
     assert "No self-promotion" in block
-    assert "Do **not** advertise.\n- not even once" in block
-    assert block.startswith("**1. No self-promotion**")
+    assert "Do **not** advertise.\n- not even once" in _unquote(block)
+    assert _unquote(block).startswith("**1. No self-promotion**")
+
+
+def test_format_rule_block_quotes_every_line():
+    rule = _rule(body="First line.\nSecond line.")
+
+    block = format_rule_block(rule)
+
+    assert [line.startswith(">") for line in block.split("\n")] == [True] * 3
+
+
+def test_format_rule_block_quotes_blank_lines_too():
+    """A bare newline would end the quote, splitting one rule into two blocks."""
+    rule = _rule(body="First paragraph.\n\nSecond paragraph.")
+
+    block = format_rule_block(rule)
+
+    assert all(line.startswith(">") for line in block.split("\n"))
+    assert "\n\n" not in block
 
 
 def test_format_rule_block_omits_empty_body():
     block = format_rule_block(_rule(body=""))
 
-    assert block == "**1. No self-promotion**"
+    assert block == "> **1. No self-promotion**"
 
 
-def test_render_rule_citation_puts_rules_before_the_explanation():
-    rendered = render_rule_citation([_rule()], "They advertised a paid course.")
+def test_render_rule_citation_omits_the_model_explanation():
+    """Only the guild's own rule text is posted; the model's prose is noise."""
+    rendered = render_rule_citation([_rule()])
 
-    assert rendered.index("No self-promotion") < rendered.index("paid course")
+    assert "No self-promotion" in rendered
+    assert "advertised" not in rendered
 
 
 def test_render_rule_citation_keeps_rule_text_byte_for_byte():
     rules = parse_guild_rules(RULES_MARKDOWN)
 
-    rendered = render_rule_citation(rules, "Explanation here.")
+    unquoted = _unquote(render_rule_citation(rules))
 
     for rule in rules:
-        assert rule.title in rendered
-        assert rule.body in rendered
+        assert rule.title in unquoted
+        assert rule.body in unquoted
 
 
 def test_render_rule_citation_renders_every_matched_rule():
     rules = [_rule(1), _rule(2, title="Be kind", body="No attacks.")]
 
-    rendered = render_rule_citation(rules, "why")
+    rendered = render_rule_citation(rules)
 
     assert "No self-promotion" in rendered
     assert "Be kind" in rendered
-
-
-def test_render_rule_citation_truncates_the_explanation_not_the_rule():
-    long_body = "b" * 1_900
-    rule = _rule(body=long_body)
-    explanation = "e" * 500
-
-    rendered = render_rule_citation([rule], explanation)
-
-    assert len(rendered) <= DISCORD_MESSAGE_CHAR_LIMIT
-    assert long_body in rendered, "the rule body must never be cut"
-    assert "…" in rendered
-    assert explanation not in rendered
-
-
-def test_render_rule_citation_drops_the_explanation_when_no_room_is_left():
-    rule = _rule(body="b" * 1_950)
-
-    rendered = render_rule_citation([rule], "an explanation that will not fit")
-
-    assert len(rendered) <= DISCORD_MESSAGE_CHAR_LIMIT
-    assert "b" * 1_950 in rendered
-    assert "explanation that will not fit" not in rendered
 
 
 def test_render_rule_citation_never_renders_a_partial_rule():
@@ -157,7 +164,7 @@ def test_render_rule_citation_never_renders_a_partial_rule():
         _rule(2, title="Second", body="b" * 1_500),
     ]
 
-    rendered = render_rule_citation(rules, "why")
+    rendered = render_rule_citation(rules)
 
     assert len(rendered) <= DISCORD_MESSAGE_CHAR_LIMIT
     assert "a" * 1_500 in rendered
@@ -166,30 +173,28 @@ def test_render_rule_citation_never_renders_a_partial_rule():
 
 
 def test_render_rule_citation_is_nothing_at_all_when_no_rule_fits():
-    """A post naming no rule and giving no explanation is worse than no post."""
+    """A post naming no rule is worse than no post."""
     rules = [_rule(index, body="x" * 3_000) for index in (1, 2)]
 
-    assert render_rule_citation(rules, "why") is None
+    assert render_rule_citation(rules) is None
 
 
 def test_render_rule_citation_is_nothing_at_all_for_one_oversized_rule():
-    rendered = render_rule_citation([_rule(body="b" * 2_100)], "why they broke it")
-
-    assert rendered is None
+    assert render_rule_citation([_rule(body="b" * 2_100)]) is None
 
 
 def test_render_rule_citation_without_any_rule_renders_nothing():
     """The rendering rail: model prose is never posted on its own."""
-    assert render_rule_citation([], "pure model prose, no rule behind it") is None
+    assert render_rule_citation([]) is None
 
 
-@pytest.mark.parametrize("char_limit", [0, -1, -100])
-def test_truncate_with_ellipsis_never_exceeds_a_nonpositive_budget(char_limit: int):
-    assert truncate_with_ellipsis("abcdefgh", char_limit) == ""
+def test_render_rule_citation_counts_the_quote_markers_against_the_limit():
+    """The `> ` on every line is real length — budgeting must see it."""
+    rule = _rule(body="\n".join("b" * 40 for _ in range(45)))
 
+    rendered = render_rule_citation([rule])
 
-def test_truncate_with_ellipsis_respects_a_tiny_budget():
-    assert truncate_with_ellipsis("abcdefgh", 3) == "ab…"
+    assert rendered is None or len(rendered) <= DISCORD_MESSAGE_CHAR_LIMIT
 
 
 def test_format_rule_block_neutralizes_a_mass_mention_in_the_rule_text():
@@ -207,25 +212,10 @@ def test_format_rule_block_neutralizes_a_mass_mention_in_the_rule_text():
 def test_render_rule_citation_neutralizes_a_mass_mention_in_the_rule_text():
     rules = parse_guild_rules("## No @everyone\nDon't ping @here either.\n")
 
-    rendered = render_rule_citation(rules, "they did it")
+    rendered = render_rule_citation(rules)
 
     assert "@everyone" not in rendered
     assert "@here" not in rendered
-
-
-def test_render_rule_citation_neutralizes_a_mass_mention_in_the_explanation():
-    rendered = render_rule_citation([_rule()], "they pinged @everyone and @here")
-
-    assert "@everyone" not in rendered
-    assert "@here" not in rendered
-    assert f"@{ZERO_WIDTH_SPACE}everyone" in rendered
-
-
-def test_minimum_explanation_chars_is_the_drop_threshold():
-    body_length = DISCORD_MESSAGE_CHAR_LIMIT - MINIMUM_EXPLANATION_CHARS
-    rendered = render_rule_citation([_rule(body="b" * body_length)], "words")
-
-    assert "words" not in rendered
 
 
 # --------------------------------------------------------------------------- #
@@ -527,7 +517,7 @@ def _run_rule(
         or RuleCitation(
             matched_rule_indices=[1],
             target_message_id="1001",
-            explanation="They advertised a paid course without asking.",
+            explanation=DEFAULT_EXPLANATION,
         ),
         side_effect=match_side_effect,
     )
@@ -739,8 +729,7 @@ async def test_a_match_posts_the_rule_verbatim_as_a_reply_to_the_target():
     posted = args[1]
     rules = parse_guild_rules(RULES_MARKDOWN)
     assert rules[0].title in posted
-    assert rules[0].body in posted
-    assert "They advertised a paid course without asking." in posted
+    assert rules[0].body in _unquote(posted)
     assert kwargs["reply"].id == 1001
 
 
@@ -778,13 +767,26 @@ async def test_a_mass_mention_in_the_rules_document_cannot_ping_either():
     assert f"@{ZERO_WIDTH_SPACE}everyone" in posted
 
 
-async def test_the_public_post_still_pings_the_replied_to_member():
+async def test_the_public_post_does_not_ping_the_replied_to_member():
+    """The citation is a reply, not a summons — it should notify nobody."""
     ctx = _ctx()
 
     await _invoke(ctx)
 
     _, kwargs = ctx.bot.rest.create_message.call_args
-    assert kwargs["mentions_reply"] is True
+    assert kwargs["mentions_reply"] is False
+    assert kwargs["mentions_everyone"] is False
+    assert kwargs["user_mentions"] is False
+    assert kwargs["role_mentions"] is False
+
+
+async def test_the_public_post_carries_no_model_prose():
+    ctx = _ctx()
+
+    await _invoke(ctx)
+
+    posted = ctx.bot.rest.create_message.call_args.args[1]
+    assert DEFAULT_EXPLANATION not in posted
 
 
 async def test_a_match_confirms_to_the_invoker_ephemerally():
