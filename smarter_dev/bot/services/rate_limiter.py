@@ -19,7 +19,14 @@ class RateLimiter:
         # Command-specific limits
         self.COMMAND_LIMITS = {
             "help": {"limit": 10, "window": timedelta(minutes=30)},
-            "tldr": {"limit": 5, "window": timedelta(hours=1)}
+            "tldr": {"limit": 5, "window": timedelta(hours=1)},
+            # /rule is ungated — anyone may run it — and every match posts a
+            # public, user-pinging, LLM-written message. Handling one real
+            # incident takes one or two calls, and a bad flare-up maybe five, so
+            # five per ten minutes never gets in a moderator's way. It also caps
+            # a griefer at six public pings an hour aimed at one victim, which is
+            # slower than they could type the same abuse by hand.
+            "rule": {"limit": 5, "window": timedelta(minutes=10)},
         }
 
         # Global token limits
