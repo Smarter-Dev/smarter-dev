@@ -44,6 +44,7 @@ from smarter_dev.web.models import (
     AdventOfCodeThread,
     AttachmentFilterConfig,
     ModerationFilterConfig,
+    GuildRulesConfig,
     ModerationConfig,
     ModerationAction,
     ChannelModelOverride,
@@ -5442,6 +5443,141 @@ class ModerationFilterConfigOperations:
         except Exception as e:
             raise DatabaseOperationError(
                 f"Failed to delete moderation filter config: {e}"
+            ) from e
+
+
+class GuildRulesConfigOperations:
+    """Database operations for the per-guild rules document.
+
+    Handles CRUD for the markdown an admin authors on ``/admin/bot``; parsing it
+    into addressable rules belongs to
+    :mod:`smarter_dev.web.guild_rules`, not to this layer.
+    """
+
+    async def get_config(
+        self,
+        session: AsyncSession,
+        guild_id: str
+    ) -> GuildRulesConfig | None:
+        """Get the rules configuration for a guild.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+
+        Returns:
+            GuildRulesConfig or None if the guild has no rules row yet
+
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        try:
+            stmt = select(GuildRulesConfig).where(
+                GuildRulesConfig.guild_id == guild_id
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+        except Exception as e:
+            raise DatabaseOperationError(f"Failed to get guild rules config: {e}") from e
+
+    async def get_or_create_config(
+        self,
+        session: AsyncSession,
+        guild_id: str
+    ) -> GuildRulesConfig:
+        """Get or create the rules configuration for a guild.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+
+        Returns:
+            GuildRulesConfig: Guild configuration (existing, or newly created
+            with an empty rules document)
+
+        Raises:
+            DatabaseOperationError: If query fails
+        """
+        try:
+            config = await self.get_config(session, guild_id)
+            if config is None:
+                config = GuildRulesConfig(guild_id=guild_id)
+                session.add(config)
+                await session.flush()
+            return config
+        except DatabaseOperationError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to get or create guild rules config: {e}"
+            ) from e
+
+    async def update_config(
+        self,
+        session: AsyncSession,
+        guild_id: str,
+        **updates
+    ) -> GuildRulesConfig:
+        """Update the rules configuration for a guild.
+
+        Creates an empty config first when the guild has none.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+            **updates: Fields to update; unknown keys are ignored
+
+        Returns:
+            GuildRulesConfig: Updated configuration
+
+        Raises:
+            DatabaseOperationError: If update fails
+        """
+        try:
+            config = await self.get_or_create_config(session, guild_id)
+
+            for key, value in updates.items():
+                if hasattr(config, key):
+                    setattr(config, key, value)
+
+            config.updated_at = datetime.now(UTC)
+            await session.flush()
+
+            return config
+        except DatabaseOperationError:
+            raise
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to update guild rules config: {e}"
+            ) from e
+
+    async def delete_config(
+        self,
+        session: AsyncSession,
+        guild_id: str
+    ) -> bool:
+        """Delete the rules configuration for a guild.
+
+        Args:
+            session: Database session
+            guild_id: Discord guild snowflake ID
+
+        Returns:
+            bool: True if deleted, False if not found
+
+        Raises:
+            DatabaseOperationError: If deletion fails
+        """
+        try:
+            result = await session.execute(
+                delete(GuildRulesConfig).where(
+                    GuildRulesConfig.guild_id == guild_id
+                )
+            )
+            return result.rowcount > 0
+        except Exception as e:
+            raise DatabaseOperationError(
+                f"Failed to delete guild rules config: {e}"
             ) from e
 
 

@@ -62,6 +62,7 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "forum_notification_topics",
     "forum_user_subscriptions",
     "guild_handler_memory",
+    "guild_rules_configs",
     "handler_runs",
     "help_conversations",
     "member_activity",

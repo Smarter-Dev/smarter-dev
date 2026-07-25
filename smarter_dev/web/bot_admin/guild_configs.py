@@ -3,11 +3,12 @@
 Ports ``audit_log_config``, ``advent_of_code_config`` and
 ``attachment_filter_config`` from the legacy ``smarter_dev.web.admin.views`` onto
 a single Skrift-native Litestar controller under ``/admin/bot``, and adds the
-moderation-filter page for the core content filters and spam engine. Guild
-identity comes from Discord (via :mod:`smarter_dev.web.discord_admin_client`);
-the four settings groups live in the ``audit_log_configs``,
-``advent_of_code_configs``, ``attachment_filter_configs`` and
-``moderation_filter_configs`` tables.
+moderation-filter page for the core content filters and spam engine plus the
+guild-rules editor the ``/rule`` command cites. Guild identity comes from
+Discord (via :mod:`smarter_dev.web.discord_admin_client`); the five settings
+groups live in the ``audit_log_configs``, ``advent_of_code_configs``,
+``attachment_filter_configs``, ``moderation_filter_configs`` and
+``guild_rules_configs`` tables.
 
 Form parsing is factored into pure module-level helpers so the accepted-field
 contract can be unit-tested without a request or a database.
@@ -26,23 +27,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from skrift.admin.helpers import get_admin_context
 from skrift.auth.guards import Permission, auth_guard
-from skrift.flash import flash_error, flash_success, get_flash_messages
+from skrift.flash import (
+    flash_error,
+    flash_success,
+    flash_warning,
+    get_flash_messages,
+)
 
 from smarter_dev.web.bot_admin.squads import fetch_guild_or_error
 from smarter_dev.web.crud import (
     AdventOfCodeConfigOperations,
     AttachmentFilterConfigOperations,
     AuditLogConfigOperations,
+    GuildRulesConfigOperations,
     ModerationFilterConfigOperations,
 )
 from smarter_dev.web.discord_admin_client import (
     DiscordAdminError,
     get_admin_discord_client,
 )
+from smarter_dev.web.guild_rules import normalize_newlines, parse_guild_rules
 from smarter_dev.web.models import (
     AdventOfCodeConfig,
     AttachmentFilterConfig,
     AuditLogConfig,
+    GuildRulesConfig,
     ModerationFilterConfig,
 )
 
@@ -52,6 +61,7 @@ audit_ops = AuditLogConfigOperations()
 advent_ops = AdventOfCodeConfigOperations()
 attachment_ops = AttachmentFilterConfigOperations()
 moderation_filter_ops = ModerationFilterConfigOperations()
+guild_rules_ops = GuildRulesConfigOperations()
 
 # Discord channel type ids used by the channel pickers.
 _TEXT_CHANNEL_TYPES: frozenset[int] = frozenset({0, 5})  # GUILD_TEXT, GUILD_NEWS
@@ -427,6 +437,20 @@ def parse_moderation_filter_form(form: Mapping[str, str]) -> dict:
     return updates
 
 
+def parse_guild_rules_form(form: Mapping[str, str]) -> dict:
+    """Turn a submitted guild-rules form into keyword arguments for the model.
+
+    Pure function. The rules document is stored verbatim apart from two
+    normalisations: browser CRLF endings become LF (so stored markdown matches
+    what the parser sees), and surrounding blank space is trimmed (so an
+    "emptied" textarea stores as the empty string rather than stray newlines).
+
+    Never raises: any text is a valid submission. Whether it parses into rules
+    is reported back to the admin by the page's preview, not by rejecting it.
+    """
+    return {"rules_markdown": normalize_newlines(form.get("rules_markdown")).strip()}
+
+
 async def load_or_create_audit_config(
     db_session: AsyncSession, guild_id: str
 ) -> AuditLogConfig:
@@ -459,6 +483,15 @@ async def load_or_create_moderation_filter_config(
 ) -> ModerationFilterConfig:
     """Return the guild's moderation-filter config, persisting a default row."""
     config = await moderation_filter_ops.get_or_create_config(db_session, guild_id)
+    await db_session.commit()
+    return config
+
+
+async def load_or_create_guild_rules_config(
+    db_session: AsyncSession, guild_id: str
+) -> GuildRulesConfig:
+    """Return the guild's rules config, persisting an empty document if absent."""
+    config = await guild_rules_ops.get_or_create_config(db_session, guild_id)
     await db_session.commit()
     return config
 
@@ -499,7 +532,7 @@ async def fetch_guild_roles(guild_id: str) -> list:
 
 
 class GuildConfigsAdminController(Controller):
-    """Audit-log, AoC, attachment- and moderation-filter config under ``/admin/bot``."""
+    """Audit-log, AoC, attachment/moderation filter and rules config under ``/admin/bot``."""
 
     path = "/admin/bot"
     guards = [auth_guard]
@@ -740,4 +773,72 @@ class GuildConfigsAdminController(Controller):
         flash_success(
             request, "Moderation filter configuration updated successfully!"
         )
+        return redirect
+
+    # -- Guild rules ----------------------------------------------------------
+
+    @get(
+        "/guilds/{guild_id:str}/rules",
+        guards=[auth_guard, Permission("administrator")],
+    )
+    async def guild_rules_config(
+        self, request: Request, db_session: AsyncSession, guild_id: str
+    ) -> TemplateResponse:
+        """Render the rules editor and the parse preview for one guild."""
+        guild, error = await fetch_guild_or_error(
+            request, db_session, guild_id, "guild_rules"
+        )
+        if error is not None:
+            return error
+
+        ctx = await get_admin_context(request, db_session)
+        config = await load_or_create_guild_rules_config(db_session, guild_id)
+
+        return TemplateResponse(
+            "admin/bot/guild_configs/guild_rules.html",
+            context={
+                "guild": guild,
+                "config": config,
+                "parsed_rules": parse_guild_rules(config.rules_markdown),
+                "active_page": "guild_rules",
+                "guild_id": guild_id,
+                "flash_messages": get_flash_messages(request),
+                **ctx,
+            },
+        )
+
+    @post(
+        "/guilds/{guild_id:str}/rules",
+        guards=[auth_guard, Permission("administrator")],
+    )
+    async def save_guild_rules_config(
+        self, request: Request, db_session: AsyncSession, guild_id: str
+    ) -> Redirect:
+        """Persist the submitted rules document, then redirect back.
+
+        Any text is accepted — the ``/rule`` command simply has nothing to cite
+        when nothing parses — so the outcome is reported by the flash message
+        and the preview rather than by rejecting the submission. A document that
+        yields no rules is the one case worth flagging, because it looks saved
+        but leaves the command with nothing.
+        """
+        redirect = Redirect(path=f"/admin/bot/guilds/{guild_id}/rules")
+
+        form = await request.form()
+        updates = parse_guild_rules_form(form)
+
+        await guild_rules_ops.update_config(db_session, guild_id, **updates)
+        await db_session.commit()
+
+        rules_markdown = updates["rules_markdown"]
+        rules = parse_guild_rules(rules_markdown)
+        if rules_markdown and not rules:
+            flash_warning(
+                request,
+                "Rules saved, but no rules could be parsed from them. Start each "
+                "rule with a markdown heading, e.g. '## No self-promotion'.",
+            )
+            return redirect
+
+        flash_success(request, f"Rules saved — {len(rules)} rules parsed.")
         return redirect
