@@ -71,6 +71,14 @@
     </div>
 
     <div style="display:flex; flex-direction:column; gap:1rem;">
+        {% if conversation.content_purged_at %}
+        <div class="sk-flash sk-flash-info">
+            <strong>Content purged
+            {{ conversation.content_purged_at.strftime('%Y-%m-%d %H:%M') }} UTC.</strong>
+            Discord text is kept for 48 hours; the usage figures below are permanent.
+        </div>
+        {% endif %}
+
         {% if conversation.context_messages %}
         <div class="sk-panel">
             <div class="sk-panel-head">Context Messages</div>

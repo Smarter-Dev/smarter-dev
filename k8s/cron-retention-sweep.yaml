@@ -1,0 +1,68 @@
+---
+# Hourly Discord content retention sweep:
+#   - scrubs message text older than 48 hours out of every table that captures
+#     it passively (help/chat/AI-moderation/forum agent + handler trigger
+#     contexts), stamping content_purged_at
+#   - keeps the rows themselves: timestamps, token counts, cost, decisions
+#
+# Runs hourly rather than daily so the real worst-case retention is 48-49h
+# rather than 48-72h — the window we state publicly should be the window we
+# actually enforce. Image is pinned to the same web image so the codebase /
+# venv match exactly.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: smarter-dev-retention-sweep
+    namespace: smarter-dev
+    labels:
+        app: smarter-dev-retention-sweep
+spec:
+    # Top of every hour, UTC.
+    schedule: "0 * * * *"
+    timeZone: "UTC"
+    concurrencyPolicy: Forbid
+    successfulJobsHistoryLimit: 3
+    failedJobsHistoryLimit: 5
+    jobTemplate:
+        spec:
+            # The sweep is idempotent, so a retry is always safe; the next
+            # hourly run heals anything a failed run left behind.
+            backoffLimit: 2
+            # Headroom for the first run, which has to work through all the
+            # history that predates the sweep. Steady state is seconds.
+            activeDeadlineSeconds: 1800
+            ttlSecondsAfterFinished: 86400
+            template:
+                metadata:
+                    labels:
+                        app: smarter-dev-retention-sweep
+                spec:
+                    restartPolicy: OnFailure
+                    containers:
+                      - name: sweep
+                        image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
+                        # PYTHONPATH=/app + uv run so /app (and thus the
+                        # smarter_dev package) is on sys.path — matches the
+                        # proven migrate-job.yaml / cron-sudo-sweep.yaml pattern.
+                        command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/retention_sweep.py"]
+                        envFrom:
+                          - configMapRef:
+                              name: smarter-dev-config
+                        env:
+                          - name: DATABASE_URL
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: database-url
+                          - name: REDIS_URL
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: redis-url
+                        resources:
+                            requests:
+                                cpu: "50m"
+                                memory: "192Mi"
+                            limits:
+                                cpu: "500m"
+                                memory: "512Mi"
