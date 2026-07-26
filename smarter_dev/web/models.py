@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timezone, date
+from datetime import UTC, datetime, timedelta, timezone, date
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -25,6 +25,15 @@ from sqlalchemy.orm import mapped_column
 from sqlalchemy.sql import func
 
 from smarter_dev.shared.database import Base
+
+# How long Discord-sourced message text may live in our database before the
+# retention sweep scrubs it. Every table that captures message content passively
+# — i.e. text a user typed in Discord rather than typed into one of our modals —
+# carries a ``content_purged_at`` marker and is swept on this window. The row
+# itself survives (timestamps, token counts, cost, decisions) so operators keep
+# usage and abuse history; only the human text goes.
+# See :mod:`smarter_dev.web.retention`.
+CONTENT_RETENTION_WINDOW = timedelta(hours=48)
 
 
 class CampaignSignup(Base):
@@ -1024,7 +1033,16 @@ class HelpConversation(Base):
         onupdate=func.now(),
         doc="When the record was last updated"
     )
-    
+    content_purged_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        doc=(
+            "When the Discord-sourced text on this row was scrubbed by the "
+            "retention sweep. NULL means the content is still present."
+        ),
+    )
+
     # Database constraints and indexes
     # Note: expires_at and is_sensitive already have column-level index=True
     __table_args__ = (
@@ -1041,19 +1059,15 @@ class HelpConversation(Base):
         kwargs.setdefault('last_activity_at', now)
         kwargs.setdefault('created_at', now)
         
-        # Set default expiration based on retention policy
-        if 'retention_policy' in kwargs and 'expires_at' not in kwargs:
-            retention = kwargs['retention_policy']
-            if retention == "sensitive":
-                from datetime import timedelta
-                kwargs['expires_at'] = now + timedelta(days=7)
-            elif retention == "minimal":
-                from datetime import timedelta
-                kwargs['expires_at'] = now + timedelta(days=30)
-            elif retention == "standard":
-                from datetime import timedelta
-                kwargs['expires_at'] = now + timedelta(days=90)
-        
+        # Every conversation expires on the same 48-hour window, whatever its
+        # policy label: the text here is Discord message content the user never
+        # explicitly submitted to us, so it is scrubbed by the retention sweep
+        # (smarter_dev.web.retention) as soon as the window elapses.
+        kwargs.setdefault(
+            'expires_at', kwargs['created_at'] + CONTENT_RETENTION_WINDOW
+        )
+
+
         super().__init__(**kwargs)
     
     def __repr__(self) -> str:
@@ -1330,7 +1344,16 @@ class ForumAgentResponse(Base):
         index=True,
         doc="Timestamp when the post was evaluated"
     )
-    
+    content_purged_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        doc=(
+            "When the post/response text on this row was scrubbed by the "
+            "retention sweep. NULL means the content is still present."
+        ),
+    )
+
     # Database constraints and indexes
     __table_args__ = (
         Index("ix_forum_agent_responses_agent_created", "agent_id", "created_at"),
@@ -3851,6 +3874,17 @@ class ModerationAction(Base):
         nullable=False,
         server_default=func.now(),
     )
+    content_purged_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        doc=(
+            "When ``ai_context_summary`` was scrubbed by the retention sweep. "
+            "The action record itself — who, what, when, and the reason given "
+            "— is kept as a moderation audit trail; only the retelling of the "
+            "channel conversation goes."
+        ),
+    )
 
     __table_args__ = (
         Index("ix_mod_actions_guild_user", "guild_id", "target_user_id"),
@@ -4249,6 +4283,16 @@ class ChatAgentEngagement(Base):
         Numeric(10, 6), nullable=False, default=Decimal("0")
     )
 
+    content_purged_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        doc=(
+            "When the denormalised topic/notes on this row were scrubbed by "
+            "the retention sweep. Token and cost aggregates survive."
+        ),
+    )
+
     turns: Mapped[list["ChatAgentTurn"]] = relationship(
         back_populates="engagement",
         cascade="all, delete-orphan",
@@ -4310,6 +4354,16 @@ class ChatAgentError(Base):
         nullable=False,
         server_default=func.now(),
         index=True,
+    )
+    content_purged_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        doc=(
+            "When ``provider_body`` was scrubbed by the retention sweep — a "
+            "provider error body can echo the prompt, and the prompt carries "
+            "message content. The error type/traceback are kept."
+        ),
     )
 
     __table_args__ = (
@@ -4418,6 +4472,17 @@ class ChatAgentTurn(Base):
     voice_sent_ok: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     voice_send_error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    content_purged_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        doc=(
+            "When the triggering messages, agent output and model-message "
+            "delta on this row were scrubbed by the retention sweep. Token, "
+            "cost, timing and model fields survive."
+        ),
+    )
+
     engagement: Mapped[ChatAgentEngagement] = relationship(back_populates="turns")
     compaction_events: Mapped[list["ChatAgentCompactionEvent"]] = relationship(
         back_populates="turn",
@@ -4481,6 +4546,16 @@ class ChatAgentCompactionEvent(Base):
     )
     summarizer_cost_usd: Mapped[Decimal] = mapped_column(
         Numeric(10, 6), nullable=False, default=Decimal("0")
+    )
+    content_purged_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        doc=(
+            "When the original content and its summary were scrubbed by the "
+            "retention sweep. The char counts and summariser cost survive, so "
+            "the compaction-ratio dashboards keep working."
+        ),
     )
 
     turn: Mapped[ChatAgentTurn] = relationship(back_populates="compaction_events")
@@ -4875,6 +4950,16 @@ class HandlerRun(Base):
         Integer, nullable=False, default=0, server_default="0"
     )
     duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    content_purged_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+        doc=(
+            "When the message text inside ``trigger_context`` was scrubbed by "
+            "the retention sweep. The non-content trigger fields (ids, flags, "
+            "trigger type) and every counter survive."
+        ),
+    )
 
 
 class AdminHandler(Base):

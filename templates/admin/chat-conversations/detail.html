@@ -206,6 +206,13 @@
         · ${{ '%.6f'|format(turn.chat_cost_usd + turn.voice_cost_usd) }}
     </div>
 
+    {% if turn.content_purged_at %}
+    <div class="cc-meta" style="padding: .5rem 0;">
+        🧹 Message content purged {{ turn.content_purged_at.strftime('%Y-%m-%d %H:%M') }} UTC
+        &mdash; Discord text is kept for 48 hours; the metrics above are permanent.
+    </div>
+    {% endif %}
+
     {# what the agent saw on this turn #}
     {% for msg in turn.triggering_messages %}
     <div class="cc-user-msg {% if msg.mentions_bot or msg.reply_to_is_self %}cc-mention{% endif %}">
