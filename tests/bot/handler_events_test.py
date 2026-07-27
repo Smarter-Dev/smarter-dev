@@ -684,3 +684,29 @@ async def test_cache_guilds_with_trigger_filters_by_trigger():
     cache = ActiveChannelsCache(ttl_seconds=999)
     assert await cache.guilds_with_trigger(api, "dm_message") == {"G1"}
     assert await cache.guilds_with_trigger(api, "member_join") == {"G2"}
+
+
+async def test_dispatch_posts_chain_depth_zero_for_a_gateway_event(monkeypatch):
+    """Gateway events are chain ROOTS, so the bot starts the counter at 0.
+
+    Depth rides as its own field, never inside trigger_context — a script must
+    never be able to read or reset the counter that bounds its own cascade.
+    """
+    posted: list[dict] = []
+
+    class _PostAPI:
+        async def post(self, path, json_data=None):
+            posted.append(json_data)
+            return _Resp({"dispatched": True, "handler_ids": ["h"], "reason": None})
+
+    api = _PostAPI()
+    monkeypatch.setattr(handler_events, "_get_api_client", lambda: api)
+
+    async def always_present(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(handler_events._cache, "has", always_present)
+
+    assert await handler_events._dispatch("C1", "G1", "message", {"a": 1}) is True
+    assert posted[0]["chain_depth"] == 0
+    assert "chain_depth" not in posted[0]["trigger_context"]

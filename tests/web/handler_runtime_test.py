@@ -181,7 +181,7 @@ async def _run(
     script, *, budget=None, emitter=None, limiter=None, agent_runner=None,
     actor=None, channel_ids=None, allowed_role_ids=None,
     timer_scheduler=None, timer_limiter=None, dm_user_limiter=None, handler_id=None,
-    mod_action_reader=None,
+    mod_action_reader=None, mod_action_recorder=None, rules_reader=None,
 ):
     emitter = emitter or _FakeEmitter()
     limiter = limiter or _StubLimiter()
@@ -190,6 +190,10 @@ async def _run(
         kwargs["dm_user_limiter"] = dm_user_limiter
     if mod_action_reader is not None:
         kwargs["mod_action_reader"] = mod_action_reader
+    if mod_action_recorder is not None:
+        kwargs["mod_action_recorder"] = mod_action_recorder
+    if rules_reader is not None:
+        kwargs["rules_reader"] = rules_reader
     if agent_runner is not None:
         kwargs["agent_runner"] = agent_runner
     if actor is not None:
@@ -1572,3 +1576,209 @@ async def test_get_role_members_denied_when_budget_zero():
     assert result.cap == "discord_reads"
     assert result.usage["discord_reads"] == 0
     assert emitter.role_member_calls == []  # denied before the emitter is reached
+
+
+# -- warn_user (admin tier: notice + best-effort DM + audit row) -------------
+
+
+def _recorder(calls, warn_count=1):
+    """A mod_action_recorder stand-in recording its host-bound args."""
+
+    async def recorder(user_id, reason, channel_id):
+        calls.append((user_id, reason, channel_id))
+        return warn_count
+
+    return recorder
+
+
+async def test_warn_user_posts_notice_dms_and_records():
+    calls = []
+    script = (
+        "r = await warn_user('U9', 'spamming links')\n"
+        "await send_message(f\"{r['message_id']}|{r['dm_sent']}|{r['warn_count']}\")\n"
+    )
+    result, emitter, _ = await _run(
+        script,
+        budget=admin_budget(),
+        actor=_FakeActor(),
+        mod_action_recorder=_recorder(calls, warn_count=3),
+    )
+    assert result.outcome == "ok", result.error
+    # The notice lands in the HOME channel; the recorder is told the same one.
+    assert emitter.messages[0][0] == "C1"
+    assert "spamming links" in emitter.messages[0][1]
+    assert emitter.dm_sends[0][0] == "U9"
+    assert calls == [("U9", "spamming links", "C1")]
+    # Both the notice and the DM draw on the shared per-fire message pool.
+    assert result.usage["messages_sent"] == 3  # notice + DM + the echo above
+    assert result.usage["mod_actions"] == 1
+    assert emitter.messages[-1][1] == "msg1|True|3"
+
+
+async def test_warn_user_spends_mod_action_before_any_side_effect():
+    # The loop rail: a mod_action-triggered fire runs with max_mod_actions=0, so
+    # the spend must raise BEFORE the notice, the DM, or the audit row.
+    calls = []
+    result, emitter, _ = await _run(
+        "await warn_user('U9', 'nope')\n",
+        budget=HandlerBudget(max_mod_actions=0, max_messages=5),
+        actor=_FakeActor(),
+        mod_action_recorder=_recorder(calls),
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "mod_actions"
+    assert emitter.messages == []
+    assert emitter.dm_sends == []
+    assert calls == []
+
+
+async def test_warn_user_rejects_out_of_scope_channel():
+    # Same rail rename_channel uses: an EXPLICIT channel outside channel_ids is
+    # refused, and nothing is emitted or recorded.
+    calls = []
+    result, emitter, _ = await _run(
+        "await warn_user('U9', 'r', 'C-OTHER')\n",
+        budget=admin_budget(),
+        actor=_FakeActor(),
+        channel_ids=["C1"],
+        mod_action_recorder=_recorder(calls),
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "out_of_scope_channel"
+    assert emitter.messages == []
+    assert calls == []
+
+
+async def test_warn_user_explicit_in_scope_channel_is_used_for_notice_and_row():
+    calls = []
+    result, emitter, _ = await _run(
+        "await warn_user('U9', 'r', 'C2')\n",
+        budget=admin_budget(),
+        actor=_FakeActor(),
+        channel_ids=["C1", "C2"],
+        mod_action_recorder=_recorder(calls),
+    )
+    assert result.outcome == "ok", result.error
+    assert emitter.messages[0][0] == "C2"
+    assert calls == [("U9", "r", "C2")]
+
+
+async def test_warn_user_closed_dms_reported_not_errored():
+    # A False from send_dm (closed DMs / no mutual guild) is an expected outcome:
+    # dm_sent=False, and the warn still posts and still records.
+    calls = []
+    emitter = _FakeEmitter(dm_result=False)
+    script = (
+        "r = await warn_user('U9', 'r')\n"
+        "await send_message(str(r['dm_sent']))\n"
+    )
+    result, emitter, _ = await _run(
+        script,
+        budget=admin_budget(),
+        actor=_FakeActor(),
+        emitter=emitter,
+        mod_action_recorder=_recorder(calls),
+    )
+    assert result.outcome == "ok", result.error
+    assert emitter.messages[-1][1] == "False"
+    assert calls == [("U9", "r", "C1")]
+
+
+async def test_warn_user_dm_false_skips_the_dm_entirely():
+    calls = []
+    result, emitter, _ = await _run(
+        "await warn_user('U9', 'r', None, False)\n",
+        budget=admin_budget(),
+        actor=_FakeActor(),
+        mod_action_recorder=_recorder(calls),
+    )
+    assert result.outcome == "ok", result.error
+    assert emitter.dm_sends == []
+    assert result.usage["messages_sent"] == 1  # the notice only
+    assert calls == [("U9", "r", "C1")]
+
+
+async def test_warn_user_records_the_row_before_the_dm_can_breach_a_cap():
+    # The notice is already public once _send_message returns, so the permanent
+    # row must not hang on the DM. Here the message pool runs out ON the DM
+    # (notice = the last allowed message), which is what a real fire hits on the
+    # 11th handler warn in a minute (the global DMs/min window). The fire still
+    # fails — a cap breach is a rail — but the warn is durably recorded, so
+    # /history, list_mod_actions, warn_count and the mod-log fire all see it.
+    calls = []
+    result, emitter, _ = await _run(
+        "await warn_user('U9', 'third strike')\n",
+        budget=HandlerBudget(max_mod_actions=5, max_messages=1),
+        actor=_FakeActor(),
+        mod_action_recorder=_recorder(calls),
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "messages"
+    assert emitter.messages[0][0] == "C1"  # the public notice went out ...
+    assert calls == [("U9", "third strike", "C1")]  # ... and so did the row
+    assert emitter.dm_sends == []
+
+
+async def test_warn_user_not_available_to_standard_handler():
+    result, _, _ = await _run("await warn_user('U9', 'r')\n")
+    assert result.outcome == "error"
+    assert "warn_user" in result.error
+
+
+# -- list_rules (admin-tier lookup over the guild's rules document) ----------
+
+
+async def test_list_rules_returns_rows_and_spends_a_lookup():
+    rows = [
+        {"number": 1, "title": "Be kind", "text": "No harassment."},
+        {"number": 2, "title": "No spam", "text": "Nobody likes it."},
+    ]
+
+    async def reader():
+        return rows
+
+    script = (
+        "rules = await list_rules()\n"
+        "await send_message(f\"{len(rules)}:{rules[1]['title']}\")\n"
+    )
+    result, emitter, _ = await _run(
+        script, budget=admin_budget(), actor=_FakeActor(), rules_reader=reader
+    )
+    assert result.outcome == "ok", result.error
+    assert emitter.messages[0][1] == "2:No spam"
+    assert result.usage["lookups"] == 1
+
+
+async def test_list_rules_on_guild_with_no_rules_is_an_empty_list():
+    async def reader():
+        return []
+
+    script = (
+        "rules = await list_rules()\n"
+        "await send_message(str(len(rules)))\n"
+    )
+    result, emitter, _ = await _run(
+        script, budget=admin_budget(), actor=_FakeActor(), rules_reader=reader
+    )
+    assert result.outcome == "ok", result.error
+    assert emitter.messages[0][1] == "0"
+
+
+async def test_list_rules_shares_the_lookups_pool():
+    async def reader():
+        return []
+
+    result, _, _ = await _run(
+        "for i in range(3):\n    await list_rules()\n",
+        budget=HandlerBudget(max_lookups=2, max_messages=5),
+        actor=_FakeActor(),
+        rules_reader=reader,
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "lookups"
+
+
+async def test_list_rules_not_available_to_standard_handler():
+    result, _, _ = await _run("await list_rules()\n")
+    assert result.outcome == "error"
+    assert "list_rules" in result.error

@@ -34,7 +34,8 @@ from smarter_dev.web.handler_guild_memory import (
     load_guild_memory,
     persist_guild_memory,
 )
-from smarter_dev.web.crud import ModerationActionOperations
+from smarter_dev.web.crud import GuildRulesConfigOperations, ModerationActionOperations
+from smarter_dev.web.guild_rules import parse_guild_rules
 from smarter_dev.web.handler_notify import notify_handler_error
 from smarter_dev.web.handler_schedule import next_fire_at
 from smarter_dev.web.models import AdminHandler, HandlerRun, ModerationAction
@@ -42,6 +43,7 @@ from smarter_dev.web.models import AdminHandler, HandlerRun, ModerationAction
 logger = logging.getLogger(__name__)
 
 _mod_action_ops = ModerationActionOperations()
+_guild_rules_ops = GuildRulesConfigOperations()
 
 
 def _mod_action_row(action: ModerationAction) -> dict:
@@ -67,6 +69,12 @@ class AdminHandlerFirePayload(BaseModel):
     admin_handler_id: str
     channel_id: str = ""
     trigger_context: dict = {}
+    # How many handler fires deep this fire is (0 = caused by a gateway event).
+    # An explicit FIELD, never a trigger_context key: context goes to the Monty
+    # sandbox verbatim, so a depth in there would be script-readable and
+    # script-forgeable. Defaulted so an omitted field means "chain root", not a
+    # crash — schedule re-arms are roots, and so is any already-enqueued job.
+    chain_depth: int = 0
 
 
 @handler(
@@ -88,6 +96,9 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
             return {"status": "missing"}
         script = record.script
         guild_id = record.guild_id
+        # Read here (not from the row later) because the recorder stamps it into
+        # every ModerationAction as "handler:<name>" — a permanent audit field.
+        handler_name = record.name
         trigger_type = record.trigger_type
         channel_ids = list(record.channel_ids or [])
         handler_settings = dict(record.settings or {})
@@ -108,7 +119,9 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
     # Loop rail (§3.5, HARD): a mod_action-triggered handler formats and posts an
     # audit row into the mod-log — it must NEVER ban/kick/timeout/delete, or a
     # handler action would write an audit row that re-fires it. Forcing the
-    # mod-action budget to 0 makes that loop structurally impossible.
+    # mod-action budget to 0 makes that loop structurally impossible. The chain
+    # depth counter is defense in DEPTH behind this, never a replacement for it:
+    # depth would still permit three generations of a ban wave, this permits zero.
     if trigger_type == "mod_action":
         budget.max_mod_actions = 0
     # The emitter carries the fire's guild so list_threads() can hit the
@@ -136,6 +149,12 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
                 admin_handler_id=str(handler_id),
                 channel_id=channel_id,
                 trigger_context=refire_context,
+                # Caused BY this fire, so it descends one generation. The re-fire
+                # is still enqueued (depth is enforced at the dispatch choke
+                # point, and the 3600s arming window bounds a self-deferring
+                # handler); carrying the depth is what makes anything that
+                # re-fire DISPATCHES get refused past MAX_CHAIN_DEPTH.
+                chain_depth=payload.chain_depth + 1,
             ),
             scheduled_for=fire_at,
             job_id=uuid4().hex,
@@ -150,6 +169,91 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
             )
             return [_mod_action_row(action) for action in actions]
 
+    async def record_warn(
+        target_user_id: str, reason: str, warn_channel_id: str
+    ) -> int:
+        # guild_id is bound host-side from THIS fire's guild, like the reader —
+        # the script supplies only the target, the reason, and the channel it
+        # already had to be in scope for.
+        target_user_id = str(target_user_id)
+        # The username lands in a PERMANENT audit record, so it is resolved from
+        # Discord rather than trusted from the script (a script-supplied name
+        # could impersonate anyone in the log). One UNMETERED fetch — it is a
+        # host rail, not a script-visible read — and a failure degrades to the
+        # raw id rather than failing a warn that already posted its notice.
+        target_username = target_user_id
+        try:
+            info = await actor.get_member_info(target_user_id)
+            target_username = info.get("username") or target_user_id
+        except Exception:  # noqa: BLE001 — a name lookup must never fail the warn
+            logger.debug(
+                "warn_user could not resolve username for %s", target_user_id,
+                exc_info=True,
+            )
+        async with get_db_session_context() as writer_session:
+            action = await _mod_action_ops.create_action(
+                writer_session,
+                guild_id=guild_id,
+                target_user_id=target_user_id,
+                target_username=target_username,
+                moderator_user_id=None,
+                moderator_username=f"handler:{handler_name}",
+                action_type="warn",
+                reason=reason,
+                source="handler",
+                channel_id=warn_channel_id or None,
+            )
+            await writer_session.commit()
+            # Counted host-side so the script gets an AUTHORITATIVE escalation
+            # counter. A script tallying warns itself from list_mod_actions would
+            # silently undercount: that read is clamped to 50 rows and returns
+            # every action type, so a heavy user's warn history truncates and the
+            # "third strike" escalation quietly never fires.
+            warn_count = await _mod_action_ops.count_warns_for_user(
+                writer_session, guild_id, target_user_id
+            )
+            # Fire the synthetic mod_action trigger so a handler-issued warn
+            # reaches mod-log formatter handlers exactly like /warn does. Best
+            # effort, mirroring mod_action_dispatch's discipline: a dispatch
+            # failure is logged, NEVER propagated into the warn, whose notice and
+            # audit row have both already landed. Imported here because
+            # handler_dispatch imports this module for AdminHandlerFirePayload.
+            try:
+                from smarter_dev.web.handler_dispatch import (
+                    build_mod_action_context,
+                    dispatch_handler_event,
+                )
+
+                await dispatch_handler_event(
+                    writer_session,
+                    guild_id=guild_id,
+                    channel_id="",
+                    trigger_type="mod_action",
+                    trigger_context=build_mod_action_context(action),
+                    # This dispatch is caused BY the running fire, so it descends
+                    # one generation: warn -> mod-log handler -> whatever THAT
+                    # warns is a real chain, and past MAX_CHAIN_DEPTH the choke
+                    # point cuts it. Sits behind the max_mod_actions=0 rail above,
+                    # which already forbids a mod_action fire from warning at all.
+                    chain_depth=payload.chain_depth + 1,
+                )
+            except Exception:  # noqa: BLE001 — dispatch never breaks the warn
+                logger.debug("handler warn mod_action dispatch failed", exc_info=True)
+        return warn_count
+
+    async def read_rules() -> list[dict]:
+        # guild_id bound host-side, same as the mod-action reader. Parsing is
+        # guild_rules.parse_guild_rules — the SAME function /rule uses — so a
+        # handler and the command number the rules identically. A guild with no
+        # rules row parses None into [].
+        async with get_db_session_context() as reader_session:
+            config = await _guild_rules_ops.get_config(reader_session, guild_id)
+        markdown = config.rules_markdown if config is not None else None
+        return [
+            {"number": rule.index, "title": rule.title, "text": rule.body}
+            for rule in parse_guild_rules(markdown)
+        ]
+
     result = await run_handler_script(
         script,
         payload.trigger_context,
@@ -161,6 +265,8 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
         limiter=limiter,
         agent_runner=run_gathering_agent,
         mod_action_reader=read_mod_actions,
+        mod_action_recorder=record_warn,
+        rules_reader=read_rules,
         handler_id=str(handler_id),
         timer_scheduler=schedule_timer,
         timer_limiter=timer_limiter,

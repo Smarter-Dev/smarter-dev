@@ -55,66 +55,29 @@ from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from smarter_dev.shared.redis_client import get_redis_client
-from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.api_native.errors import parse_uuid_path
 from smarter_dev.web.api_native.errors import plain_error
-from smarter_dev.web.handler_caps import ADMIN_FIRES_PER_MIN
-from smarter_dev.web.handler_caps import DM_FIRES_PER_AUTHOR_PER_MIN
-from smarter_dev.web.handler_caps import GUILD_MEMBER_EVENTS_PER_MIN
 from smarter_dev.web.handler_caps import MAX_HANDLERS_PER_CHANNEL
-from smarter_dev.web.handler_caps import WindowedLimiter
-from smarter_dev.web.handler_caps import dm_trigger_author_key
-from smarter_dev.web.handler_caps import fires_per_min_for_trigger
-from smarter_dev.web.handler_caps import guild_member_events_key
-from smarter_dev.web.handler_caps import handler_fire_key
+# The fan-out and its trigger-class constants live in handler_dispatch so the
+# worker can fire a trigger through the same rails; re-imported here because
+# active-channels shares the guild-scoped classification with dispatch.
+from smarter_dev.web.handler_dispatch import CHAIN_DEPTH_DECLINE_REASON
+from smarter_dev.web.handler_dispatch import GUILD_SCOPED_ADMIN_TRIGGERS
+from smarter_dev.web.handler_dispatch import chain_depth_exceeded
+from smarter_dev.web.handler_dispatch import dispatch_handler_event
 from smarter_dev.web.handler_schedule import ScheduleError
 from smarter_dev.web.handler_schedule import first_fire_at
 from smarter_dev.web.handler_schedule import validate_time_trigger_settings
 from smarter_dev.web.handlers_jobs import HandlerFirePayload
-from smarter_dev.web.member_activity import activity_facts
-from smarter_dev.web.member_activity import get_activity
-from smarter_dev.web.member_activity import record_activity
 from smarter_dev.web.models import ADMIN_HANDLER_EVENT_TRIGGERS
-from smarter_dev.web.models import ADMIN_ONLY_TRIGGER_TYPES
-from smarter_dev.web.models import ADMIN_SYNTHETIC_TRIGGER_TYPES
 from smarter_dev.web.models import HANDLER_EVENT_TRIGGERS
 from smarter_dev.web.models import HANDLER_TRIGGER_TYPES
 from smarter_dev.web.models import AdminHandler
 from smarter_dev.web.models import ChannelHandler
 
 logger = logging.getLogger(__name__)
-
-# Admin-only triggers that are NOT guild-shaped member lifecycle events, so the
-# per-guild raid window must not gate them: thread_create and message_edit
-# (both dispatched with a real home channel — the thread's parent / the edited
-# message's channel) and dm_message (its own per-author window). Excluded from
-# MEMBER_EVENT_TRIGGERS.
-_NON_MEMBER_ADMIN_TRIGGERS = ("thread_create", "dm_message", "message_edit")
-
-# The guild-shaped member lifecycle triggers: dispatched with ``channel_id=""``
-# (a member event has no channel), matched admin-only by guild + trigger, and
-# gated by the per-guild ``GUILD_MEMBER_EVENTS_PER_MIN`` raid window. dm_message is
-# deliberately NOT here — it is guild-scoped in dispatch but has its OWN
-# per-(handler, author) window (see GUILD_SCOPED_ADMIN_TRIGGERS), not the raid gate.
-MEMBER_EVENT_TRIGGERS = tuple(
-    trigger
-    for trigger in ADMIN_ONLY_TRIGGER_TYPES
-    if trigger not in _NON_MEMBER_ADMIN_TRIGGERS
-)
-
-# Admin triggers dispatched with NO home channel (``channel_id=""``), so the
-# admin scope check is bypassed and the handler surfaces as a (guild_id, trigger)
-# guild-trigger in active-channels: the member_* events, dm_message (a DM has no
-# guild channel to scope against), and the synthetic mod_action trigger (fired
-# guild-wide after a ModerationAction commit; NOT under the member-events raid
-# gate — MEMBER_EVENT_TRIGGERS excludes it — so a mass-ban wave is bounded only by
-# the per-handler ADMIN_FIRES_PER_MIN window).
-GUILD_SCOPED_ADMIN_TRIGGERS = (
-    MEMBER_EVENT_TRIGGERS + ("dm_message",) + ADMIN_SYNTHETIC_TRIGGER_TYPES
-)
 
 # Permission granted to the bot's Skrift service key (see roles.py `bot-service`
 # role and the phase-01 key-mint runbook).
@@ -166,6 +129,11 @@ class DispatchRequest(BaseModel):
     channel_id: str
     trigger_type: str
     trigger_context: dict = Field(default_factory=dict)
+    # How many handler fires deep this dispatch is. A separate field rather than
+    # a trigger_context key so it never reaches the sandbox — see
+    # dispatch_handler_event. Defaulted to 0: the bot's gateway events are chain
+    # roots, so an omitted field is a root, not an error.
+    chain_depth: int = 0
 
 
 def _to_response(record: ChannelHandler) -> HandlerResponse:
@@ -405,142 +373,35 @@ class HandlerController(Controller):
         db_session: AsyncSession,
         data: DispatchRequest,
     ) -> dict:
-        limiter = WindowedLimiter(redis=get_redis_client())
-        dispatched: list[str] = []
+        """HTTP face of the fan-out: the bot's only route into the fire queue.
 
-        is_member_event = data.trigger_type in MEMBER_EVENT_TRIGGERS
-        is_guild_scoped = data.trigger_type in GUILD_SCOPED_ADMIN_TRIGGERS
-        # mod_action is admin-only (synthetic), never in the standard vocabulary,
-        # so the standard-tier query is skipped for it exactly like the member
-        # events — no ChannelHandler can carry it.
-        is_admin_only = (
-            data.trigger_type in ADMIN_ONLY_TRIGGER_TYPES
-            or data.trigger_type in ADMIN_SYNTHETIC_TRIGGER_TYPES
+        Every gate (raid window, activity enrichment, both tier queries, the
+        per-handler windows) lives in :func:`dispatch_handler_event` so the
+        worker can fire a trigger — a handler-issued warn's synthetic
+        ``mod_action`` — through the SAME rails without an HTTP hop.
+        """
+        dispatched = await dispatch_handler_event(
+            db_session,
+            guild_id=data.guild_id,
+            channel_id=data.channel_id,
+            trigger_type=data.trigger_type,
+            trigger_context=data.trigger_context,
+            chain_depth=data.chain_depth,
         )
-
-        # Member lifecycle events are gated by a per-guild raid window BEFORE any
-        # fire is enqueued, so a raid + ban wave degrades to declined dispatches
-        # rather than a fire-queue explosion (all four member_* triggers share the
-        # window). thread_create is not under this gate.
-        if is_member_event and not await limiter.hit(
-            guild_member_events_key(data.guild_id), GUILD_MEMBER_EVENTS_PER_MIN
-        ):
-            return {"dispatched": False, "handler_ids": []}
-
-        # Message triggers carry the author: enrich the context with activity
-        # facts ("first message ever", "days since last message") read BEFORE
-        # recording this message, so scripts get platform truth instead of
-        # tracking users in their size-capped memory.
-        trigger_context = dict(data.trigger_context)
-        # Every gateway-dispatched fire carries its guild id in context so a
-        # script can build cross-channel jump links (mod-log formatters, !history)
-        # — the runtime binds guild_id host-side but doesn't expose it to the
-        # sandbox, and the prompts document context["guild_id"].
-        trigger_context["guild_id"] = data.guild_id
-        # A bot/webhook-authored message (author_is_bot, set bot-side after the
-        # own-bot anti-loop guard) fires ONLY handlers that opted in via
-        # settings["include_bot_messages"]; a plain message handler in the same
-        # channel must not react to bot traffic. Human messages fire every
-        # message handler unchanged.
-        author_is_bot = bool(trigger_context.get("author_is_bot"))
-        author_id = trigger_context.get("author_id")
-        # Activity is human-only: a bot/webhook is not a guild member, so an
-        # opted-in bot message neither records a MemberActivity row nor derives
-        # human-shaped activity facts for it (the bot-side batcher skips them for
-        # the same reason).
-        if data.trigger_type == "message" and author_id and not author_is_bot:
-            now = datetime.now(UTC)
-            row = await get_activity(db_session, data.guild_id, str(author_id))
-            trigger_context.update(activity_facts(row, now))
-            await record_activity(db_session, data.guild_id, str(author_id), now)
-            await db_session.commit()
-
-        # Standard tier: every enabled handler for this (channel, trigger) fires,
-        # each behind its own windowed cap. The five admin-only member/thread
-        # triggers are never in the standard vocabulary, so skip the query for
-        # them (no ChannelHandler can match).
-        if not is_admin_only:
-            standard_rows = (
-                (
-                    await db_session.execute(
-                        select(ChannelHandler).where(
-                            ChannelHandler.channel_id == data.channel_id,
-                            ChannelHandler.trigger_type == data.trigger_type,
-                            ChannelHandler.enabled.is_(True),
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            for standard in standard_rows:
-                if author_is_bot and not (standard.settings or {}).get(
-                    "include_bot_messages"
-                ):
-                    continue
-                if not await limiter.hit(
-                    handler_fire_key(str(standard.id)),
-                    fires_per_min_for_trigger(standard.trigger_type),
-                ):
-                    continue
-                await worker_submit(
-                    HandlerFirePayload(
-                        handler_id=str(standard.id), trigger_context=trigger_context
-                    )
-                )
-                dispatched.append(str(standard.id))
-
-        # Admin tier: every enabled admin handler for this guild+trigger. For
-        # member_* events (channel_id="") the scope check is bypassed — the event
-        # has no channel for a scope to mean anything, so they match by guild
-        # alone. Every other trigger (including thread_create, dispatched with the
-        # parent channel) matches when its scope includes the channel ([] = all).
-        admin_rows = (
-            (
-                await db_session.execute(
-                    select(AdminHandler).where(
-                        AdminHandler.guild_id == data.guild_id,
-                        AdminHandler.trigger_type == data.trigger_type,
-                        AdminHandler.enabled.is_(True),
-                    )
-                )
-            )
-            .scalars()
-            .all()
+        # ``reason`` names WHY nothing fired when the answer isn't "no handler
+        # matched" — a depth cut is otherwise indistinguishable from silence, and
+        # "my handler randomly stopped" is the worst way to learn about a rail.
+        # None on every other outcome, so the two existing keys are unchanged.
+        reason = (
+            CHAIN_DEPTH_DECLINE_REASON
+            if chain_depth_exceeded(data.chain_depth)
+            else None
         )
-        for admin_handler in admin_rows:
-            if author_is_bot and not (admin_handler.settings or {}).get(
-                "include_bot_messages"
-            ):
-                continue
-            if not is_guild_scoped:
-                scope = admin_handler.channel_ids or []
-                if scope and data.channel_id not in scope:
-                    continue
-            # dm_message: a per-(handler, author) minute window so a user spamming
-            # DMs burns their OWN window (a declined dispatch) rather than the
-            # handler's global fire budget. Enforced before the fire cap below,
-            # which still applies on top. A DM always carries author_id.
-            if data.trigger_type == "dm_message" and author_id:
-                if not await limiter.hit(
-                    dm_trigger_author_key(str(admin_handler.id), str(author_id)),
-                    DM_FIRES_PER_AUTHOR_PER_MIN,
-                ):
-                    continue
-            if not await limiter.hit(
-                handler_fire_key(str(admin_handler.id)), ADMIN_FIRES_PER_MIN
-            ):
-                continue
-            await worker_submit(
-                AdminHandlerFirePayload(
-                    admin_handler_id=str(admin_handler.id),
-                    channel_id=data.channel_id,
-                    trigger_context=trigger_context,
-                )
-            )
-            dispatched.append(str(admin_handler.id))
-
-        return {"dispatched": bool(dispatched), "handler_ids": dispatched}
+        return {
+            "dispatched": bool(dispatched),
+            "handler_ids": dispatched,
+            "reason": reason,
+        }
 
     @get("/active-channels", status_code=HTTP_200_OK, guards=BOT_API_GUARDS)
     async def active_channels(

@@ -221,6 +221,12 @@ async def _dispatch(
                 "channel_id": channel_id,
                 "trigger_type": trigger_type,
                 "trigger_context": context,
+                # Every dispatch from here is a gateway event, i.e. a chain
+                # ROOT — nothing a handler did caused it (as far as the worker
+                # can correlate), so it starts the depth counter at 0. Sent
+                # explicitly rather than leaning on the API default so the
+                # root-ness is visible at the call site.
+                "chain_depth": 0,
             },
         )
     except Exception:  # noqa: BLE001 — dispatch is best-effort for a toy

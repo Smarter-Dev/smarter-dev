@@ -212,6 +212,22 @@ Provided async functions — you MUST `await` every call:
   await timeout_user(user_id: str, duration_seconds: int = 600) -> str
       For kick/timeout, a member who already left (404) is likewise a successful no-op. Other
       failures still raise.
+  await warn_user(user_id: str, reason: str, channel_id: str = None, dm: bool = True) -> dict
+      The handler-tier /warn: posts a public warning notice, best-effort DMs the member, and
+      records a PERMANENT moderation-log row that /history and list_mod_actions both read.
+      Returns {"message_id", "dm_sent", "warn_count"}. dm_sent=False means the member's DMs are
+      CLOSED or you share no mutual guild — expected, NOT an error; the warn still counted.
+      warn_count is the member's AUTHORITATIVE total warns in this guild AFTER this one, so
+      escalate on it (`if result["warn_count"] >= 3: await timeout_user(...)`) — never tally warns
+      yourself from list_mod_actions, which is clamped to 50 rows and returns every action type,
+      so a heavy user's count silently truncates. channel_id defaults to the trigger channel and
+      must be inside channel_ids when set; the notice spends the message budget and the channel
+      message window like any send. The username in the log is resolved from Discord host-side —
+      you pass only the id. PROPORTIONALITY: for an ESTABLISHED member (see the activity facts),
+      prefer warn_user over timeout_user for a first offence — a warn is a correction, a timeout
+      is a punishment; save timeout/kick/ban for repeat offenders, raids, and obvious bad actors.
+      Spends a moderation action, so a mod_action-triggered handler CANNOT call it (0 moderation
+      actions) — that is the rail that stops a warn from re-triggering a warn.
   await add_role(user_id: str, role_id: str, reason: str = None) -> bool
   await remove_role(user_id: str, role_id: str, reason: str = None) -> bool
       Grant/revoke ONE role on a member. Returns True when applied, False when the member has
@@ -279,6 +295,14 @@ Provided async functions — you MUST `await` every call:
       under Discord's 100 window, a FLOOR once it fills — render "N+ more", never an exact total. One
       lookup covers the whole call (search + role resolution). All-digit queries: also try
       get_member_info(query) for a direct id hit.
+  await list_rules() -> list[dict]
+      This guild's configured rules IN ORDER, each {"number", "title", "text"} — the SAME rules,
+      with the SAME numbering, that the /rule command cites, so quoting rule 3 here and there
+      means the same thing. A guild that has written no rules returns [] — ALWAYS branch on the
+      empty list rather than indexing blind. Use it to quote the rule a warning is about
+      (`rules = await list_rules()` once, then pick by number) or to render a rules digest;
+      "text" is markdown, so long rules can blow the 2000-char message cap — truncate. Costs a
+      lookup (shared 10/fire pool). Call it ONCE per fire and reuse the list.
   await create_thread(name: str, message_id: str = None) -> str   # returns the new thread id
       message_id set: spins a thread off that message; omitted: a public thread on the home channel.
   await create_post(title: str, content: str, tag_names: list = None) -> str   # forum post thread id
@@ -339,11 +363,16 @@ Provided async functions — you MUST `await` every call:
 
 ## Per-fire limits (admin tier)
 - 5 messages, 25 moderation actions, 3 agent calls, 32 KB context into an agent, 120 s wall-clock.
+  Moderation actions cover ban/kick/timeout/WARN/delete_message/delete_webhook/rename_channel; a
+  warn_user also spends a message for its notice (and one more for the DM).
 - 5 discord-reads (list_threads / get_guild_member_count / get_role_members), 10 thread-ops (create/close/lock/reopen/
   delete thread). A guild thread-op window also caps thread ops server-wide — don't fan out
   creates/deletes in a loop.
-- 10 lookups (list_mod_actions / get_member_info / search_guild_members), separate from discord-reads.
-  A mod_action-triggered handler runs with 0 moderation actions (it can only format + post).
+- 10 lookups (list_mod_actions / get_member_info / search_guild_members / list_rules), separate
+  from discord-reads.
+  A mod_action-triggered handler runs with 0 moderation actions (it can only format + post) — so
+  it cannot warn_user either, which is exactly what stops a warn's own mod-log fire from warning
+  again.
 - 10 role-changes (add_role/remove_role), separate from moderation actions; a guild role-change
   window also caps grants server-wide — never grant roles in an unbounded loop.
 - 5 timers armed per fire (schedule_timer), plus a 30/hour per-handler arming window.

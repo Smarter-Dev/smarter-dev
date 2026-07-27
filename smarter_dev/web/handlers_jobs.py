@@ -43,6 +43,12 @@ class HandlerFirePayload(BaseModel):
 
     handler_id: str
     trigger_context: dict = {}
+    # How many handler fires deep this fire is (0 = caused by a gateway event).
+    # An explicit FIELD, never a trigger_context key: context goes to the sandbox
+    # verbatim, so a depth in there would be script-readable and script-forgeable.
+    # Defaulted so an omitted field means "chain root", not a crash — schedule
+    # re-arms and any older enqueued job read as roots, which is what they are.
+    chain_depth: int = 0
 
 
 @handler(
@@ -93,6 +99,13 @@ async def run_handler_fire(payload: HandlerFirePayload) -> dict:
             HandlerFirePayload(
                 handler_id=str(handler_id),
                 trigger_context=refire_context,
+                # A timer re-fire is caused BY this fire, so it descends one
+                # generation. The re-fire itself is still enqueued (the depth
+                # check lives at the dispatch choke point, and the arming window
+                # is what bounds a self-deferring handler); carrying the depth is
+                # what makes anything that re-fire DISPATCHES get refused once
+                # the chain has run past MAX_CHAIN_DEPTH.
+                chain_depth=payload.chain_depth + 1,
             ),
             scheduled_for=fire_at,
             job_id=uuid4().hex,

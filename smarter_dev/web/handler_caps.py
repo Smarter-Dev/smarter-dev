@@ -43,6 +43,25 @@ GUILD_THREAD_OPS_PER_MIN = 30
 # declined fire rather than a REST flood.
 GUILD_ROLE_CHANGES_PER_MIN = 30
 
+# Trigger chain-depth bound. A gateway event is a chain ROOT at depth 0; a
+# handler firing at depth d causes dispatches at depth d+1; a dispatch arriving
+# with depth > MAX_CHAIN_DEPTH is declined before either tier is enqueued. So a
+# chain runs root -> 1 -> 2 -> 3 (four generations) and the one that would be
+# depth 4 is cut. This is a RECURSION bound, not a volume bound — every
+# per-handler and per-guild fire window above is untouched by it, and depth is
+# what stops an unbounded cascade that never breaches any single window because
+# each generation is individually slow.
+#
+# BOUNDARY (know this before trusting the counter): depth only follows causal
+# links the WORKER can see — a fire's schedule_timer re-fire and a fire's
+# warn_user mod_action dispatch. A cascade that leaves through Discord and comes
+# back as a fresh gateway event (a handler's send_message observed as a message,
+# create_thread as thread_create, add_role as member_role_change, ban as
+# member_leave) re-enters at depth 0, because nothing correlates the gateway
+# event back to the fire that caused it. Closing that would need Redis
+# breadcrumbs keyed by the emitted side effect; deliberately not built yet.
+MAX_CHAIN_DEPTH = 3
+
 # Per-channel rename ceiling. Discord itself hard-limits channel renames to
 # 2 per 10 minutes per channel, so this window is pinned to that limit rather
 # than the generous preset — a looser value would just surface as REST 429s.
