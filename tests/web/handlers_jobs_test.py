@@ -109,6 +109,7 @@ async def test_admin_fire_sets_emitter_guild_id(monkeypatch, capture_emitter):
     record = SimpleNamespace(
         enabled=True,
         script="pass",
+        name="h",
         guild_id="G77",
         trigger_type="message",
         channel_ids=["C1"],
@@ -537,8 +538,8 @@ async def test_standard_fire_arms_timer_submits_fire_payload(monkeypatch):
 
 async def test_admin_fire_arms_timer_submits_admin_payload(monkeypatch):
     record = SimpleNamespace(
-        enabled=True, script="pass", guild_id="G1", trigger_type="message",
-        channel_ids=["C1"], settings={}, memory={},
+        enabled=True, script="pass", name="h", guild_id="G1",
+        trigger_type="message", channel_ids=["C1"], settings={}, memory={},
     )
     captured, submits, limiter_kwargs = {}, [], []
 
@@ -745,8 +746,8 @@ def _patch_admin_reschedule_job(monkeypatch, record, submits):
 
 async def test_admin_schedule_row_scheduled_fire_reschedules(monkeypatch):
     record = SimpleNamespace(
-        enabled=True, script="pass", guild_id="G1", trigger_type="schedule",
-        channel_ids=["C1"],
+        enabled=True, script="pass", name="h", guild_id="G1",
+        trigger_type="schedule", channel_ids=["C1"],
         settings={
             "interval_seconds": 300,
             "start_at": "2099-01-01T00:00:00Z",
@@ -771,8 +772,9 @@ async def test_admin_schedule_row_timer_refire_does_not_reschedule(monkeypatch):
     # Same fork guard on the admin fire job: a timer re-fire of a schedule admin
     # handler must not enqueue a second next-occurrence chain.
     record = SimpleNamespace(
-        enabled=True, script="pass", guild_id="G1", trigger_type="schedule",
-        channel_ids=["C1"], settings={"interval_seconds": 300}, memory={},
+        enabled=True, script="pass", name="h", guild_id="G1",
+        trigger_type="schedule", channel_ids=["C1"],
+        settings={"interval_seconds": 300}, memory={},
     )
     submits: list = []
     _patch_admin_reschedule_job(monkeypatch, record, submits)
@@ -898,6 +900,7 @@ async def test_dm_message_admin_fire_skips_error_notice(monkeypatch):
     record = SimpleNamespace(
         enabled=True,
         script="pass",
+        name="h",
         guild_id="G5",
         trigger_type="dm_message",
         channel_ids=[],
@@ -1078,3 +1081,357 @@ async def test_mod_action_fire_forces_zero_mod_action_budget(monkeypatch, test_e
     run = await _handler_run_for(test_engine, handler_id)
     assert run.outcome == "cap_exceeded"
     assert run.cap == "mod_actions"
+
+
+# -- warn recorder + rules reader injection (host-bound guild) ------------------
+
+import smarter_dev.web.handler_dispatch as handler_dispatch
+from smarter_dev.web.models import GuildRulesConfig
+
+
+class _NamedActor:
+    """AdminActor stand-in whose get_member_info answers the username lookup.
+
+    ``fail`` models a REST failure so the degrade-to-raw-id path is exercisable.
+    """
+
+    fail = False
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def get_member_info(self, user_id):
+        if _NamedActor.fail:
+            raise RuntimeError("discord is down")
+        return {"user_id": user_id, "username": f"name-{user_id}"}
+
+
+def _capture_injected(monkeypatch, test_engine, captured):
+    """Run an admin fire that only captures the injected callables."""
+
+    async def fake_run(script, context, **kwargs):
+        captured["recorder"] = kwargs.get("mod_action_recorder")
+        captured["rules_reader"] = kwargs.get("rules_reader")
+        return _ok_result()
+
+    _patch_admin_job(monkeypatch, test_engine, _ok_result())
+    monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
+
+    import smarter_dev.web.admin_actions as admin_actions
+
+    monkeypatch.setattr(admin_actions, "AdminActor", _NamedActor)
+    # The recorder's mod_action fire rides the extracted fan-out; stub its
+    # submit/redis seams so nothing reaches a real worker queue.
+    submitted: list = []
+
+    async def fake_submit(payload, **kwargs):
+        submitted.append(payload)
+
+    monkeypatch.setattr(handler_dispatch, "worker_submit", fake_submit)
+    monkeypatch.setattr(handler_dispatch, "get_redis_client", lambda: None)
+
+    class _AllowLimiter:
+        def __init__(self, redis=None):
+            pass
+
+        async def hit(self, key, limit, window_seconds=None):
+            return True
+
+    monkeypatch.setattr(handler_dispatch, "WindowedLimiter", _AllowLimiter)
+    return submitted
+
+
+async def _actions_for(engine, guild_id: str) -> list[ModerationAction]:
+    from sqlalchemy import select
+
+    async with async_sessionmaker(engine, expire_on_commit=False)() as s:
+        return list(
+            (
+                await s.execute(
+                    select(ModerationAction).where(
+                        ModerationAction.guild_id == guild_id
+                    )
+                )
+            ).scalars().all()
+        )
+
+
+async def test_warn_recorder_binds_guild_and_resolves_username_host_side(
+    monkeypatch, test_engine
+):
+    _NamedActor.fail = False
+    handler_id = await _seed_admin_handler(test_engine, "G1")
+    captured: dict = {}
+    _capture_injected(monkeypatch, test_engine, captured)
+
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
+    )
+
+    count = await captured["recorder"]("U1", "spamming", "C1")
+    assert count == 1
+
+    actions = await _actions_for(test_engine, "G1")
+    assert len(actions) == 1
+    action = actions[0]
+    # The guild is bound host-side; the script supplied only the target.
+    assert action.guild_id == "G1"
+    assert action.action_type == "warn"
+    assert action.source == "handler"
+    assert action.channel_id == "C1"
+    # The username is resolved from Discord, never taken from the script.
+    assert action.target_username == "name-U1"
+    assert action.moderator_username.startswith("handler:")
+
+
+async def test_warn_recorder_returns_authoritative_warn_count(
+    monkeypatch, test_engine
+):
+    _NamedActor.fail = False
+    handler_id = await _seed_admin_handler(test_engine, "G2")
+    captured: dict = {}
+    _capture_injected(monkeypatch, test_engine, captured)
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
+    )
+
+    # The count is the guild+user total AFTER each warn, so a script can escalate
+    # on it without tallying (and truncating) list_mod_actions itself.
+    assert await captured["recorder"]("U5", "one", "C1") == 1
+    assert await captured["recorder"]("U5", "two", "C1") == 2
+    # Another user's warns never bleed into the counter.
+    assert await captured["recorder"]("U6", "one", "C1") == 1
+
+
+async def test_warn_recorder_degrades_to_raw_id_when_lookup_fails(
+    monkeypatch, test_engine
+):
+    # A username fetch failure must not fail a warn whose notice and DM already
+    # landed: the audit row falls back to the raw id.
+    _NamedActor.fail = True
+    handler_id = await _seed_admin_handler(test_engine, "G3")
+    captured: dict = {}
+    _capture_injected(monkeypatch, test_engine, captured)
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
+    )
+
+    assert await captured["recorder"]("U7", "r", "C1") == 1
+    actions = await _actions_for(test_engine, "G3")
+    assert actions[0].target_username == "U7"
+    _NamedActor.fail = False
+
+
+async def test_warn_recorder_fires_mod_action_trigger_for_mod_log_handlers(
+    monkeypatch, test_engine
+):
+    _NamedActor.fail = False
+    handler_id = await _seed_admin_handler(test_engine, "G4")
+    # A guild-wide mod-log formatter that must see the handler-issued warn
+    # exactly like it sees /warn's.
+    log_id = await _seed_admin_handler(test_engine, "G4", trigger_type="mod_action")
+    captured: dict = {}
+    submitted = _capture_injected(monkeypatch, test_engine, captured)
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
+    )
+
+    await captured["recorder"]("U8", "rude", "C1")
+    fired = [p.admin_handler_id for p in submitted]
+    assert log_id in fired
+    context = [p for p in submitted if p.admin_handler_id == log_id][0].trigger_context
+    assert context["trigger_type"] == "mod_action"
+    assert context["action_type"] == "warn"
+    assert context["target_user_id"] == "U8"
+
+
+async def test_warn_recorder_survives_a_dispatch_failure(monkeypatch, test_engine):
+    # Best-effort, mirroring mod_action_dispatch: a dispatch blow-up is logged,
+    # never propagated into the warn — the row and the count still come back.
+    _NamedActor.fail = False
+    handler_id = await _seed_admin_handler(test_engine, "G5")
+    captured: dict = {}
+    _capture_injected(monkeypatch, test_engine, captured)
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("queue is down")
+
+    monkeypatch.setattr(handler_dispatch, "dispatch_handler_event", boom)
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
+    )
+
+    assert await captured["recorder"]("U9", "r", "C1") == 1
+    assert len(await _actions_for(test_engine, "G5")) == 1
+
+
+async def test_rules_reader_binds_guild_and_reuses_the_shared_parse(
+    monkeypatch, test_engine
+):
+    _NamedActor.fail = False
+    handler_id = await _seed_admin_handler(test_engine, "G6")
+    async with async_sessionmaker(test_engine, expire_on_commit=False)() as s:
+        s.add(
+            GuildRulesConfig(
+                guild_id="G6",
+                rules_markdown="preamble\n\n## Be kind\nNo harassment.\n\n## No spam\n",
+            )
+        )
+        # A different guild's rules must never surface through G6's reader.
+        s.add(GuildRulesConfig(guild_id="G7", rules_markdown="## Other\nnope\n"))
+        await s.commit()
+
+    captured: dict = {}
+    _capture_injected(monkeypatch, test_engine, captured)
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
+    )
+
+    rules = await captured["rules_reader"]()
+    # Numbering matches /rule's: 1-based document order, preamble discarded.
+    assert rules == [
+        {"number": 1, "title": "Be kind", "text": "No harassment."},
+        {"number": 2, "title": "No spam", "text": ""},
+    ]
+
+
+async def test_rules_reader_returns_empty_for_a_guild_with_no_rules_row(
+    monkeypatch, test_engine
+):
+    _NamedActor.fail = False
+    handler_id = await _seed_admin_handler(test_engine, "G8")
+    captured: dict = {}
+    _capture_injected(monkeypatch, test_engine, captured)
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
+    )
+    assert await captured["rules_reader"]() == []
+
+
+# -- trigger chain depth (§3.8 recursion rail) ---------------------------------
+
+from smarter_dev.web.handler_caps import MAX_CHAIN_DEPTH
+
+
+async def test_standard_timer_refire_descends_one_generation(monkeypatch):
+    # A timer re-fire is caused BY the running fire, so its payload carries
+    # depth+1. An unset depth on the incoming payload means "chain root" (0).
+    record = SimpleNamespace(
+        enabled=True, script="pass", channel_id="C1", guild_id="G1",
+        trigger_type="message", settings={}, memory={},
+    )
+    captured, submits, limiter_kwargs = {}, [], []
+
+    async def fake_run(script, context, **kwargs):
+        captured.update(kwargs)
+        return _ok_result()
+
+    _patch_std_job(
+        monkeypatch, record, fake_run=fake_run, submits=submits,
+        limiter_kwargs=limiter_kwargs,
+    )
+    hid = str(uuid4())
+    payload_in = HandlerFirePayload(handler_id=hid)
+    assert payload_in.chain_depth == 0  # default: an omitted field is a root
+    await handlers_jobs.run_handler_fire(payload_in)
+
+    fire_at = datetime.now(timezone.utc) + timedelta(seconds=60)
+    await captured["timer_scheduler"](fire_at, {"trigger_type": "timer"})
+    assert submits[0][0].chain_depth == 1
+
+
+async def test_standard_timer_refire_carries_the_incoming_depth(monkeypatch):
+    record = SimpleNamespace(
+        enabled=True, script="pass", channel_id="C1", guild_id="G1",
+        trigger_type="message", settings={}, memory={},
+    )
+    captured, submits, limiter_kwargs = {}, [], []
+
+    async def fake_run(script, context, **kwargs):
+        captured.update(kwargs)
+        return _ok_result()
+
+    _patch_std_job(
+        monkeypatch, record, fake_run=fake_run, submits=submits,
+        limiter_kwargs=limiter_kwargs,
+    )
+    await handlers_jobs.run_handler_fire(
+        HandlerFirePayload(handler_id=str(uuid4()), chain_depth=2)
+    )
+    await captured["timer_scheduler"](
+        datetime.now(timezone.utc) + timedelta(seconds=60), {"trigger_type": "timer"}
+    )
+    assert submits[0][0].chain_depth == 3
+
+
+async def test_admin_timer_refire_descends_one_generation(monkeypatch, test_engine):
+    handler_id = await _seed_admin_handler(test_engine, "GD1")
+    captured: dict = {}
+
+    async def fake_run(script, context, **kwargs):
+        captured.update(kwargs)
+        return _ok_result()
+
+    _patch_admin_job(monkeypatch, test_engine, _ok_result())
+    monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
+    submits: list = []
+
+    async def fake_submit(payload, scheduled_for=None, job_id=None):
+        submits.append(payload)
+
+    monkeypatch.setattr(admin_handlers_jobs, "worker_submit", fake_submit)
+
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(
+            admin_handler_id=handler_id, channel_id="C1", chain_depth=1
+        )
+    )
+    await captured["timer_scheduler"](
+        datetime.now(timezone.utc) + timedelta(seconds=60), {"trigger_type": "timer"}
+    )
+    assert submits[0].chain_depth == 2
+
+
+async def test_warn_mod_action_dispatch_descends_one_generation(
+    monkeypatch, test_engine
+):
+    # warn -> mod-log handler is a real causal chain, so the synthetic
+    # mod_action dispatch descends one generation from the warning fire.
+    _NamedActor.fail = False
+    handler_id = await _seed_admin_handler(test_engine, "GD2")
+    log_id = await _seed_admin_handler(test_engine, "GD2", trigger_type="mod_action")
+    captured: dict = {}
+    submitted = _capture_injected(monkeypatch, test_engine, captured)
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(
+            admin_handler_id=handler_id, channel_id="C1", chain_depth=1
+        )
+    )
+
+    await captured["recorder"]("U1", "rude", "C1")
+    fired = [p for p in submitted if p.admin_handler_id == log_id]
+    assert len(fired) == 1
+    assert fired[0].chain_depth == 2
+    # Depth stays OUT of the sandbox-visible context.
+    assert "chain_depth" not in fired[0].trigger_context
+
+
+async def test_warn_mod_action_dispatch_is_cut_past_the_max_depth(
+    monkeypatch, test_engine
+):
+    # A fire already at MAX_CHAIN_DEPTH would dispatch at MAX+1: refused at the
+    # choke point, nothing enqueued — and the warn itself still succeeds.
+    _NamedActor.fail = False
+    handler_id = await _seed_admin_handler(test_engine, "GD3")
+    await _seed_admin_handler(test_engine, "GD3", trigger_type="mod_action")
+    captured: dict = {}
+    submitted = _capture_injected(monkeypatch, test_engine, captured)
+    await admin_handlers_jobs.run_admin_handler_fire(
+        AdminHandlerFirePayload(
+            admin_handler_id=handler_id, channel_id="C1", chain_depth=MAX_CHAIN_DEPTH
+        )
+    )
+
+    assert await captured["recorder"]("U1", "rude", "C1") == 1
+    assert submitted == []
+    assert len(await _actions_for(test_engine, "GD3")) == 1

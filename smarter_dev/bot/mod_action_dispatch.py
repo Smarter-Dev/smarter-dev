@@ -16,34 +16,19 @@ that recorded the action, so :func:`dispatch_mod_action` never raises.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from smarter_dev.bot.plugins.handler_events import _dispatch
+
+# The context shape lives in the web tier's handler_dispatch because the worker's
+# handler-issued ``warn_user`` builds the same context for the same trigger, and
+# the web package must never import from the bot. Re-exported here so the bot-side
+# writers (and their tests) keep importing it from the module they always have.
+from smarter_dev.web.handler_dispatch import build_mod_action_context
 from smarter_dev.web.models import ModerationAction
 
 logger = logging.getLogger(__name__)
 
-
-def build_mod_action_context(action: ModerationAction) -> dict[str, Any]:
-    """Map a ``ModerationAction`` row to the §3.5 ``mod_action`` trigger context.
-
-    ``channel_id`` / ``trigger_message_id`` come straight off the row (either may
-    be None) so a mod-log-formatter can build "Jump To Action" links; ``created_at``
-    is ISO-8601 (None only for an unflushed row)."""
-    return {
-        "trigger_type": "mod_action",
-        "action_type": action.action_type,
-        "target_user_id": action.target_user_id,
-        "target_username": action.target_username,
-        "moderator_user_id": action.moderator_user_id,
-        "moderator_username": action.moderator_username,
-        "reason": action.reason,
-        "duration_seconds": action.duration_seconds,
-        "source": action.source,
-        "channel_id": action.channel_id,
-        "trigger_message_id": action.trigger_message_id,
-        "created_at": action.created_at.isoformat() if action.created_at else None,
-    }
+__all__ = ["build_mod_action_context", "dispatch_mod_action"]
 
 
 async def dispatch_mod_action(action: ModerationAction) -> None:

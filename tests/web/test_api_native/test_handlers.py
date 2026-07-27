@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from smarter_dev.shared.database import Base
+from smarter_dev.web import handler_dispatch as dispatch_module
 from smarter_dev.web.api_native import handlers as handlers_module
 from smarter_dev.web.api_native.handlers import HandlerController
 from smarter_dev.web.handler_caps import MAX_HANDLERS_PER_CHANNEL
@@ -68,9 +69,12 @@ def submitted(monkeypatch) -> list[tuple]:
     _StubJobHandle.cancelled = []
     monkeypatch.setattr(handlers_module, "worker_submit", _submit)
     monkeypatch.setattr(handlers_module, "get_handle", _StubJobHandle)
-    monkeypatch.setattr(handlers_module, "get_redis_client", lambda: None)
+    # The dispatch fan-out lives in handler_dispatch (the controller is a thin
+    # wrapper over it), so its submit/redis/limiter seams are stubbed there.
+    monkeypatch.setattr(dispatch_module, "worker_submit", _submit)
+    monkeypatch.setattr(dispatch_module, "get_redis_client", lambda: None)
     monkeypatch.setattr(
-        handlers_module, "WindowedLimiter", lambda redis: _StubLimiter(allow=True)
+        dispatch_module, "WindowedLimiter", lambda redis: _StubLimiter(allow=True)
     )
     return captured
 
@@ -347,7 +351,7 @@ def test_dispatch_fires_all_standard_handlers_for_trigger(client):
 
 def test_dispatch_rate_limited(client, monkeypatch):
     monkeypatch.setattr(
-        handlers_module, "WindowedLimiter", lambda redis: _StubLimiter(allow=False)
+        dispatch_module, "WindowedLimiter", lambda redis: _StubLimiter(allow=False)
     )
     client.post("/api/handlers", json=_event_body())
     resp = client.post(
@@ -624,7 +628,7 @@ async def test_dispatch_member_events_decline_past_guild_window(
     from smarter_dev.web.models import AdminHandler
 
     monkeypatch.setattr(
-        handlers_module, "WindowedLimiter", lambda redis: _KeyAwareLimiter()
+        dispatch_module, "WindowedLimiter", lambda redis: _KeyAwareLimiter()
     )
     db_session.add(AdminHandler(
         guild_id="G1", name="gate", trigger_type=trigger, settings={},
@@ -712,7 +716,7 @@ async def test_dispatch_thread_create_not_gated_by_member_window(
     # Even with the member-events window exhausted, thread_create is unaffected —
     # it is bounded by the per-handler fire cap and the thread-op caps, not this.
     monkeypatch.setattr(
-        handlers_module, "WindowedLimiter", lambda redis: _KeyAwareLimiter()
+        dispatch_module, "WindowedLimiter", lambda redis: _KeyAwareLimiter()
     )
     db_session.add(AdminHandler(
         guild_id="G1", name="all-forums", trigger_type="thread_create", settings={},
@@ -878,7 +882,7 @@ async def test_dispatch_message_edit_not_gated_by_member_window(
     # Even with the member-events raid window exhausted, message_edit is
     # unaffected — it is a channel-keyed trigger, not a member lifecycle event.
     monkeypatch.setattr(
-        handlers_module, "WindowedLimiter", lambda redis: _KeyAwareLimiter()
+        dispatch_module, "WindowedLimiter", lambda redis: _KeyAwareLimiter()
     )
     db_session.add(AdminHandler(
         guild_id="G1", name="all-edits", trigger_type="message_edit", settings={},
@@ -1009,7 +1013,7 @@ async def test_dispatch_dm_per_author_window_declines_spammer(
     from smarter_dev.web.models import AdminHandler
 
     shared = _DmAuthorLimiter()
-    monkeypatch.setattr(handlers_module, "WindowedLimiter", lambda redis: shared)
+    monkeypatch.setattr(dispatch_module, "WindowedLimiter", lambda redis: shared)
     db_session.add(AdminHandler(
         guild_id="G1", name="dm-mirror", trigger_type="dm_message", settings={},
         channel_ids=[], description="mirror", script="pass\n", created_by_admin="A1",
@@ -1132,7 +1136,7 @@ async def test_dispatch_mod_action_not_under_member_raid_gate(
         limiters.append(limiter)
         return limiter
 
-    monkeypatch.setattr(handlers_module, "WindowedLimiter", make_limiter)
+    monkeypatch.setattr(dispatch_module, "WindowedLimiter", make_limiter)
     db_session.add(AdminHandler(
         guild_id="G1", name="mod-log", trigger_type="mod_action", settings={},
         channel_ids=[], description="format", script="pass\n", created_by_admin="A1",
@@ -1170,3 +1174,161 @@ async def test_active_channels_lists_mod_action_as_guild_trigger(client, db_sess
     # (guild_id, trigger) guild-trigger even though the handler is scoped.
     assert ["G1", "mod_action"] in body["guild_triggers"]
     assert all(trigger != "mod_action" for _, trigger in body["channels"])
+
+
+# -- the fan-out called DIRECTLY (the worker's path, no HTTP) ------------------
+
+
+async def test_dispatch_handler_event_fans_out_without_the_controller(
+    db_session, submitted
+):
+    """The worker fires a trigger through the SAME function the endpoint uses.
+
+    A handler-issued warn records its ModerationAction and then fires the
+    synthetic ``mod_action`` trigger from inside the fire job — no HTTP hop — so
+    the fan-out must be callable with a bare session and still enqueue.
+    """
+    from smarter_dev.web.handler_dispatch import dispatch_handler_event
+    from smarter_dev.web.models import AdminHandler
+
+    db_session.add(AdminHandler(
+        guild_id="G1", name="mod-log", trigger_type="mod_action", settings={},
+        channel_ids=["C-OTHER"], description="format", script="pass\n",
+        created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    dispatched = await dispatch_handler_event(
+        db_session,
+        guild_id="G1",
+        channel_id="",
+        trigger_type="mod_action",
+        trigger_context={"trigger_type": "mod_action", "action_type": "warn"},
+    )
+    assert len(dispatched) == 1
+    payload, _ = submitted[0]
+    # mod_action is guild-scoped: the handler's channel scope is bypassed, and
+    # the guild id is stamped into the context for jump links.
+    assert payload.channel_id == ""
+    assert payload.trigger_context["guild_id"] == "G1"
+
+
+async def test_dispatch_handler_event_keeps_the_raid_gate(
+    db_session, submitted, monkeypatch
+):
+    # Called directly, the member-events raid window still declines BEFORE any
+    # fire is enqueued — the gate lives in the function, not the endpoint.
+    from smarter_dev.web.handler_dispatch import dispatch_handler_event
+    from smarter_dev.web.models import AdminHandler
+
+    monkeypatch.setattr(
+        dispatch_module, "WindowedLimiter", lambda redis: _KeyAwareLimiter()
+    )
+    db_session.add(AdminHandler(
+        guild_id="G1", name="greeter", trigger_type="member_join", settings={},
+        channel_ids=[], description="greet", script="pass\n", created_by_admin="A1",
+    ))
+    await db_session.commit()
+
+    dispatched = await dispatch_handler_event(
+        db_session,
+        guild_id="G1",
+        channel_id="",
+        trigger_type="member_join",
+        trigger_context={"trigger_type": "member_join", "member_id": "U9"},
+    )
+    assert dispatched == []
+    assert submitted == []
+
+
+# -- trigger chain depth (recursion rail, both tiers) ---------------------------
+
+
+def _seed_both_tiers(db_session):
+    """One standard + one guild-wide admin handler on the same message trigger."""
+    from smarter_dev.web.models import AdminHandler, ChannelHandler
+
+    db_session.add(ChannelHandler(
+        guild_id="G1", channel_id="C1", name="std", trigger_type="message",
+        settings={}, description="std", script="await send_message('x')\n",
+        created_by="U1",
+    ))
+    db_session.add(AdminHandler(
+        guild_id="G1", name="adm", trigger_type="message", settings={},
+        channel_ids=[], description="adm", script="await send_message('y')\n",
+        created_by_admin="A1",
+    ))
+
+
+async def test_dispatch_defaults_to_chain_root_depth_zero(client, db_session):
+    # An omitted chain_depth is a ROOT, not an error, and both tiers' payloads
+    # carry it so their fire jobs can descend from it.
+    _seed_both_tiers(db_session)
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "C1",
+            "trigger_type": "message",
+            "trigger_context": {},
+        },
+    )
+    assert resp.json()["dispatched"] is True
+    assert resp.json()["reason"] is None
+    submitted = client.submitted  # type: ignore[attr-defined]
+    assert len(submitted) == 2
+    assert all(payload.chain_depth == 0 for payload, _ in submitted)
+    # Depth never enters the sandbox-visible context.
+    assert all("chain_depth" not in payload.trigger_context for payload, _ in submitted)
+
+
+async def test_dispatch_at_the_max_depth_still_fires_both_tiers(client, db_session):
+    from smarter_dev.web.handler_caps import MAX_CHAIN_DEPTH
+
+    _seed_both_tiers(db_session)
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "C1",
+            "trigger_type": "message",
+            "trigger_context": {},
+            "chain_depth": MAX_CHAIN_DEPTH,
+        },
+    )
+    # root -> 1 -> 2 -> 3 is four permitted generations; the boundary itself runs.
+    assert len(resp.json()["handler_ids"]) == 2
+    assert resp.json()["reason"] is None
+    submitted = client.submitted  # type: ignore[attr-defined]
+    assert all(payload.chain_depth == MAX_CHAIN_DEPTH for payload, _ in submitted)
+
+
+async def test_dispatch_past_the_max_depth_is_declined_for_both_tiers(
+    client, db_session
+):
+    from smarter_dev.web.handler_caps import MAX_CHAIN_DEPTH
+
+    _seed_both_tiers(db_session)
+    await db_session.commit()
+
+    resp = client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "C1",
+            "trigger_type": "message",
+            "trigger_context": {},
+            "chain_depth": MAX_CHAIN_DEPTH + 1,
+        },
+    )
+    body = resp.json()
+    assert body["dispatched"] is False
+    assert body["handler_ids"] == []
+    # The cut is NAMED, so a silently-stopped handler is diagnosable.
+    assert body["reason"] == "chain_depth_exceeded"
+    # Nothing reached the queue: the check precedes both worker_submits.
+    assert client.submitted == []  # type: ignore[attr-defined]

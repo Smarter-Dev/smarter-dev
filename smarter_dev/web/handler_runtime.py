@@ -71,8 +71,19 @@ limit=10)`` -> list[dict] (this guild's recent actions for a member, newest
 first, via an injected DB reader), ``get_member_info(user_id)`` -> dict (member
 profile; a departed user comes back with ``in_guild=False``), and
 ``search_guild_members(query, limit=10)`` -> dict (prefix name/nick search with a
-per-row top role and an overflow count) — each of the three spends the lookups
-budget, plus ``get_role_members(role_id)`` -> list[dict] (every member currently
+per-row top role and an overflow count), and ``list_rules()`` -> list[dict] of
+the guild's configured rules (``{"number", "title", "text"}``, parsed by
+``guild_rules.parse_guild_rules`` — the same parse ``/rule`` uses — via an
+injected DB reader; ``[]`` when the guild has none) — each of the four spends the
+lookups budget, plus ``warn_user(user_id, reason, channel_id=None, dm=True)`` ->
+dict (``{"message_id", "dm_sent", "warn_count"}``: the handler-tier ``/warn`` —
+spends a mod_action FIRST so a mod_action-triggered fire, which runs with zero
+mod actions, structurally cannot warn in response to a warn; then posts the
+notice through ``send_message``'s budget/window, records the audit row + fires
+the ``mod_action`` trigger through an injected recorder that binds the guild and
+resolves the target's username host-side, and only THEN best-effort DMs the
+target (``dm_sent=False`` on closed DMs, not an error) — recording before the DM
+so a DM-window breach can never leave a public warning with no record), plus ``get_role_members(role_id)`` -> list[dict] (every member currently
 holding a role, paged worker-side and hard-capped at 200; backs the daily
 onboarding-reconcile sweep — spends the discord_reads budget like
 ``get_guild_member_count``).
@@ -162,6 +173,18 @@ TimerScheduler = Callable[[datetime.datetime, dict[str, Any]], Awaitable[None]]
 # another guild's mod history) — the same injection discipline as AgentRunner.
 ModActionReader = Callable[[str, int], Awaitable[list[dict[str, Any]]]]
 
+# An async function (target_user_id, reason, channel_id) -> the target's total
+# warn count in this guild AFTER the row is written. Injected by the admin fire
+# job, which binds the guild id host-side, resolves the target's username from
+# Discord (never from the script), and fires the synthetic mod_action trigger —
+# the same injection discipline as ModActionReader.
+ModActionRecorder = Callable[[str, str, str], Awaitable[int]]
+
+# An async function () -> this guild's configured rules, in document order.
+# Injected by the admin fire job with the guild id bound host-side, so a script
+# can never read another guild's rules — same discipline as ModActionReader.
+RulesReader = Callable[[], Awaitable[list[dict[str, Any]]]]
+
 
 async def _no_agent(prompt: str, has_tools: bool, budget: HandlerBudget) -> str:
     raise RuntimeError("no agent runner configured for this handler execution")
@@ -173,6 +196,14 @@ async def _no_timer(fire_at: datetime.datetime, refire_context: dict[str, Any]) 
 
 async def _no_mod_action_reader(user_id: str, limit: int) -> list[dict[str, Any]]:
     raise RuntimeError("no mod-action reader configured for this handler execution")
+
+
+async def _no_mod_action_recorder(user_id: str, reason: str, channel_id: str) -> int:
+    raise RuntimeError("no mod-action recorder configured for this handler execution")
+
+
+async def _no_rules_reader() -> list[dict[str, Any]]:
+    raise RuntimeError("no rules reader configured for this handler execution")
 
 
 def _clock_os(
@@ -252,6 +283,14 @@ class HandlerExecution:
     # binds the fire's guild id host-side). Admin handlers only; standard fires
     # never construct list_mod_actions so this stays the raising default.
     mod_action_reader: ModActionReader = _no_mod_action_reader
+    # DB-backed writer for warn_user, injected by the admin fire job alongside
+    # the reader: it binds the guild host-side, resolves the target's username
+    # from Discord, commits the ModerationAction and fires the mod_action
+    # trigger. Admin handlers only; the raising default guards an unwired call.
+    mod_action_recorder: ModActionRecorder = _no_mod_action_recorder
+    # DB-backed reader for list_rules (the guild's parsed rules), injected by the
+    # admin fire job with the guild bound host-side. Admin handlers only.
+    rules_reader: RulesReader = _no_rules_reader
     # This handler's id — needed only for the per-handler timer-arming window key.
     # Optional (default "") so existing callers that never arm a timer are unaffected.
     handler_id: str = ""
@@ -326,12 +365,14 @@ class HandlerExecution:
                     "ban_user": self._guard(self._ban_user),
                     "kick_user": self._guard(self._kick_user),
                     "timeout_user": self._guard(self._timeout_user),
+                    "warn_user": self._guard(self._warn_user),
                     "add_role": self._guard(self._add_role),
                     "remove_role": self._guard(self._remove_role),
                     "send_dm": self._guard(self._send_dm),
                     # Mod-audit reads (each spends a lookup): the mod-channel
                     # lookup/history/whois commands and the rejoin alert.
                     "list_mod_actions": self._guard(self._list_mod_actions),
+                    "list_rules": self._guard(self._list_rules),
                     "get_member_info": self._guard(self._get_member_info),
                     "search_guild_members": self._guard(self._search_guild_members),
                     "get_role_members": self._guard(self._get_role_members),
@@ -636,6 +677,107 @@ class HandlerExecution:
         self.budget.spend_mod_action()
         return await self.actor.timeout_user(str(user_id), int(duration_seconds))
 
+    async def _warn_user(
+        self,
+        user_id: str,
+        reason: str,
+        channel_id: str | None = None,
+        dm: bool = True,
+    ) -> dict:
+        """Warn a member: channel notice, best-effort DM, durable audit row.
+
+        The handler-tier twin of ``/warn``, so the two produce the same record
+        and the same mod-log fire. Returns ``{"message_id", "dm_sent",
+        "warn_count"}``; ``warn_count`` is the target's authoritative total AFTER
+        this warn, so a script can escalate on it.
+
+        Ordering matters and is deliberate:
+
+        1. The mod_action budget is spent FIRST, before any side effect. This is
+           what makes the §3.5 loop rail hold: a mod_action-triggered handler
+           runs with ``max_mod_actions=0``, so the spend raises immediately and a
+           warn can never be issued in response to a warn — no notice, no DM, no
+           row, no re-dispatch. Spending later would let the loop close before
+           the rail fired.
+        2. An EXPLICIT ``channel_id`` is scope-checked exactly like
+           ``rename_channel``: outside the handler's ``channel_ids`` (or outside
+           this guild when the scope is empty) raises ``out_of_scope_channel``.
+           Unset means the handler's home channel, which needs no check.
+        3. The notice goes out through ``_send_message``, so the per-fire message
+           budget and the per-channel message window apply to a warn's notice
+           exactly as they do to any other send — a warn is not a way around them.
+        4. The row is written by the injected recorder (which owns the guild
+           binding, the host-side username resolution and the mod_action fire)
+           BEFORE the DM, and that order is load-bearing. Once the public notice
+           is out, the member HAS been warned; the durable record must not be
+           contingent on a courtesy DM that shares the per-fire message pool and
+           two windows of its own (per-recipient hour, global per-minute). A
+           warn that posted its notice and then died on the global DM window —
+           the 11th handler warn in a minute, i.e. exactly the raid this exists
+           for — would be publicly visible with nothing in ``/history``, nothing
+           in ``list_mod_actions``, no mod-log fire, and a ``warn_count`` that
+           never advanced, so a script's "third strike" escalation would silently
+           skip a strike. Recording first makes the record the thing that
+           survives.
+        5. The DM is best-effort through ``_send_dm``: a ``False`` return means
+           closed DMs / no mutual guild, an expected outcome reported as
+           ``dm_sent=False``, NOT an error. A DM cap breach still raises (it is a
+           rail, not a branch) — but by then the warn is durably recorded, so the
+           breach fails the fire without losing the warn.
+        """
+        self.budget.spend_mod_action()
+        explicit_target = bool(channel_id)
+        target = str(channel_id) if channel_id else self.channel_id
+        if explicit_target and not await self._admin_channel_in_scope(target):
+            raise CapExceeded(
+                "out_of_scope_channel",
+                "warn_user channel is outside the handler's channel scope / guild",
+            )
+        target_user = str(user_id)
+        reason_text = str(reason)
+        notice = f"⚠️ <@{target_user}> has been warned.\n**Reason:** {reason_text}"
+        # Only forward an explicit channel: the default path must keep
+        # _send_message's raise-on-4xx home-channel contract.
+        message_id = (
+            await self._send_message(notice, target)
+            if explicit_target
+            else await self._send_message(notice)
+        )
+        # Recorded BEFORE the DM: the notice is already public, so the permanent
+        # row (and the warn_count and mod_action fire that come with it) must not
+        # hang on a DM window breach. See step 4 above.
+        warn_count = await self.mod_action_recorder(target_user, reason_text, target)
+        dm_sent = False
+        if dm:
+            dm_sent = await self._send_dm(
+                target_user,
+                f"You have received a warning.\n\n"
+                f"**Reason:** {reason_text}\n\n"
+                f"Please review the server rules. Continued violations may "
+                f"result in further action (timeout, kick, or ban).",
+            )
+        # A gone explicit target makes _send_message return False; the warn itself
+        # (audit row + DM) still happened, so report an empty id rather than a
+        # falsy one the script would have to type-check.
+        return {
+            "message_id": str(message_id) if message_id else "",
+            "dm_sent": bool(dm_sent),
+            "warn_count": int(warn_count),
+        }
+
+    async def _list_rules(self) -> list[dict]:
+        """This guild's configured rules, in document order; spends a lookup.
+
+        Backed by the injected reader, which binds the fire's guild host-side and
+        reuses ``guild_rules.parse_guild_rules`` — the SAME parse ``/rule`` uses,
+        so a handler citing rule 3 cites what the command cites. Rows are
+        ``{"number", "title", "text"}``; a guild with no rules row yields ``[]``.
+        Metered on the lookups pool (like the mod-audit reads) rather than
+        discord_reads: it is a DB read behind a command-shaped guard.
+        """
+        self.budget.spend_lookup()
+        return await self.rules_reader()
+
     # -- admin-only thread mutations (only present when self.actor is set) --
 
     async def _close_thread(self, thread_id: str) -> bool:
@@ -900,6 +1042,8 @@ async def run_handler_script(
     limiter: WindowedLimiter,
     agent_runner: AgentRunner = _no_agent,
     mod_action_reader: ModActionReader = _no_mod_action_reader,
+    mod_action_recorder: ModActionRecorder = _no_mod_action_recorder,
+    rules_reader: RulesReader = _no_rules_reader,
     handler_id: str = "",
     timer_scheduler: TimerScheduler = _no_timer,
     timer_limiter: WindowedLimiter | None = None,
@@ -937,6 +1081,8 @@ async def run_handler_script(
         limiter=limiter,
         agent_runner=agent_runner,
         mod_action_reader=mod_action_reader,
+        mod_action_recorder=mod_action_recorder,
+        rules_reader=rules_reader,
         handler_id=handler_id,
         timer_scheduler=timer_scheduler,
         timer_limiter=timer_limiter or limiter,
