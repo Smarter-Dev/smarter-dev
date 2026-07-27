@@ -21,7 +21,17 @@ _GOOGLE_MODEL = get_model("gemini-3-1-flash-lite")
 _OPENAI_MODEL = get_model("gpt-5-4")
 _ANTHROPIC_MODEL = get_model("claude-sonnet-5")
 _ANTHROPIC_NO_REASONING_MODEL = get_model("claude-haiku-4-5")
-_OPENROUTER_MODEL = get_model("poolside-laguna-xs-2-1")
+_OPENCODE_ZEN_MODEL = get_model("kimi-k3")
+# No catalog model routes through OpenRouter since GLM/DeepSeek/Laguna moved to
+# OpenCode Zen, but the provider branch is still live and still worth covering,
+# so this fixture is synthetic rather than a catalog lookup.
+_OPENROUTER_MODEL = CatalogModel(
+    key="test-openrouter-model",
+    label="Test OpenRouter Model",
+    family="Poolside",
+    provider=ModelProvider.OPENROUTER,
+    model_id="poolside/laguna-xs-2.1",
+)
 
 
 def test_digitalocean_threads_base_url_and_key(monkeypatch):
@@ -118,6 +128,19 @@ def test_anthropic_model_reads_anthropic_key(monkeypatch):
     anthropic_model.assert_called_once_with(
         _ANTHROPIC_MODEL.model_id, provider=provider.return_value
     )
+
+
+def test_opencode_zen_threads_base_url_and_key(monkeypatch):
+    monkeypatch.setenv("OPENCODE_ZEN_API_KEY", "zen-secret")
+    base_url = model_router.get_settings().opencode_zen_base_url
+    with (
+        patch.object(model_router, "OpenAIChatModel") as chat_model,
+        patch.object(model_router, "OpenAIProvider") as provider,
+    ):
+        build_model_for(_OPENCODE_ZEN_MODEL)
+
+    provider.assert_called_once_with(base_url=base_url, api_key="zen-secret")
+    assert chat_model.call_args.args[0] == _OPENCODE_ZEN_MODEL.model_id
 
 
 def test_openrouter_model_reads_standard_key(monkeypatch):

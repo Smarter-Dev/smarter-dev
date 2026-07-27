@@ -121,6 +121,15 @@ class Settings(BaseSettings):
         "inference endpoint",
     )
 
+    # OpenCode Zen (OpenAI-compatible /chat/completions). Hosts the
+    # Kimi K3/MiniMax/Qwen3.6/GLM/DeepSeek/Laguna catalog models. Like the DO
+    # endpoint above, only the URL is configured here — the secret is read from
+    # the OPENCODE_ZEN_API_KEY env var in model_router.
+    opencode_zen_base_url: str = Field(
+        default="https://opencode.ai/zen/v1",
+        description="Base URL for OpenCode Zen's OpenAI-compatible endpoint",
+    )
+
     # API
     api_secret_key: str = Field(
         default="dev-secret-key-change-in-production",

@@ -63,6 +63,16 @@ def _model_id() -> str:
     return os.getenv(MODEL_ENV_VAR, DEFAULT_MODEL)
 
 
+# Providers whose models need PromptedOutput instead of tool/json_schema output.
+# Both serve the same open-weights families over an OpenAI-compatible endpoint
+# that is uneven on structured output; prompted JSON is the one mode every one
+# of them handles.
+_PROMPTED_OUTPUT_PROVIDERS = (
+    ModelProvider.DIGITALOCEAN,
+    ModelProvider.OPENCODE_ZEN,
+)
+
+
 def _catalog_model_for_id(model_id: str) -> CatalogModel | None:
     """Return the catalog model whose wire ``model_id`` matches, if any."""
     for model in MODEL_CATALOG:
@@ -109,7 +119,10 @@ def _output_type_for(
     passes ``AgentReturn``; the worker agent passes ``BriefingDecision``.
     """
     catalog_model = _catalog_model_for_id(model_id)
-    if catalog_model is not None and catalog_model.provider is ModelProvider.DIGITALOCEAN:
+    # OpenCode Zen serves the same open-weights models (Kimi/GLM/Qwen/DeepSeek/
+    # MiniMax) over the same OpenAI-compatible surface, so it inherits the same
+    # structured-output weakness — the endpoint changed, the model did not.
+    if catalog_model is not None and catalog_model.provider in _PROMPTED_OUTPUT_PROVIDERS:
         return PromptedOutput(output_type)
     return output_type
 

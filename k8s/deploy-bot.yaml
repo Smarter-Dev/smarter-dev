@@ -90,6 +90,11 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: digitalocean-inference-api-key
+                  - name: OPENCODE_ZEN_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: opencode-zen-api-key
                   - name: ANTHROPIC_API_KEY
                     valueFrom:
                       secretKeyRef:

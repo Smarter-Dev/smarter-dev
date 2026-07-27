@@ -15,7 +15,15 @@ from smarter_dev.shared.model_catalog import models_by_family
 from smarter_dev.shared.model_catalog import parse_reasoning_level
 from smarter_dev.shared.model_catalog import resolve_reasoning_level
 
-_DIGITALOCEAN_FAMILIES = {"Kimi", "GLM", "DeepSeek", "Gemma", "Qwen"}
+# Open-weights families. These no longer map to a single provider: the same
+# family can be served by Digital Ocean and OpenCode Zen at once (Kimi K2.6 on
+# DO, Kimi K3 on Zen; Qwen3.5 on DO, Qwen3.6 Plus on Zen), so routing is
+# asserted per model rather than per family.
+_OPEN_WEIGHTS_FAMILIES = {"Kimi", "GLM", "DeepSeek", "Gemma", "Qwen", "MiniMax"}
+_OPEN_WEIGHTS_PROVIDERS = {
+    ModelProvider.DIGITALOCEAN,
+    ModelProvider.OPENCODE_ZEN,
+}
 
 
 def test_catalog_entries_are_well_formed():
@@ -118,18 +126,34 @@ def test_claude_opus_5_is_selectable():
     assert opus.default_reasoning in opus.reasoning_levels
 
 
-def test_poolside_models_route_through_openrouter():
+def test_poolside_model_routes_through_opencode_zen():
+    # Zen carries no paid Laguna S — the free tier is the only listed variant,
+    # and Laguna XS left the catalog to keep the Discord select under its cap.
+    model = get_model("poolside-laguna-s-2-1")
+    assert model is not None
+    assert model.model_id == "laguna-s-2.1-free"
+    assert model.family == "Poolside"
+    assert model.provider is ModelProvider.OPENCODE_ZEN
+    assert model.supports_reasoning is False
+    assert get_model("poolside-laguna-xs-2-1") is None
+
+
+def test_opencode_zen_models_carry_their_verified_wire_ids():
+    # Verified against GET https://opencode.ai/zen/v1/models. DeepSeek is the
+    # trap: Zen's id differs from the DO id the same model used to carry.
     expected = {
-        "poolside-laguna-xs-2-1": "poolside/laguna-xs-2.1",
-        "poolside-laguna-s-2-1": "poolside/laguna-s-2.1",
+        "kimi-k3": "kimi-k3",
+        "minimax-m3": "minimax-m3",
+        "qwen3-6-plus": "qwen3.6-plus",
+        "glm-5-2": "glm-5.2",
+        "deepseek-v4": "deepseek-v4-flash",
+        "poolside-laguna-s-2-1": "laguna-s-2.1-free",
     }
     for key, model_id in expected.items():
         model = get_model(key)
-        assert model is not None
+        assert model is not None, key
         assert model.model_id == model_id
-        assert model.family == "Poolside"
-        assert model.provider is ModelProvider.OPENROUTER
-        assert model.supports_reasoning is False
+        assert model.provider is ModelProvider.OPENCODE_ZEN
 
 
 def test_keys_are_unique():
@@ -173,9 +197,9 @@ def test_provider_routing_by_family():
         elif model.family == "Claude":
             assert model.provider is ModelProvider.ANTHROPIC
         elif model.family == "Poolside":
-            assert model.provider is ModelProvider.OPENROUTER
-        elif model.family in _DIGITALOCEAN_FAMILIES:
-            assert model.provider is ModelProvider.DIGITALOCEAN
+            assert model.provider is ModelProvider.OPENCODE_ZEN
+        elif model.family in _OPEN_WEIGHTS_FAMILIES:
+            assert model.provider in _OPEN_WEIGHTS_PROVIDERS
         else:  # pragma: no cover - guarded by test_catalog_entries_are_well_formed
             raise AssertionError(f"unexpected family {model.family}")
 
