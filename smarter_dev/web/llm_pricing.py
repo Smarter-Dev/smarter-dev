@@ -212,6 +212,44 @@ _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
     ),
 }
 
+# OpenCode Zen models. USD per million tokens, from
+# https://opencode.ai/docs/zen/#pricing (2026-07). "laguna-s-2.1-free" is a
+# limited-time free tier and prices at zero on every axis; it is listed
+# explicitly rather than omitted so a free turn resolves to Decimal("0")
+# instead of falling through to genai-prices, which does not know the id.
+_OPENCODE_ZEN_PRICES: dict[str, types.ModelPrice] = {
+    "kimi-k3": types.ModelPrice(
+        input_mtok=Decimal("3.00"),
+        output_mtok=Decimal("15.00"),
+        cache_read_mtok=Decimal("0.30"),
+    ),
+    "minimax-m3": types.ModelPrice(
+        input_mtok=Decimal("0.30"),
+        output_mtok=Decimal("1.20"),
+        cache_read_mtok=Decimal("0.06"),
+    ),
+    "qwen3.6-plus": types.ModelPrice(
+        input_mtok=Decimal("0.50"),
+        output_mtok=Decimal("3.00"),
+        cache_read_mtok=Decimal("0.05"),
+    ),
+    "glm-5.2": types.ModelPrice(
+        input_mtok=Decimal("1.40"),
+        output_mtok=Decimal("4.40"),
+        cache_read_mtok=Decimal("0.26"),
+    ),
+    "deepseek-v4-flash": types.ModelPrice(
+        input_mtok=Decimal("0.14"),
+        output_mtok=Decimal("0.28"),
+        cache_read_mtok=Decimal("0.028"),
+    ),
+    "laguna-s-2.1-free": types.ModelPrice(
+        input_mtok=Decimal("0"),
+        output_mtok=Decimal("0"),
+        cache_read_mtok=Decimal("0"),
+    ),
+}
+
 _TOKENS_PER_MTOK = Decimal("1000000")
 
 
@@ -278,6 +316,27 @@ def calc_session_cost(
         provider_id = _PROVIDER_MAP.get(pydantic_provider, pydantic_provider)
     else:
         provider_id, model_ref = None, parts[0]
+
+    # Zen is checked BEFORE Digital Ocean because the two share one wire id:
+    # "glm-5.2" means the same model on both, at different rates ($1.40 vs
+    # $1.05 input). Names arrive flat (provider_id None), so the id alone cannot
+    # say which endpoint served a given turn. GLM now runs only on Zen, so every
+    # NEW row is a Zen row and Zen-first prices those correctly; the cost is that
+    # pre-move GLM rows re-price at the Zen rate too, overstating historical GLM
+    # lines by ~33%. Deliberate: mispricing live traffic forever is worse than a
+    # bounded restatement of one model's history. The other moved ids do not
+    # collide — Zen's DeepSeek is "deepseek-v4-flash" against DO's
+    # "deepseek-4-flash", and the Laguna ids differ from the OpenRouter paths.
+    if provider_id in (None, "opencode_zen"):
+        zen_price = _OPENCODE_ZEN_PRICES.get(model_ref)
+        if zen_price is not None:
+            return _direct_model_cost(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+                price=zen_price,
+            )
 
     # DO-served models are unknown to genai-prices and billed at DO's own
     # rates; price them directly. Chat/voice/summarizer names arrive flat

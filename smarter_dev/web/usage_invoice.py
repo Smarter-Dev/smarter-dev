@@ -51,6 +51,13 @@ _PROVIDER_BY_FLAT_MODEL_ID: dict[str, str] = {
 }
 # Wire ids of retired catalog models — historical usage rows still carry them.
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gemini-3.5-flash", "google")
+# Retired when GLM/DeepSeek/Laguna moved to OpenCode Zen: the models live on
+# under new ids (or, for Laguna XS, left the catalog entirely), but rows written
+# before the move still carry the old wire id and would otherwise fall to
+# "unknown" and silently drop out of the per-provider invoice breakdown.
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("deepseek-4-flash", "digitalocean")
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("poolside/laguna-xs-2.1", "openrouter")
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("poolside/laguna-s-2.1", "openrouter")
 
 # Provider key -> human display label.
 PROVIDER_LABELS: dict[str, str] = {
@@ -58,6 +65,11 @@ PROVIDER_LABELS: dict[str, str] = {
     "openai": "OpenAI",
     "anthropic": "Anthropic",
     "digitalocean": "DigitalOcean",
+    # openrouter has no catalog model left after the Zen move, but historical
+    # Laguna rows still resolve to it and this table is indexed directly — a
+    # missing key is a KeyError mid-invoice, not a fallback.
+    "openrouter": "OpenRouter",
+    "opencode_zen": "OpenCode Zen",
     "unknown": "Unknown",
 }
 

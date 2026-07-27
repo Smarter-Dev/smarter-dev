@@ -39,6 +39,16 @@ WRITER_SYSTEM_PROMPT = (
 ).read_text(encoding="utf-8")
 
 
+# Providers whose models need PromptedOutput instead of tool/json_schema output.
+# Both serve the same open-weights families over an OpenAI-compatible endpoint
+# that is uneven on structured output; prompted JSON is the one mode every one
+# of them handles.
+_PROMPTED_OUTPUT_PROVIDERS = (
+    ModelProvider.DIGITALOCEAN,
+    ModelProvider.OPENCODE_ZEN,
+)
+
+
 def _catalog_model_for_id(model_id: str) -> CatalogModel | None:
     """Return the catalog model whose wire ``model_id`` matches, if any."""
     for model in MODEL_CATALOG:
@@ -56,7 +66,7 @@ def _output_type_for(model_id: str) -> type[WriterOutput] | PromptedOutput:
     every other provider returns ``WriterOutput`` via the default tool output.
     """
     catalog_model = _catalog_model_for_id(model_id)
-    if catalog_model is not None and catalog_model.provider is ModelProvider.DIGITALOCEAN:
+    if catalog_model is not None and catalog_model.provider in _PROMPTED_OUTPUT_PROVIDERS:
         return PromptedOutput(WriterOutput)
     return WriterOutput
 

@@ -46,6 +46,7 @@ from smarter_dev.shared.model_catalog import resolve_reasoning_level
 DIGITALOCEAN_API_KEY_ENV_VAR = "DIGITALOCEAN_INFERENCE_API_KEY"
 OPENROUTER_API_KEY_ENV_VAR = "OPENROUTER_API_KEY"
 OPENROUTER_API_KEY_LEGACY_ENV_VAR = "OPEN_ROUTER"
+OPENCODE_ZEN_API_KEY_ENV_VAR = "OPENCODE_ZEN_API_KEY"
 
 
 def build_model_for(model: CatalogModel) -> Model:
@@ -70,6 +71,30 @@ def build_model_for(model: CatalogModel) -> Model:
         return OpenAIChatModel(
             model.model_id,
             provider=OpenRouterProvider(api_key=api_key or ""),
+        )
+    if model.provider is ModelProvider.OPENCODE_ZEN:
+        settings = get_settings()
+        # Zen routes by model family: Claude ids go to /messages, GPT to
+        # /responses, Gemini to /models/{id}, and everything else — every model
+        # we route here (Kimi, MiniMax, Qwen, GLM, DeepSeek, Laguna) — to the
+        # OpenAI-compatible /chat/completions, which is exactly what
+        # OpenAIChatModel speaks. Routing a Claude/GPT/Gemini id through this
+        # branch would hit the wrong endpoint; keep those on their native
+        # providers, where we already hold first-party keys.
+        return OpenAIChatModel(
+            model.model_id,
+            provider=OpenAIProvider(
+                base_url=settings.opencode_zen_base_url,
+                api_key=os.getenv(OPENCODE_ZEN_API_KEY_ENV_VAR) or "",
+            ),
+            # Same open-weights caveats the DO branch documents below: these are
+            # the same underlying models (Kimi/GLM/Qwen), so assume the same
+            # tool_choice and system-message limits rather than discovering them
+            # in production.
+            profile=OpenAIModelProfile(
+                openai_supports_tool_choice_required=False,
+                openai_chat_supports_multiple_system_messages=False,
+            ),
         )
     if model.provider is ModelProvider.DIGITALOCEAN:
         settings = get_settings()

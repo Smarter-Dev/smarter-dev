@@ -19,10 +19,6 @@ class TestDigitalOceanPricing:
         # 1M input @ $0.76 + 1M output @ $3.20
         assert calc_cost(1_000_000, 1_000_000, "kimi-k2.6") == Decimal("3.96")
 
-    def test_glm_52_rates(self):
-        assert calc_cost(1_000_000, 0, "glm-5.2") == Decimal("1.05")
-        assert calc_cost(0, 1_000_000, "glm-5.2") == Decimal("4.40")
-
     def test_deepseek_4_flash_rates(self):
         assert calc_cost(1_000_000, 1_000_000, "deepseek-4-flash") == Decimal(
             "0.336"
@@ -115,6 +111,49 @@ class TestOpenRouterPricing:
             model_name="openrouter:poolside/laguna-xs-2.1",
         )
         assert cost == Decimal("0.042")
+
+
+class TestOpenCodeZenPricing:
+    """Zen rates, and the one wire id that collides with Digital Ocean's table."""
+
+    def test_kimi_k3_rates(self):
+        assert calc_cost(1_000_000, 1_000_000, "kimi-k3") == Decimal("18.00")
+
+    def test_minimax_m3_rates(self):
+        assert calc_cost(1_000_000, 1_000_000, "minimax-m3") == Decimal("1.50")
+
+    def test_qwen36_plus_rates(self):
+        assert calc_cost(1_000_000, 1_000_000, "qwen3.6-plus") == Decimal("3.50")
+
+    def test_deepseek_v4_flash_rates(self):
+        # Zen's id, distinct from DO's "deepseek-4-flash" at $0.336/M pair.
+        assert calc_cost(1_000_000, 1_000_000, "deepseek-v4-flash") == Decimal(
+            "0.42"
+        )
+
+    def test_laguna_s_free_tier_costs_nothing(self):
+        assert calc_cost(1_000_000, 1_000_000, "laguna-s-2.1-free") == Decimal("0")
+
+    def test_glm_52_prices_at_zen_rates_not_digital_ocean(self):
+        # "glm-5.2" is the SAME wire id on both providers at different rates,
+        # and stored names are flat, so the lookup order decides. GLM runs only
+        # on Zen now, so Zen wins: $1.40 in / $4.40 out, not DO's $1.05 in.
+        # Pre-move GLM rows re-price at this rate too — the accepted cost of
+        # pricing live traffic correctly.
+        assert calc_cost(1_000_000, 0, "glm-5.2") == Decimal("1.40")
+        assert calc_cost(0, 1_000_000, "glm-5.2") == Decimal("4.40")
+
+    def test_zen_cache_read_rate(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=600_000,
+            cache_write_tokens=0,
+            model_name="opencode_zen:minimax-m3",
+        )
+        # Cache reads are a SUBSET of input: 400k fresh @ $0.30 + 600k cached
+        # @ $0.06 = 0.12 + 0.036.
+        assert cost == Decimal("0.156")
 
 
 class TestUnknownModelFallback:

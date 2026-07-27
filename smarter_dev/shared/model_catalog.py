@@ -33,6 +33,7 @@ class ModelProvider(enum.Enum):
     DIGITALOCEAN = "digitalocean"
     ANTHROPIC = "anthropic"
     OPENROUTER = "openrouter"
+    OPENCODE_ZEN = "opencode_zen"
 
 
 class ReasoningLevel(enum.Enum):
@@ -125,6 +126,7 @@ MODEL_FAMILIES: tuple[str, ...] = (
     "DeepSeek",
     "Gemma",
     "Qwen",
+    "MiniMax",
     "Gemini",
     "GPT",
     "Claude",
@@ -180,24 +182,6 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         model_id="kimi-k2.6",
     ),
     CatalogModel(
-        key="glm-5-2",
-        label="GLM-5.2 (Zhipu)",
-        family="GLM",
-        provider=ModelProvider.DIGITALOCEAN,
-        model_id="glm-5.2",
-        reasoning_levels=_OPEN_EFFORT,
-        default_reasoning=ReasoningLevel.MEDIUM,
-    ),
-    CatalogModel(
-        key="deepseek-v4",
-        label="DeepSeek V4 Flash",
-        family="DeepSeek",
-        provider=ModelProvider.DIGITALOCEAN,
-        model_id="deepseek-4-flash",
-        reasoning_levels=_OPEN_EFFORT,
-        default_reasoning=ReasoningLevel.MEDIUM,
-    ),
-    CatalogModel(
         key="gemma-4-31b",
         label="Gemma 4 31B",
         family="Gemma",
@@ -210,6 +194,56 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         family="Qwen",
         provider=ModelProvider.DIGITALOCEAN,
         model_id="qwen3.5-397b-a17b",
+        reasoning_levels=_OPEN_EFFORT,
+        default_reasoning=ReasoningLevel.MEDIUM,
+    ),
+    # --- Open weights via OpenCode Zen (OpenAI-compatible /chat/completions) ---
+    # Zen wire ids verified against GET https://opencode.ai/zen/v1/models. Note
+    # they do NOT all match the DO ids for the same model: DeepSeek is
+    # "deepseek-v4-flash" here but "deepseek-4-flash" on DO, and the DO-era id
+    # is still what historical usage rows carry (see llm_pricing).
+    # Reasoning: Qwen keeps the low/medium/high knob its 3.5 sibling exposes.
+    # Kimi K3 and MiniMax M3 declare NO knob — their reasoning support is
+    # unverified, and declaring none sends no effort field at all, which every
+    # OpenAI-compatible endpoint accepts. Add the ladder once it is confirmed.
+    CatalogModel(
+        key="kimi-k3",
+        label="Kimi K3 (Moonshot)",
+        family="Kimi",
+        provider=ModelProvider.OPENCODE_ZEN,
+        model_id="kimi-k3",
+    ),
+    CatalogModel(
+        key="minimax-m3",
+        label="MiniMax M3",
+        family="MiniMax",
+        provider=ModelProvider.OPENCODE_ZEN,
+        model_id="minimax-m3",
+    ),
+    CatalogModel(
+        key="qwen3-6-plus",
+        label="Qwen3.6 Plus",
+        family="Qwen",
+        provider=ModelProvider.OPENCODE_ZEN,
+        model_id="qwen3.6-plus",
+        reasoning_levels=_OPEN_EFFORT,
+        default_reasoning=ReasoningLevel.MEDIUM,
+    ),
+    CatalogModel(
+        key="glm-5-2",
+        label="GLM-5.2 (Zhipu)",
+        family="GLM",
+        provider=ModelProvider.OPENCODE_ZEN,
+        model_id="glm-5.2",
+        reasoning_levels=_OPEN_EFFORT,
+        default_reasoning=ReasoningLevel.MEDIUM,
+    ),
+    CatalogModel(
+        key="deepseek-v4",
+        label="DeepSeek V4 Flash",
+        family="DeepSeek",
+        provider=ModelProvider.OPENCODE_ZEN,
+        model_id="deepseek-v4-flash",
         reasoning_levels=_OPEN_EFFORT,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
@@ -351,20 +385,20 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         reasoning_levels=_CLAUDE_EFFORT,
         default_reasoning=ReasoningLevel.HIGH,
     ),
-    # --- Poolside via OpenRouter ---
-    CatalogModel(
-        key="poolside-laguna-xs-2-1",
-        label="Laguna XS 2.1",
-        family="Poolside",
-        provider=ModelProvider.OPENROUTER,
-        model_id="poolside/laguna-xs-2.1",
-    ),
+    # --- Poolside via OpenCode Zen ---
+    # Zen carries no paid Laguna S: "laguna-s-2.1-free" is the only match in its
+    # model list. It is free, but OpenCode documents it as a limited-time offer
+    # whose "collected data may be retained and used to improve the model" — so
+    # picking this model sends real Discord conversation content to a training
+    # corpus, and the endpoint can disappear when the promo ends. Chosen
+    # deliberately over keeping the paid OpenRouter route; revisit if either the
+    # retention terms or the promo window matter more than the cost saving.
     CatalogModel(
         key="poolside-laguna-s-2-1",
-        label="Laguna S 2.1",
+        label="Laguna S 2.1 (free tier)",
         family="Poolside",
-        provider=ModelProvider.OPENROUTER,
-        model_id="poolside/laguna-s-2.1",
+        provider=ModelProvider.OPENCODE_ZEN,
+        model_id="laguna-s-2.1-free",
     ),
 )
 
