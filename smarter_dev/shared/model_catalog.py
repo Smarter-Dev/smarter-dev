@@ -385,20 +385,20 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         reasoning_levels=_CLAUDE_EFFORT,
         default_reasoning=ReasoningLevel.HIGH,
     ),
-    # --- Poolside via OpenCode Zen ---
-    # Zen carries no paid Laguna S: "laguna-s-2.1-free" is the only match in its
-    # model list. It is free, but OpenCode documents it as a limited-time offer
-    # whose "collected data may be retained and used to improve the model" — so
-    # picking this model sends real Discord conversation content to a training
-    # corpus, and the endpoint can disappear when the promo ends. Chosen
-    # deliberately over keeping the paid OpenRouter route; revisit if either the
-    # retention terms or the promo window matter more than the cost saving.
+    # --- Poolside via OpenRouter ---
+    # Deliberately NOT on Zen: Zen carries no paid Laguna S, only
+    # "laguna-s-2.1-free", and that free pool throttles — measured at 1 in 6
+    # calls returning 429 provider_rate_limit_exceeded at ~1 req/s, with no
+    # published quota to engineer against. chat_engine has no 429 retry, so each
+    # throttle is a dead chat turn. It also retains conversation content for
+    # training and is promo-limited. OpenRouter's paid route is $0.10/$0.20 per
+    # M — cents a month at chat volume — and buys reliability outright.
     CatalogModel(
         key="poolside-laguna-s-2-1",
-        label="Laguna S 2.1 (free tier)",
+        label="Laguna S 2.1",
         family="Poolside",
-        provider=ModelProvider.OPENCODE_ZEN,
-        model_id="laguna-s-2.1-free",
+        provider=ModelProvider.OPENROUTER,
+        model_id="poolside/laguna-s-2.1",
     ),
 )
 

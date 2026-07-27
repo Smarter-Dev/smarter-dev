@@ -243,6 +243,10 @@ _OPENCODE_ZEN_PRICES: dict[str, types.ModelPrice] = {
         output_mtok=Decimal("0.28"),
         cache_read_mtok=Decimal("0.028"),
     ),
+    # No longer in the catalog — Laguna S went back to OpenRouter's paid route
+    # after the free pool throttled. Kept because rows written while it WAS
+    # selectable still carry this id, and dropping it would fall them through to
+    # genai-prices, which does not know it.
     "laguna-s-2.1-free": types.ModelPrice(
         input_mtok=Decimal("0"),
         output_mtok=Decimal("0"),

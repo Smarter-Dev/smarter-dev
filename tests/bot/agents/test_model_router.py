@@ -22,16 +22,7 @@ _OPENAI_MODEL = get_model("gpt-5-4")
 _ANTHROPIC_MODEL = get_model("claude-sonnet-5")
 _ANTHROPIC_NO_REASONING_MODEL = get_model("claude-haiku-4-5")
 _OPENCODE_ZEN_MODEL = get_model("kimi-k3")
-# No catalog model routes through OpenRouter since GLM/DeepSeek/Laguna moved to
-# OpenCode Zen, but the provider branch is still live and still worth covering,
-# so this fixture is synthetic rather than a catalog lookup.
-_OPENROUTER_MODEL = CatalogModel(
-    key="test-openrouter-model",
-    label="Test OpenRouter Model",
-    family="Poolside",
-    provider=ModelProvider.OPENROUTER,
-    model_id="poolside/laguna-xs-2.1",
-)
+_OPENROUTER_MODEL = get_model("poolside-laguna-s-2-1")
 
 
 def test_digitalocean_threads_base_url_and_key(monkeypatch):
