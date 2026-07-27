@@ -126,14 +126,15 @@ def test_claude_opus_5_is_selectable():
     assert opus.default_reasoning in opus.reasoning_levels
 
 
-def test_poolside_model_routes_through_opencode_zen():
-    # Zen carries no paid Laguna S — the free tier is the only listed variant,
-    # and Laguna XS left the catalog to keep the Discord select under its cap.
+def test_poolside_model_stays_on_openrouter():
+    # Zen only carries the free Laguna S, whose pool throttles, so Poolside
+    # stays on the paid OpenRouter route. Laguna XS left the catalog to keep
+    # the Discord select under its cap.
     model = get_model("poolside-laguna-s-2-1")
     assert model is not None
-    assert model.model_id == "laguna-s-2.1-free"
+    assert model.model_id == "poolside/laguna-s-2.1"
     assert model.family == "Poolside"
-    assert model.provider is ModelProvider.OPENCODE_ZEN
+    assert model.provider is ModelProvider.OPENROUTER
     assert model.supports_reasoning is False
     assert get_model("poolside-laguna-xs-2-1") is None
 
@@ -147,7 +148,6 @@ def test_opencode_zen_models_carry_their_verified_wire_ids():
         "qwen3-6-plus": "qwen3.6-plus",
         "glm-5-2": "glm-5.2",
         "deepseek-v4": "deepseek-v4-flash",
-        "poolside-laguna-s-2-1": "laguna-s-2.1-free",
     }
     for key, model_id in expected.items():
         model = get_model(key)
@@ -197,7 +197,7 @@ def test_provider_routing_by_family():
         elif model.family == "Claude":
             assert model.provider is ModelProvider.ANTHROPIC
         elif model.family == "Poolside":
-            assert model.provider is ModelProvider.OPENCODE_ZEN
+            assert model.provider is ModelProvider.OPENROUTER
         elif model.family in _OPEN_WEIGHTS_FAMILIES:
             assert model.provider in _OPEN_WEIGHTS_PROVIDERS
         else:  # pragma: no cover - guarded by test_catalog_entries_are_well_formed
