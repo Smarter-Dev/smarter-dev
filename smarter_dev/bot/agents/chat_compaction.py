@@ -39,9 +39,14 @@ and merges into the next running summary.
 
 Cut points are always the start of a user turn (a ``ModelRequest``
 containing a ``UserPromptPart``), so a tool call and its return are never
-split across the summary boundary. The current turn (the final
-``ModelRequest`` onward) is never touched — the agent must see its real
-input.
+split across the summary boundary. Where that request *also* carries the
+previous turn's tool results — Pydantic AI merges consecutive requests, so
+a turn boundary routinely looks like ``[ToolReturnPart, UserPromptPart]`` —
+the results are pushed back into the folded half by
+:func:`_split_cut_point`, because a function response whose call was
+summarised away is a hard 400 on every provider that validates the pairing.
+The current turn (the final ``ModelRequest`` onward) is never touched — the
+agent must see its real input.
 """
 
 from __future__ import annotations
@@ -56,6 +61,8 @@ from pydantic_ai import Agent
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
+    ModelResponse,
+    RetryPromptPart,
     SystemPromptPart,
     TextPart,
     ToolCallPart,
@@ -422,6 +429,79 @@ def _collect_system_parts(messages: list[ModelMessage]) -> list[SystemPromptPart
     return parts
 
 
+def _is_tool_result(part) -> bool:
+    """A part the provider renders as a function response, needing its call."""
+    return isinstance(part, ToolReturnPart) or (
+        isinstance(part, RetryPromptPart) and part.tool_name is not None
+    )
+
+
+def _split_cut_point(
+    boundary: ModelRequest,
+) -> tuple[ModelRequest | None, ModelRequest | None]:
+    """Split a cut-point request into its (folded, kept) halves.
+
+    Pydantic AI merges consecutive ``ModelRequest``s before a run starts, so
+    the tool return that closed the previous turn ("Final result processed.")
+    travels in the same request as the next turn's user prompt — and that
+    merged shape is what gets persisted, so it is permanent. Cutting there
+    would fold the tool CALL into the summary while leaving its RETURN in the
+    kept window, and an unpaired function response is a hard 400 on Gemini
+    (and on the OpenAI-compatible providers).
+
+    So the tool results go back with ``old``, where they are summarised
+    alongside the call they answer, and only the user-facing parts start the
+    kept window. Either half is None when it would be empty.
+    """
+    folded_parts = [p for p in boundary.parts if _is_tool_result(p)]
+    if not folded_parts:
+        return None, boundary
+    kept_parts = [p for p in boundary.parts if not _is_tool_result(p)]
+    return (
+        ModelRequest(parts=folded_parts),
+        ModelRequest(parts=kept_parts, instructions=boundary.instructions)
+        if kept_parts
+        else None,
+    )
+
+
+def _strip_orphan_leading_results(
+    messages: list[ModelMessage],
+) -> list[ModelMessage]:
+    """Drop tool results that precede every tool call in ``messages``.
+
+    A backstop for histories that arrive already broken (a persisted
+    conversation whose head was trimmed elsewhere): the provider rejects the
+    whole request when the first thing it sees is a function response, so a
+    result with no call ahead of it is worth strictly less than the turn it
+    would cost. Returns the input unchanged when there is nothing to strip.
+    """
+    head_end = len(messages)
+    for index, message in enumerate(messages):
+        if isinstance(message, ModelResponse) and any(
+            isinstance(p, ToolCallPart) for p in message.parts
+        ):
+            head_end = index
+            break
+    head = messages[:head_end]
+    if not any(_is_tool_result(p) for m in head for p in m.parts):
+        return messages
+
+    repaired: list[ModelMessage] = []
+    for message in head:
+        if not isinstance(message, ModelRequest):
+            repaired.append(message)
+            continue
+        parts = [p for p in message.parts if not _is_tool_result(p)]
+        if len(parts) == len(message.parts):
+            repaired.append(message)
+        elif parts:
+            repaired.append(
+                ModelRequest(parts=parts, instructions=message.instructions)
+            )
+    return [*repaired, *messages[head_end:]]
+
+
 async def compact_history(messages: list[ModelMessage]) -> list[ModelMessage]:
     """Fold old turns into a running summary when the cost model says to.
 
@@ -443,9 +523,15 @@ async def compact_history(messages: list[ModelMessage]) -> list[ModelMessage]:
 
     cut = _pick_cut_index(prior)
     if cut is None:
-        return messages
+        return _strip_orphan_leading_results(messages)
     old = prior[:cut]
     kept = prior[cut:]
+    # The cut point may carry the previous turn's tool results as well as this
+    # turn's prompt; those results fold with the call they answer.
+    folded_head, kept_head = _split_cut_point(kept[0])
+    if folded_head is not None:
+        old = [*old, folded_head]
+        kept = [kept_head, *kept[1:]] if kept_head is not None else kept[1:]
 
     foldable_tokens = sum(_message_chars(m) for m in old) // CHARS_PER_TOKEN
     kept_tokens = (
@@ -457,12 +543,12 @@ async def compact_history(messages: list[ModelMessage]) -> list[ModelMessage]:
         )
     ) // CHARS_PER_TOKEN
     if not _should_fold(foldable_tokens, kept_tokens, cache_warm=cache_warm):
-        return messages
+        return _strip_orphan_leading_results(messages)
 
     transcript = _render_transcript(old)
     summary = await _summarise_conversation(transcript)
     if summary is None:
-        return messages
+        return _strip_orphan_leading_results(messages)
 
     _record_event(
         CompactionEvent(
