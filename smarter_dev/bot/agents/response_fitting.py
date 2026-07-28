@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from dataclasses import is_dataclass
+from dataclasses import replace
 from typing import Any
 
 from pydantic_ai import Agent
@@ -137,11 +139,21 @@ async def _shorten_with_agent(
     ``None`` when the run fails or the agent declines to respond, so the
     caller can fall through to the summarizer. Failures must never break the
     turn — the original reply is still deliverable via later tiers.
+
+    The re-run is deliberately tool-free. It reshapes text the agent already
+    wrote, so it needs nothing fetched or computed — and this prompt names an
+    exact character count, which is precisely the bait that has sent a model
+    into a loop of sandbox calls trying to verify its own length.
     """
     prompt = _SHORTEN_PROMPT_TEMPLATE.format(length=len(message))
+    tool_free_deps = (
+        replace(deps, tools_disabled=True) if is_dataclass(deps) else deps
+    )
     try:
         result = await agent.run(
-            user_prompt=prompt, message_history=message_history, deps=deps
+            user_prompt=prompt,
+            message_history=message_history,
+            deps=tool_free_deps,
         )
     except Exception:
         logger.exception("Shorten re-run failed — falling back to summarizer")

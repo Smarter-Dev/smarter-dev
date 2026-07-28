@@ -40,6 +40,7 @@ from typing import Any
 import hikari
 from pydantic_ai.exceptions import ModelAPIError
 from pydantic_ai.usage import RunUsage
+from pydantic_ai.usage import UsageLimits
 from redis.exceptions import RedisError
 
 from smarter_dev.bot.agents.chat_agent import DEFAULT_MODEL as CHAT_DEFAULT_MODEL
@@ -47,6 +48,7 @@ from smarter_dev.bot.agents.chat_agent import MODEL_ENV_VAR as CHAT_MODEL_ENV_VA
 from smarter_dev.bot.agents.chat_agent import get_chat_agent
 from smarter_dev.bot.agents.chat_agent import get_worker_agent
 from smarter_dev.bot.agents.chat_agent import resolved_reasoning_level
+from smarter_dev.bot.agents.chat_tool_budget import resolve_tool_token_budget
 from smarter_dev.bot.agents.chat_compaction import drain_collection
 from smarter_dev.bot.agents.chat_compaction import set_last_model_call
 from smarter_dev.bot.agents.chat_compaction import start_collection
@@ -74,6 +76,7 @@ from smarter_dev.bot.services.channel_token_budget import fallback_ended_key
 from smarter_dev.bot.services.channel_token_budget import fallback_flag_key
 from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.channel_token_budget import over_budget_reset_epoch
+from smarter_dev.bot.services.channel_token_budget import remaining_budget
 from smarter_dev.bot.services.chat_conversation_persistence import end_engagement
 from smarter_dev.bot.services.chat_conversation_persistence import persist_error
 from smarter_dev.bot.services.chat_conversation_persistence import persist_turn
@@ -96,6 +99,14 @@ QUEUE_FIRE_THRESHOLD = 15
 MAX_NO_RESPONSE_TURNS = 3
 INACTIVITY_TIMEOUT = timedelta(minutes=30)
 MAX_RUNTIME = timedelta(hours=2)
+
+# Last-resort stop for a run that never terminates. The graceful bound is the
+# per-turn tool budget (see chat_tool_budget), which withdraws the tools and
+# lets the model answer; this only catches a model that keeps requesting after
+# that, and it aborts the turn into the error path rather than replying. Sized
+# far above any legitimate turn — the heaviest research turns run a handful of
+# tool rounds, so reaching 30 model requests means something is wrong.
+TURN_USAGE_LIMITS = UsageLimits(request_limit=30)
 
 # When a channel's model token budget is exhausted the engine stays quiet, but
 # posts one short notice so the silence is explained. This throttle (a Redis
@@ -653,11 +664,29 @@ class ChannelEngine:
                 if two_stage
                 else get_chat_agent(override_model_id, override_reasoning)
             )
+            # How much this turn may spend before its tools are withdrawn. An
+            # enforced channel gets what its budget has left, so one turn can no
+            # longer blow past the cap the channel was given; everything else
+            # (no override, or a free-fallback window where spend isn't
+            # enforced) gets the flat per-turn ceiling.
+            channel_budget_left = (
+                await remaining_budget(
+                    budget_redis,
+                    str(self.channel_id),
+                    override.daily_token_budget,
+                    override.hourly_token_budget,
+                )
+                if override is not None
+                and budget_redis is not None
+                and not fallback_active
+                else None
+            )
             deps = ChatDeps(
                 bot=self.bot,
                 channel_id=self.channel_id,
                 guild_id=self.guild_id,
                 api_client=self._shared_api_client(),
+                tool_token_budget=resolve_tool_token_budget(channel_budget_left),
             )
             # Install a per-run compaction collector. The history processor
             # appends events to it; we drain after the run.
@@ -689,6 +718,7 @@ class ChannelEngine:
                     user_prompt=user_prompt,
                     message_history=message_history,
                     deps=deps,
+                    usage_limits=TURN_USAGE_LIMITS,
                 )
                 if two_stage:
                     (

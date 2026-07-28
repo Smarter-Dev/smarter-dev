@@ -13,6 +13,7 @@ from pydantic_ai import PromptedOutput
 import smarter_dev.bot.agents.chat_agent as chat_agent
 from smarter_dev.bot.agents.chat_agent import get_chat_agent
 from smarter_dev.bot.agents.chat_agent import get_worker_agent
+from smarter_dev.bot.agents.chat_tool_budget import ToolBudgetGuard
 from smarter_dev.bot.agents.chat_models import BriefingDecision
 from smarter_dev.bot.agents.chat_models import TurnDecision
 from smarter_dev.bot.agents.chat_tools import chat_tool_functions
@@ -55,10 +56,30 @@ def test_worker_agent_do_model_uses_prompted_briefing_decision():
     assert agent._output_type.outputs is BriefingDecision
 
 
+def _registered_tool_names(agent) -> set[str]:
+    """Tool names on ``agent``, read through the per-turn budget guard.
+
+    Tools are registered as a ``ToolBudgetGuard``-wrapped toolset rather than
+    via ``tools=``, so they no longer live on the agent's own function
+    toolset.
+    """
+    guard = agent._user_toolsets[0]
+    assert isinstance(guard, ToolBudgetGuard)
+    return set(guard.wrapped.tools.keys())
+
+
 def test_worker_agent_has_same_tools_as_chat_agent():
     _reset_caches()
     agent = get_worker_agent("gpt-5.4")
-    assert set(agent._function_toolset.tools.keys()) == _expected_tool_names()
+    assert _registered_tool_names(agent) == _expected_tool_names()
+
+
+def test_worker_agent_tools_are_budget_guarded():
+    """The worker runs the agentic loop in two-stage mode, so it needs the
+    same runaway protection as the single-stage chat agent."""
+    _reset_caches()
+    assert isinstance(get_worker_agent("gpt-5.4")._user_toolsets[0], ToolBudgetGuard)
+    assert isinstance(get_chat_agent("gpt-5.4")._user_toolsets[0], ToolBudgetGuard)
 
 
 def test_worker_agent_uses_worker_prompt_not_chat_prompt():

@@ -30,6 +30,8 @@ from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.settings import ModelSettings
 
 from smarter_dev.bot.agents.chat_compaction import compact_history
+from smarter_dev.bot.agents.chat_tool_budget import budgeted_toolset
+from smarter_dev.bot.agents.chat_tool_budget import tool_budget_notice
 from smarter_dev.bot.agents.chat_models import AgentReturn
 from smarter_dev.bot.agents.chat_models import BriefingDecision
 from smarter_dev.bot.agents.chat_tools import ChatDeps
@@ -202,9 +204,11 @@ def get_chat_agent(
             output_type=_output_type_for(resolved_id),
             deps_type=ChatDeps,
             system_prompt=SYSTEM_PROMPT,
-            tools=chat_tool_functions() + handler_tool_functions(),
+            toolsets=[
+                budgeted_toolset(chat_tool_functions() + handler_tool_functions())
+            ],
             model_settings=_model_settings_for(resolved_id, reasoning_level),
-            history_processors=[compact_history],
+            history_processors=[compact_history, tool_budget_notice],
         )
         _chat_agents[cache_key] = agent
     return agent
@@ -239,9 +243,11 @@ def get_worker_agent(
             output_type=_output_type_for(resolved_id, BriefingDecision),
             deps_type=ChatDeps,
             system_prompt=WORKER_SYSTEM_PROMPT,
-            tools=chat_tool_functions() + handler_tool_functions(),
+            toolsets=[
+                budgeted_toolset(chat_tool_functions() + handler_tool_functions())
+            ],
             model_settings=_model_settings_for(resolved_id, reasoning_level),
-            history_processors=[compact_history],
+            history_processors=[compact_history, tool_budget_notice],
         )
         _worker_agents[cache_key] = agent
     return agent
