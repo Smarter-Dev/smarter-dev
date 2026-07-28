@@ -801,6 +801,11 @@ class ChannelEngine:
             # logged but not metered, so it adds no extra tokens.
             fit_extra_input = 0
             fit_extra_output = 0
+            # The shorten re-run is a second agent.run, so its messages are not
+            # in ``result.new_messages()``. They are appended to the persisted
+            # history below — without them the turn record simply omits a run
+            # that can call tools and outspend the main one.
+            fit_extra_messages: list = []
             if (
                 output.response is not None
                 and output.response.message
@@ -831,6 +836,7 @@ class ChannelEngine:
                 )
                 fit_extra_input = fit.extra_input_tokens
                 fit_extra_output = fit.extra_output_tokens
+                fit_extra_messages = list(fit.extra_messages)
                 tokens += fit_extra_input + fit_extra_output
             # Meter this turn's chat tokens against the channel's usage windows.
             # Every channel is metered (so ``/bot-usage`` always has numbers);
@@ -914,7 +920,9 @@ class ChannelEngine:
                         ),
                         triggering_messages=triggering,
                         agent_output=output.model_dump(mode="json"),
-                        new_model_messages=list(result.new_messages()),
+                        new_model_messages=(
+                            list(result.new_messages()) + fit_extra_messages
+                        ),
                         duration_ms=duration_ms,
                         chat_tokens_input=chat_in,
                         chat_tokens_output=chat_out,

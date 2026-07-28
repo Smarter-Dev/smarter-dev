@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from dataclasses import field
 from dataclasses import is_dataclass
 from dataclasses import replace
 from typing import Any
@@ -73,12 +74,19 @@ class FitResult:
     ``extra_input_tokens`` / ``extra_output_tokens`` are the shorten re-run's
     chat-model spend for the engine to meter; ``method`` records which tier
     produced the text ("shortened" / "summarized" / "truncated").
+
+    ``extra_messages`` are the shorten re-run's own ``ModelMessage``s, for the
+    engine to append to the turn's persisted history. Without them the re-run
+    is invisible after the fact: it is a second ``agent.run`` whose messages
+    the turn record would otherwise omit entirely, even though it can call
+    tools and spend most of the turn's tokens.
     """
 
     text: str
     extra_input_tokens: int
     extra_output_tokens: int
     method: str
+    extra_messages: list = field(default_factory=list)
 
 
 def split_for_discord(text: str) -> list[str]:
@@ -127,18 +135,27 @@ def get_length_summarizer() -> Agent:
     return _length_summarizer
 
 
+@dataclass(frozen=True)
+class _ShortenOutcome:
+    """What the shorten re-run produced: text, its spend, and its messages."""
+
+    text: str | None
+    input_tokens: int
+    output_tokens: int
+    messages: list
+
+
 async def _shorten_with_agent(
     message: str,
     agent: Agent,
     deps: Any,
     message_history: list[ModelMessage],
-) -> tuple[str | None, int, int]:
+) -> _ShortenOutcome:
     """Ask the turn's own agent to rewrite its overlong reply.
 
-    Returns ``(rewritten_text, input_tokens, output_tokens)``; the text is
-    ``None`` when the run fails or the agent declines to respond, so the
-    caller can fall through to the summarizer. Failures must never break the
-    turn — the original reply is still deliverable via later tiers.
+    ``text`` is ``None`` when the run fails or the agent declines to respond,
+    so the caller can fall through to the summarizer. Failures must never
+    break the turn — the original reply is still deliverable via later tiers.
 
     The re-run is deliberately tool-free. It reshapes text the agent already
     wrote, so it needs nothing fetched or computed — and this prompt names an
@@ -157,13 +174,15 @@ async def _shorten_with_agent(
         )
     except Exception:
         logger.exception("Shorten re-run failed — falling back to summarizer")
-        return None, 0, 0
+        return _ShortenOutcome(None, 0, 0, [])
     usage = result.usage()
     input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
     output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
     response = result.output.response
     text = response.message.strip() if response and response.message else None
-    return text or None, input_tokens, output_tokens
+    return _ShortenOutcome(
+        text or None, input_tokens, output_tokens, list(result.new_messages())
+    )
 
 
 async def _summarize_with_luna(message: str) -> str | None:
@@ -198,21 +217,36 @@ async def fit_overlong_response(
     Lite summarizer on the original text, then a hard truncation so a reply
     is always delivered.
     """
-    shortened, input_tokens, output_tokens = await _shorten_with_agent(
-        message, agent, deps, message_history
-    )
+    # The re-run's messages ride along on every tier: even a rewrite that gets
+    # discarded for still being too long already made whatever tool calls it
+    # made, and that is precisely what an investigation needs to see.
+    outcome = await _shorten_with_agent(message, agent, deps, message_history)
+    shortened = outcome.text
     if shortened is not None and len(shortened) <= SUMMARIZE_THRESHOLD:
-        return FitResult(shortened, input_tokens, output_tokens, "shortened")
+        return FitResult(
+            shortened,
+            outcome.input_tokens,
+            outcome.output_tokens,
+            "shortened",
+            outcome.messages,
+        )
 
     summary = await _summarize_with_luna(message)
     if summary is not None and len(summary) <= SUMMARIZE_THRESHOLD:
-        return FitResult(summary, input_tokens, output_tokens, "summarized")
+        return FitResult(
+            summary,
+            outcome.input_tokens,
+            outcome.output_tokens,
+            "summarized",
+            outcome.messages,
+        )
 
     return FitResult(
         message[: DISCORD_MESSAGE_LIMIT - 1].rstrip() + "…",
-        input_tokens,
-        output_tokens,
+        outcome.input_tokens,
+        outcome.output_tokens,
         "truncated",
+        outcome.messages,
     )
 
 

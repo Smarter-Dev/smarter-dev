@@ -901,3 +901,51 @@ async def test_turn_run_is_capped_by_usage_limits(fake_bot, fake_memory):
 
     assert captured["usage_limits"] is not None
     assert captured["usage_limits"].request_limit == 30
+
+
+@pytest.mark.asyncio
+async def test_shorten_rerun_messages_are_persisted_with_the_turn(
+    fake_bot, fake_memory
+):
+    """The overlong-reply rewrite is a second agent.run that can call tools.
+
+    In the 2026-07-28 incident it made 16 run_code calls that were absent from
+    the turn record, because only the main run's new_messages() was persisted
+    — reconstructing it needed raw Discord history.
+    """
+    captured: dict = {}
+
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
+        return _result(
+            _send("x" * 5000, topic="long", notes="overlong draft"),
+            new_messages=["main-a", "main-b"],
+        )
+
+    async def fake_fit(message, *, agent, deps, message_history):
+        from smarter_dev.bot.agents.response_fitting import FitResult
+
+        return FitResult("short reply", 11, 7, "shortened", ["rerun-1", "rerun-2"])
+
+    async def fake_persist(**kwargs):
+        captured.update(kwargs)
+
+    patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
+    with patches[0], patches[1], patches[2], patches[3], patch(
+        "smarter_dev.bot.services.chat_engine.fit_overlong_response", new=fake_fit
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.persist_turn", new=fake_persist
+    ):
+        engine, _ = await _build_engine(fake_bot)
+        engine.engagement_id = "eng-1"
+        engine.start()
+        engine.trigger_initial(_fake_trigger_message())
+        await asyncio.sleep(0.1)
+        await engine.shutdown()
+
+    assert captured, "persist_turn was never called"
+    assert captured["new_model_messages"] == [
+        "main-a",
+        "main-b",
+        "rerun-1",
+        "rerun-2",
+    ]
