@@ -517,3 +517,172 @@ async def test_deep_tool_loop_does_not_erode_its_own_turn(patched_summarise):
     # Every round of the in-flight turn is still there.
     for i in range(16):
         assert f"Char count attempt {i + 2}" in text
+
+
+# ---------------------------------------------------------------------------
+# Merged turn boundaries (the 2026-07-28 Gemini 400)
+#
+# Pydantic AI merges consecutive ``ModelRequest``s before a run starts, so the
+# ``ToolReturnPart`` closing one turn ("Final result processed.") ends up in
+# the SAME request as the next turn's user prompt — and that merged request is
+# what gets persisted, so it stays that shape forever. It still reads as a
+# user-turn start, so the compactor is free to cut there, which folds the tool
+# CALL into the summary while its RETURN survives in the kept window. Pydantic
+# AI then merges the summary request with that boundary (tool returns sorted
+# first) and the orphan lands at the very head of the history, where Gemini
+# rejects it: "Please ensure that function response turn comes immediately
+# after a function call turn."
+# ---------------------------------------------------------------------------
+
+BOUNDARY_PROMPT = "the message that opened the next turn"
+
+
+def _closed_turn(text: str, *, call_id: str, system: bool = False) -> list:
+    """A completed turn the way Pydantic AI persists a tool-output run."""
+    req_parts = ([SystemPromptPart(content="sys")] if system else []) + [
+        UserPromptPart(content=text)
+    ]
+    return [
+        ModelRequest(parts=req_parts),
+        ModelResponse(
+            parts=[ToolCallPart(tool_name="final_result", args="{}", tool_call_id=call_id)]
+        ),
+        ModelRequest(
+            parts=[
+                ToolReturnPart(
+                    tool_name="final_result",
+                    content="Final result processed.",
+                    tool_call_id=call_id,
+                )
+            ]
+        ),
+    ]
+
+
+def _merged_boundary_history() -> list:
+    """Prior turns, then a boundary request carrying a return AND a prompt.
+
+    Sized so the cut lands *on* the boundary: the turn it opens is heavy
+    enough to fill the keep-recent window on its own, so the previous turn
+    start no longer fits and the boundary is the earliest one that does.
+    """
+    messages = _closed_turn(BIG, call_id="o0", system=True)
+    for i in range(1, 6):
+        messages += _closed_turn(BIG, call_id=f"o{i}")
+    # What `_clean_message_history` leaves behind: the trailing tool return of
+    # the last closed turn merged into the next turn's first user prompt.
+    boundary = messages.pop()
+    messages.append(
+        ModelRequest(parts=[*boundary.parts, UserPromptPart(content=BOUNDARY_PROMPT)])
+    )
+    # The turn that boundary opened: a heavy research round, then its answer.
+    messages += [
+        ModelResponse(
+            parts=[ToolCallPart(tool_name="web_search", args="{}", tool_call_id="s9")]
+        ),
+        ModelRequest(
+            parts=[
+                ToolReturnPart(
+                    tool_name="web_search", content="x" * 16_000, tool_call_id="s9"
+                )
+            ]
+        ),
+        ModelResponse(
+            parts=[ToolCallPart(tool_name="final_result", args="{}", tool_call_id="o9")]
+        ),
+        ModelRequest(
+            parts=[
+                ToolReturnPart(
+                    tool_name="final_result",
+                    content="Final result processed.",
+                    tool_call_id="o9",
+                )
+            ]
+        ),
+    ]
+    return messages + _current_turn()
+
+
+def _first_return_precedes_no_call(messages: list) -> bool:
+    """True when a tool return appears before any tool call — the 400 shape."""
+    seen_call = False
+    for message in messages:
+        for part in message.parts:
+            if isinstance(part, ToolCallPart):
+                seen_call = True
+            elif isinstance(part, ToolReturnPart) and not seen_call:
+                return True
+    return False
+
+
+@pytest.mark.asyncio
+async def test_merged_boundary_fold_leaves_no_orphan_tool_return(patched_summarise):
+    """Folding at a merged boundary must not strand its tool return."""
+    _cold()
+    result = await compact_history(_merged_boundary_history())
+    assert patched_summarise.await_count == 1, "expected a fold to happen"
+    assert not _first_return_precedes_no_call(result)
+
+
+@pytest.mark.asyncio
+async def test_merged_boundary_prompt_survives_the_fold(patched_summarise):
+    """Splitting the boundary keeps the user's own message verbatim."""
+    _cold()
+    result = await compact_history(_merged_boundary_history())
+    assert BOUNDARY_PROMPT in _all_text(result)
+
+
+@pytest.mark.asyncio
+async def test_merged_boundary_return_reaches_the_summariser(patched_summarise):
+    """The folded-away return is summarised, not silently dropped."""
+    _cold()
+    await compact_history(_merged_boundary_history())
+    transcript = patched_summarise.await_args.args[0]
+    assert "Final result processed." in transcript
+
+
+@pytest.mark.asyncio
+async def test_gemini_never_sees_a_leading_function_response(patched_summarise):
+    """The full wire path: Pydantic AI re-merges the compacted history.
+
+    This is the actual regression — the orphan only reaches the head once
+    ``_clean_message_history`` folds the summary request into the boundary and
+    sorts tool returns to the front.
+    """
+    from pydantic_ai._agent_graph import _clean_message_history
+
+    _cold()
+    result = await compact_history(_merged_boundary_history())
+    wire = _clean_message_history(result)
+    head = wire[0]
+    assert not any(isinstance(part, ToolReturnPart) for part in head.parts)
+    assert not _first_return_precedes_no_call(wire)
+
+
+@pytest.mark.asyncio
+async def test_leading_orphan_return_is_stripped(patched_summarise):
+    """Backstop: a history that arrives already orphaned is repaired."""
+    messages = [
+        ModelRequest(
+            parts=[
+                SystemPromptPart(content="sys"),
+                ToolReturnPart(
+                    tool_name="final_result",
+                    content="Final result processed.",
+                    tool_call_id="stale",
+                ),
+                UserPromptPart(content="hello"),
+            ]
+        ),
+        ModelResponse(parts=[TextPart(content="hi")]),
+        ModelRequest(parts=[UserPromptPart(content="newest message")]),
+    ]
+    result = await compact_history(messages)
+    assert not _first_return_precedes_no_call(result)
+    # The rest of the head survives untouched.
+    assert "hello" in _all_text(result)
+    assert any(
+        isinstance(part, SystemPromptPart)
+        for message in result
+        for part in message.parts
+    )

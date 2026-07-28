@@ -949,3 +949,50 @@ async def test_shorten_rerun_messages_are_persisted_with_the_turn(
         "rerun-1",
         "rerun-2",
     ]
+
+
+@pytest.mark.asyncio
+async def test_rate_limited_model_says_so(fake_bot, fake_memory):
+    """A 429 reads as "busy, try shortly" — not as a generic failure.
+
+    Still no provider detail: the model name and the upstream body stay in the
+    admin diagnostics, same as every other inference error.
+    """
+
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
+        raise ModelHTTPError(
+            status_code=429,
+            model_name="poolside/laguna-s-2.1",
+            body={
+                "message": "Provider returned error",
+                "code": 429,
+                "metadata": {
+                    "raw": "poolside/laguna-s-2.1 is temporarily rate-limited upstream.",
+                    "provider_name": "Poolside",
+                },
+            },
+        )
+
+    error_url = "https://smarter.dev/admin/chat-errors/error-id"
+    persist = AsyncMock(return_value=error_url)
+    patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
+    with (
+        patches[0],
+        patches[1],
+        patches[2],
+        patches[3],
+        patch("smarter_dev.bot.services.chat_engine.persist_error", new=persist),
+    ):
+        engine, _ = await _build_engine(fake_bot)
+        engine.start()
+        engine.trigger_initial(_fake_trigger_message())
+        await asyncio.sleep(0.05)
+        await engine.shutdown()
+
+    posted = fake_bot.rest.create_message.await_args.kwargs.get("content", "")
+    assert "rate-limited" in posted.lower() or "rate limited" in posted.lower()
+    assert "couldn't generate a reply" not in posted
+    assert "Admin diagnostics" in posted
+    assert error_url in posted
+    assert "poolside" not in posted.lower()
+    assert "429" not in posted

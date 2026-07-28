@@ -39,6 +39,7 @@ from typing import Any
 
 import hikari
 from pydantic_ai.exceptions import ModelAPIError
+from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.usage import RunUsage
 from pydantic_ai.usage import UsageLimits
 from redis.exceptions import RedisError
@@ -107,6 +108,24 @@ MAX_RUNTIME = timedelta(hours=2)
 # far above any legitimate turn — the heaviest research turns run a handful of
 # tool rounds, so reaching 30 model requests means something is wrong.
 TURN_USAGE_LIMITS = UsageLimits(request_limit=30)
+
+# What a member sees when a turn dies. Provider detail (model name, status
+# code, upstream body) never appears here — it lives in the admin diagnostics
+# link appended alongside. A rate limit gets its own line because it is the one
+# failure the member can act on: the same message a minute later usually works,
+# where retrying an outright error usually doesn't.
+GENERIC_ERROR_NOTICE = "Sorry, couldn't generate a reply for that one — try again?"
+RATE_LIMITED_NOTICE = (
+    "I'm rate-limited at the moment — give it a minute and ask me again?"
+)
+
+
+def _user_facing_error(error: Exception) -> str:
+    """The member-facing text for a failed turn."""
+    if isinstance(error, ModelHTTPError) and error.status_code == 429:
+        return RATE_LIMITED_NOTICE
+    return GENERIC_ERROR_NOTICE
+
 
 # When a channel's model token budget is exhausted the engine stays quiet, but
 # posts one short notice so the silence is explained. This throttle (a Redis
@@ -766,7 +785,7 @@ class ChannelEngine:
                         "trigger_message_id": error_reply_to,
                     },
                 )
-                message = "Sorry, couldn't generate a reply for that one — try again?"
+                message = _user_facing_error(error)
                 if admin_url is not None:
                     message += (
                         f"\n-# Admin diagnostics: [view error details]({admin_url})"
