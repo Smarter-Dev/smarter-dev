@@ -15,6 +15,7 @@ from smarter_dev.bot.services.channel_token_budget import (
     current_window_usage,
     next_window_reset_epoch,
     over_budget_reset_epoch,
+    remaining_budget,
 )
 
 
@@ -221,3 +222,38 @@ def test_next_window_reset_epoch_is_the_next_wall_boundary():
         _assert_is_next_boundary(
             next_window_reset_epoch(now, window_seconds), window_seconds
         )
+
+
+@pytest.mark.asyncio
+async def test_remaining_budget_is_none_when_unlimited():
+    redis = _FakeRedis()
+    await add_usage(redis, "chan", 10_000_000)
+    assert await remaining_budget(redis, "chan", 0, 0) is None
+
+
+@pytest.mark.asyncio
+async def test_remaining_budget_reports_untouched_budget_in_full():
+    redis = _FakeRedis()
+    assert await remaining_budget(redis, "chan", 0, 5_000) == 5_000
+
+
+@pytest.mark.asyncio
+async def test_remaining_budget_subtracts_consumed_tokens():
+    redis = _FakeRedis()
+    await add_usage(redis, "chan", 2_000)
+    assert await remaining_budget(redis, "chan", 0, 5_000) == 3_000
+
+
+@pytest.mark.asyncio
+async def test_remaining_budget_takes_the_tighter_window():
+    redis = _FakeRedis()
+    await add_usage(redis, "chan", 1_000)
+    # Hour has 4_000 left, day has 9_000 — the hour binds.
+    assert await remaining_budget(redis, "chan", 10_000, 5_000) == 4_000
+
+
+@pytest.mark.asyncio
+async def test_remaining_budget_never_goes_negative():
+    redis = _FakeRedis()
+    await add_usage(redis, "chan", 9_999)
+    assert await remaining_budget(redis, "chan", 0, 5_000) == 0

@@ -111,6 +111,15 @@ class ChatDeps:
     # Images generated this turn, drained by the engine and attached to the
     # outgoing reply. Fresh per run (a new ChatDeps is built each turn).
     pending_images: list[GeneratedImage] = field(default_factory=list)
+    # Tokens this turn may spend before its tools are withdrawn (see
+    # chat_tool_budget). None/0 means unlimited; the engine sizes it per turn
+    # from what the channel's budget has left.
+    tool_token_budget: int | None = None
+    # Withhold tools for the whole run, regardless of spend. A token budget
+    # can't express this: a fresh run starts at zero usage, so its first step
+    # would still be offered tools. Used for the overlong-reply rewrite, which
+    # only reshapes text it already has.
+    tools_disabled: bool = False
 
 
 # -- web search / read ---------------------------------------------------

@@ -98,6 +98,7 @@ def _no_send(
         topic=topic,
         continue_watching=continue_watching,
     )
+from smarter_dev.bot.agents.chat_tool_budget import TURN_TOOL_TOKEN_CAP
 from smarter_dev.bot.services.chat_engine import (
     INACTIVITY_TIMEOUT,
     MAX_NO_RESPONSE_TURNS,
@@ -256,7 +257,7 @@ async def test_initial_activation_fires_agent_exactly_once(fake_bot, fake_memory
     the bot ended up replying to its own message."""
     runs: list[bool] = []
 
-    async def fake_run(*, user_prompt, message_history, deps):
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
         runs.append(True)
         return _result(_send("hi there", topic="greeting", notes="user said hi"))
 
@@ -277,7 +278,7 @@ async def test_initial_activation_calls_initial_builder(fake_bot, fake_memory):
     history is folded into message_history, one ModelRequest per message."""
     captured: dict = {}
 
-    async def fake_run(*, user_prompt, message_history, deps):
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
         captured["history"] = message_history
         return _result(
             _send("hi", topic="greeting", notes="user said hi"),
@@ -322,7 +323,7 @@ async def test_followup_turn_loads_history_and_uses_followup_builder(
     build_followup_input — not build_initial_input."""
     history_calls: list = []
 
-    async def fake_run(*, user_prompt, message_history, deps):
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
         history_calls.append(list(message_history))
         return _result(
             _send("ack", topic="ongoing", notes="tracking thread"),
@@ -358,7 +359,7 @@ async def test_queue_threshold_fires_agent(fake_bot, fake_memory):
     """Pushing 15 messages onto the queue should fire the agent without waiting 5s."""
     runs: list[bool] = []
 
-    async def fake_run(*, user_prompt, message_history, deps):
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
         runs.append(True)
         return _result(_no_send(topic="nothing to add"))
 
@@ -385,7 +386,7 @@ async def test_no_response_deactivates_after_three_turns(
     """Three consecutive NoResponse outputs should deactivate the engine."""
     monkeypatch.setattr("smarter_dev.bot.services.chat_engine.IDLE_FIRE_SECONDS", 0)
 
-    async def fake_run(*, user_prompt, message_history, deps):
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
         return _result(_no_send(topic="quiet channel"))
 
     patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
@@ -408,7 +409,7 @@ async def test_no_response_deactivates_after_three_turns(
 
 @pytest.mark.asyncio
 async def test_continue_watching_false_deactivates(fake_bot, fake_memory):
-    async def fake_run(*, user_prompt, message_history, deps):
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
         return _result(
             _send(
                 "bye",
@@ -444,7 +445,7 @@ async def test_stop_phrase_in_observe_deactivates_and_arms_cooldown(
         "smarter_dev.bot.services.chat_engine.set_channel_cooldown", _track_cooldown
     )
 
-    async def fake_run(*, user_prompt, message_history, deps):
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
         return _result(_send("hello", topic="greeting", notes="starting up"))
 
     patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
@@ -465,7 +466,7 @@ async def test_stop_phrase_in_observe_deactivates_and_arms_cooldown(
 
 @pytest.mark.asyncio
 async def test_send_response_reply_to_message_id_passes_through(fake_bot, fake_memory):
-    async def fake_run(*, user_prompt, message_history, deps):
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
         return _result(
             _send(
                 "here you go",
@@ -495,7 +496,7 @@ async def test_voice_only_response_sends_voice_not_text(fake_bot, fake_memory):
     async def voice_send(channel_id, text, reply_to, instruction=None):
         voice_calls.append((channel_id, text, reply_to))
 
-    async def fake_run(*, user_prompt, message_history, deps):
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
         return _result(
             _send(
                 voice_summary="async/await lets you write concurrent code that reads like sync",
@@ -525,7 +526,7 @@ async def test_text_and_voice_dispatched_in_parallel(fake_bot, fake_memory):
     async def voice_send(channel_id, text, reply_to, instruction=None):
         voice_calls.append((channel_id, text, reply_to))
 
-    async def fake_run(*, user_prompt, message_history, deps):
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
         return _result(
             _send(
                 "Here's the long explanation with code...\n\n```python\nimport asyncio\n```",
@@ -556,7 +557,7 @@ async def test_fire_now_re_triggers_an_active_engine(fake_bot, fake_memory):
     so the mention is queued AND the agent fires immediately."""
     runs: list[str] = []
 
-    async def fake_run(*, user_prompt, message_history, deps):
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
         runs.append(user_prompt)
         return _result(
             _send("ack", topic="t", notes="n"),
@@ -593,7 +594,7 @@ async def test_voice_instruction_forwarded_to_voice_send(fake_bot, fake_memory):
     async def voice_send(channel_id, text, reply_to, instruction=None):
         voice_calls.append((channel_id, text, reply_to, instruction))
 
-    async def fake_run(*, user_prompt, message_history, deps):
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
         return _result(
             _send(
                 voice_summary="bazinga",
@@ -624,7 +625,7 @@ async def test_voice_only_failure_posts_fallback(fake_bot, fake_memory):
     async def voice_send(channel_id, text, reply_to, instruction=None):
         raise RuntimeError("Discord error 400: 50173")
 
-    async def fake_run(*, user_prompt, message_history, deps):
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
         return _result(
             _send(
                 voice_summary="here you go",
@@ -656,7 +657,7 @@ async def test_voice_failure_with_text_does_not_post_extra_fallback(fake_bot, fa
     async def voice_send(channel_id, text, reply_to, instruction=None):
         raise RuntimeError("Discord error 400")
 
-    async def fake_run(*, user_prompt, message_history, deps):
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
         return _result(
             _send(
                 "here's the text",
@@ -685,7 +686,7 @@ async def test_agent_run_failure_posts_error_message(fake_bot, fake_memory):
     """If agent.run raises, the user sees a brief "couldn't generate a reply"
     note rather than silent nothing."""
 
-    async def fake_run(*, user_prompt, message_history, deps):
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
         raise RuntimeError("provider exploded")
 
     patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
@@ -705,7 +706,7 @@ async def test_agent_run_failure_posts_error_message(fake_bot, fake_memory):
 async def test_inference_http_error_posts_generic_admin_link(fake_bot, fake_memory):
     """Members see no provider detail; admins get the protected diagnostic URL."""
 
-    async def fake_run(*, user_prompt, message_history, deps):
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
         raise ModelHTTPError(
             status_code=503,
             model_name="kimi-k2.6",
@@ -852,3 +853,51 @@ def test_turn_decision_rejects_invalid_non_english_response(
             ),
             topic="x",
         )
+
+
+@pytest.mark.asyncio
+async def test_turn_carries_a_tool_token_budget(fake_bot, fake_memory):
+    """Every turn hands the agent a tool budget, so no run is unbounded.
+
+    A channel with no admin override is unlimited for *billing*, but must
+    still get the flat per-turn ceiling — otherwise the majority of channels
+    keep the old runaway behaviour.
+    """
+    captured: dict = {}
+
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
+        captured["deps"] = deps
+        captured["usage_limits"] = kwargs.get("usage_limits")
+        return _result(_send("hi", topic="greeting", notes="user said hi"))
+
+    patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
+    with patches[0], patches[1], patches[2], patches[3]:
+        engine, _ = await _build_engine(fake_bot)
+        engine.start()
+        engine.trigger_initial(_fake_trigger_message())
+        await asyncio.sleep(0.1)
+        await engine.shutdown()
+
+    assert captured["deps"].tool_token_budget == TURN_TOOL_TOKEN_CAP
+    assert captured["deps"].tools_disabled is False
+
+
+@pytest.mark.asyncio
+async def test_turn_run_is_capped_by_usage_limits(fake_bot, fake_memory):
+    """The backstop for a model that keeps requesting after losing its tools."""
+    captured: dict = {}
+
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
+        captured["usage_limits"] = kwargs.get("usage_limits")
+        return _result(_send("hi", topic="greeting", notes="user said hi"))
+
+    patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
+    with patches[0], patches[1], patches[2], patches[3]:
+        engine, _ = await _build_engine(fake_bot)
+        engine.start()
+        engine.trigger_initial(_fake_trigger_message())
+        await asyncio.sleep(0.1)
+        await engine.shutdown()
+
+    assert captured["usage_limits"] is not None
+    assert captured["usage_limits"].request_limit == 30

@@ -118,6 +118,40 @@ async def over_budget_reset_epoch(
     return latest_reset_epoch
 
 
+async def remaining_budget(
+    redis: Redis,
+    channel_id: str,
+    daily_budget: int,
+    hourly_budget: int,
+) -> int | None:
+    """Tokens ``channel_id`` may still spend, or None when unlimited.
+
+    The tighter of the two enforced windows binds, since spending stops the
+    moment either one is met. A ``0`` budget is unlimited and sits out the
+    comparison, so with both budgets ``0`` this returns None. Never negative:
+    a window already over its cap reads as 0 left.
+
+    Unlike :func:`over_budget_reset_epoch` (which gates whether a turn may
+    start), this sizes how much a turn that has already started may spend —
+    see :mod:`smarter_dev.bot.agents.chat_tool_budget`.
+    """
+    now_epoch = datetime.now(UTC).timestamp()
+    checks = (
+        (hourly_budget, "hour", HOUR_WINDOW_SECONDS),
+        (daily_budget, "day", DAY_WINDOW_SECONDS),
+    )
+    smallest_remaining: int | None = None
+    for budget, scope, window_seconds in checks:
+        if budget <= 0:
+            continue
+        window_index = _window_index(now_epoch, window_seconds)
+        consumed = await _consumed(redis, budget_key(channel_id, scope, window_index))
+        left = max(0, budget - consumed)
+        if smallest_remaining is None or left < smallest_remaining:
+            smallest_remaining = left
+    return smallest_remaining
+
+
 async def current_window_usage(redis: Redis, channel_id: str) -> tuple[int, int]:
     """Tokens ``channel_id`` has consumed in the current (hour, day) windows.
 
