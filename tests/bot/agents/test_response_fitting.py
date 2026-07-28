@@ -13,6 +13,7 @@ from smarter_dev.bot.agents.response_fitting import DISCORD_MESSAGE_LIMIT
 from smarter_dev.bot.agents.response_fitting import LENGTH_SUMMARIZER_MODEL_KEY
 from smarter_dev.bot.agents.response_fitting import SPLIT_TARGET
 from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
+from smarter_dev.bot.agents.response_fitting import _ShortenOutcome
 from smarter_dev.bot.agents.response_fitting import _shorten_with_agent
 from smarter_dev.bot.agents.response_fitting import fit_overlong_response
 from smarter_dev.bot.agents.response_fitting import fit_writer_message
@@ -87,7 +88,13 @@ def test_split_defensive_overlong_tail_is_truncated():
 # --------------------------------------------------------------------------- #
 
 
-def _agent_returning(message, *, input_tokens=10, output_tokens=5):
+def _outcome(text, input_tokens, output_tokens, messages):
+    return _ShortenOutcome(text, input_tokens, output_tokens, list(messages))
+
+
+def _agent_returning(
+    message, *, input_tokens=10, output_tokens=5, rerun_messages=None
+):
     agent = MagicMock()
     response = (
         SimpleNamespace(message=message) if message is not None else None
@@ -98,6 +105,7 @@ def _agent_returning(message, *, input_tokens=10, output_tokens=5):
             usage=lambda: SimpleNamespace(
                 input_tokens=input_tokens, output_tokens=output_tokens
             ),
+            new_messages=lambda: list(rerun_messages or []),
         )
     )
     return agent
@@ -106,11 +114,11 @@ def _agent_returning(message, *, input_tokens=10, output_tokens=5):
 @pytest.mark.asyncio
 async def test_shorten_returns_rewrite_and_usage():
     agent = _agent_returning("short version")
-    text, input_tokens, output_tokens = await _shorten_with_agent(
+    outcome = await _shorten_with_agent(
         "x" * 4000, agent, deps=None, message_history=[]
     )
-    assert text == "short version"
-    assert (input_tokens, output_tokens) == (10, 5)
+    assert outcome.text == "short version"
+    assert (outcome.input_tokens, outcome.output_tokens) == (10, 5)
     prompt = agent.run.await_args.kwargs["user_prompt"]
     assert "4000" in prompt
 
@@ -118,18 +126,21 @@ async def test_shorten_returns_rewrite_and_usage():
 @pytest.mark.asyncio
 async def test_shorten_no_response_returns_none():
     agent = _agent_returning(None)
-    text, _, _ = await _shorten_with_agent("x" * 4000, agent, None, [])
-    assert text is None
+    outcome = await _shorten_with_agent("x" * 4000, agent, None, [])
+    assert outcome.text is None
 
 
 @pytest.mark.asyncio
 async def test_shorten_run_failure_degrades_to_none():
     agent = MagicMock()
     agent.run = AsyncMock(side_effect=RuntimeError("model down"))
-    text, input_tokens, output_tokens = await _shorten_with_agent(
-        "x" * 4000, agent, None, []
+    outcome = await _shorten_with_agent("x" * 4000, agent, None, [])
+    assert (outcome.text, outcome.input_tokens, outcome.output_tokens) == (
+        None,
+        0,
+        0,
     )
-    assert (text, input_tokens, output_tokens) == (None, 0, 0)
+    assert outcome.messages == []
 
 
 # --------------------------------------------------------------------------- #
@@ -144,7 +155,7 @@ async def test_fit_uses_agent_rewrite_when_it_fits(monkeypatch):
     monkeypatch.setattr(
         response_fitting,
         "_shorten_with_agent",
-        AsyncMock(return_value=("rewritten", 11, 7)),
+        AsyncMock(return_value=_outcome("rewritten", 11, 7, ["m1", "m2"])),
     )
     summarize = AsyncMock()
     monkeypatch.setattr(response_fitting, "_summarize_with_luna", summarize)
@@ -162,7 +173,9 @@ async def test_fit_falls_back_to_summarizer_when_rewrite_still_long(monkeypatch)
     monkeypatch.setattr(
         response_fitting,
         "_shorten_with_agent",
-        AsyncMock(return_value=("y" * (SUMMARIZE_THRESHOLD + 1), 11, 7)),
+        AsyncMock(
+            return_value=_outcome("y" * (SUMMARIZE_THRESHOLD + 1), 11, 7, ["m1"])
+        ),
     )
     summarize = AsyncMock(return_value="a tidy summary")
     monkeypatch.setattr(response_fitting, "_summarize_with_luna", summarize)
@@ -179,7 +192,9 @@ async def test_fit_falls_back_to_summarizer_when_rewrite_still_long(monkeypatch)
 @pytest.mark.asyncio
 async def test_fit_truncates_when_everything_fails(monkeypatch):
     monkeypatch.setattr(
-        response_fitting, "_shorten_with_agent", AsyncMock(return_value=(None, 0, 0))
+        response_fitting,
+        "_shorten_with_agent",
+        AsyncMock(return_value=_outcome(None, 0, 0, [])),
     )
     monkeypatch.setattr(
         response_fitting, "_summarize_with_luna", AsyncMock(return_value=None)
@@ -237,3 +252,81 @@ async def test_fit_writer_message_truncates_when_summary_still_too_long(monkeypa
 
     assert fit.method == "truncated"
     assert len(fit.text) <= DISCORD_MESSAGE_LIMIT
+
+
+# --------------------------------------------------------------------------- #
+# The shorten re-run's messages must reach the persisted turn
+#
+# The 2026-07-28 incident happened inside this re-run — 16 run_code calls
+# counting characters — and none of it was recoverable from the DB, because
+# only the main run's new_messages() is persisted. Reconstructing it needed
+# raw Discord history.
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.asyncio
+async def test_shorten_returns_the_rerun_messages():
+    agent = _agent_returning("short version", rerun_messages=["req", "resp"])
+    outcome = await _shorten_with_agent(
+        "x" * 4000, agent, deps=None, message_history=[]
+    )
+    assert outcome.messages == ["req", "resp"]
+
+
+@pytest.mark.asyncio
+async def test_shorten_messages_survive_into_the_fit_result(monkeypatch):
+    monkeypatch.setattr(
+        response_fitting,
+        "_shorten_with_agent",
+        AsyncMock(return_value=_outcome("rewritten", 11, 7, ["m1", "m2"])),
+    )
+    monkeypatch.setattr(response_fitting, "_summarize_with_luna", AsyncMock())
+
+    fit = await fit_overlong_response(LONG, agent=None, deps=None, message_history=[])
+
+    assert fit.extra_messages == ["m1", "m2"]
+
+
+@pytest.mark.asyncio
+async def test_rerun_messages_kept_even_when_the_rewrite_is_discarded(monkeypatch):
+    """A rewrite that still overruns is thrown away — but it made the tool
+    calls, so its messages are exactly what an investigation needs."""
+    monkeypatch.setattr(
+        response_fitting,
+        "_shorten_with_agent",
+        AsyncMock(
+            return_value=_outcome("y" * (SUMMARIZE_THRESHOLD + 1), 11, 7, ["m1"])
+        ),
+    )
+    monkeypatch.setattr(
+        response_fitting, "_summarize_with_luna", AsyncMock(return_value="tidy")
+    )
+
+    fit = await fit_overlong_response(LONG, agent=None, deps=None, message_history=[])
+
+    assert fit.method == "summarized"
+    assert fit.extra_messages == ["m1"]
+
+
+@pytest.mark.asyncio
+async def test_failed_rerun_contributes_no_messages(monkeypatch):
+    monkeypatch.setattr(
+        response_fitting,
+        "_shorten_with_agent",
+        AsyncMock(return_value=_outcome(None, 0, 0, [])),
+    )
+    monkeypatch.setattr(
+        response_fitting, "_summarize_with_luna", AsyncMock(return_value=None)
+    )
+
+    fit = await fit_overlong_response(LONG, agent=None, deps=None, message_history=[])
+
+    assert fit.method == "truncated"
+    assert fit.extra_messages == []
+
+
+@pytest.mark.asyncio
+async def test_writer_fit_has_no_rerun_messages():
+    """Two-stage's writer is tool-less and never re-runs an agent."""
+    fit = await fit_writer_message("z" * 5000)
+    assert fit.extra_messages == []

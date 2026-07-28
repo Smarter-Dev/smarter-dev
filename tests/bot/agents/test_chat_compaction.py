@@ -396,3 +396,124 @@ async def test_empty_and_single_message_pass_through(patched_summarise):
     single = [ModelRequest(parts=[UserPromptPart(content=BIG * 5)])]
     assert await compact_history(list(single)) == single
     assert patched_summarise.await_count == 0
+
+
+# ---------------------------------------------------------------------------
+# The current turn is never folded, including mid tool-loop
+#
+# ``_index_of_last_request`` anchors the boundary on the last ModelRequest,
+# and Pydantic AI appends a tool-return-only ModelRequest after every round of
+# tool calls — so that anchor walks forward while a turn is still running,
+# which reads like it should let a long tool loop fold away its own in-flight
+# work. It doesn't: ``_pick_cut_index`` only ever cuts at a user-turn start,
+# and the running turn's own prompt is one, so everything from it onward stays
+# verbatim regardless of where the anchor landed.
+#
+# These pin that invariant down, because the reasoning above is subtle enough
+# to be worth a regression test rather than a re-derivation.
+# ---------------------------------------------------------------------------
+
+CURRENT_PROMPT = "count the characters in my draft"
+
+
+def _in_flight_tool_turn() -> list:
+    """The current turn, mid tool-loop — no final response yet."""
+    return [
+        ModelRequest(parts=[UserPromptPart(content=CURRENT_PROMPT)]),
+        ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="run_code",
+                    args='{"reason":"Quick char count"}',
+                    tool_call_id="tc9",
+                )
+            ]
+        ),
+        ModelRequest(
+            parts=[
+                ToolReturnPart(
+                    tool_name="run_code", content="4211", tool_call_id="tc9"
+                )
+            ]
+        ),
+    ]
+
+
+def _all_text(messages: list) -> str:
+    chunks = []
+    for message in messages:
+        for part in message.parts:
+            content = getattr(part, "content", None)
+            if isinstance(content, str):
+                chunks.append(content)
+            args = getattr(part, "args", None)
+            if isinstance(args, str):
+                chunks.append(args)
+    return "\n".join(chunks)
+
+
+@pytest.mark.asyncio
+async def test_in_flight_turn_prompt_survives_a_fold(patched_summarise):
+    """The running turn's own user prompt must stay verbatim."""
+    _cold()
+    messages = _long_history(5) + _in_flight_tool_turn()
+    result = await compact_history(messages)
+    assert patched_summarise.await_count == 1, "expected a fold to happen"
+    assert CURRENT_PROMPT in _all_text(result)
+
+
+@pytest.mark.asyncio
+async def test_in_flight_tool_call_and_return_survive_a_fold(patched_summarise):
+    """The tool work this turn already did is what the model answers from."""
+    _cold()
+    messages = _long_history(5) + _in_flight_tool_turn()
+    result = await compact_history(messages)
+    text = _all_text(result)
+    assert "Quick char count" in text
+    assert "4211" in text
+
+
+@pytest.mark.asyncio
+async def test_prior_turns_still_fold_around_an_in_flight_turn(patched_summarise):
+    """The fix must not disable folding — old turns still collapse."""
+    _cold()
+    messages = _long_history(5) + _in_flight_tool_turn()
+    result = await compact_history(messages)
+    assert STUB_SUMMARY_TEXT in _all_text(result)
+    assert len(result) < len(messages)
+
+
+@pytest.mark.asyncio
+async def test_deep_tool_loop_does_not_erode_its_own_turn(patched_summarise):
+    """Sixteen rounds — the shape of the 2026-07-28 incident."""
+    _cold()
+    loop: list = [ModelRequest(parts=[UserPromptPart(content=CURRENT_PROMPT)])]
+    for i in range(16):
+        loop.append(
+            ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="run_code",
+                        args=f'{{"reason":"Char count attempt {i + 2}"}}',
+                        tool_call_id=f"tc{i}",
+                    )
+                ]
+            )
+        )
+        loop.append(
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        tool_name="run_code",
+                        content=f"result {i}",
+                        tool_call_id=f"tc{i}",
+                    )
+                ]
+            )
+        )
+    result = await compact_history(_long_history(5) + loop)
+    text = _all_text(result)
+    assert CURRENT_PROMPT in text
+    # Every round of the in-flight turn is still there.
+    for i in range(16):
+        assert f"Char count attempt {i + 2}" in text
