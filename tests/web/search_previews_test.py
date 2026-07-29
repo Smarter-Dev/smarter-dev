@@ -145,9 +145,12 @@ async def test_view_is_read_only_and_rejects_unsafe_result_links(db_session):
         reservation.id,
         [
             {
-                "title": "Unsafe",
+                "title": "<strong>Unsafe</strong> &amp; escaped",
                 "url": "javascript:alert(1)",
-                "description": "Still rendered as inert text.",
+                "description": (
+                    "<strong>Still</strong> rendered as inert text."
+                    "<script>alert(1)</script>"
+                ),
             }
         ],
     )
@@ -156,7 +159,13 @@ async def test_view_is_read_only_and_rejects_unsafe_result_links(db_session):
     response = await search_preview_view.fn(_TOKEN, db_session)
     assert response.template_name == "ai/search_preview.html"
     assert response.context["status"] == "ready"
-    assert response.context["results"][0]["safe_url"] is None
+    result = response.context["results"][0]
+    assert result["safe_url"] is None
+    assert result["title"] == "Unsafe & escaped"
+    assert result["description_html"] == (
+        "<strong>Still</strong> rendered as inert text."
+    )
+    assert response.context["disable_analytics"] is True
     assert response.headers["Cache-Control"] == "no-store"
     assert "noindex" in response.headers["X-Robots-Tag"]
     assert response.headers["Referrer-Policy"] == "no-referrer"

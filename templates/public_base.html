@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Smarter Dev{% endblock %}</title>
+    {% block extra_head %}{% endblock %}
     <link rel="icon" type="image/png" href="/static/favicon.png">
     
     <!-- Fonts -->
@@ -20,7 +21,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css">
     
     <!-- Google Analytics -->
-    {% if config.google_analytics_id %}
+    {% if config.google_analytics_id and not disable_analytics|default(false) %}
     <script async src="https://www.googletagmanager.com/gtag/js?id={{ config.google_analytics_id }}"></script>
     <script>
         window.dataLayer = window.dataLayer || [];
