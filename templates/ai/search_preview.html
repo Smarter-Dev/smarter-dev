@@ -1,77 +1,158 @@
-<!doctype html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
-    <meta name="referrer" content="no-referrer">
-    {% if status == "pending" %}<meta http-equiv="refresh" content="2">{% endif %}
-    <title>Agent web search · Smarter Dev</title>
-    <style>
-        :root { color-scheme: dark; }
-        * { box-sizing: border-box; }
-        body {
-            margin: 0;
-            min-height: 100vh;
-            background: #02000f;
-            color: #f4f7fb;
-            font: 16px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        }
-        main { width: min(760px, calc(100% - 32px)); margin: 0 auto; padding: 56px 0 80px; }
-        .eyebrow { color: #00e1ff; font-size: .78rem; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
-        h1 { margin: 10px 0 8px; font-size: clamp(1.6rem, 5vw, 2.5rem); line-height: 1.2; overflow-wrap: anywhere; }
-        .intro, .meta { color: #aeb8c8; }
-        .meta { margin-top: 8px; font-size: .85rem; }
-        ol { margin: 36px 0 0; padding: 0; list-style: none; counter-reset: result; }
-        li {
-            counter-increment: result;
-            position: relative;
-            margin: 0 0 14px;
-            padding: 20px 20px 20px 54px;
-            border: 1px solid rgba(0, 225, 255, .2);
-            border-radius: 14px;
-            background: rgba(255, 255, 255, .045);
-        }
-        li::before { content: counter(result); position: absolute; left: 20px; color: #00e1ff; font-weight: 700; }
-        h2 { margin: 0 0 6px; font-size: 1.05rem; line-height: 1.35; overflow-wrap: anywhere; }
-        a { color: #8ceeff; text-decoration-thickness: 1px; text-underline-offset: 3px; }
-        .url { margin-top: 8px; color: #7e899b; font-size: .8rem; overflow-wrap: anywhere; }
-        .description { margin: 8px 0 0; color: #d3dae5; }
-        .state { margin-top: 32px; padding: 24px; border: 1px solid rgba(0, 225, 255, .2); border-radius: 14px; }
-        .pulse { display: inline-block; width: 9px; height: 9px; margin-right: 8px; border-radius: 50%; background: #00e1ff; }
-    </style>
-</head>
-<body>
-<main>
-    <div class="eyebrow">Smarter Dev · Agent web search</div>
-    <h1>{{ query }}</h1>
-    <p class="intro">A read-only snapshot of the search results the agent saw. This page cannot run or refresh a web search.</p>
+{% extends "public_base.html" %}
+
+{% block title %}Agent web search · Smarter Dev{% endblock %}
+
+{% block extra_head %}
+<meta name="robots" content="noindex,nofollow,noarchive,nosnippet">
+<meta name="referrer" content="no-referrer">
+{% if status == "pending" %}<meta http-equiv="refresh" content="2">{% endif %}
+{% endblock %}
+
+{% block extra_styles %}
+.search-preview {
+    padding-top: 1.25rem;
+    padding-bottom: 3rem;
+}
+
+.search-preview-header {
+    margin-bottom: 2.25rem;
+}
+
+.search-preview-eyebrow {
+    margin: 0 0 .65rem;
+    color: #00E1FF;
+    font-size: .75rem;
+    font-weight: 600;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+}
+
+.search-preview h1 {
+    margin: 0;
+    color: #fff;
+    font-size: clamp(1.65rem, 5vw, 2.35rem);
+    font-weight: 600;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+}
+
+.search-results {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+}
+
+.search-result {
+    max-width: 42rem;
+}
+
+.search-result-source {
+    display: block;
+    margin-bottom: .25rem;
+    color: rgba(255, 255, 255, .58);
+    font-size: .78rem;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+    text-decoration: none;
+}
+
+.search-result-source:hover {
+    color: rgba(255, 255, 255, .78);
+}
+
+.search-result-domain {
+    color: rgba(255, 255, 255, .88);
+    font-weight: 500;
+}
+
+.search-result h2 {
+    margin: 0;
+    font-size: 1.17rem;
+    font-weight: 500;
+    line-height: 1.35;
+}
+
+.search-result h2 a {
+    color: #65e9ff;
+    text-decoration: none;
+}
+
+.search-result h2 a:hover {
+    color: #fff;
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 3px;
+}
+
+.search-result-description {
+    margin: .35rem 0 0;
+    color: rgba(255, 255, 255, .76);
+    font-size: .93rem;
+    line-height: 1.55;
+}
+
+.search-preview-state {
+    display: flex;
+    align-items: center;
+    gap: .65rem;
+    color: rgba(255, 255, 255, .72);
+}
+
+.search-preview-pulse {
+    width: .55rem;
+    height: .55rem;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: #00E1FF;
+    box-shadow: 0 0 12px rgba(0, 225, 255, .7);
+}
+
+@media (max-width: 576px) {
+    .search-preview { padding-top: .5rem; }
+    .search-preview-header { margin-bottom: 2rem; }
+    .search-results { gap: 1.7rem; }
+}
+{% endblock %}
+
+{% block content %}
+<div class="container search-preview">
+    <header class="search-preview-header">
+        <p class="search-preview-eyebrow">Agent web search</p>
+        <h1>{{ query }}</h1>
+    </header>
 
     {% if status == "pending" %}
-        <div class="state"><span class="pulse"></span>The agent is searching. This page will update when the results arrive.</div>
+        <div class="search-preview-state">
+            <span class="search-preview-pulse" aria-hidden="true"></span>
+            <span>The agent is searching. This page will update when the results arrive.</span>
+        </div>
     {% elif status == "failed" %}
-        <div class="state">The agent could not complete this search.</div>
+        <div class="search-preview-state">The agent could not complete this search.</div>
     {% elif results %}
-        <ol>
+        <div class="search-results">
         {% for result in results %}
-            <li>
+            <article class="search-result">
+                {% if result.safe_url %}
+                    <a class="search-result-source" href="{{ result.safe_url }}" rel="nofollow noopener noreferrer">
+                        <span class="search-result-domain">{{ result.domain }}</span>{% if result.display_url %} · {{ result.display_url }}{% endif %}
+                    </a>
+                {% elif result.url %}
+                    <div class="search-result-source">{{ result.url }}</div>
+                {% endif %}
+
                 <h2>
                     {% if result.safe_url %}
-                        <a href="{{ result.safe_url }}" rel="nofollow noopener noreferrer">{{ result.title or result.url }}</a>
+                        <a href="{{ result.safe_url }}" rel="nofollow noopener noreferrer">{{ result.title or result.domain }}</a>
                     {% else %}
                         {{ result.title or result.url or "Untitled result" }}
                     {% endif %}
                 </h2>
-                {% if result.description %}<p class="description">{{ result.description }}</p>{% endif %}
-                {% if result.url %}<div class="url">{{ result.url }}</div>{% endif %}
-            </li>
+                {% if result.description_html %}<p class="search-result-description">{{ result.description_html|safe }}</p>{% endif %}
+            </article>
         {% endfor %}
-        </ol>
+        </div>
     {% else %}
-        <div class="state">The search completed without any results.</div>
+        <div class="search-preview-state">The search completed without any results.</div>
     {% endif %}
-
-    <p class="meta">Snapshot expires {{ expires_at.strftime("%Y-%m-%d %H:%M UTC") }}.</p>
-</main>
-</body>
-</html>
+</div>
+{% endblock %}
