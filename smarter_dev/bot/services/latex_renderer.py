@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 MAX_LATEX_SOURCE_CHARS = 1_800
 MAX_RENDERED_BYTES = 8 * 1024 * 1024
 RENDER_TIMEOUT_SECONDS = 5.0
+STARTUP_TIMEOUT_SECONDS = 30.0
 
 
 class LatexRenderError(RuntimeError):
@@ -38,15 +39,21 @@ class LatexRenderer:
         worker_path: Path | None = None,
         *,
         timeout_seconds: float = RENDER_TIMEOUT_SECONDS,
+        startup_timeout_seconds: float = STARTUP_TIMEOUT_SECONDS,
     ) -> None:
         repository_root = Path(__file__).resolve().parents[3]
         self.worker_path = worker_path or (
             repository_root / "latex_renderer" / "worker.mjs"
         )
         self.timeout_seconds = timeout_seconds
+        self.startup_timeout_seconds = startup_timeout_seconds
         self._process: asyncio.subprocess.Process | None = None
         self._lock = asyncio.Lock()
         self._next_id = 0
+
+    async def initialize(self) -> None:
+        """Start the worker and exercise the full render path before serving chat."""
+        await self.render("x")
 
     async def render(self, source: str) -> RenderedLatex:
         """Render ``source`` as PNG, restarting the worker after protocol errors."""
@@ -124,6 +131,23 @@ class LatexRenderer:
         except OSError as exc:
             raise LatexRenderError("LaTeX renderer could not start") from exc
         self._process = process
+        try:
+            assert process.stdout is not None
+            line = await asyncio.wait_for(
+                process.stdout.readline(),
+                timeout=self.startup_timeout_seconds,
+            )
+            response: dict[str, Any] = json.loads(line)
+        except TimeoutError as exc:
+            await self._stop_process()
+            raise LatexRenderError("LaTeX renderer startup timed out") from exc
+        except (EOFError, json.JSONDecodeError) as exc:
+            await self._stop_process()
+            raise LatexRenderError("LaTeX renderer failed during startup") from exc
+        if response != {"ready": True}:
+            await self._stop_process()
+            raise LatexRenderError("LaTeX renderer returned invalid startup data")
+        logger.info("LaTeX renderer worker is ready")
         return process
 
     async def _stop_process(self) -> None:
