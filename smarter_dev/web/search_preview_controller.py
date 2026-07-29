@@ -11,6 +11,7 @@ from litestar.exceptions import NotFoundException
 from litestar.response import Template
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.shared.config import get_settings
 from smarter_dev.web.search_previews import get_active_search_preview
 
 _PREVIEW_HEADERS = {
@@ -104,6 +105,7 @@ async def search_preview_view(
             "created_at": preview.created_at,
             "expires_at": preview.expires_at,
             "disable_analytics": True,
+            "config": get_settings(),
         },
         headers=_PREVIEW_HEADERS,
     )
