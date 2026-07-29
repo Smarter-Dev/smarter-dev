@@ -9,6 +9,7 @@ wheels/
 # Virtual environments
 .venv
 venv/
+latex_renderer/node_modules/
 .python-version
 .idea
 /smarter_dev.db

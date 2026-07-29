@@ -26,6 +26,7 @@ from smarter_dev.bot.audit_logger import log_message_edit
 from smarter_dev.bot.content_filter import check_content_filters
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.exceptions import ServiceError
+from smarter_dev.bot.services.latex_renderer import LatexRenderer
 from smarter_dev.bot.spam_engine import check_spam_engine
 from smarter_dev.bot.spam_engine import release_guild_spam_state
 from smarter_dev.bot.utils.embeds import create_error_embed
@@ -49,7 +50,7 @@ async def start_health_server(bot: lightbulb.BotApp, port: int = 8080) -> web.Ap
         The AppRunner instance for cleanup
     """
     async def health_handler(request: web.Request) -> web.Response:
-        is_alive = bot.is_alive if hasattr(bot, 'is_alive') else False
+        is_alive = bot.is_alive if hasattr(bot, "is_alive") else False
         if is_alive:
             return web.json_response({"status": "healthy", "discord": "connected"})
         else:
@@ -524,11 +525,14 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         cache_manager = None
 
         # Create services
+        from smarter_dev.bot.services.advent_of_code_service import AdventOfCodeService
         from smarter_dev.bot.services.bytes_service import BytesService
         from smarter_dev.bot.services.challenge_service import ChallengeService
         from smarter_dev.bot.services.chat_memory import init_chat_memory
-        from smarter_dev.bot.services.quests_service import QuestService
+        from smarter_dev.bot.services.discord_voice import VoiceService
         from smarter_dev.bot.services.forum_agent_service import ForumAgentService
+        from smarter_dev.bot.services.model_override_service import ModelOverrideService
+        from smarter_dev.bot.services.quests_service import QuestService
         from smarter_dev.bot.services.repeating_message_service import (
             RepeatingMessageService,
         )
@@ -536,13 +540,6 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             ScheduledMessageService,
         )
         from smarter_dev.bot.services.squads_service import SquadsService
-        from smarter_dev.bot.services.advent_of_code_service import (
-            AdventOfCodeService,
-        )
-        from smarter_dev.bot.services.discord_voice import VoiceService
-        from smarter_dev.bot.services.model_override_service import (
-            ModelOverrideService,
-        )
 
         bytes_service = BytesService(api_client, cache_manager)
         squads_service = SquadsService(api_client, cache_manager)
@@ -558,6 +555,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         advent_of_code_service = AdventOfCodeService(api_client, cache_manager, bot)
         voice_service = VoiceService(api_client, cache_manager, settings)
         model_override_service = ModelOverrideService(api_client, cache_manager)
+        latex_renderer = LatexRenderer()
 
         # Initialize chat agent memory (Redis-backed; non-critical)
         import redis.asyncio as redis_async
@@ -713,6 +711,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         bot.d["chat_memory_redis"] = chat_memory_redis
         bot.d["voice_service"] = voice_service
         bot.d["model_override_service"] = model_override_service
+        bot.d["latex_renderer"] = latex_renderer
 
         # Store services in d for plugin access (primary)
         bot.d["_services"] = {
@@ -726,6 +725,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             "advent_of_code_service": advent_of_code_service,
             "voice_service": voice_service,
             "model_override_service": model_override_service,
+            "latex_renderer": latex_renderer,
         }
 
         logger.info("✓ Bot services setup complete")
@@ -1103,6 +1103,9 @@ async def cleanup_bot_services(bot: lightbulb.BotApp) -> None:
         # Clean up cache manager (if used)
         if hasattr(bot, "d") and "cache_manager" in bot.d and bot.d["cache_manager"]:
             await bot.d["cache_manager"].cleanup()
+
+        if hasattr(bot, "d") and "latex_renderer" in bot.d:
+            await bot.d["latex_renderer"].close()
 
         # Clean up API client
         if hasattr(bot, "d") and "api_client" in bot.d:
