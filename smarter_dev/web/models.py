@@ -3624,6 +3624,40 @@ class GuildRulesConfig(Base):
         )
 
 
+class SearchResultPreview(Base):
+    """Short-lived, immutable preview of results an agent web search saw.
+
+    The public URL carries a random capability token; only its SHA-256 hash is
+    stored here. A preview is reserved before the search starts so the bot can
+    link to it in the initial tool-use message, then populated when Brave
+    returns. Loading the preview never initiates a search.
+    """
+
+    __tablename__ = "search_result_previews"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    access_token_hash: Mapped[str] = mapped_column(
+        String(64), nullable=False, unique=True, index=True
+    )
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending", server_default="pending"
+    )
+    results: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('pending', 'ready', 'failed')",
+            name="search_result_previews_status",
+        ),
+    )
+
+
 class ResearchSession(Base):
     """A research session created by the Scan research agent."""
 

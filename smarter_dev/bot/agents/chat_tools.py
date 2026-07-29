@@ -29,6 +29,9 @@ from smarter_dev.bot.agents.web_summarizer import summarize_web_content
 from smarter_dev.bot.utils import web_fetch
 from smarter_dev.shared.config import get_settings
 from smarter_dev.web.research_tools import brave_search
+from smarter_dev.web.search_previews import mark_search_preview_failed
+from smarter_dev.web.search_previews import populate_search_preview
+from smarter_dev.web.search_previews import reserve_search_preview
 
 # Reads longer than this are truncated before summarization to bound the
 # summarizer's input; shorter reads are passed through whole.
@@ -141,12 +144,65 @@ async def _post_status(ctx: RunContext[ChatDeps], text: str) -> None:
         logger.debug("failed to post tool status message", exc_info=True)
 
 
+def _search_status(query: str, preview_url: str | None) -> str:
+    """Build a Discord-safe status without ever truncating the preview URL."""
+    label = " ".join(query.split()).replace("\\", "\\\\")
+    for marker in "[]*_~`>|":
+        label = label.replace(marker, f"\\{marker}")
+
+    if preview_url:
+        prefix = 'Searching the web: ["'
+        suffix = f'"]({preview_url})'
+    else:
+        prefix = 'Searching the web: "'
+        suffix = '"'
+
+    # ``_post_status`` adds ``> -# `` and Discord caps messages at 2,000
+    # characters. Reserve enough room for the complete capability URL.
+    max_label = max(0, 1_990 - len(prefix) - len(suffix))
+    if len(label) > max_label:
+        label = label[: max(0, max_label - 1)] + "…"
+    return f"{prefix}{label}{suffix}"
+
+
 async def web_search(ctx: RunContext[ChatDeps], query: str) -> list[dict[str, str]]:
     """Search the web; returns up to 5 result snippets. For accurate or deep answers, follow up with web_read on the best result."""
     logger.info("web_search: %r (channel=%s)", query, ctx.deps.channel_id)
-    await _post_status(ctx, f'Searching the web: "{query}"')
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        results = await brave_search(client, query, num_results=5)
+
+    # Reserve + commit before the provider call so the initial tool-use message
+    # can link to a real pending page. Preview persistence is best-effort and
+    # must never prevent the agent from searching.
+    preview = None
+    try:
+        preview = await reserve_search_preview(query)
+    except Exception:  # noqa: BLE001 — optional user-facing artifact
+        logger.warning("failed to reserve web-search preview", exc_info=True)
+
+    await _post_status(
+        ctx,
+        _search_status(query, preview.url if preview is not None else None),
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            results = await brave_search(client, query, num_results=5)
+    except Exception:
+        if preview is not None:
+            try:
+                await mark_search_preview_failed(preview.id)
+            except Exception:  # noqa: BLE001 — preserve the original failure
+                logger.warning("failed to mark web-search preview failed", exc_info=True)
+        raise
+
+    if preview is not None:
+        try:
+            if results and all("error" in result for result in results):
+                await mark_search_preview_failed(preview.id)
+            else:
+                await populate_search_preview(preview.id, results)
+        except Exception:  # noqa: BLE001 — search results still reach the agent
+            logger.warning("failed to populate web-search preview", exc_info=True)
+
     logger.info(
         "web_search returned %d results for %r (channel=%s)",
         len(results),

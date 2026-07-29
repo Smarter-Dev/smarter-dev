@@ -94,3 +94,17 @@ uv run python scripts/retention_sweep.py
 
 Operators can also hard-delete emptied help-conversation rows outright from
 `/admin/help-conversations/cleanup`; the sweep only blanks the text.
+
+## Agent web-search previews
+
+User-facing chat-agent searches create an immutable capability link showing the
+query and ordered Brave result snippets the agent saw. The preview is reserved
+before the provider call (so the initial Discord tool-use message can link to a
+pending page), populated when the search returns, and never performs a search
+when loaded or refreshed.
+
+These snapshots have a separate fixed 48-hour lifecycle. The public controller
+rejects them as soon as `expires_at` is reached, and the same hourly retention
+job then hard-deletes the expired rows. Only a SHA-256 hash of the random URL
+token is stored. Preview pages are read-only, unlisted, marked `noindex`, and do
+not load analytics or other third-party assets.

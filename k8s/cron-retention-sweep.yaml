@@ -4,10 +4,11 @@
 #     it passively (help/chat/AI-moderation/forum agent + handler trigger
 #     contexts), stamping content_purged_at
 #   - keeps the rows themselves: timestamps, token counts, cost, decisions
+#   - hard-deletes expired 48-hour agent web-search previews
 #
-# Runs hourly rather than daily so the real worst-case retention is 48-49h
-# rather than 48-72h — the window we state publicly should be the window we
-# actually enforce. Image is pinned to the same web image so the codebase /
+# Runs hourly rather than daily so the real worst-case physical retention is
+# 48-49h rather than 48-72h. Search previews become inaccessible at exactly
+# 48h in the GET query. Image is pinned to the same web image so the codebase /
 # venv match exactly.
 apiVersion: batch/v1
 kind: CronJob
