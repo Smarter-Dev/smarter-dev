@@ -13,6 +13,7 @@ pip-log.txt
 
 # Development
 .venv
+node_modules
 .pytest_cache
 .coverage
 .mypy_cache
