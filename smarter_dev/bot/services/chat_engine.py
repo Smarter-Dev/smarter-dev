@@ -49,33 +49,33 @@ from smarter_dev.bot.agents.chat_agent import MODEL_ENV_VAR as CHAT_MODEL_ENV_VA
 from smarter_dev.bot.agents.chat_agent import get_chat_agent
 from smarter_dev.bot.agents.chat_agent import get_worker_agent
 from smarter_dev.bot.agents.chat_agent import resolved_reasoning_level
-from smarter_dev.bot.agents.chat_tool_budget import resolve_tool_token_budget
 from smarter_dev.bot.agents.chat_compaction import drain_collection
 from smarter_dev.bot.agents.chat_compaction import set_last_model_call
 from smarter_dev.bot.agents.chat_compaction import start_collection
 from smarter_dev.bot.agents.chat_context import build_followup_input
 from smarter_dev.bot.agents.chat_context import build_initial_input
 from smarter_dev.bot.agents.chat_input_format import build_agent_call
-from smarter_dev.bot.agents.message_gate import GateMessage
-from smarter_dev.bot.agents.message_gate import filter_messages
 from smarter_dev.bot.agents.chat_models import BriefingDecision
 from smarter_dev.bot.agents.chat_models import ResponseBody
 from smarter_dev.bot.agents.chat_models import TurnDecision
-from smarter_dev.bot.agents.writer_agent import build_writer_prompt
-from smarter_dev.bot.agents.writer_agent import get_writer_agent
+from smarter_dev.bot.agents.chat_tool_budget import resolve_tool_token_budget
+from smarter_dev.bot.agents.chat_tools import ChatDeps
+from smarter_dev.bot.agents.chat_tools import GeneratedImage
+from smarter_dev.bot.agents.latex_blocks import TextSection
+from smarter_dev.bot.agents.latex_blocks import has_latex_section
+from smarter_dev.bot.agents.latex_blocks import split_latex_sections
+from smarter_dev.bot.agents.message_gate import GateMessage
+from smarter_dev.bot.agents.message_gate import filter_messages
 from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
 from smarter_dev.bot.agents.response_fitting import fit_overlong_response
 from smarter_dev.bot.agents.response_fitting import fit_writer_message
 from smarter_dev.bot.agents.response_fitting import split_for_discord
-from smarter_dev.bot.agents.chat_tools import ChatDeps
-from smarter_dev.bot.agents.chat_tools import GeneratedImage
-from smarter_dev.shared.model_catalog import get_model
+from smarter_dev.bot.agents.writer_agent import build_writer_prompt
+from smarter_dev.bot.agents.writer_agent import get_writer_agent
 from smarter_dev.bot.services.channel_token_budget import add_fallback_usage
 from smarter_dev.bot.services.channel_token_budget import add_usage
-from smarter_dev.bot.services.default_model_override import read_default_model_override
 from smarter_dev.bot.services.channel_token_budget import fallback_ended_key
 from smarter_dev.bot.services.channel_token_budget import fallback_flag_key
-from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.channel_token_budget import over_budget_reset_epoch
 from smarter_dev.bot.services.channel_token_budget import remaining_budget
 from smarter_dev.bot.services.chat_conversation_persistence import end_engagement
@@ -83,6 +83,8 @@ from smarter_dev.bot.services.chat_conversation_persistence import persist_error
 from smarter_dev.bot.services.chat_conversation_persistence import persist_turn
 from smarter_dev.bot.services.chat_conversation_persistence import start_engagement
 from smarter_dev.bot.services.chat_memory import get_chat_memory
+from smarter_dev.bot.services.default_model_override import read_default_model_override
+from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.user_message_limit import DIRECTED_SCORE_THRESHOLD
 from smarter_dev.bot.services.user_message_limit import format_usage_warning_notice
 from smarter_dev.bot.services.user_message_limit import record_directed_messages
@@ -92,6 +94,7 @@ from smarter_dev.bot.utils.stop_detection import set_channel_cooldown
 from smarter_dev.bot.views.model_override_views import (
     MODEL_BUDGET_FALLBACK_CUSTOM_ID_PREFIX,
 )
+from smarter_dev.shared.model_catalog import get_model
 
 logger = logging.getLogger(__name__)
 
@@ -829,6 +832,7 @@ class ChannelEngine:
                 output.response is not None
                 and output.response.message
                 and len(output.response.message) > SUMMARIZE_THRESHOLD
+                and not has_latex_section(output.response.message)
             ):
                 if two_stage:
                     fit = await fit_writer_message(output.response.message)
@@ -1045,7 +1049,6 @@ class ChannelEngine:
         has_text = bool(body.message and body.message.strip())
         has_voice = bool(body.voice_summary and body.voice_summary.strip())
 
-        text_ok = True
         voice_outcome: _VoiceOutcome | None = None
 
         if not has_text and not has_voice and not images:
@@ -1053,6 +1056,11 @@ class ChannelEngine:
 
         # Dispatch in parallel; capture each result independently.
         async def _text_runner() -> bool:
+            if has_latex_section(body.message):
+                sent = await self._send_fenced_response(body.message, reply_to)
+                if images:
+                    await self._post_images(images, reply_to=None)
+                return sent
             return await self._send_text(body.message, reply_to, images)
 
         async def _voice_runner() -> _VoiceOutcome:
@@ -1073,10 +1081,7 @@ class ChannelEngine:
 
         results = await asyncio.gather(*tasks.values(), return_exceptions=True)
         for kind, res in zip(tasks.keys(), results):
-            if kind == "text":
-                if isinstance(res, BaseException) or res is False:
-                    text_ok = False
-            elif kind == "voice":
+            if kind == "voice":
                 if isinstance(res, BaseException):
                     voice_outcome = _VoiceOutcome(
                         sent_ok=False,
@@ -1101,6 +1106,100 @@ class ChannelEngine:
             )
 
         return voice_outcome
+
+    def _latex_renderer(self) -> Any | None:
+        """Return the process-wide fenced-LaTeX renderer, if configured."""
+        data = getattr(self.bot, "d", None)
+        if not isinstance(data, dict):
+            return None
+        renderer = data.get("latex_renderer")
+        if renderer is None:
+            renderer = data.get("_services", {}).get("latex_renderer")
+        return renderer
+
+    async def _send_fenced_response(
+        self,
+        message: str,
+        reply_to: int | None,
+    ) -> bool:
+        """Send prose and rendered ``latex`` fences in their original order."""
+        sections = split_latex_sections(message)
+        renderer = self._latex_renderer()
+        sent_any = False
+
+        for section in sections:
+            # Anchor only the first successfully delivered Discord message to
+            # the agent's selected target. Later sections are consecutive
+            # channel messages, never replies to that target or to each other.
+            section_reply = reply_to if not sent_any else None
+            if isinstance(section, TextSection):
+                if not section.text.strip():
+                    continue
+                sent = await self._send_text(
+                    section.text,
+                    reply_to=section_reply,
+                    images=None,
+                )
+            else:
+                sent = False
+                if renderer is not None:
+                    try:
+                        rendered = await renderer.render(section.source)
+                        sent = await self._send_latex_image(
+                            rendered.data,
+                            rendered.filename,
+                            rendered.mime_type,
+                            reply_to=section_reply,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to render fenced LaTeX in channel %s; "
+                            "sending source fallback",
+                            self.channel_id,
+                            exc_info=True,
+                        )
+                else:
+                    logger.warning(
+                        "No LaTeX renderer configured for channel %s; "
+                        "sending source fallback",
+                        self.channel_id,
+                    )
+                if not sent:
+                    sent = await self._send_text(
+                        section.original,
+                        reply_to=section_reply,
+                        images=None,
+                    )
+
+            if sent:
+                sent_any = True
+
+        return sent_any
+
+    async def _send_latex_image(
+        self,
+        data: bytes,
+        filename: str,
+        mime_type: str,
+        *,
+        reply_to: int | None,
+    ) -> bool:
+        """Post one rendered equation as an image-only Discord message."""
+        kwargs: dict[str, Any] = {
+            "attachment": hikari.Bytes(data, filename, mime_type),
+        }
+        if reply_to is not None:
+            kwargs["reply"] = reply_to
+        try:
+            await self.bot.rest.create_message(self.channel_id, **kwargs)
+            return True
+        except Exception:
+            logger.warning(
+                "Failed to post rendered LaTeX in channel %s",
+                self.channel_id,
+                exc_info=True,
+            )
+            return False
 
     async def _send_text(
         self,

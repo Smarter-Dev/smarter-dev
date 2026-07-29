@@ -249,6 +249,39 @@ async def test_reply_at_threshold_is_not_rewritten(fake_memory, fake_redis):
 
 
 @pytest.mark.asyncio
+async def test_overlong_fenced_reply_preserves_latex_before_dispatch(
+    fake_memory, fake_redis
+):
+    reply = "before\n```latex\nx^2\n```\n" + ("A" * 2980)
+    agent_mock = MagicMock()
+    agent_mock.run = AsyncMock(return_value=_result(_send(reply)))
+    engine = _make_engine(fake_redis)
+    renderer = MagicMock()
+    renderer.render = AsyncMock(
+        return_value=SimpleNamespace(
+            data=b"PNG",
+            filename="latex.png",
+            mime_type="image/png",
+        )
+    )
+    engine.bot.d["latex_renderer"] = renderer
+
+    fit_mock = AsyncMock()
+    patches = _patches(agent_mock, fake_memory)
+    with patches[0], patches[1], patches[2], patches[3], patch(
+        "smarter_dev.bot.services.chat_engine.fit_overlong_response",
+        new=fit_mock,
+    ):
+        await engine._run_once(first_activation=True)
+
+    fit_mock.assert_not_awaited()
+    renderer.render.assert_awaited_once_with("x^2")
+    calls = engine.bot.rest.create_message.await_args_list
+    assert calls[0].kwargs["content"] == "before"
+    assert "attachment" in calls[1].kwargs
+
+
+@pytest.mark.asyncio
 async def test_split_reply_puts_attachments_on_the_last_message(fake_redis):
     """Images ride on the second message of a split reply so an attachment
     never visually interrupts the text."""

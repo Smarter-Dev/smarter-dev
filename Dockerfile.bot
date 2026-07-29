@@ -11,6 +11,8 @@ RUN apt-get update && apt-get install -y \
     curl \
     ffmpeg \
     procps \
+    nodejs \
+    npm \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv
@@ -18,9 +20,11 @@ RUN pip install uv
 
 # Copy dependency files
 COPY pyproject.toml uv.lock ./
+COPY latex_renderer/package.json latex_renderer/package-lock.json ./latex_renderer/
 
 # Install dependencies in production mode with bot group
 RUN uv sync --frozen --no-dev --group bot
+RUN npm ci --omit=dev --prefix latex_renderer
 
 # Copy application code
 COPY . .
