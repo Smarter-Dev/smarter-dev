@@ -614,6 +614,15 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         await model_override_service.initialize()
         logger.info("✓ Model override service initialized")
 
+        logger.info("Initializing LaTeX renderer...")
+        try:
+            await latex_renderer.initialize()
+            logger.info("✓ LaTeX renderer initialized")
+        except Exception:
+            logger.exception(
+                "LaTeX renderer warmup failed — fenced equations will retry lazily"
+            )
+
         # Verify service health
         logger.info("Verifying service health...")
         try:

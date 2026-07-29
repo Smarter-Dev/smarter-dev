@@ -186,3 +186,35 @@ async def test_real_worker_renders_png_when_node_dependencies_are_installed():
 
     assert result.mime_type == "image/png"
     assert result.data.startswith(b"\x89PNG\r\n\x1a\n")
+
+
+@pytest.mark.asyncio
+async def test_worker_startup_has_a_separate_readiness_timeout(tmp_path):
+    worker = tmp_path / "slow-worker.mjs"
+    worker.write_text(
+        """
+import { createInterface } from "node:readline";
+await new Promise(resolve => setTimeout(resolve, 75));
+process.stdout.write(JSON.stringify({ready: true}) + "\\n");
+const lines = createInterface({input: process.stdin, crlfDelay: Infinity});
+for await (const line of lines) {
+  const request = JSON.parse(line);
+  process.stdout.write(JSON.stringify({
+    id: request.id,
+    png: Buffer.from("PNG").toString("base64"),
+  }) + "\\n");
+}
+""",
+        encoding="utf-8",
+    )
+    renderer = LatexRenderer(
+        worker_path=worker,
+        timeout_seconds=0.05,
+        startup_timeout_seconds=1.0,
+    )
+    try:
+        result = await renderer.render("x")
+    finally:
+        await renderer.close()
+
+    assert result.data == b"PNG"

@@ -13,6 +13,8 @@ const jax = await mathjax.init({
   },
 });
 
+process.stdout.write(`${JSON.stringify({ ready: true })}\n`);
+
 async function render(source) {
   if (typeof source !== "string" || source.length === 0) {
     throw new Error("LaTeX source must not be empty");
