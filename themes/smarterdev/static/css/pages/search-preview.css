@@ -1,0 +1,149 @@
+/* Agent web-search results — deliberately plain result rows, not cards. */
+
+.sp-wrap {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 920px);
+  min-height: calc(100vh - 105px);
+  padding: clamp(7rem, 12vw, 9rem) clamp(1.25rem, 5vw, 3rem) 6rem;
+}
+
+.sp-header {
+  max-width: 760px;
+  margin-bottom: clamp(2.75rem, 6vw, 4.25rem);
+}
+
+.sp-header .code-label {
+  margin-bottom: .75rem;
+}
+
+.sp-query {
+  font-family: var(--heading);
+  font-size: clamp(1.65rem, 4.5vw, 2.7rem);
+  font-weight: 400;
+  line-height: 1.25;
+  letter-spacing: .015em;
+  color: var(--white);
+  overflow-wrap: anywhere;
+  text-shadow: 0 0 32px rgba(0,212,255,.08);
+}
+
+.sp-results {
+  display: flex;
+  flex-direction: column;
+  gap: 2.25rem;
+  max-width: 760px;
+}
+
+.sp-result {
+  position: relative;
+}
+
+.sp-source {
+  display: flex;
+  align-items: baseline;
+  gap: .5rem;
+  min-width: 0;
+  margin-bottom: .28rem;
+  font-family: var(--mono);
+  font-size: .68rem;
+  line-height: 1.45;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.sp-domain {
+  flex-shrink: 0;
+  color: var(--light);
+}
+
+.sp-path {
+  min-width: 0;
+  color: var(--gray);
+}
+
+.sp-source:hover .sp-domain {
+  color: var(--cyan);
+}
+
+.sp-title {
+  margin: 0;
+  font-family: var(--body);
+  font-size: clamp(1.05rem, 2.2vw, 1.22rem);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.sp-title a {
+  color: var(--cyan);
+  text-decoration: none;
+  transition: color .2s, text-shadow .2s;
+}
+
+.sp-title a:hover {
+  color: var(--white);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  text-shadow: var(--glow-sm);
+}
+
+.sp-description {
+  margin: .35rem 0 0;
+  color: var(--light);
+  font-family: var(--body);
+  font-size: .9rem;
+  line-height: 1.65;
+}
+
+.sp-description strong,
+.sp-description em {
+  color: var(--white);
+}
+
+.sp-state {
+  display: flex;
+  align-items: center;
+  gap: .7rem;
+  font-family: var(--mono);
+  font-size: .78rem;
+  color: var(--gray);
+}
+
+.sp-state-error {
+  color: var(--rose);
+}
+
+.sp-pulse {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 10px rgba(0,212,255,.7);
+  animation: pulse 2s infinite;
+}
+
+@media (max-width: 600px) {
+  .sp-wrap {
+    padding-top: 6.5rem;
+    padding-bottom: 4rem;
+  }
+
+  .sp-header {
+    margin-bottom: 2.5rem;
+  }
+
+  .sp-results {
+    gap: 1.85rem;
+  }
+
+  .sp-source {
+    display: block;
+  }
+
+  .sp-domain,
+  .sp-path {
+    display: block;
+  }
+}

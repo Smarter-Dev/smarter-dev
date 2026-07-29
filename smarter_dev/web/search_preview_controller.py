@@ -11,20 +11,10 @@ from litestar.exceptions import NotFoundException
 from litestar.response import Template
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from smarter_dev.shared.config import get_settings
 from smarter_dev.web.search_previews import get_active_search_preview
 
 _PREVIEW_HEADERS = {
     "Cache-Control": "no-store",
-    "Content-Security-Policy": (
-        "default-src 'self'; "
-        "script-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com "
-        "https://cdn.jsdelivr.net https://cdnjs.cloudflare.com; "
-        "font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; "
-        "img-src 'self' data:; connect-src 'self'; base-uri 'self'; "
-        "form-action 'self'; frame-ancestors 'none'"
-    ),
     "Referrer-Policy": "no-referrer",
     "X-Content-Type-Options": "nosniff",
     "X-Robots-Tag": "noindex, nofollow, noarchive, nosnippet",
@@ -104,8 +94,17 @@ async def search_preview_view(
             "results": results,
             "created_at": preview.created_at,
             "expires_at": preview.expires_at,
-            "disable_analytics": True,
-            "config": get_settings(),
+            "seo_meta": {
+                "description": "Agent web search results.",
+                "robots": "noindex,nofollow,noarchive,nosnippet",
+            },
+            "og_meta": {
+                "title": preview.query,
+                "description": "Agent web search results.",
+                "site_name": "Smarter Dev",
+                "type": "website",
+                "image": "",
+            },
         },
         headers=_PREVIEW_HEADERS,
     )
