@@ -165,7 +165,7 @@ async def test_view_is_read_only_and_rejects_unsafe_result_links(db_session):
     assert result["description_html"] == (
         "<strong>Still</strong> rendered as inert text."
     )
-    assert response.context["disable_analytics"] is True
+    assert response.context["seo_meta"]["robots"].startswith("noindex")
     assert response.headers["Cache-Control"] == "no-store"
     assert "noindex" in response.headers["X-Robots-Tag"]
     assert response.headers["Referrer-Policy"] == "no-referrer"

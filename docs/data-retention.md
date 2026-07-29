@@ -106,5 +106,4 @@ when loaded or refreshed.
 These snapshots have a separate fixed 48-hour lifecycle. The public controller
 rejects them as soon as `expires_at` is reached, and the same hourly retention
 job then hard-deletes the expired rows. Only a SHA-256 hash of the random URL
-token is stored. Preview pages are read-only, unlisted, marked `noindex`, and do
-not load analytics.
+token is stored. Preview pages are read-only, unlisted, and marked `noindex`.

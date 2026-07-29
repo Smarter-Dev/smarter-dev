@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block page_type %}search-preview{% endblock %}
+{% block page_title %}{{ query }}{% endblock %}
+
+{% block head %}
+{% if status == "pending" %}<meta http-equiv="refresh" content="2">{% endif %}
+{% endblock %}
+
+{% block page_css %}
+<link rel="stylesheet" href="{{ theme_url('css/pages/search-preview.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="sp-wrap container">
+    <header class="sp-header reveal">
+        <p class="code-label">// agent web search</p>
+        <h1 class="sp-query">{{ query }}</h1>
+    </header>
+
+    {% if status == "pending" %}
+        <div class="sp-state">
+            <span class="sp-pulse" aria-hidden="true"></span>
+            <span>Searching...</span>
+        </div>
+    {% elif status == "failed" %}
+        <div class="sp-state sp-state-error">Search failed.</div>
+    {% elif results %}
+        <div class="sp-results">
+        {% for result in results %}
+            <article class="sp-result">
+                {% if result.safe_url %}
+                    <a class="sp-source" href="{{ result.safe_url }}"
+                       rel="nofollow noopener noreferrer" data-sk-no-spa>
+                        <span class="sp-domain">{{ result.domain }}</span>{% if result.display_url %}<span class="sp-path">{{ result.display_url }}</span>{% endif %}
+                    </a>
+                {% elif result.url %}
+                    <div class="sp-source"><span class="sp-path">{{ result.url }}</span></div>
+                {% endif %}
+
+                <h2 class="sp-title">
+                    {% if result.safe_url %}
+                        <a href="{{ result.safe_url }}" rel="nofollow noopener noreferrer" data-sk-no-spa>{{ result.title or result.domain }}</a>
+                    {% else %}
+                        {{ result.title or result.url or "Untitled result" }}
+                    {% endif %}
+                </h2>
+                {% if result.description_html %}
+                    <p class="sp-description">{{ result.description_html|safe }}</p>
+                {% endif %}
+            </article>
+        {% endfor %}
+        </div>
+    {% else %}
+        <div class="sp-state">No results.</div>
+    {% endif %}
+</div>
+{% endblock %}
