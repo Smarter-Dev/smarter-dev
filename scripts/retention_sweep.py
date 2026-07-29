@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Scrub expired Discord message content (CronJob entry point).
+"""Run the application's hourly content-retention jobs.
 
-Runs :func:`smarter_dev.web.retention.run_retention_sweep` once: every table
-that passively captures Discord message text has the human text nulled out on
-rows older than the 48-hour window, keeping the row's timestamps, counters and
-cost. Exits 0 on success, 1 on an unhandled exception; counts go to the log.
+Scrubs expired Discord message content and deletes expired, short-lived agent
+web-search previews. Exits 0 on success, 1 on an unhandled exception; counts go
+to the log.
 
 Intended to be triggered hourly by a Kubernetes CronJob
 (``k8s/cron-retention-sweep.yaml``). Locally:
@@ -19,6 +18,7 @@ import sys
 
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.retention import run_retention_sweep
+from smarter_dev.web.search_previews import delete_expired_search_previews
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -29,7 +29,13 @@ logger = logging.getLogger("retention_sweep")
 async def main() -> int:
     async with get_db_session_context() as session:
         result = await run_retention_sweep(session)
-    logger.info("retention sweep complete: %s", result)
+        deleted_previews = await delete_expired_search_previews(session)
+        await session.commit()
+    logger.info(
+        "retention sweep complete: %s; search_result_previews=%d deleted",
+        result,
+        deleted_previews,
+    )
     return 0
 
 
