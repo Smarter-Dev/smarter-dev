@@ -31,9 +31,12 @@ data:
   SITE_BASE_URL: "https://smarter.dev"
 
   # LLM Model Configuration
-  LLM_FAST_MODEL: "gemini/gemini-3.1-flash-lite"
-  LLM_MEDIUM_MODEL: "claude-haiku-4-5-20251001"
-  LLM_JUDGE_MODEL: "gemini/gemini-3.1-flash-lite"
+  LLM_FAST_MODEL: "gpt-5.6-luna"
+  LLM_MEDIUM_MODEL: "gpt-5.6-luna"
+  LLM_JUDGE_MODEL: "gpt-5.6-luna"
+  CHAT_AGENT_MODEL: "gpt-5.6-luna"
+  CHAT_AGENT_COMPACT_MODEL: "gpt-5.6-luna"
+  HANDLER_AGENT_MODEL: "gpt-5.6-luna"
 
   # Discord voice message configuration
   VOICE_TTS_MODEL: "gemini-2.5-flash-preview-tts"

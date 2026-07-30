@@ -3,9 +3,8 @@
 Registered on the ``ChatAgent`` as a ``history_processor``. Pydantic AI
 invokes this before every model call. When folding the oldest turns into
 a summary is *economically* worth it (see below), they're rendered to a
-transcript and summarised into a single running-summary message by a
-small Gemini agent; the most recent ~``KEEP_RECENT_CHARS`` of turns stay
-verbatim.
+transcript and summarised into a single running-summary message by
+GPT-5.6 Luna; the most recent ~``KEEP_RECENT_CHARS`` of turns stay verbatim.
 
 The fold decision is a cost model, not a fixed threshold. Providers cache
 prompt prefixes for a few minutes; re-reading a cached prefix costs ~10%
@@ -55,23 +54,25 @@ import dataclasses
 import logging
 import os
 from contextvars import ContextVar
-from datetime import UTC, datetime
+from datetime import UTC
+from datetime import datetime
 
 from pydantic_ai import Agent
-from pydantic_ai.messages import (
-    ModelMessage,
-    ModelRequest,
-    ModelResponse,
-    RetryPromptPart,
-    SystemPromptPart,
-    TextPart,
-    ToolCallPart,
-    ToolReturnPart,
-    UserPromptPart,
-)
-from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
-from pydantic_ai.providers.google import GoogleProvider
+from pydantic_ai.messages import ModelMessage
+from pydantic_ai.messages import ModelRequest
+from pydantic_ai.messages import ModelResponse
+from pydantic_ai.messages import RetryPromptPart
+from pydantic_ai.messages import SystemPromptPart
+from pydantic_ai.messages import TextPart
+from pydantic_ai.messages import ToolCallPart
+from pydantic_ai.messages import ToolReturnPart
+from pydantic_ai.messages import UserPromptPart
+from pydantic_ai.models import Model
 
+from smarter_dev.bot.agents.model_router import build_model_for
+from smarter_dev.bot.agents.model_router import model_settings_for
+from smarter_dev.shared.model_catalog import MODEL_CATALOG
+from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ReasoningLevel
 
 logger = logging.getLogger(__name__)
@@ -101,22 +102,23 @@ TRANSCRIPT_TOOL_CLAMP = 1_500
 
 COMPACTED_PREFIX = "[compacted history]"
 
-DEFAULT_COMPACT_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_COMPACT_MODEL = "gpt-5.6-luna"
 COMPACT_MODEL_ENV_VAR = "CHAT_AGENT_COMPACT_MODEL"
-# The summarizer runs at a fixed reasoning level (Gemini thinking_level LOW);
-# persisted with each compaction event so the dashboard can attribute its spend.
+# The summarizer runs at fixed low reasoning; persisted with each compaction
+# event so the dashboard can attribute its spend.
 SUMMARIZER_REASONING_LEVEL = ReasoningLevel.LOW
 # Mirrors chat_agent.MODEL_ENV_VAR — chat_agent imports this module, so
 # importing back would be circular.
 CHAT_MODEL_ENV_VAR = "CHAT_AGENT_MODEL"
-DEFAULT_CHAT_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_CHAT_MODEL = "gpt-5.6-luna"
 
 # $/Mtok (input, cached_input, output), matched by id prefix. Cached rate
 # defaults to 10% of input when the provider hasn't published one.
 _PRICES: dict[str, tuple[float, float, float]] = {
     "gemini-3.1-flash-lite": (0.25, 0.025, 1.50),
     "gemini-3-flash": (0.15, 0.0375, 0.60),
-    "gpt-5.6-luna": (1.00, 0.10, 6.00),
+    "gpt-5.6-luna": (0.20, 0.02, 1.20),
+    "gpt-5.6-terra": (2.00, 0.20, 12.00),
     "gpt-5.4-nano": (0.20, 0.02, 1.25),
 }
 _DEFAULT_PRICES = (0.50, 0.05, 2.00)
@@ -143,13 +145,13 @@ def set_last_model_call(when: datetime | None) -> None:
     _last_model_call.set(when)
 
 
-def _should_fold(
-    foldable_tokens: int, kept_tokens: int, *, cache_warm: bool
-) -> bool:
+def _should_fold(foldable_tokens: int, kept_tokens: int, *, cache_warm: bool) -> bool:
     """The cost model: is folding cheaper than carrying the history?"""
     chat_model = os.getenv(CHAT_MODEL_ENV_VAR, DEFAULT_CHAT_MODEL)
     p_in, p_cached, _ = _prices_for(chat_model)
-    q_in, _, q_out = _prices_for(os.getenv(COMPACT_MODEL_ENV_VAR, DEFAULT_COMPACT_MODEL))
+    q_in, _, q_out = _prices_for(
+        os.getenv(COMPACT_MODEL_ENV_VAR, DEFAULT_COMPACT_MODEL)
+    )
 
     summary_tokens = MAX_SUMMARY_CHARS // CHARS_PER_TOKEN
     saved = foldable_tokens - summary_tokens
@@ -254,24 +256,30 @@ quoting, no apologies. Return just the summary text.
 _summarizer_agent: Agent[None, str] | None = None
 
 
-def _build_summarizer_model() -> GoogleModel:
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+def _summarizer_catalog_model() -> CatalogModel:
+    """Resolve the configured compactor wire id through the shared catalog."""
     model_id = os.getenv(COMPACT_MODEL_ENV_VAR, DEFAULT_COMPACT_MODEL)
-    return GoogleModel(model_id, provider=GoogleProvider(api_key=api_key))
+    for model in MODEL_CATALOG:
+        if model.model_id == model_id:
+            return model
+    raise RuntimeError(f"Compaction model is not in the catalog: {model_id}")
+
+
+def _build_summarizer_model() -> Model:
+    return build_model_for(_summarizer_catalog_model())
 
 
 def get_summarizer_agent() -> Agent[None, str]:
     """Return the singleton compaction summarizer agent."""
     global _summarizer_agent
     if _summarizer_agent is None:
+        catalog_model = _summarizer_catalog_model()
         _summarizer_agent = Agent(
-            _build_summarizer_model(),
+            build_model_for(catalog_model),
             output_type=str,
             system_prompt=_SUMMARIZER_PROMPT.format(max_chars=MAX_SUMMARY_CHARS),
-            model_settings=GoogleModelSettings(
-                google_thinking_config={
-                    "thinking_level": SUMMARIZER_REASONING_LEVEL.value.upper(),
-                },
+            model_settings=model_settings_for(
+                catalog_model, SUMMARIZER_REASONING_LEVEL
             ),
         )
     return _summarizer_agent
@@ -329,7 +337,7 @@ async def _summarise_conversation(transcript: str) -> _SummariseResult | None:
 
 
 def _part_chars(part) -> int:
-    if isinstance(part, (UserPromptPart, TextPart, ToolReturnPart)):
+    if isinstance(part, UserPromptPart | TextPart | ToolReturnPart):
         content = part.content
         return len(content) if isinstance(content, str) else len(str(content))
     if isinstance(part, ToolCallPart):
@@ -356,7 +364,9 @@ def _render_transcript(messages: list[ModelMessage]) -> str:
             if isinstance(part, SystemPromptPart):
                 continue
             if isinstance(part, UserPromptPart):
-                content = part.content if isinstance(part.content, str) else str(part.content)
+                content = (
+                    part.content if isinstance(part.content, str) else str(part.content)
+                )
                 chunks.append(f"[user_input]\n{content}")
             elif isinstance(part, TextPart):
                 chunks.append(f"[assistant]\n{part.content}")
@@ -367,7 +377,9 @@ def _render_transcript(messages: list[ModelMessage]) -> str:
                     f"{_clamp(args, TRANSCRIPT_TOOL_CLAMP)}"
                 )
             elif isinstance(part, ToolReturnPart):
-                content = part.content if isinstance(part.content, str) else str(part.content)
+                content = (
+                    part.content if isinstance(part.content, str) else str(part.content)
+                )
                 chunks.append(
                     f"[tool_return {part.tool_name}]\n"
                     f"{_clamp(content, TRANSCRIPT_TOOL_CLAMP)}"
@@ -513,8 +525,7 @@ async def compact_history(messages: list[ModelMessage]) -> list[ModelMessage]:
     if len(messages) <= 1:
         return messages
     cache_warm = (
-        last_call is not None
-        and (now - last_call).total_seconds() < CACHE_TTL_SECONDS
+        last_call is not None and (now - last_call).total_seconds() < CACHE_TTL_SECONDS
     )
 
     current_start = _index_of_last_request(messages)

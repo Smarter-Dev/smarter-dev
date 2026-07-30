@@ -95,6 +95,6 @@ def test_resolved_reasoning_level_none_for_adhoc_model():
 
 
 def test_resolved_reasoning_level_default_model_when_id_omitted(monkeypatch):
-    # None model id resolves to the env/default (a catalog Gemini, default MEDIUM).
+    # None model id resolves to the env/default (catalog Luna, default MEDIUM).
     monkeypatch.delenv(chat_agent.MODEL_ENV_VAR, raising=False)
     assert resolved_reasoning_level(None, None) == "medium"

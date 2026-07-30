@@ -8,33 +8,34 @@ warm, thresholds per model price).
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, patch
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
+from unittest.mock import AsyncMock
+from unittest.mock import patch
 
 import pytest
-from pydantic_ai.messages import (
-    ModelRequest,
-    ModelResponse,
-    SystemPromptPart,
-    TextPart,
-    ToolCallPart,
-    ToolReturnPart,
-    UserPromptPart,
-)
+from pydantic_ai.messages import ModelRequest
+from pydantic_ai.messages import ModelResponse
+from pydantic_ai.messages import SystemPromptPart
+from pydantic_ai.messages import TextPart
+from pydantic_ai.messages import ToolCallPart
+from pydantic_ai.messages import ToolReturnPart
+from pydantic_ai.messages import UserPromptPart
 
-from smarter_dev.bot.agents.chat_compaction import (
-    CACHE_TTL_SECONDS,
-    COMPACTED_PREFIX,
-    HARD_FOLD_TOKENS,
-    KEEP_RECENT_CHARS,
-    CompactionEvent,
-    _should_fold,
-    _summarise_conversation,
-    compact_history,
-    drain_collection,
-    set_last_model_call,
-    start_collection,
-)
+from smarter_dev.bot.agents.chat_compaction import CACHE_TTL_SECONDS
+from smarter_dev.bot.agents.chat_compaction import COMPACTED_PREFIX
+from smarter_dev.bot.agents.chat_compaction import DEFAULT_CHAT_MODEL
+from smarter_dev.bot.agents.chat_compaction import DEFAULT_COMPACT_MODEL
+from smarter_dev.bot.agents.chat_compaction import HARD_FOLD_TOKENS
+from smarter_dev.bot.agents.chat_compaction import KEEP_RECENT_CHARS
+from smarter_dev.bot.agents.chat_compaction import CompactionEvent
+from smarter_dev.bot.agents.chat_compaction import _should_fold
+from smarter_dev.bot.agents.chat_compaction import _summarise_conversation
+from smarter_dev.bot.agents.chat_compaction import compact_history
+from smarter_dev.bot.agents.chat_compaction import drain_collection
+from smarter_dev.bot.agents.chat_compaction import set_last_model_call
+from smarter_dev.bot.agents.chat_compaction import start_collection
 
 STUB_SUMMARY_TEXT = f"{COMPACTED_PREFIX} alice (id 1) asked about webhooks."
 
@@ -76,9 +77,7 @@ def _warm():
 
 
 def _cold():
-    set_last_model_call(
-        datetime.now(UTC) - timedelta(seconds=CACHE_TTL_SECONDS + 60)
-    )
+    set_last_model_call(datetime.now(UTC) - timedelta(seconds=CACHE_TTL_SECONDS + 60))
 
 
 def _user_turn(text: str, reply: str = "ok", *, system: bool = False) -> list:
@@ -124,23 +123,27 @@ SMALL = "hello"
 
 
 # ---------------------------------------------------------------------------
-# The cost model itself (token-level unit tests; default Flash Lite prices
-# unless CHAT_AGENT_MODEL says otherwise)
+# The cost model itself (token-level unit tests; default Luna prices unless
+# CHAT_AGENT_MODEL says otherwise)
 # ---------------------------------------------------------------------------
 
 
-def test_should_fold_flash_lite_cold_threshold(monkeypatch):
+def test_default_chat_and_compaction_models_are_luna():
+    assert DEFAULT_CHAT_MODEL == "gpt-5.6-luna"
+    assert DEFAULT_COMPACT_MODEL == "gpt-5.6-luna"
+
+
+def test_should_fold_luna_default_cold_threshold(monkeypatch):
     monkeypatch.delenv("CHAT_AGENT_MODEL", raising=False)
-    # (p + n*c)(F - S) >= Sigma crosses at F ~= 9375 tokens
+    # (p + n*c)(F - S) >= Sigma crosses at F ~= 9375 tokens.
     assert not _should_fold(9_000, 3_000, cache_warm=False)
     assert _should_fold(10_000, 3_000, cache_warm=False)
 
 
-def test_should_fold_flash_lite_never_warm_below_cap(monkeypatch):
+def test_should_fold_luna_default_never_warm_below_cap(monkeypatch):
     monkeypatch.delenv("CHAT_AGENT_MODEL", raising=False)
-    # Cached savings (0.025*n) accrue slower than the summariser's own
-    # input rate (0.25) — below the latency cap, no F makes a warm fold
-    # profitable.
+    # Cached savings (0.02*n) accrue slower than the summariser's own input
+    # rate (0.20) — below the latency cap, no F makes a warm fold profitable.
     assert not _should_fold(HARD_FOLD_TOKENS - 1, 0, cache_warm=True)
 
 
@@ -151,16 +154,15 @@ def test_hard_cap_folds_regardless_of_economics(monkeypatch):
     assert _should_fold(HARD_FOLD_TOKENS, 0, cache_warm=True)
 
 
-def test_should_fold_luna_cold_threshold(monkeypatch):
+def test_explicit_luna_uses_reduced_rate_threshold(monkeypatch):
     monkeypatch.setenv("CHAT_AGENT_MODEL", "gpt-5.6-luna")
-    # Crosses at F ~= 1560 tokens
-    assert not _should_fold(1_200, 3_000, cache_warm=False)
-    assert _should_fold(2_000, 3_000, cache_warm=False)
+    assert not _should_fold(9_000, 3_000, cache_warm=False)
+    assert _should_fold(10_000, 3_000, cache_warm=False)
 
 
 def test_should_fold_luna_warm_threshold(monkeypatch):
     monkeypatch.setenv("CHAT_AGENT_MODEL", "gpt-5.6-luna")
-    # With K=3000 kept tokens the warm break-even is F ~= 15.8k tokens
+    # Luna-on-Luna compaction is not economical while warm below the hard cap.
     assert not _should_fold(15_000, 3_000, cache_warm=True)
     assert _should_fold(17_000, 3_000, cache_warm=True)
 
@@ -170,7 +172,7 @@ def test_should_fold_nothing_to_save():
 
 
 # ---------------------------------------------------------------------------
-# compact_history plumbing (Flash Lite prices, cold cache unless stated)
+# compact_history plumbing (Luna prices, cold cache unless stated)
 # ---------------------------------------------------------------------------
 
 
@@ -221,7 +223,7 @@ async def test_explicit_cold_gap_folds(patched_summarise):
 @pytest.mark.asyncio
 async def test_second_call_same_run_reads_warm(patched_summarise):
     """The processor stamps its own invocations: a tool-loop's second model
-    call is seconds after the first, so Flash Lite must not fold there."""
+    call is seconds after the first, so Luna must not fold there."""
     messages = _long_history(5) + _current_turn()
     out1 = await compact_history(list(messages))
     assert patched_summarise.await_count == 1  # cold: folded
@@ -254,7 +256,7 @@ async def test_kept_window_respects_budget(patched_summarise):
         len(p.content)
         for m in kept
         for p in m.parts
-        if isinstance(p, (UserPromptPart, TextPart))
+        if isinstance(p, UserPromptPart | TextPart)
     )
     assert kept_chars <= KEEP_RECENT_CHARS
     # But at least one prior turn stayed verbatim.
@@ -285,9 +287,11 @@ async def test_tool_pairs_never_split(patched_summarise):
 
 @pytest.mark.asyncio
 async def test_current_turn_never_compacted(patched_summarise):
-    messages = _user_turn(BIG, system=True) + _user_turn(BIG) + [
-        ModelRequest(parts=[UserPromptPart(content=BIG * 3)])
-    ]
+    messages = (
+        _user_turn(BIG, system=True)
+        + _user_turn(BIG)
+        + [ModelRequest(parts=[UserPromptPart(content=BIG * 3)])]
+    )
     out = await compact_history(list(messages))
     # However huge, the current request is byte-identical.
     assert out[-1] is messages[-1]
@@ -357,9 +361,7 @@ async def test_summarise_reads_cache_tokens_from_usage():
         cache_read_tokens=150,
         cache_write_tokens=5,
     )
-    run_result = SimpleNamespace(
-        output="a concise summary", usage=lambda: usage
-    )
+    run_result = SimpleNamespace(output="a concise summary", usage=lambda: usage)
     stub_agent = SimpleNamespace(run=AsyncMock(return_value=run_result))
     with patch(
         "smarter_dev.bot.agents.chat_compaction.get_summarizer_agent",
@@ -431,9 +433,7 @@ def _in_flight_tool_turn() -> list:
         ),
         ModelRequest(
             parts=[
-                ToolReturnPart(
-                    tool_name="run_code", content="4211", tool_call_id="tc9"
-                )
+                ToolReturnPart(tool_name="run_code", content="4211", tool_call_id="tc9")
             ]
         ),
     ]
@@ -545,7 +545,9 @@ def _closed_turn(text: str, *, call_id: str, system: bool = False) -> list:
     return [
         ModelRequest(parts=req_parts),
         ModelResponse(
-            parts=[ToolCallPart(tool_name="final_result", args="{}", tool_call_id=call_id)]
+            parts=[
+                ToolCallPart(tool_name="final_result", args="{}", tool_call_id=call_id)
+            ]
         ),
         ModelRequest(
             parts=[

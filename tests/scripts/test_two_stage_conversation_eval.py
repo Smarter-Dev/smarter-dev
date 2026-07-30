@@ -18,6 +18,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 import eval_prices  # noqa: E402
 import two_stage_conversation_eval as harness  # noqa: E402
+
 from smarter_dev.shared.model_catalog import get_model  # noqa: E402
 
 
@@ -27,8 +28,12 @@ def _prices():
 
 
 def test_token_use_add_and_total():
-    a = harness.TokenUse(input_tokens=10, output_tokens=5, cache_read_tokens=2, cache_write_tokens=1)
-    b = harness.TokenUse(input_tokens=3, output_tokens=4, cache_read_tokens=1, cache_write_tokens=0)
+    a = harness.TokenUse(
+        input_tokens=10, output_tokens=5, cache_read_tokens=2, cache_write_tokens=1
+    )
+    b = harness.TokenUse(
+        input_tokens=3, output_tokens=4, cache_read_tokens=1, cache_write_tokens=0
+    )
     combined = harness.total_tokens([a, b])
     assert combined.input_tokens == 13
     assert combined.output_tokens == 9
@@ -42,19 +47,19 @@ def test_total_tokens_empty_is_zero():
 
 
 def test_stage_cost_matches_list_price_terra():
-    # Terra: $2.50 in / $15 out per 1M. 1M in + 1M out -> $17.50.
+    # Terra: $2 in / $12 out per 1M. 1M in + 1M out -> $14.
     terra = get_model("gpt-5-6-terra")
     cost = harness.stage_cost(
         harness.TokenUse(input_tokens=1_000_000, output_tokens=1_000_000), terra
     )
-    assert cost == Decimal("17.50")
+    assert cost == Decimal("14.00")
 
 
 def test_stage_cost_prices_cache_read_and_write_separately():
     # 1M input of which 800k cache-read, 100k cache-write, on Terra:
-    #   uncached 100k @ $2.50/M = 0.25
-    #   cache-read 800k @ $0.25/M = 0.20
-    #   cache-write 100k @ $3.125/M = 0.3125  -> total 0.7625
+    #   uncached 100k @ $2.00/M = 0.20
+    #   cache-read 800k @ $0.20/M = 0.16
+    #   cache-write 100k @ $2.50/M = 0.25  -> total 0.61
     terra = get_model("gpt-5-6-terra")
     cost = harness.stage_cost(
         harness.TokenUse(
@@ -65,7 +70,7 @@ def test_stage_cost_prices_cache_read_and_write_separately():
         ),
         terra,
     )
-    assert cost == Decimal("0.7625")
+    assert cost == Decimal("0.61")
 
 
 def test_stage_cost_worker_cheaper_than_large_for_same_tokens():
