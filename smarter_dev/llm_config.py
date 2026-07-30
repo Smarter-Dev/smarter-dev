@@ -7,9 +7,15 @@ project using environment variables.
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
+
 import dotenv
 from google import genai
-from typing import Optional
+
+if TYPE_CHECKING:
+    import dspy
+
+DEFAULT_LLM_MODEL = "gpt-5.6-luna"
 
 
 def get_llm_model(model_type: str = "fast") -> dspy.LM:
@@ -25,9 +31,9 @@ def get_llm_model(model_type: str = "fast") -> dspy.LM:
         Configured dspy.LM instance
 
     Environment Variables:
-        LLM_FAST_MODEL: Fast model for quick operations (default: gemini/gemini-3.1-flash-lite-preview)
-        LLM_MEDIUM_MODEL: Medium intelligence model (default: claude-haiku-4-5-20251001)
-        LLM_JUDGE_MODEL: Model for LLM-as-judge tests (default: gemini/gemini-3.1-flash-lite-preview)
+        LLM_FAST_MODEL: Fast model for quick operations (default: gpt-5.6-luna)
+        LLM_MEDIUM_MODEL: Medium intelligence model (default: gpt-5.6-luna)
+        LLM_JUDGE_MODEL: Model for LLM-as-judge tests (default: gpt-5.6-luna)
         OPENAI_API_KEY: OpenAI API key
         GEMINI_API_KEY: Google Gemini API key
         ANTHROPIC_API_KEY: Anthropic API key
@@ -49,25 +55,22 @@ def get_llm_model(model_type: str = "fast") -> dspy.LM:
 
     # Get model based on type
     if model_type == "judge":
-        model_name = os.getenv("LLM_JUDGE_MODEL", "gemini/gemini-3.1-flash-lite-preview")
+        model_name = os.getenv("LLM_JUDGE_MODEL", DEFAULT_LLM_MODEL)
     elif model_type == "medium":
-        model_name = os.getenv("LLM_MEDIUM_MODEL", "claude-haiku-4-5-20251001")
+        model_name = os.getenv("LLM_MEDIUM_MODEL", DEFAULT_LLM_MODEL)
     else:
         # "fast" or "default" (for backwards compatibility)
-        model_name = os.getenv("LLM_FAST_MODEL", "gemini/gemini-3.1-flash-lite-preview")
-    
+        model_name = os.getenv("LLM_FAST_MODEL", DEFAULT_LLM_MODEL)
+
     # Determine API key based on model provider
     api_key = _get_api_key_for_model(model_name)
-    
+
     # Special handling for cache setting
     cache = False if model_type in ("fast", "default") else True
-    
+
     # Special parameters for reasoning models
-    kwargs = {
-        "api_key": api_key,
-        "cache": cache
-    }
-    
+    kwargs = {"api_key": api_key, "cache": cache}
+
     # Ensure OpenAI models use the correct provider format
     provider = _get_provider_from_model(model_name)
     if provider == "openai" and not model_name.startswith("openai/"):
@@ -75,12 +78,12 @@ def get_llm_model(model_type: str = "fast") -> dspy.LM:
         formatted_model_name = f"openai/{model_name}"
     else:
         formatted_model_name = model_name
-    
+
     # OpenAI reasoning models (o1, GPT-5) require specific parameters
     if _is_reasoning_model(model_name):
         kwargs["temperature"] = 1.0
         kwargs["max_tokens"] = 25000  # High limit for reasoning models
-    
+
     return dspy.LM(formatted_model_name, **kwargs)
 
 
@@ -94,14 +97,14 @@ def get_model_info(model_type: str = "fast") -> dict:
         Dict with model_name, provider, has_api_key, and env_var info
     """
     if model_type == "judge":
-        model_name = os.getenv("LLM_JUDGE_MODEL", "gemini/gemini-3.1-flash-lite-preview")
+        model_name = os.getenv("LLM_JUDGE_MODEL", DEFAULT_LLM_MODEL)
         env_var = "LLM_JUDGE_MODEL"
     elif model_type == "medium":
-        model_name = os.getenv("LLM_MEDIUM_MODEL", "claude-haiku-4-5-20251001")
+        model_name = os.getenv("LLM_MEDIUM_MODEL", DEFAULT_LLM_MODEL)
         env_var = "LLM_MEDIUM_MODEL"
     else:
         # "fast" or "default" (for backwards compatibility)
-        model_name = os.getenv("LLM_FAST_MODEL", "gemini/gemini-3.1-flash-lite-preview")
+        model_name = os.getenv("LLM_FAST_MODEL", DEFAULT_LLM_MODEL)
         env_var = "LLM_FAST_MODEL"
 
     provider = _get_provider_from_model(model_name)
@@ -139,7 +142,7 @@ def _get_provider_from_model(model_name: str) -> str:
         return "unknown"
 
 
-def _get_api_key_for_model(model_name: str) -> Optional[str]:
+def _get_api_key_for_model(model_name: str) -> str | None:
     """Get appropriate API key for model.
 
     Checks environment variables first (for Kubernetes/Docker environments),
@@ -152,50 +155,46 @@ def _get_api_key_for_model(model_name: str) -> Optional[str]:
     elif provider == "gemini":
         return os.getenv("GEMINI_API_KEY") or dotenv.get_key(".env", "GEMINI_API_KEY")
     elif provider == "anthropic":
-        return os.getenv("ANTHROPIC_API_KEY") or dotenv.get_key(".env", "ANTHROPIC_API_KEY")
+        return os.getenv("ANTHROPIC_API_KEY") or dotenv.get_key(
+            ".env", "ANTHROPIC_API_KEY"
+        )
     else:
         # Fallback - try common keys from environment first, then .env
-        return (os.getenv("OPENAI_API_KEY") or
-                os.getenv("GEMINI_API_KEY") or
-                os.getenv("ANTHROPIC_API_KEY") or
-                dotenv.get_key(".env", "OPENAI_API_KEY") or
-                dotenv.get_key(".env", "GEMINI_API_KEY") or
-                dotenv.get_key(".env", "ANTHROPIC_API_KEY"))
+        return (
+            os.getenv("OPENAI_API_KEY")
+            or os.getenv("GEMINI_API_KEY")
+            or os.getenv("ANTHROPIC_API_KEY")
+            or dotenv.get_key(".env", "OPENAI_API_KEY")
+            or dotenv.get_key(".env", "GEMINI_API_KEY")
+            or dotenv.get_key(".env", "ANTHROPIC_API_KEY")
+        )
 
 
 def _is_reasoning_model(model_name: str) -> bool:
     """Check if model is a reasoning model requiring special parameters."""
-    reasoning_models = [
-        "o1-preview", "o1-mini", "o1",
-        "gpt-5-nano", "gpt-5-mini", "gpt-5",
-        "openai/o1-preview", "openai/o1-mini", "openai/o1",
-        "openai/gpt-5-nano", "openai/gpt-5-mini", "openai/gpt-5"
-    ]
-    
-    # Check exact matches and prefix matches for dated models
-    for reasoning_model in reasoning_models:
-        if model_name == reasoning_model or model_name.startswith(f"{reasoning_model}-"):
-            return True
-    
-    return False
+    unprefixed = model_name.removeprefix("openai/")
+    return unprefixed.startswith(("o1", "gpt-5"))
 
 
 def validate_model_config(model_type: str = "fast") -> tuple[bool, str]:
     """Validate that model configuration is complete.
-    
+
     Args:
         model_type: Type of model to validate
-        
+
     Returns:
         (is_valid, error_message) tuple
     """
     try:
         info = get_model_info(model_type)
-        
+
         if not info["has_api_key"]:
             provider_key = f"{info['provider'].upper()}_API_KEY"
-            return False, f"Missing {provider_key} in .env for model {info['model_name']}"
-        
+            return (
+                False,
+                f"Missing {provider_key} in .env for model {info['model_name']}",
+            )
+
         return True, ""
     except Exception as e:
         return False, f"Configuration error: {e}"
