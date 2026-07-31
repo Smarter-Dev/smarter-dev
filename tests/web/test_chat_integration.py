@@ -540,3 +540,5 @@ def test_browser_contract_includes_csrf_recovery_and_live_updates():
     assert '"chat_tool_event"' in jobs and "subagent_id" in jobs
     assert "model operation exceeded its hard timeout" not in runtime
     assert "timed out and was cancelled" not in jobs
+    assert "cancellation_subscription" in runtime
+    assert "await asyncio.sleep(interval)" not in runtime

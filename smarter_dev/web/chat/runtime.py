@@ -22,6 +22,9 @@ from pydantic_ai.settings import ModelSettings
 from sqlalchemy import select
 
 from smarter_dev.shared.database import get_db_session_context
+from smarter_dev.web.chat.cancellation import cancellation_subscription
+from smarter_dev.web.chat.cancellation import parse_notice
+from smarter_dev.web.chat.cancellation import publish_cancellation
 from smarter_dev.web.chat.entitlements import resolve_spend_tier
 from smarter_dev.web.chat.limits import OperationAlreadyReserved
 from smarter_dev.web.chat.limits import current_spend_decision
@@ -263,6 +266,10 @@ class SpendMeteredModel(WrapperModel):
 
                     turn.cutoff_at = datetime.now(UTC)
                 await session.commit()
+                with suppress(Exception):
+                    await publish_cancellation(
+                        self.context.turn_id, reason="cutoff"
+                    )
                 raise HardSpendCutoff("Chat hard spend cutoff reached")
             await session.commit()
 
@@ -351,6 +358,9 @@ class SpendMeteredModel(WrapperModel):
                 # aggregate AgentRunResult usage across a tool loop.
                 conversation.current_context_tokens = i
             await session.commit()
+        if decision.hard_cutoff:
+            with suppress(Exception):
+                await publish_cancellation(self.context.turn_id, reason="cutoff")
         try:
             from skrift.notifications import notify_user
 
@@ -433,48 +443,87 @@ class SpendMeteredModel(WrapperModel):
         await self._settle(operation_key, response, messages)
 
 
+async def _check_durable_cancellation_state(
+    *,
+    turn_id: UUID,
+    subagent_id: UUID | None,
+    worker_lease_token: str | None,
+    allow_cutoff: bool,
+) -> None:
+    """Check once after subscribing, closing the subscribe/check race."""
+    async with get_db_session_context() as session:
+        turn = await session.get(WebChatTurn, turn_id)
+        child = (
+            await session.get(WebChatSubagent, subagent_id)
+            if subagent_id is not None
+            else None
+        )
+    if turn is None or turn.stop_requested_at is not None:
+        raise RunCancelled()
+    if turn.cutoff_at is not None and not allow_cutoff:
+        raise HardSpendCutoff("Chat hard spend cutoff reached")
+    if (
+        worker_lease_token is not None
+        and turn.worker_lease_token != worker_lease_token
+    ):
+        raise RunSuperseded()
+    if child is not None and child.cancel_requested_at is not None:
+        raise RunCancelled()
+
+
 async def wait_for_cancellation(
     *,
     turn_id: UUID,
     subagent_id: UUID | None = None,
     worker_lease_token: str | None = None,
     allow_cutoff: bool = False,
-    interval: float = 1.0,
 ) -> None:
+    """Wait on Redis signals; Postgres is checked once per subscription only."""
     while True:
         try:
-            async with get_db_session_context() as session:
-                turn = await session.get(WebChatTurn, turn_id)
-                child = (
-                    await session.get(WebChatSubagent, subagent_id)
-                    if subagent_id is not None
-                    else None
+            async with cancellation_subscription(turn_id) as pubsub:
+                await _check_durable_cancellation_state(
+                    turn_id=turn_id,
+                    subagent_id=subagent_id,
+                    worker_lease_token=worker_lease_token,
+                    allow_cutoff=allow_cutoff,
                 )
+                async for message in pubsub.listen():
+                    if message.get("type") != "message":
+                        continue
+                    notice = parse_notice(message.get("data"))
+                    if notice is None:
+                        continue
+                    if (
+                        notice.subagent_id is not None
+                        and notice.subagent_id != subagent_id
+                    ):
+                        continue
+                    if (
+                        notice.worker_lease_token is not None
+                        and notice.worker_lease_token != worker_lease_token
+                    ):
+                        continue
+                    if notice.reason == "cutoff":
+                        if allow_cutoff:
+                            continue
+                        raise HardSpendCutoff("Chat hard spend cutoff reached")
+                    if notice.reason == "superseded":
+                        raise RunSuperseded()
+                    raise RunCancelled()
+        except (HardSpendCutoff, RunCancelled, RunSuperseded):
+            raise
         except asyncio.CancelledError:
             raise
         except Exception:
-            # Cancellation is advisory until the durable row can be read. A
-            # transient database disconnect must not abort a live provider run
-            # or cause the queue to retry and duplicate the entire agent loop.
+            # Pub/Sub reconnects are paired with a fresh durable state check.
+            # This is outage recovery, not recurring database polling.
             logger.warning(
-                "Chat cancellation check temporarily unavailable for turn %s",
+                "Chat cancellation signal temporarily unavailable for turn %s",
                 turn_id,
                 exc_info=True,
             )
-            await asyncio.sleep(interval)
-            continue
-        if turn is None or turn.stop_requested_at is not None:
-            raise RunCancelled()
-        if turn.cutoff_at is not None and not allow_cutoff:
-            raise HardSpendCutoff("Chat hard spend cutoff reached")
-        if (
-            worker_lease_token is not None
-            and turn.worker_lease_token != worker_lease_token
-        ):
-            raise RunSuperseded()
-        if child is not None and child.cancel_requested_at is not None:
-            raise RunCancelled()
-        await asyncio.sleep(interval)
+            await asyncio.sleep(1)
 
 
 async def run_cancellable(
