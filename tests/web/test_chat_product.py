@@ -41,8 +41,21 @@ from smarter_dev.web.chat.toolsets import ExecutionCounters
 from smarter_dev.web.chat.toolsets import run_code
 from smarter_dev.web.chat.toolsets import web_read_optional
 from smarter_dev.web.chat.toolsets import web_read_required
+from smarter_dev.web.chat_settings_admin import filter_unpriced_catalog_selections
 from smarter_dev.web.llm_pricing import model_change_warning
 from smarter_dev.web.llm_pricing import price_rates_for_model
+
+
+def test_unpriced_catalog_choice_does_not_block_other_admin_changes():
+    filtered, skipped = filter_unpriced_catalog_selections(
+        {
+            "gpt-5-6-luna": (True, "low"),
+            "gpt-5-6-sol": (True, "medium"),
+        }
+    )
+    assert filtered["gpt-5-6-luna"] == (True, "low")
+    assert filtered["gpt-5-6-sol"] == (False, "medium")
+    assert skipped == ["gpt-5-6-sol"]
 
 
 def test_chat_api_routes_register_with_litestar():

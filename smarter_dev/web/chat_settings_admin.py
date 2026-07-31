@@ -18,6 +18,7 @@ from skrift.auth.guards import auth_guard
 from skrift.auth.session_keys import SESSION_USER_ID
 from skrift.flash import flash_error
 from skrift.flash import flash_success
+from skrift.flash import flash_warning
 from skrift.flash import get_flash_messages
 from skrift.forms.core import verify_csrf
 from sqlalchemy import select
@@ -31,8 +32,26 @@ from smarter_dev.web.chat.settings import SettingsInput
 from smarter_dev.web.chat.settings import decimal_field
 from smarter_dev.web.chat.settings import ensure_settings
 from smarter_dev.web.chat.settings import validate_settings_input
+from smarter_dev.web.llm_pricing import price_rates_for_model
 from smarter_dev.web.models import ChatCatalogModel
 from smarter_dev.web.models import ChatSpendLimit
+
+
+def filter_unpriced_catalog_selections(
+    catalog: dict[str, tuple[bool, str]],
+) -> tuple[dict[str, tuple[bool, str]], list[str]]:
+    """Keep valid settings saveable while refusing unpriced model admission."""
+    filtered = dict(catalog)
+    skipped: list[str] = []
+    for model in MODEL_CATALOG:
+        selection = filtered.get(model.key)
+        if selection is None:
+            continue
+        enabled, tier = selection
+        if enabled and price_rates_for_model(model) is None:
+            filtered[model.key] = (False, tier)
+            skipped.append(model.key)
+    return filtered, skipped
 
 
 class ChatSettingsAdminController(Controller):
@@ -64,6 +83,10 @@ class ChatSettingsAdminController(Controller):
             context={
                 "settings": settings,
                 "models": [(model, configured[model.key]) for model in MODEL_CATALOG],
+                "pricing_available": {
+                    model.key: price_rates_for_model(model) is not None
+                    for model in MODEL_CATALOG
+                },
                 "limits": limits,
                 "spend_tiers": SPEND_TIERS,
                 "reasoning_levels": ALL_REASONING_LEVELS,
@@ -87,6 +110,7 @@ class ChatSettingsAdminController(Controller):
                 )
                 for model in MODEL_CATALOG
             }
+            catalog, skipped_unpriced = filter_unpriced_catalog_selections(catalog)
             limits: dict[str, tuple[Decimal, Decimal, Decimal]] = {}
             for tier in SPEND_TIERS:
                 limits[tier] = (
@@ -158,4 +182,12 @@ class ChatSettingsAdminController(Controller):
         flash_success(
             request, "Chat settings saved. New limits apply to the next operation."
         )
+        if skipped_unpriced:
+            labels = [
+                model.label for model in MODEL_CATALOG if model.key in skipped_unpriced
+            ]
+            flash_warning(
+                request,
+                "Left unpriced model(s) disabled: " + ", ".join(labels) + ".",
+            )
         return Redirect(path="/admin/chat-settings")
