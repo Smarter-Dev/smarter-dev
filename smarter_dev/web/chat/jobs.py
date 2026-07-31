@@ -14,6 +14,7 @@ from uuid import UUID
 from uuid import uuid4
 
 from pydantic import BaseModel
+from pydantic_ai import RunContext
 from skrift.auth.services import get_user_permissions
 from skrift.notifications import NotificationMode
 from skrift.notifications import notify_user
@@ -775,7 +776,6 @@ async def _build_root_agent(
     from pydantic_ai import Agent
     from pydantic_ai import PartDeltaEvent
     from pydantic_ai import PartStartEvent
-    from pydantic_ai import RunContext
     from pydantic_ai.messages import TextPart
     from pydantic_ai.messages import TextPartDelta
 
@@ -1917,7 +1917,6 @@ async def run_chat_subagent(payload: ChatSubagentPayload) -> dict:
             status=f"{child.name}: Working",
         )
         from pydantic_ai import Agent
-        from pydantic_ai import RunContext
 
         metered = SpendMeteredModel(
             build_model_for(model),
