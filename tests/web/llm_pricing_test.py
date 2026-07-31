@@ -10,8 +10,10 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
+from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.web.llm_pricing import calc_cost
 from smarter_dev.web.llm_pricing import calc_session_cost
+from smarter_dev.web.llm_pricing import price_rates_for_model
 
 
 class TestDigitalOceanPricing:
@@ -150,7 +152,28 @@ class TestOpenCodeZenPricing:
         assert cost == Decimal("0.156")
 
 
+class TestGooglePricing:
+    def test_gemini_31_pro_base_rates(self):
+        assert calc_cost(1_000_000, 1_000_000, "gemini-3.1-pro") == Decimal(
+            "14.00"
+        )
+
+
 class TestOpenAIPricing:
+    def test_gpt_55_rates(self):
+        assert calc_cost(1_000_000, 1_000_000, "gpt-5.5") == Decimal("35.00")
+
+    def test_sol_cache_read_and_write_rates(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=800_000,
+            cache_write_tokens=100_000,
+            model_name="openai:gpt-5.6-sol",
+        )
+        # 100k fresh @ $5 + 800k read @ $0.50 + 100k write @ $6.25.
+        assert cost == Decimal("1.525")
+
     def test_luna_reduced_rates(self):
         # Effective 2026-07-30: $0.20/M input + $1.20/M output.
         assert calc_cost(1_000_000, 1_000_000, "gpt-5.6-luna") == Decimal("1.40")
@@ -180,6 +203,32 @@ class TestOpenAIPricing:
         )
         # 100k fresh @ $2 + 800k read @ $0.20 + 100k write @ $2.50.
         assert cost == Decimal("0.61")
+
+
+class TestAnthropicPricing:
+    def test_opus_5_rates(self):
+        assert calc_cost(1_000_000, 1_000_000, "claude-opus-5") == Decimal(
+            "30.00"
+        )
+
+    def test_sonnet_5_introductory_rates_and_cache(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=1_000_000,
+            cache_read_tokens=800_000,
+            cache_write_tokens=100_000,
+            model_name="anthropic:claude-sonnet-5",
+        )
+        # 100k fresh @ $2 + 800k read @ $0.20 + 100k write @ $2.50 + $10 output.
+        assert cost == Decimal("10.61")
+
+
+class TestCatalogPricingCompleteness:
+    def test_every_selectable_model_has_provider_pricing(self):
+        missing = [
+            model.key for model in MODEL_CATALOG if price_rates_for_model(model) is None
+        ]
+        assert missing == []
 
 
 class TestUnknownModelFallback:

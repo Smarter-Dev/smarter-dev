@@ -46,16 +46,20 @@ from smarter_dev.web.llm_pricing import model_change_warning
 from smarter_dev.web.llm_pricing import price_rates_for_model
 
 
-def test_unpriced_catalog_choice_does_not_block_other_admin_changes():
+def test_priced_catalog_choices_remain_enabled_during_admin_save():
     filtered, skipped = filter_unpriced_catalog_selections(
         {
             "gpt-5-6-luna": (True, "low"),
             "gpt-5-6-sol": (True, "medium"),
+            "claude-opus-5": (True, "high"),
         }
     )
-    assert filtered["gpt-5-6-luna"] == (True, "low")
-    assert filtered["gpt-5-6-sol"] == (False, "medium")
-    assert skipped == ["gpt-5-6-sol"]
+    assert filtered == {
+        "gpt-5-6-luna": (True, "low"),
+        "gpt-5-6-sol": (True, "medium"),
+        "claude-opus-5": (True, "high"),
+    }
+    assert skipped == []
 
 
 def test_chat_api_routes_register_with_litestar():
