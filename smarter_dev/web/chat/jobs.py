@@ -18,7 +18,6 @@ from pydantic import BaseModel
 from pydantic_ai import RunContext
 from skrift.auth.services import get_user_permissions
 from skrift.notifications import NotificationMode
-from skrift.notifications import notify_user
 from skrift.workers import get_handle
 from skrift.workers import handler
 from sqlalchemy import func
@@ -44,6 +43,7 @@ from smarter_dev.web.chat.entitlements import has_chat
 from smarter_dev.web.chat.entitlements import has_ultra_chat
 from smarter_dev.web.chat.entitlements import resolve_spend_tier
 from smarter_dev.web.chat.limits import current_spend_decision
+from smarter_dev.web.chat.notifications import notify_chat_user
 from smarter_dev.web.chat.policy import IntelligenceMode
 from smarter_dev.web.chat.policy import compaction_model_key
 from smarter_dev.web.chat.policy import policy_for
@@ -105,7 +105,7 @@ async def _notify_safe(
     owner_id: UUID, event_type: str, conversation_id: UUID, turn_id: UUID, **payload
 ) -> None:
     try:
-        await notify_user(
+        await notify_chat_user(
             str(owner_id),
             event_type,
             mode=NotificationMode.EPHEMERAL,

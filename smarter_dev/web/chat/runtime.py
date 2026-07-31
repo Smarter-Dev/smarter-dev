@@ -30,6 +30,7 @@ from smarter_dev.web.chat.limits import OperationAlreadyReserved
 from smarter_dev.web.chat.limits import current_spend_decision
 from smarter_dev.web.chat.limits import reserve_operation
 from smarter_dev.web.chat.limits import settle_reservation
+from smarter_dev.web.chat.notifications import notify_chat_user
 from smarter_dev.web.chat.usage import record_settled_chat_usage
 from smarter_dev.web.llm_pricing import price_rates_for_model
 from smarter_dev.web.models import UsageCostRow
@@ -362,9 +363,7 @@ class SpendMeteredModel(WrapperModel):
             with suppress(Exception):
                 await publish_cancellation(self.context.turn_id, reason="cutoff")
         try:
-            from skrift.notifications import notify_user
-
-            await notify_user(
+            await notify_chat_user(
                 str(self.context.owner_id),
                 "chat_usage_updated",
                 conversation_id=str(self.context.conversation_id),
