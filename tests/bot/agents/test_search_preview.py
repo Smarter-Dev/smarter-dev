@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 from unittest.mock import patch
 from uuid import uuid4
 
+import hikari
 import pytest
 
 from smarter_dev.bot.agents.chat_tools import ChatDeps
@@ -64,6 +65,7 @@ async def test_search_reserves_and_posts_link_before_provider_call():
         123,
         '> -# Searching the web: ["python task groups"]'
         "(https://smarter.dev/ai/search/capability)",
+        flags=hikari.MessageFlag.SUPPRESS_EMBEDS,
     )
 
 
@@ -89,7 +91,9 @@ async def test_preview_failure_does_not_block_search():
 
     assert results == expected
     bot.rest.create_message.assert_awaited_once_with(
-        123, '> -# Searching the web: "still search"'
+        123,
+        '> -# Searching the web: "still search"',
+        flags=hikari.MessageFlag.SUPPRESS_EMBEDS,
     )
 
 
