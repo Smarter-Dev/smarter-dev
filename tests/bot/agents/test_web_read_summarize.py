@@ -41,7 +41,7 @@ def test_web_summarizer_prompt_favors_quotes_for_extraction():
     assert "explicitly asks for a summary" in web_summarizer.SYSTEM_PROMPT
 
 
-def test_web_summarizer_uses_laguna_primary_and_low_thinking_gemini_fallback():
+def test_web_summarizer_uses_luna_primary_and_low_thinking_gemini_fallback():
     primary = MagicMock()
     fallback = MagicMock()
     with (
@@ -58,8 +58,9 @@ def test_web_summarizer_uses_laguna_primary_and_low_thinking_gemini_fallback():
 
     assert primary is not fallback
     primary_call, fallback_call = agent_class.call_args_list
+    assert web_summarizer.PRIMARY_MODEL_KEY == "gpt-5-6-luna"
     assert primary_call.args == (primary,)
-    assert primary_call.kwargs["model_settings"] is None
+    assert primary_call.kwargs["model_settings"]["openai_reasoning_effort"] == "medium"
     assert fallback_call.args == (fallback,)
     assert fallback_call.kwargs["model_settings"]["google_thinking_config"] == {
         "thinking_level": "LOW"
@@ -391,7 +392,7 @@ async def test_summarize_web_content_builds_prompt_and_calls_agent():
 @pytest.mark.asyncio
 async def test_summarize_web_content_fails_over_to_gemini_and_logs_critical(caplog):
     primary_agent = MagicMock()
-    primary_agent.run = AsyncMock(side_effect=RuntimeError("Laguna unavailable"))
+    primary_agent.run = AsyncMock(side_effect=RuntimeError("Luna unavailable"))
     fallback_agent = MagicMock()
     fallback_agent.run = AsyncMock(return_value=SimpleNamespace(output="FALLBACK"))
 
@@ -417,14 +418,14 @@ async def test_summarize_web_content_fails_over_to_gemini_and_logs_critical(capl
     assert result == "FALLBACK"
     fallback_agent.run.assert_awaited_once_with(primary_agent.run.call_args.args[0])
     assert "WEB SUMMARIZER FAILOVER" in caplog.text
-    assert "Laguna S 2.1 failed" in caplog.text
+    assert "GPT-5.6 Luna failed" in caplog.text
     assert "using Gemini 3.1 Flash Lite" in caplog.text
     assert "https://e.test" in caplog.text
-    assert "Laguna unavailable" in caplog.text
+    assert "Luna unavailable" in caplog.text
     record_failover.assert_called_once()
     assert record_failover.call_args.kwargs == {
         "operation": "web_summarizer",
-        "primary_model": "poolside/laguna-s-2.1",
+        "primary_model": "gpt-5.6-luna",
         "fallback_model": "gemini-3.1-flash-lite",
         "error": primary_agent.run.side_effect,
     }

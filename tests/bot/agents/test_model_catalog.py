@@ -86,7 +86,7 @@ def test_resolve_reasoning_level_none_for_models_without_reasoning():
 
 def test_gemini_lineup_reflects_current_releases():
     # 3.6 Flash replaced 3.5 Flash (2026-07-21); 3.5 Flash Lite joined the
-    # catalog; 3.1 Flash Lite stays (it is still the configured chat default).
+    # catalog; 3.1 Flash Lite remains selectable.
     assert get_model("gemini-3-5-flash") is None
     flash_3_6 = get_model("gemini-3-6-flash")
     assert flash_3_6 is not None
