@@ -31,6 +31,7 @@ from smarter_dev.shared.model_catalog import parse_reasoning_level
 from smarter_dev.shared.model_router import build_model_for
 from smarter_dev.shared.model_router import model_settings_for
 from smarter_dev.shared.redis_client import get_redis_client
+from smarter_dev.web.chat.cancellation import publish_cancellation
 from smarter_dev.web.chat.compaction import compact_model_history
 from smarter_dev.web.chat.compaction import should_compact_history
 from smarter_dev.web.chat.compaction import version_fingerprint
@@ -334,12 +335,20 @@ async def _claim_turn(
             and turn.worker_lease_expires_at > now
         ):
             return turn, conversation, conversation.owner_user_id, "owned"
+        superseded_token = turn.worker_lease_token
         turn.status = "running"
         turn.worker_lease_token = token
         turn.worker_lease_expires_at = now + timedelta(seconds=1000)
         turn.attempt_count += 1
         conversation.status = "running"
         await session.commit()
+        if superseded_token and superseded_token != token:
+            with suppress(Exception):
+                await publish_cancellation(
+                    turn.id,
+                    reason="superseded",
+                    worker_lease_token=superseded_token,
+                )
         return turn, conversation, conversation.owner_user_id, token
 
 
@@ -775,6 +784,8 @@ async def _mark_cutoff(turn_id: UUID) -> None:
             if job_id:
                 worker_jobs.append(job_id)
         await session.commit()
+    with suppress(Exception):
+        await publish_cancellation(turn_id, reason="cutoff")
     for job_id in worker_jobs:
         with suppress(Exception):
             await get_handle(job_id).cancel()

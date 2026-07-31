@@ -40,6 +40,7 @@ from smarter_dev.web.chat.attachments import AttachmentError
 from smarter_dev.web.chat.attachments import extract_text_bounded
 from smarter_dev.web.chat.attachments import require_attachment_count
 from smarter_dev.web.chat.attachments import validate_attachment
+from smarter_dev.web.chat.cancellation import publish_cancellation
 from smarter_dev.web.chat.csrf import require_api_csrf
 from smarter_dev.web.chat.dispatch import cancel_dispatch
 from smarter_dev.web.chat.dispatch import create_dispatch
@@ -1059,6 +1060,8 @@ class ChatApiController(Controller):
             if child_job_id:
                 worker_job_ids.append(child_job_id)
         await db_session.commit()
+        with suppress(Exception):
+            await publish_cancellation(turn.id, reason="stop")
         root_queue_cancelled = False
         for worker_job_id in worker_job_ids:
             try:
