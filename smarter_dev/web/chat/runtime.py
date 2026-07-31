@@ -467,7 +467,6 @@ async def run_cancellable(
     subagent_id: UUID | None = None,
     worker_lease_token: str | None = None,
     allow_cutoff: bool = False,
-    timeout: float = 900,
 ):
     work = asyncio.create_task(awaitable)
     cancel_watch = asyncio.create_task(
@@ -481,12 +480,8 @@ async def run_cancellable(
     try:
         done, _ = await asyncio.wait(
             {work, cancel_watch},
-            timeout=timeout,
             return_when=asyncio.FIRST_COMPLETED,
         )
-        if not done:
-            work.cancel()
-            raise TimeoutError("model operation exceeded its hard timeout")
         if cancel_watch in done:
             work.cancel()
             with suppress(asyncio.CancelledError):

@@ -10,6 +10,7 @@ from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
 from decimal import Decimal
+from urllib.parse import urlsplit
 from uuid import UUID
 from uuid import uuid4
 
@@ -144,6 +145,48 @@ async def _event(turn_id: UUID, event_type: str, payload: dict) -> None:
             )
         )
         await session.commit()
+
+
+def _display_host(url: str) -> str:
+    """Return a compact host label without leaking URL query values."""
+    with suppress(ValueError):
+        return urlsplit(url).hostname or url[:160]
+    return url[:160]
+
+
+async def _publish_activity(
+    *,
+    owner_id: UUID,
+    conversation_id: UUID,
+    turn_id: UUID,
+    status: str,
+    tool: str | None = None,
+    subagent_id: UUID | None = None,
+    subagent_name: str | None = None,
+    phase: str = "running",
+) -> None:
+    """Persist and publish structured activity for live UI and reconnects."""
+    if status == "Thinking…" and phase == "complete":
+        phase = "thinking"
+    if tool == "web_read" and status.startswith("Opening "):
+        status = f"Opening {_display_host(status.removeprefix('Opening '))}"
+    payload = {
+        "scope": "subagent" if subagent_id is not None else "root",
+        "status": status,
+        "tool": tool,
+        "phase": phase,
+        "subagent_id": str(subagent_id) if subagent_id is not None else None,
+        "subagent_name": subagent_name,
+        "occurred_at": datetime.now(UTC).isoformat(),
+    }
+    await _event(turn_id, "chat_tool_event", payload)
+    await _notify_safe(
+        owner_id,
+        "chat_tool_event",
+        conversation_id,
+        turn_id,
+        **payload,
+    )
 
 
 async def _record_tool_result(
@@ -880,15 +923,23 @@ async def _build_root_agent(
         )
         if before.hard_cutoff:
             return USAGE_LIMIT_RESULT
-        await _notify_safe(
-            owner_id,
-            "chat_tool_event",
-            conversation.id,
-            turn.id,
+        await _publish_activity(
+            owner_id=owner_id,
+            conversation_id=conversation.id,
+            turn_id=turn.id,
+            tool="web_search",
             status=f'Searching for "{query[:160]}"',
         )
         result = str(await web_search(query, policy=policy))
         await _record_tool_result(turn.id, "web_search", result)
+        await _publish_activity(
+            owner_id=owner_id,
+            conversation_id=conversation.id,
+            turn_id=turn.id,
+            tool="web_search",
+            status="Thinking…",
+            phase="complete",
+        )
         after = await _tool_state(
             owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
         )
@@ -928,17 +979,25 @@ async def _build_root_agent(
             )
             if before.hard_cutoff:
                 return USAGE_LIMIT_RESULT
-            await _notify_safe(
-                owner_id,
-                "chat_tool_event",
-                conversation.id,
-                turn.id,
-                status=f"Reading {url[:300]}",
+            await _publish_activity(
+                owner_id=owner_id,
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+                tool="web_read",
+                status=f"Opening {url[:300]}",
             )
             result = await web_read_required(
                 url, summarization_instruction, summarize=summarize_web
             )
             await _record_tool_result(turn.id, "web_read", result)
+            await _publish_activity(
+                owner_id=owner_id,
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+                tool="web_read",
+                status="Thinking…",
+                phase="complete",
+            )
             after = await _tool_state(
                 owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
             )
@@ -958,17 +1017,25 @@ async def _build_root_agent(
             )
             if before.hard_cutoff:
                 return USAGE_LIMIT_RESULT
-            await _notify_safe(
-                owner_id,
-                "chat_tool_event",
-                conversation.id,
-                turn.id,
-                status=f"Reading {url[:300]}",
+            await _publish_activity(
+                owner_id=owner_id,
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+                tool="web_read",
+                status=f"Opening {url[:300]}",
             )
             result = await web_read_optional(
                 url, summarization_instruction, summarize=summarize_web
             )
             await _record_tool_result(turn.id, "web_read", result)
+            await _publish_activity(
+                owner_id=owner_id,
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+                tool="web_read",
+                status="Thinking…",
+                phase="complete",
+            )
             after = await _tool_state(
                 owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
             )
@@ -982,15 +1049,23 @@ async def _build_root_agent(
         )
         if before.hard_cutoff:
             return USAGE_LIMIT_RESULT
-        await _notify_safe(
-            owner_id,
-            "chat_tool_event",
-            conversation.id,
-            turn.id,
+        await _publish_activity(
+            owner_id=owner_id,
+            conversation_id=conversation.id,
+            turn_id=turn.id,
+            tool="run_code",
             status=f"Running code: {reason[:160]}",
         )
         result = await execute_code(reason, code)
         await _record_tool_result(turn.id, "run_code", result)
+        await _publish_activity(
+            owner_id=owner_id,
+            conversation_id=conversation.id,
+            turn_id=turn.id,
+            tool="run_code",
+            status="Thinking…",
+            phase="complete",
+        )
         after = await _tool_state(
             owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
         )
@@ -1084,14 +1159,23 @@ async def _build_root_agent(
             if dispatch is not None:
                 with suppress(Exception):
                     await dispatch_one(dispatch.id)
-            await _notify_safe(
-                owner_id,
-                "chat_tool_event",
-                conversation.id,
-                turn.id,
-                status=f"{clean_name}: Queued",
+            await _publish_activity(
+                owner_id=owner_id,
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+                subagent_id=child.id,
+                subagent_name=clean_name,
+                tool="run_subagent",
+                status="Queued",
+                phase="queued",
             )
-            deadline = asyncio.get_running_loop().time() + 900
+            await _publish_activity(
+                owner_id=owner_id,
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+                tool="run_subagent",
+                status="Waiting for sub-agent results…",
+            )
             while True:
                 await _tool_state(
                     owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
@@ -1109,6 +1193,14 @@ async def _build_root_agent(
                         await _record_tool_result(
                             turn.id, "run_subagent", result, subagent_name=clean_name
                         )
+                        await _publish_activity(
+                            owner_id=owner_id,
+                            conversation_id=conversation.id,
+                            turn_id=turn.id,
+                            tool="run_subagent",
+                            status="Thinking…",
+                            phase="complete",
+                        )
                         after = await _tool_state(
                             owner_id=owner_id,
                             conversation=conversation,
@@ -1116,32 +1208,6 @@ async def _build_root_agent(
                             tier=tier,
                         )
                         return _format_tool_result(result, after)
-                if asyncio.get_running_loop().time() >= deadline:
-                    async with get_db_session_context() as session:
-                        timed_out = await session.scalar(
-                            select(WebChatSubagent)
-                            .where(WebChatSubagent.id == child.id)
-                            .with_for_update()
-                        )
-                        timed_out_job = None
-                        if (
-                            timed_out is not None
-                            and timed_out.status not in TERMINAL_CHILD
-                        ):
-                            timed_out.cancel_requested_at = datetime.now(UTC)
-                            if timed_out.status == "queued":
-                                timed_out.status = "cancelled"
-                                timed_out.finished_at = datetime.now(UTC)
-                            timed_out_job, _ = await cancel_dispatch(
-                                session,
-                                job_type="chat.subagent.run",
-                                aggregate_id=child.id,
-                            )
-                        await session.commit()
-                    if timed_out_job:
-                        with suppress(Exception):
-                            await get_handle(timed_out_job).cancel()
-                    return f"{clean_name}: timed out and was cancelled."
                 await asyncio.sleep(0.2)
 
         agent.tool(run_subagent)
@@ -1191,7 +1257,7 @@ async def _final_response(
     # Deliberately no registered tools. This is the single bounded response the
     # product allows after hard cutoff.
     settings = model_settings_for(model, reasoning) or {}
-    settings = {**settings, "max_tokens": min(1024, model.max_output_tokens)}
+    settings = {**settings, "max_tokens": min(8192, model.max_output_tokens)}
     metered = SpendMeteredModel(
         build_model_for(model),
         MeteringContext(
@@ -1211,8 +1277,10 @@ async def _final_response(
         metered,
         output_type=str,
         system_prompt=(
-            "Tool and usage limits are exhausted. Give one concise final answer "
-            "from information already present. Do not request or mention tools."
+            "Tool and usage limits are exhausted. Give one complete final answer "
+            "from information already present. Do not request or mention tools. "
+            "Keep the visible answer under 1,500 words and reserve enough output "
+            "budget to finish every sentence, list, table, and code block."
         ),
         model_settings=settings,
     )
@@ -1232,7 +1300,6 @@ async def _final_response(
         turn_id=turn.id,
         worker_lease_token=turn.worker_lease_token,
         allow_cutoff=True,
-        timeout=180,
     )
     return result
 
@@ -1338,9 +1405,15 @@ async def run_chat_turn(payload: ChatTurnPayload) -> dict:
             )
             return {"status": "selection_required"}
 
-        await _event(turn_id, "chat_run_state", {"status": "running"})
+        run_state = {
+            "scope": "root",
+            "status": "Thinking…",
+            "phase": "running",
+            "started_at": turn.created_at.isoformat(),
+        }
+        await _event(turn_id, "chat_run_state", run_state)
         await _notify_safe(
-            owner_id, "chat_run_state", conversation.id, turn.id, status="running"
+            owner_id, "chat_run_state", conversation.id, turn.id, **run_state
         )
         history, prior_rows, branch_fingerprint = await _structured_history(
             conversation, turn
@@ -1792,7 +1865,7 @@ async def run_chat_subagent(payload: ChatSubagentPayload) -> dict:
         await session.commit()
     semaphore = RedisSubagentSemaphore(get_redis_client())
     try:
-        lease = await semaphore.acquire(ticket=str(child_id), wait=True, timeout=900)
+        lease = await semaphore.acquire(ticket=str(child_id), wait=True)
     except SemaphoreUnavailable as exc:
         # Fail closed: never execute without a distributed slot. Exhaustion is
         # durable so the outbox reconciler does not create an infinite retry loop.
@@ -1909,12 +1982,14 @@ async def run_chat_subagent(payload: ChatSubagentPayload) -> dict:
             "chat_subagent_state",
             {"subagent_id": str(child.id), "name": child.name, "status": "running"},
         )
-        await _notify_safe(
-            owner_id,
-            "chat_tool_event",
-            conversation.id,
-            turn.id,
-            status=f"{child.name}: Working",
+        await _publish_activity(
+            owner_id=owner_id,
+            conversation_id=conversation.id,
+            turn_id=turn.id,
+            subagent_id=child.id,
+            subagent_name=child.name,
+            tool="run_subagent",
+            status="Working…",
         )
         from pydantic_ai import Agent
 
@@ -1954,16 +2029,28 @@ async def run_chat_subagent(payload: ChatSubagentPayload) -> dict:
             )
             if before.hard_cutoff:
                 return USAGE_LIMIT_RESULT
-            await _notify_safe(
-                owner_id,
-                "chat_tool_event",
-                conversation.id,
-                turn.id,
-                status=f'{child.name}: Searching for "{query[:160]}"',
+            await _publish_activity(
+                owner_id=owner_id,
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+                subagent_id=child.id,
+                subagent_name=child.name,
+                tool="web_search",
+                status=f'Searching for "{query[:160]}"',
             )
             result = str(await web_search(query, policy=policy))
             await _record_tool_result(
                 turn.id, "web_search", result, subagent_name=child.name
+            )
+            await _publish_activity(
+                owner_id=owner_id,
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+                subagent_id=child.id,
+                subagent_name=child.name,
+                tool="web_search",
+                status="Thinking…",
+                phase="complete",
             )
             after = await _tool_state(
                 owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
@@ -2003,18 +2090,30 @@ async def run_chat_subagent(payload: ChatSubagentPayload) -> dict:
                 )
                 if before.hard_cutoff:
                     return USAGE_LIMIT_RESULT
-                await _notify_safe(
-                    owner_id,
-                    "chat_tool_event",
-                    conversation.id,
-                    turn.id,
-                    status=f"{child.name}: Reading {url[:300]}",
+                await _publish_activity(
+                    owner_id=owner_id,
+                    conversation_id=conversation.id,
+                    turn_id=turn.id,
+                    subagent_id=child.id,
+                    subagent_name=child.name,
+                    tool="web_read",
+                    status=f"Opening {url[:300]}",
                 )
                 result = await web_read_required(
                     url, summarization_instruction, summarize=summarize
                 )
                 await _record_tool_result(
                     turn.id, "web_read", result, subagent_name=child.name
+                )
+                await _publish_activity(
+                    owner_id=owner_id,
+                    conversation_id=conversation.id,
+                    turn_id=turn.id,
+                    subagent_id=child.id,
+                    subagent_name=child.name,
+                    tool="web_read",
+                    status="Thinking…",
+                    phase="complete",
                 )
                 after = await _tool_state(
                     owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
@@ -2035,18 +2134,30 @@ async def run_chat_subagent(payload: ChatSubagentPayload) -> dict:
                 )
                 if before.hard_cutoff:
                     return USAGE_LIMIT_RESULT
-                await _notify_safe(
-                    owner_id,
-                    "chat_tool_event",
-                    conversation.id,
-                    turn.id,
-                    status=f"{child.name}: Reading {url[:300]}",
+                await _publish_activity(
+                    owner_id=owner_id,
+                    conversation_id=conversation.id,
+                    turn_id=turn.id,
+                    subagent_id=child.id,
+                    subagent_name=child.name,
+                    tool="web_read",
+                    status=f"Opening {url[:300]}",
                 )
                 result = await web_read_optional(
                     url, summarization_instruction, summarize=summarize
                 )
                 await _record_tool_result(
                     turn.id, "web_read", result, subagent_name=child.name
+                )
+                await _publish_activity(
+                    owner_id=owner_id,
+                    conversation_id=conversation.id,
+                    turn_id=turn.id,
+                    subagent_id=child.id,
+                    subagent_name=child.name,
+                    tool="web_read",
+                    status="Thinking…",
+                    phase="complete",
                 )
                 after = await _tool_state(
                     owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
@@ -2061,16 +2172,28 @@ async def run_chat_subagent(payload: ChatSubagentPayload) -> dict:
             )
             if before.hard_cutoff:
                 return USAGE_LIMIT_RESULT
-            await _notify_safe(
-                owner_id,
-                "chat_tool_event",
-                conversation.id,
-                turn.id,
-                status=f"{child.name}: Running code: {reason[:160]}",
+            await _publish_activity(
+                owner_id=owner_id,
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+                subagent_id=child.id,
+                subagent_name=child.name,
+                tool="run_code",
+                status=f"Running code: {reason[:160]}",
             )
             result = await execute_code(reason, code)
             await _record_tool_result(
                 turn.id, "run_code", result, subagent_name=child.name
+            )
+            await _publish_activity(
+                owner_id=owner_id,
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+                subagent_id=child.id,
+                subagent_name=child.name,
+                tool="run_code",
+                status="Thinking…",
+                phase="complete",
             )
             after = await _tool_state(
                 owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
@@ -2086,7 +2209,6 @@ async def run_chat_subagent(payload: ChatSubagentPayload) -> dict:
                 turn_id=turn.id,
                 subagent_id=child.id,
                 worker_lease_token=turn.worker_lease_token,
-                timeout=900,
             )
         )
         lease_watch = asyncio.create_task(_lease_watch(lease, child.id))
@@ -2139,12 +2261,15 @@ async def run_chat_subagent(payload: ChatSubagentPayload) -> dict:
                     "status": "complete",
                 },
             )
-            await _notify_safe(
-                owner_id,
-                "chat_tool_event",
-                conversation.id,
-                turn.id,
-                status=f"{child.name}: Complete",
+            await _publish_activity(
+                owner_id=owner_id,
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+                subagent_id=child.id,
+                subagent_name=child.name,
+                tool="run_subagent",
+                status="Complete",
+                phase="complete",
             )
             return {"status": "complete", "result": text}
         except LeaseSuperseded:
@@ -2205,12 +2330,15 @@ async def run_chat_subagent(payload: ChatSubagentPayload) -> dict:
                 "error": error,
             },
         )
-        await _notify_safe(
-            owner_id,
-            "chat_tool_event",
-            conversation.id,
-            turn.id,
-            status=f"{child.name}: {status.replace('_', ' ').title()}",
+        await _publish_activity(
+            owner_id=owner_id,
+            conversation_id=conversation.id,
+            turn_id=turn.id,
+            subagent_id=child.id,
+            subagent_name=child.name,
+            tool="run_subagent",
+            status=status.replace("_", " ").title(),
+            phase="complete",
         )
         return {"status": status, "error": error}
 
