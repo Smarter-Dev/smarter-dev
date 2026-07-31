@@ -23,8 +23,8 @@ from pydantic_ai import Agent
 from pydantic_ai import RunContext
 from pydantic_ai.models import Model
 
-from smarter_dev.bot.agents.model_router import build_model_for
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
+from smarter_dev.shared.model_router import build_model_for
 from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.handler_budget import HandlerBudget
 from smarter_dev.web.media_read import read_url
