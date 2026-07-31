@@ -9,11 +9,13 @@ from datetime import timedelta
 from decimal import Decimal
 
 import pytest
+from litestar import Litestar
 from pydantic_ai.messages import ModelRequest
 from pydantic_ai.messages import ToolReturnPart
 from pydantic_ai.messages import UserPromptPart
 
 from smarter_dev.shared.model_catalog import get_model
+from smarter_dev.web.chat.api import ChatApiController
 from smarter_dev.web.chat.attachments import AttachmentError
 from smarter_dev.web.chat.attachments import extract_text
 from smarter_dev.web.chat.attachments import require_attachment_count
@@ -41,6 +43,11 @@ from smarter_dev.web.chat.toolsets import web_read_optional
 from smarter_dev.web.chat.toolsets import web_read_required
 from smarter_dev.web.llm_pricing import model_change_warning
 from smarter_dev.web.llm_pricing import price_rates_for_model
+
+
+def test_chat_api_routes_register_with_litestar():
+    app = Litestar(route_handlers=[ChatApiController])
+    assert app.routes
 
 
 @pytest.mark.parametrize(
