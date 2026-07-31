@@ -22,6 +22,9 @@
   var conversationPromise = null;
   var catalog = null;
   var pendingChange = null;
+  var agentPanel = document.querySelector('[data-chat-agent-panel]');
+  var subagentList = document.querySelector('[data-chat-subagents]');
+  var notificationStreamStatus = null;
 
   function api(url, options) {
     options = options || {};
@@ -57,6 +60,10 @@
   }
 
   function setStatus(text) {
+    if (mode === 'chat') {
+      updateRootActivity({turn_id: activeTurn, status: text || ''});
+      return;
+    }
     if (!statusEl) return;
     statusEl.textContent = text || '';
     statusEl.hidden = !text;
@@ -89,9 +96,153 @@
     var content = document.createElement('div');
     content.className = 'chat-content';
     content.textContent = text;
-    article.append(label, content);
+    article.appendChild(label);
+    if (role === 'assistant' && mode === 'chat') {
+      article.appendChild(createActivity(new Date().toISOString(), 'Working…'));
+    }
+    article.appendChild(content);
     return article;
   }
+
+  function createActivity(startedAt, label) {
+    var activity = document.createElement('div');
+    activity.className = 'chat-agent-activity';
+    activity.dataset.rootActivity = '';
+    activity.dataset.startedAt = startedAt || new Date().toISOString();
+    var pulse = document.createElement('span');
+    pulse.className = 'chat-activity-pulse';
+    pulse.setAttribute('aria-hidden', 'true');
+    var text = document.createElement('span');
+    text.dataset.activityLabel = '';
+    text.textContent = label || 'Working…';
+    var timer = document.createElement('time');
+    timer.dataset.activityTimer = '';
+    timer.textContent = '0:00';
+    activity.append(pulse, text, timer);
+    return activity;
+  }
+
+  function elapsed(startedAt, finishedAt) {
+    var start = Date.parse(startedAt || '');
+    var finish = finishedAt ? Date.parse(finishedAt) : Date.now();
+    if (!Number.isFinite(start) || !Number.isFinite(finish)) return '0:00';
+    var seconds = Math.max(0, Math.floor((finish - start) / 1000));
+    var hours = Math.floor(seconds / 3600);
+    var minutes = Math.floor((seconds % 3600) / 60);
+    var remainder = seconds % 60;
+    return (hours ? hours + ':' + String(minutes).padStart(2, '0') : minutes) + ':' + String(remainder).padStart(2, '0');
+  }
+
+  function refreshActivityTimers() {
+    document.querySelectorAll('[data-activity-timer]').forEach(function (timer) {
+      var holder = timer.closest('[data-started-at]');
+      if (!holder) return;
+      timer.textContent = elapsed(holder.dataset.startedAt, holder.dataset.finishedAt);
+    });
+  }
+
+  function rootArticle(turnId) {
+    if (turnId) {
+      return thread.querySelector('[data-pending-turn="' + turnId + '"]') || thread.querySelector('[data-turn-id="' + turnId + '"]');
+    }
+    return thread.querySelector('[data-pending-turn]:last-of-type') || thread.querySelector('.chat-message-assistant:last-of-type');
+  }
+
+  function updateRootActivity(data) {
+    if (mode !== 'chat') return;
+    var turnId = data.turn_id || activeTurn;
+    var article = rootArticle(turnId);
+    if (!article) return;
+    var activity = article.querySelector('[data-root-activity]');
+    if (!activity) {
+      activity = createActivity(data.started_at || data.occurred_at, data.status);
+      article.insertBefore(activity, article.querySelector('.chat-content'));
+    }
+    if (data.started_at) activity.dataset.startedAt = data.started_at;
+    if (data.finished_at) activity.dataset.finishedAt = data.finished_at;
+    activity.dataset.phase = data.phase || 'running';
+    var label = activity.querySelector('[data-activity-label]');
+    if (label && data.status !== undefined) label.textContent = data.status || '';
+    activity.hidden = !data.status;
+    refreshActivityTimers();
+  }
+
+  function terminalPhase(status) {
+    return ['complete', 'error', 'cancelled', 'usage_limited', 'lease_lost'].indexOf(status) !== -1;
+  }
+
+  function updateSubagentActivity(data) {
+    if (!subagentList || !data.subagent_id) return;
+    var row = subagentList.querySelector('[data-subagent-id="' + data.subagent_id + '"]');
+    if (!row) {
+      row = document.createElement('div');
+      row.className = 'chat-agent-row';
+      row.dataset.subagentId = data.subagent_id;
+      var name = document.createElement('span');
+      name.className = 'chat-agent-name';
+      var state = document.createElement('span');
+      state.className = 'chat-agent-status';
+      var pulse = document.createElement('span');
+      pulse.className = 'chat-activity-pulse';
+      state.appendChild(pulse);
+      var stateText = document.createElement('span');
+      stateText.dataset.agentStatus = '';
+      state.appendChild(stateText);
+      var timer = document.createElement('time');
+      timer.dataset.activityTimer = '';
+      row.append(name, state, timer);
+      subagentList.appendChild(row);
+    }
+    row.dataset.startedAt = row.dataset.startedAt || data.started_at || data.queued_at || data.occurred_at || new Date().toISOString();
+    if (data.finished_at) row.dataset.finishedAt = data.finished_at;
+    var phase = data.phase || (terminalPhase(data.status) ? 'complete' : 'running');
+    row.dataset.phase = phase;
+    var nameEl = row.querySelector('.chat-agent-name');
+    var statusEl = row.querySelector('[data-agent-status]');
+    var name = data.subagent_name || data.name || nameEl.textContent || 'Sub-agent';
+    var status = data.activity || data.status || 'Working…';
+    if (status.indexOf(name + ': ') === 0) status = status.slice(name.length + 2);
+    nameEl.textContent = name;
+    statusEl.textContent = status.replace(/_/g, ' ');
+    if (agentPanel) agentPanel.hidden = false;
+    refreshActivityTimers();
+  }
+
+  function syncAgentActivity(snapshot) {
+    if (!snapshot.active_turn || !subagentList) {
+      if (agentPanel) agentPanel.hidden = true;
+      return;
+    }
+    var turnId = snapshot.active_turn.id;
+    var latestRoot = null;
+    var latestChildren = {};
+    (snapshot.activity_events || snapshot.events || []).forEach(function (event) {
+      if (event.turn_id !== turnId || (event.type !== 'chat_tool_event' && event.type !== 'chat_run_state')) return;
+      var payload = event.payload || {};
+      if (payload.scope === 'subagent' && payload.subagent_id) latestChildren[payload.subagent_id] = payload;
+      if (payload.scope === 'root' || event.type === 'chat_run_state') latestRoot = payload;
+    });
+    updateRootActivity(Object.assign({
+      turn_id: turnId,
+      started_at: snapshot.active_turn.started_at,
+      status: snapshot.active_turn.status === 'stopping' ? 'Stopping…' : 'Working…'
+    }, latestRoot || {}));
+    subagentList.textContent = '';
+    (snapshot.subagents || []).filter(function (child) {
+      return child.root_turn_id === turnId;
+    }).forEach(function (child) {
+      var activity = latestChildren[child.id] || {};
+      updateSubagentActivity(Object.assign({}, child, activity, {
+        subagent_id: child.id,
+        subagent_name: child.name,
+        activity: activity.status,
+      }));
+    });
+    if (agentPanel) agentPanel.hidden = !subagentList.children.length;
+  }
+
+  // Timers only update local DOM; live state remains notification-driven.
+  window.setInterval(refreshActivityTimers, 1000);
 
   function submissionKey() {
     if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
@@ -353,7 +504,7 @@
     if (!text) return showError('Type a message first.');
     if (text.length > 5000) return showError('Keep it under 5000 characters.');
     var user = bubble('user', text);
-    var assistant = bubble('assistant', 'Working…');
+    var assistant = bubble('assistant', '');
     thread.insertBefore(user, statusEl);
     thread.insertBefore(assistant, statusEl);
     input.value = '';
@@ -364,6 +515,10 @@
       if (mode === 'resources') resourceRunning = true;
       assistant.dataset.pendingTurn = activeTurn || '';
       assistant.dataset.turnId = activeTurn || '';
+      updateRootActivity({
+        turn_id: activeTurn,
+        status: ['disconnected', 'suspended', 'reconnecting'].indexOf(notificationStreamStatus) !== -1 ? 'Connection lost; reconnecting…' : 'Working…'
+      });
       setBusy(true);
       pendingAttachments = [];
       var box = document.querySelector('[data-attachments]');
@@ -395,10 +550,10 @@
     setBusy(true);
     api('/v2/api/chat/conversations/' + conversationId + '/turns/' + button.dataset.turnId + '/regenerate', json('POST', {})).then(function (data) {
       activeTurn = data.turn_id;
-      var placeholder = bubble('assistant', 'Regenerating…', data.turn_id);
+      var placeholder = bubble('assistant', '', data.turn_id);
       placeholder.dataset.pendingTurn = data.turn_id;
       button.closest('.chat-message').after(placeholder);
-      setStatus('Regenerating…');
+      updateRootActivity({turn_id: data.turn_id, status: 'Regenerating…'});
       setBusy(true);
     }).catch(function (error) {
       setBusy(false);
@@ -425,6 +580,7 @@
       stopBtn.disabled = false;
     }
     setBusy(false);
+    if (agentPanel) agentPanel.hidden = true;
     refreshUsage();
   }
 
@@ -452,12 +608,17 @@
       turn_id: payload.turn_id || envelope.turn_id,
     });
     if (data.conversation_id !== conversationId) return;
-    if (type === 'chat_tool_event' || type === 'chat_run_state' || type === 'chat_subagent_state') {
-      setStatus(data.status || 'Working…');
+    if (mode === 'chat' && activeTurn && data.turn_id && data.turn_id !== activeTurn) return;
+    if (type === 'chat_tool_event') {
+      if (data.scope === 'subagent') updateSubagentActivity(data);
+      else updateRootActivity(data);
     }
+    if (type === 'chat_run_state') updateRootActivity(data);
+    if (type === 'chat_subagent_state') updateSubagentActivity(data);
     if (type === 'chat_output_delta') {
       var pending = thread.querySelector('[data-pending-turn="' + data.turn_id + '"] .chat-content') || thread.querySelector('[data-turn-id="' + data.turn_id + '"] .chat-content');
       if (pending) pending.textContent = data.content || '';
+      updateRootActivity({turn_id: data.turn_id, status: 'Writing response…'});
     }
     if (type === 'chat_usage_updated') refreshUsage();
     if (type === 'agent_run_complete' && mode === 'resources') {
@@ -510,13 +671,7 @@
         window.location.reload();
       }
       syncPendingAttachments(snapshot.pending_attachments);
-      var childBox = document.querySelector('[data-chat-subagents]');
-      if (childBox && snapshot.subagents && snapshot.subagents.length) {
-        childBox.hidden = false;
-        childBox.textContent = snapshot.subagents.map(function (child) {
-          return child.name + ': ' + child.status;
-        }).join(' · ');
-      }
+      syncAgentActivity(snapshot);
     }).catch(function () {});
     refreshUsage();
   }
@@ -528,12 +683,14 @@
   var notificationNeedsReconcile = false;
   document.addEventListener('sk:notification-status', function (event) {
     var status = event.detail && event.detail.status;
+    notificationStreamStatus = status;
     if (status === 'connected') {
       if (notificationNeedsReconcile) reconcile();
       notificationHasConnected = true;
       notificationNeedsReconcile = false;
-    } else if (notificationHasConnected && (status === 'disconnected' || status === 'suspended' || status === 'reconnecting')) {
-      notificationNeedsReconcile = true;
+    } else if (status === 'disconnected' || status === 'suspended' || status === 'reconnecting') {
+      notificationNeedsReconcile = notificationHasConnected;
+      if (activeTurn) updateRootActivity({turn_id: activeTurn, status: 'Connection lost; reconnecting…'});
     }
   });
 

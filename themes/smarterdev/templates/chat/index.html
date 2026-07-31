@@ -42,7 +42,8 @@
                {% if active_turn and message.turn_id == active_turn.id|string %}data-pending-turn="{{ active_turn.id }}"{% endif %}
                data-version-group-id="{{ message.version_group }}">
         <div class="chat-role">{{ 'You' if message.role == 'user' else ('Resource Agent' if mode == 'resources' else 'Smarter Dev') }}</div>
-        <div class="chat-content sdanswer-prose">{% if message.role == 'assistant' and not message.content %}Working…{% else %}{{ message.content_html|safe }}{% endif %}</div>
+        {% if mode == 'chat' and message.role == 'assistant' and active_turn and message.turn_id == active_turn.id|string %}<div class="chat-agent-activity" data-root-activity data-started-at="{{ active_turn.created_at.isoformat() }}"><span class="chat-activity-pulse" aria-hidden="true"></span><span data-activity-label>Working…</span><time data-activity-timer>0:00</time></div>{% endif %}
+        <div class="chat-content sdanswer-prose">{% if message.role == 'assistant' and not message.content and not (mode == 'chat' and active_turn) %}Working…{% else %}{{ message.content_html|safe }}{% endif %}</div>
         {% if mode == 'chat' and message.attachments %}<div class="chat-sent-attachments">{% for attachment in message.attachments %}<a href="/v2/api/chat/conversations/{{ conversation.id }}/attachments/{{ attachment.id }}">{{ attachment.name }}</a>{% endfor %}</div>{% endif %}
         {% if mode == 'resources' and message.role == 'assistant' and message.sdanswer_blocks %}<script type="application/json" class="sdanswer-payload">{{ message.sdanswer_blocks|tojson }}</script>{% endif %}
         {% if message.stopped %}<span class="chat-stopped">Stopped</span>{% endif %}
@@ -53,8 +54,9 @@
         </div>{% endif %}
       </article>
       {% endfor %}
-      <div class="chat-live-status" data-chat-status {% if not resource_running and not active_turn %}hidden{% endif %}>{% if resource_running %}Resource Agent is working…{% elif active_turn %}Smarter Dev is working…{% endif %}</div>
+      <div class="chat-live-status" data-chat-status {% if not resource_running %}hidden{% endif %}>{% if resource_running %}Resource Agent is working…{% endif %}</div>
     </section>
+    {% if mode == 'chat' %}<section class="chat-agent-panel" data-chat-agent-panel hidden aria-label="Running sub-agents"><div class="chat-agent-panel-title">Sub-agents</div><div data-chat-subagents></div></section>{% endif %}
     <p class="chat-error" data-chat-error hidden></p>
     {% if mode == 'chat' or (is_owner and not resource_running and quota_state and quota_state.followups_remaining > 0) %}<form class="chat-composer" data-chat-composer>
       <div class="chat-attachments" data-attachments></div>
@@ -67,7 +69,6 @@
       {% if mode == 'resources' and quota_state %}<p class="chat-resource-quota">{{ quota_state.followups_remaining }}/{{ quota_state.max_followups }} follow-ups remaining · {{ quota_state.questions_remaining }}/{{ quota_state.max_questions }} weekly questions remaining</p>{% endif %}
       <textarea data-chat-input maxlength="5000" required placeholder="Message Smarter Dev…" rows="2"></textarea>
       <div class="chat-composer-foot"><span><b data-context-tokens>0</b> context · <b data-subagent-tokens>0</b> sub-agent · <b data-total-tokens>0</b> total<br><small><span data-conversation-percent>0</span>% this conversation / <span data-all-percent>0</span>% all Chat (4h)</small></span><div><button type="button" data-chat-stop {% if not active_turn %}hidden{% endif %}>Stop</button><button type="submit" {% if active_turn %}disabled{% endif %}>Send</button></div></div>
-      <div class="chat-subagents" data-chat-subagents hidden></div>
     </form>{% elif mode == 'resources' and is_owner %}<p class="chat-resource-quota">No follow-ups remain for this answer. <a href="/resources">Start a new question</a>.</p>{% endif %}
   </main>
 </div>

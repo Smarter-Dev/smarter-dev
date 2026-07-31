@@ -93,9 +93,9 @@ class RedisSubagentSemaphore:
         redis,
         *,
         namespace: str = "smarter-dev:chat:subagents",
-        # Longer than the hard child timeout, refreshed every ten seconds. A
-        # dead worker's potentially accepted remote request finishes/times out
-        # before Redis can reuse its global slot.
+        # Refreshed every ten seconds while an agent runs. A dead worker's
+        # lease eventually expires so it cannot permanently consume a global
+        # slot; live agents have no execution timeout.
         lease_seconds: int = 1_200,
     ):
         self.redis = redis

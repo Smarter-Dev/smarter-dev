@@ -522,6 +522,10 @@ def test_browser_contract_includes_csrf_recovery_and_live_updates():
     assert "sk:notification" in javascript
     assert "sk:notification-status" in javascript
     assert "setInterval(reconcile" not in javascript
+    assert "setInterval(refreshActivityTimers" in javascript
+    assert "data-root-activity" in template
+    assert "data-chat-agent-panel" in template
+    assert "data-activity-timer" in template
     assert "data-chat-new-intelligence" in template
     assert "data-version-group" in template
     assert "data-chat-error" in template
@@ -531,3 +535,8 @@ def test_browser_contract_includes_csrf_recovery_and_live_updates():
     assert "/storage/default/chat-attachments/" in main
     deploy = Path(".github/workflows/deploy.yaml").read_text()
     assert "deploy-chat-child-worker.yaml" in deploy
+    jobs = Path("smarter_dev/web/chat/jobs.py").read_text()
+    runtime = Path("smarter_dev/web/chat/runtime.py").read_text()
+    assert '"chat_tool_event"' in jobs and "subagent_id" in jobs
+    assert "model operation exceeded its hard timeout" not in runtime
+    assert "timed out and was cancelled" not in jobs

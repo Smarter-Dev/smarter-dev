@@ -365,6 +365,22 @@ class ChatApiController(Controller):
             ).scalars()
         )
         events.reverse()
+        activity_events = list(
+            (
+                await db_session.execute(
+                    select(WebChatRuntimeEvent)
+                    .where(
+                        WebChatRuntimeEvent.conversation_id == conversation_id,
+                        WebChatRuntimeEvent.event_type.in_(
+                            ("chat_tool_event", "chat_run_state", "chat_subagent_state")
+                        ),
+                    )
+                    .order_by(WebChatRuntimeEvent.created_at.desc())
+                    .limit(1_000)
+                )
+            ).scalars()
+        )
+        activity_events.reverse()
         active_turn = await db_session.scalar(
             select(WebChatTurn)
             .where(
@@ -417,6 +433,7 @@ class ChatApiController(Controller):
                         ),
                         "",
                     ),
+                    "started_at": active_turn.created_at.isoformat(),
                 }
                 if active_turn
                 else None
@@ -444,6 +461,13 @@ class ChatApiController(Controller):
                     "status": child.status,
                     "input_tokens": child.input_tokens,
                     "output_tokens": child.output_tokens,
+                    "queued_at": child.queued_at.isoformat(),
+                    "started_at": child.started_at.isoformat()
+                    if child.started_at
+                    else None,
+                    "finished_at": child.finished_at.isoformat()
+                    if child.finished_at
+                    else None,
                 }
                 for child in subagents
             ],
@@ -452,8 +476,20 @@ class ChatApiController(Controller):
                     "type": event.event_type,
                     "payload": event.payload,
                     "sequence": event.sequence,
+                    "turn_id": str(event.turn_id),
+                    "created_at": event.created_at.isoformat(),
                 }
                 for event in events
+            ],
+            "activity_events": [
+                {
+                    "type": event.event_type,
+                    "payload": event.payload,
+                    "sequence": event.sequence,
+                    "turn_id": str(event.turn_id),
+                    "created_at": event.created_at.isoformat(),
+                }
+                for event in activity_events
             ],
         }
 
