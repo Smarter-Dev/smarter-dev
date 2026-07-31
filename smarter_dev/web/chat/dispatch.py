@@ -17,9 +17,11 @@ from datetime import timedelta
 from uuid import UUID
 from uuid import uuid4
 
+from pydantic import BaseModel
 from skrift.hooks import APP_SHUTDOWN
 from skrift.hooks import APP_STARTUP
 from skrift.hooks import action
+from skrift.workers import registry as worker_registry
 from skrift.workers import submit as worker_submit
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +35,63 @@ from smarter_dev.web.models import WorkDispatch
 
 logger = logging.getLogger(__name__)
 _dispatcher_task: asyncio.Task | None = None
+
+
+class _ChatTurnSubmission(BaseModel):
+    turn_id: str
+
+
+class _ChatSubagentSubmission(BaseModel):
+    subagent_id: str
+
+
+class _ChatAccountDeletionSubmission(BaseModel):
+    request_id: str
+
+
+class _ResourcesSubmission(BaseModel):
+    run_id: str | None = None
+    conversation_id: str | None = None
+    owner_user_id: str | None = None
+    question: str | None = None
+
+
+async def _submission_only_handler(_payload: BaseModel) -> None:
+    raise RuntimeError("submission-only handler cannot execute in the web process")
+
+
+_SUBMISSION_DESCRIPTORS = {
+    "chat.turn.run": (_ChatTurnSubmission, "agents", 1800.0),
+    "chat.subagent.run": (_ChatSubagentSubmission, "chat-subagents", 1200.0),
+    "chat.account.delete": (_ChatAccountDeletionSubmission, "agents", 600.0),
+    "resources.agent.run": (_ResourcesSubmission, "agents", 600.0),
+}
+
+
+def ensure_submission_handler(job_type: str) -> None:
+    """Register the lightweight descriptor Skrift requires before enqueueing.
+
+    Worker processes already hold the real handlers. The web process needs only
+    matching payload/queue metadata; importing full agent jobs here would waste
+    scarce web-pod memory.
+    """
+    try:
+        worker_registry.get(job_type)
+        return
+    except KeyError:
+        pass
+    config = _SUBMISSION_DESCRIPTORS.get(job_type)
+    if config is None:
+        raise KeyError(f"No worker submission descriptor for {job_type!r}")
+    payload_model, queue, visibility_timeout = config
+    worker_registry.register(
+        job_type,
+        _submission_only_handler,
+        payload_model=payload_model,
+        queue=queue,
+        max_attempts=5,
+        visibility_timeout=visibility_timeout,
+    )
 
 
 async def create_dispatch(
@@ -83,6 +142,10 @@ async def dispatch_one(dispatch_id: UUID) -> bool:
         worker_job_id = f"outbox:{row.id}:{row.attempt_count}:{uuid4().hex[:8]}"
         job_type, payload, queue = row.job_type, dict(row.payload), row.queue
         try:
+            # Skrift validates the handler descriptor in the submitting process
+            # before writing to the durable queue. Worker imports alone do not
+            # populate the web ASGI process's registry.
+            ensure_submission_handler(job_type)
             await worker_submit(
                 job_type,
                 payload,

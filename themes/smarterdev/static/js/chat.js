@@ -22,7 +22,6 @@
   var conversationPromise = null;
   var catalog = null;
   var pendingChange = null;
-  var pollTimer = null;
 
   function api(url, options) {
     options = options || {};
@@ -370,7 +369,6 @@
       var box = document.querySelector('[data-attachments]');
       if (box) box.textContent = '';
       if (mode === 'resources') setStatus('Resource Agent is working…');
-      startPolling();
     }).catch(function (error) {
       assistant.querySelector('.chat-content').textContent = error.message;
       setStatus('');
@@ -402,7 +400,6 @@
       button.closest('.chat-message').after(placeholder);
       setStatus('Regenerating…');
       setBusy(true);
-      startPolling();
     }).catch(function (error) {
       setBusy(false);
       showError(error.message);
@@ -429,7 +426,6 @@
     }
     setBusy(false);
     refreshUsage();
-    stopPolling();
   }
 
   function handleTerminal(data, type) {
@@ -525,23 +521,25 @@
     refreshUsage();
   }
 
-  function startPolling() {
-    if (pollTimer || !conversationId) return;
-    pollTimer = window.setInterval(reconcile, 1500);
-  }
-
-  function stopPolling() {
-    if (pollTimer) window.clearInterval(pollTimer);
-    pollTimer = null;
-  }
+  // Skrift notifications drive live output and terminal state. Reconcile only
+  // once on load and whenever the notification stream reconnects, so a missed
+  // ephemeral event cannot strand the UI without creating a polling loop.
+  var notificationHasConnected = false;
+  var notificationNeedsReconcile = false;
+  document.addEventListener('sk:notification-status', function (event) {
+    var status = event.detail && event.detail.status;
+    if (status === 'connected') {
+      if (notificationNeedsReconcile) reconcile();
+      notificationHasConnected = true;
+      notificationNeedsReconcile = false;
+    } else if (notificationHasConnected && (status === 'disconnected' || status === 'suspended' || status === 'reconnecting')) {
+      notificationNeedsReconcile = true;
+    }
+  });
 
   loadCatalog().then(function () {
     refreshUsage();
-    if (mode === 'chat' && conversationId && !activeTurn) reconcile();
-    if (activeTurn || resourceRunning) {
-      setBusy(true);
-      startPolling();
-      reconcile();
-    }
+    if (conversationId) reconcile();
+    if (activeTurn || resourceRunning) setBusy(true);
   });
 })();
