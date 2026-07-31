@@ -40,11 +40,12 @@ CUSTOM_PRICES: dict[str, dict[str, tuple[str, str, str, str | None, str | None]]
         "gpt-5.4-nano": ("GPT 5.4 Nano", "0.2", "1.25", "0.02", None),
         # GPT-5.4 Mini — $0.75 in / $4.50 out / $0.075 cached.
         "gpt-5.4-mini": ("GPT 5.4 Mini", "0.75", "4.5", "0.075", None),
-        # GPT-5.6 Luna — preview pricing, July 2026. $1.00 in / $6.00 out /
-        # $0.10 cached-read / $1.25 cache-write.
-        "gpt-5.6-luna": ("GPT 5.6 Luna", "1", "6", "0.1", "1.25"),
-        # GPT-5.6 Terra — $2.50 in / $15.00 out / $0.25 cached-read / $3.125 cache-write.
-        "gpt-5.6-terra": ("GPT 5.6 Terra", "2.5", "15", "0.25", "3.125"),
+        # GPT-5.6 Luna — rates effective 2026-07-30 after an 80% cut.
+        # $0.20 in / $1.20 out / $0.02 cached-read / $0.25 cache-write.
+        "gpt-5.6-luna": ("GPT 5.6 Luna", "0.2", "1.2", "0.02", "0.25"),
+        # GPT-5.6 Terra — rates effective 2026-07-30 after a 20% cut.
+        # $2.00 in / $12.00 out / $0.20 cached-read / $2.50 cache-write.
+        "gpt-5.6-terra": ("GPT 5.6 Terra", "2", "12", "0.2", "2.5"),
     },
 }
 

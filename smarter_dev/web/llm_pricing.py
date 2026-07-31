@@ -2,6 +2,10 @@
 
 Patches missing models into the genai-prices snapshot at import time,
 then exposes calc_session_cost() for computing per-session costs.
+
+Chat and compaction costs are calculated once when their usage rows are created
+and persisted with those rows. Updating a rate here therefore affects newly
+ingested usage only; it does not retroactively reprice existing invoice rows.
 """
 
 from __future__ import annotations
@@ -134,15 +138,34 @@ _patch_provider(
     ),
 )
 
-# GPT-5.6 Luna — not yet in genai-prices (preview pricing, July 2026)
+# GPT-5.6 Luna — not yet in genai-prices. Rates effective 2026-07-30
+# after OpenAI's 80% price cut.
 _patch_provider(
     "openai",
     types.ModelInfo(
         id="gpt-5.6-luna",
         match=types.ClauseStartsWith(starts_with="gpt-5.6-luna"),
         prices=types.ModelPrice(
-            input_mtok=Decimal("1.00"),
-            output_mtok=Decimal("6.00"),
+            input_mtok=Decimal("0.20"),
+            output_mtok=Decimal("1.20"),
+            cache_read_mtok=Decimal("0.02"),
+            cache_write_mtok=Decimal("0.25"),
+        ),
+    ),
+)
+
+# GPT-5.6 Terra — not yet in genai-prices. Rates effective 2026-07-30
+# after OpenAI's 20% price cut.
+_patch_provider(
+    "openai",
+    types.ModelInfo(
+        id="gpt-5.6-terra",
+        match=types.ClauseStartsWith(starts_with="gpt-5.6-terra"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("2.00"),
+            output_mtok=Decimal("12.00"),
+            cache_read_mtok=Decimal("0.20"),
+            cache_write_mtok=Decimal("2.50"),
         ),
     ),
 )

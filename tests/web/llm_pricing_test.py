@@ -20,25 +20,21 @@ class TestDigitalOceanPricing:
         assert calc_cost(1_000_000, 1_000_000, "kimi-k2.6") == Decimal("3.96")
 
     def test_deepseek_4_flash_rates(self):
-        assert calc_cost(1_000_000, 1_000_000, "deepseek-4-flash") == Decimal(
-            "0.336"
-        )
+        assert calc_cost(1_000_000, 1_000_000, "deepseek-4-flash") == Decimal("0.336")
 
     def test_gemma_4_rates(self):
         assert calc_cost(1_000_000, 1_000_000, "gemma-4-31B-it") == Decimal("0.68")
 
     def test_qwen_35_rates(self):
-        assert calc_cost(1_000_000, 1_000_000, "qwen3.5-397b-a17b") == Decimal(
-            "2.835"
-        )
+        assert calc_cost(1_000_000, 1_000_000, "qwen3.5-397b-a17b") == Decimal("2.835")
 
     def test_small_token_counts_stay_exact_decimal(self):
         # 110 input + 45 output on kimi-k2.6:
         # (110 * 0.76 + 45 * 3.20) / 1_000_000
         cost = calc_cost(110, 45, "kimi-k2.6")
-        assert cost == Decimal("110") * Decimal("0.76") / Decimal(
-            "1000000"
-        ) + Decimal("45") * Decimal("3.20") / Decimal("1000000")
+        assert cost == Decimal("110") * Decimal("0.76") / Decimal("1000000") + Decimal(
+            "45"
+        ) * Decimal("3.20") / Decimal("1000000")
         assert isinstance(cost, Decimal)
 
     def test_digitalocean_prefixed_name_also_resolves(self):
@@ -93,14 +89,14 @@ class TestDigitalOceanPricing:
 
 class TestOpenRouterPricing:
     def test_laguna_s_rates(self):
-        assert calc_cost(
-            1_000_000, 1_000_000, "poolside/laguna-s-2.1"
-        ) == Decimal("0.30")
+        assert calc_cost(1_000_000, 1_000_000, "poolside/laguna-s-2.1") == Decimal(
+            "0.30"
+        )
 
     def test_laguna_xs_rates(self):
-        assert calc_cost(
-            1_000_000, 1_000_000, "poolside/laguna-xs-2.1"
-        ) == Decimal("0.18")
+        assert calc_cost(1_000_000, 1_000_000, "poolside/laguna-xs-2.1") == Decimal(
+            "0.18"
+        )
 
     def test_laguna_cache_rate(self):
         cost = calc_session_cost(
@@ -127,9 +123,7 @@ class TestOpenCodeZenPricing:
 
     def test_deepseek_v4_flash_rates(self):
         # Zen's id, distinct from DO's "deepseek-4-flash" at $0.336/M pair.
-        assert calc_cost(1_000_000, 1_000_000, "deepseek-v4-flash") == Decimal(
-            "0.42"
-        )
+        assert calc_cost(1_000_000, 1_000_000, "deepseek-v4-flash") == Decimal("0.42")
 
     def test_laguna_s_free_tier_costs_nothing(self):
         assert calc_cost(1_000_000, 1_000_000, "laguna-s-2.1-free") == Decimal("0")
@@ -156,6 +150,38 @@ class TestOpenCodeZenPricing:
         assert cost == Decimal("0.156")
 
 
+class TestOpenAIPricing:
+    def test_luna_reduced_rates(self):
+        # Effective 2026-07-30: $0.20/M input + $1.20/M output.
+        assert calc_cost(1_000_000, 1_000_000, "gpt-5.6-luna") == Decimal("1.40")
+
+    def test_luna_cache_read_and_write_rates(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=800_000,
+            cache_write_tokens=100_000,
+            model_name="openai:gpt-5.6-luna",
+        )
+        # 100k fresh @ $0.20 + 800k read @ $0.02 + 100k write @ $0.25.
+        assert cost == Decimal("0.061")
+
+    def test_terra_reduced_rates(self):
+        # Effective 2026-07-30: $2/M input + $12/M output.
+        assert calc_cost(1_000_000, 1_000_000, "gpt-5.6-terra") == Decimal("14.00")
+
+    def test_terra_cache_read_and_write_rates(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=800_000,
+            cache_write_tokens=100_000,
+            model_name="openai:gpt-5.6-terra",
+        )
+        # 100k fresh @ $2 + 800k read @ $0.20 + 100k write @ $2.50.
+        assert cost == Decimal("0.61")
+
+
 class TestUnknownModelFallback:
     def test_unknown_model_returns_zero_and_logs_warning(self, caplog):
         with caplog.at_level(logging.WARNING, logger="smarter_dev.web.llm_pricing"):
@@ -163,8 +189,7 @@ class TestUnknownModelFallback:
 
         assert cost == Decimal("0")
         assert any(
-            "totally-unknown-model-xyz" in record.message
-            for record in caplog.records
+            "totally-unknown-model-xyz" in record.message for record in caplog.records
         )
 
     def test_known_genai_prices_model_still_priced(self):

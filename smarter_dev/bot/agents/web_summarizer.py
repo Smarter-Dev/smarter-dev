@@ -28,7 +28,7 @@ from smarter_dev.shared.observability import record_llm_failover
 
 logger = logging.getLogger(__name__)
 
-PRIMARY_MODEL_KEY = "poolside-laguna-s-2-1"
+PRIMARY_MODEL_KEY = "gpt-5-6-luna"
 FALLBACK_MODEL_KEY = "gemini-3-1-flash-lite"
 
 SYSTEM_PROMPT = """\
@@ -106,7 +106,7 @@ def get_web_summarizer_fallback_agent() -> Agent[None, str]:
 async def summarize_web_content(
     *, instruction: str, content: str, title: str, url: str
 ) -> str:
-    """Summarize with Laguna S 2.1, failing over loudly to Gemini Flash Lite."""
+    """Summarize with GPT-5.6 Luna, failing over loudly to Gemini Flash Lite."""
     agent = get_web_summarizer_agent()
     prompt = (
         f"URL: {url}\n"
@@ -118,7 +118,7 @@ async def summarize_web_content(
         result = await agent.run(prompt)
     except Exception as exc:
         logger.critical(
-            "WEB SUMMARIZER FAILOVER: Laguna S 2.1 failed; using Gemini 3.1 "
+            "WEB SUMMARIZER FAILOVER: GPT-5.6 Luna failed; using Gemini 3.1 "
             "Flash Lite for url=%s title=%r",
             url,
             title,
@@ -126,7 +126,7 @@ async def summarize_web_content(
         )
         record_llm_failover(
             operation="web_summarizer",
-            primary_model="poolside/laguna-s-2.1",
+            primary_model="gpt-5.6-luna",
             fallback_model="gemini-3.1-flash-lite",
             error=exc,
         )

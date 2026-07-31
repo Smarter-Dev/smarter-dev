@@ -1,8 +1,8 @@
 """Discord chat agent — single Pydantic AI agent driving every conversation turn.
 
 Replaces the old classification/evaluation/response trio. One agent, one model
-(Gemini 3.1 Flash Lite on medium thinking by default; override with the
-CHAT_AGENT_MODEL env var — "gpt-"/"openai/" ids route to OpenAI), one
+(GPT-5.6 Luna on medium reasoning by default; override with the
+CHAT_AGENT_MODEL env var), one
 structured return type.
 
 Usage:
@@ -30,29 +30,29 @@ from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.settings import ModelSettings
 
 from smarter_dev.bot.agents.chat_compaction import compact_history
-from smarter_dev.bot.agents.chat_tool_budget import budgeted_toolset
-from smarter_dev.bot.agents.chat_tool_budget import tool_budget_notice
 from smarter_dev.bot.agents.chat_models import AgentReturn
 from smarter_dev.bot.agents.chat_models import BriefingDecision
+from smarter_dev.bot.agents.chat_tool_budget import budgeted_toolset
+from smarter_dev.bot.agents.chat_tool_budget import tool_budget_notice
 from smarter_dev.bot.agents.chat_tools import ChatDeps
 from smarter_dev.bot.agents.chat_tools import chat_tool_functions
 from smarter_dev.bot.agents.handler_tools import handler_tool_functions
+from smarter_dev.bot.agents.model_router import build_model_for
+from smarter_dev.bot.agents.model_router import model_settings_for
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ModelProvider
 from smarter_dev.shared.model_catalog import parse_reasoning_level
 from smarter_dev.shared.model_catalog import resolve_reasoning_level
-from smarter_dev.bot.agents.model_router import build_model_for
-from smarter_dev.bot.agents.model_router import model_settings_for
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_MODEL = "gpt-5.6-luna"
 MODEL_ENV_VAR = "CHAT_AGENT_MODEL"
 
-SYSTEM_PROMPT = (
-    Path(__file__).parent / "prompts" / "chat_agent.md"
-).read_text(encoding="utf-8")
+SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "chat_agent.md").read_text(
+    encoding="utf-8"
+)
 
 # Two-stage WORKER prompt: same decision funnel as the chat agent, but the
 # final step authors a context brief instead of writing the reply.
@@ -124,7 +124,10 @@ def _output_type_for(
     # OpenCode Zen serves the same open-weights models (Kimi/GLM/Qwen/DeepSeek/
     # MiniMax) over the same OpenAI-compatible surface, so it inherits the same
     # structured-output weakness — the endpoint changed, the model did not.
-    if catalog_model is not None and catalog_model.provider in _PROMPTED_OUTPUT_PROVIDERS:
+    if (
+        catalog_model is not None
+        and catalog_model.provider in _PROMPTED_OUTPUT_PROVIDERS
+    ):
         return PromptedOutput(output_type)
     return output_type
 

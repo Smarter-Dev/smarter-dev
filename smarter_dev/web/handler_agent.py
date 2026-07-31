@@ -9,9 +9,8 @@ and decides what (if anything) to emit. Two shapes:
   agent that reads two pages leaves the script one read.
 - ``has_tools=False`` — a pure text transform: prompt in, plaintext out, no tools.
 
-Model: Gemini 3.1 Flash Lite — deliberately a lazy tool user, which is a safety
-feature here (it won't spiral into runaway tool loops). A budget cap raised
-inside a tool propagates out of ``agent.run`` and stops the fire loud.
+Model: GPT-5.6 Luna by default. A budget cap raised inside a tool propagates
+out of ``agent.run`` and stops the fire loud.
 """
 
 from __future__ import annotations
@@ -22,9 +21,10 @@ import os
 import httpx
 from pydantic_ai import Agent
 from pydantic_ai import RunContext
-from pydantic_ai.models.google import GoogleModel
-from pydantic_ai.providers.google import GoogleProvider
+from pydantic_ai.models import Model
 
+from smarter_dev.bot.agents.model_router import build_model_for
+from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.handler_budget import HandlerBudget
 from smarter_dev.web.media_read import read_url
@@ -32,7 +32,7 @@ from smarter_dev.web.research_tools import brave_search
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_MODEL = "gpt-5.6-luna"
 MODEL_ENV_VAR = "HANDLER_AGENT_MODEL"
 
 _GATHER_PROMPT = (
@@ -59,10 +59,14 @@ class _GatherDeps:
         self.budget = budget
 
 
-def _build_model() -> GoogleModel:
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+def _build_model() -> Model:
     model_id = os.getenv(MODEL_ENV_VAR, DEFAULT_MODEL)
-    return GoogleModel(model_id, provider=GoogleProvider(api_key=api_key))
+    catalog_model = next(
+        (model for model in MODEL_CATALOG if model.model_id == model_id), None
+    )
+    if catalog_model is None:
+        raise RuntimeError(f"Handler agent model is not in the catalog: {model_id}")
+    return build_model_for(catalog_model)
 
 
 async def _web_search(ctx: RunContext[_GatherDeps], query: str) -> list[dict[str, str]]:
