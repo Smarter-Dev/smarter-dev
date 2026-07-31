@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ from litestar.exceptions import HTTPException
 from skrift.auth.session_keys import SESSION_USER_ID
 from skrift.db.models.user import User
 from skrift.forms.core import CSRF_SESSION_KEY
+from skrift.workers import registry as worker_registry
 from sqlalchemy import func
 from sqlalchemy import select
 
@@ -21,10 +23,12 @@ from smarter_dev.web import agent_api
 from smarter_dev.web.agent_api import AskBody
 from smarter_dev.web.agent_api import ResourcesAgentApiController
 from smarter_dev.web.chat import api as chat_api
+from smarter_dev.web.chat import dispatch as chat_dispatch
 from smarter_dev.web.chat.api import ChatApiController
 from smarter_dev.web.chat.api import ReasoningBody
 from smarter_dev.web.chat.api import TurnBody
 from smarter_dev.web.chat.csrf import require_api_csrf
+from smarter_dev.web.chat.dispatch import ensure_submission_handler
 from smarter_dev.web.chat.limits import OperationAlreadyReserved
 from smarter_dev.web.chat.limits import reserve_operation
 from smarter_dev.web.chat.settings import ensure_settings
@@ -38,6 +42,51 @@ from smarter_dev.web.models import WebChatConversation
 from smarter_dev.web.models import WebChatMessage
 from smarter_dev.web.models import WebChatTurn
 from smarter_dev.web.models import WorkDispatch
+
+
+@pytest.mark.parametrize(
+    "job_type",
+    (
+        "chat.turn.run",
+        "chat.subagent.run",
+        "chat.account.delete",
+        "resources.agent.run",
+    ),
+)
+def test_web_submitter_can_resolve_worker_descriptors(job_type):
+    ensure_submission_handler(job_type)
+    assert worker_registry.get(job_type).job_type == job_type
+
+
+@pytest.mark.asyncio
+async def test_outbox_registers_descriptor_before_web_submission(
+    db_session, monkeypatch
+):
+    row = WorkDispatch(
+        job_type="chat.turn.run",
+        aggregate_id=uuid4(),
+        payload={"turn_id": str(uuid4())},
+        queue="agents",
+        status="pending",
+    )
+    db_session.add(row)
+    await db_session.commit()
+    submitted = {}
+
+    async def fake_submit(job_type, payload, **kwargs):
+        submitted.update(job_type=job_type, payload=payload, kwargs=kwargs)
+
+    @asynccontextmanager
+    async def fake_session_context():
+        yield db_session
+
+    monkeypatch.setattr(chat_dispatch, "get_db_session_context", fake_session_context)
+    monkeypatch.setattr(chat_dispatch, "worker_submit", fake_submit)
+    assert await chat_dispatch.dispatch_one(row.id) is True
+    await db_session.refresh(row)
+    assert row.status == "dispatched"
+    assert submitted["job_type"] == "chat.turn.run"
+    assert submitted["payload"] == row.payload
 
 
 def _request(user_id, *, token: str = "csrf-token"):
@@ -470,7 +519,9 @@ def test_browser_contract_includes_csrf_recovery_and_live_updates():
     javascript = Path("themes/smarterdev/static/js/chat.js").read_text()
     template = Path("themes/smarterdev/templates/chat/index.html").read_text()
     assert "X-CSRF-Token" in javascript
-    assert "sk:notification" in javascript and "setInterval(reconcile" in javascript
+    assert "sk:notification" in javascript
+    assert "sk:notification-status" in javascript
+    assert "setInterval(reconcile" not in javascript
     assert "data-chat-new-intelligence" in template
     assert "data-version-group" in template
     assert "data-chat-error" in template
