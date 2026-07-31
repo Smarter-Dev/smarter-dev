@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from contextlib import suppress
 from dataclasses import dataclass
@@ -32,6 +33,8 @@ from smarter_dev.web.models import UsageCostRow
 from smarter_dev.web.models import WebChatConversation
 from smarter_dev.web.models import WebChatSubagent
 from smarter_dev.web.models import WebChatTurn
+
+logger = logging.getLogger(__name__)
 
 
 class HardSpendCutoff(RuntimeError):
@@ -436,27 +439,41 @@ async def wait_for_cancellation(
     subagent_id: UUID | None = None,
     worker_lease_token: str | None = None,
     allow_cutoff: bool = False,
-    interval: float = 0.2,
+    interval: float = 1.0,
 ) -> None:
     while True:
-        async with get_db_session_context() as session:
-            turn = await session.get(WebChatTurn, turn_id)
-            child = (
-                await session.get(WebChatSubagent, subagent_id)
-                if subagent_id is not None
-                else None
+        try:
+            async with get_db_session_context() as session:
+                turn = await session.get(WebChatTurn, turn_id)
+                child = (
+                    await session.get(WebChatSubagent, subagent_id)
+                    if subagent_id is not None
+                    else None
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # Cancellation is advisory until the durable row can be read. A
+            # transient database disconnect must not abort a live provider run
+            # or cause the queue to retry and duplicate the entire agent loop.
+            logger.warning(
+                "Chat cancellation check temporarily unavailable for turn %s",
+                turn_id,
+                exc_info=True,
             )
-            if turn is None or turn.stop_requested_at is not None:
-                raise RunCancelled()
-            if turn.cutoff_at is not None and not allow_cutoff:
-                raise HardSpendCutoff("Chat hard spend cutoff reached")
-            if (
-                worker_lease_token is not None
-                and turn.worker_lease_token != worker_lease_token
-            ):
-                raise RunSuperseded()
-            if child is not None and child.cancel_requested_at is not None:
-                raise RunCancelled()
+            await asyncio.sleep(interval)
+            continue
+        if turn is None or turn.stop_requested_at is not None:
+            raise RunCancelled()
+        if turn.cutoff_at is not None and not allow_cutoff:
+            raise HardSpendCutoff("Chat hard spend cutoff reached")
+        if (
+            worker_lease_token is not None
+            and turn.worker_lease_token != worker_lease_token
+        ):
+            raise RunSuperseded()
+        if child is not None and child.cancel_requested_at is not None:
+            raise RunCancelled()
         await asyncio.sleep(interval)
 
 
