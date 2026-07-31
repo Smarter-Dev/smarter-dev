@@ -106,6 +106,23 @@ _patch_provider(
     ),
 )
 
+# Gemini 3.1 Pro — base tier (up to 200K input tokens). Google applies
+# $4/$18 long-context pricing above 200K; the current usage ledger does not
+# expose the threshold split, so admission uses the documented base rate.
+# https://ai.google.dev/gemini-api/docs/pricing
+_patch_provider(
+    "google",
+    types.ModelInfo(
+        id="gemini-3.1-pro",
+        match=types.ClauseStartsWith(starts_with="gemini-3.1-pro"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("2.00"),
+            output_mtok=Decimal("12.00"),
+            cache_read_mtok=Decimal("0.20"),
+        ),
+    ),
+)
+
 # GPT-5.4 Nano — not yet in genai-prices
 _patch_provider(
     "openai",
@@ -138,6 +155,23 @@ _patch_provider(
     ),
 )
 
+# GPT-5.5 — official legacy rate. Long-context requests above 272K input
+# tokens receive a 2x input / 1.5x output multiplier that cannot be separated
+# from aggregate provider usage, so this is the documented base rate.
+# https://developers.openai.com/api/docs/models/gpt-5.5
+_patch_provider(
+    "openai",
+    types.ModelInfo(
+        id="gpt-5.5",
+        match=types.ClauseStartsWith(starts_with="gpt-5.5"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("5.00"),
+            output_mtok=Decimal("30.00"),
+            cache_read_mtok=Decimal("0.50"),
+        ),
+    ),
+)
+
 # GPT-5.6 Luna — not yet in genai-prices. Rates effective 2026-07-30
 # after OpenAI's 80% price cut.
 _patch_provider(
@@ -150,6 +184,23 @@ _patch_provider(
             output_mtok=Decimal("1.20"),
             cache_read_mtok=Decimal("0.02"),
             cache_write_mtok=Decimal("0.25"),
+        ),
+    ),
+)
+
+# GPT-5.6 Sol — current flagship rate. Explicit cache writes are 1.25x
+# uncached input and cache reads are 10% of uncached input.
+# https://developers.openai.com/api/docs/models/gpt-5.6-sol
+_patch_provider(
+    "openai",
+    types.ModelInfo(
+        id="gpt-5.6-sol",
+        match=types.ClauseStartsWith(starts_with="gpt-5.6-sol"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("5.00"),
+            output_mtok=Decimal("30.00"),
+            cache_read_mtok=Decimal("0.50"),
+            cache_write_mtok=Decimal("6.25"),
         ),
     ),
 )
@@ -195,6 +246,38 @@ _patch_provider(
             input_mtok=Decimal("2.50"),
             output_mtok=Decimal("15.00"),
             cache_read_mtok=Decimal("0.25"),
+        ),
+    ),
+)
+
+
+# Claude 5 pricing. Anthropic's standard five-minute cache writes are 1.25x
+# input and reads are 10% of input. Sonnet 5 uses its introductory rate through
+# 2026-08-31; changing that future rate must not reprice settled usage rows.
+# https://platform.claude.com/docs/en/about-claude/pricing
+_patch_provider(
+    "anthropic",
+    types.ModelInfo(
+        id="claude-opus-5",
+        match=types.ClauseStartsWith(starts_with="claude-opus-5"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("5.00"),
+            output_mtok=Decimal("25.00"),
+            cache_read_mtok=Decimal("0.50"),
+            cache_write_mtok=Decimal("6.25"),
+        ),
+    ),
+)
+_patch_provider(
+    "anthropic",
+    types.ModelInfo(
+        id="claude-sonnet-5",
+        match=types.ClauseStartsWith(starts_with="claude-sonnet-5"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("2.00"),
+            output_mtok=Decimal("10.00"),
+            cache_read_mtok=Decimal("0.20"),
+            cache_write_mtok=Decimal("2.50"),
         ),
     ),
 )
