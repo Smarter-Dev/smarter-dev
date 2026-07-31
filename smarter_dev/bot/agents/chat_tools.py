@@ -138,7 +138,9 @@ async def _post_status(ctx: RunContext[ChatDeps], text: str) -> None:
     """
     try:
         await ctx.deps.bot.rest.create_message(
-            ctx.deps.channel_id, f"> -# {text}"[:2000]
+            ctx.deps.channel_id,
+            f"> -# {text}"[:2000],
+            flags=hikari.MessageFlag.SUPPRESS_EMBEDS,
         )
     except Exception:  # noqa: BLE001 — status messages are best-effort
         logger.debug("failed to post tool status message", exc_info=True)
