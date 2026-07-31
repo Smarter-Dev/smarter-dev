@@ -20,6 +20,7 @@ from litestar import post
 from litestar.datastructures import UploadFile
 from litestar.exceptions import HTTPException
 from litestar.response import Response
+from litestar.status_codes import HTTP_200_OK
 from litestar.status_codes import HTTP_201_CREATED
 from msgspec import Struct
 from msgspec import field
@@ -685,7 +686,10 @@ class ChatApiController(Controller):
             "size_bytes": attachment.size_bytes,
         }
 
-    @delete("/conversations/{conversation_id:uuid}/attachments/{attachment_id:uuid}")
+    @delete(
+        "/conversations/{conversation_id:uuid}/attachments/{attachment_id:uuid}",
+        status_code=HTTP_200_OK,
+    )
     async def delete_attachment(
         self,
         conversation_id: UUID,
