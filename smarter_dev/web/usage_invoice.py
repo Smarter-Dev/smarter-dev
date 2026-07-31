@@ -14,20 +14,23 @@ from the stored model-name string.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC
+from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import String
+from sqlalchemy import cast
+from sqlalchemy import func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
-from smarter_dev.web.models import (
-    ChatAgentCompactionEvent,
-    ChatAgentEngagement,
-    ChatAgentTurn,
-    ResearchSession,
-    ScanServiceUsage,
-)
+from smarter_dev.web.models import ChatAgentCompactionEvent
+from smarter_dev.web.models import ChatAgentEngagement
+from smarter_dev.web.models import ChatAgentTurn
+from smarter_dev.web.models import ResearchSession
+from smarter_dev.web.models import ScanServiceUsage
+from smarter_dev.web.models import UsageCostRow
 
 # ---------------------------------------------------------------------------
 # Provider identity
@@ -119,11 +122,11 @@ def month_bounds(month: str) -> tuple[datetime, datetime]:
     month_number = int(parts[1])
     if not 1 <= month_number <= 12:
         raise ValueError(f"month out of range: {month!r}")
-    start = datetime(year, month_number, 1, tzinfo=timezone.utc)
+    start = datetime(year, month_number, 1, tzinfo=UTC)
     if month_number == 12:
-        end = datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+        end = datetime(year + 1, 1, 1, tzinfo=UTC)
     else:
-        end = datetime(year, month_number + 1, 1, tzinfo=timezone.utc)
+        end = datetime(year, month_number + 1, 1, tzinfo=UTC)
     return start, end
 
 
@@ -144,6 +147,7 @@ async def available_months(db_session: AsyncSession) -> list[str]:
         ChatAgentCompactionEvent.created_at,
         ResearchSession.created_at,
         ScanServiceUsage.created_at,
+        UsageCostRow.metered_at,
     )
     earliest: datetime | None = None
     for column in earliest_columns:
@@ -153,11 +157,11 @@ async def available_months(db_session: AsyncSession) -> list[str]:
         if table_min is None:
             continue
         if table_min.tzinfo is None:
-            table_min = table_min.replace(tzinfo=timezone.utc)
+            table_min = table_min.replace(tzinfo=UTC)
         if earliest is None or table_min < earliest:
             earliest = table_min
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     if earliest is None:
         return [_month_label(now)]
 
@@ -282,6 +286,50 @@ async def monthly_invoice(db_session: AsyncSession, month: str) -> list[InvoiceL
     start, end = month_bounds(month)
     lines: list[InvoiceLine] = []
 
+    ledger_rows = (
+        await db_session.execute(
+            select(
+                UsageCostRow.product_mode,
+                UsageCostRow.operation_type,
+                UsageCostRow.provider_key,
+                UsageCostRow.model_id,
+                UsageCostRow.reasoning_level,
+                _tokens(UsageCostRow.input_tokens).label("input_tokens"),
+                _tokens(UsageCostRow.output_tokens).label("output_tokens"),
+                _tokens(UsageCostRow.cache_read_tokens).label("cache_read_tokens"),
+                _tokens(UsageCostRow.cache_write_tokens).label("cache_write_tokens"),
+                _cost(UsageCostRow.cost_usd).label("cost_usd"),
+            )
+            .where(UsageCostRow.metered_at >= start, UsageCostRow.metered_at < end)
+            .group_by(
+                UsageCostRow.product_mode,
+                UsageCostRow.operation_type,
+                UsageCostRow.provider_key,
+                UsageCostRow.model_id,
+                UsageCostRow.reasoning_level,
+            )
+        )
+    ).all()
+    for row in ledger_rows:
+        provider_key = (
+            row.provider_key if row.provider_key in PROVIDER_LABELS else "unknown"
+        )
+        lines.append(
+            InvoiceLine(
+                provider_key=provider_key,
+                provider_label=PROVIDER_LABELS[provider_key],
+                model_name=row.model_id,
+                reasoning_level=row.reasoning_level,
+                source=f"{row.product_mode}:{row.operation_type}",
+                input_tokens=int(row.input_tokens or 0),
+                output_tokens=int(row.output_tokens or 0),
+                cache_read_tokens=int(row.cache_read_tokens or 0),
+                cache_write_tokens=int(row.cache_write_tokens or 0),
+                cost_usd=Decimal(row.cost_usd or 0),
+            )
+        )
+
+    # Legacy Discord rows remain a fallback for pre-ledger databases/tests.
     # -- chat bucket -------------------------------------------------------
     chat_stmt = (
         select(
@@ -295,6 +343,15 @@ async def monthly_invoice(db_session: AsyncSession, month: str) -> list[InvoiceL
         )
         .where(ChatAgentTurn.started_at >= start)
         .where(ChatAgentTurn.started_at < end)
+        .where(
+            ~select(UsageCostRow.id)
+            .where(
+                UsageCostRow.product_mode == "discord",
+                UsageCostRow.operation_type == "primary",
+                UsageCostRow.root_turn_id == ChatAgentTurn.id,
+            )
+            .exists()
+        )
         .group_by(ChatAgentTurn.chat_model_name, ChatAgentTurn.chat_reasoning_level)
     )
     for row in (await db_session.execute(chat_stmt)).all():
@@ -324,6 +381,15 @@ async def monthly_invoice(db_session: AsyncSession, month: str) -> list[InvoiceL
         .where(ChatAgentTurn.started_at >= start)
         .where(ChatAgentTurn.started_at < end)
         .where(ChatAgentTurn.voice_model_name.is_not(None))
+        .where(
+            ~select(UsageCostRow.id)
+            .where(
+                UsageCostRow.product_mode == "discord",
+                UsageCostRow.operation_type == "voice",
+                UsageCostRow.root_turn_id == ChatAgentTurn.id,
+            )
+            .exists()
+        )
         .group_by(ChatAgentTurn.voice_model_name)
     )
     for row in (await db_session.execute(voice_stmt)).all():
@@ -345,14 +411,33 @@ async def monthly_invoice(db_session: AsyncSession, month: str) -> list[InvoiceL
         select(
             ChatAgentCompactionEvent.summarizer_model_name,
             ChatAgentCompactionEvent.summarizer_reasoning_level,
-            _tokens(ChatAgentCompactionEvent.summarizer_tokens_input).label("input_tokens"),
-            _tokens(ChatAgentCompactionEvent.summarizer_tokens_output).label("output_tokens"),
-            _tokens(ChatAgentCompactionEvent.summarizer_cache_read_tokens).label("cache_read_tokens"),
-            _tokens(ChatAgentCompactionEvent.summarizer_cache_write_tokens).label("cache_write_tokens"),
+            _tokens(ChatAgentCompactionEvent.summarizer_tokens_input).label(
+                "input_tokens"
+            ),
+            _tokens(ChatAgentCompactionEvent.summarizer_tokens_output).label(
+                "output_tokens"
+            ),
+            _tokens(ChatAgentCompactionEvent.summarizer_cache_read_tokens).label(
+                "cache_read_tokens"
+            ),
+            _tokens(ChatAgentCompactionEvent.summarizer_cache_write_tokens).label(
+                "cache_write_tokens"
+            ),
             _cost(ChatAgentCompactionEvent.summarizer_cost_usd).label("cost_usd"),
         )
         .where(ChatAgentCompactionEvent.created_at >= start)
         .where(ChatAgentCompactionEvent.created_at < end)
+        .where(
+            ~select(UsageCostRow.id)
+            .where(
+                UsageCostRow.product_mode == "discord",
+                UsageCostRow.operation_type == "compaction",
+                UsageCostRow.operation_key.like(
+                    "%:compaction:" + cast(ChatAgentCompactionEvent.id, String)
+                ),
+            )
+            .exists()
+        )
         .group_by(
             ChatAgentCompactionEvent.summarizer_model_name,
             ChatAgentCompactionEvent.summarizer_reasoning_level,
@@ -536,8 +621,12 @@ async def channel_breakdown(
             channel_name,
             ChatAgentCompactionEvent.summarizer_model_name,
             ChatAgentCompactionEvent.summarizer_reasoning_level,
-            _tokens(ChatAgentCompactionEvent.summarizer_tokens_input).label("input_tokens"),
-            _tokens(ChatAgentCompactionEvent.summarizer_tokens_output).label("output_tokens"),
+            _tokens(ChatAgentCompactionEvent.summarizer_tokens_input).label(
+                "input_tokens"
+            ),
+            _tokens(ChatAgentCompactionEvent.summarizer_tokens_output).label(
+                "output_tokens"
+            ),
             _cost(ChatAgentCompactionEvent.summarizer_cost_usd).label("cost_usd"),
         )
         .select_from(ChatAgentCompactionEvent)

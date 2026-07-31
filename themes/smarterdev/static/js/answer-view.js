@@ -19,6 +19,11 @@
 
   function $(id) { return document.getElementById(id); }
 
+  function submissionKey() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+  }
+
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -177,8 +182,8 @@
         textarea && textarea.focus();
         return;
       }
-      if (question.length > 1000) {
-        setHint('error', 'Keep it under 1000 characters.');
+      if (question.length > 5000) {
+        setHint('error', 'Keep it under 5000 characters.');
         return;
       }
 
@@ -207,10 +212,15 @@
       }
       assistantTurn.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
+      var csrf = form.querySelector('input[name="_csrf"]');
       fetch('/v2/api/agent/conversations/' + encodeURIComponent(conversationId) + '/reply', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify({ question: question }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-CSRF-Token': csrf ? csrf.value : '',
+        },
+        body: JSON.stringify({ question: question, submission_key: submissionKey() }),
         credentials: 'same-origin',
       })
         .then(function (res) {

@@ -99,6 +99,12 @@ class CatalogModel:
     model_id: str
     reasoning_levels: tuple[ReasoningLevel, ...] = ()
     default_reasoning: ReasoningLevel | None = None
+    # Capability metadata is deliberately immutable catalog data. Availability
+    # and the display-only cost tier are administrator-controlled DB settings.
+    context_window: int = 128_000
+    max_output_tokens: int = 16_384
+    supports_vision: bool = False
+    supports_tools: bool = True
 
     def __post_init__(self) -> None:
         if self.default_reasoning is not None and (
@@ -117,6 +123,11 @@ class CatalogModel:
     def supports_reasoning(self) -> bool:
         """Whether this model exposes a reasoning knob at all."""
         return bool(self.reasoning_levels)
+
+    @property
+    def vision_capable(self) -> bool:
+        """Compatibility alias used by attachment and admin code."""
+        return self.supports_vision
 
 
 # The model families the admin override exposes.
@@ -254,6 +265,7 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         family="Gemini",
         provider=ModelProvider.GOOGLE,
         model_id="gemini-3-flash-preview",
+        supports_vision=True,
         reasoning_levels=_GEMINI_THINKING,
         default_reasoning=ReasoningLevel.HIGH,
     ),
@@ -263,6 +275,7 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         family="Gemini",
         provider=ModelProvider.GOOGLE,
         model_id="gemini-3.1-flash-lite",
+        supports_vision=True,
         reasoning_levels=_GEMINI_THINKING,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
@@ -272,6 +285,7 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         family="Gemini",
         provider=ModelProvider.GOOGLE,
         model_id="gemini-3.1-pro",
+        supports_vision=True,
         reasoning_levels=_GEMINI_THINKING,
         default_reasoning=ReasoningLevel.HIGH,
     ),
@@ -281,6 +295,7 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         family="Gemini",
         provider=ModelProvider.GOOGLE,
         model_id="gemini-3.5-flash-lite",
+        supports_vision=True,
         reasoning_levels=_GEMINI_THINKING,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
@@ -292,6 +307,7 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         family="Gemini",
         provider=ModelProvider.GOOGLE,
         model_id="gemini-3.6-flash",
+        supports_vision=True,
         reasoning_levels=_GEMINI_THINKING,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
@@ -302,6 +318,7 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         family="GPT",
         provider=ModelProvider.OPENAI,
         model_id="gpt-5.4-nano",
+        supports_vision=True,
         reasoning_levels=_OPENAI_5X,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
@@ -311,6 +328,7 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         family="GPT",
         provider=ModelProvider.OPENAI,
         model_id="gpt-5.4-mini",
+        supports_vision=True,
         reasoning_levels=_OPENAI_5X,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
@@ -320,6 +338,7 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         family="GPT",
         provider=ModelProvider.OPENAI,
         model_id="gpt-5.4",
+        supports_vision=True,
         reasoning_levels=_OPENAI_5X,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
@@ -329,6 +348,7 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         family="GPT",
         provider=ModelProvider.OPENAI,
         model_id="gpt-5.5",
+        supports_vision=True,
         reasoning_levels=_OPENAI_5X,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
@@ -338,6 +358,7 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         family="GPT",
         provider=ModelProvider.OPENAI,
         model_id="gpt-5.6-luna",
+        supports_vision=True,
         reasoning_levels=_OPENAI_56,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
@@ -347,6 +368,7 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         family="GPT",
         provider=ModelProvider.OPENAI,
         model_id="gpt-5.6-sol",
+        supports_vision=True,
         reasoning_levels=_OPENAI_56,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
@@ -356,6 +378,7 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         family="GPT",
         provider=ModelProvider.OPENAI,
         model_id="gpt-5.6-terra",
+        supports_vision=True,
         reasoning_levels=_OPENAI_56,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
@@ -366,6 +389,7 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         family="Claude",
         provider=ModelProvider.ANTHROPIC,
         model_id="claude-opus-5",
+        supports_vision=True,
         reasoning_levels=_CLAUDE_EFFORT,
         default_reasoning=ReasoningLevel.HIGH,
     ),
@@ -375,6 +399,7 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         family="Claude",
         provider=ModelProvider.ANTHROPIC,
         model_id="claude-haiku-4-5",
+        supports_vision=True,
     ),
     CatalogModel(
         key="claude-sonnet-5",
@@ -382,6 +407,7 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         family="Claude",
         provider=ModelProvider.ANTHROPIC,
         model_id="claude-sonnet-5",
+        supports_vision=True,
         reasoning_levels=_CLAUDE_EFFORT,
         default_reasoning=ReasoningLevel.HIGH,
     ),

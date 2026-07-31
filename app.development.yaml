@@ -38,6 +38,7 @@ controllers:
   - smarter_dev.web.account_controller:AccountController
   - smarter_dev.web.account_controller:BillingController
   - smarter_dev.web.feature_flags_admin:FeatureFlagsAdminController
+  - smarter_dev.web.chat_settings_admin:ChatSettingsAdminController
   # Native bot API (/api) — Litestar controllers replacing the FastAPI mount
   # (docs/v2/legacy-sunset/04-api-rewrite.md switchover).
   - smarter_dev.web.api_native.auth:ApiHealthController
@@ -66,7 +67,10 @@ controllers:
   - smarter_dev.web.agent_api:ResourcesAgentApiController
   - smarter_dev.web.agent_api:AgentConversationApiController
   - smarter_dev.web.agent_api:AgentMessageApiController
-  - smarter_dev.web.agent_view_controller:answer_view
+  - smarter_dev.web.chat.controller:chat_index
+  - smarter_dev.web.chat.controller:chat_conversation
+  - smarter_dev.web.chat.controller:legacy_answer_redirect
+  - smarter_dev.web.chat.api:ChatApiController
   - smarter_dev.web.search_preview_controller:search_preview_view
   - smarter_dev.web.vibe_courses_controller:vibe_courses
   - smarter_dev.web.vibe_courses_controller:vibe_courses_legacy_redirect
@@ -118,6 +122,18 @@ security_headers:
 rate_limit:
   enabled: false
 
+storage:
+  default: default
+  stores:
+    default:
+      backend: local
+      local_path: ./uploads
+      max_upload_size: 10485760
+    chat_attachments:
+      backend: local
+      local_path: ./uploads/chat-attachments
+      max_upload_size: 10485760
+
 redis:
   url: $REDIS_URL
 
@@ -133,11 +149,16 @@ workers:
   preset: single_node
   queues:
     - agents
+    - chat-subagents
   visibility_timeout: 1800
   execution: in_process
-  concurrency: 8
+  # Leave capacity for queued Chat children while in-process root jobs wait.
+  concurrency: 16
   imports:
+    - smarter_dev.shared.worker_observability
     - smarter_dev.web.resources_agent
+    - smarter_dev.web.resources_jobs
+    - smarter_dev.web.chat.jobs
     - smarter_dev.web.title_agent
     - smarter_dev.web.blogging_agent.pipeline
     - smarter_dev.web.handlers_jobs

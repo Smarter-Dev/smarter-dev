@@ -19,6 +19,7 @@ from sqlalchemy import JSON
 from sqlalchemy import Numeric
 from sqlalchemy import String
 from sqlalchemy import Text
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
 from sqlalchemy.orm import Mapped, relationship
 from sqlalchemy.orm import mapped_column
@@ -4240,6 +4241,573 @@ class AgentMessage(Base):
 
     __table_args__ = (
         UniqueConstraint("conversation_id", "sequence", name="uq_agent_messages_conv_seq"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Smarter Dev web Chat. These tables are deliberately separate from the
+# shareable Resources conversations above and from Discord's retention-bound
+# chat tables below. Mode/intelligence are immutable by application and DB
+# migration trigger; all content cascades with the Skrift owner account.
+# ---------------------------------------------------------------------------
+
+
+class ChatSettings(Base):
+    __tablename__ = "chat_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    default_model_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    default_reasoning: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    default_intelligence_mode: Mapped[str] = mapped_column(String(40), nullable=False)
+    summarizer_model_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    summarizer_fallback_model_key: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
+    )
+    compaction_model_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    compaction_fallback_model_key: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    updated_by_user_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True
+    )
+
+    __table_args__ = (CheckConstraint("id = 1", name="chat_settings_singleton"),)
+
+
+class ChatCatalogModel(Base):
+    __tablename__ = "chat_catalog_models"
+
+    model_key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    cost_tier: Mapped[str] = mapped_column(String(16), nullable=False, default="medium")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        CheckConstraint(
+            "cost_tier IN ('low','medium','high','ultra')",
+            name="chat_catalog_cost_tier",
+        ),
+    )
+
+
+class ChatSpendLimit(Base):
+    __tablename__ = "chat_spend_limits"
+
+    tier: Mapped[str] = mapped_column(String(16), primary_key=True)
+    four_hour_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
+    daily_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
+    weekly_usd: Mapped[Decimal] = mapped_column(Numeric(12, 6), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("tier IN ('hacker','r','rw','rwx')", name="chat_spend_tier"),
+        CheckConstraint(
+            "four_hour_usd >= 0 AND daily_usd >= 0 AND weekly_usd >= 0",
+            name="chat_spend_nonnegative",
+        ),
+    )
+
+
+class WebChatConversation(Base):
+    __tablename__ = "web_chat_conversations"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    owner_user_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=False
+    )
+    intelligence_mode: Mapped[str] = mapped_column(String(40), nullable=False)
+    selected_model_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    reasoning_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="idle")
+    next_sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    current_context_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    context_state: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    context_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        CheckConstraint(
+            "intelligence_mode IN ('maximize_efficiency','efficient','intelligence','maximize_intelligence','ultra_intelligence')",
+            name="web_chat_intelligence_mode",
+        ),
+        Index("ix_web_chat_conversations_owner_updated", "owner_user_id", "updated_at"),
+    )
+
+
+class ChatSpendWindow(Base):
+    __tablename__ = "chat_spend_windows"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    user_id: Mapped[UUID] = mapped_column(PostgresUUID(as_uuid=True), nullable=False)
+    starts_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    overage_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(14, 8), nullable=False, default=Decimal("0")
+    )
+
+    __table_args__ = (
+        CheckConstraint("ends_at > starts_at", name="chat_spend_window_bounds"),
+        Index("ix_chat_spend_windows_user_starts", "user_id", "starts_at"),
+    )
+
+
+class WebChatTurn(Base):
+    __tablename__ = "web_chat_turns"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    conversation_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("web_chat_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    submission_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="message")
+    regenerates_turn_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("web_chat_turns.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    response_version_group: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=False, default=uuid4
+    )
+    response_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    model_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    reasoning_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="submitted")
+    stop_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    cutoff_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    final_response_used: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    tool_calls: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    searches: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    subagent_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    four_hour_window_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("chat_spend_windows.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    worker_lease_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    worker_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "conversation_id", "sequence", name="uq_web_chat_turn_sequence"
+        ),
+        UniqueConstraint(
+            "conversation_id", "submission_key", name="uq_web_chat_turn_submission"
+        ),
+        Index(
+            "uq_web_chat_turn_one_active",
+            "conversation_id",
+            unique=True,
+            postgresql_where=text(
+                "status IN ('submitted','queued','running','stopping')"
+            ),
+            sqlite_where=text("status IN ('submitted','queued','running','stopping')"),
+        ),
+    )
+
+
+class WebChatMessage(Base):
+    __tablename__ = "web_chat_messages"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    conversation_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("web_chat_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    turn_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("web_chat_turns.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    model_message: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    tool_call_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    tool_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    version_group: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=False, default=uuid4
+    )
+    version_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    stopped: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "version_group", "version_number", name="uq_web_chat_message_version"
+        ),
+        Index(
+            "ix_web_chat_messages_conversation_sequence",
+            "conversation_id",
+            "sequence",
+        ),
+        Index(
+            "uq_web_chat_message_active_version",
+            "version_group",
+            unique=True,
+            postgresql_where=text("is_active"),
+            sqlite_where=text("is_active = 1"),
+        ),
+    )
+
+
+class WebChatModelChange(Base):
+    __tablename__ = "web_chat_model_changes"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    conversation_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("web_chat_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    owner_user_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=False
+    )
+    from_model_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    to_model_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    warning: Mapped[str] = mapped_column(Text, nullable=False)
+    confirmed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class WebChatAttachment(Base):
+    __tablename__ = "web_chat_attachments"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    conversation_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("web_chat_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    owner_user_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=False
+    )
+    turn_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("web_chat_turns.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    storage_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    summarization_instruction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="ready")
+
+
+class WebChatCompaction(Base):
+    __tablename__ = "web_chat_compactions"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    conversation_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("web_chat_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    through_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    original_messages: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    compacted_messages: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    version_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    model_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    reasoning_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="complete")
+    context_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class WebChatSubagent(Base):
+    __tablename__ = "web_chat_subagents"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    root_turn_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("web_chat_turns.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    parent_subagent_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("web_chat_subagents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    task: Mapped[str] = mapped_column(Text, nullable=False)
+    lineage: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    spawn_ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="queued")
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reasoning_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    job_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    session_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(14, 8), nullable=False, default=Decimal("0")
+    )
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    queued_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    lease_fence: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    heartbeat_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("root_turn_id", "name", name="uq_web_chat_subagent_name"),
+    )
+
+
+class ChatSpendReservation(Base):
+    __tablename__ = "chat_spend_reservations"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    operation_key: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    operation_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(PostgresUUID(as_uuid=True), nullable=False)
+    conversation_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True
+    )
+    root_turn_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True
+    )
+    window_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("chat_spend_windows.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    intelligence_mode: Mapped[str] = mapped_column(String(40), nullable=False)
+    reserved_usd: Mapped[Decimal] = mapped_column(Numeric(14, 8), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+
+
+class UsageCostRow(Base):
+    __tablename__ = "usage_cost_rows"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    operation_key: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    product_mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    operation_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    user_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True
+    )
+    discord_user_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    conversation_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True
+    )
+    root_turn_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True
+    )
+    subagent_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True
+    )
+    provider_key: Mapped[str] = mapped_column(String(40), nullable=False)
+    catalog_model_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    model_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    reasoning_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    intelligence_mode: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cache_read_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cache_write_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(14, 8), nullable=False, default=Decimal("0")
+    )
+    overage_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(14, 8), nullable=False, default=Decimal("0")
+    )
+    four_hour_window_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("chat_spend_windows.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    metered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    details: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    __table_args__ = (
+        CheckConstraint(
+            "product_mode IN ('resources','chat','discord')",
+            name="usage_product_mode",
+        ),
+        CheckConstraint(
+            "input_tokens >= 0 AND output_tokens >= 0 AND cache_read_tokens >= 0 AND cache_write_tokens >= 0",
+            name="usage_tokens_nonnegative",
+        ),
+        Index("ix_usage_cost_rows_product_metered", "product_mode", "metered_at"),
+        Index("ix_usage_cost_rows_user_metered", "user_id", "metered_at"),
+    )
+
+
+class WebChatRuntimeEvent(Base):
+    __tablename__ = "web_chat_runtime_events"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    conversation_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("web_chat_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    turn_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("web_chat_turns.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "turn_id", "sequence", name="uq_web_chat_runtime_event_sequence"
+        ),
+    )
+
+
+class WorkDispatch(Base):
+    """Transactional outbox entry for every durable worker handoff."""
+
+    __tablename__ = "work_dispatches"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    job_type: Mapped[str] = mapped_column(String(80), nullable=False)
+    aggregate_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=False
+    )
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    queue: Mapped[str] = mapped_column(String(40), nullable=False, default="agents")
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    worker_job_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    )
+    dispatched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("job_type", "aggregate_id", name="uq_work_dispatch_aggregate"),
+        Index("ix_work_dispatch_pending", "status", "next_attempt_at"),
+    )
+
+
+class ResourceAgentRun(Base):
+    __tablename__ = "resource_agent_runs"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    conversation_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("agent_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    owner_user_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=False
+    )
+    user_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    submission_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="submitted")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    worker_lease_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    worker_lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "conversation_id", "user_sequence", name="uq_resource_agent_run_turn"
+        ),
+        UniqueConstraint(
+            "owner_user_id", "submission_key", name="uq_resource_agent_run_submission"
+        ),
+    )
+
+
+class AccountDeletionRequest(Base):
+    __tablename__ = "account_deletion_requests"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=False, unique=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    subscription_ids: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 

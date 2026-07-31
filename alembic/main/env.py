@@ -10,14 +10,15 @@ from __future__ import annotations
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
-from sqlalchemy import pool, text
+from sqlalchemy import pool
+from sqlalchemy import text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from smarter_dev.shared.database import Base
-from smarter_dev.shared.config import get_settings
 import smarter_dev.web.models  # noqa: F401  -- registers all models with Base.metadata
+from alembic import context
+from smarter_dev.shared.config import get_settings
+from smarter_dev.shared.database import Base
 
 # Tables this alembic config owns; enforced via `include_object` so each
 # migration only touches its own tables.
@@ -28,6 +29,7 @@ import smarter_dev.web.models  # noqa: F401  -- registers all models with Base.m
 # deleted in the decommission phase. Ownership is guarded by
 # tests/test_migration_ownership.py.
 MAIN_TABLES: frozenset[str] = frozenset({
+    "account_deletion_requests",
     "admin_handlers",
     "advent_of_code_configs",
     "advent_of_code_threads",
@@ -54,6 +56,11 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "chat_agent_engagements",
     "chat_agent_errors",
     "chat_agent_turns",
+    "chat_catalog_models",
+    "chat_settings",
+    "chat_spend_limits",
+    "chat_spend_reservations",
+    "chat_spend_windows",
     "daily_quests",
     "extension_installs",
     "feature_flags",
@@ -75,6 +82,7 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "quests",
     "repeating_messages",
     "research_sessions",
+    "resource_agent_runs",
     "resource_categories",
     "resource_creators",
     "resource_directories",
@@ -95,8 +103,18 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "sudo_memberships",
     "tags",
     "tracked_link_counters",
+    "usage_cost_rows",
     "user_profiles",
+    "web_chat_attachments",
+    "web_chat_compactions",
+    "web_chat_conversations",
+    "web_chat_messages",
+    "web_chat_model_changes",
+    "web_chat_runtime_events",
+    "web_chat_subagents",
+    "web_chat_turns",
     "webhook_events_processed",
+    "work_dispatches",
 })
 
 SCHEMA = "skrift"

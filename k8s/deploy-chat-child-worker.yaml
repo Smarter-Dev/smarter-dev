@@ -1,40 +1,40 @@
 ---
+# Chat child-worker tier: a standalone Skrift worker process that drains the
+# shared 'chat-subagents' queue and executes every agent/LLM job out-of-process,
+# off the web tier. Runs the WEB image (it imports smarter_dev.web.* agent
+# handler modules and needs the pydantic-ai/google-genai/openai stack), but
+# starts the worker CLI instead of the HTTP server. Pairs with
+# `workers.preset: distributed` (execution: out_of_process) in app.yaml.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-    name: smarter-dev-website
+    name: smarter-dev-chat-child-worker
     namespace: smarter-dev
     labels:
-        app: smarter-dev-website
+        app: smarter-dev-chat-child-worker
 spec:
     strategy:
         type: RollingUpdate
         rollingUpdate:
-            maxSurge: 2
-            maxUnavailable: 50%
+            maxSurge: 1
+            maxUnavailable: 0
     selector:
         matchLabels:
-            app: smarter-dev-website
-            tier: frontend
+            app: smarter-dev-chat-child-worker
+            tier: backend
     replicas: 1
     template:
         metadata:
             labels:
-                app: smarter-dev-website
-                tier: frontend
+                app: smarter-dev-chat-child-worker
+                tier: backend
         spec:
-            topologySpreadConstraints:
-            - maxSkew: 1
-              topologyKey: kubernetes.io/hostname
-              whenUnsatisfiable: ScheduleAnyway
-              labelSelector:
-                  matchLabels:
-                      app: smarter-dev-website
             containers:
-              - name: starlette-site
+              - name: chat-child-worker
                 image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
-                ports:
-                  - containerPort: 8000
+                # Drain only durable Chat child jobs. Redis fencing remains the
+                # cross-pod hard-five concurrency authority.
+                command: ["uv", "run", "--no-sync", "skrift", "workers", "run", "--queue", "chat-subagents", "--concurrency", "5"]
                 envFrom:
                   - configMapRef:
                       name: smarter-dev-config
@@ -59,6 +59,26 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: web-session-secret
+                  - name: SECRET_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: secret-key
+                  # Object storage (DigitalOcean Spaces) — app.yaml's
+                  # storage.stores.default.s3 block interpolates these at
+                  # config-load time, so the process won't boot without them.
+                  - name: SPACES_ACCESS_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: spaces-access-key
+                  - name: SPACES_SECRET_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: spaces-secret-key
+                  # Auth provider creds — app.yaml's auth config interpolates
+                  # these at load time, so config parsing fails without them.
                   - name: DISCORD_CLIENT_ID
                     valueFrom:
                       secretKeyRef:
@@ -89,90 +109,6 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: discord-bot-token
-                  - name: GOOGLE_ANALYTICS_ID
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: google-analytics-id
-                  - name: ANTHROPIC_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: anthropic-api-key
-                  - name: OPENCODE_ZEN_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: opencode-zen-api-key
-                  - name: RESEND_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: resend-api-key
-                  - name: SECRET_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: secret-key
-                  - name: JINA_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: jina-api-key
-                  - name: BRAVE_SEARCH_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: brave-search-api-key
-                  - name: YOUTUBE_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: youtube-api-key
-                  - name: GEMINI_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: gemini-api-key
-                  - name: OPENAI_API_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: openai-api-key
-                  - name: SPACES_ACCESS_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: spaces-access-key
-                  - name: SPACES_SECRET_KEY
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: spaces-secret-key
-                  - name: LOGFIRE_TOKEN
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: logfire-token
-                        optional: true
-                  - name: LOGFIRE_SERVICE_NAME
-                    value: "smarter-dev-web"
-                  - name: LOGFIRE_SERVICE_VERSION
-                    value: "<IMAGE_VERSION>"
-                  - name: POLAR_ACCESS_TOKEN
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: polar-access-token
-                  - name: POLAR_WEBHOOK_SECRET
-                    valueFrom:
-                      secretKeyRef:
-                        name: smarter-dev-secrets
-                        key: polar-webhook-secret
-                  # Polar environment. The polar-access-token / polar-webhook-secret
-                  # secrets must belong to the matching Polar org (production here).
-                  - name: POLAR_SERVER
-                    value: "production"
                   - name: GITHUB_CLIENT_ID
                     valueFrom:
                       secretKeyRef:
@@ -193,28 +129,105 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: google-client-secret
+                  # LLM providers used by the agents executed here.
+                  - name: GEMINI_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: gemini-api-key
+                  - name: OPENAI_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: openai-api-key
+                  - name: ANTHROPIC_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: anthropic-api-key
+                  - name: OPENCODE_ZEN_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: opencode-zen-api-key
+                  - name: DIGITALOCEAN_INFERENCE_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: digitalocean-inference-api-key
+                        optional: true
+                  - name: OPENROUTER_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: openrouter-api-key
+                        optional: true
+                  - name: LOGFIRE_TOKEN
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: logfire-token
+                        optional: true
+                  - name: LOGFIRE_SERVICE_NAME
+                    value: "smarter-dev-agent-worker"
+                  - name: LOGFIRE_SERVICE_VERSION
+                    value: "<IMAGE_VERSION>"
+                  - name: POLAR_ACCESS_TOKEN
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: polar-access-token
+                  - name: POLAR_SERVER
+                    value: "production"
+                  # Research/blogging agent tool credentials.
+                  - name: JINA_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: jina-api-key
+                  - name: BRAVE_SEARCH_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: brave-search-api-key
+                  - name: YOUTUBE_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: youtube-api-key
+                  - name: RESEND_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: resend-api-key
                   - name: SKRIFT_ENV
                     value: "production"
                 resources:
                     requests:
-                        cpu: 75m
-                        memory: 192Mi
+                        cpu: 100m
+                        memory: 512Mi
                     limits:
-                        cpu: 300m
-                        memory: 384Mi
+                        cpu: "1"
+                        memory: 1Gi
+                # Liveness/readiness by process presence — the worker has no
+                # HTTP port. Matches the bot's pgrep pattern.
+                startupProbe:
+                    exec:
+                        command: ["sh", "-c", "grep -qa workers /proc/*/cmdline"]
+                    failureThreshold: 30
+                    periodSeconds: 10
                 livenessProbe:
-                    httpGet:
-                        path: /api/health
-                        port: 8000
-                    initialDelaySeconds: 30
+                    exec:
+                        command: ["sh", "-c", "grep -qa workers /proc/*/cmdline"]
+                    initialDelaySeconds: 15
                     periodSeconds: 30
                     timeoutSeconds: 5
                     failureThreshold: 3
                 readinessProbe:
-                    httpGet:
-                        path: /api/health
-                        port: 8000
+                    exec:
+                        command: ["sh", "-c", "grep -qa workers /proc/*/cmdline"]
                     initialDelaySeconds: 10
                     periodSeconds: 10
                     timeoutSeconds: 3
                     failureThreshold: 2
+            restartPolicy: Always

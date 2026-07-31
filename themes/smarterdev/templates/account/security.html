@@ -111,6 +111,16 @@
     {% endif %}
 </div>
 
+<div class="account-card" style="border-color:rgba(239,68,68,.35)">
+    <h2 style="font-family:var(--heading);color:#ff8a8a;font-size:.95rem;letter-spacing:.06em;margin:0 0 .5rem;">Delete account</h2>
+    <p class="account-meta">Permanently deletes your web Chat conversations and private attachments. This cannot be undone. Discord content keeps its existing retention policy.</p>
+    <form method="post" action="/account/delete" data-sk-no-spa>
+        {{ csrf_field() }}
+        <div class="form-row"><label for="delete-confirmation">Type DELETE to confirm</label><input id="delete-confirmation" name="confirmation" autocomplete="off" required pattern="DELETE"></div>
+        <button type="submit" class="sec-remove-btn">Delete account permanently</button>
+    </form>
+</div>
+
 <script nonce="{{ csp_nonce() }}">
 function base64urlToBuffer(value) {
     const padding = "=".repeat((4 - value.length % 4) % 4);

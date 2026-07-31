@@ -43,11 +43,12 @@
     </div>
     {% else %}
     <form id="rsa-form" novalidate>
+        {{ csrf_field() }}
         <div class="rsa-form-row">
             <label for="rsa-input" class="visually-hidden">Your question</label>
             <textarea id="rsa-input" class="rsa-input" name="question"
                       placeholder="What do you want to learn, build, debug, or compare?"
-                      rows="3" maxlength="1000" required></textarea>
+                      rows="3" maxlength="5000" required></textarea>
         </div>
 
         <div class="rsa-controls">

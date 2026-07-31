@@ -1,171 +1,397 @@
-"""Resources-agent run as a Skrift worker job.
-
-The web ``/v2/api/resources/ask`` and ``.../reply`` controllers used to run the
-whole resource-agent pipeline inline on the web event loop (loading history,
-building pydantic-ai message objects, running the pipeline, persisting the
-answer, notifying the browser). That pulled pydantic-ai into the web process.
-
-Here that orchestration lives behind a worker ``@handler``: the web controllers
-just ``worker_submit(ResourcesRunPayload(...))`` and return; this handler runs
-entirely in the agent-worker tier, where pydantic-ai lives. The module is kept
-import-clean of pydantic-ai (the message-history conversion imports it lazily)
-so the web process can import ``ResourcesRunPayload`` to dispatch jobs without
-loading the inference stack.
-"""
+"""Durable, idempotent Resources-agent worker orchestration."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+from contextlib import suppress
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
 from uuid import UUID
+from uuid import uuid4
 
 from pydantic import BaseModel
+from skrift.db.models.user import User
+from skrift.notifications import NotificationMode
 from skrift.notifications import notify_user
 from skrift.workers import handler
 from sqlalchemy import select
 
 from smarter_dev.shared.database import get_db_session_context
-from smarter_dev.web.models import AgentConversation, AgentMessage
-from smarter_dev.web.resources_agent import begin_run, run_resources_pipeline
+from smarter_dev.shared.model_catalog import MODEL_CATALOG
+from smarter_dev.web.chat.usage import record_usage
+from smarter_dev.web.models import AgentMessage
+from smarter_dev.web.models import ResourceAgentRun
+from smarter_dev.web.resources_agent import begin_run
+from smarter_dev.web.resources_agent import run_resources_pipeline
 from smarter_dev.web.sdanswer import enrich_answer
 
 logger = logging.getLogger(__name__)
 
 
 class ResourcesRunPayload(BaseModel):
-    """Job payload for a single resource-agent run on a conversation."""
-
-    conversation_id: str
-    owner_user_id: str
-    question: str
+    # Legacy fields remain during rolling deploys: old workers ignore run_id,
+    # while new workers materialize a durable run for old queued payloads.
+    run_id: str | None = None
+    conversation_id: str | None = None
+    owner_user_id: str | None = None
+    question: str | None = None
 
 
 def _build_message_history(prior: list[AgentMessage]):
-    """Convert persisted turns into pydantic-ai ModelMessages for replay.
-
-    Imported lazily so this module stays pydantic-ai-free at import time (it
-    runs only in the worker that executes the agent)."""
-    from pydantic_ai.messages import (
-        ModelRequest,
-        ModelResponse,
-        TextPart,
-        UserPromptPart,
-    )
+    from pydantic_ai.messages import ModelRequest
+    from pydantic_ai.messages import ModelResponse
+    from pydantic_ai.messages import TextPart
+    from pydantic_ai.messages import UserPromptPart
 
     history = []
-    for msg in prior:
-        if msg.role == "user":
-            history.append(ModelRequest(parts=[UserPromptPart(content=msg.content)]))
-        elif msg.role == "assistant":
-            history.append(ModelResponse(parts=[TextPart(content=msg.content)]))
+    for message in prior:
+        if message.role == "user":
+            history.append(
+                ModelRequest(parts=[UserPromptPart(content=message.content)])
+            )
+        elif message.role == "assistant":
+            history.append(ModelResponse(parts=[TextPart(content=message.content)]))
     return history
+
+
+def _catalog_model(model_name: str | None):
+    if not model_name:
+        return None
+    wire = model_name.split(":", 1)[-1]
+    return next(
+        (
+            model
+            for model in MODEL_CATALOG
+            if wire == model.model_id or wire.startswith(model.model_id)
+        ),
+        None,
+    )
+
+
+async def _persist_stage_usage(
+    session, run: ResourceAgentRun, stages: list[dict]
+) -> None:
+    for index, stage in enumerate(stages):
+        operation_index = int(stage.get("_operation_index", index))
+        model = _catalog_model(stage.get("model_name"))
+        if model is None:
+            logger.warning("Skipping unrecognized Resources stage model %r", stage)
+            continue
+        await record_usage(
+            session,
+            operation_key=(
+                f"resources:{run.id}:attempt:{run.attempt_count}:"
+                f"{stage.get('stage', 'unknown')}:{operation_index}"
+            ),
+            product_mode="resources",
+            operation_type=f"resource_{stage.get('stage', 'unknown')}",
+            model=model,
+            input_tokens=int(stage.get("input_tokens") or 0),
+            output_tokens=int(stage.get("output_tokens") or 0),
+            cache_read_tokens=int(stage.get("cache_read_tokens") or 0),
+            cache_write_tokens=int(stage.get("cache_write_tokens") or 0),
+            user_id=run.owner_user_id,
+            conversation_id=run.conversation_id,
+            root_turn_id=run.id,
+            details={"resource_run_id": str(run.id)},
+        )
+
+
+async def _heartbeat(run_id: UUID, token: str) -> None:
+    while True:
+        await asyncio.sleep(10)
+        async with get_db_session_context() as session:
+            run = await session.scalar(
+                select(ResourceAgentRun).where(
+                    ResourceAgentRun.id == run_id,
+                    ResourceAgentRun.worker_lease_token == token,
+                    ResourceAgentRun.status == "running",
+                )
+            )
+            if run is None:
+                return
+            run.worker_lease_expires_at = datetime.now(UTC) + timedelta(seconds=660)
+            await session.commit()
+
+
+async def _notify_safe(user_id: UUID, event: str, **payload) -> None:
+    try:
+        await notify_user(
+            str(user_id), event, mode=NotificationMode.EPHEMERAL, **payload
+        )
+    except Exception:
+        logger.exception("Resources notification failed after durable state commit")
 
 
 @handler(
     "resources.agent.run",
     queue="agents",
-    max_attempts=1,
-    # The reframer→researcher→gap-filler→author pipeline plus its sub-agent /
-    # tool-call dispatch can run for a couple of minutes; keep a generous
-    # visibility timeout so the job isn't re-claimed mid-run.
+    max_attempts=5,
     visibility_timeout=600.0,
 )
 async def run_resources_job(payload: ResourcesRunPayload) -> dict:
-    """Run the resource agent for a conversation and finalize the answer.
-
-    Loads prior turns, replays them as history, runs the pipeline, persists the
-    assistant turn with enriched HTML, and fires ``agent_run_complete`` (or
-    ``agent_run_error``) so the open browser tab swaps in the answer."""
-    conversation_id = UUID(payload.conversation_id)
-    owner_user_id = UUID(payload.owner_user_id)
-    question = payload.question
-    try:
-        stub = os.getenv("RESOURCE_AGENT_STUB", "").strip().lower() in {
-            "1", "true", "yes",
-        }
-        if stub:
-            answer_text = (
-                "[stub] resource_agent is disabled via "
-                "`RESOURCE_AGENT_STUB=1`; no Gemini call was made."
-            )
-        else:
-            async with get_db_session_context() as history_session:
-                prior_q = await history_session.execute(
-                    select(AgentMessage)
-                    .where(AgentMessage.conversation_id == conversation_id)
-                    .order_by(AgentMessage.sequence.asc())
+    if payload.run_id:
+        run_id = UUID(payload.run_id)
+    else:
+        if not (payload.conversation_id and payload.owner_user_id and payload.question):
+            raise ValueError("invalid Resources worker payload")
+        conversation_id = UUID(payload.conversation_id)
+        owner_user_id = UUID(payload.owner_user_id)
+        async with get_db_session_context() as session:
+            user_message = await session.scalar(
+                select(AgentMessage)
+                .where(
+                    AgentMessage.conversation_id == conversation_id,
+                    AgentMessage.role == "user",
+                    AgentMessage.content == payload.question,
                 )
-                prior = list(prior_q.scalars().all())
-            # Drop the latest user turn — it's `question` itself; the agent
-            # gets it via the prompt arg.
-            if prior and prior[-1].role == "user":
-                prior = prior[:-1]
-            message_history = _build_message_history(prior) if prior else None
-
-            begin_run()
-            answer_text = await run_resources_pipeline(
-                question,
-                message_history=message_history,
-                actor=str(owner_user_id),
-                conversation_id=str(conversation_id),
-                owner_user_id=str(owner_user_id),
-            )
-
-        async with get_db_session_context() as bg_session:
-            conversation = await bg_session.get(AgentConversation, conversation_id)
-            if conversation is None:
-                return {"status": "missing"}
-
-            next_seq_q = await bg_session.execute(
-                select(AgentMessage.sequence)
-                .where(AgentMessage.conversation_id == conversation_id)
                 .order_by(AgentMessage.sequence.desc())
                 .limit(1)
             )
-            last_seq = next_seq_q.scalar_one_or_none() or 0
+            if user_message is None:
+                return {"status": "missing"}
+            run = await session.scalar(
+                select(ResourceAgentRun).where(
+                    ResourceAgentRun.conversation_id == conversation_id,
+                    ResourceAgentRun.user_sequence == user_message.sequence,
+                )
+            )
+            if run is None:
+                run = ResourceAgentRun(
+                    conversation_id=conversation_id,
+                    owner_user_id=owner_user_id,
+                    user_sequence=user_message.sequence,
+                    submission_key=(
+                        f"legacy:{conversation_id}:{user_message.sequence}"
+                    )[:128],
+                    question=payload.question,
+                    status="submitted",
+                )
+                session.add(run)
+                await session.commit()
+            run_id = run.id
+    token = uuid4().hex
+    now = datetime.now(UTC)
+    async with get_db_session_context() as session:
+        run = await session.scalar(
+            select(ResourceAgentRun)
+            .where(ResourceAgentRun.id == run_id)
+            .with_for_update()
+        )
+        if run is None:
+            return {"status": "missing"}
+        if run.status in {"complete", "error", "cancelled"}:
+            return {"status": run.status, "idempotent": True}
+        owner = await session.get(User, run.owner_user_id)
+        if owner is None or not owner.is_active:
+            run.status = "cancelled"
+            run.error = "account is inactive"
+            run.finished_at = now
+            await session.commit()
+            return {"status": "cancelled"}
+        if (
+            run.status == "running"
+            and run.worker_lease_expires_at is not None
+            and run.worker_lease_expires_at > now
+        ):
+            return {"status": "running", "idempotent": True}
+        run.status = "running"
+        run.worker_lease_token = token
+        run.worker_lease_expires_at = now + timedelta(seconds=660)
+        run.attempt_count += 1
+        conversation_id = run.conversation_id
+        owner_user_id = run.owner_user_id
+        question = run.question
+        user_sequence = run.user_sequence
+        existing_assistant = await session.scalar(
+            select(AgentMessage).where(
+                AgentMessage.conversation_id == conversation_id,
+                AgentMessage.sequence == user_sequence + 1,
+                AgentMessage.role == "assistant",
+            )
+        )
+        if existing_assistant is not None:
+            # A legacy worker from a rolling deployment may already have
+            # completed this payload without knowing ResourceAgentRun.
+            run.status = "complete"
+            run.finished_at = datetime.now(UTC)
+            run.worker_lease_token = None
+            run.worker_lease_expires_at = None
+            await session.commit()
+            return {
+                "status": "complete",
+                "assistant_message_id": str(existing_assistant.id),
+                "legacy_worker": True,
+            }
+        await session.commit()
 
-            assistant_turn = AgentMessage(
+    heartbeat = asyncio.create_task(_heartbeat(run_id, token))
+    stage_usage: list[dict] = []
+    try:
+        stub = os.getenv("RESOURCE_AGENT_STUB", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        if stub:
+            answer_text = (
+                "[stub] resource_agent is disabled via `RESOURCE_AGENT_STUB=1`; "
+                "no provider call was made."
+            )
+        else:
+            async with get_db_session_context() as history_session:
+                prior = list(
+                    (
+                        await history_session.execute(
+                            select(AgentMessage)
+                            .where(
+                                AgentMessage.conversation_id == conversation_id,
+                                AgentMessage.sequence < user_sequence,
+                            )
+                            .order_by(AgentMessage.sequence)
+                        )
+                    ).scalars()
+                )
+            begin_run()
+
+            async def persist_stage(record: dict, index: int) -> None:
+                durable_record = {**record, "_operation_index": index}
+                async with get_db_session_context() as usage_session:
+                    durable_run = await usage_session.scalar(
+                        select(ResourceAgentRun).where(
+                            ResourceAgentRun.id == run_id,
+                            ResourceAgentRun.worker_lease_token == token,
+                            ResourceAgentRun.status == "running",
+                        )
+                    )
+                    if durable_run is None:
+                        raise asyncio.CancelledError
+                    await _persist_stage_usage(
+                        usage_session, durable_run, [durable_record]
+                    )
+                    await usage_session.commit()
+
+            answer_text = await run_resources_pipeline(
+                question,
+                message_history=_build_message_history(prior) if prior else None,
+                actor=str(owner_user_id),
+                conversation_id=str(conversation_id),
+                owner_user_id=str(owner_user_id),
+                usage_records=stage_usage,
+                usage_callback=persist_stage,
+            )
+
+        async with get_db_session_context() as session:
+            run = await session.scalar(
+                select(ResourceAgentRun)
+                .where(
+                    ResourceAgentRun.id == run_id,
+                    ResourceAgentRun.worker_lease_token == token,
+                    ResourceAgentRun.status == "running",
+                )
+                .with_for_update()
+            )
+            if run is None:
+                return {"status": "superseded"}
+            if run.status == "complete":
+                return {"status": "complete", "idempotent": True}
+            existing = await session.scalar(
+                select(AgentMessage).where(
+                    AgentMessage.conversation_id == conversation_id,
+                    AgentMessage.sequence == user_sequence + 1,
+                    AgentMessage.role == "assistant",
+                )
+            )
+            assistant = existing or AgentMessage(
                 conversation_id=conversation_id,
-                sequence=last_seq + 1,
+                sequence=user_sequence + 1,
                 role="assistant",
                 content=answer_text,
                 citations=[],
+                usage={"stages": stage_usage},
             )
-            bg_session.add(assistant_turn)
-            await bg_session.commit()
-            await bg_session.refresh(assistant_turn)
+            if existing is None:
+                session.add(assistant)
+            await _persist_stage_usage(session, run, stage_usage)
+            run.status = "complete"
+            run.finished_at = datetime.now(UTC)
+            run.worker_lease_token = None
+            run.worker_lease_expires_at = None
+            await session.commit()
+            await session.refresh(assistant)
+            content_html, blocks = await enrich_answer(session, answer_text)
 
-            content_html, blocks = await enrich_answer(bg_session, answer_text)
-
-        await notify_user(
-            str(owner_user_id),
+        await _notify_safe(
+            owner_user_id,
             "agent_run_complete",
             conversation_id=str(conversation_id),
-            assistant_message_id=str(assistant_turn.id),
+            assistant_message_id=str(assistant.id),
             content_html=content_html,
             sdanswer_blocks=blocks,
         )
-        return {"status": "ok", "assistant_message_id": str(assistant_turn.id)}
-    except Exception as exc:  # noqa: BLE001
-        logger.exception(
-            "resources agent run failed for conversation %s", conversation_id
+        return {"status": "ok", "assistant_message_id": str(assistant.id)}
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.exception("Resources run failed for %s", run_id)
+        detail = (
+            "Agent not configured. Try again later."
+            if "api_key" in str(exc).lower()
+            else "Agent failed to respond. Try again in a moment."
         )
-        msg = str(exc)
-        if (
-            "GEMINI_API_KEY" in msg
-            or "GOOGLE_API_KEY" in msg
-            or "api_key" in msg.lower()
-        ):
-            detail = "Agent not configured. Try again later."
-        else:
-            detail = "Agent failed to respond. Try again in a moment."
-        try:
-            await notify_user(
-                str(owner_user_id),
-                "agent_run_error",
-                conversation_id=str(conversation_id),
-                detail=detail,
+        async with get_db_session_context() as session:
+            run = await session.scalar(
+                select(ResourceAgentRun)
+                .where(
+                    ResourceAgentRun.id == run_id,
+                    ResourceAgentRun.worker_lease_token == token,
+                    ResourceAgentRun.status == "running",
+                )
+                .with_for_update()
             )
-        except Exception:  # noqa: BLE001
-            logger.exception("agent_run_error notify_user failed")
+            if run is not None:
+                await _persist_stage_usage(session, run, stage_usage)
+                if run.attempt_count < 5:
+                    run.status = "submitted"
+                    run.error = detail
+                    run.worker_lease_token = None
+                    run.worker_lease_expires_at = None
+                    await session.commit()
+                    raise RuntimeError("transient Resources failure") from exc
+                run.status = "error"
+                run.error = detail
+                run.finished_at = datetime.now(UTC)
+                run.worker_lease_token = None
+                run.worker_lease_expires_at = None
+                existing = await session.scalar(
+                    select(AgentMessage).where(
+                        AgentMessage.conversation_id == run.conversation_id,
+                        AgentMessage.sequence == run.user_sequence + 1,
+                    )
+                )
+                if existing is None:
+                    session.add(
+                        AgentMessage(
+                            conversation_id=run.conversation_id,
+                            sequence=run.user_sequence + 1,
+                            role="assistant",
+                            content=detail,
+                            citations=[],
+                            usage={"status": "error"},
+                        )
+                    )
+                await session.commit()
+        await _notify_safe(
+            owner_user_id,
+            "agent_run_error",
+            conversation_id=str(conversation_id),
+            detail=detail,
+        )
         return {"status": "error"}
+    finally:
+        heartbeat.cancel()
+        with suppress(asyncio.CancelledError):
+            await heartbeat

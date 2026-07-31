@@ -3,29 +3,39 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC
 from uuid import UUID
 
-from litestar import Controller, Request, get, post
+from litestar import Controller
+from litestar import Request
+from litestar import get
+from litestar import post
 from litestar.exceptions import NotAuthorizedException
-from litestar.response import Redirect, Template as TemplateResponse
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from litestar.response import Redirect
+from litestar.response import Template as TemplateResponse
 from skrift.auth.guards import auth_guard
 from skrift.auth.second_factors.passkey_service import is_webauthn_available
+from skrift.auth.second_factors.services import deactivate_second_factor_enrollment
 from skrift.auth.second_factors.services import (
-    deactivate_second_factor_enrollment,
     list_second_factor_enrollments_for_factor,
 )
 from skrift.config import get_settings as get_skrift_settings
 from skrift.db.models.oauth_account import OAuthAccount
 from skrift.db.models.user import User
+from skrift.flash import flash_error
+from skrift.flash import flash_success
+from skrift.flash import get_flash_messages
 from skrift.forms.core import verify_csrf
-from skrift.flash import flash_error, flash_success, get_flash_messages
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.web.billing.portal import create_portal_session
-from smarter_dev.web.models import SudoMembership, UserProfile
+from smarter_dev.web.chat.dispatch import create_dispatch
+from smarter_dev.web.chat.dispatch import dispatch_one
+from smarter_dev.web.models import AccountDeletionRequest
+from smarter_dev.web.models import SudoMembership
+from smarter_dev.web.models import UserProfile
 
 logger = logging.getLogger(__name__)
 
@@ -80,9 +90,9 @@ async def _get_active_membership(
       2. Otherwise the most recently expired row (so the billing page can
          show "expired — renew at founder rate" instead of looking empty).
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now = datetime.now(tz=timezone.utc)
+    now = datetime.now(tz=UTC)
     result = await db_session.execute(
         select(SudoMembership)
         .where(SudoMembership.user_id == user_id)
@@ -184,6 +194,48 @@ class AccountController(Controller):
             },
         )
 
+    @post("/delete")
+    async def delete_account(
+        self, request: Request, db_session: AsyncSession
+    ) -> Redirect:
+        """Queue attachment cleanup + account cascade after explicit confirmation."""
+        user = await _current_user(request, db_session)
+        if not await verify_csrf(request):
+            flash_error(request, "Your session expired. Please try again.")
+            return Redirect(path="/account/security")
+        form = await request.form()
+        if str(form.get("confirmation") or "").strip() != "DELETE":
+            flash_error(request, "Type DELETE to confirm account deletion.")
+            return Redirect(path="/account/security")
+        # Serialize deactivation with attachment uploads, which lock this same
+        # row through their object-store commit.
+        user = await db_session.scalar(
+            select(User).where(User.id == user.id).with_for_update()
+        )
+        deletion = await db_session.scalar(
+            select(AccountDeletionRequest).where(
+                AccountDeletionRequest.user_id == user.id
+            )
+        )
+        if deletion is None:
+            deletion = AccountDeletionRequest(user_id=user.id, status="pending")
+            db_session.add(deletion)
+            await db_session.flush()
+        user.is_active = False
+        dispatch = await create_dispatch(
+            db_session,
+            job_type="chat.account.delete",
+            aggregate_id=deletion.id,
+            payload={"request_id": str(deletion.id)},
+        )
+        await db_session.commit()
+        try:
+            await dispatch_one(dispatch.id)
+        except Exception:
+            pass
+        request.session.clear()
+        return Redirect(path="/", status_code=303)
+
     @post("/security/passkeys/{enrollment_id:uuid}/delete")
     async def delete_passkey(
         self, request: Request, db_session: AsyncSession, enrollment_id: UUID
@@ -216,8 +268,9 @@ class BillingController(Controller):
         membership = await _get_active_membership(db_session, user.id)
         membership_expired = False
         if membership and membership.expires_at:
-            from datetime import datetime, timezone as _tz
-            membership_expired = membership.expires_at < datetime.now(_tz.utc)
+            from datetime import datetime
+
+            membership_expired = membership.expires_at < datetime.now(UTC)
         # Has the user linked a Discord OAuth account? Drives a small
         # "connect your Discord to receive in-server roles" prompt on the
         # billing card when they have an active membership but no link.
@@ -241,9 +294,7 @@ class BillingController(Controller):
         )
 
     @post("/portal")
-    async def open_portal(
-        self, request: Request, db_session: AsyncSession
-    ) -> Redirect:
+    async def open_portal(self, request: Request, db_session: AsyncSession) -> Redirect:
         user = await _current_user(request, db_session)
         membership = await _get_active_membership(db_session, user.id)
         if membership is None:

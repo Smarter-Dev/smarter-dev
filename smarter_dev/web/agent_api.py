@@ -15,45 +15,52 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from collections import defaultdict
-from typing import Optional
+from datetime import UTC
 from uuid import UUID
 
-from litestar import Controller, Request, get, post
+from litestar import Controller
+from litestar import Request
+from litestar import get
+from litestar import post
 from litestar.exceptions import HTTPException
 from litestar.response import Response
-from litestar.status_codes import (
-    HTTP_201_CREATED,
-    HTTP_401_UNAUTHORIZED,
-    HTTP_403_FORBIDDEN,
-    HTTP_404_NOT_FOUND,
-    HTTP_422_UNPROCESSABLE_ENTITY,
-    HTTP_429_TOO_MANY_REQUESTS,
-    HTTP_503_SERVICE_UNAVAILABLE,
-)
+from litestar.status_codes import HTTP_201_CREATED
+from litestar.status_codes import HTTP_401_UNAUTHORIZED
+from litestar.status_codes import HTTP_403_FORBIDDEN
+from litestar.status_codes import HTTP_404_NOT_FOUND
+from litestar.status_codes import HTTP_422_UNPROCESSABLE_ENTITY
+from litestar.status_codes import HTTP_429_TOO_MANY_REQUESTS
 from msgspec import Struct
+from skrift.auth.services import get_user_permissions
+from skrift.auth.session_keys import SESSION_USER_ID
+from skrift.db.models.user import User
+from skrift.markdown import render_markdown
+from skrift.notifications import notify_user
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from skrift.auth.services import get_user_permissions
-from skrift.auth.session_keys import SESSION_USER_ID
-from skrift.markdown import render_markdown
-from skrift.notifications import notify_user
-
 from smarter_dev.shared.database import get_db_session_context
-from smarter_dev.web.models import (
-    AgentConversation,
-    AgentMessage,
-    ResourceSource,
-)
-from smarter_dev.web.resources_jobs import ResourcesRunPayload
+from smarter_dev.web.chat.csrf import require_api_csrf
+from smarter_dev.web.chat.dispatch import create_dispatch
+from smarter_dev.web.chat.dispatch import dispatch_one
+from smarter_dev.web.models import AgentConversation
+from smarter_dev.web.models import AgentMessage
+from smarter_dev.web.models import ResourceAgentRun
+from smarter_dev.web.models import ResourceSource
 from smarter_dev.web.sdanswer import enrich_answer
 from smarter_dev.web.title_agent import generate_title
-from skrift.workers import submit as worker_submit
 
 logger = logging.getLogger(__name__)
+
+
+async def _try_dispatch(dispatch_id: UUID) -> None:
+    try:
+        await dispatch_one(dispatch_id)
+    except Exception:
+        # The durable outbox reconciler retries independently.
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -101,9 +108,11 @@ def resources_weekly_quota(perms) -> tuple[int, int]:
     if (
         "administrator" in perms.permissions
         or "sudo-founder" in perms.roles
+        or "sudo-rwx" in perms.roles
+        or "sudo-rw" in perms.roles
     ):
         return 50, 10
-    if "sudo-hacker" in perms.roles:
+    if "sudo-hacker" in perms.roles or "sudo-r" in perms.roles:
         return 30, 10
     return 0, 0
 
@@ -152,10 +161,12 @@ async def resources_quota_state(
 async def _count_questions_last_week(
     db_session: AsyncSession, user_id: UUID, agent_type: str
 ) -> int:
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime
+    from datetime import timedelta
+
     from sqlalchemy import func
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    cutoff = datetime.now(UTC) - timedelta(days=7)
     stmt = (
         select(func.count(AgentConversation.id))
         .where(AgentConversation.owner_user_id == user_id)
@@ -165,9 +176,7 @@ async def _count_questions_last_week(
     return int((await db_session.execute(stmt)).scalar() or 0)
 
 
-async def _count_user_turns(
-    db_session: AsyncSession, conversation_id: UUID
-) -> int:
+async def _count_user_turns(db_session: AsyncSession, conversation_id: UUID) -> int:
     from sqlalchemy import func
 
     stmt = (
@@ -182,6 +191,15 @@ async def _enforce_weekly_question_quota(
     db_session: AsyncSession, request: Request, user_id: UUID
 ) -> None:
     """Raise 429 if the user has used their weekly question allowance."""
+    # Serialize admission per account so concurrent requests cannot all pass
+    # the count-before-insert check.
+    user = await db_session.scalar(
+        select(User).where(User.id == user_id).with_for_update()
+    )
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=HTTP_401_UNAUTHORIZED, detail="Invalid session."
+        )
     perms = await get_user_permissions(db_session, user_id)
     max_questions, _ = _resources_weekly_quota(perms)
     used = await _count_questions_last_week(db_session, user_id, "resources")
@@ -194,9 +212,7 @@ async def _enforce_weekly_question_quota(
                 "in the last 7 days). The window rolls forward as your "
                 "earliest question ages out."
             )
-        raise HTTPException(
-            status_code=HTTP_429_TOO_MANY_REQUESTS, detail=detail
-        )
+        raise HTTPException(status_code=HTTP_429_TOO_MANY_REQUESTS, detail=detail)
 
 
 async def _enforce_followup_quota(
@@ -220,9 +236,7 @@ async def _enforce_followup_quota(
                 "replies in this answer). Start a fresh question on "
                 "/resources to keep going."
             )
-        raise HTTPException(
-            status_code=HTTP_429_TOO_MANY_REQUESTS, detail=detail
-        )
+        raise HTTPException(status_code=HTTP_429_TOO_MANY_REQUESTS, detail=detail)
 
 
 def _require_user_id(request: Request) -> UUID:
@@ -235,11 +249,11 @@ def _require_user_id(request: Request) -> UUID:
         )
     try:
         return UUID(str(raw))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError) as exc:
         raise HTTPException(
             status_code=HTTP_401_UNAUTHORIZED,
             detail="Invalid session.",
-        )
+        ) from exc
 
 
 def _derive_title(question: str, max_len: int = 80) -> str:
@@ -303,9 +317,7 @@ def _kick_title_generation(
     task.add_done_callback(_TITLE_TASKS.discard)
 
 
-async def _resolve_citations(
-    db_session: AsyncSession, hits: list[dict]
-) -> list[dict]:
+async def _resolve_citations(db_session: AsyncSession, hits: list[dict]) -> list[dict]:
     """Build the citation list to persist alongside an assistant turn.
 
     Priority order: every URL the agent fetched via ``read_source`` (in order),
@@ -380,7 +392,7 @@ async def _resolve_citations(
     return citations
 
 
-def _coerce_usage(result_usage) -> Optional[dict]:
+def _coerce_usage(result_usage) -> dict | None:
     """Pull token counts off a pydantic-ai RunResult.usage object if present."""
     if result_usage is None:
         return None
@@ -396,8 +408,6 @@ def _coerce_usage(result_usage) -> Optional[dict]:
         return None
 
 
-
-
 # ---------------------------------------------------------------------------
 # Request bodies
 # ---------------------------------------------------------------------------
@@ -407,6 +417,7 @@ class AskBody(Struct):
     """Request body for POST /v2/api/resources/ask."""
 
     question: str
+    submission_key: str
     level: str = "senior"
 
 
@@ -414,6 +425,29 @@ class ReplyBody(Struct):
     """Request body for POST /v2/api/agent/conversations/{id}/reply."""
 
     question: str
+    submission_key: str
+
+
+def _validate_submission_key(value: str) -> str:
+    key = (value or "").strip()
+    if not key or len(key) > 128:
+        raise HTTPException(
+            status_code=HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="A valid submission_key is required.",
+        )
+    return key
+
+
+async def _require_active_user(db_session: AsyncSession, user_id: UUID) -> User:
+    user = await db_session.scalar(
+        select(User).where(User.id == user_id).with_for_update()
+    )
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=HTTP_401_UNAUTHORIZED,
+            detail="This account is inactive.",
+        )
+    return user
 
 
 def _validate_question(text: str) -> str:
@@ -423,10 +457,10 @@ def _validate_question(text: str) -> str:
             status_code=HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Question is required.",
         )
-    if len(cleaned) > 1000:
+    if len(cleaned) > 5000:
         raise HTTPException(
             status_code=HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Question is too long (max 1000 characters).",
+            detail="Question is too long (max 5000 characters).",
         )
     return cleaned
 
@@ -441,9 +475,7 @@ def _validate_level(level: str) -> str:
     return level
 
 
-async def _message_to_dict(
-    db_session: AsyncSession, msg: AgentMessage
-) -> dict:
+async def _message_to_dict(db_session: AsyncSession, msg: AgentMessage) -> dict:
     if msg.role == "assistant":
         content_html, blocks = await enrich_answer(db_session, msg.content or "")
     else:
@@ -484,7 +516,39 @@ class ResourcesAgentApiController(Controller):
         client-side morph from /resources to /ai/answer/{id} doesn't
         stall on the form submit.
         """
+        require_api_csrf(request)
         user_id = _require_user_id(request)
+        await _require_active_user(db_session, user_id)
+        submission_key = _validate_submission_key(data.submission_key)
+        existing_run = await db_session.scalar(
+            select(ResourceAgentRun).where(
+                ResourceAgentRun.owner_user_id == user_id,
+                ResourceAgentRun.submission_key == submission_key,
+            )
+        )
+        if existing_run is not None:
+            existing_turn = await db_session.scalar(
+                select(AgentMessage).where(
+                    AgentMessage.conversation_id == existing_run.conversation_id,
+                    AgentMessage.sequence == existing_run.user_sequence,
+                    AgentMessage.role == "user",
+                )
+            )
+            return {
+                "id": str(existing_run.conversation_id),
+                "url": f"/chat/{existing_run.conversation_id}",
+                "idempotent": True,
+                "user_message": {
+                    "id": str(existing_turn.id) if existing_turn else None,
+                    "sequence": existing_run.user_sequence,
+                    "content": existing_run.question,
+                    "created_at": (
+                        existing_turn.created_at.isoformat()
+                        if existing_turn and existing_turn.created_at
+                        else None
+                    ),
+                },
+            }
         _enforce_rate(_ask_log, str(user_id), _ASK_LIMIT)
         await _enforce_weekly_question_quota(db_session, request, user_id)
 
@@ -508,40 +572,76 @@ class ResourcesAgentApiController(Controller):
             citations=[],
         )
         db_session.add(user_turn)
+        run = ResourceAgentRun(
+            conversation_id=conversation.id,
+            owner_user_id=user_id,
+            user_sequence=1,
+            submission_key=submission_key,
+            question=question,
+            status="submitted",
+        )
+        db_session.add(run)
+        await db_session.flush()
+        dispatch = await create_dispatch(
+            db_session,
+            job_type="resources.agent.run",
+            aggregate_id=run.id,
+            payload={
+                "run_id": str(run.id),
+                "conversation_id": str(conversation.id),
+                "owner_user_id": str(user_id),
+                "question": question,
+            },
+        )
         await db_session.commit()
         await db_session.refresh(user_turn)
 
         # Title generation + agent run both happen in the background. The
         # browser stays on /resources (morphed into the answer layout) and
         # picks up notifications as each completes.
-        _kick_title_generation(conversation.id, user_id, question)
-        await worker_submit(
-            ResourcesRunPayload(
-                conversation_id=str(conversation.id),
-                owner_user_id=str(user_id),
-                question=question,
-            )
-        )
+        # The deterministic derived title avoids an unmetered cosmetic model
+        # call; all provider usage for Resources now flows through the run ledger.
+        await _try_dispatch(dispatch.id)
 
         return {
             "id": str(conversation.id),
-            "url": f"/ai/answer/{conversation.id}",
+            "url": f"/chat/{conversation.id}",
             "user_message": {
                 "id": str(user_turn.id),
                 "sequence": user_turn.sequence,
                 "content": user_turn.content,
                 "created_at": (
-                    user_turn.created_at.isoformat()
-                    if user_turn.created_at else None
+                    user_turn.created_at.isoformat() if user_turn.created_at else None
                 ),
             },
         }
 
 
 class AgentConversationApiController(Controller):
-    """``POST /v2/api/agent/conversations/{id}/reply`` — owner-only follow-up."""
+    """Owner-only status and follow-ups for persisted Resources conversations."""
 
     path = "/v2/api/agent/conversations"
+
+    @get("/{conversation_id:uuid}/status")
+    async def status(
+        self, conversation_id: UUID, request: Request, db_session: AsyncSession
+    ) -> dict:
+        conversation = await db_session.get(AgentConversation, conversation_id)
+        if conversation is None or conversation.agent_type != "resources":
+            raise HTTPException(
+                status_code=HTTP_404_NOT_FOUND, detail="Conversation not found."
+            )
+        run = await db_session.scalar(
+            select(ResourceAgentRun)
+            .where(ResourceAgentRun.conversation_id == conversation_id)
+            .order_by(ResourceAgentRun.created_at.desc())
+            .limit(1)
+        )
+        return {
+            "status": run.status if run is not None else "idle",
+            "active": bool(run and run.status in {"submitted", "running"}),
+            "detail": run.error if run is not None else None,
+        }
 
     @post("/{conversation_id:uuid}/reply", status_code=HTTP_201_CREATED)
     async def reply(
@@ -558,13 +658,51 @@ class AgentConversationApiController(Controller):
         `sk:notification` types as the initial ask (`agent_tool_event`,
         `agent_run_complete`) to animate the new turn in place.
         """
+        require_api_csrf(request)
         user_id = _require_user_id(request)
+        await _require_active_user(db_session, user_id)
+        submission_key = _validate_submission_key(data.submission_key)
+        existing_run = await db_session.scalar(
+            select(ResourceAgentRun).where(
+                ResourceAgentRun.owner_user_id == user_id,
+                ResourceAgentRun.submission_key == submission_key,
+            )
+        )
+        if existing_run is not None:
+            if existing_run.conversation_id != conversation_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail="submission_key was already used for another conversation.",
+                )
+            existing_turn = await db_session.scalar(
+                select(AgentMessage).where(
+                    AgentMessage.conversation_id == conversation_id,
+                    AgentMessage.sequence == existing_run.user_sequence,
+                    AgentMessage.role == "user",
+                )
+            )
+            return {
+                "user_message": {
+                    "id": str(existing_turn.id) if existing_turn else None,
+                    "sequence": existing_run.user_sequence,
+                    "content": existing_run.question,
+                    "created_at": (
+                        existing_turn.created_at.isoformat()
+                        if existing_turn and existing_turn.created_at
+                        else None
+                    ),
+                },
+                "idempotent": True,
+                "turn_id": str(existing_run.id),
+            }
         _enforce_rate(_reply_log, str(user_id), _REPLY_LIMIT)
 
         question = _validate_question(data.question)
 
         result = await db_session.execute(
-            select(AgentConversation).where(AgentConversation.id == conversation_id)
+            select(AgentConversation)
+            .where(AgentConversation.id == conversation_id)
+            .with_for_update()
         )
         conversation = result.scalar_one_or_none()
         if conversation is None:
@@ -576,17 +714,26 @@ class AgentConversationApiController(Controller):
                 status_code=HTTP_403_FORBIDDEN,
                 detail="Only the original asker can reply here.",
             )
-        await _enforce_followup_quota(
-            db_session, request, user_id, conversation.id
-        )
+        await _enforce_followup_quota(db_session, request, user_id, conversation.id)
 
-        next_seq_q = await db_session.execute(
-            select(AgentMessage.sequence)
+        last_message = await db_session.scalar(
+            select(AgentMessage)
             .where(AgentMessage.conversation_id == conversation.id)
             .order_by(AgentMessage.sequence.desc())
             .limit(1)
         )
-        last_seq = next_seq_q.scalar_one_or_none() or 0
+        active_run = await db_session.scalar(
+            select(ResourceAgentRun).where(
+                ResourceAgentRun.conversation_id == conversation.id,
+                ResourceAgentRun.status.in_(("submitted", "running")),
+            )
+        )
+        if active_run is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="Wait for the active Resource Agent turn to finish.",
+            )
+        last_seq = last_message.sequence if last_message is not None else 0
 
         user_turn = AgentMessage(
             conversation_id=conversation.id,
@@ -596,16 +743,30 @@ class AgentConversationApiController(Controller):
             citations=[],
         )
         db_session.add(user_turn)
+        run = ResourceAgentRun(
+            conversation_id=conversation.id,
+            owner_user_id=user_id,
+            user_sequence=user_turn.sequence,
+            submission_key=submission_key,
+            question=question,
+            status="submitted",
+        )
+        db_session.add(run)
+        await db_session.flush()
+        dispatch = await create_dispatch(
+            db_session,
+            job_type="resources.agent.run",
+            aggregate_id=run.id,
+            payload={
+                "run_id": str(run.id),
+                "conversation_id": str(conversation.id),
+                "owner_user_id": str(user_id),
+                "question": question,
+            },
+        )
         await db_session.commit()
         await db_session.refresh(user_turn)
-
-        await worker_submit(
-            ResourcesRunPayload(
-                conversation_id=str(conversation.id),
-                owner_user_id=str(user_id),
-                question=question,
-            )
-        )
+        await _try_dispatch(dispatch.id)
 
         # Recompute the remaining follow-ups *after* the just-committed
         # user turn so the client can decrement its counter from the
@@ -620,8 +781,7 @@ class AgentConversationApiController(Controller):
                 "sequence": user_turn.sequence,
                 "content": user_turn.content,
                 "created_at": (
-                    user_turn.created_at.isoformat()
-                    if user_turn.created_at else None
+                    user_turn.created_at.isoformat() if user_turn.created_at else None
                 ),
             },
             "followups_remaining": quota["followups_remaining"],
@@ -642,9 +802,7 @@ class AgentMessageApiController(Controller):
     path = "/v2/api/agent/messages"
 
     @get("/{message_id:uuid}/markdown")
-    async def markdown(
-        self, message_id: UUID, db_session: AsyncSession
-    ) -> Response:
+    async def markdown(self, message_id: UUID, db_session: AsyncSession) -> Response:
         msg = await db_session.get(AgentMessage, message_id)
         if msg is None:
             raise HTTPException(
@@ -655,5 +813,3 @@ class AgentMessageApiController(Controller):
             media_type="text/markdown; charset=utf-8",
             headers={"Cache-Control": "private, max-age=300"},
         )
-
-

@@ -60,10 +60,11 @@
 
         {% if is_owner and quota_state and quota_state.followups_remaining > 0 %}
         <form id="ai-followup-form" class="ai-followup" novalidate>
+            {{ csrf_field() }}
             <label for="ai-followup-input" class="visually-hidden">Follow-up question</label>
             <textarea id="ai-followup-input" name="question"
                       placeholder="Reply, paste a snippet, or ask anything in this conversation..."
-                      maxlength="1000" required></textarea>
+                      maxlength="5000" required></textarea>
             <div class="ai-followup-row">
                 <span class="ai-followup-hint" data-error hidden></span>
                 <span class="ai-followup-counter"

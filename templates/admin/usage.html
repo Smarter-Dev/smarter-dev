@@ -100,11 +100,23 @@
 {# ── Tabs ────────────────────────────────────────────────────────── #}
 <div class="usage-tabs-wrap">
     <div class="usage-tab-bar">
+        <button class="usage-tab {% if active_tab == 'products' %}active{% endif %}" data-tab="products">Products &amp; Operations</button>
         <button class="usage-tab {% if active_tab == 'runs' %}active{% endif %}" data-tab="runs">Individual Runs</button>
         <button class="usage-tab {% if active_tab == 'users' %}active{% endif %}" data-tab="users">By User</button>
         <button class="usage-tab {% if active_tab == 'service' %}active{% endif %}" data-tab="service">Service Costs</button>
         <button class="usage-tab {% if active_tab == 'invoice' %}active{% endif %}" data-tab="invoice">Invoice</button>
         <button class="usage-tab {% if active_tab == 'channels' %}active{% endif %}" data-tab="channels">By Channel</button>
+    </div>
+
+    <div id="tab-products" class="usage-tab-content {% if active_tab != 'products' %}hidden{% endif %}">
+      <h2>Normalized product usage</h2>
+      <p>Durable costs by product and operation. Chat rows include primary agents, sub-agents, web/media summarizers, and compaction; Resources stages and Discord retain their distinct product dimensions.</p>
+      {% if pending_chat_reservation_count %}<p><strong>Pending Chat provider exposure:</strong> {{ pending_chat_reservation_count }} ambiguous/in-flight operation{{ '' if pending_chat_reservation_count == 1 else 's' }}, up to ${{ "{:.6f}".format(pending_chat_reservation_cost) }} reserved. This is included in spend enforcement but not counted as settled usage below.</p>{% endif %}
+      {% if product_rows %}<table class="sk-admin-table"><thead><tr><th>Product</th><th>Operation</th><th>User identity</th><th>Intelligence</th><th>Provider / model / reasoning</th><th>Conversation / turn / child</th><th>Operations</th><th>Input</th><th>Output</th><th>Cost</th><th>Overage</th></tr></thead><tbody>
+      {% for row in product_rows %}<tr><td><span class="sk-pill">{{ row.product_mode }}</span></td><td>{{ row.operation_type }}</td><td>{% if row.user_id %}{{ row.user_id }}{% elif row.discord_user_id and discord_links.get(row.discord_user_id) %}{{ discord_links.get(row.discord_user_id) }} <small>(Discord {{ row.discord_user_id }})</small>{% elif row.discord_user_id %}discord:{{ row.discord_user_id }}{% else %}global{% endif %}</td><td>{{ row.intelligence_mode or '—' }}</td><td>{{ row.provider_key }} / {{ row.model_id }} / {{ row.reasoning_level or '—' }}</td><td><small>{{ row.conversation_id or '—' }}<br>{{ row.root_turn_id or '—' }}<br>{{ row.subagent_id or '—' }}</small></td><td class="usage-td-num">{{ row.operations }}</td><td class="usage-td-num">{{ row.input_tokens or 0 }}</td><td class="usage-td-num">{{ row.output_tokens or 0 }}</td><td class="usage-td-num">${{ "{:.6f}".format(row.cost_usd or 0) }}</td><td class="usage-td-num">${{ "{:.6f}".format(row.overage_cost_usd or 0) }}</td></tr>{% endfor %}
+      </tbody></table>{% else %}<p class="sk-no-items">No normalized usage rows in this period.</p>{% endif %}
+      <h2>Chat sub-agent lineage</h2>
+      {% if subagent_rows %}<table class="sk-admin-table"><thead><tr><th>Name</th><th>User</th><th>Conversation</th><th>Root turn</th><th>Lineage / spawn</th><th>Status</th><th>Reasoning</th><th>Tokens</th><th>Cost</th></tr></thead><tbody>{% for child in subagent_rows %}<tr><td>{{ child.name }}</td><td>{{ child.owner_user_id }}</td><td>{{ child.conversation_id }}</td><td>{{ child.root_turn_id }}</td><td>{{ child.lineage|join(' → ') }} / {{ child.spawn_ordinal }}</td><td>{{ child.status }}</td><td>{{ child.reasoning_level or 'inherit' }}</td><td>{{ (child.input_tokens or 0) + (child.output_tokens or 0) }}</td><td>${{ "{:.6f}".format(child.cost_usd or 0) }}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="sk-no-items">No Chat sub-agents in this period.</p>{% endif %}
     </div>
 
     {# ── Tab: Individual Runs ────────────────────────────────────── #}

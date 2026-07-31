@@ -59,6 +59,7 @@ controllers:
   - smarter_dev.web.account_controller:AccountController
   - smarter_dev.web.account_controller:BillingController
   - smarter_dev.web.feature_flags_admin:FeatureFlagsAdminController
+  - smarter_dev.web.chat_settings_admin:ChatSettingsAdminController
   # Native bot API (/api) — Litestar controllers replacing the FastAPI mount
   # (docs/v2/legacy-sunset/04-api-rewrite.md switchover).
   - smarter_dev.web.api_native.auth:ApiHealthController
@@ -87,7 +88,10 @@ controllers:
   - smarter_dev.web.agent_api:ResourcesAgentApiController
   - smarter_dev.web.agent_api:AgentConversationApiController
   - smarter_dev.web.agent_api:AgentMessageApiController
-  - smarter_dev.web.agent_view_controller:answer_view
+  - smarter_dev.web.chat.controller:chat_index
+  - smarter_dev.web.chat.controller:chat_conversation
+  - smarter_dev.web.chat.controller:legacy_answer_redirect
+  - smarter_dev.web.chat.api:ChatApiController
   - smarter_dev.web.search_preview_controller:search_preview_view
   - smarter_dev.web.vibe_courses_controller:vibe_courses
   - smarter_dev.web.vibe_courses_controller:vibe_courses_legacy_redirect
@@ -152,6 +156,17 @@ storage:
         secret_access_key: $SPACES_SECRET_KEY
         acl: public-read
         public_url: https://production-bucket-zechz-1234.sfo3.digitaloceanspaces.com
+    chat_attachments:
+      backend: s3
+      max_upload_size: 10485760
+      s3:
+        bucket: production-bucket-zechz-1234
+        region: sfo3
+        endpoint_url: https://sfo3.digitaloceanspaces.com
+        access_key_id: $SPACES_ACCESS_KEY
+        secret_access_key: $SPACES_SECRET_KEY
+        acl: private
+        prefix: chat-attachments
 
 redis:
   url: $REDIS_URL
@@ -177,6 +192,7 @@ workers:
   preset: distributed
   queues:
     - agents
+    - chat-subagents
   # Global claim-timeout for the worker pool. The blogging orchestrator
   # job runs the whole 5-stage pipeline inside one claim and can take
   # well over 10 minutes when Research dispatches a chatty sub-agent.
@@ -217,6 +233,7 @@ workers:
     - smarter_dev.shared.worker_observability
     - smarter_dev.web.resources_agent
     - smarter_dev.web.resources_jobs
+    - smarter_dev.web.chat.jobs
     - smarter_dev.web.title_agent
     - smarter_dev.web.blogging_agent.pipeline
     - smarter_dev.web.handlers_jobs

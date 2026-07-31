@@ -32,8 +32,8 @@ spec:
             containers:
               - name: agent-worker
                 image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
-                # Drain the 'agents' queue. concurrency 8 keeps the blogging
-                # orchestrator job from starving its own stage/sub-agent jobs.
+                # Drain root jobs only. Chat roots may await child jobs, so a separate
+                # deployment drains chat-subagents without queue starvation.
                 command: ["uv", "run", "--no-sync", "skrift", "workers", "run", "--queue", "agents", "--concurrency", "8"]
                 envFrom:
                   - configMapRef:
@@ -150,6 +150,18 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: opencode-zen-api-key
+                  - name: DIGITALOCEAN_INFERENCE_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: digitalocean-inference-api-key
+                        optional: true
+                  - name: OPENROUTER_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: openrouter-api-key
+                        optional: true
                   - name: LOGFIRE_TOKEN
                     valueFrom:
                       secretKeyRef:
@@ -160,6 +172,13 @@ spec:
                     value: "smarter-dev-agent-worker"
                   - name: LOGFIRE_SERVICE_VERSION
                     value: "<IMAGE_VERSION>"
+                  - name: POLAR_ACCESS_TOKEN
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: polar-access-token
+                  - name: POLAR_SERVER
+                    value: "production"
                   # Research/blogging agent tool credentials.
                   - name: JINA_API_KEY
                     valueFrom:
