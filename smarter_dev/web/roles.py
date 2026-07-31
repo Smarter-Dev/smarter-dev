@@ -13,8 +13,9 @@ register_role(
     "use-scan",
     "use-deep-scan",
     "view-answer-history",
+    "chat",
     display_name="sudo Hacker",
-    description="Hacker membership — every RunHacks challenge + Scan tools",
+    description="Hacker membership — every RunHacks challenge + Scan tools + Chat",
 )
 
 register_role(
@@ -22,8 +23,44 @@ register_role(
     "use-scan",
     "use-deep-scan",
     "view-answer-history",
+    "chat",
+    "ultra-chat",
     display_name="sudo Founder",
     description="Founder membership — everything in Hacker plus the inside seat",
+)
+
+# Internal sudo tiers are assigned directly through Skrift rather than sold via
+# Polar.  Keep the terminal-style labels exact: they are user-facing.
+register_role(
+    "sudo-r",
+    "use-scan",
+    "use-deep-scan",
+    "view-answer-history",
+    "chat",
+    display_name="r--",
+    description="Internal read tier — Resources and Chat",
+)
+
+register_role(
+    "sudo-rw",
+    "use-scan",
+    "use-deep-scan",
+    "view-answer-history",
+    "chat",
+    "ultra-chat",
+    display_name="rw-",
+    description="Internal read/write tier — Resources, Chat, and Ultra Chat",
+)
+
+register_role(
+    "sudo-rwx",
+    "use-scan",
+    "use-deep-scan",
+    "view-answer-history",
+    "chat",
+    "ultra-chat",
+    display_name="rwx",
+    description="Internal highest tier — Resources, Chat, and Ultra Chat",
 )
 
 # ── Member ────────────────────────────────────────────────────

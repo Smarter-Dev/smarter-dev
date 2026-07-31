@@ -22,6 +22,7 @@ jobs:
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy.yaml
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy-bot.yaml
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy-worker.yaml
+        sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy-chat-child-worker.yaml
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/cron-sudo-sweep.yaml
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/cron-retention-sweep.yaml
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/migrate-job.yaml
@@ -79,11 +80,18 @@ jobs:
         fi
         echo "migrations applied"
 
-    - name: Deploy to DigitalOcean Kubernetes
+    # Workers must know every new job payload before web pods can enqueue it.
+    - name: Deploy and verify workers
+      run: |
+        kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy-worker.yaml
+        kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy-chat-child-worker.yaml
+        kubectl rollout status deployment/smarter-dev-agent-worker
+        kubectl rollout status deployment/smarter-dev-chat-child-worker
+
+    - name: Deploy web, bot, and scheduled services
       run: |
         kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy-bot.yaml
-        kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy-worker.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/site.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/cron-sudo-sweep.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/cron-retention-sweep.yaml
@@ -93,6 +101,3 @@ jobs:
 
     - name: Verify bot deployment
       run: kubectl rollout status deployment/smarter-dev-bot
-
-    - name: Verify agent-worker deployment
-      run: kubectl rollout status deployment/smarter-dev-agent-worker

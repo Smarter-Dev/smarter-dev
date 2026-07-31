@@ -34,6 +34,11 @@
 
   function nowIso() { return new Date().toISOString(); }
 
+  function submissionKey() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2);
+  }
+
   function clockNow() {
     return new Date().toLocaleTimeString('en-US', {
       hour: 'numeric', minute: '2-digit', hour12: true,
@@ -259,8 +264,8 @@
         textarea && textarea.focus();
         return;
       }
-      if (question.length > 1000) {
-        setHint('error', 'Keep it under 1000 characters.');
+      if (question.length > 5000) {
+        setHint('error', 'Keep it under 5000 characters.');
         return;
       }
 
@@ -269,10 +274,15 @@
 
       var scaffold = startMorph(question);
 
+      var csrf = form.querySelector('input[name="_csrf"]');
       fetch('/v2/api/resources/ask', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-        body: JSON.stringify({ question: question }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-CSRF-Token': csrf ? csrf.value : '',
+        },
+        body: JSON.stringify({ question: question, submission_key: submissionKey() }),
         credentials: 'same-origin',
       })
         .then(function (res) {
@@ -282,26 +292,9 @@
         })
         .then(function (resp) {
           if (resp.ok && resp.body && resp.body.url && resp.body.id) {
-            try {
-              history.pushState({ aiAnswer: true }, '', resp.body.url);
-            } catch (e) { /* swallow — some browsers block pushState */ }
-
-            var thread = scaffold && scaffold.querySelector('[data-ai-live-thread]');
-            if (thread) {
-              thread.setAttribute('data-conversation-id', resp.body.id);
-              thread.setAttribute('data-asker-name', askerName);
-              thread.setAttribute('data-answer-url', resp.body.url);
-              var userTurn = thread.querySelector('[data-ai-user-turn]');
-              if (userTurn && resp.body.user_message && resp.body.user_message.id) {
-                userTurn.id = 'turn-' + resp.body.user_message.id;
-              }
-            }
-            // Tell answer-time.js this conversation is mine — only events
-            // with this conversation_id are allowed to claim an unstamped
-            // thread (defeats the queued-replay race for old events).
-            if (window.AIAnswerTime && window.AIAnswerTime.registerLiveConversation) {
-              window.AIAnswerTime.registerLiveConversation(resp.body.id);
-            }
+            // Resources keeps its existing API, quotas, and pipeline, but every
+            // accepted conversation enters the unified /chat shell.
+            window.location.assign(resp.body.url);
             return;
           }
           var detail = (resp.body && (resp.body.detail || resp.body.message)) || '';

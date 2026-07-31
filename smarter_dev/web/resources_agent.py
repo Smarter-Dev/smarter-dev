@@ -50,12 +50,13 @@ import os
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC
+from datetime import datetime
 
 import httpx
 import skrift
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+from pydantic import Field
 from pydantic_ai import RunContext
 from skrift.agents.models import ResumeContext
 
@@ -67,7 +68,8 @@ from skrift.agents.models import ResumeContext
 # worker when the string model ids below materialize, never on the web tier.
 from skrift.notifications import notify_user
 
-from smarter_dev.web.research_tools import brave_search, jina_read
+from smarter_dev.web.research_tools import brave_search
+from smarter_dev.web.research_tools import jina_read
 
 logger = logging.getLogger(__name__)
 
@@ -702,8 +704,7 @@ class Gap(BaseModel):
     concept: str = Field(
         ...,
         description=(
-            "The concept or sub-topic you couldn't find a relevant "
-            "document for."
+            "The concept or sub-topic you couldn't find a relevant document for."
         ),
     )
     tried_queries: list[str] = Field(
@@ -716,8 +717,7 @@ class Gap(BaseModel):
     needed: str = Field(
         ...,
         description=(
-            "One sentence describing what kind of source would fill "
-            "this gap."
+            "One sentence describing what kind of source would fill this gap."
         ),
     )
 
@@ -777,7 +777,7 @@ class GapFillerOutput(BaseModel):
 # Kept for legacy callers; new pipeline does not depend on it for
 # citations (citations are surfaced via the structured Pydantic
 # outputs).
-_HITS: ContextVar[Optional[list[dict]]] = ContextVar("resource_agent_hits", default=None)
+_HITS: ContextVar[list[dict] | None] = ContextVar("resource_agent_hits", default=None)
 
 
 def begin_run() -> list[dict]:
@@ -954,13 +954,11 @@ async def search_resources(
         and "tool" for indexed tools.
     """
     from sqlalchemy import text
-
-    from smarter_dev.shared.config import get_settings
-    from smarter_dev.shared.database import (
-        convert_postgres_url_for_asyncpg,
-    )
     from sqlalchemy.ext.asyncio import create_async_engine
     from sqlalchemy.pool import NullPool
+
+    from smarter_dev.shared.config import get_settings
+    from smarter_dev.shared.database import convert_postgres_url_for_asyncpg
 
     if not query or not query.strip():
         return []
@@ -1030,16 +1028,20 @@ async def search_resources(
                 """
             )
             src_rows = (
-                await conn.execute(
-                    sources_sql, {"q": query, "limit": limit}
-                )
-            ).mappings().all()
+                (await conn.execute(sources_sql, {"q": query, "limit": limit}))
+                .mappings()
+                .all()
+            )
             tool_rows = (
-                await conn.execute(
-                    tools_sql,
-                    {"q": query, "tool_limit": max(2, limit // 2)},
+                (
+                    await conn.execute(
+                        tools_sql,
+                        {"q": query, "tool_limit": max(2, limit // 2)},
+                    )
                 )
-            ).mappings().all()
+                .mappings()
+                .all()
+            )
     finally:
         await engine.dispose()
 
@@ -1197,7 +1199,8 @@ def _open_db_session():
     keeps the tool decoupled and avoids interfering with the request's
     transaction state.
     """
-    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from sqlalchemy.ext.asyncio import create_async_engine
     from sqlalchemy.pool import NullPool
 
     from smarter_dev.shared.config import get_settings
@@ -1214,7 +1217,8 @@ def _open_db_session():
 
 async def _read_from_db_cache(url: str) -> str | None:
     """Return cached Jina body if fresh, else None. None also means non-curated."""
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime
+    from datetime import timedelta
 
     from sqlalchemy import text as sql_text
 
@@ -1239,14 +1243,14 @@ async def _read_from_db_cache(url: str) -> str | None:
     content, fetched_at = row
     if not content or not fetched_at:
         return None  # Curated but not warmed yet — caller will warm it.
-    if datetime.now(timezone.utc) - fetched_at > timedelta(days=_READ_DB_TTL_DAYS):
+    if datetime.now(UTC) - fetched_at > timedelta(days=_READ_DB_TTL_DAYS):
         return None  # Stale — caller will refresh.
     return content
 
 
 async def _write_to_db_cache(url: str, body: str) -> bool:
     """Persist a freshly fetched Jina body. Returns True if the URL was curated."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from sqlalchemy import text as sql_text
 
@@ -1262,7 +1266,7 @@ async def _write_to_db_cache(url: str, body: str) -> bool:
                 ),
                 {
                     "body": body,
-                    "now": datetime.now(timezone.utc),
+                    "now": datetime.now(UTC),
                     "url": url,
                 },
             )
@@ -1325,7 +1329,9 @@ async def web_search(ctx: RunContext[RunDeps], query: str) -> list[dict]:
         label=query,
         summary=f"{len(hits)} hit" + ("s" if len(hits) != 1 else ""),
     )
-    logger.debug("web_search %r → %d hits in %.2fs", query, len(hits), time.monotonic() - t0)
+    logger.debug(
+        "web_search %r → %d hits in %.2fs", query, len(hits), time.monotonic() - t0
+    )
     return hits
 
 
@@ -1409,12 +1415,8 @@ def _build_reframer_user_turn(question: str) -> str:
     whether the user is asking about something the curated corpus would
     already cover or about something genuinely newer than the catalog.
     """
-    today = datetime.now(timezone.utc).date().isoformat()
-    return (
-        f"Current UTC date: {today}\n\n"
-        "User question:\n\n"
-        f"{question}"
-    )
+    today = datetime.now(UTC).date().isoformat()
+    return f"Current UTC date: {today}\n\nUser question:\n\n{question}"
 
 
 def _build_researcher_user_turn(
@@ -1453,9 +1455,7 @@ def _format_gap_payload(
         f"{question}\n\n",
     ]
     if gaps:
-        parts.append(
-            "Curated-corpus gaps to fill (one citation each):\n\n```json\n"
-        )
+        parts.append("Curated-corpus gaps to fill (one citation each):\n\n```json\n")
         parts.append(
             json.dumps([g.model_dump() for g in gaps], indent=2, ensure_ascii=False)
         )
@@ -1485,18 +1485,22 @@ def _build_author_payload(
     """
     excerpts: list[dict] = []
     for ex in research.excerpts:
-        excerpts.append({
-            "purpose": ex.purpose,
-            "excerpt": ex.excerpt,
-            "source_url": ex.source_url,
-        })
+        excerpts.append(
+            {
+                "purpose": ex.purpose,
+                "excerpt": ex.excerpt,
+                "source_url": ex.source_url,
+            }
+        )
     for c in web_citations:
-        excerpts.append({
-            "purpose": c.gap_concept,
-            "excerpt": c.excerpt,
-            "source_url": c.source_url,
-            "source_title": c.source_title,
-        })
+        excerpts.append(
+            {
+                "purpose": c.gap_concept,
+                "excerpt": c.excerpt,
+                "source_url": c.source_url,
+                "source_title": c.source_title,
+            }
+        )
     further_reading: list[dict] = [
         {"source_url": fr.source_url, "blurb": fr.blurb}
         for fr in research.further_reading
@@ -1552,13 +1556,38 @@ async def _await_typed_result(session, model_cls):
     )
 
 
+async def _capture_stage_usage(
+    session, stage: str, sink: list[dict] | None, callback=None
+) -> None:
+    if sink is None:
+        return
+    state = await session.state()
+    totals = state.usage_totals
+    records = list(state.turn_usage.values())
+    latest = records[-1] if records else None
+    record = {
+        "stage": stage,
+        "model_name": latest.configured_model if latest else None,
+        "provider_name": latest.provider_name if latest else None,
+        "input_tokens": totals.input_tokens,
+        "output_tokens": totals.output_tokens,
+        "cache_read_tokens": totals.cache_read_tokens,
+        "cache_write_tokens": totals.cache_write_tokens,
+    }
+    sink.append(record)
+    if callback is not None:
+        await callback(record, len(sink) - 1)
+
+
 async def run_resources_pipeline(
     question: str,
     *,
-    message_history: Optional[list],
+    message_history: list | None,
     actor: str,
     conversation_id: str,
     owner_user_id: str,
+    usage_records: list[dict] | None = None,
+    usage_callback=None,
 ) -> str:
     """Run the four-stage pipeline (reframer → researcher → gap-filler
     → author) as a single user-visible agent run. Tool events from
@@ -1600,7 +1629,12 @@ async def run_resources_pipeline(
         ),
         timeout=_REFRAMER_TIMEOUT_S,
     )
-    reframe = await _await_typed_result(reframer_session, ReframerOutput)
+    try:
+        reframe = await _await_typed_result(reframer_session, ReframerOutput)
+    finally:
+        await _capture_stage_usage(
+            reframer_session, "reframer", usage_records, usage_callback
+        )
 
     # Push the user-visible restated_question to the open browser tab.
     # The frontend renders this as a transient preface above the tool
@@ -1616,9 +1650,7 @@ async def run_resources_pipeline(
             message=reframe.restated_question,
         )
     except Exception:  # noqa: BLE001
-        logger.exception(
-            "agent_reframe_ready notify_user failed; pipeline continues"
-        )
+        logger.exception("agent_reframe_ready notify_user failed; pipeline continues")
 
     # ── Stage 1: Researcher ──────────────────────────────────────────────
     researcher_input = _build_researcher_user_turn(
@@ -1635,7 +1667,12 @@ async def run_resources_pipeline(
         ),
         timeout=_RESEARCHER_TIMEOUT_S,
     )
-    research = await _await_typed_result(researcher_session, ResearchOutput)
+    try:
+        research = await _await_typed_result(researcher_session, ResearchOutput)
+    finally:
+        await _capture_stage_usage(
+            researcher_session, "researcher", usage_records, usage_callback
+        )
 
     # ── Stage 2: Gap-filler (gaps OR reframer-requested web topics) ─────
     web_citations: list[GapCitation] = []
@@ -1651,19 +1688,20 @@ async def run_resources_pipeline(
                 ),
                 timeout=_GAP_FILLER_TIMEOUT_S,
             )
-            gap_output = await _await_typed_result(
-                gap_session, GapFillerOutput
-            )
-            web_citations = list(gap_output.citations)
+            try:
+                gap_output = await _await_typed_result(gap_session, GapFillerOutput)
+                web_citations = list(gap_output.citations)
+            finally:
+                await _capture_stage_usage(
+                    gap_session, "gap_filler", usage_records, usage_callback
+                )
         except Exception:  # noqa: BLE001
             logger.exception("gap_filler stage failed; continuing without web cites")
             total = len(research.gaps) + len(reframe.web_search_topics)
             await _emit_tool_event(
                 orchestrator_deps,
                 tool="gap_filler",
-                label=(
-                    f"{total} item" + ("s" if total != 1 else "")
-                ),
+                label=(f"{total} item" + ("s" if total != 1 else "")),
                 summary="skipped (error)",
             )
 
@@ -1680,4 +1718,10 @@ async def run_resources_pipeline(
         ),
         timeout=_AUTHOR_TIMEOUT_S,
     )
-    return await _await_text_result(author_session)
+    try:
+        answer = await _await_text_result(author_session)
+    finally:
+        await _capture_stage_usage(
+            author_session, "author", usage_records, usage_callback
+        )
+    return answer

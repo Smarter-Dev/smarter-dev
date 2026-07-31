@@ -7,6 +7,7 @@ then exposes calc_session_cost() for computing per-session costs.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from decimal import Decimal
 
 from genai_prices import calc_price
@@ -146,8 +147,22 @@ _patch_provider(
     ),
 )
 
+# GPT-5.4 Mini — keep this more-specific prefix ahead of standard GPT-5.4.
+_patch_provider(
+    "openai",
+    types.ModelInfo(
+        id="gpt-5.4-mini",
+        match=types.ClauseStartsWith(starts_with="gpt-5.4-mini"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("0.75"),
+            output_mtok=Decimal("4.50"),
+            cache_read_mtok=Decimal("0.075"),
+        ),
+    ),
+)
+
 # GPT-5.4 (standard) — not yet in genai-prices
-# NOTE: must come after gpt-5.4-nano so the more specific match wins
+# NOTE: must come after mini/nano so the more specific matches win.
 _patch_provider(
     "openai",
     types.ModelInfo(
@@ -376,6 +391,59 @@ def calc_session_cost(
 
     result = calc_price(usage, model_ref, provider_id=provider_id)
     return result.total_price
+
+
+@dataclass(frozen=True, slots=True)
+class ModelPriceRates:
+    """Actual USD-per-million rates suitable for user-facing comparisons."""
+
+    input_mtok: Decimal
+    output_mtok: Decimal
+    cache_read_mtok: Decimal
+    cache_write_mtok: Decimal
+
+
+def price_rates_for_model(model) -> ModelPriceRates | None:
+    """Resolve provider-explicit rates for a catalog model.
+
+    Synthetic one-million-token calculations deliberately reuse the canonical
+    calculator, avoiding a second pricing table. Unknown models return ``None``
+    rather than inventing a discount or silently recording a misleading quote.
+    """
+    provider = getattr(getattr(model, "provider", None), "value", None)
+    provider_prefix = {
+        "google": "google-gla", "openai": "openai", "anthropic": "anthropic",
+        "digitalocean": "digitalocean", "openrouter": "openrouter",
+        "opencode_zen": "opencode_zen",
+    }.get(provider)
+    wire_id = getattr(model, "model_id", str(model))
+    model_name = f"{provider_prefix}:{wire_id}" if provider_prefix else wire_id
+    try:
+        uncached = calc_session_cost(1_000_000, 0, 0, 0, model_name)
+        output = calc_session_cost(0, 1_000_000, 0, 0, model_name)
+        cached = calc_session_cost(1_000_000, 0, 1_000_000, 0, model_name)
+        cache_write = calc_session_cost(1_000_000, 0, 0, 1_000_000, model_name)
+    except (LookupError, ValueError):
+        return None
+    return ModelPriceRates(uncached, output, cached, cache_write)
+
+
+def model_change_warning(old_model, new_model) -> str:
+    """Build an honest confirmation warning from known provider pricing."""
+    old_rates = price_rates_for_model(old_model)
+    new_rates = price_rates_for_model(new_model)
+    if old_rates is None or new_rates is None:
+        return (
+            f"Change from {old_model.label} to {new_model.label}? Exact provider "
+            "pricing is unavailable for at least one model; usage cost may change."
+        )
+    return (
+        f"Change from {old_model.label} to {new_model.label}? Per 1M tokens, "
+        f"the new model is ${new_rates.input_mtok} uncached input, "
+        f"${new_rates.cache_read_mtok} cached input, and "
+        f"${new_rates.output_mtok} output (current: ${old_rates.input_mtok}, "
+        f"${old_rates.cache_read_mtok}, ${old_rates.output_mtok})."
+    )
 
 
 def calc_cost(

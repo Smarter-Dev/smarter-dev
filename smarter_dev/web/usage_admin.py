@@ -3,28 +3,37 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
 from decimal import Decimal
-from typing import Optional
 
-from litestar import Controller, Request, get
+from litestar import Controller
+from litestar import Request
+from litestar import get
 from litestar.response import Template as TemplateResponse
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from skrift.admin.helpers import get_admin_context
 from skrift.admin.navigation import ADMIN_NAV_TAG
-from skrift.auth.guards import Permission, auth_guard
+from skrift.auth.guards import Permission
+from skrift.auth.guards import auth_guard
+from skrift.db.models.oauth_account import OAuthAccount
+from sqlalchemy import func
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.model_catalog import ReasoningLevel
-from smarter_dev.web.models import ResearchSession, ScanServiceUsage
-from smarter_dev.web.usage_invoice import (
-    ChannelUsageLine,
-    InvoiceLine,
-    available_months,
-    channel_breakdown,
-    monthly_invoice,
-)
+from smarter_dev.web.models import ChatSpendReservation
+from smarter_dev.web.models import ResearchSession
+from smarter_dev.web.models import ScanServiceUsage
+from smarter_dev.web.models import UsageCostRow
+from smarter_dev.web.models import WebChatConversation
+from smarter_dev.web.models import WebChatSubagent
+from smarter_dev.web.models import WebChatTurn
+from smarter_dev.web.usage_invoice import ChannelUsageLine
+from smarter_dev.web.usage_invoice import InvoiceLine
+from smarter_dev.web.usage_invoice import available_months
+from smarter_dev.web.usage_invoice import channel_breakdown
+from smarter_dev.web.usage_invoice import monthly_invoice
 
 # Bucket expressions keyed by granularity name.
 # Each returns a string label suitable for Chart.js x-axis.
@@ -44,12 +53,10 @@ _BUCKET_EXPR = {
 }
 
 
-def _build_filters(
-    days: int | None, pipeline_mode: str | None
-) -> list:
+def _build_filters(days: int | None, pipeline_mode: str | None) -> list:
     filters = []
     if days:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff = datetime.now(UTC) - timedelta(days=days)
         filters.append(ResearchSession.created_at >= cutoff)
     if pipeline_mode:
         filters.append(ResearchSession.pipeline_mode == pipeline_mode)
@@ -64,7 +71,7 @@ _SOURCE_LABELS = {
     "scan_service": "Scan services",
 }
 
-_VALID_TABS = {"runs", "users", "service", "invoice", "channels"}
+_VALID_TABS = {"runs", "users", "service", "invoice", "channels", "products"}
 
 
 def _reasoning_display(reasoning_level: str | None) -> str:
@@ -97,26 +104,34 @@ def build_invoice_tree(lines: list[InvoiceLine]) -> tuple[list[dict], dict]:
     grand_totals = _zero_token_totals()
 
     for line in lines:
-        provider = providers_by_key.setdefault(line.provider_key, {
-            "key": line.provider_key,
-            "label": line.provider_label,
-            **_zero_token_totals(),
-            "models": {},
-        })
-        model = provider["models"].setdefault(line.model_name, {
-            "name": line.model_name,
-            **_zero_token_totals(),
-            "rows": [],
-        })
-        model["rows"].append({
-            "reasoning": _reasoning_display(line.reasoning_level),
-            "source": _SOURCE_LABELS.get(line.source, line.source),
-            "input_tokens": line.input_tokens,
-            "output_tokens": line.output_tokens,
-            "cache_read_tokens": line.cache_read_tokens,
-            "cache_write_tokens": line.cache_write_tokens,
-            "cost": line.cost_usd,
-        })
+        provider = providers_by_key.setdefault(
+            line.provider_key,
+            {
+                "key": line.provider_key,
+                "label": line.provider_label,
+                **_zero_token_totals(),
+                "models": {},
+            },
+        )
+        model = provider["models"].setdefault(
+            line.model_name,
+            {
+                "name": line.model_name,
+                **_zero_token_totals(),
+                "rows": [],
+            },
+        )
+        model["rows"].append(
+            {
+                "reasoning": _reasoning_display(line.reasoning_level),
+                "source": _SOURCE_LABELS.get(line.source, line.source),
+                "input_tokens": line.input_tokens,
+                "output_tokens": line.output_tokens,
+                "cache_read_tokens": line.cache_read_tokens,
+                "cache_write_tokens": line.cache_write_tokens,
+                "cost": line.cost_usd,
+            }
+        )
         for bucket in (model, provider, grand_totals):
             bucket["cost"] += line.cost_usd
             bucket["input_tokens"] += line.input_tokens
@@ -124,9 +139,7 @@ def build_invoice_tree(lines: list[InvoiceLine]) -> tuple[list[dict], dict]:
             bucket["cache_read_tokens"] += line.cache_read_tokens
             bucket["cache_write_tokens"] += line.cache_write_tokens
 
-    providers = sorted(
-        providers_by_key.values(), key=lambda p: p["cost"], reverse=True
-    )
+    providers = sorted(providers_by_key.values(), key=lambda p: p["cost"], reverse=True)
     for provider in providers:
         provider["models"] = sorted(
             provider["models"].values(), key=lambda m: m["cost"], reverse=True
@@ -141,26 +154,31 @@ def build_channel_tree(lines: list[ChannelUsageLine]) -> list[dict]:
     channels_by_key: dict[tuple, dict] = {}
 
     for line in lines:
-        channel = channels_by_key.setdefault((line.guild_id, line.channel_id), {
-            "guild_id": line.guild_id,
-            "channel_id": line.channel_id,
-            "display_name": None,
-            "cost": Decimal("0"),
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "rows": [],
-        })
+        channel = channels_by_key.setdefault(
+            (line.guild_id, line.channel_id),
+            {
+                "guild_id": line.guild_id,
+                "channel_id": line.channel_id,
+                "display_name": None,
+                "cost": Decimal("0"),
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "rows": [],
+            },
+        )
         if line.channel_name and not channel["display_name"]:
             channel["display_name"] = f"#{line.channel_name}"
-        channel["rows"].append({
-            "provider_label": line.provider_label,
-            "model_name": line.model_name,
-            "reasoning": _reasoning_display(line.reasoning_level),
-            "source": _SOURCE_LABELS.get(line.source, line.source),
-            "input_tokens": line.input_tokens,
-            "output_tokens": line.output_tokens,
-            "cost": line.cost_usd,
-        })
+        channel["rows"].append(
+            {
+                "provider_label": line.provider_label,
+                "model_name": line.model_name,
+                "reasoning": _reasoning_display(line.reasoning_level),
+                "source": _SOURCE_LABELS.get(line.source, line.source),
+                "input_tokens": line.input_tokens,
+                "output_tokens": line.output_tokens,
+                "cost": line.cost_usd,
+            }
+        )
         channel["cost"] += line.cost_usd
         channel["input_tokens"] += line.input_tokens
         channel["output_tokens"] += line.output_tokens
@@ -195,9 +213,9 @@ class UsageAdminController(Controller):
         self,
         request: Request,
         db_session: AsyncSession,
-        days: Optional[int] = 30,
-        pipeline_mode: Optional[str] = None,
-        granularity: Optional[str] = "day",
+        days: int | None = 30,
+        pipeline_mode: str | None = None,
+        granularity: str | None = "day",
         month: str | None = None,
         tab: str | None = None,
     ) -> TemplateResponse:
@@ -294,29 +312,186 @@ class UsageAdminController(Controller):
         palette = {"lite": "#3b82f6", "premium": "#f59e0b"}
         nice_name = {"lite": "Lite Research", "premium": "Advanced Research"}
         for product, costs_by_label in sorted(products.items()):
-            chart_datasets.append({
-                "label": nice_name.get(product, product),
-                "data": [costs_by_label.get(lbl, 0) for lbl in labels_ordered],
-                "borderColor": palette.get(product, "#8b5cf6"),
-                "backgroundColor": palette.get(product, "#8b5cf6") + "33",
-                "fill": True,
-                "tension": 0.3,
-            })
+            chart_datasets.append(
+                {
+                    "label": nice_name.get(product, product),
+                    "data": [costs_by_label.get(lbl, 0) for lbl in labels_ordered],
+                    "borderColor": palette.get(product, "#8b5cf6"),
+                    "backgroundColor": palette.get(product, "#8b5cf6") + "33",
+                    "fill": True,
+                    "tension": 0.3,
+                }
+            )
+
+        # ------------------------------------------------------------------
+        # Canonical cross-product usage ledger (web Chat, Resources, Discord)
+        # ------------------------------------------------------------------
+        ledger_filters = []
+        if days:
+            ledger_filters.append(
+                UsageCostRow.metered_at >= datetime.now(UTC) - timedelta(days=days)
+            )
+        product_rows = (
+            await db_session.execute(
+                select(
+                    UsageCostRow.product_mode,
+                    UsageCostRow.operation_type,
+                    UsageCostRow.user_id,
+                    UsageCostRow.discord_user_id,
+                    UsageCostRow.intelligence_mode,
+                    UsageCostRow.provider_key,
+                    UsageCostRow.model_id,
+                    UsageCostRow.reasoning_level,
+                    UsageCostRow.conversation_id,
+                    UsageCostRow.root_turn_id,
+                    UsageCostRow.subagent_id,
+                    func.count().label("operations"),
+                    func.sum(UsageCostRow.input_tokens).label("input_tokens"),
+                    func.sum(UsageCostRow.output_tokens).label("output_tokens"),
+                    func.sum(UsageCostRow.cost_usd).label("cost_usd"),
+                    func.sum(UsageCostRow.overage_cost_usd).label("overage_cost_usd"),
+                )
+                .where(*ledger_filters)
+                .group_by(
+                    UsageCostRow.product_mode,
+                    UsageCostRow.operation_type,
+                    UsageCostRow.user_id,
+                    UsageCostRow.discord_user_id,
+                    UsageCostRow.intelligence_mode,
+                    UsageCostRow.provider_key,
+                    UsageCostRow.model_id,
+                    UsageCostRow.reasoning_level,
+                    UsageCostRow.conversation_id,
+                    UsageCostRow.root_turn_id,
+                    UsageCostRow.subagent_id,
+                )
+                .order_by(func.sum(UsageCostRow.cost_usd).desc())
+            )
+        ).all()
+        subagent_rows = (
+            await db_session.execute(
+                select(
+                    WebChatSubagent.id,
+                    WebChatSubagent.name,
+                    WebChatSubagent.lineage,
+                    WebChatSubagent.spawn_ordinal,
+                    WebChatSubagent.status,
+                    WebChatSubagent.reasoning_level,
+                    WebChatSubagent.input_tokens,
+                    WebChatSubagent.output_tokens,
+                    WebChatSubagent.cost_usd,
+                    WebChatTurn.id.label("root_turn_id"),
+                    WebChatConversation.id.label("conversation_id"),
+                    WebChatConversation.owner_user_id,
+                    WebChatConversation.intelligence_mode,
+                )
+                .join(WebChatTurn, WebChatTurn.id == WebChatSubagent.root_turn_id)
+                .join(
+                    WebChatConversation,
+                    WebChatConversation.id == WebChatTurn.conversation_id,
+                )
+                .order_by(WebChatSubagent.queued_at.desc())
+                .limit(500)
+            )
+        ).all()
+        pending_chat_reservations = (
+            await db_session.execute(
+                select(
+                    func.count(ChatSpendReservation.id),
+                    func.coalesce(func.sum(ChatSpendReservation.reserved_usd), 0),
+                ).where(
+                    ChatSpendReservation.status == "active",
+                    ChatSpendReservation.expires_at > datetime.now(UTC),
+                )
+            )
+        ).one()
+        ledger_totals = (
+            await db_session.execute(
+                select(
+                    func.count().label("operations"),
+                    func.coalesce(func.sum(UsageCostRow.input_tokens), 0),
+                    func.coalesce(func.sum(UsageCostRow.output_tokens), 0),
+                    func.coalesce(func.sum(UsageCostRow.cost_usd), 0),
+                ).where(*ledger_filters)
+            )
+        ).one()
+        ledger_bucket = func.to_char(
+            func.date_trunc(granularity, UsageCostRow.metered_at),
+            "YYYY-MM-DD HH24:00"
+            if granularity == "hour"
+            else ("YYYY-MM" if granularity == "month" else "YYYY-MM-DD"),
+        )
+        ledger_chart_rows = (
+            await db_session.execute(
+                select(
+                    ledger_bucket.label("bucket"),
+                    UsageCostRow.product_mode,
+                    func.coalesce(func.sum(UsageCostRow.cost_usd), 0).label("cost"),
+                )
+                .where(*ledger_filters)
+                .group_by(ledger_bucket, UsageCostRow.product_mode)
+                .order_by(ledger_bucket)
+            )
+        ).all()
+        if ledger_chart_rows:
+            labels_ordered = []
+            products = {}
+            for row in ledger_chart_rows:
+                if row.bucket not in labels_ordered:
+                    labels_ordered.append(row.bucket)
+                products.setdefault(row.product_mode, {})[row.bucket] = float(
+                    row.cost or 0
+                )
+            product_palette = {
+                "resources": "#3b82f6",
+                "chat": "#8b5cf6",
+                "discord": "#22c55e",
+            }
+            chart_datasets = [
+                {
+                    "label": product.title(),
+                    "data": [values.get(label, 0) for label in labels_ordered],
+                    "borderColor": product_palette.get(product, "#8b5cf6"),
+                    "backgroundColor": product_palette.get(product, "#8b5cf6") + "33",
+                    "fill": True,
+                    "tension": 0.3,
+                }
+                for product, values in sorted(products.items())
+            ]
+
+        discord_ids = {
+            row.discord_user_id for row in product_rows if row.discord_user_id
+        }
+        discord_links = {}
+        if discord_ids:
+            discord_links = dict(
+                (
+                    await db_session.execute(
+                        select(
+                            OAuthAccount.provider_account_id,
+                            OAuthAccount.user_id,
+                        ).where(
+                            OAuthAccount.provider == "discord",
+                            OAuthAccount.provider_account_id.in_(discord_ids),
+                        )
+                    )
+                ).all()
+            )
 
         # ------------------------------------------------------------------
         # Grand totals
         # ------------------------------------------------------------------
-        total_sessions = sum(r.session_count for r in agg_rows)
-        total_input = sum(r.total_input or 0 for r in agg_rows)
-        total_output = sum(r.total_output or 0 for r in agg_rows)
-        total_cost = sum(r.total_cost or 0 for r in agg_rows)
+        total_sessions = int(ledger_totals[0] or 0)
+        total_input = int(ledger_totals[1] or 0)
+        total_output = int(ledger_totals[2] or 0)
+        total_cost = Decimal(ledger_totals[3] or 0)
 
         # ------------------------------------------------------------------
         # Service usage (profiler, etc.) — internal costs
         # ------------------------------------------------------------------
         svc_filters: list = []
         if days:
-            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            cutoff = datetime.now(UTC) - timedelta(days=days)
             svc_filters.append(ScanServiceUsage.created_at >= cutoff)
 
         svc_runs_stmt = (
@@ -368,6 +543,15 @@ class UsageAdminController(Controller):
                 "invoice_providers": invoice_providers,
                 "invoice_totals": invoice_totals,
                 "channels": channels,
+                "product_rows": product_rows,
+                "subagent_rows": subagent_rows,
+                "pending_chat_reservation_count": int(
+                    pending_chat_reservations[0] or 0
+                ),
+                "pending_chat_reservation_cost": Decimal(
+                    pending_chat_reservations[1] or 0
+                ),
+                "discord_links": discord_links,
                 **ctx,
             },
         )
