@@ -566,6 +566,87 @@ async def test_active_turn_blocks_reasoning_changes(db_session, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_conversation_snapshot_carries_rendered_markdown_and_all_versions(
+    db_session, monkeypatch
+):
+    """The browser reconciles terminal turns from this payload without a reload."""
+    user, conversation = await _seed_chat(db_session)
+
+    async def entitled(*_args, **_kwargs):
+        return {"sudo-r"}
+
+    monkeypatch.setattr(chat_api, "require_entitled", entitled)
+    version_group = uuid4()
+    turn = WebChatTurn(
+        conversation_id=conversation.id,
+        sequence=1,
+        submission_key="reconcile-turn",
+        response_version_group=version_group,
+        response_sequence=2,
+        model_key=conversation.selected_model_key,
+        reasoning_level=conversation.reasoning_level,
+        status="complete",
+    )
+    db_session.add(turn)
+    await db_session.flush()
+    db_session.add_all(
+        [
+            WebChatMessage(
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+                sequence=1,
+                role="user",
+                content="Explain **durable** queues",
+                version_group=uuid4(),
+                version_number=1,
+                is_active=True,
+            ),
+            WebChatMessage(
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+                sequence=2,
+                role="assistant",
+                content="# Superseded",
+                version_group=version_group,
+                version_number=1,
+                is_active=False,
+            ),
+            WebChatMessage(
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+                sequence=2,
+                role="assistant",
+                content="# Durable queues",
+                version_group=version_group,
+                version_number=2,
+                is_active=True,
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    snapshot = await ChatApiController.get_conversation.fn(
+        object.__new__(ChatApiController),
+        conversation.id,
+        _request(user.id),
+        db_session,
+    )
+
+    assert snapshot["active_turn"] is None
+    messages = snapshot["messages"]
+    user_message = next(item for item in messages if item["role"] == "user")
+    assert "<strong>durable</strong>" in user_message["content_html"]
+    assert user_message["attachments"] == []
+    assistants = [item for item in messages if item["role"] == "assistant"]
+    # Every version ships so the client can rebuild the version <select>.
+    assert [item["version_number"] for item in assistants] == [1, 2]
+    assert [item["is_active"] for item in assistants] == [False, True]
+    assert all(item["version_group"] == str(version_group) for item in assistants)
+    active = next(item for item in assistants if item["is_active"])
+    assert "<h1>Durable queues</h1>" in active["content_html"]
+
+
+@pytest.mark.asyncio
 async def test_active_ambiguous_reservation_cannot_be_reused(db_session):
     user, conversation = await _seed_chat(db_session)
     kwargs = {
@@ -633,6 +714,21 @@ def test_browser_contract_includes_csrf_recovery_and_live_updates():
     assert "sk:notification-status" in javascript
     assert "setInterval(reconcile" not in javascript
     assert "setInterval(refreshActivityTimers" in javascript
+    # Terminal chat turns reconcile the DOM from the conversation snapshot
+    # instead of reloading the page, so scroll/composer state survives.
+    terminal = javascript.split("function handleTerminal")[1].split(
+        "function notification"
+    )[0]
+    assert "reconcile();" in terminal
+    chat_branch = terminal.split("if (mode === 'chat')")[1].split(
+        "if (type === 'agent_run_error')"
+    )[0]
+    assert "location.reload" not in chat_branch
+    assert "chat_turn_complete" in javascript and "chat_turn_stopped" in javascript
+    assert "function syncThread" in javascript
+    assert "content_html" in javascript
+    assert "data-version-group" in javascript and "data-regenerate" in javascript
+    assert "captureScroll" in javascript and "restoreScroll" in javascript
     assert "data-root-activity" in template
     assert "data-chat-agent-panel" in template
     assert "data-activity-timer" in template
