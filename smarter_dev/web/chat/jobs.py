@@ -39,6 +39,8 @@ from smarter_dev.web.chat.concurrency import SemaphoreUnavailable
 from smarter_dev.web.chat.dispatch import cancel_dispatch
 from smarter_dev.web.chat.dispatch import create_dispatch
 from smarter_dev.web.chat.dispatch import dispatch_one
+from smarter_dev.web.chat.documents import MarkdownDocumentError
+from smarter_dev.web.chat.documents import store_markdown_document
 from smarter_dev.web.chat.entitlements import has_chat
 from smarter_dev.web.chat.entitlements import has_ultra_chat
 from smarter_dev.web.chat.entitlements import resolve_spend_tier
@@ -1082,9 +1084,90 @@ async def _build_root_agent(
         )
         return _format_tool_result(result, after)
 
+    async def create_markdown_document(
+        ctx: RunContext, title: str, filename: str, markdown: str
+    ) -> str:
+        """Create a private Markdown document the user can preview and download."""
+        call_id = ctx.tool_call_id or uuid4().hex
+        if not await accept("tool", call_id):
+            return "Tool limit reached. Conclude with available information."
+        before = await _tool_state(
+            owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
+        )
+        if before.hard_cutoff:
+            return USAGE_LIMIT_RESULT
+        await _publish_activity(
+            owner_id=owner_id,
+            conversation_id=conversation.id,
+            turn_id=turn.id,
+            tool="create_markdown_document",
+            status=f"Creating {title[:160] or 'document'}",
+        )
+        try:
+            async with get_db_session_context() as session:
+                document, created = await store_markdown_document(
+                    session,
+                    conversation_id=conversation.id,
+                    turn_id=turn.id,
+                    assistant_message_id=draft_message_id,
+                    worker_lease_token=turn.worker_lease_token or "",
+                    tool_call_id=call_id,
+                    title=title,
+                    filename=filename,
+                    markdown=markdown,
+                )
+                metadata = {
+                    "id": str(document.id),
+                    "turn_id": str(turn.id),
+                    "assistant_message_id": str(draft_message_id),
+                    "title": document.title,
+                    "filename": document.filename,
+                    "size_bytes": document.size_bytes,
+                }
+                await session.commit()
+        except MarkdownDocumentError as exc:
+            result = f"error: {exc}"
+            await _record_tool_result(turn.id, "create_markdown_document", result)
+            await _publish_activity(
+                owner_id=owner_id,
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+                tool="create_markdown_document",
+                status="Thinking…",
+                phase="complete",
+            )
+            return result
+        if created:
+            await _event(turn.id, "chat_document_created", metadata)
+            await _notify_safe(
+                owner_id,
+                "chat_document_created",
+                conversation.id,
+                turn.id,
+                **{key: value for key, value in metadata.items() if key != "turn_id"},
+            )
+        result = (
+            f"Document ready: {document.title} ({document.filename}). "
+            "The user can preview or download it from this response."
+        )
+        await _record_tool_result(turn.id, "create_markdown_document", result)
+        await _publish_activity(
+            owner_id=owner_id,
+            conversation_id=conversation.id,
+            turn_id=turn.id,
+            tool="create_markdown_document",
+            status="Thinking…",
+            phase="complete",
+        )
+        after = await _tool_state(
+            owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
+        )
+        return _format_tool_result(result, after)
+
     agent.tool(search_web, name="web_search")
     agent.tool(read_web, name="web_read")
     agent.tool(run_code_tool, name="run_code")
+    agent.tool(create_markdown_document)
 
     if policy.subagents_enabled:
 

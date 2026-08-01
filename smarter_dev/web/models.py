@@ -4530,6 +4530,45 @@ class WebChatAttachment(Base):
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="ready")
 
 
+class WebChatDocument(Base):
+    __tablename__ = "web_chat_documents"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    conversation_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("web_chat_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    turn_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("web_chat_turns.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    assistant_message_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("web_chat_messages.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    tool_call_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    markdown_content: Mapped[str] = mapped_column(Text, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "turn_id", "tool_call_id", name="uq_web_chat_document_tool_call"
+        ),
+        Index(
+            "ix_web_chat_documents_conversation_created",
+            "conversation_id",
+            "created_at",
+        ),
+    )
+
+
 class WebChatCompaction(Base):
     __tablename__ = "web_chat_compactions"
 

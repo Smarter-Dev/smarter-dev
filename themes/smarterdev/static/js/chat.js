@@ -25,6 +25,9 @@
   var agentPanel = document.querySelector('[data-chat-agent-panel]');
   var subagentList = document.querySelector('[data-chat-subagents]');
   var notificationStreamStatus = null;
+  var documentDialog = document.querySelector('[data-chat-document-dialog]');
+  var documentDialogTrigger = null;
+  var pendingDocuments = [];
 
   function api(url, options) {
     options = options || {};
@@ -102,6 +105,120 @@
     }
     article.appendChild(content);
     return article;
+  }
+
+  function documentDownloadUrl(documentId) {
+    return '/v2/api/chat/conversations/' + conversationId + '/documents/' + encodeURIComponent(documentId) + '/download';
+  }
+
+  function formatDocumentSize(sizeBytes) {
+    var size = Number(sizeBytes) || 0;
+    if (size < 1024) return size + ' bytes';
+    return (size / 1024).toFixed(size < 10240 ? 1 : 0) + ' KB';
+  }
+
+  function renderDocumentCard(item) {
+    if (!item || !item.id || document.querySelector('[data-document-id="' + item.id + '"]')) return true;
+    var article = item.assistant_message_id && thread.querySelector('[data-message-id="' + item.assistant_message_id + '"]');
+    article = article || rootArticle(item.turn_id);
+    if (!article) return false;
+    var documents = article.querySelector('[data-chat-documents]');
+    if (!documents) {
+      documents = document.createElement('div');
+      documents.className = 'chat-documents';
+      documents.dataset.chatDocuments = '';
+      var responseActions = article.querySelector('.chat-response-actions');
+      article.insertBefore(documents, responseActions || null);
+    }
+    var card = document.createElement('article');
+    card.className = 'chat-document';
+    card.dataset.documentId = item.id;
+    var mark = document.createElement('div');
+    mark.className = 'chat-document-mark';
+    mark.setAttribute('aria-hidden', 'true');
+    mark.textContent = 'MD';
+    var info = document.createElement('div');
+    info.className = 'chat-document-info';
+    var title = document.createElement('strong');
+    title.textContent = item.title || 'Markdown document';
+    var filename = document.createElement('span');
+    filename.textContent = (item.filename || 'document.md') + ' · ' + formatDocumentSize(item.size_bytes);
+    info.append(title, filename);
+    var actions = document.createElement('div');
+    actions.className = 'chat-document-actions';
+    var preview = document.createElement('button');
+    preview.type = 'button';
+    preview.dataset.openDocument = '';
+    preview.dataset.documentId = item.id;
+    preview.textContent = 'Preview';
+    var download = document.createElement('a');
+    download.href = documentDownloadUrl(item.id);
+    download.download = item.filename || 'document.md';
+    download.dataset.skNoSpa = '';
+    download.textContent = 'Download';
+    actions.append(preview, download);
+    card.append(mark, info, actions);
+    documents.appendChild(card);
+    return true;
+  }
+
+  function syncDocuments(items) {
+    (items || []).forEach(function (item) {
+      if (renderDocumentCard(item)) return;
+      if (!pendingDocuments.some(function (pending) { return pending.id === item.id; })) {
+        pendingDocuments.push(item);
+      }
+    });
+  }
+
+  function flushPendingDocuments() {
+    var queued = pendingDocuments;
+    pendingDocuments = [];
+    syncDocuments(queued);
+  }
+
+  function closeDocumentDialog() {
+    if (!documentDialog) return;
+    documentDialog.hidden = true;
+    document.body.classList.remove('chat-document-open');
+    documentDialog.querySelector('[data-document-content]').textContent = '';
+    if (documentDialogTrigger) documentDialogTrigger.focus();
+    documentDialogTrigger = null;
+  }
+
+  function openDocumentDialog(documentId, trigger) {
+    if (!documentDialog || !documentId) return;
+    documentDialogTrigger = trigger || null;
+    var title = documentDialog.querySelector('[data-document-title]');
+    var filename = documentDialog.querySelector('[data-document-filename]');
+    var content = documentDialog.querySelector('[data-document-content]');
+    var download = documentDialog.querySelector('[data-document-download]');
+    title.textContent = 'Loading…';
+    filename.textContent = '';
+    content.textContent = 'Loading document…';
+    download.removeAttribute('href');
+    documentDialog.hidden = false;
+    document.body.classList.add('chat-document-open');
+    documentDialog.querySelector('[data-close-document]:not(.chat-document-backdrop)').focus();
+    api('/v2/api/chat/conversations/' + conversationId + '/documents/' + encodeURIComponent(documentId)).then(function (documentData) {
+      title.textContent = documentData.title;
+      filename.textContent = documentData.filename + ' · ' + formatDocumentSize(documentData.size_bytes);
+      content.innerHTML = documentData.content_html;
+      download.href = documentDownloadUrl(documentId);
+      download.download = documentData.filename;
+    }).catch(function (error) {
+      title.textContent = 'Document unavailable';
+      content.textContent = error.message;
+    });
+  }
+
+  if (documentDialog) {
+    documentDialog.addEventListener('click', function (event) {
+      if (event.target.closest('[data-close-document]')) closeDocumentDialog();
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && !documentDialog.hidden) closeDocumentDialog();
+    });
   }
 
   function createActivity(startedAt, label) {
@@ -515,6 +632,7 @@
       if (mode === 'resources') resourceRunning = true;
       assistant.dataset.pendingTurn = activeTurn || '';
       assistant.dataset.turnId = activeTurn || '';
+      flushPendingDocuments();
       updateRootActivity({
         turn_id: activeTurn,
         status: ['disconnected', 'suspended', 'reconnecting'].indexOf(notificationStreamStatus) !== -1 ? 'Connection lost; reconnecting…' : 'Working…'
@@ -545,6 +663,11 @@
   });
 
   document.addEventListener('click', function (event) {
+    var documentButton = event.target.closest('[data-open-document]');
+    if (documentButton) {
+      openDocumentDialog(documentButton.dataset.documentId, documentButton);
+      return;
+    }
     var button = event.target.closest('[data-regenerate]');
     if (!button) return;
     setBusy(true);
@@ -615,6 +738,7 @@
     }
     if (type === 'chat_run_state') updateRootActivity(data);
     if (type === 'chat_subagent_state') updateSubagentActivity(data);
+    if (type === 'chat_document_created') syncDocuments([data]);
     if (type === 'chat_output_delta') {
       var pending = thread.querySelector('[data-pending-turn="' + data.turn_id + '"] .chat-content') || thread.querySelector('[data-turn-id="' + data.turn_id + '"] .chat-content');
       if (pending) pending.textContent = data.content || '';
@@ -671,6 +795,7 @@
         window.location.reload();
       }
       syncPendingAttachments(snapshot.pending_attachments);
+      syncDocuments(snapshot.documents);
       syncAgentActivity(snapshot);
     }).catch(function () {});
     refreshUsage();
