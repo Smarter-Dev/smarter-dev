@@ -358,8 +358,11 @@
   }
 
   document.addEventListener('sk:notification', function (e) {
-    var data = (e && e.detail) || {};
-    if (!data || !data.type) return;
+    // Skrift ≥0.2.0a17 nests event fields under detail.payload; keep the
+    // envelope's type alongside them for dispatching.
+    var envelope = (e && e.detail) || {};
+    if (!envelope.type) return;
+    var data = Object.assign({}, envelope.payload, { type: envelope.type });
     if (data.type.indexOf('agent_') !== 0) return;
     var handled = handleAgentEvent(data);
     if (handled) {
