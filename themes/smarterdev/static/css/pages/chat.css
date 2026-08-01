@@ -89,24 +89,6 @@
   border-color: var(--cyan);
 }
 
-.chat-mode,
-.chat-intelligence {
-  font-family: var(--heading);
-  font-size: .5rem;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  color: var(--cyan);
-  white-space: nowrap;
-}
-
-.chat-mode { opacity: .75 }
-
-.chat-intelligence {
-  padding: 5px 9px;
-  border: 1px solid var(--chat-line-mid);
-  background: rgba(0, 212, 255, .04);
-}
-
 .chat-sidebar nav {
   display: flex;
   flex-direction: column;
@@ -146,6 +128,9 @@
 
 .chat-main {
   display: grid;
+  /* An explicit 0-floor column: without it the implicit auto track is sized by
+     the header's min-content and the whole pane overflows narrow viewports. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr) auto auto auto;
   min-width: 0;
   min-height: 0;
@@ -154,43 +139,103 @@
 
 .chat-header {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
-  gap: 1rem 1.5rem;
-  flex-wrap: wrap;
-  padding: .9rem var(--chat-pad);
+  gap: .75rem 1.5rem;
+  padding: .75rem var(--chat-pad);
   background: var(--chat-rail);
   border-bottom: 1px solid var(--chat-line);
 }
 
-.chat-kicker {
-  font-family: var(--heading);
-  font-size: .5rem;
-  letter-spacing: .14em;
-  color: var(--cyan);
-  opacity: .75;
-  margin-bottom: .35rem;
-}
-
 .chat-header h1 {
+  flex: 1 1 auto;
+  min-width: 0;
   font-family: var(--heading);
   font-weight: 400;
-  font-size: .95rem;
+  font-size: .9rem;
   line-height: 1.35;
   letter-spacing: .02em;
   color: var(--white);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.chat-controls {
-  display: flex;
-  align-items: flex-end;
-  gap: .75rem;
-  flex-wrap: wrap;
+.chat-header > .chat-settings { flex: 0 0 auto }
+
+/* ── Disclosures ────────────────────────────────────────
+   Model settings, usage, and sub-agents are all the same object: a quiet chip
+   that opens a panel. <details> keeps them keyboard-reachable and working with
+   scripting off; chat.js only adds aria-expanded, Escape, and click-away. */
+
+.chat-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
-.chat-controls label,
-.chat-start-settings label {
-  display: block;
+.chat-disclosure[hidden] { display: none }
+
+.chat-disclosure > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  min-height: 28px;
+  padding: 0 .55rem;
+  font-family: var(--mono);
+  font-size: .72rem;
+  color: var(--chat-dim);
+  border: 1px solid transparent;
+  cursor: pointer;
+  list-style: none;
+  white-space: nowrap;
+  transition: color .2s, border-color .2s;
+}
+.chat-disclosure > summary::-webkit-details-marker { display: none }
+.chat-disclosure > summary::after {
+  content: "";
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform .2s;
+}
+.chat-disclosure > summary:hover { color: var(--cyan) }
+.chat-disclosure[open] > summary {
+  color: var(--cyan);
+  border-color: var(--chat-line-mid);
+}
+.chat-disclosure[open] > summary::after { transform: translateY(1px) rotate(-135deg) }
+
+/* Popovers float above the layout so opening one never moves the thread. */
+.chat-pop-host { position: relative }
+
+.chat-pop {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + .4rem);
+  right: 0;
+  width: max-content;
+  max-width: min(21rem, calc(100vw - 2 * var(--chat-pad)));
+  padding: .85rem .9rem;
+  background: var(--chat-float);
+  border: 1px solid var(--chat-line-mid);
+  border-top: 2px solid var(--cyan);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .6);
+}
+
+.chat-settings-pop { display: grid; gap: .7rem }
+
+.chat-settings-pop label {
+  display: grid;
+  gap: .3rem;
   font-family: var(--heading);
   font-size: .5rem;
   letter-spacing: .1em;
@@ -198,13 +243,33 @@
   color: var(--chat-dim);
 }
 
+.chat-pop-note,
+.chat-usage-pop p {
+  font-family: var(--mono);
+  font-size: .7rem;
+  line-height: 1.65;
+  color: var(--chat-dim);
+}
+.chat-pop-note b,
+.chat-usage-pop b { color: var(--light); font-weight: 500 }
+.chat-pop-note .chat-intelligence { color: var(--cyan) }
+
+.chat-usage-pop { display: grid; gap: .5rem }
+.chat-usage > summary { font-variant-numeric: tabular-nums }
+
+/* The composer sits at the foot of the pane, so its panel opens upward. */
+.chat-usage .chat-pop {
+  top: auto;
+  bottom: calc(100% + .4rem);
+  border-top: 1px solid var(--chat-line-mid);
+  border-bottom: 2px solid var(--cyan);
+}
+
 /* ── Selects ────────────────────────────────────────── */
 
-.chat-controls select,
+.chat-settings-pop select,
 .chat-start-settings select,
 .chat-response-actions select {
-  display: block;
-  margin-top: .4rem;
   min-height: 34px;
   max-width: 100%;
   padding: 0 2rem 0 .6rem;
@@ -221,19 +286,19 @@
   cursor: pointer;
   transition: border-color .2s, background-color .2s;
 }
-.chat-controls select:hover:not(:disabled),
+.chat-settings-pop select:hover:not(:disabled),
 .chat-start-settings select:hover:not(:disabled),
 .chat-response-actions select:hover {
   border-color: var(--chat-line-hot);
 }
-.chat-controls select:disabled,
+.chat-settings-pop select:disabled,
 .chat-start-settings select:disabled {
   color: var(--gray);
   border-color: rgba(255, 255, 255, .07);
   background-color: var(--chat-card);
   cursor: not-allowed;
 }
-.chat-controls option,
+.chat-settings-pop option,
 .chat-start-settings option,
 .chat-response-actions option {
   background: var(--chat-float);
@@ -470,38 +535,47 @@
   background: rgba(234, 179, 8, .06);
 }
 
-/* ── Per-response controls ──────────────────────────── */
+/* ── Per-response controls ──────────────────────────────
+   Regenerate and the version picker belong to one message, so they surface
+   with that message: on hover, and on keyboard focus anywhere inside it. The
+   row keeps its space either way, so revealing it never shifts the thread. */
 
 .chat-response-actions {
   display: flex;
   align-items: center;
   gap: .5rem;
   flex-wrap: wrap;
-  margin-top: .9rem;
+  margin-top: .6rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .18s;
+}
+.chat-message:hover .chat-response-actions,
+.chat-message:focus-within .chat-response-actions { opacity: 1; pointer-events: auto }
+
+/* Touch has no hover, so the actions stay visible there. */
+@media (hover: none) {
+  .chat-response-actions { opacity: 1; pointer-events: auto }
 }
 
 .chat-response-actions button {
-  min-height: 32px;
-  padding: 0 14px;
+  min-height: 28px;
+  padding: 0;
   font-family: var(--heading);
-  font-size: .52rem;
-  letter-spacing: .08em;
-  color: var(--cyan);
+  font-size: .5rem;
+  letter-spacing: .1em;
+  color: var(--chat-dim);
   background: transparent;
-  border: 1px solid rgba(0, 212, 255, .25);
+  border: 0;
   cursor: pointer;
-  transition: background .2s, border-color .2s;
+  transition: color .2s;
 }
-.chat-response-actions button:hover:not(:disabled) {
-  background: rgba(0, 212, 255, .08);
-  border-color: var(--cyan);
-}
+.chat-response-actions button:hover:not(:disabled) { color: var(--cyan) }
 .chat-response-actions button:disabled {
   color: var(--gray);
-  border-color: rgba(255, 255, 255, .07);
   cursor: not-allowed;
 }
-.chat-response-actions select { margin-top: 0; min-height: 32px }
+.chat-response-actions select { min-height: 28px; font-size: .7rem }
 
 .chat-sent-attachments {
   display: flex;
@@ -543,18 +617,29 @@
   line-height: 1.75;
 }
 
+/* One calm sentence, not three labelled form rows: the choice reads as prose
+   and the selects are the only things that look adjustable. */
 .chat-start-settings {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
-  gap: 1rem 1.25rem;
   margin-top: 2rem;
-  padding: 1.25rem;
-  text-align: left;
-  background: var(--chat-card);
-  border: 1px solid var(--chat-line);
-  border-top: 2px solid var(--chat-line-mid);
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--chat-line);
 }
-.chat-start-settings select { width: 100% }
+.chat-start-settings p {
+  font-size: .88rem;
+  line-height: 2.6;
+  color: var(--light);
+}
+.chat-start-settings select {
+  margin: 0 .15rem;
+  vertical-align: baseline;
+}
+.chat-start-settings .chat-start-note {
+  margin-top: .8rem;
+  font-family: var(--mono);
+  font-size: .7rem;
+  line-height: 1.7;
+  color: var(--chat-dim);
+}
 
 /* ── Jump to latest ─────────────────────────────────── */
 
@@ -584,23 +669,19 @@
 
 /* ── Sub-agent panel ────────────────────────────────── */
 
+/* Only present while a turn is fanning out, and only a count until asked. */
 .chat-agent-panel {
   width: min(var(--chat-measure), calc(100% - 2 * var(--chat-pad)));
-  margin: 0 auto .7rem;
-  padding: .7rem .9rem;
-  background: var(--chat-raised);
-  border: 1px solid var(--chat-line);
-  border-top: 2px solid var(--chat-line-mid);
+  margin: 0 auto .5rem;
 }
 .chat-agent-panel[hidden] { display: none }
-
-.chat-agent-panel-title {
-  font-family: var(--heading);
-  font-size: .5rem;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  color: var(--chat-dim);
-  margin-bottom: .45rem;
+.chat-agent-panel > summary { padding-left: 0 }
+.chat-agent-panel[open] > summary { border-color: transparent }
+.chat-agent-panel > div {
+  margin-top: .3rem;
+  padding: .35rem .8rem .5rem;
+  background: var(--chat-raised);
+  border-left: 1px solid var(--chat-line-mid);
 }
 
 .chat-agent-row {
@@ -685,25 +766,38 @@
   position: relative;
   width: min(var(--chat-measure), calc(100% - 2 * var(--chat-pad)));
   margin: 0 auto var(--chat-pad);
-  padding: .85rem .9rem .75rem;
+  padding: .55rem .65rem;
   background: var(--chat-raised);
   border: 1px solid var(--chat-line-mid);
   border-top: 2px solid rgba(0, 212, 255, .22);
-  box-shadow: 0 -14px 34px -20px rgba(0, 0, 0, .9);
-  transition: border-color .25s, box-shadow .25s;
+  transition: border-color .25s;
 }
 .chat-composer:focus-within {
   border-color: var(--chat-line-hot);
   border-top-color: var(--cyan);
-  box-shadow: 0 0 24px -6px rgba(0, 212, 255, .22);
+}
+
+/* One row: attach, the draft, and the controls that act on it. */
+.chat-composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: .5rem;
+}
+
+.chat-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  flex-shrink: 0;
 }
 
 .chat-composer textarea {
   display: block;
-  width: 100%;
-  min-height: 2.75rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--chat-tap);
   max-height: min(40vh, 15rem);
-  padding: 0;
+  padding: .55rem 0;
   background: transparent;
   border: 0;
   outline: 0;
@@ -718,65 +812,41 @@
 .chat-composer textarea::placeholder { color: var(--chat-dim) }
 .chat-composer textarea:disabled { color: var(--gray); cursor: not-allowed }
 
-.chat-composer-foot {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-top: .7rem;
-  padding-top: .65rem;
-  border-top: 1px solid var(--chat-line);
-  font-family: var(--mono);
-  font-size: .68rem;
-  line-height: 1.6;
-  color: var(--chat-dim);
-}
-.chat-composer-foot b { color: var(--light); font-weight: 500 }
-.chat-composer-foot small { font-size: .92em }
-.chat-composer-foot > div {
-  display: flex;
-  align-items: center;
-  gap: .5rem;
-  flex-shrink: 0;
-}
-
 .chat-composer button[type="submit"] {
   min-height: var(--chat-tap);
-  padding: 0 22px;
+  padding: 0 18px;
   font-family: var(--heading);
-  font-size: .6rem;
+  font-size: .58rem;
   letter-spacing: .08em;
   color: var(--cyan);
   background: transparent;
-  border: 1.5px solid var(--cyan);
-  box-shadow: 0 0 15px rgba(0, 212, 255, .12), inset 0 0 15px rgba(0, 212, 255, .04);
+  border: 1px solid var(--chat-line-hot);
   cursor: pointer;
-  transition: all .25s;
+  transition: background .2s, color .2s, border-color .2s;
 }
 .chat-composer button[type="submit"]:hover:not(:disabled) {
   background: var(--cyan);
   color: var(--bg);
-  box-shadow: 0 0 26px rgba(0, 212, 255, .28);
+  border-color: var(--cyan);
 }
 .chat-composer button[type="submit"]:disabled {
   color: var(--gray);
   border-color: rgba(255, 255, 255, .1);
   background: transparent;
-  box-shadow: none;
   cursor: not-allowed;
 }
 
 .chat-composer [data-chat-stop] {
   min-height: var(--chat-tap);
-  padding: 0 18px;
+  padding: 0 14px;
   font-family: var(--heading);
-  font-size: .6rem;
+  font-size: .58rem;
   letter-spacing: .08em;
   color: #ff9c9c;
-  background: rgba(239, 68, 68, .07);
+  background: transparent;
   border: 1px solid rgba(239, 68, 68, .45);
   cursor: pointer;
-  transition: all .2s;
+  transition: background .2s, color .2s;
 }
 .chat-composer [data-chat-stop]:hover:not(:disabled) {
   background: var(--rose);
@@ -785,44 +855,44 @@
 .chat-composer [data-chat-stop]:disabled { opacity: .5; cursor: not-allowed }
 .chat-composer [data-chat-stop][hidden] { display: none }
 
-/* Keyboard hint doubles as the explanation for the disabled Send button. */
+/* The hint is the description for the message box, so it stays in the DOM for
+   aria-describedby; it only paints while the composer is in use or blocked. */
 .chat-composer-hint {
   display: block;
-  margin-top: .35rem;
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
   font-family: var(--heading);
   font-size: .46rem;
   letter-spacing: .1em;
   text-transform: uppercase;
   color: var(--chat-dim);
+  transition: max-height .2s, opacity .2s, margin-top .2s;
+}
+.chat-composer:focus-within .chat-composer-hint,
+.chat-composer[data-busy="true"] .chat-composer-hint {
+  max-height: 2rem;
+  margin-top: .4rem;
+  opacity: 1;
 }
 .chat-composer[data-busy="true"] .chat-composer-hint { color: var(--cyan) }
 
 /* ── Attachments ────────────────────────────────────── */
 
-.chat-attachment-controls {
-  display: flex;
-  align-items: center;
-  gap: .6rem;
-  flex-wrap: wrap;
-  margin-bottom: .7rem;
-}
-
 .chat-attach {
-  display: inline-flex;
-  align-items: center;
-  min-height: 32px;
-  padding: 0 14px;
-  font-family: var(--heading);
-  font-size: .52rem;
-  letter-spacing: .08em;
-  color: var(--light);
+  display: inline-grid;
+  place-items: center;
+  width: var(--chat-tap);
+  height: var(--chat-tap);
+  flex: 0 0 auto;
+  color: var(--chat-dim);
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, .1);
+  border: 1px solid transparent;
   cursor: pointer;
-  white-space: nowrap;
   transition: border-color .2s, color .2s;
 }
-.chat-attach:hover,
+.chat-attach svg { width: 18px; height: 18px }
+.chat-attach:hover { color: var(--cyan) }
 .chat-attach:focus-within { border-color: var(--chat-line-hot); color: var(--cyan) }
 .chat-attach input {
   position: absolute;
@@ -832,21 +902,21 @@
   pointer-events: none;
 }
 
-.chat-attachment-controls > label:not(.chat-attach) {
-  display: flex;
-  align-items: center;
-  gap: .5rem;
-  flex: 1 1 16rem;
-  min-width: 0;
+/* Only shown while an image is attached — it steers nothing else. */
+.chat-media-instruction {
+  display: grid;
+  gap: .3rem;
+  margin-bottom: .55rem;
+}
+.chat-media-instruction[hidden] { display: none }
+.chat-media-instruction label {
   font-family: var(--heading);
   font-size: .46rem;
   letter-spacing: .09em;
   text-transform: uppercase;
   color: var(--chat-dim);
 }
-.chat-attachment-controls input[type="text"] {
-  flex: 1 1 auto;
-  min-width: 0;
+.chat-media-instruction input[type="text"] {
   min-height: 32px;
   padding: 0 .6rem;
   background: var(--chat-card);
@@ -855,7 +925,7 @@
   font-family: var(--mono);
   font-size: .72rem;
 }
-.chat-attachment-controls input[type="text"]:focus { border-color: var(--chat-line-hot) }
+.chat-media-instruction input[type="text"]:focus { border-color: var(--chat-line-hot) }
 
 .chat-attachments {
   display: flex;
@@ -983,7 +1053,6 @@
     gap: .5rem;
     border-bottom: 0;
   }
-  .chat-sidebar-head .chat-mode { display: none }
   .chat-sidebar nav {
     flex-direction: row;
     gap: .4rem;
@@ -1005,33 +1074,29 @@
     border-bottom-color: var(--cyan);
   }
 
-  .chat-header { align-items: flex-start; gap: .75rem }
-  .chat-controls { width: 100%; justify-content: flex-start }
-  .chat-controls label { flex: 1 1 9rem; min-width: 0 }
-  .chat-controls select { width: 100% }
+  .chat-settings-pop select { width: 100% }
   .chat-message-user { width: min(34rem, 100%) }
-  .chat-composer-foot { align-items: center; gap: .6rem }
 }
 
-/* Phones: the composer must not eat the thread. Stack the attachment controls
-   into single full-width rows and keep the metrics beside the send button. */
+/* Narrow panes: a chip near the right edge has no room for a panel beneath it,
+   so the panels anchor to the header and the composer instead of to the chip.
+   Dropping the chip out of the positioning chain is what re-parents them. */
+@media (max-width: 600px) {
+  .chat-pop-host { position: static }
+  .chat-header { position: relative }
+  .chat-pop {
+    left: .5rem;
+    right: .5rem;
+    width: auto;
+    max-width: none;
+  }
+}
+
 @media (max-width: 480px) {
-  .chat-composer { padding: .7rem .7rem .6rem }
-  .chat-attachment-controls {
-    flex-direction: column;
-    align-items: stretch;
-    gap: .45rem;
-    margin-bottom: .55rem;
-  }
-  .chat-attach { align-self: flex-start }
-  .chat-attachment-controls > label:not(.chat-attach) {
-    flex: 0 0 auto;
-    flex-direction: column;
-    align-items: stretch;
-    gap: .25rem;
-  }
-  .chat-composer-foot { gap: .6rem }
-  .chat-composer-foot > span { min-width: 0; overflow: hidden }
+  .chat-composer { padding: .45rem .5rem }
+  .chat-composer-row { gap: .3rem }
+  .chat-composer button[type="submit"] { padding: 0 14px }
+  .chat-usage > summary { padding: 0 .3rem }
 }
 
 @media (prefers-reduced-motion: reduce) {
