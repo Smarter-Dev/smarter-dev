@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block page_type %}chat{% endblock %}
 {% block page_title %}{% if conversation %}{{ conversation.title or 'Chat' }}{% else %}Chat{% endif %}{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="{{ theme_url('css/pages/chat.css') }}"><link rel="stylesheet" href="{{ theme_url('css/pages/sdanswer.css') }}">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="{{ theme_url('css/pages/chat.css') }}"><link rel="stylesheet" href="{{ theme_url('css/pages/chat-documents.css') }}"><link rel="stylesheet" href="{{ theme_url('css/pages/sdanswer.css') }}">{% endblock %}
 {% block content %}
 {% if mode == 'chat' or is_owner|default(false) %}<div data-chat-csrf hidden>{{ csrf_field() }}</div>{% endif %}
 <div class="chat-shell"
@@ -45,6 +45,7 @@
         {% if mode == 'chat' and message.role == 'assistant' and active_turn and message.turn_id == active_turn.id|string %}<div class="chat-agent-activity" data-root-activity data-started-at="{{ active_turn.created_at.isoformat() }}"><span class="chat-activity-pulse" aria-hidden="true"></span><span data-activity-label>Working…</span><time data-activity-timer>0:00</time></div>{% endif %}
         <div class="chat-content sdanswer-prose">{% if message.role == 'assistant' and not message.content and not (mode == 'chat' and active_turn) %}Working…{% else %}{{ message.content_html|safe }}{% endif %}</div>
         {% if mode == 'chat' and message.attachments %}<div class="chat-sent-attachments">{% for attachment in message.attachments %}<a href="/v2/api/chat/conversations/{{ conversation.id }}/attachments/{{ attachment.id }}">{{ attachment.name }}</a>{% endfor %}</div>{% endif %}
+        {% if mode == 'chat' and message.documents %}<div class="chat-documents" data-chat-documents>{% for document in message.documents %}<article class="chat-document" data-document-id="{{ document.id }}"><div class="chat-document-mark" aria-hidden="true">MD</div><div class="chat-document-info"><strong>{{ document.title }}</strong><span>{{ document.filename }} · {{ document.size_bytes }} bytes</span></div><div class="chat-document-actions"><button type="button" data-open-document data-document-id="{{ document.id }}">Preview</button><a href="/v2/api/chat/conversations/{{ conversation.id }}/documents/{{ document.id }}/download" download="{{ document.filename }}" data-sk-no-spa>Download</a></div></article>{% endfor %}</div>{% endif %}
         {% if mode == 'resources' and message.role == 'assistant' and message.sdanswer_blocks %}<script type="application/json" class="sdanswer-payload">{{ message.sdanswer_blocks|tojson }}</script>{% endif %}
         {% if message.stopped %}<span class="chat-stopped">Stopped</span>{% endif %}
         {% if message.role == 'assistant' and mode == 'chat' %}<div class="chat-response-actions">
@@ -73,5 +74,6 @@
   </main>
 </div>
 <div class="chat-dialog-backdrop" data-model-dialog hidden><div role="dialog" aria-modal="true" class="chat-dialog"><h2>Confirm model change</h2><p data-model-warning></p><button type="button" data-model-cancel>Cancel</button><button type="button" data-model-confirm>Confirm change</button></div></div>
+{% if mode == 'chat' %}<div class="chat-document-overlay" data-chat-document-dialog hidden><button type="button" class="chat-document-backdrop" data-close-document aria-label="Close document preview"></button><section class="chat-document-window" role="dialog" aria-modal="true" aria-labelledby="chat-document-title"><header><div><p>Markdown document</p><h2 id="chat-document-title" data-document-title>Document</h2><span data-document-filename></span></div><div class="chat-document-window-actions"><a data-document-download download data-sk-no-spa>Download .md</a><button type="button" data-close-document aria-label="Close document preview">Close</button></div></header><div class="chat-document-content markdown-body" data-document-content></div></section></div>{% endif %}
 {% endblock %}
 {% block page_scripts %}<script src="{{ theme_url('js/sdanswer.js') }}" defer></script><script src="{{ theme_url('js/chat.js') }}" defer></script>{% endblock %}

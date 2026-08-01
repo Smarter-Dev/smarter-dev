@@ -108,6 +108,7 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "web_chat_attachments",
     "web_chat_compactions",
     "web_chat_conversations",
+    "web_chat_documents",
     "web_chat_messages",
     "web_chat_model_changes",
     "web_chat_runtime_events",

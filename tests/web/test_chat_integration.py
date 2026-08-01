@@ -29,6 +29,7 @@ from smarter_dev.web.chat.api import ReasoningBody
 from smarter_dev.web.chat.api import TurnBody
 from smarter_dev.web.chat.csrf import require_api_csrf
 from smarter_dev.web.chat.dispatch import ensure_submission_handler
+from smarter_dev.web.chat.documents import store_markdown_document
 from smarter_dev.web.chat.limits import OperationAlreadyReserved
 from smarter_dev.web.chat.limits import reserve_operation
 from smarter_dev.web.chat.settings import ensure_settings
@@ -39,6 +40,7 @@ from smarter_dev.web.models import ChatSpendReservation
 from smarter_dev.web.models import ResourceAgentRun
 from smarter_dev.web.models import UsageCostRow
 from smarter_dev.web.models import WebChatConversation
+from smarter_dev.web.models import WebChatDocument
 from smarter_dev.web.models import WebChatMessage
 from smarter_dev.web.models import WebChatTurn
 from smarter_dev.web.models import WorkDispatch
@@ -384,6 +386,114 @@ async def test_cross_owner_conversation_lookup_is_not_found(db_session, monkeypa
 
 
 @pytest.mark.asyncio
+async def test_markdown_document_is_idempotent_private_and_downloadable(
+    db_session, monkeypatch
+):
+    user, conversation = await _seed_chat(db_session)
+    turn = WebChatTurn(
+        conversation_id=conversation.id,
+        sequence=1,
+        submission_key="document-turn",
+        response_version_group=uuid4(),
+        response_sequence=2,
+        model_key=conversation.selected_model_key,
+        reasoning_level=conversation.reasoning_level,
+        status="running",
+        worker_lease_token="lease-token",
+    )
+    db_session.add(turn)
+    await db_session.flush()
+    assistant = WebChatMessage(
+        conversation_id=conversation.id,
+        turn_id=turn.id,
+        sequence=2,
+        role="assistant",
+        content="",
+        version_group=turn.response_version_group,
+    )
+    db_session.add(assistant)
+    await db_session.commit()
+
+    first, first_created = await store_markdown_document(
+        db_session,
+        conversation_id=conversation.id,
+        turn_id=turn.id,
+        assistant_message_id=assistant.id,
+        worker_lease_token="lease-token",
+        tool_call_id="tool-call-1",
+        title="Durable queues",
+        filename="durable-queues",
+        markdown="# Durable queues\n\nUse an outbox.",
+    )
+    await db_session.commit()
+    second, second_created = await store_markdown_document(
+        db_session,
+        conversation_id=conversation.id,
+        turn_id=turn.id,
+        assistant_message_id=assistant.id,
+        worker_lease_token="lease-token",
+        tool_call_id="tool-call-1",
+        title="Ignored retry title",
+        filename="ignored.md",
+        markdown="Ignored retry body",
+    )
+    await db_session.commit()
+
+    assert first.id == second.id
+    assert first_created is True and second_created is False
+    assert await db_session.scalar(select(func.count(WebChatDocument.id))) == 1
+
+    async def entitled(*_args, **_kwargs):
+        return {"sudo-r"}
+
+    monkeypatch.setattr(chat_api, "require_entitled", entitled)
+    controller = object.__new__(ChatApiController)
+    preview_response = await ChatApiController.get_document.fn(
+        controller, conversation.id, first.id, _request(user.id), db_session
+    )
+    preview = preview_response.content
+    assert preview["title"] == "Durable queues"
+    assert "<h1>Durable queues</h1>" in preview["content_html"]
+    assert "markdown" not in preview
+    assert preview_response.headers["Cache-Control"] == "no-store"
+
+    download = await ChatApiController.download_document.fn(
+        controller, conversation.id, first.id, _request(user.id), db_session
+    )
+    assert download.content == b"# Durable queues\n\nUse an outbox."
+    assert download.headers["Content-Disposition"].startswith(
+        'attachment; filename="durable-queues.md"'
+    )
+    assert download.headers["Cache-Control"] == "no-store"
+
+    snapshot = await ChatApiController.get_conversation.fn(
+        controller, conversation.id, _request(user.id), db_session
+    )
+    assert snapshot["documents"] == [
+        {
+            "id": str(first.id),
+            "turn_id": str(turn.id),
+            "assistant_message_id": str(assistant.id),
+            "title": "Durable queues",
+            "filename": "durable-queues.md",
+            "size_bytes": first.size_bytes,
+        }
+    ]
+    assert "markdown_content" not in str(snapshot)
+
+    stranger = User(
+        email=f"{uuid4().hex}@example.test", name="Stranger", is_active=True
+    )
+    db_session.add(stranger)
+    await db_session.commit()
+    with pytest.raises(HTTPException) as exc:
+        await ChatApiController.get_document.fn(
+            controller, conversation.id, first.id, _request(stranger.id), db_session
+        )
+    assert exc.value.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_submit_rolls_back_all_rows_when_outbox_creation_fails(
     db_session, monkeypatch
 ):
@@ -531,6 +641,10 @@ def test_browser_contract_includes_csrf_recovery_and_live_updates():
     assert "data-chat-error" in template
     assert "data-chat-csrf" in template
     assert "sdanswer.js" in template and "data-resource-running" in template
+    assert "chat_document_created" in javascript
+    assert "data-chat-document-dialog" in template
+    assert "data-document-id" in template
+    assert "/documents/" in javascript and "/download" in javascript
     main = Path("main.py").read_text()
     assert "/storage/default/chat-attachments/" in main
     deploy = Path(".github/workflows/deploy.yaml").read_text()

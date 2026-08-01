@@ -23,6 +23,8 @@ from smarter_dev.web.chat.attachments import validate_attachment
 from smarter_dev.web.chat.compaction import _split_cut_point
 from smarter_dev.web.chat.compaction import compact_safely
 from smarter_dev.web.chat.compaction import should_compact_history
+from smarter_dev.web.chat.documents import MarkdownDocumentError
+from smarter_dev.web.chat.documents import validate_markdown_document
 from smarter_dev.web.chat.entitlements import has_chat
 from smarter_dev.web.chat.entitlements import has_ultra_chat
 from smarter_dev.web.chat.entitlements import resolve_spend_tier
@@ -189,6 +191,8 @@ def test_children_cannot_recurse_and_prompt_omits_guidance():
     ]
     assert "run_subagent" in effective_system_prompt(child=False)
     assert "run_subagent" not in effective_system_prompt(child=True)
+    assert "create_markdown_document" in effective_system_prompt(child=False)
+    assert "create_markdown_document" not in effective_system_prompt(child=True)
     assert list(inspect.signature(run_subagent).parameters) == [
         "name",
         "task",
@@ -304,6 +308,35 @@ def test_attachment_count_and_size_boundaries():
         require_attachment_count([1, 2, 3, 4, 5, 6])
     with pytest.raises(AttachmentError):
         validate_attachment("x.txt", "text/plain", b"x" * (10 * 1024 * 1024 + 1))
+
+
+def test_markdown_document_validation_normalizes_filename():
+    document = validate_markdown_document(
+        title=" Queue design ", filename="durable-queues", markdown="# Design\n"
+    )
+    assert document.title == "Queue design"
+    assert document.filename == "durable-queues.md"
+    assert document.markdown == "# Design\n"
+    assert document.size_bytes == len(document.markdown.encode("utf-8"))
+
+
+@pytest.mark.parametrize(
+    ("title", "filename", "markdown"),
+    [
+        ("", "guide.md", "content"),
+        ("Guide", "../guide.md", "content"),
+        ("Guide", "guide\n.md", "content"),
+        ("Guide", "guide.md", ""),
+        ("Guide", "guide.md", "x" * 100_001),
+    ],
+)
+def test_markdown_document_validation_rejects_unsafe_or_unbounded_values(
+    title, filename, markdown
+):
+    with pytest.raises(MarkdownDocumentError):
+        validate_markdown_document(
+            title=title, filename=filename, markdown=markdown
+        )
 
 
 @pytest.mark.asyncio

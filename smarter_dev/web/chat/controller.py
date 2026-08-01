@@ -28,6 +28,7 @@ from smarter_dev.web.models import AgentConversation
 from smarter_dev.web.models import ResourceAgentRun
 from smarter_dev.web.models import WebChatAttachment
 from smarter_dev.web.models import WebChatConversation
+from smarter_dev.web.models import WebChatDocument
 from smarter_dev.web.models import WebChatMessage
 from smarter_dev.web.models import WebChatTurn
 from smarter_dev.web.sdanswer import enrich_answer
@@ -68,6 +69,25 @@ async def _chat_context(
                 "size_bytes": attachment.size_bytes,
             }
         )
+    document_rows = list(
+        (
+            await session.execute(
+                select(WebChatDocument)
+                .where(WebChatDocument.conversation_id == conversation.id)
+                .order_by(WebChatDocument.created_at)
+            )
+        ).scalars()
+    )
+    documents_by_message: dict[UUID, list[dict]] = {}
+    for document in document_rows:
+        documents_by_message.setdefault(document.assistant_message_id, []).append(
+            {
+                "id": str(document.id),
+                "title": document.title,
+                "filename": document.filename,
+                "size_bytes": document.size_bytes,
+            }
+        )
     versions: dict[str, list[dict]] = {}
     rendered = []
     for message in messages:
@@ -84,6 +104,9 @@ async def _chat_context(
             "stopped": message.stopped,
             "attachments": attachments_by_turn.get(message.turn_id, [])
             if message.role == "user"
+            else [],
+            "documents": documents_by_message.get(message.id, [])
+            if message.role == "assistant"
             else [],
         }
         if message.role == "assistant":

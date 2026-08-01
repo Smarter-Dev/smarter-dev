@@ -26,6 +26,7 @@ from msgspec import Struct
 from msgspec import field
 from skrift.auth.services import get_user_permissions
 from skrift.auth.session_keys import SESSION_USER_ID
+from skrift.markdown import render_markdown
 from skrift.workers import get_handle
 from sqlalchemy import func
 from sqlalchemy import select
@@ -60,6 +61,7 @@ from smarter_dev.web.models import ChatCatalogModel
 from smarter_dev.web.models import ChatSpendLimit
 from smarter_dev.web.models import WebChatAttachment
 from smarter_dev.web.models import WebChatConversation
+from smarter_dev.web.models import WebChatDocument
 from smarter_dev.web.models import WebChatMessage
 from smarter_dev.web.models import WebChatModelChange
 from smarter_dev.web.models import WebChatRuntimeEvent
@@ -231,6 +233,17 @@ def message_dict(message: WebChatMessage) -> dict:
         "is_active": message.is_active,
         "stopped": message.stopped,
         "created_at": message.created_at.isoformat() if message.created_at else None,
+    }
+
+
+def document_dict(document: WebChatDocument) -> dict:
+    return {
+        "id": str(document.id),
+        "turn_id": str(document.turn_id),
+        "assistant_message_id": str(document.assistant_message_id),
+        "title": document.title,
+        "filename": document.filename,
+        "size_bytes": document.size_bytes,
     }
 
 
@@ -413,6 +426,15 @@ class ChatApiController(Controller):
                 )
             ).scalars()
         )
+        documents = list(
+            (
+                await db_session.execute(
+                    select(WebChatDocument)
+                    .where(WebChatDocument.conversation_id == conversation_id)
+                    .order_by(WebChatDocument.created_at)
+                )
+            ).scalars()
+        )
         return {
             "id": str(conversation.id),
             "mode": "chat",
@@ -440,6 +462,7 @@ class ChatApiController(Controller):
                 else None
             ),
             "messages": [message_dict(message) for message in messages],
+            "documents": [document_dict(document) for document in documents],
             "pending_attachments": [
                 {
                     "id": str(attachment.id),
@@ -798,6 +821,73 @@ class ChatApiController(Controller):
                 "X-Content-Type-Options": "nosniff",
                 "Content-Disposition": (
                     f"attachment; filename=\"{safe_name}\"; filename*=UTF-8''{encoded_name}"
+                ),
+            },
+        )
+
+    @get("/conversations/{conversation_id:uuid}/documents/{document_id:uuid}")
+    async def get_document(
+        self,
+        conversation_id: UUID,
+        document_id: UUID,
+        request: Request,
+        db_session: AsyncSession,
+    ) -> Response:
+        user_id = require_user_id(request)
+        await require_entitled(db_session, user_id)
+        await owned_conversation(db_session, conversation_id, user_id)
+        document = await db_session.scalar(
+            select(WebChatDocument).where(
+                WebChatDocument.id == document_id,
+                WebChatDocument.conversation_id == conversation_id,
+            )
+        )
+        if document is None:
+            raise HTTPException(status_code=404, detail="Document not found.")
+        return Response(
+            content={
+                **document_dict(document),
+                "content_html": render_markdown(document.markdown_content),
+            },
+            media_type="application/json",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    @get(
+        "/conversations/{conversation_id:uuid}/documents/{document_id:uuid}/download"
+    )
+    async def download_document(
+        self,
+        conversation_id: UUID,
+        document_id: UUID,
+        request: Request,
+        db_session: AsyncSession,
+    ) -> Response:
+        user_id = require_user_id(request)
+        await require_entitled(db_session, user_id)
+        await owned_conversation(db_session, conversation_id, user_id)
+        document = await db_session.scalar(
+            select(WebChatDocument).where(
+                WebChatDocument.id == document_id,
+                WebChatDocument.conversation_id == conversation_id,
+            )
+        )
+        if document is None:
+            raise HTTPException(status_code=404, detail="Document not found.")
+        safe_name = document.filename.replace('"', "")
+        encoded_name = quote(document.filename, safe="")
+        return Response(
+            content=document.markdown_content.encode("utf-8"),
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+                "Content-Disposition": (
+                    f'attachment; filename="{safe_name}"; '
+                    f"filename*=UTF-8''{encoded_name}"
                 ),
             },
         )
