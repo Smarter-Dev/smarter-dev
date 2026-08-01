@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.web.agent_api import resources_quota_state
 from smarter_dev.web.chat.api import require_user_id
@@ -25,6 +26,7 @@ from smarter_dev.web.chat.entitlements import has_chat
 from smarter_dev.web.chat.entitlements import has_ultra_chat
 from smarter_dev.web.chat.settings import ensure_settings
 from smarter_dev.web.models import AgentConversation
+from smarter_dev.web.models import ChatCatalogModel
 from smarter_dev.web.models import ResourceAgentRun
 from smarter_dev.web.models import WebChatAttachment
 from smarter_dev.web.models import WebChatConversation
@@ -32,6 +34,46 @@ from smarter_dev.web.models import WebChatDocument
 from smarter_dev.web.models import WebChatMessage
 from smarter_dev.web.models import WebChatTurn
 from smarter_dev.web.sdanswer import enrich_answer
+
+
+async def _catalog_context(session: AsyncSession, settings) -> dict:
+    """Enabled models rendered into the page so the selects work without JS.
+
+    ``/v2/api/chat/catalog`` stays the source of truth — chat.js reconciles the
+    same data after load — but the server-rendered options mean the model and
+    reasoning controls are usable before the fetch resolves (and if it fails).
+    """
+    rows = {
+        row.model_key: row
+        for row in (
+            await session.execute(
+                select(ChatCatalogModel)
+                .where(ChatCatalogModel.enabled.is_(True))
+                .order_by(ChatCatalogModel.sort_order)
+            )
+        ).scalars()
+    }
+    models = [
+        {
+            "key": model.key,
+            "label": model.label,
+            "cost_tier": rows[model.key].cost_tier,
+            "reasoning_levels": [level.value for level in model.reasoning_levels],
+        }
+        for model in MODEL_CATALOG
+        if model.key in rows
+    ]
+    default_model = get_model(settings.default_model_key)
+    return {
+        "catalog_models": models,
+        "default_model_key": settings.default_model_key,
+        "default_reasoning": settings.default_reasoning or "",
+        "default_reasoning_levels": [
+            level.value for level in default_model.reasoning_levels
+        ]
+        if default_model
+        else [],
+    }
 
 
 async def _chat_context(
@@ -161,6 +203,7 @@ async def chat_index(request: Request, db_session: AsyncSession) -> Template:
                 "robots": "noindex,nofollow",
                 "description": "Smarter Dev Chat",
             },
+            **await _catalog_context(db_session, settings),
         },
     )
 
@@ -184,6 +227,7 @@ async def chat_conversation(
             raise NotFoundException()
         context = await _chat_context(db_session, web)
         settings = await ensure_settings(db_session)
+        selected_model = get_model(web.selected_model_key)
         conversations = list(
             (
                 await db_session.execute(
@@ -202,13 +246,19 @@ async def chat_conversation(
                 "conversation": web,
                 "mode": "chat",
                 "conversations": conversations,
-                "model": get_model(web.selected_model_key),
+                "model": selected_model,
+                "model_reasoning_levels": [
+                    level.value for level in selected_model.reasoning_levels
+                ]
+                if selected_model
+                else [],
                 "settings": settings,
                 "ultra_chat": has_ultra_chat(permissions),
                 "seo_meta": {
                     "robots": "noindex,nofollow",
                     "description": web.title or "Smarter Dev Chat",
                 },
+                **await _catalog_context(db_session, settings),
                 **context,
             },
         )

@@ -221,17 +221,24 @@ async def _finalize_cancelled_turn(turn_id: UUID, db_session: AsyncSession) -> N
     await db_session.commit()
 
 
-def message_dict(message: WebChatMessage) -> dict:
+def message_dict(
+    message: WebChatMessage, attachments: list[dict] | None = None
+) -> dict:
     return {
         "id": str(message.id),
         "turn_id": str(message.turn_id),
         "sequence": message.sequence,
         "role": message.role,
         "content": message.content,
+        # The browser reconciles terminal state without a reload, so it needs the
+        # same server-rendered markdown the page template emits. Rendering here
+        # keeps a single markdown implementation instead of shipping one to JS.
+        "content_html": render_markdown(message.content or ""),
         "version_group": str(message.version_group),
         "version_number": message.version_number,
         "is_active": message.is_active,
         "stopped": message.stopped,
+        "attachments": attachments or [],
         "created_at": message.created_at.isoformat() if message.created_at else None,
     }
 
@@ -416,6 +423,27 @@ class ChatApiController(Controller):
                 )
             ).scalars()
         )
+        submitted_attachments = list(
+            (
+                await db_session.execute(
+                    select(WebChatAttachment).where(
+                        WebChatAttachment.conversation_id == conversation_id,
+                        WebChatAttachment.turn_id.is_not(None),
+                        WebChatAttachment.status == "ready",
+                    )
+                )
+            ).scalars()
+        )
+        attachments_by_turn: dict[UUID, list[dict]] = {}
+        for attachment in submitted_attachments:
+            attachments_by_turn.setdefault(attachment.turn_id, []).append(
+                {
+                    "id": str(attachment.id),
+                    "name": attachment.original_name,
+                    "media_type": attachment.media_type,
+                    "size_bytes": attachment.size_bytes,
+                }
+            )
         subagents = list(
             (
                 await db_session.execute(
@@ -461,7 +489,15 @@ class ChatApiController(Controller):
                 if active_turn
                 else None
             ),
-            "messages": [message_dict(message) for message in messages],
+            "messages": [
+                message_dict(
+                    message,
+                    attachments_by_turn.get(message.turn_id, [])
+                    if message.role == "user"
+                    else [],
+                )
+                for message in messages
+            ],
             "documents": [document_dict(document) for document in documents],
             "pending_attachments": [
                 {

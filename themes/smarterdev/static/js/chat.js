@@ -13,6 +13,9 @@
   var errorEl = document.querySelector('[data-chat-error]');
   var stopBtn = document.querySelector('[data-chat-stop]');
   var submitBtn = form && form.querySelector('button[type=submit]');
+  var hintEl = document.querySelector('[data-chat-hint]');
+  var toBottomBtn = document.querySelector('[data-chat-to-bottom]');
+  var IDLE_HINT = 'Enter sends · Shift + Enter adds a line';
   var csrfInput = document.querySelector('[data-chat-csrf] input[name="_csrf"]');
   var csrfToken = csrfInput && csrfInput.value || '';
   var pendingAttachments = [];
@@ -74,7 +77,15 @@
 
   function setBusy(busy) {
     var locked = Boolean(busy);
-    if (submitBtn) submitBtn.disabled = Boolean(locked || uploadCount);
+    var blocked = Boolean(locked || uploadCount);
+    if (submitBtn) submitBtn.disabled = blocked;
+    // Say why Send is off rather than leaving a greyed-out button unexplained.
+    if (form) form.dataset.busy = blocked ? 'true' : 'false';
+    if (hintEl) {
+      hintEl.textContent = uploadCount
+        ? 'Uploading attachments — Send unlocks when they finish'
+        : (locked ? 'Working — Send unlocks when this turn finishes' : IDLE_HINT);
+    }
     if (stopBtn) stopBtn.hidden = !activeTurn;
     document.querySelectorAll('[data-regenerate]').forEach(function (button) {
       button.disabled = locked;
@@ -218,6 +229,251 @@
     });
     document.addEventListener('keydown', function (event) {
       if (event.key === 'Escape' && !documentDialog.hidden) closeDocumentDialog();
+    });
+  }
+
+  // Terminal turns reconcile in place instead of reloading, so every mutation
+  // has to leave the reader where they were. The thread is the scroll container
+  // but the window can scroll too on short viewports; restore both.
+  function atBottom() {
+    if (!thread) return true;
+    return thread.scrollHeight - thread.scrollTop - thread.clientHeight < 48;
+  }
+
+  function scrollToBottom(smooth) {
+    if (!thread) return;
+    if (smooth && thread.scrollTo) thread.scrollTo({top: thread.scrollHeight, behavior: 'smooth'});
+    else thread.scrollTop = thread.scrollHeight;
+    syncToBottomButton();
+  }
+
+  // Streaming output only follows the reader when the reader is already at the
+  // bottom; scrolled-up readers keep their place and get the jump button.
+  function stick(wasAtBottom) {
+    if (wasAtBottom) scrollToBottom(false);
+    else syncToBottomButton();
+  }
+
+  function syncToBottomButton() {
+    if (!toBottomBtn) return;
+    toBottomBtn.hidden = atBottom();
+  }
+
+  if (thread) thread.addEventListener('scroll', syncToBottomButton, {passive: true});
+  if (toBottomBtn) toBottomBtn.addEventListener('click', function () { scrollToBottom(true); });
+
+  function captureScroll() {
+    if (!thread) return null;
+    return {
+      top: thread.scrollTop,
+      atBottom: atBottom(),
+      windowTop: window.scrollY,
+    };
+  }
+
+  function restoreScroll(state) {
+    if (!state || !thread) return;
+    thread.scrollTop = state.atBottom ? thread.scrollHeight : state.top;
+    window.scrollTo(window.scrollX, state.windowTop);
+    syncToBottomButton();
+  }
+
+  // The composer grows with the draft up to the max height set in chat.css,
+  // after which it scrolls instead of pushing the thread off screen.
+  function autoGrow() {
+    if (!input) return;
+    input.style.height = 'auto';
+    input.style.height = input.scrollHeight + 'px';
+  }
+
+  if (input) {
+    input.addEventListener('input', autoGrow);
+    input.addEventListener('keydown', function (event) {
+      if (event.key !== 'Enter' || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+      if (event.isComposing || event.keyCode === 229) return;
+      event.preventDefault();
+      if (!form || (submitBtn && submitBtn.disabled)) return;
+      if (form.requestSubmit) form.requestSubmit();
+      else form.dispatchEvent(new Event('submit', {cancelable: true, bubbles: true}));
+    });
+    window.requestAnimationFrame(autoGrow);
+  }
+
+  // A server-rendered thread opens at the newest turn, not the oldest.
+  if (thread && thread.querySelector('.chat-message')) {
+    window.requestAnimationFrame(function () { scrollToBottom(false); });
+  }
+
+  function adoptArticle(message, adopted) {
+    // Optimistic bubbles carry no message id until the server names them.
+    var candidates = thread.querySelectorAll('.chat-message-' + message.role + ':not([data-message-id])');
+    for (var index = 0; index < candidates.length; index += 1) {
+      var candidate = candidates[index];
+      if (adopted.indexOf(candidate) !== -1) continue;
+      if (candidate.dataset.turnId && candidate.dataset.turnId !== message.turn_id) continue;
+      return candidate;
+    }
+    return null;
+  }
+
+  function messageArticle(message, existing) {
+    var article = existing;
+    if (!article) {
+      article = document.createElement('article');
+      article.className = 'chat-message chat-message-' + message.role;
+    }
+    article.dataset.messageId = message.id;
+    article.dataset.turnId = message.turn_id;
+    article.dataset.versionGroupId = message.version_group;
+    var label = article.querySelector('.chat-role');
+    if (!label) {
+      label = document.createElement('div');
+      label.className = 'chat-role';
+      article.insertBefore(label, article.firstChild);
+    }
+    label.textContent = message.role === 'user' ? 'You' : 'Smarter Dev';
+    var content = article.querySelector('.chat-content');
+    if (!content) {
+      content = document.createElement('div');
+      content.className = 'chat-content';
+      article.appendChild(content);
+    }
+    content.classList.add('sdanswer-prose');
+    return article;
+  }
+
+  function renderSentAttachments(article, message) {
+    var box = article.querySelector('.chat-sent-attachments');
+    var items = message.attachments || [];
+    if (!items.length) {
+      if (box) box.remove();
+      return;
+    }
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'chat-sent-attachments';
+      article.appendChild(box);
+    }
+    box.textContent = '';
+    items.forEach(function (item) {
+      var link = document.createElement('a');
+      link.href = '/v2/api/chat/conversations/' + conversationId + '/attachments/' + item.id;
+      link.textContent = item.name;
+      box.appendChild(link);
+    });
+  }
+
+  function renderStoppedBadge(article, message) {
+    var badge = article.querySelector('.chat-stopped');
+    if (!message.stopped) {
+      if (badge) badge.remove();
+      return;
+    }
+    if (badge) return;
+    badge = document.createElement('span');
+    badge.className = 'chat-stopped';
+    badge.textContent = 'Stopped';
+    article.insertBefore(badge, article.querySelector('.chat-response-actions'));
+  }
+
+  function renderResponseActions(article, message, choices, locked) {
+    var actions = article.querySelector('.chat-response-actions');
+    if (!actions) {
+      actions = document.createElement('div');
+      actions.className = 'chat-response-actions';
+      article.appendChild(actions);
+    }
+    var regenerate = actions.querySelector('[data-regenerate]');
+    if (!regenerate) {
+      regenerate = document.createElement('button');
+      regenerate.type = 'button';
+      regenerate.dataset.regenerate = '';
+      regenerate.textContent = 'Regenerate';
+      actions.appendChild(regenerate);
+    }
+    regenerate.dataset.turnId = message.turn_id;
+    regenerate.disabled = Boolean(locked);
+    var select = actions.querySelector('[data-version-group]');
+    if ((choices || []).length < 2) {
+      if (select) select.remove();
+      return;
+    }
+    if (!select) {
+      select = document.createElement('select');
+      select.dataset.versionGroup = '';
+      actions.appendChild(select);
+    }
+    select.textContent = '';
+    choices.forEach(function (choice) {
+      var option = document.createElement('option');
+      option.value = choice.id;
+      option.textContent = 'Response ' + choice.version_number;
+      option.selected = Boolean(choice.is_active);
+      select.appendChild(option);
+    });
+  }
+
+  function renderMessage(article, message, choices, locked) {
+    // Markdown is rendered server-side and shipped as content_html so the client
+    // never needs a second markdown implementation.
+    var content = article.querySelector('.chat-content');
+    if (message.role === 'assistant' && !message.content) content.textContent = 'Working…';
+    else content.innerHTML = message.content_html || '';
+    renderSentAttachments(article, message);
+    if (message.role === 'assistant' && mode === 'chat') {
+      renderResponseActions(article, message, choices, locked);
+    }
+    renderStoppedBadge(article, message);
+  }
+
+  function visibleDocuments(snapshot) {
+    var visible = {};
+    (snapshot.messages || []).forEach(function (message) {
+      if (message.role === 'assistant' && message.is_active) visible[message.id] = true;
+    });
+    return (snapshot.documents || []).filter(function (item) {
+      return !item.assistant_message_id || visible[item.assistant_message_id];
+    });
+  }
+
+  // Rebuild the thread from the durable snapshot: active versions only, rendered
+  // markdown, regenerate/version controls, and no stale placeholders. This is the
+  // client-side equivalent of the server-rendered page after a reload.
+  function syncThread(snapshot) {
+    if (mode !== 'chat' || !thread) return;
+    var messages = snapshot.messages || [];
+    var activeTurnId = snapshot.active_turn && snapshot.active_turn.id;
+    var locked = Boolean(activeTurnId);
+    var versions = {};
+    messages.forEach(function (message) {
+      if (message.role !== 'assistant') return;
+      versions[message.version_group] = versions[message.version_group] || [];
+      versions[message.version_group].push(message);
+    });
+    var empty = thread.querySelector('.chat-empty');
+    if (empty && messages.length) empty.remove();
+    var kept = [];
+    var adopted = [];
+    messages.filter(function (message) {
+      return message.role !== 'assistant' || message.is_active;
+    }).forEach(function (message) {
+      var article = thread.querySelector('[data-message-id="' + message.id + '"]') || adoptArticle(message, adopted);
+      if (article && !article.dataset.messageId) adopted.push(article);
+      article = messageArticle(message, article);
+      var streaming = Boolean(activeTurnId && message.role === 'assistant' && message.turn_id === activeTurnId);
+      if (streaming) {
+        article.dataset.pendingTurn = activeTurnId;
+      } else {
+        article.removeAttribute('data-pending-turn');
+        var activity = article.querySelector('[data-root-activity]');
+        if (activity) activity.remove();
+        renderMessage(article, message, versions[message.version_group], locked);
+      }
+      thread.insertBefore(article, statusEl || null);
+      kept.push(article);
+    });
+    Array.prototype.forEach.call(thread.querySelectorAll('.chat-message'), function (article) {
+      if (kept.indexOf(article) === -1) article.remove();
     });
   }
 
@@ -625,6 +881,9 @@
     thread.insertBefore(user, statusEl);
     thread.insertBefore(assistant, statusEl);
     input.value = '';
+    autoGrow();
+    // The reader just acted, so follow their own message down unconditionally.
+    scrollToBottom(false);
     setBusy(true);
     setStatus('Starting…');
     (mode === 'chat' ? submitChat(text) : submitResources(text)).then(function (result) {
@@ -673,9 +932,11 @@
     setBusy(true);
     api('/v2/api/chat/conversations/' + conversationId + '/turns/' + button.dataset.turnId + '/regenerate', json('POST', {})).then(function (data) {
       activeTurn = data.turn_id;
+      var wasAtBottom = atBottom();
       var placeholder = bubble('assistant', '', data.turn_id);
       placeholder.dataset.pendingTurn = data.turn_id;
       button.closest('.chat-message').after(placeholder);
+      stick(wasAtBottom);
       updateRootActivity({turn_id: data.turn_id, status: 'Regenerating…'});
       setBusy(true);
     }).catch(function (error) {
@@ -691,7 +952,7 @@
     var turnId = article && article.dataset.turnId;
     if (!turnId) return;
     api('/v2/api/chat/conversations/' + conversationId + '/turns/' + turnId + '/selected-version', json('PATCH', {message_id: select.value})).then(function () {
-      location.reload();
+      reconcile();
     }).catch(function (error) { showError(error.message); });
   });
 
@@ -708,28 +969,36 @@
   }
 
   function handleTerminal(data, type) {
+    var wasAtBottom = atBottom();
     var pending = thread.querySelector('[data-pending-turn="' + data.turn_id + '"] .chat-content');
     if (pending && data.content !== undefined) pending.textContent = data.content || '';
+    stick(wasAtBottom);
     if (type === 'chat_turn_error' || type === 'agent_run_error') {
       if (pending) pending.textContent = data.detail || 'The run failed.';
       showError(data.detail || 'The run failed.');
     }
     finishTurn();
-    if (mode === 'chat' || type === 'agent_run_error') {
-      // Server rendering consolidates placeholders, alternatives, restored
-      // controls, and terminal errors after every durable terminal transition.
+    if (mode === 'chat') {
+      // Reconcile against the durable snapshot instead of reloading. The
+      // conversation GET ships rendered markdown, version groups, and documents,
+      // so placeholders, alternatives, and controls consolidate without losing
+      // scroll position, composer text, or focus.
+      reconcile();
+      return;
+    }
+    if (type === 'agent_run_error') {
+      // Resources answers are enriched server-side (sdanswer blocks), so their
+      // terminal rendering still comes from a fresh page render.
       window.setTimeout(function () { location.reload(); }, 50);
     }
   }
 
   function notification(event) {
+    // Skrift ≥0.2.0a17 nests event fields under detail.payload; the envelope
+    // keeps only {type, id, mode, created_at, group}.
     var envelope = event.detail || {};
-    var payload = envelope.payload || envelope;
-    var type = envelope.type || payload.type || event.type;
-    var data = Object.assign({}, payload, {
-      conversation_id: payload.conversation_id || envelope.conversation_id,
-      turn_id: payload.turn_id || envelope.turn_id,
-    });
+    var type = envelope.type;
+    var data = envelope.payload || {};
     if (data.conversation_id !== conversationId) return;
     if (mode === 'chat' && activeTurn && data.turn_id && data.turn_id !== activeTurn) return;
     if (type === 'chat_tool_event') {
@@ -740,9 +1009,11 @@
     if (type === 'chat_subagent_state') updateSubagentActivity(data);
     if (type === 'chat_document_created') syncDocuments([data]);
     if (type === 'chat_output_delta') {
+      var wasAtBottom = atBottom();
       var pending = thread.querySelector('[data-pending-turn="' + data.turn_id + '"] .chat-content') || thread.querySelector('[data-turn-id="' + data.turn_id + '"] .chat-content');
       if (pending) pending.textContent = data.content || '';
       updateRootActivity({turn_id: data.turn_id, status: 'Writing response…'});
+      stick(wasAtBottom);
     }
     if (type === 'chat_usage_updated') refreshUsage();
     if (type === 'agent_run_complete' && mode === 'resources') {
@@ -784,7 +1055,9 @@
       return;
     }
     api('/v2/api/chat/conversations/' + conversationId).then(function (snapshot) {
+      var scroll = captureScroll();
       var active = snapshot.active_turn;
+      syncThread(snapshot);
       if (active) {
         activeTurn = active.id;
         setStatus(active.status === 'stopping' ? 'Stopping…' : 'Working…');
@@ -792,11 +1065,14 @@
         if (target && active.partial) target.textContent = active.partial;
         setBusy(true);
       } else if (activeTurn) {
-        window.location.reload();
+        finishTurn();
+      } else {
+        setBusy(false);
       }
       syncPendingAttachments(snapshot.pending_attachments);
-      syncDocuments(snapshot.documents);
+      syncDocuments(visibleDocuments(snapshot));
       syncAgentActivity(snapshot);
+      restoreScroll(scroll);
     }).catch(function () {});
     refreshUsage();
   }
