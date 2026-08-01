@@ -573,8 +573,11 @@ if (window.__skriftNotifications) {
     }
 
     document.addEventListener("sk:notification", function(e) {
-        const data = e.detail;
-        if (!data || !data.type) return;
+        // Skrift ≥0.2.0a17 nests event fields under detail.payload; keep the
+        // envelope's type alongside them for dispatching.
+        const envelope = e.detail || {};
+        if (!envelope.type) return;
+        const data = Object.assign({}, envelope.payload, { type: envelope.type });
 
         // Only handle research notifications for this session
         if (!data.type.startsWith("research:")) return;
