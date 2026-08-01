@@ -22,13 +22,12 @@
 }
 .chat-document:hover { border-left-color: var(--cyan) }
 
+/* The mark says "this is a document" — that is all it needs to do, so it is
+   lettering rather than a filled tile. */
 .chat-document-mark {
   display: grid;
   place-items: center;
   width: 2.5rem;
-  height: 2.5rem;
-  border: 1px solid var(--chat-line-mid);
-  background: rgba(0, 212, 255, .05);
   color: var(--cyan);
   font-family: var(--heading);
   font-size: .5rem;
@@ -74,25 +73,28 @@
   display: inline-flex;
   align-items: center;
   min-height: 32px;
-  padding: 0 13px;
+  padding: 0 10px;
   background: transparent;
-  border: 1px solid rgba(0, 212, 255, .25);
-  color: var(--cyan);
+  border: 1px solid transparent;
+  color: var(--chat-dim);
   font-family: var(--heading);
-  font-size: .52rem;
-  letter-spacing: .08em;
+  font-size: .5rem;
+  letter-spacing: .1em;
   text-decoration: none;
   white-space: nowrap;
   cursor: pointer;
-  transition: background .2s, border-color .2s;
+  transition: color .2s, border-color .2s;
 }
 .chat-document-actions button:hover,
 .chat-document-actions a:hover,
 .chat-document-window-actions button:hover,
 .chat-document-window-actions a:hover {
-  background: rgba(0, 212, 255, .08);
-  border-color: var(--cyan);
+  color: var(--cyan);
+  border-color: var(--chat-line-mid);
 }
+
+/* Inside the preview window the actions are the reason the window is open. */
+.chat-document-window-actions a { color: var(--cyan) }
 
 /* ── Preview window ─────────────────────────────────── */
 

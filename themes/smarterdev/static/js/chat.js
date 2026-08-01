@@ -31,6 +31,60 @@
   var documentDialog = document.querySelector('[data-chat-document-dialog]');
   var documentDialogTrigger = null;
   var pendingDocuments = [];
+  var settingsDisclosure = document.querySelector('[data-chat-settings]');
+  var mediaInstructionRow = document.querySelector('[data-media-instruction-row]');
+  var imageUploads = 0;
+
+  // ── Disclosures ───────────────────────────────────────
+  // Every quiet chip on the page is a <details>, so it works without JS and
+  // exposes its state to assistive tech natively. JS only adds the extras a
+  // popover needs: an explicit aria-expanded, Escape, and click-away.
+  function closeDisclosure(disclosure, restoreFocus) {
+    if (!disclosure || !disclosure.open) return;
+    disclosure.open = false;
+    if (restoreFocus) {
+      var summary = disclosure.querySelector('summary');
+      if (summary) summary.focus();
+    }
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('.chat-disclosure'), function (disclosure) {
+    var summary = disclosure.querySelector('summary');
+    if (!summary) return;
+    summary.setAttribute('aria-expanded', disclosure.open ? 'true' : 'false');
+    disclosure.addEventListener('toggle', function () {
+      summary.setAttribute('aria-expanded', disclosure.open ? 'true' : 'false');
+    });
+  });
+
+  document.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape') return;
+    var open = document.querySelector('.chat-pop-host[open]');
+    if (open) closeDisclosure(open, true);
+  });
+
+  document.addEventListener('click', function (event) {
+    Array.prototype.forEach.call(document.querySelectorAll('.chat-pop-host[open]'), function (disclosure) {
+      if (!disclosure.contains(event.target)) closeDisclosure(disclosure, false);
+    });
+  });
+
+  function syncModelLabel(modelKey) {
+    var label = document.querySelector('[data-chat-model-label]');
+    if (!label || !modelKey) return;
+    var model = catalog && catalog.models.find(function (item) { return item.key === modelKey; });
+    label.textContent = model ? model.label : modelKey;
+  }
+
+  // The instruction only steers image summarisation, so it stays out of the
+  // composer until an image is actually in play.
+  function syncMediaInstruction() {
+    if (!mediaInstructionRow) return;
+    var hasImage = imageUploads > 0 || pendingAttachments.some(function (item) {
+      return String(item.media_type || '').indexOf('image/') === 0;
+    });
+    mediaInstructionRow.hidden = !hasImage;
+  }
 
   function api(url, options) {
     options = options || {};
@@ -540,6 +594,14 @@
     refreshActivityTimers();
   }
 
+  // The panel stays collapsed to a count until the reader asks for detail.
+  function syncSubagentSummary() {
+    var summary = document.querySelector('[data-chat-subagent-summary]');
+    if (!summary || !subagentList) return;
+    var count = subagentList.children.length;
+    summary.textContent = count + (count === 1 ? ' sub-agent' : ' sub-agents');
+  }
+
   function terminalPhase(status) {
     return ['complete', 'error', 'cancelled', 'usage_limited', 'lease_lost'].indexOf(status) !== -1;
   }
@@ -578,6 +640,7 @@
     nameEl.textContent = name;
     statusEl.textContent = status.replace(/_/g, ' ');
     if (agentPanel) agentPanel.hidden = false;
+    syncSubagentSummary();
     refreshActivityTimers();
   }
 
@@ -612,6 +675,7 @@
       }));
     });
     if (agentPanel) agentPanel.hidden = !subagentList.children.length;
+    syncSubagentSummary();
   }
 
   // Timers only update local DOM; live state remains notification-driven.
@@ -641,6 +705,8 @@
 
   function activateConversationControls(persistedModel, persistedReasoning) {
     if (!catalog || !conversationId) return;
+    // Model and reasoning only mean something once a conversation exists.
+    if (settingsDisclosure) settingsDisclosure.hidden = false;
     var current = document.querySelector('[data-chat-model]');
     if (current) {
       current.textContent = '';
@@ -659,6 +725,7 @@
       }
       current.value = persistedModel;
       current.dataset.original = current.value;
+      syncModelLabel(current.value);
       if (!current.dataset.bound) {
         current.addEventListener('change', proposeModel);
         current.dataset.bound = 'true';
@@ -719,6 +786,7 @@
     var target = select.value;
     api('/v2/api/chat/conversations/' + conversationId + '/model-changes', json('POST', {model_key: target})).then(function (change) {
       pendingChange = change;
+      closeDisclosure(settingsDisclosure, false);
       var dialog = document.querySelector('[data-model-dialog]');
       dialog.querySelector('[data-model-warning]').textContent = change.warning;
       dialog.hidden = false;
@@ -742,6 +810,7 @@
         var select = document.querySelector('[data-chat-model]');
         select.dataset.original = data.model_key;
         select.value = data.model_key;
+        syncModelLabel(data.model_key);
         shell.dataset.modelKey = data.model_key;
         shell.dataset.reasoningLevel = data.reasoning_level || '';
         fillReasoning(data.model_key, document.querySelector('[data-chat-reasoning]'), data.reasoning_level);
@@ -796,6 +865,7 @@
       api('/v2/api/chat/conversations/' + conversationId + '/attachments/' + item.id, {method: 'DELETE'}).then(function () {
         pendingAttachments = pendingAttachments.filter(function (entry) { return entry.id !== item.id; });
         chip.remove();
+        syncMediaInstruction();
       }).catch(function (error) { showError(error.message); });
     });
     chip.append(name, remove);
@@ -808,6 +878,7 @@
       pendingAttachments.push(item);
       renderAttachment(item);
     });
+    syncMediaInstruction();
   }
 
   var files = document.querySelector('[data-chat-files]');
@@ -818,14 +889,22 @@
       files.value = '';
       return;
     }
+    var chosenImages = chosen.filter(function (file) {
+      return String(file.type || '').indexOf('image/') === 0;
+    }).length;
     uploadCount += chosen.length;
+    imageUploads += chosenImages;
+    syncMediaInstruction();
     setBusy(Boolean(activeTurn));
     var ready = conversationId ? Promise.resolve() : createConversation();
     ready.then(function () {
       chosen.forEach(function (file) {
+        var isImage = String(file.type || '').indexOf('image/') === 0;
         if (file.size > 10 * 1024 * 1024) {
           showError(file.name + ' exceeds 10 MB.');
           uploadCount -= 1;
+          if (isImage) imageUploads -= 1;
+          syncMediaInstruction();
           setBusy(Boolean(activeTurn));
           return;
         }
@@ -840,11 +919,15 @@
           showError(error.message);
         }).finally(function () {
           uploadCount -= 1;
+          if (isImage) imageUploads -= 1;
+          syncMediaInstruction();
           setBusy(Boolean(activeTurn));
         });
       });
     }).catch(function (error) {
       uploadCount -= chosen.length;
+      imageUploads -= chosenImages;
+      syncMediaInstruction();
       setBusy(Boolean(activeTurn));
       showError(error.message);
     });
@@ -900,6 +983,7 @@
       pendingAttachments = [];
       var box = document.querySelector('[data-attachments]');
       if (box) box.textContent = '';
+      syncMediaInstruction();
       if (mode === 'resources') setStatus('Resource Agent is working…');
     }).catch(function (error) {
       assistant.querySelector('.chat-content').textContent = error.message;
@@ -964,7 +1048,10 @@
       stopBtn.disabled = false;
     }
     setBusy(false);
-    if (agentPanel) agentPanel.hidden = true;
+    if (agentPanel) {
+      agentPanel.hidden = true;
+      agentPanel.open = false;
+    }
     refreshUsage();
   }
 
@@ -1035,7 +1122,10 @@
       document.querySelector('[data-context-tokens]').textContent = metrics.current_context_tokens;
       document.querySelector('[data-subagent-tokens]').textContent = metrics.subagent_tokens;
       document.querySelector('[data-total-tokens]').textContent = metrics.total_tokens;
-      document.querySelector('[data-conversation-percent]').textContent = metrics.four_hour_percent_conversation.toFixed(1);
+      var conversationPercent = metrics.four_hour_percent_conversation.toFixed(1);
+      document.querySelector('[data-conversation-percent]').textContent = conversationPercent;
+      var echo = document.querySelector('[data-conversation-percent-echo]');
+      if (echo) echo.textContent = conversationPercent;
       document.querySelector('[data-all-percent]').textContent = metrics.four_hour_percent_all_chat.toFixed(1);
     }).catch(function () {});
   }

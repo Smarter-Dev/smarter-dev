@@ -736,6 +736,24 @@ def test_browser_contract_includes_csrf_recovery_and_live_updates():
     assert "data-version-group" in template
     assert "data-chat-error" in template
     assert "data-chat-csrf" in template
+    # Model, reasoning, usage, and sub-agents live behind disclosures now. The
+    # controls are still server-rendered inside them so the page works without
+    # scripting, and every hook chat.js drives is still present in the DOM.
+    assert "data-chat-model" in template and "data-chat-reasoning" in template
+    assert "data-chat-model-label" in template
+    assert "data-media-instruction-row" in template and "data-media-instruction" in template
+    assert "data-chat-subagents" in template and "data-chat-subagent-summary" in template
+    for hook in (
+        "data-context-tokens",
+        "data-subagent-tokens",
+        "data-total-tokens",
+        "data-conversation-percent",
+        "data-all-percent",
+    ):
+        assert hook in template
+    assert 'aria-describedby="chat-composer-hint"' in template
+    assert "syncModelLabel" in javascript and "syncMediaInstruction" in javascript
+    assert "aria-expanded" in javascript
     assert "sdanswer.js" in template and "data-resource-running" in template
     assert "chat_document_created" in javascript
     assert "data-chat-document-dialog" in template
