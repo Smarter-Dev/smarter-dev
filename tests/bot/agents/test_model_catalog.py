@@ -139,6 +139,25 @@ def test_poolside_model_stays_on_openrouter():
     assert get_model("poolside-laguna-xs-2-1") is None
 
 
+def test_grok_routes_through_openrouter_with_verified_capabilities():
+    # We hold no first-party xAI key, so Grok rides OpenRouter like Laguna.
+    # Capabilities verified against OpenRouter's endpoints API (2026-08).
+    model = get_model("grok-4-5")
+    assert model is not None
+    assert model.model_id == "x-ai/grok-4.5"
+    assert model.family == "Grok"
+    assert model.provider is ModelProvider.OPENROUTER
+    assert model.supports_vision is True
+    assert model.supports_tools is True
+    assert model.context_window == 500_000
+    assert model.reasoning_levels == (
+        ReasoningLevel.LOW,
+        ReasoningLevel.MEDIUM,
+        ReasoningLevel.HIGH,
+    )
+    assert model.default_reasoning is ReasoningLevel.MEDIUM
+
+
 def test_opencode_zen_models_carry_their_verified_wire_ids():
     # Verified against GET https://opencode.ai/zen/v1/models. DeepSeek is the
     # trap: Zen's id differs from the DO id the same model used to carry.
@@ -196,7 +215,7 @@ def test_provider_routing_by_family():
             assert model.provider is ModelProvider.OPENAI
         elif model.family == "Claude":
             assert model.provider is ModelProvider.ANTHROPIC
-        elif model.family == "Poolside":
+        elif model.family in ("Poolside", "Grok"):
             assert model.provider is ModelProvider.OPENROUTER
         elif model.family in _OPEN_WEIGHTS_FAMILIES:
             assert model.provider in _OPEN_WEIGHTS_PROVIDERS

@@ -292,6 +292,8 @@ _patch_provider(
 # https://docs.digitalocean.com/products/inference/details/pricing/ (2026-07).
 
 _DIGITALOCEAN_PRICES: dict[str, types.ModelPrice] = {
+    # Retired from the catalog on 2026-08-02 (superseded by Kimi K3 on Zen).
+    # Kept because rows written while it was selectable still carry this id.
     "kimi-k2.6": types.ModelPrice(
         input_mtok=Decimal("0.76"),
         output_mtok=Decimal("3.20"),
@@ -318,8 +320,9 @@ _DIGITALOCEAN_PRICES: dict[str, types.ModelPrice] = {
     ),
 }
 
-# Poolside Laguna models served through OpenRouter. USD per million tokens;
+# Models served through OpenRouter. USD per million tokens;
 # cache is cached-input/read pricing. Cache writes bill at the input rate.
+# Rates read from GET https://openrouter.ai/api/v1/models (2026-08).
 _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
     "poolside/laguna-xs-2.1": types.ModelPrice(
         input_mtok=Decimal("0.06"),
@@ -330,6 +333,15 @@ _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
         input_mtok=Decimal("0.10"),
         output_mtok=Decimal("0.20"),
         cache_read_mtok=Decimal("0.01"),
+    ),
+    # Grok 4.5 doubles every rate once a single prompt exceeds 200K tokens
+    # ($4/$12/$0.60). This table has no length tier, so long-context turns
+    # under-bill; chat compacts well below 200K, so the base rate is the
+    # honest one for our traffic.
+    "x-ai/grok-4.5": types.ModelPrice(
+        input_mtok=Decimal("2.00"),
+        output_mtok=Decimal("6.00"),
+        cache_read_mtok=Decimal("0.30"),
     ),
 }
 

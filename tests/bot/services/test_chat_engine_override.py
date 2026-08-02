@@ -810,7 +810,7 @@ async def test_fallback_flag_skips_budget_and_uses_fallback_model(
         return_value=_result(_send(), input_tokens=10, output_tokens=5)
     )
     engine, _ = _make_engine(
-        _override("kimi-k2-6", hourly=100, fallback_model_key="gpt-5-4"), fake_redis
+        _override("gemma-4-31b", hourly=100, fallback_model_key="gpt-5-4"), fake_redis
     )
     fake_redis.exists = AsyncMock(return_value=1)  # fallback flag present
 
@@ -848,7 +848,7 @@ async def test_fallback_persisted_turn_records_fallback_model(fake_memory, fake_
         return_value=_result(_send(), input_tokens=10, output_tokens=5)
     )
     engine, _ = _make_engine(
-        _override("kimi-k2-6", hourly=100, fallback_model_key="gpt-5-4"), fake_redis
+        _override("gemma-4-31b", hourly=100, fallback_model_key="gpt-5-4"), fake_redis
     )
     fake_redis.exists = AsyncMock(return_value=1)
 
@@ -882,7 +882,7 @@ async def test_fallback_stale_key_falls_back_to_primary_model(
     agent_mock.run = AsyncMock(return_value=_result(_send()))
     engine, _ = _make_engine(
         _override(
-            "kimi-k2-6", hourly=100, fallback_model_key="this-model-was-removed"
+            "gemma-4-31b", hourly=100, fallback_model_key="this-model-was-removed"
         ),
         fake_redis,
     )
@@ -902,9 +902,9 @@ async def test_fallback_stale_key_falls_back_to_primary_model(
     ):
         await engine._run_once(first_activation=True)
 
-    # Primary override model ("kimi-k2-6" -> wire id "kimi-k2.6"), not the stale
+    # Primary override model ("gemma-4-31b" -> wire id "gemma-4-31B-it"), not the stale
     # fallback key.
-    get_agent_mock.assert_called_once_with("kimi-k2.6", None)
+    get_agent_mock.assert_called_once_with("gemma-4-31B-it", None)
     agent_mock.run.assert_awaited_once()
 
 
@@ -917,7 +917,7 @@ async def test_ended_marker_notifies_primary_restored_then_runs_primary(
     agent_mock = MagicMock()
     agent_mock.run = AsyncMock(return_value=_result(_send()))
     engine, _ = _make_engine(
-        _override("gpt-5-4", daily=1000, fallback_model_key="kimi-k2-6"), fake_redis
+        _override("gpt-5-4", daily=1000, fallback_model_key="gemma-4-31b"), fake_redis
     )
     fake_redis.exists = AsyncMock(return_value=0)  # flag expired
     fake_redis.delete = AsyncMock(return_value=1)  # marker still present
@@ -958,7 +958,7 @@ async def test_ended_marker_while_over_budget_does_not_announce_restored(
     agent_mock = MagicMock()
     agent_mock.run = AsyncMock(return_value=_result(_send()))
     engine, _ = _make_engine(
-        _override("gpt-5-4", daily=1000, fallback_model_key="kimi-k2-6"), fake_redis
+        _override("gpt-5-4", daily=1000, fallback_model_key="gemma-4-31b"), fake_redis
     )
     fake_redis.exists = AsyncMock(return_value=0)  # fallback flag expired
     fake_redis.delete = AsyncMock(return_value=1)  # marker would clear if touched
@@ -995,7 +995,7 @@ async def test_budget_exhausted_notice_carries_fallback_button(
     agent_mock = MagicMock()
     agent_mock.run = AsyncMock(return_value=_result(_send()))
     engine, _ = _make_engine(
-        _override("gpt-5-4", hourly=100, fallback_model_key="kimi-k2-6"), fake_redis
+        _override("gpt-5-4", hourly=100, fallback_model_key="gemma-4-31b"), fake_redis
     )
 
     with _patches(agent_mock=agent_mock, fake_memory=fake_memory)[0], _patches(

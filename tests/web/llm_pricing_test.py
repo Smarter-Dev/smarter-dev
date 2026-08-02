@@ -110,6 +110,20 @@ class TestOpenRouterPricing:
         )
         assert cost == Decimal("0.042")
 
+    def test_grok_4_5_rates(self):
+        assert calc_cost(1_000_000, 1_000_000, "x-ai/grok-4.5") == Decimal("8.00")
+
+    def test_grok_4_5_cache_rate(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=600_000,
+            cache_write_tokens=0,
+            model_name="openrouter:x-ai/grok-4.5",
+        )
+        # 400K uncached at $2/M + 600K cached reads at $0.30/M.
+        assert cost == Decimal("0.98")
+
 
 class TestOpenCodeZenPricing:
     """Zen rates, and the one wire id that collides with Digital Ocean's table."""

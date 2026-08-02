@@ -59,6 +59,8 @@ _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gemini-3.5-flash", "google")
 # move still carry the old wire id and would otherwise fall to "unknown" and
 # silently drop out of the per-provider invoice breakdown.
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("deepseek-4-flash", "digitalocean")
+# Retired on 2026-08-02 when Kimi K3 superseded it and Grok 4.5 took its slot.
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("kimi-k2.6", "digitalocean")
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("poolside/laguna-xs-2.1", "openrouter")
 # Laguna S briefly ran on Zen's free tier before its rate limiting sent it
 # back to OpenRouter; rows from that window carry the free id.
