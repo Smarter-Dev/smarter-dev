@@ -80,8 +80,8 @@ class CatalogModel:
 
     Attributes:
         key: Stable slug persisted in the DB and embedded in Discord custom_ids
-            (e.g. ``"kimi-k2-6"``). Never change once shipped.
-        label: Human label shown in the Discord select (e.g. ``"Kimi K2.6"``).
+            (e.g. ``"kimi-k3"``). Never change once shipped.
+        label: Human label shown in the Discord select (e.g. ``"Kimi K3"``).
         family: One of the seven supported families.
         provider: Which provider SDK serves this model.
         model_id: Exact id passed to the provider SDK / sent as the ``model``
@@ -142,6 +142,7 @@ MODEL_FAMILIES: tuple[str, ...] = (
     "GPT",
     "Claude",
     "Poolside",
+    "Grok",
 )
 
 
@@ -177,21 +178,18 @@ _CLAUDE_EFFORT = (
 
 # Curated catalog. Kept <= 24 entries so the whole set fits in one Discord
 # string-select (25-option limit, leaving room for a "server default" sentinel).
-# Gemini -> Google, GPT -> OpenAI, Claude -> Anthropic, everything else ->
-# Digital Ocean's OpenAI-compatible serverless inference. Model ids reflect the latest releases
-# as of mid-2026 (verified against provider/DO model listings); they are wire
-# ids and can be re-verified without a migration.
+# Gemini -> Google, GPT -> OpenAI, Claude -> Anthropic, Poolside and Grok ->
+# OpenRouter, and the open weights -> Digital Ocean / OpenCode Zen, both
+# OpenAI-compatible. Model ids reflect the latest releases as of mid-2026
+# (verified against provider model listings); they are wire ids and can be
+# re-verified without a migration.
 MODEL_CATALOG: tuple[CatalogModel, ...] = (
     # --- Open weights via Digital Ocean serverless inference ---
     # DO uses flat model ids (verified against GET /v1/models on the live
     # account), not vendor-prefixed paths — an unknown id 403s.
-    CatalogModel(
-        key="kimi-k2-6",
-        label="Kimi K2.6 (Moonshot)",
-        family="Kimi",
-        provider=ModelProvider.DIGITALOCEAN,
-        model_id="kimi-k2.6",
-    ),
+    # Kimi K2.6 was retired here on 2026-08-02 — Kimi K3 on Zen supersedes it,
+    # and the freed slot went to Grok 4.5. Its pricing and provider mapping are
+    # deliberately retained (llm_pricing, usage_invoice) for historical rows.
     CatalogModel(
         key="gemma-4-31b",
         label="Gemma 4 31B",
@@ -425,6 +423,24 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         family="Poolside",
         provider=ModelProvider.OPENROUTER,
         model_id="poolside/laguna-s-2.1",
+    ),
+    # --- Grok via OpenRouter ---
+    # xAI has no first-party key here, so Grok routes through OpenRouter's
+    # OpenAI-compatible /chat/completions like Laguna does. Capabilities
+    # verified against GET /api/v1/models/x-ai/grok-4.5/endpoints (2026-08):
+    # 500K context, text+image input, tools, and a reasoning_effort knob.
+    # OpenRouter normalizes low/medium/high effort for every route, so the
+    # standard open-effort ladder applies.
+    CatalogModel(
+        key="grok-4-5",
+        label="Grok 4.5 (xAI)",
+        family="Grok",
+        provider=ModelProvider.OPENROUTER,
+        model_id="x-ai/grok-4.5",
+        supports_vision=True,
+        context_window=500_000,
+        reasoning_levels=_OPEN_EFFORT,
+        default_reasoning=ReasoningLevel.MEDIUM,
     ),
 )
 

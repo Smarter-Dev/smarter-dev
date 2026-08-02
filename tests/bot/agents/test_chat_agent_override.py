@@ -85,8 +85,8 @@ def test_resolved_reasoning_level_falls_back_to_model_default():
 
 
 def test_resolved_reasoning_level_none_for_model_without_knob():
-    # Kimi K2.6 has no reasoning ladder -> always None.
-    assert resolved_reasoning_level("kimi-k2.6", "high") is None
+    # Gemma 4 31B has no reasoning ladder -> always None.
+    assert resolved_reasoning_level("gemma-4-31B-it", "high") is None
 
 
 def test_resolved_reasoning_level_none_for_adhoc_model():

@@ -15,7 +15,7 @@ from smarter_dev.shared.model_catalog import ModelProvider
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import get_model
 
-_DO_MODEL = get_model("kimi-k2-6")  # open weights, no reasoning knob
+_DO_MODEL = get_model("gemma-4-31b")  # open weights, no reasoning knob
 _DO_REASONING_MODEL = get_model("glm-5-2")  # open weights with reasoning knob
 _GOOGLE_MODEL = get_model("gemini-3-1-flash-lite")
 _OPENAI_MODEL = get_model("gpt-5-4")
@@ -23,6 +23,7 @@ _ANTHROPIC_MODEL = get_model("claude-sonnet-5")
 _ANTHROPIC_NO_REASONING_MODEL = get_model("claude-haiku-4-5")
 _OPENCODE_ZEN_MODEL = get_model("kimi-k3")
 _OPENROUTER_MODEL = get_model("poolside-laguna-s-2-1")
+_OPENROUTER_REASONING_MODEL = get_model("grok-4-5")
 
 
 def test_digitalocean_threads_base_url_and_key(monkeypatch):
@@ -159,6 +160,30 @@ def test_openrouter_model_accepts_local_legacy_key(monkeypatch):
         build_model_for(_OPENROUTER_MODEL)
 
     provider.assert_called_once_with(api_key="legacy-secret")
+
+
+def test_openrouter_reasoning_model_builds_a_chat_model(monkeypatch):
+    # Grok has a reasoning knob but takes the same OpenAI-compatible route as
+    # every other OpenRouter model — no profile overrides, no base_url.
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-secret")
+    with (
+        patch.object(model_router, "OpenAIChatModel") as chat_model,
+        patch.object(model_router, "OpenRouterProvider") as provider,
+    ):
+        build_model_for(_OPENROUTER_REASONING_MODEL)
+
+    provider.assert_called_once_with(api_key="or-secret")
+    chat_model.assert_called_once_with(
+        _OPENROUTER_REASONING_MODEL.model_id, provider=provider.return_value
+    )
+
+
+def test_openrouter_reasoning_effort_is_sent_as_openai_effort():
+    default_settings = model_settings_for(_OPENROUTER_REASONING_MODEL)
+    assert default_settings["openai_reasoning_effort"] == "medium"
+    # xhigh is off Grok's ladder and clamps down to high rather than failing.
+    clamped = model_settings_for(_OPENROUTER_REASONING_MODEL, ReasoningLevel.XHIGH)
+    assert clamped["openai_reasoning_effort"] == "high"
 
 
 def test_unhandled_provider_raises():

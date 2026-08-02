@@ -90,17 +90,17 @@ class TestPutModelOverride:
         self, model_override_client: TestClient, model_override_crud_mock, session_mock
     ):
         model_override_crud_mock.upsert.return_value = _record(
-            model_key="kimi-k2-6", daily_token_budget=42
+            model_key="gemma-4-31b", daily_token_budget=42
         )
 
         response = model_override_client.put(
             _url(),
-            json={"model_key": "kimi-k2-6", "daily_token_budget": 42},
+            json={"model_key": "gemma-4-31b", "daily_token_budget": 42},
         )
 
         assert response.status_code == 200
         body = response.json()
-        assert body["model_key"] == "kimi-k2-6"
+        assert body["model_key"] == "gemma-4-31b"
         assert body["daily_token_budget"] == 42
         session_mock.commit.assert_awaited_once()
         # Budgets default to 0 (unlimited) when omitted.
@@ -145,7 +145,7 @@ class TestPutModelOverride:
     ):
         model_override_crud_mock.upsert.return_value = _record(
             auto_respond=True,
-            fallback_model_key="kimi-k2-6",
+            fallback_model_key="gemma-4-31b",
             response_filter="Only coding questions.",
         )
 
@@ -154,7 +154,7 @@ class TestPutModelOverride:
             json={
                 "model_key": "glm-5-2",
                 "auto_respond": True,
-                "fallback_model_key": "kimi-k2-6",
+                "fallback_model_key": "gemma-4-31b",
                 "response_filter": "Only coding questions.",
             },
         )
@@ -162,27 +162,27 @@ class TestPutModelOverride:
         assert response.status_code == 200
         body = response.json()
         assert body["auto_respond"] is True
-        assert body["fallback_model_key"] == "kimi-k2-6"
+        assert body["fallback_model_key"] == "gemma-4-31b"
         assert body["response_filter"] == "Only coding questions."
         _, kwargs = model_override_crud_mock.upsert.call_args
         assert kwargs["auto_respond"] is True
-        assert kwargs["fallback_model_key"] == "kimi-k2-6"
+        assert kwargs["fallback_model_key"] == "gemma-4-31b"
         assert kwargs["response_filter"] == "Only coding questions."
 
     def test_drafter_model_passed_through(
         self, model_override_client: TestClient, model_override_crud_mock
     ):
-        model_override_crud_mock.upsert.return_value = _record(drafter_model="kimi-k2-6")
+        model_override_crud_mock.upsert.return_value = _record(drafter_model="gemma-4-31b")
 
         response = model_override_client.put(
             _url(),
-            json={"model_key": "glm-5-2", "drafter_model": "kimi-k2-6"},
+            json={"model_key": "glm-5-2", "drafter_model": "gemma-4-31b"},
         )
 
         assert response.status_code == 200
-        assert response.json()["drafter_model"] == "kimi-k2-6"
+        assert response.json()["drafter_model"] == "gemma-4-31b"
         _, kwargs = model_override_crud_mock.upsert.call_args
-        assert kwargs["drafter_model"] == "kimi-k2-6"
+        assert kwargs["drafter_model"] == "gemma-4-31b"
 
     def test_unknown_drafter_model_is_422(self, model_override_client: TestClient):
         response = model_override_client.put(
@@ -231,14 +231,14 @@ class TestPutModelOverride:
 
     def test_negative_budget_is_422(self, model_override_client: TestClient):
         response = model_override_client.put(
-            _url(), json={"model_key": "kimi-k2-6", "daily_token_budget": -1}
+            _url(), json={"model_key": "gemma-4-31b", "daily_token_budget": -1}
         )
         assert response.status_code == 422
 
     def test_over_int32_budget_is_422(self, model_override_client: TestClient):
         response = model_override_client.put(
             _url(),
-            json={"model_key": "kimi-k2-6", "daily_token_budget": 3_000_000_000},
+            json={"model_key": "gemma-4-31b", "daily_token_budget": 3_000_000_000},
         )
         assert response.status_code == 422
 
@@ -252,7 +252,7 @@ class TestPutModelOverride:
         response = model_override_client.put(
             _url(),
             json={
-                "model_key": "kimi-k2-6",
+                "model_key": "gemma-4-31b",
                 "daily_token_budget": 2_147_483_647,
                 "hourly_token_budget": 2_147_483_647,
             },

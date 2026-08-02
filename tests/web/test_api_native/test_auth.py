@@ -220,7 +220,7 @@ def test_model_override_put_missing_authorization_header_rejected(
     guarded_model_override_client: TestClient,
 ):
     response = guarded_model_override_client.put(
-        _override_url(), json={"model_key": "kimi-k2-6"}
+        _override_url(), json={"model_key": "gemma-4-31b"}
     )
     assert response.status_code == 401
 

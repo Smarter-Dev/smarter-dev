@@ -284,7 +284,7 @@ async def test_two_stage_worker_briefs_writer_writes_and_sends(
         )
     )
     engine, _ = _make_engine(
-        _override("kimi-k2-6", drafter_model="gpt-5-4"), fake_redis
+        _override("gemma-4-31b", drafter_model="gpt-5-4"), fake_redis
     )
 
     with patch(
@@ -306,7 +306,7 @@ async def test_two_stage_worker_briefs_writer_writes_and_sends(
     # The DRAFTER (worker) runs the cheap drafter model; the primary answers as
     # the WRITER, honouring its reasoning level (None here).
     get_worker.assert_called_once_with("gpt-5.4", None)
-    get_writer.assert_called_once_with("kimi-k2.6", None)
+    get_writer.assert_called_once_with("gemma-4-31B-it", None)
     worker_agent.run.assert_awaited_once()
     writer_agent.run.assert_awaited_once()
 
@@ -336,7 +336,7 @@ async def test_two_stage_advertises_primary_answerer_not_drafter(
         return_value=_writer_result(WriterOutput(message="hi"))
     )
     engine, _ = _make_engine(
-        _override("kimi-k2-6", drafter_model="gpt-5-4"), fake_redis
+        _override("gemma-4-31b", drafter_model="gpt-5-4"), fake_redis
     )
 
     with patch(
@@ -355,9 +355,9 @@ async def test_two_stage_advertises_primary_answerer_not_drafter(
         await engine._run_once(first_activation=True)
 
     user_prompt = worker_agent.run.await_args.kwargs["user_prompt"]
-    # Primary (answerer) is Kimi K2.6; the cheap drafter is GPT-5.4. The metadata
+    # Primary (answerer) is Gemma 4 31B; the cheap drafter is GPT-5.4. The metadata
     # advertises the primary answerer, not the drafter running the turn.
-    assert "Kimi K2.6" in user_prompt
+    assert "Gemma 4 31B" in user_prompt
     assert "GPT-5.4" not in user_prompt
 
 
@@ -377,7 +377,7 @@ async def test_two_stage_persists_combined_token_totals(fake_memory, fake_redis)
         )
     )
     engine, _ = _make_engine(
-        _override("kimi-k2-6", drafter_model="gpt-5-4"), fake_redis
+        _override("gemma-4-31b", drafter_model="gpt-5-4"), fake_redis
     )
 
     persist_turn = AsyncMock()
@@ -432,7 +432,7 @@ async def test_two_stage_overlong_writer_reply_is_fitted(fake_memory, fake_redis
         )
     )
     engine, _ = _make_engine(
-        _override("kimi-k2-6", drafter_model="gpt-5-4"), fake_redis
+        _override("gemma-4-31b", drafter_model="gpt-5-4"), fake_redis
     )
 
     fit_mock = AsyncMock(return_value=FitResult("fitted reply", 0, 0, "summarized"))
@@ -476,7 +476,7 @@ async def test_two_stage_silent_brief_never_calls_writer(fake_memory, fake_redis
         )
     )
     engine, _ = _make_engine(
-        _override("kimi-k2-6", drafter_model="gpt-5-4"), fake_redis
+        _override("gemma-4-31b", drafter_model="gpt-5-4"), fake_redis
     )
 
     with patch(
@@ -521,7 +521,7 @@ async def test_two_stage_voice_request_sends_voice(fake_memory, fake_redis):
     )
     voice_send = AsyncMock(return_value=None)
     engine, _ = _make_engine(
-        _override("kimi-k2-6", drafter_model="gpt-5-4"),
+        _override("gemma-4-31b", drafter_model="gpt-5-4"),
         fake_redis,
         voice_send=voice_send,
     )
@@ -559,7 +559,7 @@ async def test_two_stage_no_voice_when_not_requested(fake_memory, fake_redis):
     )
     voice_send = AsyncMock(return_value=None)
     engine, _ = _make_engine(
-        _override("kimi-k2-6", drafter_model="gpt-5-4"),
+        _override("gemma-4-31b", drafter_model="gpt-5-4"),
         fake_redis,
         voice_send=voice_send,
     )
@@ -599,7 +599,7 @@ async def test_two_stage_reply_directly_targets_top_ranked_message(
         return_value=_writer_result(WriterOutput(message="Replying directly."))
     )
     engine, _ = _make_engine(
-        _override("kimi-k2-6", drafter_model="gpt-5-4"), fake_redis
+        _override("gemma-4-31b", drafter_model="gpt-5-4"), fake_redis
     )
 
     with patch(

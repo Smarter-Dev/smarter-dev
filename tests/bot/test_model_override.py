@@ -55,7 +55,7 @@ PERMS_TARGET = "lightbulb.utils.permissions_for"
 
 # A model with no reasoning knob (its panel omits the reasoning select) and one
 # with a reasoning ladder (its panel shows the reasoning select).
-NO_REASONING_KEY = "kimi-k2-6"
+NO_REASONING_KEY = "gemma-4-31b"
 REASONING_KEY = "glm-5-2"
 # A second reasoning-capable model used as a fallback target in tests.
 FALLBACK_KEY = "deepseek-v4"

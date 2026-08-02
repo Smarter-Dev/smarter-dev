@@ -107,7 +107,7 @@ AOC_DAY = 1
 AOC_THREAD_ID = "555500000000000001"
 
 MODEL_OVERRIDE_CHANNEL_ID = "222200000000000003"
-MODEL_OVERRIDE_MODEL_KEY = "kimi-k2-6"
+MODEL_OVERRIDE_MODEL_KEY = "gemma-4-31b"
 
 # Skrift admin login (dummy provider, dev-only)
 ADMIN_EMAIL = "harness-admin@example.com"
