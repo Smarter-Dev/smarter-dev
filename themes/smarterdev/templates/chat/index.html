@@ -194,11 +194,16 @@
   {# The workshop half. A column rather than an overlay, so a document can be
      read alongside the turn that is discussing it. Two views share the column:
      the roll-up list, and one document open for reading. #}
+  {# Drag to set the reading width. A real separator role so it is operable from
+     the keyboard too — arrows nudge, Home/End jump to the limits.
+
+     A sibling of the dock rather than a child: it is chrome on the seam between
+     the two panes, positioned against the shell, and `.chat-dock > *` carries a
+     min-width for the collapse animation that would otherwise inflate it. #}
+  <div class="chat-dock-resize" data-dock-resize role="separator" aria-orientation="vertical"
+       aria-label="Resize documents panel" tabindex="0"></div>
+
   <aside class="chat-dock" id="chat-dock" aria-label="Documents" data-chat-dock>
-    {# Drag to set the reading width. A real separator role so it is operable
-       from the keyboard too — arrows nudge, Home/End jump to the limits. #}
-    <div class="chat-dock-resize" data-dock-resize role="separator" aria-orientation="vertical"
-         aria-label="Resize documents panel" tabindex="0"></div>
     <header class="chat-dock-head">
       <button type="button" class="chat-dock-back" data-dock-back hidden>
         <span aria-hidden="true">←</span> All documents
