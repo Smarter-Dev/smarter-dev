@@ -43,6 +43,12 @@
   var previewDownload = document.querySelector('[data-preview-download]');
   var previewBody = dockPreview && dockPreview.querySelector('.chat-dock-preview-body');
   var railToggle = document.querySelector('[data-rail-toggle]');
+  var resizeHandle = document.querySelector('[data-dock-resize]');
+  var quoteBox = document.querySelector('[data-chat-quote]');
+  var quoteText = document.querySelector('[data-quote-text]');
+  var quoteSource = document.querySelector('[data-quote-source]');
+  var quoteInput = document.querySelector('[data-quote-input]');
+  var quotedPassage = '';
   var dockDocuments = [];
   var dockPreviewing = null;
   var dockReturnFocus = null;
@@ -155,6 +161,129 @@
     mark.className = 'p-mark ' + state[1];
   }
 
+  // ── Quote-to-ask ──────────────────────────────────────
+  // Selecting a passage in an open document raises a small composer beside it.
+  // Sending quotes the passage above the question, so the agent answers about
+  // that paragraph rather than the document in general.
+
+  var QUOTE_MAX = 1200;   // leaves room under the 5000-char message cap
+
+  function collapseWhitespace(value) {
+    return String(value || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function hideQuote() {
+    if (!quoteBox || quoteBox.hidden) return;
+    quoteBox.hidden = true;
+    quoteText.textContent = '';
+    quoteInput.value = '';
+    quotedPassage = '';
+  }
+
+  // Anchors under the selection, then pulls back inside the viewport so a
+  // passage near an edge does not push the box off-screen.
+  function placeQuote(rect) {
+    var margin = 8;
+    var box = quoteBox.getBoundingClientRect();
+    var left = rect.left + (rect.width / 2) - (box.width / 2);
+    left = Math.min(window.innerWidth - box.width - margin, Math.max(margin, left));
+    var top = rect.bottom + margin;
+    if (top + box.height > window.innerHeight - margin) {
+      top = Math.max(margin, rect.top - box.height - margin);
+    }
+    quoteBox.style.left = Math.round(left) + 'px';
+    quoteBox.style.top = Math.round(top) + 'px';
+  }
+
+  function showQuote() {
+    if (!quoteBox || !previewContent) return;
+    var selection = window.getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return hideQuote();
+    var range = selection.getRangeAt(0);
+    // Only passages inside the open document — not the thread, not the rail.
+    if (!previewContent.contains(range.commonAncestorContainer)) return;
+    var passage = collapseWhitespace(selection.toString());
+    if (passage.length < 2) return hideQuote();
+    quotedPassage = passage.length > QUOTE_MAX
+      ? passage.slice(0, QUOTE_MAX).replace(/\s+\S*$/, '') + '…'
+      : passage;
+    quoteText.textContent = quotedPassage;
+    quoteSource.textContent = dockTitle ? 'From ' + dockTitle.textContent : '';
+    quoteBox.hidden = false;
+    // Measure after it is laid out, otherwise the box has no height to place by.
+    placeQuote(range.getBoundingClientRect());
+  }
+
+  if (quoteBox && previewContent) {
+    // mouseup rather than selectionchange: the latter fires on every character
+    // of a drag, and the box would chase the pointer across the document.
+    previewContent.addEventListener('mouseup', function () {
+      window.setTimeout(showQuote, 0);
+    });
+    // Touch selection does not raise a reliable mouseup, and the handles keep
+    // moving after the first touchend, so give the selection a beat to settle.
+    previewContent.addEventListener('touchend', function () {
+      window.setTimeout(showQuote, 120);
+    });
+    previewContent.addEventListener('keyup', function (event) {
+      if (event.shiftKey || event.key === 'Shift') window.setTimeout(showQuote, 0);
+    });
+
+    // Losing the selection is the signal to leave — but not when the click that
+    // cleared it landed inside the box itself.
+    document.addEventListener('mousedown', function (event) {
+      if (quoteBox.contains(event.target)) return;
+      hideQuote();
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && !quoteBox.hidden) hideQuote();
+    });
+    // The anchor is a viewport position, so it goes stale the moment anything
+    // moves underneath it.
+    if (previewBody) previewBody.addEventListener('scroll', hideQuote);
+    window.addEventListener('resize', hideQuote);
+
+    quoteInput.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault();
+        quoteBox.requestSubmit
+          ? quoteBox.requestSubmit()
+          : quoteBox.dispatchEvent(new Event('submit', {cancelable: true}));
+      }
+    });
+
+    quoteBox.addEventListener('submit', function (event) {
+      event.preventDefault();
+      var question = (quoteInput.value || '').trim();
+      if (!question) return quoteInput.focus();
+      var source = dockTitle ? dockTitle.textContent : 'the document';
+      // Markdown blockquote so it renders as a quotation in the thread, with
+      // the source named underneath for a reader coming back to it later.
+      var message = quotedPassage.split('\n').map(function (line) {
+        return '> ' + line;
+      }).join('\n') + '\n>\n> — ' + source + '\n\n' + question;
+      // Build the optimistic bubble as a real blockquote. Rendering the raw
+      // markdown as text would leave "> " markers on screen for the whole turn,
+      // until the server's rendered HTML arrives at reconcile.
+      var passage = quotedPassage;
+      function build(content) {
+        var quote = document.createElement('blockquote');
+        var body = document.createElement('p');
+        body.textContent = passage;
+        var attribution = document.createElement('p');
+        attribution.textContent = '— ' + source;
+        quote.append(body, attribution);
+        var ask = document.createElement('p');
+        ask.textContent = question;
+        content.append(quote, ask);
+      }
+      if (sendMessage(message, build)) {
+        hideQuote();
+        window.getSelection().removeAllRanges();
+      }
+    });
+  }
+
   // ── Starters ──────────────────────────────────────────
   // A starter is a draft, not a submission: it fills the composer and hands
   // the reader the caret so they can edit before sending.
@@ -251,13 +380,17 @@
     return 'chat-message chat-message-' + role + (role === 'user' ? ' p-card' : '');
   }
 
-  function bubble(role, text, turnId) {
+  // `build` lets a caller render the optimistic body itself. Without it the
+  // draft goes in as plain text, which is right for a typed message but would
+  // show a quoted passage as raw "> " markers for the whole turn.
+  function bubble(role, text, turnId, build) {
     var article = document.createElement('article');
     article.className = messageClasses(role);
     if (turnId) article.dataset.turnId = turnId;
     var content = document.createElement('div');
     content.className = 'chat-content p-prose';
-    content.textContent = text;
+    if (build) build(content);
+    else content.textContent = text;
     article.appendChild(createByline(role));
     if (role === 'assistant' && mode === 'chat') {
       article.appendChild(createActivity(new Date().toISOString(), 'Working…'));
@@ -392,8 +525,114 @@
     return window.matchMedia('(min-width: 1101px)').matches;
   }
 
+  // ── Dock width ────────────────────────────────────────
+  // Width is per conversation: a reference table wants a wide panel, a short
+  // note does not, and that choice belongs to the document being worked on
+  // rather than to the browser. Kept as a most-recent-last list capped at 20,
+  // so the store cannot grow without bound across a long chat history.
+  var DOCK_WIDTHS_KEY = 'chat.dockWidths';
+  var DOCK_WIDTH_CAP = 20;
+  var DOCK_MIN = 288;
+
+  function dockMax() {
+    // Always leave the conversation the wider half of whatever is left.
+    return Math.max(DOCK_MIN, Math.round(shell.clientWidth * 0.6));
+  }
+
+  function readDockWidths() {
+    try {
+      var parsed = JSON.parse(stored(DOCK_WIDTHS_KEY) || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function rememberDockWidth(width) {
+    if (!conversationId) return;
+    var entries = readDockWidths().filter(function (entry) {
+      return entry && entry.id !== conversationId;
+    });
+    entries.push({id: conversationId, width: Math.round(width)});
+    store(DOCK_WIDTHS_KEY, JSON.stringify(entries.slice(-DOCK_WIDTH_CAP)));
+  }
+
+  function savedDockWidth() {
+    if (!conversationId) return null;
+    var match = readDockWidths().filter(function (entry) {
+      return entry && entry.id === conversationId;
+    })[0];
+    return match ? match.width : null;
+  }
+
+  function syncResizeRange(now) {
+    if (!resizeHandle) return;
+    resizeHandle.setAttribute('aria-valuemin', String(DOCK_MIN));
+    resizeHandle.setAttribute('aria-valuemax', String(dockMax()));
+    if (now) resizeHandle.setAttribute('aria-valuenow', String(Math.round(now)));
+  }
+
+  function applyDockWidth(width, persist) {
+    var clamped = Math.min(dockMax(), Math.max(DOCK_MIN, Math.round(width)));
+    shell.style.setProperty('--chat-dock', clamped + 'px');
+    syncResizeRange(clamped);
+    if (persist) rememberDockWidth(clamped);
+    return clamped;
+  }
+
+  function currentDockWidth() {
+    return dock ? dock.getBoundingClientRect().width : DOCK_MIN;
+  }
+
+  if (resizeHandle) {
+    resizeHandle.addEventListener('pointerdown', function (event) {
+      if (!dockIsColumn() || shell.dataset.dock !== 'open') return;
+      event.preventDefault();
+      shell.dataset.resizing = 'true';
+      resizeHandle.setPointerCapture(event.pointerId);
+      var right = shell.getBoundingClientRect().right;
+
+      function move(moveEvent) {
+        applyDockWidth(right - moveEvent.clientX, false);
+      }
+      function done() {
+        shell.dataset.resizing = 'false';
+        resizeHandle.removeEventListener('pointermove', move);
+        resizeHandle.removeEventListener('pointerup', done);
+        resizeHandle.removeEventListener('pointercancel', done);
+        // Persist once, on release — not on every frame of the drag.
+        rememberDockWidth(currentDockWidth());
+      }
+      resizeHandle.addEventListener('pointermove', move);
+      resizeHandle.addEventListener('pointerup', done);
+      resizeHandle.addEventListener('pointercancel', done);
+    });
+
+    // A separator that can only be dragged is unusable without a mouse.
+    resizeHandle.addEventListener('keydown', function (event) {
+      if (!dockIsColumn() || shell.dataset.dock !== 'open') return;
+      var step = event.shiftKey ? 64 : 16;
+      var width = currentDockWidth();
+      var next = null;
+      if (event.key === 'ArrowLeft') next = width + step;
+      else if (event.key === 'ArrowRight') next = width - step;
+      else if (event.key === 'Home') next = dockMax();
+      else if (event.key === 'End') next = DOCK_MIN;
+      if (next === null) return;
+      event.preventDefault();
+      applyDockWidth(next, true);
+    });
+
+    // Double-click resets to the stylesheet's default.
+    resizeHandle.addEventListener('dblclick', function () {
+      shell.style.removeProperty('--chat-dock');
+      rememberDockWidth(currentDockWidth());
+    });
+  }
+
   function showDockList() {
     if (!dock) return;
+    hideQuote();
     dockPreviewing = null;
     if (dockList) dockList.hidden = false;
     if (dockPreview) dockPreview.hidden = true;
@@ -406,6 +645,7 @@
 
   function setDock(open, focusTarget) {
     if (!dock || !shell) return;
+    hideQuote();
     shell.dataset.dock = open ? 'open' : 'closed';
     if (dockToggle) dockToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     // A zero-width column is still in the DOM, so its contents stay tabbable
@@ -431,6 +671,7 @@
   function openDocument(documentId, trigger) {
     if (!dock || !documentId) return;
     setDock(true);
+    hideQuote();
     dockPreviewing = documentId;
     if (dockList) dockList.hidden = true;
     if (dockPreview) dockPreview.hidden = false;
@@ -1215,23 +1456,23 @@
     }));
   }
 
-  if (form) form.addEventListener('submit', function (event) {
-    event.preventDefault();
+  // One send path for both entry points: the composer, and the quote box that
+  // appears when you select text in a document. Returns false when the draft is
+  // rejected, so a caller can leave the reader's text where it is.
+  function sendMessage(text, build) {
     showError('');
-    if (uploadCount) return showError('Wait for attachments to finish uploading.');
-    var text = (input.value || '').trim();
-    if (!text) return showError('Type a message first.');
-    if (text.length > 5000) return showError('Keep it under 5000 characters.');
+    if (uploadCount) { showError('Wait for attachments to finish uploading.'); return false; }
+    text = (text || '').trim();
+    if (!text) { showError('Type a message first.'); return false; }
+    if (text.length > 5000) { showError('Keep it under 5000 characters.'); return false; }
     // The invitation is answered — drop it now rather than leaving it centred
     // above the first exchange until the turn finishes and reconcile runs.
     var empty = thread.querySelector('.chat-empty');
     if (empty) empty.remove();
-    var user = bubble('user', text);
+    var user = bubble('user', text, null, build);
     var assistant = bubble('assistant', '');
     thread.insertBefore(user, statusEl);
     thread.insertBefore(assistant, statusEl);
-    input.value = '';
-    autoGrow();
     // The reader just acted, so follow their own message down unconditionally.
     scrollToBottom(false);
     setBusy(true);
@@ -1258,6 +1499,14 @@
       showError(error.message);
       setBusy(false);
     });
+    return true;
+  }
+
+  if (form) form.addEventListener('submit', function (event) {
+    event.preventDefault();
+    if (!sendMessage(input.value)) return;
+    input.value = '';
+    autoGrow();
   });
 
   if (stopBtn) stopBtn.addEventListener('click', function () {
@@ -1483,6 +1732,11 @@
     var wantDock = stored('chat.dock') === 'open' && dockDocuments.length > 0;
     setDock(wantDock);
     showDockList();
+    // Only a stored width overrides the stylesheet's default. Measuring the
+    // dock here would read 0 while it is shut and pin it to the minimum.
+    var width = savedDockWidth();
+    if (width) applyDockWidth(width, false);
+    else syncResizeRange();
   }
 
   loadCatalog().then(function () {

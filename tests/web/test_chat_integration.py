@@ -774,6 +774,17 @@ def test_browser_contract_includes_csrf_recovery_and_live_updates():
     # Zero-width columns stay in the DOM, so both must be inert when folded or
     # their contents keep taking tab focus.
     assert "inert" in javascript
+    # Selecting a passage in a document raises a composer that sends the
+    # question with that passage quoted, so the agent answers about the
+    # paragraph rather than the document.
+    assert "data-chat-quote" in template and "data-quote-input" in template
+    assert "data-quote-text" in template and "data-quote-source" in template
+    assert "sendMessage" in javascript and "quotedPassage" in javascript
+    # The dock is draggable, and the width is remembered per conversation with
+    # the store capped so it cannot grow across a long history.
+    assert "data-dock-resize" in template
+    assert 'role="separator"' in template and "aria-orientation" in template
+    assert "chat.dockWidths" in javascript and "DOCK_WIDTH_CAP" in javascript
     main = Path("main.py").read_text()
     assert "/storage/default/chat-attachments/" in main
     deploy = Path(".github/workflows/deploy.yaml").read_text()
