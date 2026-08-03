@@ -196,6 +196,37 @@ body:has([data-product]) .nav-toggle span { background: var(--p-muted) }
    add a second scroll region below a pane that already fills the screen. */
 body:has([data-product]) > footer { display: none }
 
+/* ── Filling the viewport ───────────────────────────────
+   The page is a column: the fixed nav is cleared with padding, anything else in
+   the flow above the app (the founder banner, say) takes its natural height,
+   and the app pane takes whatever is left.
+
+   This is deliberately not `height: calc(100dvh - <nav>)` on the pane itself.
+   That hardcodes what sits above it, and was wrong the moment the founder
+   banner appeared: the banner added 49px of flow, the pane still claimed the
+   full height minus the nav, and the composer fell off the bottom of the
+   screen. Flex means nothing has to know anyone else's height. */
+body:has([data-product]) {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  padding-top: var(--p-nav);
+  overflow: hidden;
+}
+
+/* Skrift renders page content into this partial, so it is the pane's parent. */
+body:has([data-product]) [data-sk-partial="content"] {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* The masthead's nav is fixed, so the wrapper contributes no height — but say
+   so explicitly rather than relying on it collapsing. */
+body:has([data-product]) > header { flex: 0 0 auto }
+body:has([data-product]) .founder-banner { flex: 0 0 auto }
+
 /* ── Typography primitives ──────────────────────────────
    Three roles, used everywhere. `.p-label` names a region, `.p-title` heads
    one, `.p-meta` reports machine facts about it. */
