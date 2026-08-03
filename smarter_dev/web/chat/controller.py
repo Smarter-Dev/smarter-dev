@@ -160,6 +160,8 @@ async def _chat_context(
                 "title": document.title,
                 "filename": document.filename,
                 "size_bytes": document.size_bytes,
+                "assistant_message_id": str(document.assistant_message_id),
+                "created_at": document.created_at,
             }
         )
     turns = {
@@ -211,7 +213,26 @@ async def _chat_context(
         .order_by(WebChatTurn.created_at.desc())
         .limit(1)
     )
-    return {"messages": rendered, "versions": versions, "active_turn": active_turn}
+    # A flat, oldest-first roll-up for the documents panel. Regenerating a turn
+    # supersedes its assistant message, and the documents that message produced
+    # go with it — the panel lists what the conversation *currently* holds, so
+    # it is filtered to the messages actually on screen (chat.js applies the
+    # same rule to the API snapshot in visibleDocuments()).
+    visible_messages = {
+        item["id"] for item in rendered if item["role"] == "assistant"
+    }
+    documents = [
+        document
+        for message_id in visible_messages
+        for document in documents_by_message.get(UUID(message_id), [])
+    ]
+    documents.sort(key=lambda item: item["created_at"])
+    return {
+        "messages": rendered,
+        "versions": versions,
+        "active_turn": active_turn,
+        "documents": documents,
+    }
 
 
 @get("/chat")

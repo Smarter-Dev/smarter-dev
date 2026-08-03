@@ -12,25 +12,43 @@
 
 :root {
   --chat-rail: 264px;
+  --chat-dock: clamp(21rem, 30vw, 32rem);
   --chat-head: 54px;
   --chat-measure: 45rem;  /* the reading column */
   --chat-frame: 48rem;    /* the composer, deliberately a touch wider */
 }
 
 /* ── Shell ──────────────────────────────────────────────
-   One screenful. The nav is fixed, so the shell starts below it and owns the
-   remaining viewport height; nothing on the page scrolls except the thread and
-   the history rail. */
+   One screenful, three columns: history rail, conversation, document dock.
+   The nav is fixed, so the shell starts below it and owns the remaining
+   viewport height; nothing on the page scrolls except the panes themselves.
+
+   Both side columns collapse to zero width rather than leaving the flow, so
+   opening or folding one animates instead of snapping, and the conversation
+   keeps its scroll position throughout. */
 
 .chat-shell {
   display: grid;
-  grid-template-columns: var(--chat-rail) minmax(0, 1fr);
+  grid-template-columns: var(--chat-rail) minmax(0, 1fr) 0;
   margin-top: var(--p-nav);
   height: calc(100dvh - var(--p-nav));
   overflow: hidden;
   position: relative;
   z-index: 1;
   background: var(--p-bg);
+  transition: grid-template-columns .28s ease;
+}
+
+.chat-shell[data-rail="collapsed"] { grid-template-columns: 0 minmax(0, 1fr) 0 }
+.chat-shell[data-dock="open"] {
+  grid-template-columns: var(--chat-rail) minmax(0, 1fr) var(--chat-dock);
+}
+.chat-shell[data-rail="collapsed"][data-dock="open"] {
+  grid-template-columns: 0 minmax(0, 1fr) var(--chat-dock);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-shell { transition: none }
 }
 
 /* ── History rail ───────────────────────────────────────*/
@@ -41,6 +59,17 @@
   min-height: 0;
   background: var(--p-bg);
   border-right: 1px solid var(--p-line);
+  /* The column is what animates; the rail's own contents keep their width so
+     the text inside does not reflow and re-wrap on the way out. */
+  overflow: hidden;
+}
+.chat-sidebar > * { min-width: var(--chat-rail) }
+
+/* Fully out of the layout when folded: no border seam, and nothing inside can
+   take focus (chat.js also sets `inert`, this is the visual half). */
+.chat-shell[data-rail="collapsed"] .chat-sidebar {
+  border-right-color: transparent;
+  visibility: hidden;
 }
 
 .chat-sidebar-head {
@@ -140,6 +169,63 @@
 }
 
 .chat-settings { flex: 0 0 auto }
+
+/* ── Header toggles ─────────────────────────────────────
+   Both fold a column away, so they share one quiet treatment and only light up
+   to say "this panel is currently open". */
+
+.chat-rail-toggle,
+.chat-dock-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 0 .6rem;
+  font-family: var(--body);
+  font-size: .78rem;
+  color: var(--p-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: color .18s, border-color .18s, background .18s;
+}
+.chat-rail-toggle:hover,
+.chat-dock-toggle:hover {
+  color: var(--p-text);
+  border-color: var(--p-line-strong);
+}
+.chat-rail-toggle svg,
+.chat-dock-toggle svg {
+  width: 14px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+.chat-rail-toggle { margin-left: -.35rem; padding: 0 .45rem }
+.chat-rail-toggle[aria-expanded="true"] { color: var(--p-text) }
+
+.chat-dock-toggle[aria-expanded="true"] {
+  color: var(--p-text);
+  background: var(--p-surface);
+  border-color: var(--p-line-strong);
+}
+.chat-dock-toggle[hidden] { display: none }
+
+/* The count is the whole point of the button when the panel is shut. */
+.chat-dock-count {
+  min-width: 18px;
+  padding: 0 5px;
+  font-family: var(--mono);
+  font-size: .68rem;
+  line-height: 17px;
+  text-align: center;
+  color: var(--p-accent-text);
+  background: var(--p-surface-2);
+  border: 1px solid var(--p-line-strong);
+}
+.chat-dock-toggle[aria-expanded="true"] .chat-dock-count {
+  background: var(--p-bg);
+}
 
 /* The model chip is a chip, not a bare summary — the current model is a fact
    about the conversation, so it gets a surface. */
@@ -645,16 +731,42 @@
   :root { --chat-rail: 220px }
 }
 
+/* Below this there is no room for a third column, so the dock stops being one
+   and floats over the conversation instead (its own styles are in
+   pages/chat-documents.css). Declared before the phone breakpoint below so that
+   narrower rule wins on source order — both selectors have equal specificity. */
+@media (max-width: 1100px) {
+  .chat-shell[data-dock="open"],
+  .chat-shell[data-rail="collapsed"][data-dock="open"] {
+    grid-template-columns: var(--chat-rail) minmax(0, 1fr) 0;
+  }
+  .chat-shell[data-rail="collapsed"][data-dock="open"] {
+    grid-template-columns: 0 minmax(0, 1fr) 0;
+  }
+}
+
 @media (max-width: 760px) {
   :root { --p-tap: 44px }
 
   /* The rail folds into a scrollable strip rather than disappearing, so the
      conversation history stays reachable on a phone. Recency headings would
-     break the strip into unreadable fragments, so they drop out here. */
-  .chat-shell {
+     break the strip into unreadable fragments, so they drop out here.
+
+     One column at this width: the strip is a row, and the dock floats (see
+     chat-documents.css). The [data-*] variants have to be named explicitly or
+     their higher specificity would reinstate the desktop columns. */
+  .chat-shell,
+  .chat-shell[data-rail="collapsed"],
+  .chat-shell[data-dock="open"],
+  .chat-shell[data-rail="collapsed"][data-dock="open"] {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
   }
+  /* The strip is a row, so it must not carry the rail's fixed column width. */
+  .chat-sidebar > * { min-width: 0 }
+  /* Collapsing on a phone hides the strip outright — there is no column to
+     animate, and the row would otherwise keep its height. */
+  .chat-shell[data-rail="collapsed"] .chat-sidebar { display: none }
   .chat-sidebar {
     grid-template-rows: auto;
     grid-template-columns: auto minmax(0, 1fr);

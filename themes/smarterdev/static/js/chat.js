@@ -28,12 +28,65 @@
   var agentPanel = document.querySelector('[data-chat-agent-panel]');
   var subagentList = document.querySelector('[data-chat-subagents]');
   var notificationStreamStatus = null;
-  var documentDialog = document.querySelector('[data-chat-document-dialog]');
-  var documentDialogTrigger = null;
   var pendingDocuments = [];
+  var dock = document.querySelector('[data-chat-dock]');
+  var dockToggle = document.querySelector('[data-dock-toggle]');
+  var dockClose = document.querySelector('[data-dock-close]');
+  var dockBack = document.querySelector('[data-dock-back]');
+  var dockTitle = document.querySelector('[data-dock-title]');
+  var dockList = document.querySelector('[data-dock-list]');
+  var dockEmpty = document.querySelector('[data-dock-empty]');
+  var dockCount = document.querySelector('[data-dock-count]');
+  var dockPreview = document.querySelector('[data-dock-preview]');
+  var previewFilename = document.querySelector('[data-preview-filename]');
+  var previewContent = document.querySelector('[data-preview-content]');
+  var previewDownload = document.querySelector('[data-preview-download]');
+  var previewBody = dockPreview && dockPreview.querySelector('.chat-dock-preview-body');
+  var railToggle = document.querySelector('[data-rail-toggle]');
+  var dockDocuments = [];
+  var dockPreviewing = null;
+  var dockReturnFocus = null;
+  // Set once the reader moves the rail themselves; from then on the dock stops
+  // folding it for them.
+  var railUserSet = false;
+  var railAutoCollapsed = false;
   var settingsDisclosure = document.querySelector('[data-chat-settings]');
   var mediaInstructionRow = document.querySelector('[data-media-instruction-row]');
   var imageUploads = 0;
+
+  // ── Layout state ──────────────────────────────────────
+  // Rail and dock positions persist, so the workshop view a reader sets up is
+  // still there next visit. Storage is best-effort: private-mode browsers throw
+  // on both read and write, and a lost preference is not worth an error.
+  function store(key, value) {
+    try { window.localStorage.setItem(key, value); } catch (error) { /* no-op */ }
+  }
+
+  function stored(key) {
+    try { return window.localStorage.getItem(key); } catch (error) { return null; }
+  }
+
+  function setRail(open, focusTarget, automatic) {
+    if (!shell) return;
+    shell.dataset.rail = open ? 'open' : 'collapsed';
+    if (railToggle) railToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    var sidebar = document.querySelector('.chat-sidebar');
+    if (sidebar) {
+      // A zero-width column keeps its contents tabbable without this.
+      if (open) sidebar.removeAttribute('inert');
+      else sidebar.setAttribute('inert', '');
+    }
+    if (!automatic) {
+      railUserSet = true;
+      railAutoCollapsed = false;
+      store('chat.rail', open ? 'open' : 'collapsed');
+    }
+    if (focusTarget) focusTarget.focus();
+  }
+
+  if (railToggle) railToggle.addEventListener('click', function () {
+    setRail(shell.dataset.rail === 'collapsed');
+  });
 
   // ── Disclosures ───────────────────────────────────────
   // Every quiet chip on the page is a <details>, so it works without JS and
@@ -269,6 +322,10 @@
   }
 
   function syncDocuments(items) {
+    // The panel is the roll-up for the whole conversation, so it takes every
+    // document immediately. The inline card needs its message to exist first
+    // and may have to wait — that queue must not hold up the panel.
+    syncDockList(items);
     (items || []).forEach(function (item) {
       if (renderDocumentCard(item)) return;
       if (!pendingDocuments.some(function (pending) { return pending.id === item.id; })) {
@@ -283,49 +340,154 @@
     syncDocuments(queued);
   }
 
-  function closeDocumentDialog() {
-    if (!documentDialog) return;
-    documentDialog.hidden = true;
-    document.body.classList.remove('chat-document-open');
-    documentDialog.querySelector('[data-document-content]').textContent = '';
-    if (documentDialogTrigger) documentDialogTrigger.focus();
-    documentDialogTrigger = null;
+  // ── Document dock ─────────────────────────────────────
+  // The panel is a column of the shell, not an overlay: opening it narrows the
+  // conversation instead of covering it, so a document can be read alongside
+  // the turn discussing it. Two views share the column — the roll-up list, and
+  // one document open for reading.
+
+  function dockItem(item) {
+    var button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'chat-dock-item';
+    button.dataset.dockOpen = '';
+    button.dataset.documentId = item.id;
+    var mark = document.createElement('span');
+    mark.className = 'chat-dock-item-mark';
+    mark.setAttribute('aria-hidden', 'true');
+    mark.textContent = 'MD';
+    var info = document.createElement('span');
+    info.className = 'chat-dock-item-info';
+    var title = document.createElement('strong');
+    title.textContent = item.title || 'Markdown document';
+    var meta = document.createElement('span');
+    meta.className = 'p-meta';
+    meta.textContent = (item.filename || 'document.md') + ' \u00b7 ' + formatDocumentSize(item.size_bytes);
+    info.append(title, meta);
+    button.append(mark, info);
+    return button;
   }
 
-  function openDocumentDialog(documentId, trigger) {
-    if (!documentDialog || !documentId) return;
-    documentDialogTrigger = trigger || null;
-    var title = documentDialog.querySelector('[data-document-title]');
-    var filename = documentDialog.querySelector('[data-document-filename]');
-    var content = documentDialog.querySelector('[data-document-content]');
-    var download = documentDialog.querySelector('[data-document-download]');
-    title.textContent = 'Loading…';
-    filename.textContent = '';
-    content.textContent = 'Loading document…';
-    download.removeAttribute('href');
-    documentDialog.hidden = false;
-    document.body.classList.add('chat-document-open');
-    documentDialog.querySelector('[data-close-document]:not(.chat-document-backdrop)').focus();
-    api('/v2/api/chat/conversations/' + conversationId + '/documents/' + encodeURIComponent(documentId)).then(function (documentData) {
-      title.textContent = documentData.title;
-      filename.textContent = documentData.filename + ' · ' + formatDocumentSize(documentData.size_bytes);
-      content.innerHTML = documentData.content_html;
-      download.href = documentDownloadUrl(documentId);
-      download.download = documentData.filename;
+  // Appends only what is new, so the list never flickers and the row a reader
+  // is pointing at cannot move out from under them mid-turn.
+  function syncDockList(items) {
+    if (!dockList) return;
+    (items || []).forEach(function (item) {
+      if (!item || !item.id) return;
+      if (dockList.querySelector('[data-dock-open][data-document-id="' + item.id + '"]')) return;
+      dockList.insertBefore(dockItem(item), dockEmpty);
+      dockDocuments.push(item);
+    });
+    var count = dockList.querySelectorAll('[data-dock-open]').length;
+    if (dockCount) dockCount.textContent = count;
+    if (dockEmpty) dockEmpty.hidden = count > 0;
+    // The button is the only route to the panel, so it appears with the first
+    // document rather than sitting there empty for the whole conversation.
+    if (dockToggle) dockToggle.hidden = count === 0;
+  }
+
+  // Mirrors the 1100px breakpoint in pages/chat.css, where the dock stops being
+  // a grid column and starts floating over the conversation.
+  function dockIsColumn() {
+    return window.matchMedia('(min-width: 1101px)').matches;
+  }
+
+  function showDockList() {
+    if (!dock) return;
+    dockPreviewing = null;
+    if (dockList) dockList.hidden = false;
+    if (dockPreview) dockPreview.hidden = true;
+    if (dockBack) dockBack.hidden = true;
+    if (dockTitle) dockTitle.textContent = 'Documents';
+    Array.prototype.forEach.call(dockList.querySelectorAll('[data-dock-open]'), function (row) {
+      row.removeAttribute('aria-current');
+    });
+  }
+
+  function setDock(open, focusTarget) {
+    if (!dock || !shell) return;
+    shell.dataset.dock = open ? 'open' : 'closed';
+    if (dockToggle) dockToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    // A zero-width column is still in the DOM, so its contents stay tabbable
+    // without this.
+    if (open) dock.removeAttribute('inert');
+    else dock.setAttribute('inert', '');
+    store('chat.dock', open ? 'open' : 'closed');
+    // Opening the workshop view folds the rail to keep the conversation wide —
+    // but never overrules a reader who has set the rail themselves this session,
+    // and only where the dock is actually a column. Below that the dock floats
+    // over the conversation, so folding the rail would reclaim nothing and just
+    // take the history strip away.
+    if (open && dockIsColumn() && !railUserSet && shell.dataset.rail !== 'collapsed') {
+      railAutoCollapsed = true;
+      setRail(false, null, true);
+    } else if (!open && railAutoCollapsed) {
+      railAutoCollapsed = false;
+      setRail(true, null, true);
+    }
+    if (focusTarget && open) focusTarget.focus();
+  }
+
+  function openDocument(documentId, trigger) {
+    if (!dock || !documentId) return;
+    setDock(true);
+    dockPreviewing = documentId;
+    if (dockList) dockList.hidden = true;
+    if (dockPreview) dockPreview.hidden = false;
+    if (dockBack) dockBack.hidden = false;
+    dockReturnFocus = trigger || null;
+    if (dockTitle) dockTitle.textContent = 'Loading\u2026';
+    if (previewFilename) previewFilename.textContent = '';
+    if (previewContent) previewContent.textContent = 'Loading document\u2026';
+    if (previewDownload) previewDownload.removeAttribute('href');
+    api('/v2/api/chat/conversations/' + conversationId + '/documents/' + encodeURIComponent(documentId)).then(function (data) {
+      // A second click while this one was in flight wins; drop the stale reply.
+      if (dockPreviewing !== documentId) return;
+      if (dockTitle) dockTitle.textContent = data.title;
+      if (previewFilename) previewFilename.textContent = data.filename + ' \u00b7 ' + formatDocumentSize(data.size_bytes);
+      if (previewContent) previewContent.innerHTML = data.content_html;
+      if (previewDownload) {
+        previewDownload.href = documentDownloadUrl(documentId);
+        previewDownload.download = data.filename;
+      }
+      if (previewBody) previewBody.scrollTop = 0;
     }).catch(function (error) {
-      title.textContent = 'Document unavailable';
-      content.textContent = error.message;
+      if (dockPreviewing !== documentId) return;
+      if (dockTitle) dockTitle.textContent = 'Document unavailable';
+      if (previewContent) previewContent.textContent = error.message;
     });
   }
 
-  if (documentDialog) {
-    documentDialog.addEventListener('click', function (event) {
-      if (event.target.closest('[data-close-document]')) closeDocumentDialog();
-    });
-    document.addEventListener('keydown', function (event) {
-      if (event.key === 'Escape' && !documentDialog.hidden) closeDocumentDialog();
-    });
-  }
+  if (dockToggle) dockToggle.addEventListener('click', function () {
+    var open = shell.dataset.dock !== 'open';
+    setDock(open);
+    if (open && !dockPreviewing) showDockList();
+  });
+
+  if (dockClose) dockClose.addEventListener('click', function () {
+    setDock(false);
+    if (dockToggle) dockToggle.focus();
+  });
+
+  if (dockBack) dockBack.addEventListener('click', function () {
+    showDockList();
+    if (dockReturnFocus && dockReturnFocus.isConnected) dockReturnFocus.focus();
+    dockReturnFocus = null;
+  });
+
+  if (dock) dock.addEventListener('click', function (event) {
+    var row = event.target.closest('[data-dock-open]');
+    if (row) openDocument(row.dataset.documentId, row);
+  });
+
+  // Escape closes the panel only while it holds focus, so it cannot steal the
+  // key from the composer or an open disclosure.
+  document.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape' || !dock) return;
+    if (shell.dataset.dock !== 'open' || !dock.contains(document.activeElement)) return;
+    setDock(false);
+    if (dockToggle) dockToggle.focus();
+  });
 
   // Terminal turns reconcile in place instead of reloading, so every mutation
   // has to leave the reader where they were. The thread is the scroll container
@@ -1111,9 +1273,11 @@
   });
 
   document.addEventListener('click', function (event) {
+    // An inline card's Preview opens the same panel the dock list does, so a
+    // document is only ever read in one place.
     var documentButton = event.target.closest('[data-open-document]');
     if (documentButton) {
-      openDocumentDialog(documentButton.dataset.documentId, documentButton);
+      openDocument(documentButton.dataset.documentId, documentButton);
       return;
     }
     var button = event.target.closest('[data-regenerate]');
@@ -1299,6 +1463,27 @@
       if (activeTurn) updateRootActivity({turn_id: activeTurn, status: 'Connection lost; reconnecting…'});
     }
   });
+
+  // Adopt the server-rendered rows so the count and empty state are right
+  // before any fetch resolves, then restore the reader's saved layout.
+  if (dockList) {
+    Array.prototype.forEach.call(dockList.querySelectorAll('[data-dock-open]'), function (row) {
+      dockDocuments.push({id: row.dataset.documentId});
+    });
+    syncDockList([]);
+  }
+  if (dock) {
+    var savedRail = stored('chat.rail');
+    if (savedRail) {
+      railUserSet = true;
+      setRail(savedRail !== 'collapsed', null, true);
+    }
+    // Only restore an open dock when there is something in it — otherwise a
+    // brand-new conversation opens onto an empty panel.
+    var wantDock = stored('chat.dock') === 'open' && dockDocuments.length > 0;
+    setDock(wantDock);
+    showDockList();
+  }
 
   loadCatalog().then(function () {
     refreshUsage();
