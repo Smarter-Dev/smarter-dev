@@ -3,13 +3,20 @@
     <button class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">
         <span></span><span></span><span></span>
     </button>
+    {# Mark the section the reader is in. Guard `request` for the same reason the
+       signed-in check below does: error pages render outside the middleware that
+       sets it. `_path` is compared by prefix so /chat/<id> still marks Chat. #}
+    {% set _path = request.url.path if request is defined and request else '' %}
+    {% macro nav_link(href, label, match) %}
+    <a href="{{ href }}"{% if _path == match or _path.startswith(match ~ '/') %} class="active"{% endif %}>{{ label }}</a>
+    {% endmacro %}
     <div class="nav-links">
-        <a href="/resources">Resources</a>
-        <a href="/chat">Chat</a>
-        <a href="/blog/">Blog</a>
-        <a href="/about">About</a>
+        {{ nav_link('/resources', 'Resources', '/resources') }}
+        {{ nav_link('/chat', 'Chat', '/chat') }}
+        {{ nav_link('/blog/', 'Blog', '/blog') }}
+        {{ nav_link('/about', 'About', '/about') }}
         <a href="https://discord.gg/de8kajxbYS" target="_blank" data-sk-no-spa>Discord</a>
-        <a href="/sudo">sudo</a>
+        {{ nav_link('/sudo', 'sudo', '/sudo') }}
     </div>
     {# Signed-in check falls back to the session so the nav stays correct on any page,
        even when its controller doesn't pass `user` into the template context. Guard

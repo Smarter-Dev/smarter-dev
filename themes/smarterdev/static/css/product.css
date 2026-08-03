@@ -1,0 +1,706 @@
+/* ══════════════════════════════════════════════════════
+   Smarter Dev — Product surface
+
+   The second of two visual systems on this site.
+
+     framework.css  — MARKETING. Near-black ground, animated hex canvas,
+                      cyan-tinted hairlines, glows. Built to be looked at.
+     product.css    — PRODUCT.   Flat slate ground, no canvas, neutral
+                      hairlines, no glow. Built to be READ, for hours.
+
+   The product system is not a dark-mode variant of the marketing one — it is
+   the same brand with the volume down. Four rules define it:
+
+   1. ONE GROUND. Everything sits on --p-bg. Depth comes from a small number of
+      raised planes, never from a gradient or an image.
+   2. HAIRLINES ARE NEUTRAL. Marketing tints every border cyan; here borders are
+      slate (--p-line / --p-line-strong). Tinted borders read as decoration, and
+      decoration is what tires an eye over a long session.
+   3. ACCENT IS A MARK, NOT A SURFACE. Full --p-accent appears a handful of
+      times per view — the primary action, the live pulse, one meter fill, the
+      active nav rule. Accent used as *text* steps down to --p-accent-text,
+      which holds up at paragraph length where #00d4ff glares.
+   4. NO MOTION FOR ITS OWN SAKE. The only thing that animates is something
+      actually happening.
+
+   Scope: every rule below is nested under [data-product], set on the page
+   shell. Marketing pages never see any of it, so this file is safe to load
+   globally — and it survives SPA partial swaps, which a <body> class would not.
+
+   Type roles are inherited from framework.css: --heading (Bruno Ace SC) for
+   labels and titles, --body (Inter) for prose, --mono for machine text —
+   timings, token counts, model ids, keyboard hints.
+   ══════════════════════════════════════════════════════ */
+
+/* ── Tokens ─────────────────────────────────────────────
+   Declared on :root, not on [data-product], so a page can hand them to a
+   portalled dialog that lives outside the shell. */
+
+:root {
+  /* Planes, recessed → raised. */
+  --p-recess: #0b0f17;   /* chrome strips: header bars, footers, wells */
+  --p-bg: #0c111a;       /* the ground */
+  --p-surface: #121826;  /* raised: cards, composer, chips, active rows */
+  --p-surface-2: #171e2e;/* nested inside something already raised */
+  --p-float: #1a2130;    /* dialogs and popovers, above everything */
+
+  /* Hairlines. Slate, deliberately — see rule 2. */
+  --p-line: #181f2a;         /* dividers and rules on the ground */
+  --p-line-strong: #273040;  /* the edge of a raised plane */
+  --p-line-focus: #3d4c63;   /* hover / focus */
+
+  /* Text, brightest → quietest. Every step clears 4.5:1 on --p-bg. */
+  --p-text: #eaf1f8;   /* titles, emphasis, the thing you are reading now */
+  --p-body: #b9c6d6;   /* prose */
+  --p-muted: #8195aa;  /* secondary UI: nav, list items, quiet buttons */
+  --p-dim: #5f7288;    /* labels, bylines, machine chatter */
+
+  /* Accent. Sparingly. */
+  --p-accent: #00d4ff;
+  --p-accent-text: #5ecfe8;              /* accent as *text* */
+  --p-accent-wash: rgba(0, 212, 255, .07);
+  --p-accent-line: rgba(0, 212, 255, .30);
+
+  --p-ok: #3ecf8e;
+  --p-warn: #d9a441;
+  --p-bad: #e8636f;
+  --p-bad-line: rgba(232, 99, 111, .38);
+  --p-bad-wash: rgba(232, 99, 111, .07);
+
+  /* Rhythm. */
+  --p-tap: 40px;          /* minimum interactive height */
+  --p-pad: clamp(1rem, 3vw, 2rem);
+  --p-measure: 46rem;     /* reading column */
+  --p-nav: 55px;          /* fixed .site-nav height */
+}
+
+/* ── Ground ─────────────────────────────────────────────
+   The marketing canvas is a fixed, full-viewport element outside the SPA
+   content partial, so it is still in the DOM on a product page. Hide it here
+   rather than omitting it per-template: this survives SPA navigation in both
+   directions, where a template-level omission would not. */
+
+body:has([data-product]) {
+  background: var(--p-bg);
+  color: var(--p-body);
+}
+body:has([data-product]) #bg { display: none }
+
+/* ── Site nav, product dressing ─────────────────────────
+   Same nav markup as marketing; quieter clothes. Links drop the Bruno Ace
+   all-caps treatment for plain Inter — a product nav is wayfinding, not a
+   headline — and the active item is marked with a rule under it instead of a
+   glowing box. */
+
+body:has([data-product]) .site-nav {
+  padding: 0 20px;
+  height: var(--p-nav);
+  background: var(--p-bg);
+  backdrop-filter: none;
+  border-bottom: 1px solid var(--p-line);
+  gap: 1rem;
+}
+
+body:has([data-product]) .nav-links { gap: 4px }
+
+body:has([data-product]) .nav-links a {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: var(--p-nav);
+  padding: 0 14px;
+  border: 0;
+  font-family: var(--body);
+  font-size: .85rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--p-muted);
+  transition: color .18s;
+}
+body:has([data-product]) .nav-links a:hover {
+  color: var(--p-text);
+  background: none;
+}
+/* The rule is a pseudo-element so it can sit flush on the nav's own border
+   rather than pushing the link box around. */
+body:has([data-product]) .nav-links a.active {
+  color: var(--p-text);
+  background: none;
+}
+body:has([data-product]) .nav-links a.active::after {
+  content: "";
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: -1px;
+  height: 2px;
+  background: var(--p-accent);
+}
+
+body:has([data-product]) .site-nav .btn-follow {
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 18px;
+  font-family: var(--body);
+  font-size: .85rem;
+  letter-spacing: 0;
+  color: var(--p-text);
+  background: transparent;
+  border: 1px solid var(--p-line-strong);
+  box-shadow: none;
+  text-decoration: none;
+  transition: border-color .18s, background .18s;
+}
+body:has([data-product]) .site-nav .btn-follow:hover {
+  border-color: var(--p-line-focus);
+  background: var(--p-surface);
+  color: var(--p-text);
+}
+
+body:has([data-product]) .nav-toggle span { background: var(--p-muted) }
+
+/* A product page owns the whole viewport, so the marketing footer would only
+   add a second scroll region below a pane that already fills the screen. */
+body:has([data-product]) > footer { display: none }
+
+/* ── Typography primitives ──────────────────────────────
+   Three roles, used everywhere. `.p-label` names a region, `.p-title` heads
+   one, `.p-meta` reports machine facts about it. */
+
+.p-label {
+  font-family: var(--heading);
+  font-weight: 400;
+  font-size: .5rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--p-dim);
+}
+
+.p-title {
+  font-family: var(--heading);
+  font-weight: 400;
+  font-size: .9rem;
+  line-height: 1.35;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--p-text);
+}
+
+.p-meta {
+  font-family: var(--mono);
+  font-size: .72rem;
+  color: var(--p-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Visually hidden, still announced. */
+.p-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ── Status mark ────────────────────────────────────────
+   A 6px square, not a dot: the brand's grid language. Add `.is-live` for the
+   slow pulse that means "something is happening right now". */
+
+.p-mark {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  background: var(--p-dim);
+}
+.p-mark.is-ok { background: var(--p-ok) }
+.p-mark.is-warn { background: var(--p-warn) }
+.p-mark.is-bad { background: var(--p-bad) }
+.p-mark.is-accent { background: var(--p-accent) }
+
+.p-mark.is-live {
+  background: var(--p-accent);
+  animation: p-pulse 1.8s infinite;
+}
+@keyframes p-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(0, 212, 255, .4) }
+  70% { box-shadow: 0 0 0 7px rgba(0, 212, 255, 0) }
+  100% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0) }
+}
+
+/* ── Buttons ────────────────────────────────────────────
+   `.p-btn` is the quiet default. `.is-primary` is the one filled action in a
+   view — the accent earns its brightness by being rare. */
+
+.p-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .45rem;
+  min-height: var(--p-tap);
+  padding: 0 16px;
+  font-family: var(--body);
+  font-size: .82rem;
+  font-weight: 500;
+  color: var(--p-muted);
+  background: transparent;
+  border: 1px solid var(--p-line-strong);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color .18s, border-color .18s, background .18s;
+}
+.p-btn:hover:not(:disabled) {
+  color: var(--p-text);
+  border-color: var(--p-line-focus);
+  background: var(--p-surface);
+}
+.p-btn:disabled {
+  color: var(--p-dim);
+  border-color: var(--p-line);
+  background: transparent;
+  cursor: not-allowed;
+}
+
+.p-btn.is-primary {
+  color: #04121a;
+  font-weight: 600;
+  background: var(--p-accent);
+  border-color: var(--p-accent);
+}
+.p-btn.is-primary:hover:not(:disabled) {
+  background: #4ce0ff;
+  border-color: #4ce0ff;
+  color: #04121a;
+}
+.p-btn.is-primary:disabled {
+  color: var(--p-dim);
+  background: var(--p-surface);
+  border-color: var(--p-line-strong);
+}
+
+.p-btn.is-accent {
+  color: var(--p-accent-text);
+  border-color: var(--p-accent-line);
+}
+.p-btn.is-accent:hover:not(:disabled) {
+  color: var(--p-accent);
+  border-color: var(--p-accent);
+  background: var(--p-accent-wash);
+}
+
+.p-btn.is-danger {
+  color: var(--p-bad);
+  border-color: var(--p-bad-line);
+}
+.p-btn.is-danger:hover:not(:disabled) {
+  background: var(--p-bad);
+  border-color: var(--p-bad);
+  color: #fff;
+}
+
+/* Text-only action, for controls that belong to a row rather than to the page. */
+.p-btn.is-bare {
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  font-size: .76rem;
+  color: var(--p-dim);
+}
+.p-btn.is-bare:hover:not(:disabled) {
+  color: var(--p-accent-text);
+  background: none;
+}
+
+/* ── Chips ──────────────────────────────────────────────
+   A chip is machine text on a raised plane: a model id, a token count, a file
+   name. `.is-action` makes it clickable. */
+
+.p-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  min-height: 30px;
+  padding: 0 .7rem;
+  font-family: var(--mono);
+  font-size: .74rem;
+  color: var(--p-body);
+  background: var(--p-surface);
+  border: 1px solid var(--p-line-strong);
+  white-space: nowrap;
+}
+.p-chip .p-chip-dim { color: var(--p-dim) }
+
+.p-chip.is-action {
+  cursor: pointer;
+  text-decoration: none;
+  transition: border-color .18s, color .18s;
+}
+.p-chip.is-action:hover {
+  border-color: var(--p-line-focus);
+  color: var(--p-text);
+}
+
+.p-chip.is-accent {
+  color: var(--p-accent-text);
+  background: var(--p-surface-2);
+  border-color: var(--p-line-strong);
+}
+
+/* Suggestion chips: prose, not machine text, and flat on the ground so a row
+   of them reads as a menu rather than a toolbar. */
+.p-suggest {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 16px;
+  font-family: var(--body);
+  font-size: .84rem;
+  color: var(--p-muted);
+  background: transparent;
+  border: 1px solid var(--p-line);
+  cursor: pointer;
+  transition: color .18s, border-color .18s, background .18s;
+}
+.p-suggest:hover {
+  color: var(--p-text);
+  border-color: var(--p-line-strong);
+  background: var(--p-surface);
+}
+
+/* ── Form controls ──────────────────────────────────────
+   Selects keep their own chevron so they match across platforms; the chevron
+   is dim, not accent — it is an affordance, not a highlight. */
+
+.p-select {
+  min-height: 34px;
+  max-width: 100%;
+  padding: 0 1.9rem 0 .6rem;
+  background-color: var(--p-surface);
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238195aa' stroke-width='1.4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right .6rem center;
+  background-size: 9px 6px;
+  border: 1px solid var(--p-line-strong);
+  color: var(--p-text);
+  font-family: var(--mono);
+  font-size: .78rem;
+  appearance: none;
+  cursor: pointer;
+  transition: border-color .18s;
+}
+.p-select:hover:not(:disabled) { border-color: var(--p-line-focus) }
+.p-select:disabled {
+  color: var(--p-dim);
+  background-color: var(--p-bg);
+  border-color: var(--p-line);
+  cursor: not-allowed;
+}
+.p-select option {
+  background: var(--p-float);
+  color: var(--p-text);
+}
+
+.p-input {
+  min-height: 34px;
+  padding: 0 .65rem;
+  background: var(--p-surface);
+  border: 1px solid var(--p-line-strong);
+  color: var(--p-text);
+  font-family: var(--body);
+  font-size: .84rem;
+  transition: border-color .18s;
+}
+.p-input::placeholder { color: var(--p-dim) }
+.p-input:focus { outline: none; border-color: var(--p-line-focus) }
+
+/* ── Card ───────────────────────────────────────────────
+   The default raised plane. Anything that needs to sit above the ground and
+   read as one object starts here and adds only its own layout. */
+
+.p-card {
+  padding: 1rem 1.15rem;
+  background: var(--p-surface);
+  border: 1px solid var(--p-line-strong);
+}
+
+/* ── Meter ──────────────────────────────────────────────
+   A budget read-out: how much of something is used. The fill is one of the few
+   places full accent appears, because it is genuinely a value. */
+
+.p-meter {
+  display: block;
+  width: 72px;
+  height: 3px;
+  background: var(--p-surface-2);
+  overflow: hidden;
+}
+.p-meter > span {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--p-accent);
+  transition: width .4s ease;
+}
+.p-meter.is-warn > span { background: var(--p-warn) }
+.p-meter.is-bad > span { background: var(--p-bad) }
+
+/* ── Disclosure + popover ───────────────────────────────
+   Progressive disclosure the boring way: a <details> so it works with no JS
+   and exposes its own state, plus a panel that floats so opening one never
+   reflows the content behind it. Add .p-pop-up to open upward. */
+
+.p-disclosure[hidden] { display: none }
+.p-disclosure > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  min-height: 28px;
+  padding: 0 .5rem;
+  font-family: var(--mono);
+  font-size: .72rem;
+  color: var(--p-dim);
+  border: 1px solid transparent;
+  list-style: none;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color .18s, border-color .18s;
+}
+.p-disclosure > summary::-webkit-details-marker { display: none }
+.p-disclosure > summary::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform .18s;
+}
+.p-disclosure > summary:hover { color: var(--p-text) }
+.p-disclosure[open] > summary {
+  color: var(--p-text);
+  border-color: var(--p-line-strong);
+}
+.p-disclosure[open] > summary::after { transform: translateY(1px) rotate(-135deg) }
+
+.p-pop-host { position: relative }
+
+.p-pop {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + .4rem);
+  right: 0;
+  width: max-content;
+  max-width: min(21rem, calc(100vw - 2 * var(--p-pad)));
+  padding: .85rem .9rem;
+  background: var(--p-float);
+  border: 1px solid var(--p-line-strong);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .55);
+}
+.p-pop.p-pop-up {
+  top: auto;
+  bottom: calc(100% + .4rem);
+}
+
+/* ── Dialog ─────────────────────────────────────────────*/
+
+.p-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  padding: 1.25rem;
+  background: rgba(6, 9, 14, .8);
+  backdrop-filter: blur(6px);
+}
+.p-backdrop[hidden] { display: none }
+
+.p-dialog {
+  width: min(520px, 100%);
+  padding: 1.5rem;
+  background: var(--p-float);
+  border: 1px solid var(--p-line-strong);
+  box-shadow: 0 26px 70px rgba(0, 0, 0, .55);
+}
+
+/* ── Notices ────────────────────────────────────────────
+   Left-marked strips. The mark carries the severity so the fill can stay
+   almost invisible — a loud red panel in a workspace is a punishment. */
+
+.p-notice {
+  padding: .6rem .8rem;
+  font-size: .82rem;
+  line-height: 1.6;
+  color: var(--p-body);
+  background: var(--p-surface);
+  border: 1px solid var(--p-line-strong);
+  border-left: 2px solid var(--p-line-focus);
+}
+.p-notice.is-bad {
+  color: #ffb3ba;
+  background: var(--p-bad-wash);
+  border-color: var(--p-bad-line);
+  border-left: 2px solid var(--p-bad);
+}
+.p-notice.is-warn {
+  border-color: rgba(217, 164, 65, .3);
+  border-left: 2px solid var(--p-warn);
+}
+.p-notice.is-accent { border-left: 2px solid var(--p-accent) }
+.p-notice[hidden] { display: none }
+
+/* ── Long-form prose ────────────────────────────────────
+   The reading surface for anything markdown-rendered. The framework reset
+   zeroes every margin, so this re-establishes the whole rhythm.
+
+   The one distinctive move: h2/h3 are Bruno Ace SC small-caps followed by a
+   full-width hairline, so a long answer scans as a document with sections
+   rather than a wall with bold lines in it. */
+
+.p-prose {
+  color: var(--p-body);
+  font-size: .95rem;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+.p-prose > * + * { margin-top: 1rem }
+.p-prose > :first-child { margin-top: 0 }
+
+.p-prose h1,
+.p-prose h2,
+.p-prose h3,
+.p-prose h4 {
+  font-family: var(--heading);
+  font-weight: 400;
+  color: var(--p-text);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  line-height: 1.5;
+  margin-top: 2.1rem;
+  padding-bottom: .55rem;
+  border-bottom: 1px solid var(--p-line);
+}
+.p-prose h1 { font-size: .92rem }
+.p-prose h2 { font-size: .82rem }
+.p-prose h3 { font-size: .74rem }
+/* By h4 the rule is more noise than structure. */
+.p-prose h4 {
+  font-size: .68rem;
+  color: var(--p-muted);
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.p-prose strong { color: var(--p-text); font-weight: 600 }
+.p-prose em { font-style: italic }
+
+.p-prose ul, .p-prose ol { padding-left: 1.35rem }
+.p-prose ul { list-style: disc }
+.p-prose ol { list-style: decimal }
+.p-prose li::marker { color: var(--p-dim) }
+.p-prose li + li { margin-top: .35rem }
+.p-prose li > ul, .p-prose li > ol { margin-top: .35rem }
+
+.p-prose a {
+  color: var(--p-accent-text);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(94, 207, 232, .3);
+}
+.p-prose a:hover { border-bottom-color: var(--p-accent-text) }
+
+.p-prose code {
+  font-family: var(--mono);
+  font-size: .86em;
+  color: var(--p-accent-text);
+  background: var(--p-surface);
+  border: 1px solid var(--p-line-strong);
+  padding: .05em .35em;
+}
+
+.p-prose pre {
+  background: var(--p-recess);
+  border: 1px solid var(--p-line-strong);
+  padding: .9rem 1rem;
+  overflow-x: auto;
+  font-size: .8rem;
+  line-height: 1.65;
+}
+.p-prose pre code {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--p-body);
+  font-size: 1em;
+}
+
+.p-prose blockquote {
+  border-left: 2px solid var(--p-line-strong);
+  padding-left: 1rem;
+  color: var(--p-muted);
+}
+
+.p-prose hr {
+  border: 0;
+  border-top: 1px solid var(--p-line);
+  margin-block: 1.6rem;
+}
+
+.p-prose table {
+  display: block;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .84rem;
+  overflow-x: auto;
+}
+.p-prose th, .p-prose td {
+  border: 1px solid var(--p-line-strong);
+  padding: .45rem .65rem;
+  text-align: left;
+}
+.p-prose th {
+  font-family: var(--heading);
+  font-weight: 400;
+  font-size: .58rem;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--p-muted);
+  background: var(--p-surface);
+}
+
+.p-prose img { max-width: 100%; height: auto }
+
+/* ── Scrollbars ─────────────────────────────────────────
+   A product page is mostly scroll regions; the default chrome bar is the one
+   piece of UI that ignores the palette entirely. */
+
+[data-product] ::-webkit-scrollbar { width: 10px; height: 10px }
+[data-product] ::-webkit-scrollbar-track { background: transparent }
+[data-product] ::-webkit-scrollbar-thumb {
+  background: var(--p-line-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+[data-product] ::-webkit-scrollbar-thumb:hover { background-clip: padding-box }
+[data-product] * { scrollbar-width: thin; scrollbar-color: var(--p-line-strong) transparent }
+
+/* ── Focus ──────────────────────────────────────────────*/
+
+[data-product] :focus-visible,
+.p-backdrop :focus-visible {
+  outline: 2px solid var(--p-accent);
+  outline-offset: 2px;
+}
+
+/* ── Reduced motion ─────────────────────────────────────*/
+
+@media (prefers-reduced-motion: reduce) {
+  .p-mark.is-live { animation: none }
+  [data-product] *,
+  .p-backdrop * { transition-duration: .01ms !important }
+}

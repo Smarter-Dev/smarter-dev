@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+from datetime import datetime
 from uuid import UUID
 
 from litestar import Request
@@ -20,8 +22,10 @@ from sqlalchemy.orm import selectinload
 
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import get_model
+from smarter_dev.shared.model_catalog import model_vendor
 from smarter_dev.web.agent_api import resources_quota_state
 from smarter_dev.web.chat.api import require_user_id
+from smarter_dev.web.chat.api import turn_meta
 from smarter_dev.web.chat.entitlements import has_chat
 from smarter_dev.web.chat.entitlements import has_ultra_chat
 from smarter_dev.web.chat.settings import ensure_settings
@@ -34,6 +38,33 @@ from smarter_dev.web.models import WebChatDocument
 from smarter_dev.web.models import WebChatMessage
 from smarter_dev.web.models import WebChatTurn
 from smarter_dev.web.sdanswer import enrich_answer
+
+
+def group_conversations(conversations: list, now: datetime) -> list[dict]:
+    """Bucket the history rail by recency: Today, This week, then Older.
+
+    Buckets are emitted in fixed order and empty ones are dropped, so the rail
+    never shows a heading with nothing under it.
+    """
+    buckets: dict[str, list] = {"Today": [], "This week": [], "Older": []}
+    today = now.date()
+    for item in conversations:
+        stamp = getattr(item, "updated_at", None) or getattr(item, "created_at", None)
+        if stamp is None:
+            buckets["Older"].append(item)
+            continue
+        if stamp.tzinfo is None:
+            stamp = stamp.replace(tzinfo=UTC)
+        age = today - stamp.astimezone(UTC).date()
+        if age.days <= 0:
+            buckets["Today"].append(item)
+        elif age.days <= 7:
+            buckets["This week"].append(item)
+        else:
+            buckets["Older"].append(item)
+    return [
+        {"label": label, "items": items} for label, items in buckets.items() if items
+    ]
 
 
 async def _catalog_context(session: AsyncSession, settings) -> dict:
@@ -57,6 +88,7 @@ async def _catalog_context(session: AsyncSession, settings) -> dict:
         {
             "key": model.key,
             "label": model.label,
+            "vendor": model_vendor(model),
             "cost_tier": rows[model.key].cost_tier,
             "reasoning_levels": [level.value for level in model.reasoning_levels],
         }
@@ -130,6 +162,16 @@ async def _chat_context(
                 "size_bytes": document.size_bytes,
             }
         )
+    turns = {
+        turn.id: turn
+        for turn in (
+            await session.execute(
+                select(WebChatTurn).where(
+                    WebChatTurn.conversation_id == conversation.id
+                )
+            )
+        ).scalars()
+    }
     versions: dict[str, list[dict]] = {}
     rendered = []
     for message in messages:
@@ -137,6 +179,11 @@ async def _chat_context(
             "id": str(message.id),
             "turn_id": str(message.turn_id),
             "role": message.role,
+            **(
+                turn_meta(turns.get(message.turn_id))
+                if message.role == "assistant"
+                else {"model_key": None, "elapsed": None}
+            ),
             "content": message.content,
             "content_html": render_markdown(message.content or ""),
             "sequence": message.sequence,
@@ -198,6 +245,9 @@ async def chat_index(request: Request, db_session: AsyncSession) -> Template:
             "mode": "chat",
             "settings": settings,
             "conversations": conversations,
+            "conversation_groups": group_conversations(
+                conversations, datetime.now(UTC)
+            ),
             "ultra_chat": has_ultra_chat(permissions),
             "seo_meta": {
                 "robots": "noindex,nofollow",
@@ -246,6 +296,9 @@ async def chat_conversation(
                 "conversation": web,
                 "mode": "chat",
                 "conversations": conversations,
+                "conversation_groups": group_conversations(
+                    conversations, datetime.now(UTC)
+                ),
                 "model": selected_model,
                 "model_reasoning_levels": [
                     level.value for level in selected_model.reasoning_levels
@@ -335,6 +388,9 @@ async def chat_conversation(
             "messages": messages,
             "versions": {},
             "conversations": resource_conversations,
+            "conversation_groups": group_conversations(
+                resource_conversations, datetime.now(UTC)
+            ),
             "is_owner": is_owner,
             "quota_state": quota,
             "resource_running": active_resource_run is not None,

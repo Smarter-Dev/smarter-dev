@@ -35,6 +35,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import get_model
+from smarter_dev.shared.model_catalog import model_vendor
 from smarter_dev.shared.model_catalog import parse_reasoning_level
 from smarter_dev.shared.model_catalog import resolve_reasoning_level
 from smarter_dev.web.chat.attachments import AttachmentError
@@ -221,12 +222,32 @@ async def _finalize_cancelled_turn(turn_id: UUID, db_session: AsyncSession) -> N
     await db_session.commit()
 
 
+def turn_meta(turn: WebChatTurn | None) -> dict:
+    """Which model answered and how long it took, for the byline on a response.
+
+    ``elapsed`` is ``None`` while a turn is still running — the browser owns the
+    live timer in that case and only adopts this once the turn has finished.
+    """
+    if turn is None:
+        return {"model_key": None, "elapsed": None}
+    elapsed = None
+    if turn.finished_at and turn.created_at:
+        elapsed = round((turn.finished_at - turn.created_at).total_seconds(), 1)
+    return {"model_key": turn.model_key, "elapsed": elapsed}
+
+
 def message_dict(
-    message: WebChatMessage, attachments: list[dict] | None = None
+    message: WebChatMessage,
+    attachments: list[dict] | None = None,
+    turn: WebChatTurn | None = None,
 ) -> dict:
     return {
         "id": str(message.id),
         "turn_id": str(message.turn_id),
+        # The response byline (which model, how long). Only assistant turns show
+        # one, and only once the turn has finished — the browser owns the timer
+        # while it is still running.
+        **(turn_meta(turn) if message.role == "assistant" else {}),
         "sequence": message.sequence,
         "role": message.role,
         "content": message.content,
@@ -289,6 +310,7 @@ class ChatApiController(Controller):
                 {
                     "key": model.key,
                     "label": model.label,
+                    "vendor": model_vendor(model),
                     "cost_tier": rows[model.key].cost_tier,
                     "reasoning_levels": [
                         level.value for level in model.reasoning_levels
@@ -386,6 +408,16 @@ class ChatApiController(Controller):
             ).scalars()
         )
         events.reverse()
+        turns = {
+            turn.id: turn
+            for turn in (
+                await db_session.execute(
+                    select(WebChatTurn).where(
+                        WebChatTurn.conversation_id == conversation_id
+                    )
+                )
+            ).scalars()
+        }
         activity_events = list(
             (
                 await db_session.execute(
@@ -495,6 +527,7 @@ class ChatApiController(Controller):
                     attachments_by_turn.get(message.turn_id, [])
                     if message.role == "user"
                     else [],
+                    turns.get(message.turn_id),
                 )
                 for message in messages
             ],

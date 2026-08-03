@@ -146,6 +146,30 @@ MODEL_FAMILIES: tuple[str, ...] = (
 )
 
 
+# Who *made* each family, which is not who serves it: Grok is served through
+# OpenRouter but the lab is xAI, and the open weights run on Digital Ocean /
+# OpenCode Zen regardless of origin. `provider` answers "which SDK"; this
+# answers "whose model", which is what a reader wants next to the name.
+MODEL_VENDORS: dict[str, str] = {
+    "Kimi": "Moonshot",
+    "GLM": "Zhipu",
+    "DeepSeek": "DeepSeek",
+    "Gemma": "Google",
+    "Qwen": "Alibaba",
+    "MiniMax": "MiniMax",
+    "Gemini": "Google",
+    "GPT": "OpenAI",
+    "Claude": "Anthropic",
+    "Poolside": "Poolside",
+    "Grok": "xAI",
+}
+
+
+def model_vendor(model: CatalogModel) -> str:
+    """The lab that made ``model``, for display beside its label."""
+    return MODEL_VENDORS.get(model.family, model.family)
+
+
 # Common reasoning ladders, named once so the catalog stays scannable.
 # OpenAI GPT-5.4/5.5: none → xhigh. GPT-5.6 adds "max". Gemini's thinking_level
 # caps at "high". Open reasoning models (GLM/DeepSeek/Qwen served via DO) expose

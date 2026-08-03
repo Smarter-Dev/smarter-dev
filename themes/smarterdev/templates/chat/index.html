@@ -7,7 +7,12 @@
 {% set models = catalog_models|default([]) %}
 {% set model_keys = models|map(attribute='key')|list %}
 {% set current_model = (models|selectattr('key', 'equalto', conversation.selected_model_key)|list|first) if conversation else none %}
+{% set groups = conversation_groups|default([]) %}
+{# Openers for a blank conversation. Concrete tasks, not capability boasts —
+   they exist to show what this thing is for, so they read as work. #}
+{% set starters = ['Review a stack trace', 'Plan a Discord bot', 'Research model pricing', 'Explain this repo'] %}
 <div class="chat-shell"
+     data-product
      data-chat-shell
      data-mode="{{ mode }}"
      data-conversation-id="{{ conversation.id if conversation else '' }}"
@@ -19,27 +24,39 @@
 
   <aside class="chat-sidebar" aria-label="Chat history">
     <div class="chat-sidebar-head">
-      <a href="{{ '/resources' if mode == 'resources' else '/chat' }}" class="chat-new">+ New {{ 'Question' if mode == 'resources' else 'Chat' }}</a>
+      <a href="{{ '/resources' if mode == 'resources' else '/chat' }}" class="p-btn is-accent chat-new">+ New {{ 'question' if mode == 'resources' else 'chat' }}</a>
     </div>
-    <nav>{% for item in conversations %}<a href="/chat/{{ item.id }}" {% if conversation and item.id == conversation.id %}aria-current="page"{% endif %}>{{ item.title or 'Untitled Chat' }}</a>{% endfor %}</nav>
+    <nav class="chat-history">
+      {% for group in groups %}
+      <p class="p-label chat-history-group">{{ group.label }}</p>
+      {% for item in group['items'] %}<a href="/chat/{{ item.id }}" {% if conversation and item.id == conversation.id %}aria-current="page"{% endif %}>{{ item.title or 'Untitled chat' }}</a>{% endfor %}
+      {% endfor %}
+    </nav>
+    {# Connection is worth one line at the bottom of the rail and nothing more:
+       it only matters when it is wrong. #}
+    <div class="chat-rail-foot p-meta" data-chat-connection>
+      <span class="p-mark is-ok" data-connection-mark aria-hidden="true"></span>
+      <span data-connection-label>connecting</span>
+      {% if mode == 'chat' and conversation %}<span class="chat-rail-model">· <span data-rail-model>{{ conversation.selected_model_key }}</span></span>{% endif %}
+    </div>
   </aside>
 
   <main class="chat-main">
     <header class="chat-header">
-      <h1>{{ conversation.title if conversation else 'Chat' }}</h1>
+      <h1 class="p-title">{{ conversation.title if conversation else 'New chat' }}</h1>
       {% if mode == 'chat' %}
-      <details class="chat-disclosure chat-pop-host chat-settings" data-chat-settings {% if not conversation %}hidden{% endif %}>
-        <summary><span class="chat-sr">Conversation settings — model </span><span data-chat-model-label>{{ current_model.label if current_model else (conversation.selected_model_key if conversation else 'Not started') }}</span></summary>
-        <div class="chat-pop chat-settings-pop">
-          <label>Model
-            <select data-chat-model {% if not conversation %}disabled{% endif %}>
+      <details class="p-disclosure p-pop-host chat-settings" data-chat-settings {% if not conversation %}hidden{% endif %}>
+        <summary class="chat-model-chip"><span class="p-sr">Conversation settings — model </span><span data-chat-model-label>{{ current_model.label if current_model else (conversation.selected_model_key if conversation else 'Not started') }}</span><span class="p-chip-dim" data-chat-model-vendor>{% if current_model %}· {{ current_model.vendor }}{% endif %}</span></summary>
+        <div class="p-pop chat-settings-pop">
+          <label class="p-label">Model
+            <select class="p-select" data-chat-model {% if not conversation %}disabled{% endif %}>
               {% for item in models %}<option value="{{ item.key }}" {% if conversation and item.key == conversation.selected_model_key %}selected{% endif %}>{{ item.label }} · {{ item.cost_tier }}</option>{% endfor %}
               {% if conversation and conversation.selected_model_key not in model_keys %}<option value="{{ conversation.selected_model_key }}" selected>{{ conversation.selected_model_key }} · unavailable (pick a new model)</option>{% endif %}
               {% if not models %}<option value="">No models enabled</option>{% endif %}
             </select>
           </label>
-          <label>Reasoning
-            <select data-chat-reasoning {% if not conversation %}disabled{% endif %}>
+          <label class="p-label">Reasoning
+            <select class="p-select" data-chat-reasoning {% if not conversation %}disabled{% endif %}>
               <option value="" {% if not (conversation and conversation.reasoning_level) %}selected{% endif %}>Model default</option>
               {% for level in model_reasoning_levels|default([]) %}<option value="{{ level }}" {% if conversation and conversation.reasoning_level == level %}selected{% endif %}>{{ level }}</option>{% endfor %}
             </select>
@@ -58,94 +75,106 @@
           <p>Chats stay private to your account and are kept after you close the tab.</p>
           <div class="chat-start-settings">
             <p>Start in
-              <select data-chat-new-intelligence aria-label="Intelligence mode">
+              <select class="p-select" data-chat-new-intelligence aria-label="Intelligence mode">
                 {% for value, label in [('maximize_efficiency','Maximize Efficiency'),('efficient','Efficient'),('intelligence','Intelligence'),('maximize_intelligence','Maximize Intelligence')] %}<option value="{{ value }}" {% if settings.default_intelligence_mode == value %}selected{% endif %}>{{ label }}</option>{% endfor %}
                 {% if ultra_chat %}<option value="ultra_intelligence" {% if settings.default_intelligence_mode == 'ultra_intelligence' %}selected{% endif %}>Ultra Intelligence</option>{% endif %}
               </select>
               on
-              <select data-chat-new-model aria-label="Model">
+              <select class="p-select" data-chat-new-model aria-label="Model">
                 {% for item in models %}<option value="{{ item.key }}" {% if item.key == default_model_key %}selected{% endif %}>{{ item.label }} · {{ item.cost_tier }}</option>{% endfor %}
               </select>
               with
-              <select data-chat-new-reasoning aria-label="Reasoning level">
+              <select class="p-select" data-chat-new-reasoning aria-label="Reasoning level">
                 <option value="" {% if not default_reasoning %}selected{% endif %}>Model default</option>
                 {% for level in default_reasoning_levels|default([]) %}<option value="{{ level }}" {% if default_reasoning == level %}selected{% endif %}>{{ level }}</option>{% endfor %}
               </select>
               reasoning.
             </p>
-            <p class="chat-start-note">Intelligence is fixed once the conversation starts. Model and reasoning stay changeable.</p>
+            <p class="chat-start-note">Intelligence is fixed once the conversation starts.<br>Model and reasoning stay changeable.</p>
           </div>
+          {% if mode == 'chat' %}
+          <div class="chat-starters">
+            {% for starter in starters %}<button type="button" class="p-suggest" data-chat-starter>{{ starter }}</button>{% endfor %}
+          </div>
+          {% endif %}
         </div>
         {% endif %}
         {% for message in messages %}
-        <article class="chat-message chat-message-{{ message.role }}{% if mode == 'resources' and message.role == 'assistant' %} ai-turn-assistant{% endif %}"
+        <article class="chat-message chat-message-{{ message.role }}{% if message.role == 'user' %} p-card{% endif %}{% if mode == 'resources' and message.role == 'assistant' %} ai-turn-assistant{% endif %}"
                  {% if mode == 'resources' and message.role == 'assistant' and message.sdanswer_blocks %}data-has-sdanswer="1"{% endif %}
                  data-message-id="{{ message.id }}"
                  data-turn-id="{{ message.turn_id }}"
                  {% if active_turn and message.turn_id == active_turn.id|string %}data-pending-turn="{{ active_turn.id }}"{% endif %}
                  data-version-group-id="{{ message.version_group }}">
-          <div class="chat-role">{{ 'You' if message.role == 'user' else ('Resource Agent' if mode == 'resources' else 'Smarter Dev') }}</div>
-          {% if mode == 'chat' and message.role == 'assistant' and active_turn and message.turn_id == active_turn.id|string %}<div class="chat-agent-activity" data-root-activity data-started-at="{{ active_turn.created_at.isoformat() }}"><span class="chat-activity-pulse" aria-hidden="true"></span><span data-activity-label>Working…</span><time data-activity-timer>0:00</time></div>{% endif %}
-          <div class="chat-content sdanswer-prose">{% if message.role == 'assistant' and not message.content and not (mode == 'chat' and active_turn) %}Working…{% else %}{{ message.content_html|safe }}{% endif %}</div>
-          {% if mode == 'chat' and message.attachments %}<div class="chat-sent-attachments">{% for attachment in message.attachments %}<a href="/v2/api/chat/conversations/{{ conversation.id }}/attachments/{{ attachment.id }}">{{ attachment.name }}</a>{% endfor %}</div>{% endif %}
+          <div class="chat-byline">
+            <div class="chat-role p-label">{% if message.role == 'assistant' %}<span class="p-mark is-accent" aria-hidden="true"></span>{% endif %}{{ 'You' if message.role == 'user' else ('Resource Agent' if mode == 'resources' else 'Smarter.Dev') }}</div>
+            {% if message.role == 'assistant' and message.model_key %}<div class="chat-byline-meta p-meta" data-turn-meta><span data-turn-model>{{ message.model_key }}</span>{% if message.elapsed is not none %} · <span data-turn-elapsed>{{ message.elapsed }}s</span>{% endif %}</div>{% endif %}
+          </div>
+          {% if mode == 'chat' and message.role == 'assistant' and active_turn and message.turn_id == active_turn.id|string %}<div class="chat-agent-activity" data-root-activity data-started-at="{{ active_turn.created_at.isoformat() }}"><span class="p-mark is-live" aria-hidden="true"></span><span data-activity-label>Working…</span><time data-activity-timer>0:00</time></div>{% endif %}
+          <div class="chat-content p-prose sdanswer-prose">{% if message.role == 'assistant' and not message.content and not (mode == 'chat' and active_turn) %}Working…{% else %}{{ message.content_html|safe }}{% endif %}</div>
+          {% if mode == 'chat' and message.attachments %}<div class="chat-sent-attachments">{% for attachment in message.attachments %}<a class="chat-sent-attachment" href="/v2/api/chat/conversations/{{ conversation.id }}/attachments/{{ attachment.id }}"><svg viewBox="0 0 14 16" aria-hidden="true" focusable="false"><path d="M8.5.5H2.5a1 1 0 0 0-1 1v13a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V4.5zM8.5.5V4.5h4" fill="none" stroke="currentColor" stroke-width="1"/></svg>{{ attachment.name }}</a>{% endfor %}</div>{% endif %}
           {% if mode == 'chat' and message.documents %}<div class="chat-documents" data-chat-documents>{% for document in message.documents %}<article class="chat-document" data-document-id="{{ document.id }}"><div class="chat-document-mark" aria-hidden="true">MD</div><div class="chat-document-info"><strong>{{ document.title }}</strong><span>{{ document.filename }} · {{ document.size_bytes }} bytes</span></div><div class="chat-document-actions"><button type="button" data-open-document data-document-id="{{ document.id }}">Preview</button><a href="/v2/api/chat/conversations/{{ conversation.id }}/documents/{{ document.id }}/download" download="{{ document.filename }}" data-sk-no-spa>Download</a></div></article>{% endfor %}</div>{% endif %}
           {% if mode == 'resources' and message.role == 'assistant' and message.sdanswer_blocks %}<script type="application/json" class="sdanswer-payload">{{ message.sdanswer_blocks|tojson }}</script>{% endif %}
           {% if message.stopped %}<span class="chat-stopped">Stopped</span>{% endif %}
           {% if message.role == 'assistant' and mode == 'chat' %}<div class="chat-response-actions">
-            <button type="button" data-regenerate data-turn-id="{{ message.turn_id }}" {% if active_turn %}disabled{% endif %}>Regenerate</button>
+            <button type="button" class="p-btn is-bare" data-regenerate data-turn-id="{{ message.turn_id }}" {% if active_turn %}disabled{% endif %}>Regenerate</button>
             {% set choices = versions.get(message.version_group, []) %}
-            {% if choices|length > 1 %}<select data-version-group aria-label="Response version">{% for choice in choices %}<option value="{{ choice.id }}" {% if choice.is_active %}selected{% endif %}>Response {{ choice.version_number }}</option>{% endfor %}</select>{% endif %}
+            {% if choices|length > 1 %}<select class="p-select" data-version-group aria-label="Response version">{% for choice in choices %}<option value="{{ choice.id }}" {% if choice.is_active %}selected{% endif %}>Response {{ choice.version_number }}</option>{% endfor %}</select>{% endif %}
           </div>{% endif %}
         </article>
         {% endfor %}
-        <div class="chat-live-status" data-chat-status {% if not resource_running %}hidden{% endif %}>{% if resource_running %}Resource Agent is working…{% endif %}</div>
+        <div class="chat-live-status p-notice is-accent" data-chat-status {% if not resource_running %}hidden{% endif %}>{% if resource_running %}Resource Agent is working…{% endif %}</div>
       </section>
       <button type="button" class="chat-to-bottom" data-chat-to-bottom hidden>↓ Jump to latest</button>
     </div>
 
-    {% if mode == 'chat' %}<details class="chat-disclosure chat-agent-panel" data-chat-agent-panel hidden><summary><span data-chat-subagent-summary>Sub-agents</span></summary><div data-chat-subagents></div></details>{% endif %}
-    <p class="chat-error" data-chat-error role="alert" hidden></p>
+    {% if mode == 'chat' %}<details class="p-disclosure chat-agent-panel" data-chat-agent-panel hidden><summary><span data-chat-subagent-summary>Sub-agents</span></summary><div data-chat-subagents></div></details>{% endif %}
+    <p class="chat-error p-notice is-bad" data-chat-error role="alert" hidden></p>
 
     {% if mode == 'chat' or (is_owner and not resource_running and quota_state and quota_state.followups_remaining > 0) %}
     <form class="chat-composer" data-chat-composer>
       <div class="chat-attachments" data-attachments></div>
       {% if mode == 'chat' %}
       <div class="chat-media-instruction" data-media-instruction-row hidden>
-        <label for="chat-media-instruction">Image summary instruction</label>
-        <input id="chat-media-instruction" type="text" maxlength="2000" data-media-instruction placeholder="Optional — e.g. Extract the architecture diagram">
+        <label class="p-label" for="chat-media-instruction">Image summary instruction</label>
+        <input class="p-input" id="chat-media-instruction" type="text" maxlength="2000" data-media-instruction placeholder="Optional — e.g. Extract the architecture diagram">
       </div>
       {% endif %}
-      {% if mode == 'resources' and quota_state %}<p class="chat-resource-quota">{{ quota_state.followups_remaining }}/{{ quota_state.max_followups }} follow-ups remaining · {{ quota_state.questions_remaining }}/{{ quota_state.max_questions }} weekly questions remaining</p>{% endif %}
+      {% if mode == 'resources' and quota_state %}<p class="chat-resource-quota p-notice is-warn">{{ quota_state.followups_remaining }}/{{ quota_state.max_followups }} follow-ups remaining · {{ quota_state.questions_remaining }}/{{ quota_state.max_questions }} weekly questions remaining</p>{% endif %}
       <div class="chat-composer-row">
         {% if mode == 'chat' %}
         <label class="chat-attach">
           <input type="file" data-chat-files multiple accept=".txt,.md,.json,.csv,.pdf,.png,.jpg,.jpeg,.gif,.webp,.bmp,.log,.cfg,.conf,.ini,.toml,.yaml,.yml,text/*,application/json,application/pdf,image/*">
           <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M13.2 4.6 6.1 11.7a2.4 2.4 0 0 0 3.4 3.4l7.1-7.1a4 4 0 0 0-5.7-5.7L3.8 10.4a5.6 5.6 0 0 0 8 8l6.3-6.3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-          <span class="chat-sr">Attach files</span>
+          <span class="p-sr">Attach files</span>
         </label>
         {% endif %}
-        <textarea data-chat-input maxlength="5000" required rows="1" aria-label="Message" aria-describedby="chat-composer-hint" placeholder="Message Smarter Dev…"></textarea>
+        <textarea data-chat-input maxlength="5000" required rows="1" aria-label="Message" aria-describedby="chat-composer-hint" placeholder="Message Smarter.Dev…"></textarea>
         <div class="chat-composer-actions">
-          {% if mode == 'chat' %}
-          <details class="chat-disclosure chat-pop-host chat-usage" data-chat-usage>
-            <summary><span class="chat-sr">Usage — </span><span class="chat-usage-value"><b data-conversation-percent>0</b>%</span></summary>
-            <div class="chat-pop chat-usage-pop">
-              <p><b data-context-tokens>0</b> context · <b data-subagent-tokens>0</b> sub-agent · <b data-total-tokens>0</b> total tokens</p>
-              <p>This conversation is <b data-conversation-percent-echo>0</b>% of your 4-hour Chat budget; everything you have run is <b data-all-percent>0</b>%.</p>
-            </div>
-          </details>
-          {% endif %}
-          <button type="button" data-chat-stop {% if not active_turn %}hidden{% endif %}>Stop</button>
-          <button type="submit" {% if active_turn %}disabled{% endif %}>Send</button>
+          <button type="button" class="p-btn is-danger" data-chat-stop {% if not active_turn %}hidden{% endif %}>Stop</button>
+          <button type="submit" class="p-btn is-primary" {% if active_turn %}disabled{% endif %}>Send</button>
         </div>
       </div>
-      <p class="chat-composer-hint" id="chat-composer-hint" data-chat-hint>Enter sends · Shift + Enter adds a line</p>
+      {# The composer's own status strip: budget on the left, the one keyboard
+         rule on the right. Both are ambient, so both are mono and dim. #}
+      <div class="chat-composer-foot">
+        {% if mode == 'chat' %}
+        <details class="p-disclosure p-pop-host chat-usage" data-chat-usage>
+          <summary><span class="p-meter" aria-hidden="true" data-context-meter><span></span></span><span class="p-sr">Usage — </span><b data-conversation-percent>0</b>% context</summary>
+          <div class="p-pop p-pop-up chat-usage-pop">
+            <p><b data-context-tokens>0</b> context · <b data-subagent-tokens>0</b> sub-agent · <b data-total-tokens>0</b> total tokens</p>
+            <p>This conversation is <b data-conversation-percent-echo>0</b>% of your 4-hour Chat budget; everything you have run is <b data-all-percent>0</b>%.</p>
+          </div>
+        </details>
+        {% else %}<span></span>{% endif %}
+        <p class="chat-composer-hint p-meta" id="chat-composer-hint" data-chat-hint>shift+enter · newline</p>
+      </div>
     </form>
-    {% elif mode == 'resources' and is_owner %}<p class="chat-resource-quota">No follow-ups remain for this answer. <a href="/resources">Start a new question</a>.</p>{% endif %}
+    {% elif mode == 'resources' and is_owner %}<p class="chat-resource-quota p-notice is-warn">No follow-ups remain for this answer. <a href="/resources">Start a new question</a>.</p>{% endif %}
   </main>
 </div>
 
-<div class="chat-dialog-backdrop" data-model-dialog hidden><div role="dialog" aria-modal="true" class="chat-dialog"><h2>Confirm model change</h2><p data-model-warning></p><button type="button" data-model-cancel>Cancel</button><button type="button" data-model-confirm>Confirm change</button></div></div>
-{% if mode == 'chat' %}<div class="chat-document-overlay" data-chat-document-dialog hidden><button type="button" class="chat-document-backdrop" data-close-document aria-label="Close document preview"></button><section class="chat-document-window" role="dialog" aria-modal="true" aria-labelledby="chat-document-title"><header><div><p>Markdown document</p><h2 id="chat-document-title" data-document-title>Document</h2><span data-document-filename></span></div><div class="chat-document-window-actions"><a data-document-download download data-sk-no-spa>Download .md</a><button type="button" data-close-document aria-label="Close document preview">Close</button></div></header><div class="chat-document-content markdown-body" data-document-content></div></section></div>{% endif %}
+<div class="p-backdrop" data-model-dialog hidden><div role="dialog" aria-modal="true" class="p-dialog chat-dialog"><h2>Confirm model change</h2><p data-model-warning></p><div class="chat-dialog-actions"><button type="button" class="p-btn" data-model-cancel>Cancel</button><button type="button" class="p-btn is-primary" data-model-confirm>Confirm change</button></div></div></div>
+{% if mode == 'chat' %}<div class="chat-document-overlay" data-chat-document-dialog hidden><button type="button" class="chat-document-backdrop" data-close-document aria-label="Close document preview"></button><section class="chat-document-window" role="dialog" aria-modal="true" aria-labelledby="chat-document-title"><header><div><p>Markdown document</p><h2 id="chat-document-title" data-document-title>Document</h2><span data-document-filename></span></div><div class="chat-document-window-actions"><a data-document-download download data-sk-no-spa>Download .md</a><button type="button" data-close-document aria-label="Close document preview">Close</button></div></header><div class="chat-document-content p-prose" data-document-content></div></section></div>{% endif %}
 {% endblock %}
 {% block page_scripts %}<script src="{{ theme_url('js/sdanswer.js') }}" defer></script><script src="{{ theme_url('js/chat.js') }}" defer></script>{% endblock %}

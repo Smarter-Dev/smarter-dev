@@ -15,7 +15,7 @@
   var submitBtn = form && form.querySelector('button[type=submit]');
   var hintEl = document.querySelector('[data-chat-hint]');
   var toBottomBtn = document.querySelector('[data-chat-to-bottom]');
-  var IDLE_HINT = 'Enter sends · Shift + Enter adds a line';
+  var IDLE_HINT = 'shift+enter · newline';
   var csrfInput = document.querySelector('[data-chat-csrf] input[name="_csrf"]');
   var csrfToken = csrfInput && csrfInput.value || '';
   var pendingAttachments = [];
@@ -48,7 +48,7 @@
     }
   }
 
-  Array.prototype.forEach.call(document.querySelectorAll('.chat-disclosure'), function (disclosure) {
+  Array.prototype.forEach.call(document.querySelectorAll('.p-disclosure'), function (disclosure) {
     var summary = disclosure.querySelector('summary');
     if (!summary) return;
     summary.setAttribute('aria-expanded', disclosure.open ? 'true' : 'false');
@@ -59,12 +59,12 @@
 
   document.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape') return;
-    var open = document.querySelector('.chat-pop-host[open]');
+    var open = document.querySelector('.p-pop-host[open]');
     if (open) closeDisclosure(open, true);
   });
 
   document.addEventListener('click', function (event) {
-    Array.prototype.forEach.call(document.querySelectorAll('.chat-pop-host[open]'), function (disclosure) {
+    Array.prototype.forEach.call(document.querySelectorAll('.p-pop-host[open]'), function (disclosure) {
       if (!disclosure.contains(event.target)) closeDisclosure(disclosure, false);
     });
   });
@@ -74,7 +74,45 @@
     if (!label || !modelKey) return;
     var model = catalog && catalog.models.find(function (item) { return item.key === modelKey; });
     label.textContent = model ? model.label : modelKey;
+    // The vendor is the second half of the chip ("Grok 4.5 · xAI"); drop it
+    // rather than show a dangling separator when the model is off-catalog.
+    var vendor = document.querySelector('[data-chat-model-vendor]');
+    if (vendor) vendor.textContent = model && model.vendor ? '· ' + model.vendor : '';
+    var rail = document.querySelector('[data-rail-model]');
+    if (rail) rail.textContent = modelKey;
   }
+
+  // ── Connection ────────────────────────────────────────
+  // One line at the foot of the rail. It only matters when it is wrong, so the
+  // only thing that changes is the mark's colour and one word.
+  var CONNECTION = {
+    connected: ['connected', 'is-ok'],
+    connecting: ['connecting', 'is-warn'],
+    reconnecting: ['reconnecting', 'is-warn'],
+    suspended: ['suspended', 'is-warn'],
+    disconnected: ['offline', 'is-bad'],
+  };
+
+  function syncConnection(status) {
+    var mark = document.querySelector('[data-connection-mark]');
+    var label = document.querySelector('[data-connection-label]');
+    var state = CONNECTION[status];
+    if (!mark || !label || !state) return;
+    label.textContent = state[0];
+    mark.className = 'p-mark ' + state[1];
+  }
+
+  // ── Starters ──────────────────────────────────────────
+  // A starter is a draft, not a submission: it fills the composer and hands
+  // the reader the caret so they can edit before sending.
+  document.addEventListener('click', function (event) {
+    var starter = event.target.closest('[data-chat-starter]');
+    if (!starter || !input) return;
+    input.value = starter.textContent.trim() + ' ';
+    autoGrow();
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  });
 
   // The instruction only steers image summarisation, so it stays out of the
   // composer until an image is actually in play.
@@ -154,17 +192,20 @@
     });
   }
 
+  // The reader's turn is a raised plane, so it takes .p-card from the product
+  // system. Kept in one place because the template builds the same string.
+  function messageClasses(role) {
+    return 'chat-message chat-message-' + role + (role === 'user' ? ' p-card' : '');
+  }
+
   function bubble(role, text, turnId) {
     var article = document.createElement('article');
-    article.className = 'chat-message chat-message-' + role;
+    article.className = messageClasses(role);
     if (turnId) article.dataset.turnId = turnId;
-    var label = document.createElement('div');
-    label.className = 'chat-role';
-    label.textContent = role === 'user' ? 'You' : 'Smarter Dev';
     var content = document.createElement('div');
-    content.className = 'chat-content';
+    content.className = 'chat-content p-prose';
     content.textContent = text;
-    article.appendChild(label);
+    article.appendChild(createByline(role));
     if (role === 'assistant' && mode === 'chat') {
       article.appendChild(createActivity(new Date().toISOString(), 'Working…'));
     }
@@ -374,26 +415,82 @@
     var article = existing;
     if (!article) {
       article = document.createElement('article');
-      article.className = 'chat-message chat-message-' + message.role;
+      article.className = messageClasses(message.role);
     }
     article.dataset.messageId = message.id;
     article.dataset.turnId = message.turn_id;
     article.dataset.versionGroupId = message.version_group;
-    var label = article.querySelector('.chat-role');
-    if (!label) {
-      label = document.createElement('div');
-      label.className = 'chat-role';
-      article.insertBefore(label, article.firstChild);
+    var byline = article.querySelector('.chat-byline');
+    if (!byline) {
+      byline = createByline(message.role);
+      article.insertBefore(byline, article.firstChild);
     }
-    label.textContent = message.role === 'user' ? 'You' : 'Smarter Dev';
+    renderTurnMeta(byline, message);
     var content = article.querySelector('.chat-content');
     if (!content) {
       content = document.createElement('div');
-      content.className = 'chat-content';
+      content.className = 'chat-content p-prose';
       article.appendChild(content);
     }
     content.classList.add('sdanswer-prose');
     return article;
+  }
+
+  // Who spoke, on the left; which model answered and how long it took, on the
+  // right. The right half only exists for finished assistant turns — while one
+  // is running the activity row below already carries a live timer.
+  function createByline(role) {
+    var byline = document.createElement('div');
+    byline.className = 'chat-byline';
+    var label = document.createElement('div');
+    label.className = 'chat-role p-label';
+    if (role === 'assistant') {
+      var mark = document.createElement('span');
+      mark.className = 'p-mark is-accent';
+      mark.setAttribute('aria-hidden', 'true');
+      label.appendChild(mark);
+    }
+    label.appendChild(document.createTextNode(
+      role === 'user' ? 'You' : (mode === 'resources' ? 'Resource Agent' : 'Smarter.Dev')
+    ));
+    byline.appendChild(label);
+    return byline;
+  }
+
+  function renderTurnMeta(byline, message) {
+    var meta = byline.querySelector('[data-turn-meta]');
+    if (message.role !== 'assistant' || !message.model_key) {
+      if (meta) meta.remove();
+      return;
+    }
+    if (!meta) {
+      meta = document.createElement('div');
+      meta.className = 'chat-byline-meta p-meta';
+      meta.dataset.turnMeta = '';
+      byline.appendChild(meta);
+    }
+    meta.textContent = message.model_key + (
+      message.elapsed === null || message.elapsed === undefined
+        ? ''
+        : ' · ' + message.elapsed + 's'
+    );
+  }
+
+  // Matches the inline SVG the template emits, so a reconciled attachment row
+  // is indistinguishable from a server-rendered one.
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+  function fileGlyph() {
+    var svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 14 16');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    var path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', 'M8.5.5H2.5a1 1 0 0 0-1 1v13a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V4.5zM8.5.5V4.5h4');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1');
+    svg.appendChild(path);
+    return svg;
   }
 
   function renderSentAttachments(article, message) {
@@ -411,8 +508,10 @@
     box.textContent = '';
     items.forEach(function (item) {
       var link = document.createElement('a');
+      link.className = 'chat-sent-attachment';
       link.href = '/v2/api/chat/conversations/' + conversationId + '/attachments/' + item.id;
-      link.textContent = item.name;
+      link.appendChild(fileGlyph());
+      link.appendChild(document.createTextNode(item.name));
       box.appendChild(link);
     });
   }
@@ -441,6 +540,7 @@
     if (!regenerate) {
       regenerate = document.createElement('button');
       regenerate.type = 'button';
+      regenerate.className = 'p-btn is-bare';
       regenerate.dataset.regenerate = '';
       regenerate.textContent = 'Regenerate';
       actions.appendChild(regenerate);
@@ -454,6 +554,7 @@
     }
     if (!select) {
       select = document.createElement('select');
+      select.className = 'p-select';
       select.dataset.versionGroup = '';
       actions.appendChild(select);
     }
@@ -537,7 +638,7 @@
     activity.dataset.rootActivity = '';
     activity.dataset.startedAt = startedAt || new Date().toISOString();
     var pulse = document.createElement('span');
-    pulse.className = 'chat-activity-pulse';
+    pulse.className = 'p-mark is-live';
     pulse.setAttribute('aria-hidden', 'true');
     var text = document.createElement('span');
     text.dataset.activityLabel = '';
@@ -618,7 +719,7 @@
       var state = document.createElement('span');
       state.className = 'chat-agent-status';
       var pulse = document.createElement('span');
-      pulse.className = 'chat-activity-pulse';
+      pulse.className = 'p-mark is-live';
       state.appendChild(pulse);
       var stateText = document.createElement('span');
       stateText.dataset.agentStatus = '';
@@ -959,6 +1060,10 @@
     var text = (input.value || '').trim();
     if (!text) return showError('Type a message first.');
     if (text.length > 5000) return showError('Keep it under 5000 characters.');
+    // The invitation is answered — drop it now rather than leaving it centred
+    // above the first exchange until the turn finishes and reconcile runs.
+    var empty = thread.querySelector('.chat-empty');
+    if (empty) empty.remove();
     var user = bubble('user', text);
     var assistant = bubble('assistant', '');
     thread.insertBefore(user, statusEl);
@@ -1127,6 +1232,15 @@
       var echo = document.querySelector('[data-conversation-percent-echo]');
       if (echo) echo.textContent = conversationPercent;
       document.querySelector('[data-all-percent]').textContent = metrics.four_hour_percent_all_chat.toFixed(1);
+      // The meter reads the same number as the label beside it. It changes
+      // colour before it fills, so the warning arrives before the wall does.
+      var meter = document.querySelector('[data-context-meter]');
+      if (meter) {
+        var used = Math.max(0, Math.min(100, metrics.four_hour_percent_conversation));
+        meter.firstElementChild.style.width = used + '%';
+        meter.classList.toggle('is-warn', used >= 60 && used < 85);
+        meter.classList.toggle('is-bad', used >= 85);
+      }
     }).catch(function () {});
   }
 
@@ -1175,6 +1289,7 @@
   document.addEventListener('sk:notification-status', function (event) {
     var status = event.detail && event.detail.status;
     notificationStreamStatus = status;
+    syncConnection(status);
     if (status === 'connected') {
       if (notificationNeedsReconcile) reconcile();
       notificationHasConnected = true;
