@@ -22,6 +22,8 @@ from skrift.auth.guards import auth_guard, Permission
 from skrift.flash import flash_error, flash_success, get_flash_messages
 
 from smarter_dev.web.discord_admin_client import get_admin_discord_client
+from smarter_dev.web.handler_schedule import ScheduleError, next_fire_at
+from smarter_dev.web.handler_sweep import is_stalled
 from smarter_dev.web.models import AdminHandler, ChannelHandler, HandlerRun
 
 # How far back the per-handler error log reaches, and how many rows to keep per
@@ -72,6 +74,60 @@ async def _recent_error_log(
         ).scalars().all()
     )
     return _group_error_runs(rows)
+
+
+async def _last_real_fires(
+    db_session: AsyncSession, handler_ids: list[UUID]
+) -> dict[UUID, datetime]:
+    """Most recent genuine fire per handler.
+
+    Excludes ``rearmed`` rows, which the schedule sweep writes about itself — a
+    chain that keeps being re-armed but never actually fires must still read as
+    stalled here, exactly as it does to the sweep.
+    """
+    if not handler_ids:
+        return {}
+    rows = await db_session.execute(
+        select(HandlerRun.handler_id, func.max(HandlerRun.fired_at))
+        .where(
+            HandlerRun.handler_id.in_(handler_ids),
+            HandlerRun.outcome != "rearmed",
+        )
+        .group_by(HandlerRun.handler_id)
+    )
+    return dict(rows.all())
+
+
+def _schedule_health(
+    records: list, last_fires: dict[UUID, datetime], now: datetime
+) -> dict[str, dict]:
+    """Per-schedule-handler liveness for the admin page.
+
+    A recurring schedule is a chain of one-shot jobs with nothing watching it, so
+    "enabled" tells an admin almost nothing — the handler that stopped firing on
+    2026-07-30 stayed ``enabled: true`` throughout. What actually answers "is
+    this working?" is when it last fired against when it should have, which is
+    what this surfaces.
+    """
+    health: dict[str, dict] = {}
+    for record in records:
+        if record.trigger_type != "schedule":
+            continue
+        settings = dict(record.settings or {})
+        last = last_fires.get(record.id)
+        overdue = is_stalled(settings, last, record.created_at, now)
+        try:
+            expected_next = next_fire_at(settings, now)
+        except ScheduleError:
+            expected_next = None
+        health[str(record.id)] = {
+            "last_fired_at": last,
+            "expected_next": expected_next,
+            "stalled": overdue is not None,
+            "overdue_by": overdue,
+            "enabled": record.enabled,
+        }
+    return health
 
 
 class HandlersAdminController(Controller):
@@ -210,11 +266,19 @@ class HandlersAdminController(Controller):
 
         # Last-week error log for every handler currently on screen (channel
         # member handlers + the guild's admin handlers).
-        error_log = await _recent_error_log(
-            db_session,
-            [h.id for h in handlers] + [r.id for r in admin_rows]
-            if selected_guild_id
-            else [],
+        on_screen = (
+            handlers + admin_rows if selected_guild_id else []
+        )
+        error_log = await _recent_error_log(db_session, [r.id for r in on_screen])
+
+        # Schedule liveness for the recurring handlers on screen. "enabled" is
+        # not evidence a schedule is running — a broken chain leaves the row
+        # untouched — so show when each one last fired and whether it is overdue.
+        now = datetime.now(timezone.utc)
+        schedule_health = _schedule_health(
+            on_screen,
+            await _last_real_fires(db_session, [r.id for r in on_screen]),
+            now,
         )
 
         return TemplateResponse(
@@ -231,6 +295,10 @@ class HandlersAdminController(Controller):
                 "view": view,
                 "error_log": error_log,
                 "error_log_days": ERROR_LOG_DAYS,
+                "schedule_health": schedule_health,
+                "stalled_count": sum(
+                    1 for h in schedule_health.values() if h["stalled"]
+                ),
                 "flash_messages": get_flash_messages(request),
                 **ctx,
             },

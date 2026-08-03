@@ -103,6 +103,43 @@ DM_USER_WINDOW_SECONDS = 3600
 ERROR_NOTICE_WINDOW_SECONDS = 30 * 60
 ERROR_NOTICES_PER_WINDOW = 1
 
+# Fire jobs retry (max_attempts > 1) so a transient blip — a DB hiccup, a bad
+# deploy, a pod eviction — doesn't dead-letter a fire and, for a recurring
+# schedule, silently end the whole chain. But a fire's side effects are NOT
+# idempotent: re-running a script that already called send_message double-posts.
+#
+# So each attempt claims the job with SET NX before the script runs. The first
+# attempt to reach the script wins the claim; any later attempt sees the marker
+# and knows a previous attempt already began executing, so it skips the script
+# entirely (recording outcome "skipped") rather than repeating its emits. That
+# splits the retry window in two:
+#
+# - failed BEFORE the script (lazy import, record load, emitter setup) -> no
+#   marker, the retry runs the script normally. This is the case retries exist
+#   for, and it is exactly the safe one.
+# - died DURING or AFTER the script (OOM, eviction, claim expiry, a failed
+#   HandlerRun write) -> marker present, the retry declines to re-emit but still
+#   completes the job and re-arms the schedule. The fire is lost; the chain is not.
+#
+# TTL only has to outlive the retry series for one job, not the schedule period.
+FIRE_CLAIM_TTL_SECONDS = 3600
+
+
+def handler_fire_claim_key(job_id: str) -> str:
+    return f"hfire:claim:{job_id}"
+
+
+async def claim_fire_attempt(redis, job_id: str) -> bool:
+    """Claim this job's single script execution; False if an attempt already did.
+
+    ``SET key 1 EX ttl NX`` — atomic, so two workers racing the same job id (a
+    reclaim after a visibility-timeout expiry) can't both run the script.
+    """
+    claimed = await redis.set(
+        handler_fire_claim_key(job_id), "1", ex=FIRE_CLAIM_TTL_SECONDS, nx=True
+    )
+    return bool(claimed)
+
 
 def channel_message_key(channel_id: str) -> str:
     return f"hcap:chanmsg:{channel_id}"

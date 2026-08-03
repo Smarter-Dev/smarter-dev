@@ -22,6 +22,40 @@ from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
 from smarter_dev.web.handler_runtime import HandlerResult
 from smarter_dev.web.handlers_jobs import HandlerFirePayload
 
+def _ctx(job_id: str | None = None) -> SimpleNamespace:
+    """Minimal stand-in for the WorkerContext skrift injects into a fire job.
+
+    Only ``context.job.id`` is read (to key the at-most-once fire claim), so a
+    namespace is enough and keeps these tests free of the worker runtime.
+    """
+    return SimpleNamespace(job=SimpleNamespace(id=job_id or uuid4().hex))
+
+
+async def _fire(payload, *, context=None):
+    return await handlers_jobs.run_handler_fire(payload, context or _ctx())
+
+
+async def _admin_fire(payload, *, context=None):
+    return await admin_handlers_jobs.run_admin_handler_fire(payload, context or _ctx())
+
+
+@pytest.fixture(autouse=True)
+def _claim_always_granted(monkeypatch):
+    """Let every fire in this module reach its script.
+
+    These tests stub ``get_redis_client`` with a bare object, so the real
+    SET NX claim has nothing to talk to. The claim's own behaviour — that a
+    second attempt on one job id is refused — is covered in
+    ``handler_fire_claim_test.py``.
+    """
+
+    async def _granted(_redis, _job_id):
+        return True
+
+    monkeypatch.setattr(handlers_jobs, "claim_fire_attempt", _granted)
+    monkeypatch.setattr(admin_handlers_jobs, "claim_fire_attempt", _granted)
+
+
 _USAGE = {
     "messages_sent": 0,
     "web_searches": 0,
@@ -101,7 +135,7 @@ async def test_standard_fire_sets_emitter_guild_id(monkeypatch, capture_emitter)
     monkeypatch.setattr(handlers_jobs, "get_redis_client", lambda: object())
     monkeypatch.setattr(handlers_jobs, "WindowedLimiter", lambda **kwargs: object())
 
-    await handlers_jobs.run_handler_fire(HandlerFirePayload(handler_id=str(uuid4())))
+    await _fire(HandlerFirePayload(handler_id=str(uuid4())))
     assert capture_emitter["emitter"].guild_id == "G99"
 
 
@@ -131,7 +165,7 @@ async def test_admin_fire_sets_emitter_guild_id(monkeypatch, capture_emitter):
         admin_handlers_jobs, "WindowedLimiter", lambda **kwargs: object()
     )
 
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(admin_handler_id=str(uuid4()), channel_id="C1")
     )
     assert capture_emitter["emitter"].guild_id == "G77"
@@ -250,7 +284,7 @@ async def test_admin_fire_persists_guild_memory_write(monkeypatch, test_engine):
         _result_with_guild_memory(writes={"relay_bind_target": {"id": "7"}}),
         captured,
     )
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
     )
     assert captured["guild_memory"] == {}  # loaded snapshot was empty
@@ -264,7 +298,7 @@ async def test_admin_fire_loads_existing_guild_memory(monkeypatch, test_engine):
         await s.commit()
     captured = {}
     _patch_admin_job(monkeypatch, test_engine, _result_with_guild_memory(), captured)
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
     )
     assert captured["guild_memory"] == {"seen": 3}
@@ -278,7 +312,7 @@ async def test_admin_fire_persists_guild_memory_delete(monkeypatch, test_engine)
     _patch_admin_job(
         monkeypatch, test_engine, _result_with_guild_memory(deletes=["gone"])
     )
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
     )
     assert await _load(test_engine, "G1") == {"keep": 2}
@@ -293,7 +327,7 @@ async def test_guild_memory_write_survives_a_later_script_error(
         test_engine,
         _result_with_guild_memory(writes={"bind": {"id": "9"}}, outcome="error"),
     )
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
     )
     # Emitted-effects-stay: the write made before the error persisted.
@@ -344,7 +378,7 @@ async def test_standard_fire_never_touches_guild_memory(monkeypatch, test_engine
     monkeypatch.setattr(handlers_jobs, "get_redis_client", lambda: object())
     monkeypatch.setattr(handlers_jobs, "WindowedLimiter", lambda **kwargs: object())
 
-    await handlers_jobs.run_handler_fire(HandlerFirePayload(handler_id=handler_id))
+    await _fire(HandlerFirePayload(handler_id=handler_id))
     assert await _load(test_engine, "G1") == {}
 
 
@@ -355,7 +389,7 @@ async def test_concurrent_different_key_writes_and_same_key_last_write_wins(
 
     async def _fire(result):
         _patch_admin_job(monkeypatch, test_engine, result)
-        await admin_handlers_jobs.run_admin_handler_fire(
+        await _admin_fire(
             AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
         )
 
@@ -390,7 +424,7 @@ async def test_admin_fire_records_role_changes(monkeypatch, test_engine):
     usage = dict(_USAGE, role_changes=3)
     result = HandlerResult(outcome="ok", usage=usage, duration_ms=1)
     _patch_admin_job(monkeypatch, test_engine, result)
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
     )
     runs = await _load_runs(test_engine, handler_id)
@@ -408,7 +442,7 @@ async def test_admin_fire_passes_allowed_role_ids_from_settings(
     _patch_admin_job(
         monkeypatch, test_engine, _result_with_guild_memory(), captured
     )
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
     )
     assert captured["allowed_role_ids"] == ["R1", "R2"]
@@ -455,7 +489,7 @@ async def test_standard_fire_records_zero_role_changes(monkeypatch, test_engine)
     monkeypatch.setattr(handlers_jobs, "get_redis_client", lambda: object())
     monkeypatch.setattr(handlers_jobs, "WindowedLimiter", lambda **kwargs: object())
 
-    await handlers_jobs.run_handler_fire(HandlerFirePayload(handler_id=handler_id))
+    await _fire(HandlerFirePayload(handler_id=handler_id))
     runs = await _load_runs(test_engine, handler_id)
     assert len(runs) == 1
     assert runs[0].role_changes == 0
@@ -514,7 +548,7 @@ async def test_standard_fire_arms_timer_submits_fire_payload(monkeypatch):
         limiter_kwargs=limiter_kwargs,
     )
     hid = str(uuid4())
-    await handlers_jobs.run_handler_fire(HandlerFirePayload(handler_id=hid))
+    await _fire(HandlerFirePayload(handler_id=hid))
 
     # A dedicated 3600s timer-arming limiter was constructed and injected.
     assert any(
@@ -583,7 +617,7 @@ async def test_admin_fire_arms_timer_submits_admin_payload(monkeypatch):
     monkeypatch.setattr(admin_handlers_jobs, "WindowedLimiter", fake_limiter)
 
     hid = str(uuid4())
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(admin_handler_id=hid, channel_id="C1")
     )
     assert any(
@@ -618,7 +652,7 @@ async def test_timer_refire_runs_same_handler_with_payload_context(monkeypatch):
     )
     timer_ctx = {"trigger_type": "timer", "payload": {"user_id": "U1"},
                  "scheduled_at": "2026-07-18T00:00:00+00:00"}
-    await handlers_jobs.run_handler_fire(
+    await _fire(
         HandlerFirePayload(handler_id=str(uuid4()), trigger_context=timer_ctx)
     )
     # The fire job runs the script with the timer context verbatim — nothing
@@ -643,7 +677,7 @@ async def test_timer_trigger_row_does_not_reschedule(monkeypatch):
         monkeypatch, record, fake_run=fake_run, submits=submits,
         limiter_kwargs=limiter_kwargs,
     )
-    await handlers_jobs.run_handler_fire(
+    await _fire(
         HandlerFirePayload(handler_id=str(uuid4()), trigger_context={"trigger_type": "timer"})
     )
     assert submits == []
@@ -669,7 +703,7 @@ async def test_schedule_row_scheduled_fire_reschedules(monkeypatch):
         monkeypatch, record, fake_run=fake_run, submits=submits,
         limiter_kwargs=limiter_kwargs,
     )
-    await handlers_jobs.run_handler_fire(
+    await _fire(
         HandlerFirePayload(
             handler_id=str(uuid4()), trigger_context={"trigger_type": "schedule"}
         )
@@ -698,7 +732,7 @@ async def test_schedule_row_timer_refire_does_not_reschedule(monkeypatch):
         monkeypatch, record, fake_run=fake_run, submits=submits,
         limiter_kwargs=limiter_kwargs,
     )
-    await handlers_jobs.run_handler_fire(
+    await _fire(
         HandlerFirePayload(
             handler_id=str(uuid4()),
             trigger_context={"trigger_type": "timer", "payload": {}},
@@ -756,7 +790,7 @@ async def test_admin_schedule_row_scheduled_fire_reschedules(monkeypatch):
     )
     submits: list = []
     _patch_admin_reschedule_job(monkeypatch, record, submits)
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(
             admin_handler_id=str(uuid4()), channel_id="C1",
             trigger_context={"trigger_type": "schedule"},
@@ -778,7 +812,7 @@ async def test_admin_schedule_row_timer_refire_does_not_reschedule(monkeypatch):
     )
     submits: list = []
     _patch_admin_reschedule_job(monkeypatch, record, submits)
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(
             admin_handler_id=str(uuid4()), channel_id="C1",
             trigger_context={"trigger_type": "timer", "payload": {}},
@@ -804,7 +838,7 @@ async def test_refire_of_deleted_handler_returns_missing_and_emits_nothing(monke
     monkeypatch.setattr(
         handlers_jobs, "get_db_session_context", lambda: _FakeSessionCtx(None)
     )
-    result = await handlers_jobs.run_handler_fire(
+    result = await _fire(
         HandlerFirePayload(
             handler_id=str(uuid4()),
             trigger_context={"trigger_type": "timer", "payload": {}},
@@ -834,7 +868,7 @@ async def test_disabled_handler_timer_refire_noops(monkeypatch):
     monkeypatch.setattr(
         handlers_jobs, "get_db_session_context", lambda: _FakeSessionCtx(record)
     )
-    result = await handlers_jobs.run_handler_fire(
+    result = await _fire(
         HandlerFirePayload(
             handler_id=str(uuid4()),
             trigger_context={"trigger_type": "timer", "payload": {}},
@@ -887,7 +921,7 @@ async def test_handler_run_records_timers_scheduled(monkeypatch, test_engine):
     monkeypatch.setattr(handlers_jobs, "get_redis_client", lambda: object())
     monkeypatch.setattr(handlers_jobs, "WindowedLimiter", lambda **kwargs: object())
 
-    await handlers_jobs.run_handler_fire(HandlerFirePayload(handler_id=handler_id))
+    await _fire(HandlerFirePayload(handler_id=handler_id))
     runs = await _load_runs(test_engine, handler_id)
     assert len(runs) == 1
     assert runs[0].timers_scheduled == 1
@@ -939,7 +973,7 @@ async def test_dm_message_admin_fire_skips_error_notice(monkeypatch):
         admin_handlers_jobs, "WindowedLimiter", lambda **kwargs: object()
     )
 
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(
             admin_handler_id=str(uuid4()),
             channel_id="",
@@ -1006,7 +1040,7 @@ async def test_admin_fire_wires_mod_action_reader_and_records_lookups(
     _patch_admin_job(monkeypatch, test_engine, _ok_result())
     monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
 
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
     )
 
@@ -1070,7 +1104,7 @@ async def test_mod_action_fire_forces_zero_mod_action_budget(monkeypatch, test_e
         admin_handlers_jobs, "WindowedLimiter", lambda **kwargs: object()
     )
 
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(
             admin_handler_id=handler_id,
             channel_id="C1",
@@ -1164,7 +1198,7 @@ async def test_warn_recorder_binds_guild_and_resolves_username_host_side(
     captured: dict = {}
     _capture_injected(monkeypatch, test_engine, captured)
 
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
     )
 
@@ -1191,7 +1225,7 @@ async def test_warn_recorder_returns_authoritative_warn_count(
     handler_id = await _seed_admin_handler(test_engine, "G2")
     captured: dict = {}
     _capture_injected(monkeypatch, test_engine, captured)
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
     )
 
@@ -1212,7 +1246,7 @@ async def test_warn_recorder_degrades_to_raw_id_when_lookup_fails(
     handler_id = await _seed_admin_handler(test_engine, "G3")
     captured: dict = {}
     _capture_injected(monkeypatch, test_engine, captured)
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
     )
 
@@ -1232,7 +1266,7 @@ async def test_warn_recorder_fires_mod_action_trigger_for_mod_log_handlers(
     log_id = await _seed_admin_handler(test_engine, "G4", trigger_type="mod_action")
     captured: dict = {}
     submitted = _capture_injected(monkeypatch, test_engine, captured)
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
     )
 
@@ -1257,7 +1291,7 @@ async def test_warn_recorder_survives_a_dispatch_failure(monkeypatch, test_engin
         raise RuntimeError("queue is down")
 
     monkeypatch.setattr(handler_dispatch, "dispatch_handler_event", boom)
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
     )
 
@@ -1283,7 +1317,7 @@ async def test_rules_reader_binds_guild_and_reuses_the_shared_parse(
 
     captured: dict = {}
     _capture_injected(monkeypatch, test_engine, captured)
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
     )
 
@@ -1302,7 +1336,7 @@ async def test_rules_reader_returns_empty_for_a_guild_with_no_rules_row(
     handler_id = await _seed_admin_handler(test_engine, "G8")
     captured: dict = {}
     _capture_injected(monkeypatch, test_engine, captured)
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(admin_handler_id=handler_id, channel_id="C1")
     )
     assert await captured["rules_reader"]() == []
@@ -1333,7 +1367,7 @@ async def test_standard_timer_refire_descends_one_generation(monkeypatch):
     hid = str(uuid4())
     payload_in = HandlerFirePayload(handler_id=hid)
     assert payload_in.chain_depth == 0  # default: an omitted field is a root
-    await handlers_jobs.run_handler_fire(payload_in)
+    await _fire(payload_in)
 
     fire_at = datetime.now(timezone.utc) + timedelta(seconds=60)
     await captured["timer_scheduler"](fire_at, {"trigger_type": "timer"})
@@ -1355,7 +1389,7 @@ async def test_standard_timer_refire_carries_the_incoming_depth(monkeypatch):
         monkeypatch, record, fake_run=fake_run, submits=submits,
         limiter_kwargs=limiter_kwargs,
     )
-    await handlers_jobs.run_handler_fire(
+    await _fire(
         HandlerFirePayload(handler_id=str(uuid4()), chain_depth=2)
     )
     await captured["timer_scheduler"](
@@ -1381,7 +1415,7 @@ async def test_admin_timer_refire_descends_one_generation(monkeypatch, test_engi
 
     monkeypatch.setattr(admin_handlers_jobs, "worker_submit", fake_submit)
 
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(
             admin_handler_id=handler_id, channel_id="C1", chain_depth=1
         )
@@ -1402,7 +1436,7 @@ async def test_warn_mod_action_dispatch_descends_one_generation(
     log_id = await _seed_admin_handler(test_engine, "GD2", trigger_type="mod_action")
     captured: dict = {}
     submitted = _capture_injected(monkeypatch, test_engine, captured)
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(
             admin_handler_id=handler_id, channel_id="C1", chain_depth=1
         )
@@ -1426,7 +1460,7 @@ async def test_warn_mod_action_dispatch_is_cut_past_the_max_depth(
     await _seed_admin_handler(test_engine, "GD3", trigger_type="mod_action")
     captured: dict = {}
     submitted = _capture_injected(monkeypatch, test_engine, captured)
-    await admin_handlers_jobs.run_admin_handler_fire(
+    await _admin_fire(
         AdminHandlerFirePayload(
             admin_handler_id=handler_id, channel_id="C1", chain_depth=MAX_CHAIN_DEPTH
         )
