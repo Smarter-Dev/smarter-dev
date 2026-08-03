@@ -195,6 +195,10 @@
      read alongside the turn that is discussing it. Two views share the column:
      the roll-up list, and one document open for reading. #}
   <aside class="chat-dock" id="chat-dock" aria-label="Documents" data-chat-dock>
+    {# Drag to set the reading width. A real separator role so it is operable
+       from the keyboard too — arrows nudge, Home/End jump to the limits. #}
+    <div class="chat-dock-resize" data-dock-resize role="separator" aria-orientation="vertical"
+         aria-label="Resize documents panel" tabindex="0"></div>
     <header class="chat-dock-head">
       <button type="button" class="chat-dock-back" data-dock-back hidden>
         <span aria-hidden="true">←</span> All documents
@@ -224,6 +228,18 @@
       <div class="chat-dock-preview-body p-prose" data-preview-content></div>
     </div>
   </aside>
+
+  {# Appears next to a selection inside a document. Sends the question with the
+     selected passage quoted above it, so the agent is answering about a
+     specific paragraph rather than the document in general. #}
+  <form class="chat-quote" data-chat-quote hidden aria-label="Ask about the selected text">
+    <p class="chat-quote-source p-meta" data-quote-source></p>
+    <blockquote class="chat-quote-text" data-quote-text></blockquote>
+    <div class="chat-quote-row">
+      <textarea rows="1" maxlength="2000" data-quote-input placeholder="Ask about this…" aria-label="Your question about the selected text"></textarea>
+      <button type="submit" class="p-btn is-primary" data-quote-send>Ask</button>
+    </div>
+  </form>
   {% endif %}
 </div>
 

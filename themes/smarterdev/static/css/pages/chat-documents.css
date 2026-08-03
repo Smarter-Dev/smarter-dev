@@ -288,3 +288,122 @@
 @media (prefers-reduced-motion: reduce) {
   .chat-dock { transition: none }
 }
+
+/* ── Resize handle ──────────────────────────────────────
+   A 9px grab strip straddling the dock's left edge. Invisible until hovered or
+   focused — the border is the affordance, this just makes it grabbable. */
+
+/* The dock is `overflow: hidden` (it clips its own contents while the column
+   animates), so the handle is positioned against the SHELL instead — an
+   absolute box whose containing block sits outside the clipping element is not
+   clipped by it. Offsetting from the right by the dock's own width parks it on
+   the seam between the two panes. */
+.chat-dock-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: var(--chat-dock);
+  margin-right: -4px;
+  width: 9px;
+  z-index: 5;
+  cursor: col-resize;
+  background: transparent;
+  touch-action: none;
+}
+/* With the dock shut there is no seam, and the handle would strand itself in
+   the middle of the conversation. */
+.chat-shell[data-dock="closed"] .chat-dock-resize { display: none }
+.chat-dock-resize::after {
+  content: "";
+  position: absolute;
+  inset: 0 4px;
+  background: transparent;
+  transition: background .15s;
+}
+.chat-dock-resize:hover::after,
+.chat-dock-resize:focus-visible::after,
+.chat-shell[data-resizing="true"] .chat-dock-resize::after {
+  background: var(--p-accent);
+}
+.chat-dock-resize:focus-visible { outline: none }
+
+/* The pointer must not flicker to a text caret mid-drag, and a stray selection
+   would fight the drag. */
+.chat-shell[data-resizing="true"] { cursor: col-resize; user-select: none }
+.chat-shell[data-resizing="true"] .chat-dock,
+.chat-shell[data-resizing="true"] .chat-main { transition: none }
+
+/* Nothing to drag while the dock is floating over the conversation. */
+@media (max-width: 1100px) {
+  .chat-dock-resize { display: none }
+}
+
+/* ── Quote-to-ask ───────────────────────────────────────
+   Selecting a passage in a document raises this next to the selection. It is a
+   composer, so it gets the composer's treatment: raised plane, accent send.
+
+   It deliberately does NOT take focus on appearing — selecting text is most
+   often just reading, and stealing the caret every time would be hostile. */
+
+.chat-quote {
+  position: fixed;
+  z-index: 120;
+  width: min(24rem, calc(100vw - 2rem));
+  padding: .7rem .75rem;
+  background: var(--p-float);
+  border: 1px solid var(--p-line-strong);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, .55);
+}
+.chat-quote[hidden] { display: none }
+
+.chat-quote-source {
+  margin-bottom: .4rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Two lines of the passage is enough to confirm what was caught. */
+.chat-quote-text {
+  margin-bottom: .6rem;
+  padding-left: .6rem;
+  border-left: 2px solid var(--p-accent-line);
+  color: var(--p-muted);
+  font-size: .78rem;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.chat-quote-row {
+  display: flex;
+  align-items: flex-end;
+  gap: .5rem;
+}
+
+.chat-quote textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 34px;
+  max-height: 7rem;
+  padding: .45rem .55rem;
+  background: var(--p-surface);
+  border: 1px solid var(--p-line-strong);
+  outline: 0;
+  resize: none;
+  font-family: var(--body);
+  font-size: .84rem;
+  line-height: 1.5;
+  color: var(--p-text);
+  caret-color: var(--p-accent);
+}
+.chat-quote textarea::placeholder { color: var(--p-dim) }
+.chat-quote textarea:focus { border-color: var(--p-line-focus) }
+
+.chat-quote [data-quote-send] {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: .78rem;
+}
