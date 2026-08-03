@@ -160,41 +160,36 @@ body:has([data-product]) .site-nav .btn-follow:hover {
 
 body:has([data-product]) .nav-toggle span { background: var(--p-muted) }
 
-/* The full link row needs ~745px. nav.css only folds it into the hamburger at
-   600px, so between those widths it overflows horizontally — fold it here at
-   the width it actually stops fitting. (The same overflow exists on marketing
-   pages; fixing it there means moving nav.css's own breakpoint, which changes
-   every page, so it is deliberately left alone.) */
+/* nav.css now folds the row into the hamburger at 760px for every page, so the
+   fold itself is not repeated here. What is left is only what differs about a
+   PRODUCT nav once stacked: its links are sized by product tokens rather than
+   the marketing scale, and its active marker is an underline that means nothing
+   in a vertical list. */
 @media (max-width: 760px) {
   body:has([data-product]) .site-nav {
-    flex-wrap: wrap;
     height: auto;
     min-height: var(--p-nav);
   }
-  body:has([data-product]) .nav-toggle { display: flex }
-  body:has([data-product]) .nav-links {
-    display: none;
-    width: 100%;
-    flex-direction: column;
-    gap: 0;
-    padding-bottom: 8px;
-  }
-  body:has([data-product]) .nav-links.open { display: flex }
   body:has([data-product]) .nav-links a {
     height: auto;
     padding: 12px 0;
     justify-content: center;
     font-size: .85rem;
   }
-  /* The underline marks a tab in a row; stacked, colour alone carries it. */
   body:has([data-product]) .nav-links a.active::after { display: none }
+  /* `display` has to be restated in both states, not just the open one: the
+     unscoped product rule above sets `display: inline-flex` and outranks
+     nav.css's `display: none`, so without this the button stays stranded beside
+     the hamburger instead of folding into the menu. */
   body:has([data-product]) .site-nav .btn-follow {
     display: none;
     width: 100%;
     margin-bottom: 8px;
     justify-content: center;
   }
-  body:has([data-product]) .nav-toggle[aria-expanded="true"] ~ .btn-follow { display: inline-flex }
+  body:has([data-product]) .nav-toggle[aria-expanded="true"] ~ .btn-follow {
+    display: inline-flex;
+  }
 }
 
 /* A product page owns the whole viewport, so the marketing footer would only

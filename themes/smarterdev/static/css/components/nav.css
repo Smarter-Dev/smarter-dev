@@ -159,7 +159,12 @@
 @media (max-width: 520px) {
   .dash-topbar { flex-direction: column; gap: 14px; text-align: center }
 }
-@media (max-width: 600px) {
+/* 760px, not 600px: the full link row plus the Sign In / Account button needs
+   ~740px, so between those widths the button overflowed the fixed nav and
+   `body { overflow-x: clip }` meant there was no scrollbar to reach it — it was
+   simply unclickable on an iPad mini, a half-screen laptop window, or most
+   tablets in portrait. Fold at the width the row actually stops fitting. */
+@media (max-width: 760px) {
   .site-nav { flex-wrap: wrap; }
   .nav-toggle { display: flex; }
   .nav-links {
