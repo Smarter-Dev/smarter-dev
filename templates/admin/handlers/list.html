@@ -37,6 +37,13 @@
   .hx-errtable th { font-weight: 600; opacity: .7; }
   .hx-errtable td.hx-when { white-space: nowrap; opacity: .8; }
   .hx-errtable td.hx-detail { font-family: ui-monospace, monospace; word-break: break-word; }
+  .hx-stallpill { background: rgba(255,193,7,.18); color: #e0a800; border: 1px solid rgba(255,193,7,.45);
+                border-radius: 1rem; padding: .05rem .5rem; font-size: .75rem; font-weight: 600; white-space: nowrap; }
+  .hx-livepill { background: rgba(25,135,84,.15); color: #4bb87a; border: 1px solid rgba(25,135,84,.35);
+                border-radius: 1rem; padding: .05rem .5rem; font-size: .75rem; font-weight: 600; white-space: nowrap; }
+  .hx-banner { border: 1px solid rgba(255,193,7,.45); background: rgba(255,193,7,.1); color: inherit;
+                border-radius: .5rem; padding: .6rem .85rem; margin-bottom: .9rem; font-size: .9rem; }
+  .hx-stalled-note { color: #e0a800; }
 </style>
 {% endblock %}
 
@@ -60,10 +67,42 @@
   </details>
   {% endif %}
 {% endmacro %}
+{# A recurring schedule is a chain of one-shot jobs — nothing supervises it, and
+   a broken chain leaves the handler row enabled and looking healthy. So show
+   when it last actually fired, not just that it is switched on. #}
+{% macro schedule_pill(health) %}
+  {% if health %}
+    {% if health.stalled %}
+      <span class="hx-stallpill" title="Last fired {{ health.last_fired_at.strftime('%Y-%m-%d %H:%M') if health.last_fired_at else 'never' }} UTC">⏰ stalled</span>
+    {% else %}
+      <span class="hx-livepill">on schedule</span>
+    {% endif %}
+  {% endif %}
+{% endmacro %}
+{% macro schedule_rows(health) %}
+  {% if health %}
+    <dt>Last fired</dt>
+    <dd{% if health.stalled %} class="hx-stalled-note"{% endif %}>
+      {{ health.last_fired_at.strftime('%Y-%m-%d %H:%M') ~ ' UTC' if health.last_fired_at else 'never' }}
+      {% if health.stalled %} — overdue by {{ health.overdue_by }}{% endif %}
+    </dd>
+    <dt>Next fire</dt>
+    <dd>{{ health.expected_next.strftime('%Y-%m-%d %H:%M') ~ ' UTC' if health.expected_next else '—' }}</dd>
+  {% endif %}
+{% endmacro %}
 <hgroup>
   <h1>Handlers</h1>
   <p>Registered channel handlers, by guild and channel. Expand one to review its script.</p>
 </hgroup>
+
+{% if stalled_count %}
+<div class="hx-banner">
+  ⏰ <strong>{{ stalled_count }}</strong> recurring schedule{{ '' if stalled_count == 1 else 's' }}
+  in this guild {{ 'has' if stalled_count == 1 else 'have' }} stopped firing. A schedule runs as a chain of
+  one-shot jobs, so a single failed job ends it permanently — the hourly sweep
+  (<code>scripts/handler_sweep.py</code>) re-arms these automatically; this flags them in the meantime.
+</div>
+{% endif %}
 
 {% if flash_messages %}
 <div class="sk-flash-list">
@@ -120,11 +159,13 @@
     <h2 style="margin-top:0;">Admin handlers</h2>
     {% for h in admin_handlers %}
     {% set errs = error_log.get(h.id | string, []) %}
+    {% set health = schedule_health.get(h.id | string) %}
     <details class="hx-handler">
       <summary>
         <strong>{{ h.name }}</strong>
         <span class="sk-pill">{{ h.trigger_type }}</span>
         <span class="hx-desc">{{ h.description }}</span>
+        {{ schedule_pill(health) }}
         {% if errs %}<span class="hx-errpill">{{ errs | length }} err</span>{% endif %}
         {% if not h.enabled %}<span class="sk-pill sk-pill-draft">disabled</span>{% endif %}
       </summary>
@@ -135,6 +176,7 @@
           <dt>Scope</dt><dd>{{ h.scope }}</dd>
           <dt>Settings</dt><dd><code>{{ h.settings | tojson }}</code></dd>
           <dt>Memory</dt><dd><code>{{ h.memory | tojson }}</code></dd>
+          {{ schedule_rows(health) }}
         </dl>
         {{ error_log_block(errs) }}
         <pre class="hx-code"><code class="language-python">{{ h.script }}</code></pre>
@@ -161,11 +203,13 @@
     <h2 style="margin-top:0;">#{{ selected_channel_name }}</h2>
     {% for h in handlers %}
     {% set errs = error_log.get(h.id | string, []) %}
+    {% set health = schedule_health.get(h.id | string) %}
     <details class="hx-handler">
       <summary>
         <strong>{{ h.name }}</strong>
         <span class="sk-pill">{{ h.trigger_type }}</span>
         <span class="hx-desc">{{ h.description }}</span>
+        {{ schedule_pill(health) }}
         {% if errs %}<span class="hx-errpill">{{ errs | length }} err</span>{% endif %}
         {% if not h.enabled %}<span class="sk-pill sk-pill-draft">disabled</span>{% endif %}
       </summary>
@@ -177,6 +221,7 @@
           <dt>Memory</dt><dd><code>{{ h.memory | tojson }}</code></dd>
           <dt>Created by</dt><dd>{{ h.created_by }}</dd>
           <dt>Created</dt><dd>{{ h.created_at.strftime('%Y-%m-%d %H:%M UTC') }}</dd>
+          {{ schedule_rows(health) }}
         </dl>
         {{ error_log_block(errs) }}
         <pre class="hx-code"><code class="language-python">{{ h.script }}</code></pre>

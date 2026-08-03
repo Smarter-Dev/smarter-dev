@@ -25,6 +25,7 @@ jobs:
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy-chat-child-worker.yaml
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/cron-sudo-sweep.yaml
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/cron-retention-sweep.yaml
+        sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/cron-handler-sweep.yaml
         sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/migrate-job.yaml
 
     - name: Install doctl
@@ -95,6 +96,7 @@ jobs:
         kubectl apply -f $GITHUB_WORKSPACE/k8s/site.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/cron-sudo-sweep.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/cron-retention-sweep.yaml
+        kubectl apply -f $GITHUB_WORKSPACE/k8s/cron-handler-sweep.yaml
 
     - name: Verify web deployment
       run: kubectl rollout status deployment/smarter-dev-website

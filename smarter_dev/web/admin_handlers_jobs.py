@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
-from skrift.workers import handler
+from skrift.workers import RetryPolicy, WorkerContext, handler
 from skrift.workers import submit as worker_submit
 
 from smarter_dev.shared.config import get_settings
@@ -28,6 +28,7 @@ from smarter_dev.web.handler_caps import (
     ERROR_NOTICE_WINDOW_SECONDS,
     TIMER_ARMING_WINDOW_SECONDS,
     WindowedLimiter,
+    claim_fire_attempt,
 )
 from smarter_dev.web.handler_emitter import DiscordEmitter
 from smarter_dev.web.handler_guild_memory import (
@@ -80,10 +81,16 @@ class AdminHandlerFirePayload(BaseModel):
 @handler(
     "admin_handlers.fire",
     queue="agents",
-    max_attempts=1,
+    # See handlers_jobs.run_handler_fire: retries keep a transient failure from
+    # dead-lettering a fire and ending a recurring chain, and the
+    # claim_fire_attempt marker keeps script side effects at-most-once so a
+    # retry can never repeat a ban/kick/send.
+    retry_policy=RetryPolicy(max_attempts=3, backoff_seconds=30.0, jitter_seconds=10.0),
     visibility_timeout=180.0,
 )
-async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
+async def run_admin_handler_fire(
+    payload: AdminHandlerFirePayload, context: WorkerContext
+) -> dict:
     """Load, run (with moderation powers), audit one admin-handler firing."""
     settings = get_settings()
     if not settings.handlers_enabled:
@@ -254,6 +261,19 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
             for rule in parse_guild_rules(markdown)
         ]
 
+    # At-most-once side effects across retries — claimed as late as possible so
+    # only failures that reach the script suppress a re-run. See handler_caps.
+    if not await claim_fire_attempt(redis, context.job.id):
+        logger.warning(
+            "admin handler fire job %s retried after an earlier attempt already "
+            "entered the script; skipping execution so actions aren't duplicated",
+            context.job.id,
+        )
+        await _record_skipped_run(handler_id, payload.trigger_context)
+        if _is_schedule_fire(trigger_type, payload.trigger_context):
+            await _reschedule(handler_id, handler_settings)
+        return {"status": "skipped"}
+
     result = await run_handler_script(
         script,
         payload.trigger_context,
@@ -329,17 +349,41 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload) -> dict:
             error=result.error,
         )
 
-    # Re-arm the recurring chain only on a genuine scheduled fire. A schedule
-    # handler that self-arms a schedule_timer re-fires with trigger_type "timer"
-    # in its context; that re-fire must NOT re-enter _reschedule or it forks a
-    # duplicate perpetual chain and clobbers scheduled_job_id (orphaning the
-    # original chain's job so disable/update can no longer cancel it).
-    if trigger_type == "schedule" and (
-        payload.trigger_context.get("trigger_type") != "timer"
-    ):
+    if _is_schedule_fire(trigger_type, payload.trigger_context):
         await _reschedule(handler_id, handler_settings)
 
     return {"status": result.outcome, "cap": result.cap}
+
+
+def _is_schedule_fire(trigger_type: str, trigger_context: dict) -> bool:
+    """Whether this fire is the one that owns re-arming the recurring chain.
+
+    Only a genuine scheduled fire re-arms. A schedule handler that self-arms a
+    schedule_timer re-fires with trigger_type "timer" in its context; that
+    re-fire must NOT re-enter ``_reschedule`` or it forks a duplicate perpetual
+    chain and clobbers scheduled_job_id (orphaning the original chain's job so
+    disable/update can no longer cancel it).
+    """
+    return trigger_type == "schedule" and trigger_context.get("trigger_type") != "timer"
+
+
+async def _record_skipped_run(handler_id: UUID, trigger_context: dict) -> None:
+    """Audit a retry that declined to re-run an already-started admin script."""
+    async with get_db_session_context() as session:
+        session.add(
+            HandlerRun(
+                handler_id=handler_id,
+                handler_kind="admin",
+                trigger_context=trigger_context,
+                outcome="skipped",
+                error=(
+                    "retry of a fire whose script had already started; skipped to "
+                    "avoid duplicate side effects"
+                ),
+                finished_at=datetime.now(timezone.utc),
+            )
+        )
+        await session.commit()
 
 
 async def _reschedule(handler_id: UUID, handler_settings: dict) -> None:

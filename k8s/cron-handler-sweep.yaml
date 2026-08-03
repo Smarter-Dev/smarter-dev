@@ -1,0 +1,76 @@
+---
+# Hourly recurring-handler schedule sweep.
+#
+# A recurring handler schedule is a chain of one-shot worker jobs, each enqueued
+# by the previous one's completion. A single broken link ends the chain forever
+# and silently — which is exactly what happened on 2026-07-30, when a deploy made
+# every handler fire raise ImportError for ~18h: 444 jobs dead-lettered,
+# event-triggered handlers self-healed (the next Discord event re-seeds them),
+# and every recurring schedule stayed dead for days.
+#
+# This sweep is the missing head pointer: the handler row is the source of truth,
+# the queued job is only a cache of the next occurrence. Anything that has stopped
+# firing relative to its own cadence gets re-armed.
+#
+# Hourly is deliberate. The tightest grace period is 15 minutes (a 60s schedule),
+# but the cost of a stalled chain is bounded by how long a human would take to
+# notice — hours, not minutes — while the cost of sweeping too eagerly is forking
+# a duplicate chain. Image is pinned to the web image so codebase/venv match.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: smarter-dev-handler-sweep
+    namespace: smarter-dev
+    labels:
+        app: smarter-dev-handler-sweep
+spec:
+    # Half past every hour, UTC — deliberately offset from the retention sweep
+    # (top of the hour) so the two don't contend for the same DB connections.
+    schedule: "30 * * * *"
+    timeZone: "UTC"
+    concurrencyPolicy: Forbid
+    successfulJobsHistoryLimit: 3
+    failedJobsHistoryLimit: 5
+    jobTemplate:
+        spec:
+            # Re-arming is idempotent in the sense that matters: a chain it has
+            # already revived no longer looks stalled, so a retry re-arms nothing.
+            backoffLimit: 2
+            activeDeadlineSeconds: 600
+            ttlSecondsAfterFinished: 86400
+            template:
+                metadata:
+                    labels:
+                        app: smarter-dev-handler-sweep
+                spec:
+                    restartPolicy: OnFailure
+                    containers:
+                      - name: sweep
+                        image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
+                        command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/handler_sweep.py"]
+                        envFrom:
+                          - configMapRef:
+                              name: smarter-dev-config
+                        env:
+                          - name: DATABASE_URL
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: database-url
+                          - name: REDIS_URL
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: redis-url
+                          - name: DISCORD_BOT_TOKEN
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: discord-bot-token
+                        resources:
+                            requests:
+                                cpu: "50m"
+                                memory: "192Mi"
+                            limits:
+                                cpu: "500m"
+                                memory: "512Mi"

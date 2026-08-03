@@ -5536,7 +5536,12 @@ class HandlerRun(Base):
     __tablename__ = "handler_runs"
     __table_args__ = (
         CheckConstraint(
-            "outcome IN ('ok', 'cap_exceeded', 'error', 'rejected')",
+            # 'skipped'  — a retry declined to re-run a script an earlier attempt
+            #              had already started (see handler_caps.claim_fire_attempt).
+            # 'rearmed'  — not a fire at all: the schedule sweeper recording that it
+            #              revived a stalled recurring chain (see handler_sweep).
+            "outcome IN ('ok', 'cap_exceeded', 'error', 'rejected', 'skipped', "
+            "'rearmed')",
             name="ck_handler_runs_outcome",
         ),
         Index("ix_handler_runs_handler_id", "handler_id"),
