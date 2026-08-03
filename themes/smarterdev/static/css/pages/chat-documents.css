@@ -1,5 +1,5 @@
 /* ══════════════════════════════════════════════════════
-   Chat documents — attachment cards + markdown preview window
+   Chat documents — the cards in the thread and the document dock
    Built on the product tokens and primitives in css/product.css.
    ══════════════════════════════════════════════════════ */
 
@@ -59,17 +59,14 @@
   color: var(--p-dim);
 }
 
-.chat-document-actions,
-.chat-document-window-actions {
+.chat-document-actions {
   display: flex;
   align-items: center;
   gap: .4rem;
 }
 
 .chat-document-actions button,
-.chat-document-actions a,
-.chat-document-window-actions button,
-.chat-document-window-actions a {
+.chat-document-actions a {
   display: inline-flex;
   align-items: center;
   min-height: 32px;
@@ -85,105 +82,209 @@
   transition: color .2s, border-color .2s;
 }
 .chat-document-actions button:hover,
-.chat-document-actions a:hover,
-.chat-document-window-actions button:hover,
-.chat-document-window-actions a:hover {
+.chat-document-actions a:hover {
   color: var(--p-accent-text);
   border-color: var(--p-line-strong);
 }
 
-/* Inside the preview window the actions are the reason the window is open. */
-.chat-document-window-actions a { color: var(--p-accent-text) }
+/* ── Document dock ──────────────────────────────────────
+   The workshop half of the shell: a column, not an overlay, so a document can
+   be read alongside the turn discussing it. Recessed relative to the
+   conversation — it is a reference surface, not the thing being written. */
 
-/* ── Preview window ─────────────────────────────────── */
-
-.chat-document-overlay[hidden] { display: none }
-
-.chat-document-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 300;
-  display: grid;
-  place-items: center;
-  padding: clamp(.75rem, 3vw, 1.5rem);
-}
-
-.chat-document-backdrop {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  border: 0;
-  background: rgba(6, 9, 14, .82);
-  backdrop-filter: blur(6px);
-  cursor: default;
-}
-
-.chat-document-window {
-  position: relative;
+.chat-dock {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  width: min(960px, 100%);
-  max-height: min(88vh, 900px);
-  background: var(--p-float);
-  border: 1px solid var(--p-line-strong);
-  box-shadow: 0 26px 80px rgba(0, 0, 0, .6);
+  min-height: 0;
+  min-width: 0;
   overflow: hidden;
+  background: var(--p-recess);
+  border-left: 1px solid var(--p-line);
 }
 
-.chat-document-window > header {
+/* Contents keep their width while the column animates shut, so the text inside
+   does not reflow on the way out. */
+.chat-dock > * { min-width: var(--chat-dock) }
+
+.chat-shell[data-dock="closed"] .chat-dock {
+  border-left-color: transparent;
+  visibility: hidden;
+}
+
+.chat-dock-head {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  min-height: var(--chat-head);
+  padding: 0 .6rem 0 1rem;
+  border-bottom: 1px solid var(--p-line);
+}
+.chat-dock-head h2 {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: .72rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-dock-back,
+.chat-dock-close {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  flex: 0 0 auto;
+  min-height: 28px;
+  padding: 0 .5rem;
+  font-family: var(--body);
+  font-size: .76rem;
+  color: var(--p-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: color .18s, border-color .18s;
+}
+.chat-dock-back:hover,
+.chat-dock-close:hover {
+  color: var(--p-text);
+  border-color: var(--p-line-strong);
+}
+.chat-dock-back[hidden] { display: none }
+.chat-dock-close {
+  margin-left: auto;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 .55rem;
+}
+
+/* ── List view ───────────────────────────────────────── */
+
+.chat-dock-list {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: .6rem;
+}
+.chat-dock-list[hidden] { display: none }
+
+.chat-dock-item {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  align-items: center;
+  gap: .75rem;
+  width: 100%;
+  padding: .7rem .75rem;
+  text-align: left;
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background .18s, border-color .18s;
+}
+.chat-dock-item + .chat-dock-item { margin-top: .25rem }
+.chat-dock-item:hover {
+  background: var(--p-surface);
+  border-color: var(--p-line-strong);
+}
+.chat-dock-item[aria-current="true"] {
+  background: var(--p-surface);
+  border-color: var(--p-line-strong);
+  border-left: 2px solid var(--p-accent);
+}
+
+.chat-dock-item-mark {
+  font-family: var(--heading);
+  font-size: .5rem;
+  letter-spacing: .1em;
+  color: var(--p-accent-text);
+  text-align: center;
+}
+
+.chat-dock-item-info {
+  display: grid;
+  gap: .2rem;
+  min-width: 0;
+}
+.chat-dock-item-info strong {
+  font-size: .84rem;
+  font-weight: 500;
+  color: var(--p-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-dock-item-info .p-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-dock-empty {
+  padding: 1.25rem 1rem;
+  line-height: 1.7;
+}
+.chat-dock-empty[hidden] { display: none }
+
+/* ── Preview view ────────────────────────────────────── */
+
+.chat-dock-preview {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+.chat-dock-preview[hidden] { display: none }
+
+.chat-dock-preview-meta {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 1rem 1.2rem;
+  padding: .55rem 1rem;
   border-bottom: 1px solid var(--p-line);
 }
-
-.chat-document-window header p,
-.chat-document-window header span {
-  font-family: var(--heading);
-  font-size: .5rem;
-  letter-spacing: .12em;
-  text-transform: uppercase;
-  color: var(--p-accent-text);
-}
-.chat-document-window header span {
-  font-family: var(--mono);
-  font-size: .68rem;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--p-dim);
+.chat-dock-preview-meta .p-meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.chat-document-window header h2 {
-  font-family: var(--heading);
-  font-weight: 400;
-  font-size: .9rem;
-  letter-spacing: .02em;
-  color: var(--p-text);
-  margin: .4rem 0 .3rem;
-}
-
-/* The preview sheet is the reading surface: recessed below the window frame. */
-.chat-document-content {
-  padding: clamp(1rem, 3vw, 2.25rem);
-  overflow: auto;
+/* The reading sheet sits one step up from the dock chrome around it. */
+.chat-dock-preview-body {
+  min-height: 0;
+  overflow-y: auto;
   overscroll-behavior: contain;
-  background: var(--p-surface);
-  color: var(--p-text);
-  font-size: .92rem;
-  line-height: 1.8;
+  padding: 1.25rem 1rem 2rem;
+  background: var(--p-bg);
+  font-size: .88rem;
 }
 
-body.chat-document-open { overflow: hidden }
+/* ── Narrow: the dock covers the conversation ────────────
+   Below this width there is no room for a third column, so the dock stops
+   being a column and floats over the pane instead. */
 
-@media (max-width: 640px) {
-  .chat-document { grid-template-columns: 2.5rem minmax(0, 1fr) }
-  .chat-document-actions { grid-column: 1 / -1 }
-  .chat-document-window > header {
-    flex-direction: column;
-    align-items: flex-start;
+/* The shell's own column overrides live in pages/chat.css beside the rest of
+   the grid — keeping them there is what lets the narrower phone breakpoint win
+   on source order, since this file loads after it. */
+@media (max-width: 1100px) {
+  .chat-dock {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    width: min(var(--chat-dock), 100%);
+    box-shadow: -18px 0 44px rgba(0, 0, 0, .5);
+    transform: translateX(100%);
+    transition: transform .28s ease;
   }
-  .chat-document-window-actions { width: 100% }
+  .chat-dock > * { min-width: 0 }
+  .chat-shell[data-dock="open"] .chat-dock { transform: none }
+}
+
+@media (max-width: 760px) {
+  .chat-dock { width: 100% }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-dock { transition: none }
 }

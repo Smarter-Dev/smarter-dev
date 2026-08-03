@@ -11,9 +11,13 @@
 {# Openers for a blank conversation. Concrete tasks, not capability boasts —
    they exist to show what this thing is for, so they read as work. #}
 {% set starters = ['Review a stack trace', 'Plan a Discord bot', 'Research model pricing', 'Explain this repo'] %}
+{# Rail and dock state are restored by chat.js from localStorage before paint;
+   these are the no-JS defaults. #}
 <div class="chat-shell"
      data-product
      data-chat-shell
+     data-rail="open"
+     data-dock="closed"
      data-mode="{{ mode }}"
      data-conversation-id="{{ conversation.id if conversation else '' }}"
      data-model-key="{{ conversation.selected_model_key if mode == 'chat' and conversation else '' }}"
@@ -22,7 +26,7 @@
      data-active-turn-id="{{ active_turn.id if active_turn else '' }}"
      data-resource-running="{{ 'true' if resource_running|default(false) else 'false' }}">
 
-  <aside class="chat-sidebar" aria-label="Chat history">
+  <aside class="chat-sidebar" id="chat-history-rail" aria-label="Chat history">
     <div class="chat-sidebar-head">
       <a href="{{ '/resources' if mode == 'resources' else '/chat' }}" class="p-btn is-accent chat-new">+ New {{ 'question' if mode == 'resources' else 'chat' }}</a>
     </div>
@@ -43,7 +47,20 @@
 
   <main class="chat-main">
     <header class="chat-header">
+      {# Stays in the header rather than the rail so it is still reachable once
+         the rail is folded away. #}
+      <button type="button" class="chat-rail-toggle" data-rail-toggle aria-expanded="true" aria-controls="chat-history-rail">
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="1.5" y="2.5" width="13" height="11" rx="1" fill="none" stroke="currentColor"/><line x1="6" y1="2.5" x2="6" y2="13.5" stroke="currentColor"/></svg>
+        <span class="p-sr">Toggle chat history</span>
+      </button>
       <h1 class="p-title">{{ conversation.title if conversation else 'New chat' }}</h1>
+      {% if mode == 'chat' %}
+      {% set documents = documents|default([]) %}
+      <button type="button" class="chat-dock-toggle" data-dock-toggle aria-expanded="false" aria-controls="chat-dock" {% if not documents %}hidden{% endif %}>
+        <svg viewBox="0 0 14 16" aria-hidden="true" focusable="false"><path d="M8.5.5H2.5a1 1 0 0 0-1 1v13a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V4.5zM8.5.5V4.5h4" fill="none" stroke="currentColor"/></svg>
+        Documents<span class="chat-dock-count" data-dock-count>{{ documents|length }}</span>
+      </button>
+      {% endif %}
       {% if mode == 'chat' %}
       <details class="p-disclosure p-pop-host chat-settings" data-chat-settings {% if not conversation %}hidden{% endif %}>
         <summary class="chat-model-chip"><span class="p-sr">Conversation settings — model </span><span data-chat-model-label>{{ current_model.label if current_model else (conversation.selected_model_key if conversation else 'Not started') }}</span><span class="p-chip-dim" data-chat-model-vendor>{% if current_model %}· {{ current_model.vendor }}{% endif %}</span></summary>
@@ -172,9 +189,44 @@
     </form>
     {% elif mode == 'resources' and is_owner %}<p class="chat-resource-quota p-notice is-warn">No follow-ups remain for this answer. <a href="/resources">Start a new question</a>.</p>{% endif %}
   </main>
+
+  {% if mode == 'chat' %}
+  {# The workshop half. A column rather than an overlay, so a document can be
+     read alongside the turn that is discussing it. Two views share the column:
+     the roll-up list, and one document open for reading. #}
+  <aside class="chat-dock" id="chat-dock" aria-label="Documents" data-chat-dock>
+    <header class="chat-dock-head">
+      <button type="button" class="chat-dock-back" data-dock-back hidden>
+        <span aria-hidden="true">←</span> All documents
+      </button>
+      <h2 class="p-title" data-dock-title>Documents</h2>
+      <button type="button" class="chat-dock-close" data-dock-close aria-label="Close documents panel">×</button>
+    </header>
+
+    <div class="chat-dock-list" data-dock-list>
+      {% for document in documents|default([]) %}
+      <button type="button" class="chat-dock-item" data-dock-open data-document-id="{{ document.id }}">
+        <span class="chat-dock-item-mark" aria-hidden="true">MD</span>
+        <span class="chat-dock-item-info">
+          <strong>{{ document.title }}</strong>
+          <span class="p-meta">{{ document.filename }} · {{ document.size_bytes }} bytes</span>
+        </span>
+      </button>
+      {% endfor %}
+      <p class="chat-dock-empty p-meta" data-dock-empty {% if documents|default([]) %}hidden{% endif %}>Nothing here yet. Documents the agent writes will collect in this panel.</p>
+    </div>
+
+    <div class="chat-dock-preview" data-dock-preview hidden>
+      <div class="chat-dock-preview-meta">
+        <span class="p-meta" data-preview-filename></span>
+        <a class="p-btn is-bare" data-preview-download download data-sk-no-spa>Download .md</a>
+      </div>
+      <div class="chat-dock-preview-body p-prose" data-preview-content></div>
+    </div>
+  </aside>
+  {% endif %}
 </div>
 
 <div class="p-backdrop" data-model-dialog hidden><div role="dialog" aria-modal="true" class="p-dialog chat-dialog"><h2>Confirm model change</h2><p data-model-warning></p><div class="chat-dialog-actions"><button type="button" class="p-btn" data-model-cancel>Cancel</button><button type="button" class="p-btn is-primary" data-model-confirm>Confirm change</button></div></div></div>
-{% if mode == 'chat' %}<div class="chat-document-overlay" data-chat-document-dialog hidden><button type="button" class="chat-document-backdrop" data-close-document aria-label="Close document preview"></button><section class="chat-document-window" role="dialog" aria-modal="true" aria-labelledby="chat-document-title"><header><div><p>Markdown document</p><h2 id="chat-document-title" data-document-title>Document</h2><span data-document-filename></span></div><div class="chat-document-window-actions"><a data-document-download download data-sk-no-spa>Download .md</a><button type="button" data-close-document aria-label="Close document preview">Close</button></div></header><div class="chat-document-content p-prose" data-document-content></div></section></div>{% endif %}
 {% endblock %}
 {% block page_scripts %}<script src="{{ theme_url('js/sdanswer.js') }}" defer></script><script src="{{ theme_url('js/chat.js') }}" defer></script>{% endblock %}

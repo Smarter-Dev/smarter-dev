@@ -756,9 +756,24 @@ def test_browser_contract_includes_csrf_recovery_and_live_updates():
     assert "aria-expanded" in javascript
     assert "sdanswer.js" in template and "data-resource-running" in template
     assert "chat_document_created" in javascript
-    assert "data-chat-document-dialog" in template
+    # Documents are read in the dock — a column of the shell — rather than a
+    # modal, so a document can sit beside the turn discussing it. The inline
+    # cards stay in the thread and their Preview opens that same panel.
+    assert "data-chat-dock" in template and "data-dock-toggle" in template
+    assert "data-dock-list" in template and "data-dock-preview" in template
+    assert "data-preview-content" in template and "data-dock-back" in template
+    assert "data-open-document" in template and "openDocument" in javascript
+    assert "data-chat-document-dialog" not in template
     assert "data-document-id" in template
     assert "/documents/" in javascript and "/download" in javascript
+    # Rail and dock are collapsible and their state survives a reload, so the
+    # workshop layout a reader sets up is still there next visit.
+    assert "data-rail-toggle" in template
+    assert 'data-rail="open"' in template and 'data-dock="closed"' in template
+    assert "chat.rail" in javascript and "chat.dock" in javascript
+    # Zero-width columns stay in the DOM, so both must be inert when folded or
+    # their contents keep taking tab focus.
+    assert "inert" in javascript
     main = Path("main.py").read_text()
     assert "/storage/default/chat-attachments/" in main
     deploy = Path(".github/workflows/deploy.yaml").read_text()
