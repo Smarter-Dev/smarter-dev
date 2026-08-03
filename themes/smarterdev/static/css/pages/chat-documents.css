@@ -103,7 +103,12 @@
 }
 
 /* Contents keep their width while the column animates shut, so the text inside
-   does not reflow on the way out. */
+   does not reflow on the way out.
+
+   Only ever put CONTENT blocks in here: min-width beats width, so anything else
+   parked in the dock gets inflated to the full panel width. The resize handle
+   used to live here and was silently stretched to a 480px invisible box over
+   the conversation, which lit up cyan on hover. */
 .chat-dock > * { min-width: var(--chat-dock) }
 
 .chat-shell[data-dock="closed"] .chat-dock {
