@@ -27,11 +27,13 @@
    opening or folding one animates instead of snapping, and the conversation
    keeps its scroll position throughout. */
 
+/* Height comes from the flex column in product.css, not from a calc against the
+   nav — see the note there. The shell just takes what is left. */
 .chat-shell {
   display: grid;
   grid-template-columns: var(--chat-rail) minmax(0, 1fr) 0;
-  margin-top: var(--p-nav);
-  height: calc(100dvh - var(--p-nav));
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: hidden;
   position: relative;
   z-index: 1;
