@@ -11,6 +11,24 @@
 {# Openers for a blank conversation. Concrete tasks, not capability boasts —
    they exist to show what this thing is for, so they read as work. #}
 {% set starters = ['Review a stack trace', 'Plan a Discord bot', 'Research model pricing', 'Explain this repo'] %}
+{# A document exists from the moment the agent asks for one and fills in as its
+   next turn is written, so the label has to read for a file in progress too.
+   chat.js keeps the same wording client-side. #}
+{% macro artifact_mark(artifact) -%}
+{%- if artifact.kind == 'image' -%}IMG
+{%- elif artifact.kind == 'pdf' -%}PDF
+{%- elif artifact.kind == 'text' -%}TXT
+{%- else -%}MD
+{%- endif -%}
+{%- endmacro %}
+{% macro document_meta(document) -%}
+{%- if document.status == 'streaming' -%}{{ document.filename }} · Writing…
+{%- elif document.status == 'failed' -%}{{ document.filename }} · Write failed
+{%- elif document.status == 'truncated' -%}{{ document.filename }} · {{ document.size_bytes }} bytes · Truncated
+{%- elif document.status == 'stopped' -%}{{ document.filename }} · {{ document.size_bytes }} bytes · Stopped
+{%- else -%}{{ document.filename }} · {{ document.size_bytes }} bytes
+{%- endif -%}
+{%- endmacro %}
 {# Rail and dock state are restored by chat.js from localStorage before paint;
    these are the no-JS defaults. #}
 <div class="chat-shell"
@@ -55,10 +73,10 @@
       </button>
       <h1 class="p-title">{{ conversation.title if conversation else 'New chat' }}</h1>
       {% if mode == 'chat' %}
-      {% set documents = documents|default([]) %}
-      <button type="button" class="chat-dock-toggle" data-dock-toggle aria-expanded="false" aria-controls="chat-dock" {% if not documents %}hidden{% endif %}>
+      {% set artifacts = artifacts|default([]) %}
+      <button type="button" class="chat-dock-toggle" data-dock-toggle aria-expanded="false" aria-controls="chat-dock" {% if not artifacts %}hidden{% endif %}>
         <svg viewBox="0 0 14 16" aria-hidden="true" focusable="false"><path d="M8.5.5H2.5a1 1 0 0 0-1 1v13a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V4.5zM8.5.5V4.5h4" fill="none" stroke="currentColor"/></svg>
-        Documents<span class="chat-dock-count" data-dock-count>{{ documents|length }}</span>
+        Documents<span class="chat-dock-count" data-dock-count>{{ artifacts|length }}</span>
       </button>
       {% endif %}
       {% if mode == 'chat' %}
@@ -129,8 +147,8 @@
           </div>
           {% if mode == 'chat' and message.role == 'assistant' and active_turn and message.turn_id == active_turn.id|string %}<div class="chat-agent-activity" data-root-activity data-started-at="{{ active_turn.created_at.isoformat() }}"><span class="p-mark is-live" aria-hidden="true"></span><span data-activity-label>Working…</span><time data-activity-timer>0:00</time></div>{% endif %}
           <div class="chat-content p-prose sdanswer-prose">{% if message.role == 'assistant' and not message.content and not (mode == 'chat' and active_turn) %}Working…{% else %}{{ message.content_html|safe }}{% endif %}</div>
-          {% if mode == 'chat' and message.attachments %}<div class="chat-sent-attachments">{% for attachment in message.attachments %}<a class="chat-sent-attachment" href="/v2/api/chat/conversations/{{ conversation.id }}/attachments/{{ attachment.id }}"><svg viewBox="0 0 14 16" aria-hidden="true" focusable="false"><path d="M8.5.5H2.5a1 1 0 0 0-1 1v13a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V4.5zM8.5.5V4.5h4" fill="none" stroke="currentColor" stroke-width="1"/></svg>{{ attachment.name }}</a>{% endfor %}</div>{% endif %}
-          {% if mode == 'chat' and message.documents %}<div class="chat-documents" data-chat-documents>{% for document in message.documents %}<article class="chat-document" data-document-id="{{ document.id }}"><div class="chat-document-mark" aria-hidden="true">MD</div><div class="chat-document-info"><strong>{{ document.title }}</strong><span>{{ document.filename }} · {{ document.size_bytes }} bytes</span></div><div class="chat-document-actions"><button type="button" data-open-document data-document-id="{{ document.id }}">Preview</button><a href="/v2/api/chat/conversations/{{ conversation.id }}/documents/{{ document.id }}/download" download="{{ document.filename }}" data-sk-no-spa>Download</a></div></article>{% endfor %}</div>{% endif %}
+          {% if mode == 'chat' and message.attachments %}<div class="chat-sent-attachments">{% for attachment in message.attachments %}<button type="button" class="chat-sent-attachment" data-open-document data-document-id="{{ attachment.id }}" data-document-origin="upload" data-document-kind="{{ attachment.kind }}"><svg viewBox="0 0 14 16" aria-hidden="true" focusable="false"><path d="M8.5.5H2.5a1 1 0 0 0-1 1v13a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V4.5zM8.5.5V4.5h4" fill="none" stroke="currentColor" stroke-width="1"/></svg>{{ attachment.name }}</button>{% endfor %}</div>{% endif %}
+          {% if mode == 'chat' and message.documents %}<div class="chat-documents" data-chat-documents>{% for document in message.documents %}<article class="chat-document" data-document-id="{{ document.id }}" data-document-status="{{ document.status }}"><div class="chat-document-mark" aria-hidden="true">MD</div><div class="chat-document-info"><strong>{{ document.title }}</strong><span>{{ document_meta(document) }}</span></div><div class="chat-document-actions"><button type="button" data-open-document data-document-id="{{ document.id }}">Preview</button><a href="/v2/api/chat/conversations/{{ conversation.id }}/documents/{{ document.id }}/download" download="{{ document.filename }}" data-sk-no-spa {% if document.status in ('streaming', 'failed') %}hidden{% endif %}>Download</a></div></article>{% endfor %}</div>{% endif %}
           {% if mode == 'resources' and message.role == 'assistant' and message.sdanswer_blocks %}<script type="application/json" class="sdanswer-payload">{{ message.sdanswer_blocks|tojson }}</script>{% endif %}
           {% if message.stopped %}<span class="chat-stopped">Stopped</span>{% endif %}
           {% if message.role == 'assistant' and mode == 'chat' %}<div class="chat-response-actions">
@@ -212,17 +230,27 @@
       <button type="button" class="chat-dock-close" data-dock-close aria-label="Close documents panel">×</button>
     </header>
 
+    {# Written files and uploads share the shelf, so the filter is how a reader
+       separates "what I gave it" from "what it made". #}
+    <div class="chat-dock-filter" data-dock-filter role="group" aria-label="Filter documents">
+      <button type="button" data-dock-scope="all" aria-pressed="true">All</button>
+      <button type="button" data-dock-scope="created" aria-pressed="false">Written</button>
+      <button type="button" data-dock-scope="upload" aria-pressed="false">Uploads</button>
+    </div>
+
     <div class="chat-dock-list" data-dock-list>
-      {% for document in documents|default([]) %}
-      <button type="button" class="chat-dock-item" data-dock-open data-document-id="{{ document.id }}">
-        <span class="chat-dock-item-mark" aria-hidden="true">MD</span>
+      {% for artifact in artifacts|default([]) %}
+      <button type="button" class="chat-dock-item" data-dock-open data-document-id="{{ artifact.id }}" data-document-status="{{ artifact.status }}" data-document-origin="{{ artifact.origin }}" data-document-kind="{{ artifact.kind }}">
+        <span class="chat-dock-item-mark" aria-hidden="true">{{ artifact_mark(artifact) }}</span>
         <span class="chat-dock-item-info">
-          <strong>{{ document.title }}</strong>
-          <span class="p-meta">{{ document.filename }} · {{ document.size_bytes }} bytes</span>
+          <strong>{{ artifact.title }}</strong>
+          <span class="p-meta">{{ document_meta(artifact) }}</span>
         </span>
+        {% if artifact.origin == 'upload' %}<span class="chat-dock-item-tag">Upload</span>{% endif %}
       </button>
       {% endfor %}
-      <p class="chat-dock-empty p-meta" data-dock-empty {% if documents|default([]) %}hidden{% endif %}>Nothing here yet. Documents the agent writes will collect in this panel.</p>
+      <p class="chat-dock-empty p-meta" data-dock-empty {% if artifacts|default([]) %}hidden{% endif %}>Nothing here yet. Documents the agent writes, and files you upload, collect in this panel.</p>
+      <p class="chat-dock-empty p-meta" data-dock-filtered-empty hidden>Nothing matches this filter.</p>
     </div>
 
     <div class="chat-dock-preview" data-dock-preview hidden>

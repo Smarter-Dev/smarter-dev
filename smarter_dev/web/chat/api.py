@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from contextlib import suppress
 from datetime import UTC
 from datetime import datetime
@@ -47,6 +48,8 @@ from smarter_dev.web.chat.csrf import require_api_csrf
 from smarter_dev.web.chat.dispatch import cancel_dispatch
 from smarter_dev.web.chat.dispatch import create_dispatch
 from smarter_dev.web.chat.dispatch import dispatch_one
+from smarter_dev.web.chat.documents import attachment_kind
+from smarter_dev.web.chat.documents import conversation_artifacts
 from smarter_dev.web.chat.entitlements import has_chat
 from smarter_dev.web.chat.entitlements import has_ultra_chat
 from smarter_dev.web.chat.entitlements import resolve_spend_tier
@@ -272,6 +275,9 @@ def document_dict(document: WebChatDocument) -> dict:
         "title": document.title,
         "filename": document.filename,
         "size_bytes": document.size_bytes,
+        # A document is visible while it is still being written, so the client
+        # needs to know whether it is looking at a file or at a file in progress.
+        "status": document.status,
     }
 
 
@@ -474,6 +480,8 @@ class ChatApiController(Controller):
                     "name": attachment.original_name,
                     "media_type": attachment.media_type,
                     "size_bytes": attachment.size_bytes,
+                    # The chip opens the same previewer the panel uses.
+                    "kind": attachment_kind(attachment.media_type),
                 }
             )
         subagents = list(
@@ -531,13 +539,23 @@ class ChatApiController(Controller):
                 )
                 for message in messages
             ],
+            # Two lists on purpose. `documents` drives the cards under the reply
+            # that produced them; `artifacts` is the panel's shelf, where a file
+            # the agent wrote and a file the user uploaded sit side by side.
             "documents": [document_dict(document) for document in documents],
+            "artifacts": [
+                artifact.as_dict()
+                for artifact in await conversation_artifacts(
+                    db_session, conversation_id=conversation_id
+                )
+            ],
             "pending_attachments": [
                 {
                     "id": str(attachment.id),
                     "name": attachment.original_name,
                     "media_type": attachment.media_type,
                     "size_bytes": attachment.size_bytes,
+                    "kind": attachment_kind(attachment.media_type),
                 }
                 for attachment in pending_attachments
             ],
@@ -865,6 +883,7 @@ class ChatApiController(Controller):
         attachment_id: UUID,
         request: Request,
         db_session: AsyncSession,
+        inline: bool = False,
     ) -> Response:
         user_id = require_user_id(request)
         await require_entitled(db_session, user_id)
@@ -882,6 +901,10 @@ class ChatApiController(Controller):
         content = await backend.get(attachment.storage_key)
         safe_name = attachment.original_name.replace('"', "")
         encoded_name = quote(attachment.original_name, safe="")
+        # The panel shows an uploaded image where it shows any other file, which
+        # needs the bytes served for display rather than for saving. Still
+        # nosniff, still no-store — only the disposition changes.
+        disposition = "inline" if inline else "attachment"
         return Response(
             content=content,
             media_type=attachment.media_type,
@@ -889,8 +912,80 @@ class ChatApiController(Controller):
                 "Cache-Control": "no-store",
                 "X-Content-Type-Options": "nosniff",
                 "Content-Disposition": (
-                    f"attachment; filename=\"{safe_name}\"; filename*=UTF-8''{encoded_name}"
+                    f'{disposition}; filename="{safe_name}"; '
+                    f"filename*=UTF-8''{encoded_name}"
                 ),
+            },
+        )
+
+    @get("/conversations/{conversation_id:uuid}/attachments/{attachment_id:uuid}/preview")
+    async def preview_attachment(
+        self,
+        conversation_id: UUID,
+        attachment_id: UUID,
+        request: Request,
+        db_session: AsyncSession,
+    ) -> Response:
+        """Render an upload for the documents panel.
+
+        Same shape as a document preview so one previewer can show either. Text
+        and PDFs are rendered from their extracted text — as markdown when the
+        upload is markdown, and as a code block otherwise, since a .py or .csv
+        rendered as prose is unreadable. An image reports a URL instead of HTML.
+        """
+        user_id = require_user_id(request)
+        await require_entitled(db_session, user_id)
+        await owned_conversation(db_session, conversation_id, user_id)
+        attachment = await db_session.scalar(
+            select(WebChatAttachment).where(
+                WebChatAttachment.id == attachment_id,
+                WebChatAttachment.conversation_id == conversation_id,
+                WebChatAttachment.owner_user_id == user_id,
+                WebChatAttachment.status == "ready",
+            )
+        )
+        if attachment is None:
+            raise HTTPException(status_code=404, detail="Attachment not found.")
+        kind = attachment_kind(attachment.media_type)
+        content_html = ""
+        if kind != "image":
+            text = attachment.extracted_text or ""
+            if not text:
+                content_html = render_markdown(
+                    "_This file has no extractable text._"
+                )
+            elif attachment.media_type == "text/markdown":
+                content_html = render_markdown(text)
+            else:
+                # Long enough to survive any run of backticks in the file itself.
+                longest = max(
+                    (len(run) for run in re.findall(r"`+", text)), default=0
+                )
+                fence = "`" * max(3, longest + 1)
+                content_html = render_markdown(f"{fence}\n{text}\n{fence}")
+        return Response(
+            content={
+                "id": str(attachment.id),
+                "origin": "upload",
+                "kind": kind,
+                "title": attachment.original_name,
+                "filename": attachment.original_name,
+                "size_bytes": attachment.size_bytes,
+                "status": attachment.status,
+                "media_type": attachment.media_type,
+                "content_html": content_html,
+                "content_url": (
+                    f"/v2/api/chat/conversations/{conversation_id}"
+                    f"/attachments/{attachment.id}?inline=true"
+                    if kind == "image"
+                    else None
+                ),
+                "summarization_instruction": attachment.summarization_instruction,
+            },
+            media_type="application/json",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
             },
         )
 
@@ -917,6 +1012,14 @@ class ChatApiController(Controller):
             content={
                 **document_dict(document),
                 "content_html": render_markdown(document.markdown_content),
+                # A file still being written is shown as the raw text it is so
+                # far, so a reader who opens it late sees the same stream as one
+                # who was already watching. Finished files render as markdown.
+                "content_text": (
+                    document.markdown_content
+                    if document.status == "streaming"
+                    else None
+                ),
             },
             media_type="application/json",
             headers={
@@ -946,6 +1049,11 @@ class ChatApiController(Controller):
         )
         if document is None:
             raise HTTPException(status_code=404, detail="Document not found.")
+        if document.status == "streaming":
+            # Half a file is not a download. The preview shows the live text.
+            raise HTTPException(
+                status_code=409, detail="Document is still being written."
+            )
         safe_name = document.filename.replace('"', "")
         encoded_name = quote(document.filename, safe="")
         return Response(

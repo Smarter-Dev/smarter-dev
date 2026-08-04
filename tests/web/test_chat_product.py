@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 import inspect
+from contextlib import asynccontextmanager
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
 from decimal import Decimal
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 from litestar import Litestar
+from pydantic_ai.messages import BinaryContent
 from pydantic_ai.messages import ModelRequest
+from pydantic_ai.messages import ModelResponse
+from pydantic_ai.messages import TextPart
+from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.messages import ToolReturnPart
 from pydantic_ai.messages import UserPromptPart
 
@@ -23,13 +30,24 @@ from smarter_dev.web.chat.attachments import validate_attachment
 from smarter_dev.web.chat.compaction import _split_cut_point
 from smarter_dev.web.chat.compaction import compact_safely
 from smarter_dev.web.chat.compaction import should_compact_history
+from smarter_dev.web.chat.document_stream import WITHHELD_SIBLING_RESULT
+from smarter_dev.web.chat.document_stream import build_fork_messages
+from smarter_dev.web.chat.document_stream import stream_document_body
 from smarter_dev.web.chat.documents import MarkdownDocumentError
-from smarter_dev.web.chat.documents import validate_markdown_document
+from smarter_dev.web.chat.documents import attachment_kind
+from smarter_dev.web.chat.documents import clean_document_body
+from smarter_dev.web.chat.documents import validate_document_request
 from smarter_dev.web.chat.entitlements import has_chat
 from smarter_dev.web.chat.entitlements import has_ultra_chat
 from smarter_dev.web.chat.entitlements import resolve_spend_tier
+from smarter_dev.web.chat.jobs import _document_receipt
+from smarter_dev.web.chat.jobs import _upload_manifest
 from smarter_dev.web.chat.policy import compaction_model_key
 from smarter_dev.web.chat.policy import policy_for
+from smarter_dev.web.chat.runtime import BINARY_HISTORY_PLACEHOLDER
+from smarter_dev.web.chat.runtime import decode_model_messages
+from smarter_dev.web.chat.runtime import encode_model_messages
+from smarter_dev.web.chat.runtime import strip_binary_content
 from smarter_dev.web.chat.spend import append_wind_down
 from smarter_dev.web.chat.spend import daily_bounds
 from smarter_dev.web.chat.spend import evaluate_spend
@@ -191,8 +209,9 @@ def test_children_cannot_recurse_and_prompt_omits_guidance():
     ]
     assert "run_subagent" in effective_system_prompt(child=False)
     assert "run_subagent" not in effective_system_prompt(child=True)
-    assert "create_markdown_document" in effective_system_prompt(child=False)
-    assert "create_markdown_document" not in effective_system_prompt(child=True)
+    for tool in ("write_document", "read_document", "list_documents"):
+        assert tool in effective_system_prompt(child=False)
+        assert tool not in effective_system_prompt(child=True)
     assert list(inspect.signature(run_subagent).parameters) == [
         "name",
         "task",
@@ -310,33 +329,86 @@ def test_attachment_count_and_size_boundaries():
         validate_attachment("x.txt", "text/plain", b"x" * (10 * 1024 * 1024 + 1))
 
 
-def test_markdown_document_validation_normalizes_filename():
-    document = validate_markdown_document(
-        title=" Queue design ", filename="durable-queues", markdown="# Design\n"
+def test_document_request_validation_normalizes_filename():
+    requested = validate_document_request(
+        title=" Queue design ", filename="durable-queues"
     )
-    assert document.title == "Queue design"
-    assert document.filename == "durable-queues.md"
-    assert document.markdown == "# Design\n"
-    assert document.size_bytes == len(document.markdown.encode("utf-8"))
+    assert requested.title == "Queue design"
+    assert requested.filename == "durable-queues.md"
 
 
 @pytest.mark.parametrize(
-    ("title", "filename", "markdown"),
+    ("title", "filename"),
     [
-        ("", "guide.md", "content"),
-        ("Guide", "../guide.md", "content"),
-        ("Guide", "guide\n.md", "content"),
-        ("Guide", "guide.md", ""),
-        ("Guide", "guide.md", "x" * 100_001),
+        ("", "guide.md"),
+        ("Guide", "../guide.md"),
+        ("Guide", "guide\n.md"),
+        ("Guide", ""),
+        ("Guide", "g" * 300),
     ],
 )
-def test_markdown_document_validation_rejects_unsafe_or_unbounded_values(
-    title, filename, markdown
+def test_document_request_validation_rejects_unsafe_or_unbounded_values(
+    title, filename
 ):
     with pytest.raises(MarkdownDocumentError):
-        validate_markdown_document(
-            title=title, filename=filename, markdown=markdown
-        )
+        validate_document_request(title=title, filename=filename)
+
+
+@pytest.mark.parametrize(
+    ("streamed", "expected"),
+    [
+        ("```markdown\n# Plan\n\nBody\n```", "# Plan\n\nBody"),
+        ("```\n# Plan\n```", "# Plan"),
+        ("  # Plan\n\nBody  ", "# Plan\n\nBody"),
+        # A fenced code block that is the whole file stays fenced.
+        ("```python\nx = 1\n```", "```python\nx = 1\n```"),
+    ],
+)
+def test_streamed_document_body_is_unwrapped_but_code_is_left_alone(
+    streamed, expected
+):
+    assert clean_document_body(streamed) == expected
+
+
+def test_document_fork_answers_every_pending_tool_call():
+    """A branch leaving a sibling tool call unanswered is a malformed request.
+
+    The fork is a real provider request built from the live run history, so every
+    tool call in the response it branches from has to be accounted for: the
+    document's own call carries the write instruction, and any sibling gets a
+    placeholder.
+    """
+    history = [
+        ModelRequest(parts=[UserPromptPart(content="write the plan")]),
+        ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="write_document",
+                    args={"reason": "r", "filename": "plan.md", "title": "Plan"},
+                    tool_call_id="call-doc",
+                ),
+                ToolCallPart(
+                    tool_name="web_search",
+                    args={"query": "queues"},
+                    tool_call_id="call-search",
+                ),
+            ]
+        ),
+    ]
+    fork = build_fork_messages(
+        messages=history, tool_call_id="call-doc", filename="plan.md"
+    )
+    assert fork[:2] == history
+    returns = {part.tool_call_id: part for part in fork[-1].parts}
+    assert set(returns) == {"call-doc", "call-search"}
+    assert returns["call-search"].content == WITHHELD_SIBLING_RESULT
+    assert "plan.md" in returns["call-doc"].content
+    # The instruction also rides as request instructions, which providers append
+    # to the system prompt already in the history rather than replacing it.
+    assert fork[-1].instructions == returns["call-doc"].content
+    # The branch is a copy: the live history the agent is still running on must
+    # not gain a turn from being forked.
+    assert len(history) == 2
 
 
 @pytest.mark.asyncio
@@ -412,3 +484,217 @@ def test_model_warning_uses_actual_rates_and_no_universal_discount_claim():
         and "output" in warning
     )
     assert "1/10" not in warning and "90%" not in warning
+
+
+class _FakeStream:
+    """The provider side of one fork request, as a stream of text deltas."""
+
+    def __init__(self, deltas: list[str]):
+        self.deltas = deltas
+
+    async def __aiter__(self):
+        from pydantic_ai import PartDeltaEvent
+        from pydantic_ai.messages import TextPartDelta
+
+        for index, delta in enumerate(self.deltas):
+            yield PartDeltaEvent(index=index, delta=TextPartDelta(content_delta=delta))
+
+
+class _FakeMeteredModel:
+    def __init__(self, deltas: list[str]):
+        self.deltas = deltas
+        self.settings = None
+        self.messages = None
+
+    def prepare_request(self, settings, parameters):
+        return settings, parameters
+
+    def prepare_messages(self, messages):
+        return messages
+
+    @asynccontextmanager
+    async def request_stream(self, messages, settings, parameters, run_context=None):
+        self.messages = messages
+        self.settings = settings
+        yield _FakeStream(self.deltas)
+
+
+@pytest.mark.asyncio
+async def test_document_stream_flushes_as_it_writes_and_returns_the_whole_body():
+    """The reader sees the file appear, and the caller gets the finished text.
+
+    Flushes are what the preview is built from, so each one carries the new chunk
+    and the body as it stands — the client appends the chunk and never has to
+    reassemble the file from scratch.
+    """
+    model = get_model("gemini-3-1-flash-lite")
+    metered = _FakeMeteredModel(["a" * 600, "b" * 600, "tail"])
+    flushes: list[tuple[str, str]] = []
+
+    async def on_flush(chunk: str, body: str) -> None:
+        flushes.append((chunk, body))
+
+    result = await stream_document_body(
+        metered=metered,
+        model=model,
+        reasoning=None,
+        messages=[ModelRequest(parts=[UserPromptPart(content="write it")])],
+        max_chars=10_000,
+        on_flush=on_flush,
+        turn_id=uuid4(),
+        worker_lease_token="lease",
+    )
+
+    assert result.markdown == "a" * 600 + "b" * 600 + "tail"
+    assert result.truncated is False
+    # Chunks concatenate to the body, in order, with nothing repeated.
+    assert "".join(chunk for chunk, _ in flushes) == result.markdown
+    assert len(flushes) >= 2
+    assert flushes[-1][1] == result.markdown
+    # A document draws on the same output ceiling as any response, so the cap has
+    # to be asked for explicitly rather than inherited.
+    assert 0 < metered.settings["max_tokens"] <= model.max_output_tokens
+
+
+@pytest.mark.asyncio
+async def test_document_stream_stops_at_the_ceiling_and_says_it_was_truncated():
+    """Silently storing a file that stops mid-sentence is the bad failure."""
+    model = get_model("gemini-3-1-flash-lite")
+    metered = _FakeMeteredModel(["x" * 40, "y" * 40])
+    flushed: list[str] = []
+
+    async def on_flush(chunk: str, _body: str) -> None:
+        flushed.append(chunk)
+
+    result = await stream_document_body(
+        metered=metered,
+        model=model,
+        reasoning=None,
+        messages=[ModelRequest(parts=[UserPromptPart(content="write it")])],
+        max_chars=50,
+        on_flush=on_flush,
+        turn_id=uuid4(),
+        worker_lease_token="lease",
+    )
+
+    assert len(result.markdown) == 50
+    assert result.truncated is True
+    assert "".join(flushed) == result.markdown
+
+
+def test_document_receipt_omits_the_body_and_points_at_the_reread():
+    """The receipt is the whole reason the fork saves context.
+
+    It has to leave the model believing it wrote the file — otherwise the next
+    turn re-derives the contents into the reply — while carrying none of it, and
+    naming the way back to the exact text if it turns out to be needed.
+    """
+    body = "# Plan\n\n" + "Ship the queue. " * 200
+    receipt = _document_receipt(
+        title="Plan", filename="plan.md", markdown=body, truncated=False
+    )
+    assert "Ship the queue." not in receipt
+    assert 'read_document("plan.md")' in receipt
+    assert len(receipt) < len(body)
+    truncated = _document_receipt(
+        title="Plan", filename="plan.md", markdown=body, truncated=True
+    )
+    assert "TRUNCATED" in truncated
+
+
+@pytest.mark.parametrize(
+    ("media_type", "expected"),
+    [
+        ("image/png", "image"),
+        ("application/pdf", "pdf"),
+        ("text/markdown", "text"),
+        ("text/x-python", "text"),
+        ("", "text"),
+    ],
+)
+def test_upload_kind_classification(media_type, expected):
+    assert attachment_kind(media_type) == expected
+
+
+def test_upload_manifest_announces_files_without_their_contents():
+    """The manifest is the whole point of making uploads lazy.
+
+    It has to be complete enough that the model knows what it has and can name a
+    file to read, and empty enough that a 90-page PDF costs nothing until asked
+    for.
+    """
+    assert _upload_manifest([]) == ""
+    manifest = _upload_manifest(
+        [
+            SimpleNamespace(
+                original_name="spec.pdf",
+                media_type="application/pdf",
+                size_bytes=2_500_000,
+                extracted_text="CONFIDENTIAL launch plan",
+                summarization_instruction=None,
+            ),
+            SimpleNamespace(
+                original_name="mock.png",
+                media_type="image/png",
+                size_bytes=4096,
+                extracted_text=None,
+                summarization_instruction="Describe the layout",
+            ),
+            SimpleNamespace(
+                original_name="scan.pdf",
+                media_type="application/pdf",
+                size_bytes=1024,
+                extracted_text=None,
+                summarization_instruction=None,
+            ),
+        ]
+    )
+    assert "CONFIDENTIAL" not in manifest
+    assert "spec.pdf (PDF, 2.4 MB, text extracted)" in manifest
+    assert "mock.png (image, 4.0 KB, has a summarization instruction)" in manifest
+    assert "scan.pdf (PDF, 1.0 KB, no extractable text)" in manifest
+    assert "listed, not loaded" in manifest
+    assert "list_documents()" in manifest
+
+
+def test_binary_tool_returns_leave_a_pointer_in_durable_history():
+    """Bytes a tool read must not become permanent history.
+
+    A BinaryContent does not survive the JSON round-trip as binary — it comes
+    back as a mapping the provider would resend as base64 text on every later
+    turn, unreadable and megabytes at a time. So the image lives for the turn
+    that read it and leaves a note behind. Text in the same tool return, and the
+    parts around it, are untouched.
+    """
+    image = BinaryContent(
+        data=b"\x89PNG\r\n\x1a\nnot-a-real-png", media_type="image/png"
+    )
+    # The shape pydantic-ai actually produces for ToolReturn.content: the bytes
+    # arrive as a follow-on user part beside the tool return, not inside it.
+    history = [
+        ModelRequest(
+            parts=[
+                UserPromptPart(content="what does the chart say?"),
+                ToolReturnPart(
+                    tool_name="read_document",
+                    content=["chart.png — uploaded by the user", image],
+                    tool_call_id="call-read",
+                ),
+                UserPromptPart(content=[image]),
+            ]
+        ),
+        ModelResponse(parts=[TextPart(content="Revenue climbs.")]),
+    ]
+    stripped = strip_binary_content(history)
+    kept = stripped[0].parts[1].content
+    assert kept == ["chart.png — uploaded by the user", BINARY_HISTORY_PLACEHOLDER]
+    assert stripped[0].parts[2].content == [BINARY_HISTORY_PLACEHOLDER]
+    assert stripped[0].parts[0].content == "what does the chart say?"
+    assert stripped[1] == history[1]
+    # The live run may still be using these messages.
+    assert history[0].parts[1].content[1] is image
+    # And what is stored now round-trips to exactly what was stored.
+    assert (
+        decode_model_messages(encode_model_messages(stripped))[0].parts[1].content
+        == kept
+    )

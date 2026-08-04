@@ -63,6 +63,64 @@ def decode_model_messages(payload: list[dict] | None) -> list[ModelMessage]:
     return list(ModelMessagesTypeAdapter.validate_python(payload))
 
 
+BINARY_HISTORY_PLACEHOLDER = (
+    "[binary content omitted from the conversation history — read the file again "
+    "if you need to see it]"
+)
+
+
+def strip_binary_content(messages: list[ModelMessage]) -> list[ModelMessage]:
+    """Replace binary parts with a note before history is persisted.
+
+    Reading an uploaded image hands the model real bytes, which is the point. But
+    those bytes must not become permanent conversation history: they do not
+    survive the JSON round-trip as binary — they come back as a plain mapping the
+    provider would re-send as base64 text, megabytes at a time, on every turn
+    that follows, and the model could not see them anyway.
+
+    So the image lives for the turn that read it and leaves a pointer behind.
+    Needing it again means reading the file again, which is the same contract the
+    rest of the document tooling keeps. The input messages are not mutated: the
+    run they belong to may still be using them.
+    """
+    from dataclasses import replace
+
+    from pydantic_ai.messages import BinaryContent
+    from pydantic_ai.messages import ModelRequest
+    from pydantic_ai.messages import ToolReturnPart
+    from pydantic_ai.messages import UserPromptPart
+
+    def clean(content):
+        if isinstance(content, BinaryContent):
+            return BINARY_HISTORY_PLACEHOLDER
+        if isinstance(content, list):
+            return [clean(item) for item in content]
+        return content
+
+    def carries_binary(content) -> bool:
+        if isinstance(content, BinaryContent):
+            return True
+        return isinstance(content, list) and any(
+            carries_binary(item) for item in content
+        )
+
+    stripped: list[ModelMessage] = []
+    for message in messages:
+        if not isinstance(message, ModelRequest):
+            stripped.append(message)
+            continue
+        parts = list(message.parts)
+        changed = False
+        for index, part in enumerate(parts):
+            if isinstance(part, ToolReturnPart | UserPromptPart) and carries_binary(
+                part.content
+            ):
+                parts[index] = replace(part, content=clean(part.content))
+                changed = True
+        stripped.append(replace(message, parts=parts) if changed else message)
+    return stripped
+
+
 def _usage_parts(response: ModelResponse) -> tuple[int, int, int, int]:
     usage = response.usage
     details = getattr(usage, "details", {}) or {}

@@ -390,9 +390,14 @@
   gap: .4rem;
   margin-top: .9rem;
 }
+/* A button now rather than a link — it opens the file in the documents panel —
+   so it has to be talked out of the browser's button styling. */
 .chat-sent-attachment {
   display: flex;
   align-items: center;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
   gap: .6rem;
   padding: .5rem .7rem;
   font-family: var(--mono);

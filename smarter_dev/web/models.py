@@ -4554,8 +4554,15 @@ class WebChatDocument(Base):
     tool_call_id: Mapped[str] = mapped_column(String(200), nullable=False)
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     filename: Mapped[str] = mapped_column(String(255), nullable=False)
-    markdown_content: Mapped[str] = mapped_column(Text, nullable=False)
-    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    # The body arrives one provider delta at a time, so a row exists — and is
+    # visible to the reader — long before it holds a whole document. status is
+    # what separates "being written" from "safe to read, cite, or download":
+    # streaming, complete, truncated (hit the output ceiling), stopped, failed.
+    markdown_content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="streaming", server_default="complete"
+    )
 
     __table_args__ = (
         UniqueConstraint(
