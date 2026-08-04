@@ -1653,6 +1653,10 @@
         shell.dataset.modelKey,
         shell.dataset.reasoningLevel || ''
       );
+      // These values were just set programmatically, which fires no change
+      // event — snapshot them or the first conversation would be created with
+      // whatever the server-rendered defaults happened to be.
+      captureStartSettings();
     }).catch(function (error) { showError(error.message); });
   }
 
@@ -1701,23 +1705,53 @@
     });
   }
 
-  function createConversation() {
-    if (conversationId) return Promise.resolve({id: conversationId});
-    if (conversationPromise) return conversationPromise;
+  // The start-settings selects live inside the empty-state block, and sending
+  // the first message removes that block before the conversation is created —
+  // reading them at POST time found a detached DOM and threw, taking the whole
+  // send path down with it. They are snapshotted while they exist instead, so
+  // starting a conversation no longer depends on that ordering.
+  var startSettings = {
+    intelligence_mode: null,
+    model_key: null,
+    reasoning_level: '',
+  };
+
+  function captureStartSettings() {
     var intelligence = document.querySelector('[data-chat-new-intelligence]');
     var model = document.querySelector('[data-chat-new-model]');
     var reasoning = document.querySelector('[data-chat-new-reasoning]');
+    if (intelligence) startSettings.intelligence_mode = intelligence.value;
+    if (model) startSettings.model_key = model.value;
+    if (reasoning) startSettings.reasoning_level = reasoning.value || '';
+    return startSettings;
+  }
+
+  captureStartSettings();
+
+  document.addEventListener('change', function (event) {
+    if (!event.target.closest) return;
+    if (event.target.closest('[data-chat-new-intelligence], [data-chat-new-model], [data-chat-new-reasoning]')) {
+      captureStartSettings();
+    }
+  });
+
+  function createConversation() {
+    if (conversationId) return Promise.resolve({id: conversationId});
+    if (conversationPromise) return conversationPromise;
+    // Re-reads the selects when they are still on the page, and otherwise uses
+    // the last values they held.
+    var chosen = captureStartSettings();
     conversationPromise = api('/v2/api/chat/conversations', json('POST', {
-      intelligence_mode: intelligence.value,
-      model_key: model.value,
-      reasoning_level: reasoning.value || null,
+      intelligence_mode: chosen.intelligence_mode,
+      model_key: chosen.model_key,
+      reasoning_level: chosen.reasoning_level || null,
     })).then(function (data) {
       conversationId = data.id;
       shell.dataset.conversationId = data.id;
-      shell.dataset.modelKey = model.value;
-      shell.dataset.reasoningLevel = reasoning.value || '';
+      shell.dataset.modelKey = chosen.model_key;
+      shell.dataset.reasoningLevel = chosen.reasoning_level || '';
       history.replaceState({}, '', data.url);
-      activateConversationControls(model.value, reasoning.value || '');
+      activateConversationControls(chosen.model_key, chosen.reasoning_level || '');
       return data;
     }).catch(function (error) {
       conversationPromise = null;
@@ -1848,7 +1882,16 @@
     scrollToBottom(false);
     setBusy(true);
     setStatus('Starting…');
-    (mode === 'chat' ? submitChat(text) : submitResources(text)).then(function (result) {
+    // A synchronous throw in the submit path used to escape as an uncaught
+    // error: the composer went dead and the reader was told nothing. Route it
+    // into the same failure handling a rejected request gets.
+    var pending;
+    try {
+      pending = mode === 'chat' ? submitChat(text) : submitResources(text);
+    } catch (error) {
+      pending = Promise.reject(error);
+    }
+    pending.then(function (result) {
       activeTurn = result.turn_id || null;
       // A new turn re-earns the right to move the panel to what it writes.
       dockFollowStream = true;
