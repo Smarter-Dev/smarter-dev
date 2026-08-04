@@ -833,6 +833,8 @@
     if (dockPreview) dockPreview.hidden = true;
     if (dockBack) dockBack.hidden = true;
     if (dockTitle) dockTitle.textContent = 'Documents';
+    // The filter belongs to the list, not to an open file.
+    applyDockScope();
     Array.prototype.forEach.call(dockList.querySelectorAll('[data-dock-open]'), function (row) {
       row.removeAttribute('aria-current');
     });
@@ -990,6 +992,7 @@
     if (dockList) dockList.hidden = true;
     if (dockPreview) dockPreview.hidden = false;
     if (dockBack) dockBack.hidden = false;
+    if (dockFilter) dockFilter.hidden = true;
     dockReturnFocus = trigger || null;
     var known = dockDocument(documentId) || dockRowItem(documentId) || triggerItem(documentId, trigger);
     if (dockTitle) dockTitle.textContent = (known && known.title) || 'Loading\u2026';
