@@ -26,6 +26,8 @@ from smarter_dev.shared.model_catalog import model_vendor
 from smarter_dev.web.agent_api import resources_quota_state
 from smarter_dev.web.chat.api import require_user_id
 from smarter_dev.web.chat.api import turn_meta
+from smarter_dev.web.chat.documents import attachment_kind
+from smarter_dev.web.chat.documents import conversation_artifacts
 from smarter_dev.web.chat.entitlements import has_chat
 from smarter_dev.web.chat.entitlements import has_ultra_chat
 from smarter_dev.web.chat.settings import ensure_settings
@@ -141,6 +143,7 @@ async def _chat_context(
                 "name": attachment.original_name,
                 "media_type": attachment.media_type,
                 "size_bytes": attachment.size_bytes,
+                "kind": attachment_kind(attachment.media_type),
             }
         )
     document_rows = list(
@@ -160,6 +163,7 @@ async def _chat_context(
                 "title": document.title,
                 "filename": document.filename,
                 "size_bytes": document.size_bytes,
+                "status": document.status,
                 "assistant_message_id": str(document.assistant_message_id),
                 "created_at": document.created_at,
             }
@@ -227,11 +231,27 @@ async def _chat_context(
         for document in documents_by_message.get(UUID(message_id), [])
     ]
     documents.sort(key=lambda item: item["created_at"])
+    # The panel holds uploads alongside them. An upload belongs to the user's
+    # message rather than to a response, so nothing can supersede it — only
+    # written documents are filtered by which reply is on screen.
+    artifacts = [
+        {**artifact.as_dict(), "created_at": artifact.created_at}
+        for artifact in await conversation_artifacts(
+            session, conversation_id=conversation.id
+        )
+        if artifact.is_upload
+        or (
+            artifact.assistant_message_id
+            and str(artifact.assistant_message_id) in visible_messages
+        )
+    ]
+    artifacts.sort(key=lambda item: (item["created_at"] is None, item["created_at"]))
     return {
         "messages": rendered,
         "versions": versions,
         "active_turn": active_turn,
         "documents": documents,
+        "artifacts": artifacts,
     }
 
 

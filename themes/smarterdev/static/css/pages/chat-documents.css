@@ -174,7 +174,8 @@
 
 .chat-dock-item {
   display: grid;
-  grid-template-columns: 2rem minmax(0, 1fr);
+  /* Third column is the origin tag, present only on uploads. */
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
   align-items: center;
   gap: .75rem;
   width: 100%;
@@ -229,6 +230,66 @@
 }
 .chat-dock-empty[hidden] { display: none }
 
+/* ── Origin filter ───────────────────────────────────────
+   Three small text buttons above the list. Quiet by default: this is a lookup
+   aid, not a control the reader should have to notice. */
+
+.chat-dock-filter {
+  display: flex;
+  gap: .25rem;
+  padding: .5rem .75rem;
+  border-bottom: 1px solid var(--p-line);
+}
+.chat-dock-filter[hidden] { display: none }
+
+.chat-dock-filter button {
+  padding: .2rem .5rem;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--p-dim);
+  font-family: var(--mono);
+  font-size: .68rem;
+  letter-spacing: .04em;
+  cursor: pointer;
+}
+.chat-dock-filter button:hover { color: var(--p-text) }
+.chat-dock-filter button[aria-pressed="true"] {
+  border-color: var(--p-line-strong);
+  background: var(--p-surface);
+  color: var(--p-text);
+}
+
+/* An uploaded file is marked where it is listed, so "what I gave it" and "what
+   it wrote" are never confused at a glance. */
+.chat-dock-item-tag {
+  padding: .1rem .35rem;
+  border: 1px solid var(--p-line);
+  border-radius: 2px;
+  color: var(--p-dim);
+  font-family: var(--mono);
+  font-size: .58rem;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.chat-dock-item[hidden] { display: none }
+
+/* An uploaded image is shown, not rendered. */
+.chat-dock-image {
+  margin: 0;
+  display: grid;
+  gap: .5rem;
+}
+.chat-dock-image img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--p-line);
+  border-radius: 2px;
+  background: var(--p-surface);
+}
+
 /* ── Preview view ────────────────────────────────────── */
 
 .chat-dock-preview {
@@ -261,6 +322,54 @@
   padding: 1.25rem 1rem 2rem;
   background: var(--p-bg);
   font-size: .88rem;
+}
+
+/* ── A file being written ────────────────────────────────
+   The live view is the raw file, monospaced and unrendered, because that is
+   what is actually arriving. Rendering resolves it into the document the moment
+   the write finishes, and the change of typeface is the signal that it did. */
+
+.chat-dock-stream {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: .78rem;
+  line-height: 1.65;
+  color: var(--p-text);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+
+/* A caret riding the end of the text, so a pause in the stream still reads as
+   writing rather than as a stall. */
+.chat-dock-stream::after {
+  content: '';
+  display: inline-block;
+  width: .5em;
+  height: 1em;
+  margin-left: .1em;
+  vertical-align: text-bottom;
+  background: var(--p-accent);
+  animation: chat-doc-caret 1.1s steps(2, start) infinite;
+}
+
+@keyframes chat-doc-caret {
+  50% { opacity: 0 }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-dock-stream::after { animation: none }
+}
+
+/* An unfinished file is dimmed wherever it is listed, and its name is the one
+   thing still at full strength — it is the part that is already true. */
+.chat-document[data-document-status="streaming"] .chat-document-info span,
+.chat-dock-item[data-document-status="streaming"] .p-meta {
+  color: var(--p-accent-text);
+}
+
+.chat-document[data-document-status="failed"] .chat-document-info span,
+.chat-dock-item[data-document-status="failed"] .p-meta {
+  color: var(--p-bad);
 }
 
 /* ── Narrow: the dock covers the conversation ────────────

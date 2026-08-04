@@ -52,6 +52,12 @@
   var dockDocuments = [];
   var dockPreviewing = null;
   var dockReturnFocus = null;
+  // Live text of every document currently being written, keyed by id.
+  var streams = {};
+  // The panel switches itself to a file the agent starts writing, so the reader
+  // watches it appear. Dismissed once per turn: a reader who closes the panel or
+  // steps back to the list has said they would rather not be moved again.
+  var dockFollowStream = true;
   // Set once the reader moves the rail themselves; from then on the dock stops
   // folding it for them.
   var railUserSet = false;
@@ -403,14 +409,94 @@
     return '/v2/api/chat/conversations/' + conversationId + '/documents/' + encodeURIComponent(documentId) + '/download';
   }
 
+  // ── Artifacts ─────────────────────────────────────────
+  // The panel holds two kinds of file: ones the agent wrote and ones the reader
+  // uploaded. They read the same way and preview in the same place, but they are
+  // different resources on the server, so which endpoint to ask is decided from
+  // the row's own origin rather than guessed from the id.
+
+  function isUpload(item) {
+    return (item || {}).origin === 'upload';
+  }
+
+  // Mirrors attachment_kind() on the server, for rows built from an upload
+  // response that predates the next snapshot.
+  function uploadKind(mediaType) {
+    var type = String(mediaType || '').toLowerCase();
+    if (type.indexOf('image/') === 0) return 'image';
+    if (type === 'application/pdf') return 'pdf';
+    return 'text';
+  }
+
+  function artifactMark(item) {
+    if (item.kind === 'image') return 'IMG';
+    if (item.kind === 'pdf') return 'PDF';
+    if (item.kind === 'text') return 'TXT';
+    return 'MD';
+  }
+
+  function conversationPath(suffix) {
+    return '/v2/api/chat/conversations/' + conversationId + suffix;
+  }
+
+  function artifactPreviewUrl(item) {
+    var id = encodeURIComponent(item.id);
+    return isUpload(item)
+      ? conversationPath('/attachments/' + id + '/preview')
+      : conversationPath('/documents/' + id);
+  }
+
+  function artifactDownloadUrl(item) {
+    var id = encodeURIComponent(item.id);
+    return isUpload(item)
+      ? conversationPath('/attachments/' + id)
+      : conversationPath('/documents/' + id + '/download');
+  }
+
   function formatDocumentSize(sizeBytes) {
     var size = Number(sizeBytes) || 0;
     if (size < 1024) return size + ' bytes';
     return (size / 1024).toFixed(size < 10240 ? 1 : 0) + ' KB';
   }
 
+  // A document appears the moment the agent asks for one and fills in as it is
+  // written, so every label has to read sensibly for a file that does not exist
+  // yet — and say so plainly when a write ended early.
+  function documentIsWriting(item) {
+    return (item || {}).status === 'streaming';
+  }
+
+  function documentMeta(item) {
+    var name = item.filename || 'document.md';
+    if (isUpload(item)) return name + ' · ' + formatDocumentSize(item.size_bytes);
+    if (item.status === 'streaming') return name + ' · Writing…';
+    if (item.status === 'failed') return name + ' · Write failed';
+    var size = formatDocumentSize(item.size_bytes);
+    if (item.status === 'truncated') return name + ' · ' + size + ' · Truncated';
+    if (item.status === 'stopped') return name + ' · ' + size + ' · Stopped';
+    return name + ' · ' + size;
+  }
+
+  // Downloading half a file is not useful, and the endpoint refuses it anyway.
+  function documentIsDownloadable(item) {
+    return !documentIsWriting(item) && item.status !== 'failed';
+  }
+
+  function dressDocumentCard(card, item) {
+    var meta = card.querySelector('.chat-document-info span');
+    if (meta) meta.textContent = documentMeta(item);
+    card.dataset.documentStatus = item.status || 'complete';
+    var download = card.querySelector('a[download]');
+    if (download) download.hidden = !documentIsDownloadable(item);
+  }
+
   function renderDocumentCard(item) {
-    if (!item || !item.id || document.querySelector('[data-document-id="' + item.id + '"]')) return true;
+    if (!item || !item.id) return true;
+    var existing = document.querySelector('.chat-document[data-document-id="' + item.id + '"]');
+    if (existing) {
+      dressDocumentCard(existing, item);
+      return true;
+    }
     var article = item.assistant_message_id && thread.querySelector('[data-message-id="' + item.assistant_message_id + '"]');
     article = article || rootArticle(item.turn_id);
     if (!article) return false;
@@ -434,7 +520,6 @@
     var title = document.createElement('strong');
     title.textContent = item.title || 'Markdown document';
     var filename = document.createElement('span');
-    filename.textContent = (item.filename || 'document.md') + ' · ' + formatDocumentSize(item.size_bytes);
     info.append(title, filename);
     var actions = document.createElement('div');
     actions.className = 'chat-document-actions';
@@ -450,6 +535,7 @@
     download.textContent = 'Download';
     actions.append(preview, download);
     card.append(mark, info, actions);
+    dressDocumentCard(card, item);
     documents.appendChild(card);
     return true;
   }
@@ -488,28 +574,90 @@
     var mark = document.createElement('span');
     mark.className = 'chat-dock-item-mark';
     mark.setAttribute('aria-hidden', 'true');
-    mark.textContent = 'MD';
     var info = document.createElement('span');
     info.className = 'chat-dock-item-info';
     var title = document.createElement('strong');
     title.textContent = item.title || 'Markdown document';
     var meta = document.createElement('span');
     meta.className = 'p-meta';
-    meta.textContent = (item.filename || 'document.md') + ' \u00b7 ' + formatDocumentSize(item.size_bytes);
     info.append(title, meta);
     button.append(mark, info);
+    if (isUpload(item)) {
+      var tag = document.createElement('span');
+      tag.className = 'chat-dock-item-tag';
+      tag.textContent = 'Upload';
+      button.appendChild(tag);
+    }
+    dressDockItem(button, item);
     return button;
   }
 
+  function dressDockItem(button, item) {
+    var meta = button.querySelector('.p-meta');
+    if (meta) meta.textContent = documentMeta(item);
+    var mark = button.querySelector('.chat-dock-item-mark');
+    if (mark) mark.textContent = artifactMark(item);
+    button.dataset.documentStatus = item.status || 'complete';
+    button.dataset.documentOrigin = item.origin || 'created';
+    button.dataset.documentKind = item.kind || 'markdown';
+  }
+
+  // The element that asked for the preview can say what it points at, which is
+  // how an uploaded file opens correctly before any snapshot has landed.
+  function triggerItem(documentId, trigger) {
+    if (!trigger || !trigger.dataset || !trigger.dataset.documentOrigin) return null;
+    return {
+      id: documentId,
+      origin: trigger.dataset.documentOrigin,
+      kind: trigger.dataset.documentKind || 'markdown',
+      status: trigger.dataset.documentStatus || 'ready',
+      title: ''
+    };
+  }
+
+  // Falls back to the row itself for documents rendered by the server, which the
+  // panel has no entry for until the first snapshot lands.
+  function dockRowItem(documentId) {
+    var row = dockList && dockList.querySelector('[data-dock-open][data-document-id="' + documentId + '"]');
+    if (!row) return null;
+    var title = row.querySelector('strong');
+    return {
+      id: documentId,
+      origin: row.dataset.documentOrigin || 'created',
+      kind: row.dataset.documentKind || 'markdown',
+      status: row.dataset.documentStatus || 'complete',
+      title: title ? title.textContent : ''
+    };
+  }
+
+  // Look-up for what the panel knows about a document, so the preview can tell
+  // a file being written from a finished one without another request.
+  function dockDocument(documentId) {
+    for (var index = 0; index < dockDocuments.length; index += 1) {
+      if (dockDocuments[index].id === documentId) return dockDocuments[index];
+    }
+    return null;
+  }
+
   // Appends only what is new, so the list never flickers and the row a reader
-  // is pointing at cannot move out from under them mid-turn.
+  // is pointing at cannot move out from under them mid-turn. Rows already there
+  // are updated in place \u2014 a document's own row is how it reports its progress.
   function syncDockList(items) {
     if (!dockList) return;
     (items || []).forEach(function (item) {
       if (!item || !item.id) return;
-      if (dockList.querySelector('[data-dock-open][data-document-id="' + item.id + '"]')) return;
+      var row = dockList.querySelector('[data-dock-open][data-document-id="' + item.id + '"]');
+      if (row) {
+        // Rows rendered by the server arrive without an entry here, so the
+        // snapshot pass is also what teaches the panel their status.
+        var known = dockDocument(item.id);
+        if (known) Object.assign(known, item);
+        else dockDocuments.push(Object.assign({}, item));
+        dressDockItem(row, known || item);
+        return;
+      }
       dockList.insertBefore(dockItem(item), dockEmpty);
-      dockDocuments.push(item);
+      dockDocuments.push(Object.assign({}, item));
     });
     var count = dockList.querySelectorAll('[data-dock-open]').length;
     if (dockCount) dockCount.textContent = count;
@@ -517,7 +665,54 @@
     // The button is the only route to the panel, so it appears with the first
     // document rather than sitting there empty for the whole conversation.
     if (dockToggle) dockToggle.hidden = count === 0;
+    applyDockScope();
   }
+
+  // ── Origin filter ─────────────────────────────────────
+  // Written files and uploads share one shelf, which is right for reading and
+  // wrong for looking something up. The filter is a view over the same rows —
+  // nothing is removed, so a row updating mid-turn cannot fall out of the list.
+
+  var DOCK_SCOPE_KEY = 'chat.dockScope';
+  var dockScope = stored(DOCK_SCOPE_KEY) || 'all';
+  var dockFilter = document.querySelector('[data-dock-filter]');
+  var dockFilteredEmpty = document.querySelector('[data-dock-filtered-empty]');
+
+  function applyDockScope() {
+    if (!dockList) return;
+    var shown = 0;
+    var total = 0;
+    Array.prototype.forEach.call(dockList.querySelectorAll('[data-dock-open]'), function (row) {
+      var origin = row.dataset.documentOrigin || 'created';
+      var matches = dockScope === 'all' || origin === dockScope;
+      row.hidden = !matches;
+      total += 1;
+      if (matches) shown += 1;
+    });
+    if (dockFilter) {
+      Array.prototype.forEach.call(dockFilter.querySelectorAll('[data-dock-scope]'), function (button) {
+        button.setAttribute('aria-pressed', button.dataset.dockScope === dockScope ? 'true' : 'false');
+      });
+      dockFilter.hidden = total === 0;
+    }
+    // Two different silences: an empty panel, and a filter that hides everything.
+    if (dockEmpty) dockEmpty.hidden = total > 0;
+    if (dockFilteredEmpty) dockFilteredEmpty.hidden = total === 0 || shown > 0;
+  }
+
+  if (dockFilter) {
+    dockFilter.addEventListener('click', function (event) {
+      var button = event.target.closest('[data-dock-scope]');
+      if (!button) return;
+      dockScope = button.dataset.dockScope;
+      store(DOCK_SCOPE_KEY, dockScope);
+      applyDockScope();
+    });
+  }
+
+  // The server renders the rows and the template defaults to "All", so a
+  // remembered filter has to be applied before the first snapshot arrives.
+  applyDockScope();
 
   // Mirrors the 1100px breakpoint in pages/chat.css, where the dock stops being
   // a grid column and starts floating over the conversation.
@@ -668,6 +863,125 @@
     if (focusTarget && open) focusTarget.focus();
   }
 
+  // \u2500\u2500 Documents being written \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+  // A document is created empty and filled in by the model's next turn, which
+  // arrives here as a stream of chunks. The live view is deliberately raw text
+  // rather than rendered markdown: a half-written file flickers between block
+  // types as it renders, and the server sends the rendered document the moment
+  // the write finishes. Buffers are per document and dropped when it settles.
+
+  function streamState(documentId) {
+    if (!streams[documentId]) streams[documentId] = {text: '', sequence: 0, gap: false};
+    return streams[documentId];
+  }
+
+  function streamPane() {
+    if (!previewContent) return null;
+    var pane = previewContent.querySelector('[data-preview-stream]');
+    if (!pane) {
+      previewContent.textContent = '';
+      pane = document.createElement('pre');
+      pane.className = 'chat-dock-stream';
+      pane.dataset.previewStream = '';
+      previewContent.appendChild(pane);
+    }
+    return pane;
+  }
+
+  function paintStream(documentId) {
+    var pane = streamPane();
+    if (!pane) return;
+    var state = streamState(documentId);
+    pane.textContent = state.text;
+    var note = previewContent.querySelector('[data-preview-stream-note]');
+    // Say so rather than presenting a text with a hole in it as the document.
+    if (state.gap && !note) {
+      note = document.createElement('p');
+      note.className = 'p-meta';
+      note.dataset.previewStreamNote = '';
+      note.textContent = 'Joined this file mid-write \u2014 the complete document appears when it finishes.';
+      previewContent.appendChild(note);
+    } else if (!state.gap && note) {
+      note.remove();
+    }
+  }
+
+  function paneAtBottom() {
+    if (!previewBody) return true;
+    return previewBody.scrollHeight - previewBody.scrollTop - previewBody.clientHeight < 64;
+  }
+
+  function appendStreamChunk(data) {
+    var documentId = data.document_id;
+    if (!documentId) return;
+    var state = streamState(documentId);
+    var sequence = Number(data.sequence) || 0;
+    // Chunks are numbered, so a dropped or reordered notification is detectable
+    // instead of silently corrupting the text on screen.
+    if (sequence !== state.sequence + 1) state.gap = true;
+    state.sequence = sequence || state.sequence + 1;
+    state.text += data.chunk || '';
+    var known = dockDocument(documentId) || {id: documentId};
+    known.size_bytes = data.size_bytes;
+    known.status = 'streaming';
+    var row = dockList && dockList.querySelector('[data-dock-open][data-document-id="' + documentId + '"]');
+    if (row) dressDockItem(row, known);
+    var card = document.querySelector('.chat-document[data-document-id="' + documentId + '"]');
+    if (card) dressDocumentCard(card, known);
+    if (dockPreviewing !== documentId) return;
+    var follow = paneAtBottom();
+    if (previewFilename) previewFilename.textContent = documentMeta(known);
+    paintStream(documentId);
+    // Follow the writing only for a reader who is already at the end of it.
+    if (follow && previewBody) previewBody.scrollTop = previewBody.scrollHeight;
+  }
+
+  function settleDocumentPreview(data) {
+    var item = {
+      id: data.id,
+      turn_id: data.turn_id,
+      assistant_message_id: data.assistant_message_id,
+      title: data.title,
+      filename: data.filename,
+      size_bytes: data.size_bytes,
+      status: data.status
+    };
+    syncDocuments([item]);
+    delete streams[item.id];
+    if (dockPreviewing !== item.id) return;
+    // The finished document is fetched rather than pushed: rendered markdown can
+    // run to a hundred kilobytes, which does not belong in a notification. The
+    // streamed text stays on screen until the rendered file replaces it.
+    openDocument(item.id, dockReturnFocus);
+  }
+
+  // An uploaded image is the one artifact with no text form, so it is shown
+  // rather than rendered. Everything else — written markdown, an uploaded .md, a
+  // PDF's extracted text, a source file in a code block — arrives as HTML the
+  // server rendered, so there is still exactly one markdown implementation.
+  function renderPreviewBody(data) {
+    previewContent.textContent = '';
+    if (data.kind === 'image' && data.content_url) {
+      var figure = document.createElement('figure');
+      figure.className = 'chat-dock-image';
+      var image = document.createElement('img');
+      image.src = data.content_url;
+      image.alt = data.filename || 'Uploaded image';
+      image.loading = 'lazy';
+      figure.appendChild(image);
+      if (data.summarization_instruction) {
+        var caption = document.createElement('figcaption');
+        caption.className = 'p-meta';
+        caption.textContent = 'Read with: ' + data.summarization_instruction;
+        figure.appendChild(caption);
+      }
+      previewContent.appendChild(figure);
+      return;
+    }
+    if (data.content_html) previewContent.innerHTML = data.content_html;
+    else previewContent.textContent = 'This document has no readable contents.';
+  }
+
   function openDocument(documentId, trigger) {
     if (!dock || !documentId) return;
     setDock(true);
@@ -677,19 +991,52 @@
     if (dockPreview) dockPreview.hidden = false;
     if (dockBack) dockBack.hidden = false;
     dockReturnFocus = trigger || null;
-    if (dockTitle) dockTitle.textContent = 'Loading\u2026';
-    if (previewFilename) previewFilename.textContent = '';
-    if (previewContent) previewContent.textContent = 'Loading document\u2026';
-    if (previewDownload) previewDownload.removeAttribute('href');
-    api('/v2/api/chat/conversations/' + conversationId + '/documents/' + encodeURIComponent(documentId)).then(function (data) {
+    var known = dockDocument(documentId) || dockRowItem(documentId) || triggerItem(documentId, trigger);
+    if (dockTitle) dockTitle.textContent = (known && known.title) || 'Loading\u2026';
+    if (previewFilename) previewFilename.textContent = known ? documentMeta(known) : '';
+    if (previewDownload) {
+      previewDownload.removeAttribute('href');
+      previewDownload.hidden = Boolean(known) && !documentIsDownloadable(known);
+      previewDownload.textContent = known && isUpload(known) ? 'Download file' : 'Download .md';
+    }
+    var url = artifactPreviewUrl(known || {id: documentId});
+    if (known && documentIsWriting(known)) {
+      paintStream(documentId);
+      if (previewBody) previewBody.scrollTop = previewBody.scrollHeight;
+      // Nothing buffered means this client joined the write late \u2014 a reload, or
+      // a second tab. Ask the server what has been written so far.
+      if (!streamState(documentId).sequence && !streamState(documentId).text) {
+        api(url).then(function (data) {
+          var state = streamState(documentId);
+          if (dockPreviewing !== documentId || data.content_text == null) return;
+          if (state.sequence) {
+            // Deltas overtook the seed, so the prefix is unaccounted for.
+            state.gap = true;
+          } else {
+            state.text = data.content_text;
+          }
+          paintStream(documentId);
+          if (previewBody) previewBody.scrollTop = previewBody.scrollHeight;
+        }).catch(function () {});
+      }
+      return;
+    }
+    // Text already on screen \u2014 the stream that just finished \u2014 stands in for the
+    // loading state, so a settling document does not blink through empty.
+    if (previewContent && !previewContent.querySelector('[data-preview-stream]')) {
+      previewContent.textContent = 'Loading document\u2026';
+    }
+    api(url).then(function (data) {
       // A second click while this one was in flight wins; drop the stale reply.
       if (dockPreviewing !== documentId) return;
       if (dockTitle) dockTitle.textContent = data.title;
-      if (previewFilename) previewFilename.textContent = data.filename + ' \u00b7 ' + formatDocumentSize(data.size_bytes);
-      if (previewContent) previewContent.innerHTML = data.content_html;
+      if (previewFilename) previewFilename.textContent = documentMeta(data);
+      if (previewContent) renderPreviewBody(data);
       if (previewDownload) {
-        previewDownload.href = documentDownloadUrl(documentId);
+        previewDownload.hidden = !documentIsDownloadable(data);
+        previewDownload.href = artifactDownloadUrl(data);
         previewDownload.download = data.filename;
+        previewDownload.textContent = isUpload(data) ? 'Download file' : 'Download .md';
       }
       if (previewBody) previewBody.scrollTop = 0;
     }).catch(function (error) {
@@ -706,11 +1053,13 @@
   });
 
   if (dockClose) dockClose.addEventListener('click', function () {
+    dockFollowStream = false;
     setDock(false);
     if (dockToggle) dockToggle.focus();
   });
 
   if (dockBack) dockBack.addEventListener('click', function () {
+    dockFollowStream = false;
     showDockList();
     if (dockReturnFocus && dockReturnFocus.isConnected) dockReturnFocus.focus();
     dockReturnFocus = null;
@@ -910,12 +1259,19 @@
     }
     box.textContent = '';
     items.forEach(function (item) {
-      var link = document.createElement('a');
-      link.className = 'chat-sent-attachment';
-      link.href = '/v2/api/chat/conversations/' + conversationId + '/attachments/' + item.id;
-      link.appendChild(fileGlyph());
-      link.appendChild(document.createTextNode(item.name));
-      box.appendChild(link);
+      // A sent file opens in the previewer rather than downloading: it is an
+      // artifact of the conversation now, and the previewer is where one is read
+      // (with the download a button away).
+      var chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chat-sent-attachment';
+      chip.dataset.openDocument = '';
+      chip.dataset.documentId = item.id;
+      chip.dataset.documentOrigin = 'upload';
+      chip.dataset.documentKind = item.kind || uploadKind(item.media_type);
+      chip.appendChild(fileGlyph());
+      chip.appendChild(document.createTextNode(item.name));
+      box.appendChild(chip);
     });
   }
 
@@ -984,13 +1340,28 @@
     renderStoppedBadge(article, message);
   }
 
-  function visibleDocuments(snapshot) {
+  function activeAssistantMessages(snapshot) {
     var visible = {};
     (snapshot.messages || []).forEach(function (message) {
       if (message.role === 'assistant' && message.is_active) visible[message.id] = true;
     });
+    return visible;
+  }
+
+  function visibleDocuments(snapshot) {
+    var visible = activeAssistantMessages(snapshot);
     return (snapshot.documents || []).filter(function (item) {
       return !item.assistant_message_id || visible[item.assistant_message_id];
+    });
+  }
+
+  // Regenerating a turn supersedes the response it replaces, and the documents
+  // that response wrote go with it. An upload belongs to the reader's own
+  // message, so nothing can supersede it and it always stays on the shelf.
+  function visibleArtifacts(snapshot) {
+    var visible = activeAssistantMessages(snapshot);
+    return (snapshot.artifacts || []).filter(function (item) {
+      return item.origin === 'upload' || !item.assistant_message_id || visible[item.assistant_message_id];
     });
   }
 
@@ -1479,6 +1850,8 @@
     setStatus('Starting…');
     (mode === 'chat' ? submitChat(text) : submitResources(text)).then(function (result) {
       activeTurn = result.turn_id || null;
+      // A new turn re-earns the right to move the panel to what it writes.
+      dockFollowStream = true;
       if (mode === 'resources') resourceRunning = true;
       assistant.dataset.pendingTurn = activeTurn || '';
       assistant.dataset.turnId = activeTurn || '';
@@ -1488,6 +1861,20 @@
         status: ['disconnected', 'suspended', 'reconnecting'].indexOf(notificationStreamStatus) !== -1 ? 'Connection lost; reconnecting…' : 'Working…'
       });
       setBusy(true);
+      // Sending is what turns a staged upload into part of the conversation, so
+      // that is when it joins the panel — not when the turn finishes.
+      syncDockList(pendingAttachments.map(function (item) {
+        return {
+          id: item.id,
+          origin: 'upload',
+          kind: uploadKind(item.media_type),
+          title: item.name,
+          filename: item.name,
+          size_bytes: item.size_bytes,
+          status: 'ready',
+          turn_id: activeTurn
+        };
+      }));
       pendingAttachments = [];
       var box = document.querySelector('[data-attachments]');
       if (box) box.textContent = '';
@@ -1534,6 +1921,7 @@
     setBusy(true);
     api('/v2/api/chat/conversations/' + conversationId + '/turns/' + button.dataset.turnId + '/regenerate', json('POST', {})).then(function (data) {
       activeTurn = data.turn_id;
+      dockFollowStream = true;
       var wasAtBottom = atBottom();
       var placeholder = bubble('assistant', '', data.turn_id);
       placeholder.dataset.pendingTurn = data.turn_id;
@@ -1612,7 +2000,13 @@
     }
     if (type === 'chat_run_state') updateRootActivity(data);
     if (type === 'chat_subagent_state') updateSubagentActivity(data);
-    if (type === 'chat_document_created') syncDocuments([data]);
+    if (type === 'chat_document_created') {
+      syncDocuments([data]);
+      // Switch the panel to the file as the agent starts writing it.
+      if (documentIsWriting(data) && dockFollowStream) openDocument(data.id, null);
+    }
+    if (type === 'chat_document_delta') appendStreamChunk(data);
+    if (type === 'chat_document_written') settleDocumentPreview(data);
     if (type === 'chat_output_delta') {
       var wasAtBottom = atBottom();
       var pending = thread.querySelector('[data-pending-turn="' + data.turn_id + '"] .chat-content') || thread.querySelector('[data-turn-id="' + data.turn_id + '"] .chat-content');
@@ -1688,6 +2082,7 @@
       }
       syncPendingAttachments(snapshot.pending_attachments);
       syncDocuments(visibleDocuments(snapshot));
+      syncDockList(visibleArtifacts(snapshot));
       syncAgentActivity(snapshot);
       restoreScroll(scroll);
     }).catch(function () {});

@@ -29,7 +29,13 @@ from smarter_dev.web.chat.api import ReasoningBody
 from smarter_dev.web.chat.api import TurnBody
 from smarter_dev.web.chat.csrf import require_api_csrf
 from smarter_dev.web.chat.dispatch import ensure_submission_handler
-from smarter_dev.web.chat.documents import store_markdown_document
+from smarter_dev.web.chat.documents import append_document_body
+from smarter_dev.web.chat.documents import begin_document
+from smarter_dev.web.chat.documents import conversation_artifacts
+from smarter_dev.web.chat.documents import find_artifact
+from smarter_dev.web.chat.documents import find_readable_document
+from smarter_dev.web.chat.documents import finish_document
+from smarter_dev.web.chat.jobs import _upload_manifest
 from smarter_dev.web.chat.limits import OperationAlreadyReserved
 from smarter_dev.web.chat.limits import reserve_operation
 from smarter_dev.web.chat.settings import ensure_settings
@@ -39,6 +45,7 @@ from smarter_dev.web.models import ChatSpendLimit
 from smarter_dev.web.models import ChatSpendReservation
 from smarter_dev.web.models import ResourceAgentRun
 from smarter_dev.web.models import UsageCostRow
+from smarter_dev.web.models import WebChatAttachment
 from smarter_dev.web.models import WebChatConversation
 from smarter_dev.web.models import WebChatDocument
 from smarter_dev.web.models import WebChatMessage
@@ -386,9 +393,15 @@ async def test_cross_owner_conversation_lookup_is_not_found(db_session, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_markdown_document_is_idempotent_private_and_downloadable(
+async def test_streamed_document_lifecycle_is_private_and_downloadable_when_done(
     db_session, monkeypatch
 ):
+    """A document is created empty, filled by a stream, then settled.
+
+    The reader can see it the whole way through, so the checks here follow that
+    order: visible and unfinished, appended to, and only downloadable once the
+    write has actually finished.
+    """
     user, conversation = await _seed_chat(db_session)
     turn = WebChatTurn(
         conversation_id=conversation.id,
@@ -414,7 +427,7 @@ async def test_markdown_document_is_idempotent_private_and_downloadable(
     db_session.add(assistant)
     await db_session.commit()
 
-    first, first_created = await store_markdown_document(
+    opened, needs_body = await begin_document(
         db_session,
         conversation_id=conversation.id,
         turn_id=turn.id,
@@ -423,10 +436,61 @@ async def test_markdown_document_is_idempotent_private_and_downloadable(
         tool_call_id="tool-call-1",
         title="Durable queues",
         filename="durable-queues",
-        markdown="# Durable queues\n\nUse an outbox.",
     )
     await db_session.commit()
-    second, second_created = await store_markdown_document(
+    assert needs_body is True
+    assert (opened.status, opened.markdown_content, opened.size_bytes) == (
+        "streaming",
+        "",
+        0,
+    )
+    assert opened.filename == "durable-queues.md"
+
+    for chunk in ("# Durable queues\n\n", "Use an outbox."):
+        await append_document_body(
+            db_session,
+            document_id=opened.id,
+            turn_id=turn.id,
+            worker_lease_token="lease-token",
+            chunk=chunk,
+            size_bytes=1,
+        )
+    await db_session.commit()
+    await db_session.refresh(opened)
+    assert opened.markdown_content == "# Durable queues\n\nUse an outbox."
+
+    async def entitled(*_args, **_kwargs):
+        return {"sudo-r"}
+
+    monkeypatch.setattr(chat_api, "require_entitled", entitled)
+    controller = object.__new__(ChatApiController)
+
+    # Half a file is not a download, and the preview says so instead.
+    with pytest.raises(HTTPException) as exc:
+        await ChatApiController.download_document.fn(
+            controller, conversation.id, opened.id, _request(user.id), db_session
+        )
+    assert exc.value.status_code == 409
+    live = await ChatApiController.get_document.fn(
+        controller, conversation.id, opened.id, _request(user.id), db_session
+    )
+    assert live.content["status"] == "streaming"
+    assert live.content["content_text"] == "# Durable queues\n\nUse an outbox."
+
+    first = await finish_document(
+        db_session,
+        document_id=opened.id,
+        turn_id=turn.id,
+        worker_lease_token="lease-token",
+        markdown="# Durable queues\n\nUse an outbox.",
+        status="complete",
+    )
+    await db_session.commit()
+    assert first.status == "complete"
+    assert first.size_bytes == len(b"# Durable queues\n\nUse an outbox.")
+
+    # Tool redelivery for a finished document must not pay to write it twice.
+    second, second_needs_body = await begin_document(
         db_session,
         conversation_id=conversation.id,
         turn_id=turn.id,
@@ -435,25 +499,48 @@ async def test_markdown_document_is_idempotent_private_and_downloadable(
         tool_call_id="tool-call-1",
         title="Ignored retry title",
         filename="ignored.md",
-        markdown="Ignored retry body",
+    )
+    await db_session.commit()
+    assert second.id == first.id and second_needs_body is False
+    assert second.title == "Durable queues"
+    assert await db_session.scalar(select(func.count(WebChatDocument.id))) == 1
+
+    # A redelivery that arrives while a write is unfinished starts the file over
+    # rather than resuming from half a body.
+    opened.status = "streaming"
+    opened.markdown_content = "# Durable queues\n\nUse an "
+    opened.size_bytes = len(opened.markdown_content.encode("utf-8"))
+    await db_session.commit()
+    restarted, restarted_needs_body = await begin_document(
+        db_session,
+        conversation_id=conversation.id,
+        turn_id=turn.id,
+        assistant_message_id=assistant.id,
+        worker_lease_token="lease-token",
+        tool_call_id="tool-call-1",
+        title="Durable queues",
+        filename="durable-queues.md",
+    )
+    await db_session.commit()
+    assert restarted_needs_body is True
+    assert (restarted.markdown_content, restarted.size_bytes) == ("", 0)
+    first = await finish_document(
+        db_session,
+        document_id=opened.id,
+        turn_id=turn.id,
+        worker_lease_token="lease-token",
+        markdown="# Durable queues\n\nUse an outbox.",
+        status="complete",
     )
     await db_session.commit()
 
-    assert first.id == second.id
-    assert first_created is True and second_created is False
-    assert await db_session.scalar(select(func.count(WebChatDocument.id))) == 1
-
-    async def entitled(*_args, **_kwargs):
-        return {"sudo-r"}
-
-    monkeypatch.setattr(chat_api, "require_entitled", entitled)
-    controller = object.__new__(ChatApiController)
     preview_response = await ChatApiController.get_document.fn(
         controller, conversation.id, first.id, _request(user.id), db_session
     )
     preview = preview_response.content
     assert preview["title"] == "Durable queues"
     assert "<h1>Durable queues</h1>" in preview["content_html"]
+    assert preview["content_text"] is None
     assert "markdown" not in preview
     assert preview_response.headers["Cache-Control"] == "no-store"
 
@@ -466,6 +553,15 @@ async def test_markdown_document_is_idempotent_private_and_downloadable(
     )
     assert download.headers["Cache-Control"] == "no-store"
 
+    # Rereading is what lets the receipt in the conversation stay short.
+    reread = await find_readable_document(
+        db_session, conversation_id=conversation.id, filename="durable-queues"
+    )
+    assert reread is not None and reread.id == first.id
+    assert await find_readable_document(
+        db_session, conversation_id=conversation.id, filename="nope.md"
+    ) is None
+
     snapshot = await ChatApiController.get_conversation.fn(
         controller, conversation.id, _request(user.id), db_session
     )
@@ -477,6 +573,7 @@ async def test_markdown_document_is_idempotent_private_and_downloadable(
             "title": "Durable queues",
             "filename": "durable-queues.md",
             "size_bytes": first.size_bytes,
+            "status": "complete",
         }
     ]
     assert "markdown_content" not in str(snapshot)
@@ -796,3 +893,188 @@ def test_browser_contract_includes_csrf_recovery_and_live_updates():
     assert "timed out and was cancelled" not in jobs
     assert "cancellation_subscription" in runtime
     assert "await asyncio.sleep(interval)" not in runtime
+
+
+@pytest.mark.asyncio
+async def test_uploads_are_artifacts_listed_for_the_model_and_shelved_in_the_panel(
+    db_session, monkeypatch
+):
+    """An upload is a file in the conversation, not a paste into the prompt.
+
+    It shares the panel and the read tool with documents the agent wrote, it is
+    announced rather than inlined, and its own preview knows the difference
+    between markdown, a source file, and an image.
+    """
+    user, conversation = await _seed_chat(db_session)
+    turn = WebChatTurn(
+        conversation_id=conversation.id,
+        sequence=1,
+        submission_key="upload-turn",
+        response_version_group=uuid4(),
+        response_sequence=2,
+        model_key=conversation.selected_model_key,
+        reasoning_level=conversation.reasoning_level,
+        status="complete",
+        worker_lease_token=None,
+    )
+    db_session.add(turn)
+    await db_session.flush()
+    user_message = WebChatMessage(
+        conversation_id=conversation.id,
+        turn_id=turn.id,
+        sequence=1,
+        role="user",
+        content="Have a look at these",
+        version_group=uuid4(),
+    )
+    assistant = WebChatMessage(
+        conversation_id=conversation.id,
+        turn_id=turn.id,
+        sequence=2,
+        role="assistant",
+        content="Looked.",
+        version_group=turn.response_version_group,
+    )
+    db_session.add_all([user_message, assistant])
+    await db_session.flush()
+    written = WebChatDocument(
+        conversation_id=conversation.id,
+        turn_id=turn.id,
+        assistant_message_id=assistant.id,
+        tool_call_id="call-written",
+        title="Review",
+        filename="review.md",
+        markdown_content="# Review\n\nLooks fine.",
+        size_bytes=24,
+        status="complete",
+    )
+    notes = WebChatAttachment(
+        conversation_id=conversation.id,
+        owner_user_id=user.id,
+        turn_id=turn.id,
+        storage_key=uuid4().hex,
+        original_name="notes.md",
+        media_type="text/markdown",
+        size_bytes=42,
+        sha256=uuid4().hex,
+        extracted_text="# Uploaded notes\n\nThe secret is 12345.",
+        status="ready",
+    )
+    script = WebChatAttachment(
+        conversation_id=conversation.id,
+        owner_user_id=user.id,
+        turn_id=turn.id,
+        storage_key=uuid4().hex,
+        original_name="run.py",
+        media_type="text/x-python",
+        size_bytes=18,
+        sha256=uuid4().hex,
+        extracted_text="print('```')",
+        status="ready",
+    )
+    chart = WebChatAttachment(
+        conversation_id=conversation.id,
+        owner_user_id=user.id,
+        turn_id=turn.id,
+        storage_key=uuid4().hex,
+        original_name="chart.png",
+        media_type="image/png",
+        size_bytes=2048,
+        sha256=uuid4().hex,
+        summarization_instruction="Read the axis labels",
+        status="ready",
+    )
+    staged = WebChatAttachment(
+        conversation_id=conversation.id,
+        owner_user_id=user.id,
+        turn_id=None,
+        storage_key=uuid4().hex,
+        original_name="draft.txt",
+        media_type="text/plain",
+        size_bytes=9,
+        sha256=uuid4().hex,
+        extracted_text="not sent",
+        status="ready",
+    )
+    db_session.add_all([written, notes, script, chart, staged])
+    await db_session.commit()
+
+    artifacts = await conversation_artifacts(
+        db_session, conversation_id=conversation.id
+    )
+    by_name = {artifact.filename: artifact for artifact in artifacts}
+    # A file still in the composer is not yet part of the conversation.
+    assert "draft.txt" not in by_name
+    assert by_name["review.md"].origin == "created"
+    assert by_name["review.md"].kind == "markdown"
+    assert by_name["notes.md"].origin == "upload"
+    assert by_name["chart.png"].kind == "image"
+    assert by_name["run.py"].kind == "text"
+
+    # One namespace for the model: it names a file, not a table.
+    found = await find_artifact(
+        db_session, conversation_id=conversation.id, filename="CHART.PNG"
+    )
+    assert found is not None and found.is_upload and found.kind == "image"
+    assert (
+        await find_artifact(
+            db_session, conversation_id=conversation.id, filename="review"
+        )
+    ).origin == "created"
+
+    # The prompt gets an announcement, never the contents.
+    manifest = _upload_manifest([notes, chart])
+    assert "notes.md" in manifest and "chart.png" in manifest
+    assert "The secret is 12345." not in manifest
+    assert "summarization instruction" in manifest
+    assert 'read_document("' in manifest
+
+    async def entitled(*_args, **_kwargs):
+        return {"sudo-r"}
+
+    monkeypatch.setattr(chat_api, "require_entitled", entitled)
+    controller = object.__new__(ChatApiController)
+
+    markdown_preview = await ChatApiController.preview_attachment.fn(
+        controller, conversation.id, notes.id, _request(user.id), db_session
+    )
+    assert "<h1>Uploaded notes</h1>" in markdown_preview.content["content_html"]
+    assert markdown_preview.content["origin"] == "upload"
+    assert markdown_preview.content["content_url"] is None
+
+    # A source file rendered as prose is unreadable, so it is fenced — with a
+    # fence long enough to survive the backticks inside the file itself.
+    code_preview = await ChatApiController.preview_attachment.fn(
+        controller, conversation.id, script.id, _request(user.id), db_session
+    )
+    assert "<code" in code_preview.content["content_html"]
+    assert "print(" in code_preview.content["content_html"]
+
+    image_preview = await ChatApiController.preview_attachment.fn(
+        controller, conversation.id, chart.id, _request(user.id), db_session
+    )
+    assert image_preview.content["kind"] == "image"
+    assert image_preview.content["content_html"] == ""
+    assert "inline=true" in image_preview.content["content_url"]
+    assert image_preview.content["summarization_instruction"] == "Read the axis labels"
+
+    snapshot = await ChatApiController.get_conversation.fn(
+        controller, conversation.id, _request(user.id), db_session
+    )
+    shelf = {item["filename"]: item for item in snapshot["artifacts"]}
+    assert set(shelf) == {"review.md", "notes.md", "run.py", "chart.png"}
+    assert shelf["notes.md"]["origin"] == "upload"
+    assert shelf["review.md"]["origin"] == "created"
+    # The inline cards under a reply stay written documents only.
+    assert [item["filename"] for item in snapshot["documents"]] == ["review.md"]
+
+    stranger = User(
+        email=f"{uuid4().hex}@example.test", name="Stranger", is_active=True
+    )
+    db_session.add(stranger)
+    await db_session.commit()
+    with pytest.raises(HTTPException) as exc:
+        await ChatApiController.preview_attachment.fn(
+            controller, conversation.id, notes.id, _request(stranger.id), db_session
+        )
+    assert exc.value.status_code == 404
