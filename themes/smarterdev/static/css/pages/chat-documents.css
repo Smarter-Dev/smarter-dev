@@ -92,14 +92,25 @@
    be read alongside the turn discussing it. Recessed relative to the
    conversation — it is a reference surface, not the thing being written. */
 
+/* Three rows: the header, the origin filter, and the one scrolling row that the
+   list and the open document share. The filter needs its own auto row — left in
+   the 1fr row it stretched to the full height of the panel and pushed the list
+   to the bottom. An empty or hidden filter row collapses to nothing, so the
+   explicit placement below holds either way. */
 .chat-dock {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   min-height: 0;
   min-width: 0;
   overflow: hidden;
   background: var(--p-recess);
   border-left: 1px solid var(--p-line);
+}
+
+/* Only ever one of these is visible at a time. */
+.chat-dock-list,
+.chat-dock-preview {
+  grid-row: 3;
 }
 
 /* Contents keep their width while the column animates shut, so the text inside
