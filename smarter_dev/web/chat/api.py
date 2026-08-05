@@ -44,6 +44,9 @@ from smarter_dev.web.chat.attachments import extract_text_bounded
 from smarter_dev.web.chat.attachments import require_attachment_count
 from smarter_dev.web.chat.attachments import validate_attachment
 from smarter_dev.web.chat.cancellation import publish_cancellation
+from smarter_dev.web.chat.conversations import ConversationTitleError
+from smarter_dev.web.chat.conversations import derive_title
+from smarter_dev.web.chat.conversations import normalize_title
 from smarter_dev.web.chat.csrf import require_api_csrf
 from smarter_dev.web.chat.dispatch import cancel_dispatch
 from smarter_dev.web.chat.dispatch import create_dispatch
@@ -87,6 +90,13 @@ class TurnBody(Struct):
     content: str
     submission_key: str
     attachment_ids: list[str] = field(default_factory=list)
+
+
+class ConversationUpdateBody(Struct):
+    """Rename and archive share one endpoint; both fields are optional."""
+
+    title: str | None = None
+    archived: bool | None = None
 
 
 class ReasoningBody(Struct):
@@ -498,7 +508,12 @@ class ChatApiController(Controller):
             (
                 await db_session.execute(
                     select(WebChatDocument)
-                    .where(WebChatDocument.conversation_id == conversation_id)
+                    .where(
+                        WebChatDocument.conversation_id == conversation_id,
+                        # An overwritten file keeps its row so a failed
+                        # overwrite can be undone; it is not a file any more.
+                        WebChatDocument.status != "superseded",
+                    )
                     .order_by(WebChatDocument.created_at)
                 )
             ).scalars()
@@ -507,6 +522,7 @@ class ChatApiController(Controller):
             "id": str(conversation.id),
             "mode": "chat",
             "title": conversation.title,
+            "archived": conversation.archived_at is not None,
             "intelligence_mode": conversation.intelligence_mode,
             "model_key": conversation.selected_model_key,
             "reasoning_level": conversation.reasoning_level,
@@ -603,6 +619,107 @@ class ChatApiController(Controller):
                 for event in activity_events
             ],
         }
+
+    @patch("/conversations/{conversation_id:uuid}")
+    async def update_conversation(
+        self,
+        conversation_id: UUID,
+        data: ConversationUpdateBody,
+        request: Request,
+        db_session: AsyncSession,
+    ) -> dict:
+        """Rename and archive, the two edits that do not touch the transcript.
+
+        Both are safe mid-turn: neither changes what the running agent sees, and
+        an owner who archives a conversation while it is still answering is
+        making a filing decision, not a cancellation.
+        """
+        require_api_csrf(request)
+        user_id = require_user_id(request)
+        await require_entitled(db_session, user_id)
+        conversation = await owned_conversation(
+            db_session, conversation_id, user_id, lock=True
+        )
+        if data.title is not None:
+            try:
+                conversation.title = normalize_title(data.title)
+            except ConversationTitleError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from None
+            conversation.title_is_custom = True
+        if data.archived is not None:
+            conversation.archived_at = datetime.now(UTC) if data.archived else None
+        await db_session.commit()
+        return {
+            "id": str(conversation.id),
+            "title": conversation.title,
+            "archived": conversation.archived_at is not None,
+        }
+
+    @delete("/conversations/{conversation_id:uuid}", status_code=HTTP_200_OK)
+    async def delete_conversation(
+        self,
+        conversation_id: UUID,
+        request: Request,
+        db_session: AsyncSession,
+    ) -> dict:
+        """Destroy a conversation and everything hanging off it.
+
+        Turns, messages, documents and attachment rows go with the conversation
+        by cascade, but the uploaded objects are outside the database and have to
+        be removed by hand. They are marked ``deleting`` first, so a failure part
+        way through leaves them to the periodic orphan reconciler instead of
+        stranding private files with no row pointing at them — and the
+        conversation itself survives, so the owner can simply try again.
+        """
+        require_api_csrf(request)
+        user_id = require_user_id(request)
+        await require_entitled(db_session, user_id)
+        conversation = await owned_conversation(
+            db_session, conversation_id, user_id, lock=True
+        )
+        active = await db_session.scalar(
+            select(WebChatTurn.id).where(
+                WebChatTurn.conversation_id == conversation.id,
+                WebChatTurn.status.in_(ACTIVE_TURN_STATUSES),
+            )
+        )
+        if active is not None:
+            # A worker still holds this turn's rows. Stop it first, then delete.
+            raise HTTPException(
+                status_code=409,
+                detail="Stop the current response before deleting this chat.",
+            )
+        attachments = list(
+            (
+                await db_session.execute(
+                    select(WebChatAttachment).where(
+                        WebChatAttachment.conversation_id == conversation_id
+                    )
+                )
+            ).scalars()
+        )
+        if attachments:
+            for attachment in attachments:
+                attachment.status = "deleting"
+            await db_session.commit()
+            backend = await request.app.state.storage_manager.get("chat_attachments")
+            stranded = 0
+            for attachment in attachments:
+                try:
+                    await backend.delete(attachment.storage_key)
+                except Exception:
+                    stranded += 1
+                    continue
+                await db_session.delete(attachment)
+            await db_session.commit()
+            if stranded:
+                raise HTTPException(
+                    status_code=502,
+                    detail="Some uploads could not be removed. Try again shortly.",
+                )
+        await db_session.delete(conversation)
+        await db_session.commit()
+        return {"status": "deleted"}
 
     @patch("/conversations/{conversation_id:uuid}/reasoning")
     async def reasoning(
@@ -1008,6 +1125,12 @@ class ChatApiController(Controller):
         )
         if document is None:
             raise HTTPException(status_code=404, detail="Document not found.")
+        if document.status == "superseded":
+            # The row survives an overwrite so a failed one can be undone; the
+            # file it held is not part of the conversation any more.
+            raise HTTPException(
+                status_code=410, detail="This document was replaced by a newer one."
+            )
         return Response(
             content={
                 **document_dict(document),
@@ -1053,6 +1176,10 @@ class ChatApiController(Controller):
             # Half a file is not a download. The preview shows the live text.
             raise HTTPException(
                 status_code=409, detail="Document is still being written."
+            )
+        if document.status == "superseded":
+            raise HTTPException(
+                status_code=410, detail="This document was replaced by a newer one."
             )
         safe_name = document.filename.replace('"', "")
         encoded_name = quote(document.filename, safe="")
@@ -1255,8 +1382,10 @@ class ChatApiController(Controller):
             attachment.turn_id = turn.id
         conversation.next_sequence += 1
         conversation.status = "submitted"
-        if conversation.title == "New Chat":
-            conversation.title = content[:79] + ("…" if len(content) > 79 else "")
+        # A stand-in until the agent names the conversation on this first turn.
+        # Once anything has actually named it, it is left alone.
+        if not conversation.title_is_custom and conversation.next_sequence == 2:
+            conversation.title = derive_title(content)
         dispatch = await create_dispatch(
             db_session,
             job_type="chat.turn.run",

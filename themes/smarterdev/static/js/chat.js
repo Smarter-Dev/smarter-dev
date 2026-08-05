@@ -100,6 +100,235 @@
     setRail(shell.dataset.rail === 'collapsed');
   });
 
+  // ── History rail rows ─────────────────────────────────
+  // Rename, archive and delete act on a row without leaving the conversation
+  // that is on screen, so the rail is edited in place rather than reloaded —
+  // a reload here would throw away composer text and a running turn's scroll
+  // position for the sake of a row moving 200px.
+  var historyNav = document.querySelector('.chat-history');
+  var rowMenu = document.querySelector('[data-row-menu]');
+  var deleteDialog = document.querySelector('[data-delete-dialog]');
+  var menuRow = null;
+  var menuButton = null;
+  var pendingDelete = null;
+
+  function rowLink(row) { return row && row.querySelector('[data-history-title]') }
+
+  function rowTitle(row) {
+    var link = rowLink(row);
+    return link ? link.textContent.trim() : '';
+  }
+
+  function closeRowMenu(restoreFocus) {
+    if (!rowMenu || rowMenu.hidden) return;
+    rowMenu.hidden = true;
+    if (menuButton) {
+      menuButton.setAttribute('aria-expanded', 'false');
+      if (restoreFocus) menuButton.focus();
+    }
+    menuRow = null;
+    menuButton = null;
+  }
+
+  function openRowMenu(button) {
+    if (!rowMenu) return;
+    var row = button.closest('[data-history-row]');
+    if (!row) return;
+    if (menuButton === button) { closeRowMenu(true); return; }
+    closeRowMenu(false);
+    menuRow = row;
+    menuButton = button;
+    var archived = row.dataset.archived === 'true';
+    rowMenu.querySelector('[data-row-action="archive"]').textContent = archived ? 'Unarchive' : 'Archive';
+    rowMenu.hidden = false;
+    button.setAttribute('aria-expanded', 'true');
+    // Measured only once it is displayed; a hidden element has no size.
+    var anchor = button.getBoundingClientRect();
+    var size = rowMenu.getBoundingClientRect();
+    var left = Math.min(Math.max(8, anchor.right - size.width), window.innerWidth - size.width - 8);
+    var below = anchor.bottom + 4;
+    var top = below + size.height > window.innerHeight - 8 ? Math.max(8, anchor.top - size.height - 4) : below;
+    rowMenu.style.left = left + 'px';
+    rowMenu.style.top = top + 'px';
+    var first = rowMenu.querySelector('button');
+    if (first) first.focus();
+  }
+
+  // A row's group heading is a sibling that precedes it, so a band that has
+  // just lost its last row leaves a heading over nothing.
+  function pruneGroups() {
+    if (!historyNav) return;
+    Array.prototype.forEach.call(historyNav.querySelectorAll(':scope > .chat-history-group'), function (heading) {
+      var next = heading.nextElementSibling;
+      if (!next || !next.hasAttribute('data-history-row')) heading.remove();
+    });
+  }
+
+  function archiveDrawer(create) {
+    var drawer = historyNav && historyNav.querySelector('[data-history-archive]');
+    if (drawer || !create || !historyNav) return drawer;
+    drawer = document.createElement('details');
+    drawer.className = 'chat-history-archive';
+    drawer.setAttribute('data-history-archive', '');
+    drawer.innerHTML = '<summary class="p-label chat-history-group">Archived<span class="chat-history-archive-count"></span></summary>';
+    historyNav.appendChild(drawer);
+    return drawer;
+  }
+
+  function syncArchiveDrawer() {
+    var drawer = archiveDrawer(false);
+    if (!drawer) return;
+    var rows = drawer.querySelectorAll('[data-history-row]');
+    if (!rows.length) { drawer.remove(); return; }
+    var count = drawer.querySelector('.chat-history-archive-count');
+    if (count) count.textContent = rows.length;
+  }
+
+  function setRowArchived(row, archived) {
+    row.dataset.archived = archived ? 'true' : 'false';
+    if (archived) {
+      archiveDrawer(true).appendChild(row);
+    } else if (historyNav) {
+      // Back into the live list at the top: it was just touched, so the first
+      // band is where the server would put it on the next load anyway — under
+      // that band's heading, not above it.
+      var first = historyNav.firstElementChild;
+      var anchor = first && first.classList.contains('chat-history-group')
+        ? first.nextElementSibling
+        : first;
+      historyNav.insertBefore(row, anchor);
+    }
+    pruneGroups();
+    syncArchiveDrawer();
+  }
+
+  function applyTitle(id, title) {
+    var row = historyNav && historyNav.querySelector('[data-conversation-id="' + id + '"]');
+    var link = rowLink(row);
+    if (link) link.textContent = title;
+    if (id !== conversationId) return;
+    var heading = document.querySelector('.chat-header h1');
+    if (heading) heading.textContent = title;
+    document.title = title + ' · Smarter Dev';
+  }
+
+  function beginRename(row) {
+    var link = rowLink(row);
+    if (!link || row.querySelector('.chat-history-rename')) return;
+    var original = link.textContent.trim();
+    var field = document.createElement('input');
+    field.type = 'text';
+    field.className = 'chat-history-rename';
+    field.maxLength = 120;
+    field.value = original;
+    field.setAttribute('aria-label', 'Chat name');
+    link.hidden = true;
+    row.insertBefore(field, link);
+    field.focus();
+    field.select();
+    var settled = false;
+
+    function finish(save) {
+      if (settled) return;
+      settled = true;
+      var wanted = field.value.trim();
+      field.remove();
+      link.hidden = false;
+      if (!save || !wanted || wanted === original) return;
+      link.textContent = wanted;
+      api('/v2/api/chat/conversations/' + row.dataset.conversationId, json('PATCH', {title: wanted})).then(function (data) {
+        applyTitle(row.dataset.conversationId, data.title);
+      }).catch(function (error) {
+        link.textContent = original;
+        showError(error.message || 'That name could not be saved.');
+      });
+    }
+
+    field.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+      else if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+    });
+    field.addEventListener('blur', function () { finish(true); });
+  }
+
+  function archiveRow(row) {
+    var archived = row.dataset.archived !== 'true';
+    api('/v2/api/chat/conversations/' + row.dataset.conversationId, json('PATCH', {archived: archived})).then(function () {
+      setRowArchived(row, archived);
+      var drawer = archiveDrawer(false);
+      if (archived && drawer && row.dataset.conversationId === conversationId) drawer.open = true;
+    }).catch(function (error) {
+      showError(error.message || 'That chat could not be archived.');
+    });
+  }
+
+  function askDelete(row) {
+    if (!deleteDialog) return;
+    pendingDelete = row;
+    deleteDialog.querySelector('[data-delete-title]').textContent = rowTitle(row) || 'Untitled chat';
+    deleteDialog.hidden = false;
+    deleteDialog.querySelector('[data-delete-confirm]').focus();
+  }
+
+  if (rowMenu) {
+    document.addEventListener('click', function (event) {
+      var trigger = event.target.closest && event.target.closest('[data-history-menu]');
+      if (trigger) { event.preventDefault(); openRowMenu(trigger); return; }
+      if (!rowMenu.contains(event.target)) closeRowMenu(false);
+    });
+
+    document.addEventListener('keydown', function (event) {
+      if (rowMenu.hidden) return;
+      if (event.key === 'Escape') { event.preventDefault(); closeRowMenu(true); return; }
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      var items = Array.prototype.slice.call(rowMenu.querySelectorAll('button'));
+      var at = items.indexOf(document.activeElement);
+      event.preventDefault();
+      items[(at + (event.key === 'ArrowDown' ? 1 : items.length - 1) + items.length) % items.length].focus();
+    });
+
+    // Anything that moves the rail moves the button the menu is pinned to.
+    if (historyNav) historyNav.addEventListener('scroll', function () { closeRowMenu(false); });
+    window.addEventListener('resize', function () { closeRowMenu(false); });
+
+    rowMenu.addEventListener('click', function (event) {
+      var action = event.target.closest('[data-row-action]');
+      var row = menuRow;
+      if (!action || !row) return;
+      closeRowMenu(false);
+      if (action.dataset.rowAction === 'rename') beginRename(row);
+      else if (action.dataset.rowAction === 'archive') archiveRow(row);
+      else askDelete(row);
+    });
+  }
+
+  if (deleteDialog) {
+    deleteDialog.querySelector('[data-delete-cancel]').addEventListener('click', function () {
+      deleteDialog.hidden = true;
+      pendingDelete = null;
+    });
+    deleteDialog.querySelector('[data-delete-confirm]').addEventListener('click', function () {
+      if (!pendingDelete) return;
+      var row = pendingDelete;
+      var id = row.dataset.conversationId;
+      var button = deleteDialog.querySelector('[data-delete-confirm]');
+      button.disabled = true;
+      api('/v2/api/chat/conversations/' + id, {method: 'DELETE'}).then(function () {
+        deleteDialog.hidden = true;
+        pendingDelete = null;
+        row.remove();
+        pruneGroups();
+        syncArchiveDrawer();
+        // The conversation on screen no longer exists; anywhere else is fine.
+        if (id === conversationId) window.location.href = '/chat';
+      }).catch(function (error) {
+        deleteDialog.hidden = true;
+        pendingDelete = null;
+        showError(error.message || 'That chat could not be deleted.');
+      }).then(function () { button.disabled = false; });
+    });
+  }
+
   // ── Disclosures ───────────────────────────────────────
   // Every quiet chip on the page is a <details>, so it works without JS and
   // exposes its state to assistive tech natively. JS only adds the extras a
@@ -639,6 +868,47 @@
     return null;
   }
 
+  // A file the agent overwrote stops being a file. The row and its inline card
+  // go together: leaving either behind would offer the reader a download that
+  // now 410s, and a name that resolves to something else.
+  function dropDocument(documentId) {
+    if (!documentId) return;
+    dockDocuments = dockDocuments.filter(function (item) { return item.id !== documentId; });
+    delete streams[documentId];
+    var row = dockList && dockList.querySelector('[data-dock-open][data-document-id="' + documentId + '"]');
+    if (row) row.remove();
+    var card = document.querySelector('.chat-document[data-document-id="' + documentId + '"]');
+    if (card) {
+      var group = card.parentElement;
+      card.remove();
+      if (group && !group.querySelector('.chat-document')) group.remove();
+    }
+    // A reader looking at the retired file is moved back to the shelf rather
+    // than left on a preview the server will no longer serve.
+    if (dockPreviewing === documentId) showDockList();
+    syncDockCount();
+  }
+
+  // The snapshot is the backstop for a missed supersede: anything the server no
+  // longer lists is no longer in the conversation.
+  function pruneDockList(items) {
+    if (!dockList) return;
+    var live = {};
+    (items || []).forEach(function (item) { if (item && item.id) live[item.id] = true; });
+    Array.prototype.slice.call(dockList.querySelectorAll('[data-dock-open]')).forEach(function (row) {
+      if (!live[row.dataset.documentId]) dropDocument(row.dataset.documentId);
+    });
+  }
+
+  function syncDockCount() {
+    if (!dockList) return;
+    var count = dockList.querySelectorAll('[data-dock-open]').length;
+    if (dockCount) dockCount.textContent = count;
+    if (dockEmpty) dockEmpty.hidden = count > 0;
+    if (dockToggle) dockToggle.hidden = count === 0;
+    applyDockScope();
+  }
+
   // Appends only what is new, so the list never flickers and the row a reader
   // is pointing at cannot move out from under them mid-turn. Rows already there
   // are updated in place \u2014 a document's own row is how it reports its progress.
@@ -659,13 +929,9 @@
       dockList.insertBefore(dockItem(item), dockEmpty);
       dockDocuments.push(Object.assign({}, item));
     });
-    var count = dockList.querySelectorAll('[data-dock-open]').length;
-    if (dockCount) dockCount.textContent = count;
-    if (dockEmpty) dockEmpty.hidden = count > 0;
     // The button is the only route to the panel, so it appears with the first
     // document rather than sitting there empty for the whole conversation.
-    if (dockToggle) dockToggle.hidden = count === 0;
-    applyDockScope();
+    syncDockCount();
   }
 
   // ── Origin filter ─────────────────────────────────────
@@ -2052,7 +2318,10 @@
       if (documentIsWriting(data) && dockFollowStream) openDocument(data.id, null);
     }
     if (type === 'chat_document_delta') appendStreamChunk(data);
-    if (type === 'chat_document_written') settleDocumentPreview(data);
+    // An edit settles the same way a write does: the row takes the new size and
+    // an open preview refetches the rendered file.
+    if (type === 'chat_document_written' || type === 'chat_document_edited') settleDocumentPreview(data);
+    if (type === 'chat_document_superseded') dropDocument(data.id);
     if (type === 'chat_output_delta') {
       var wasAtBottom = atBottom();
       var pending = thread.querySelector('[data-pending-turn="' + data.turn_id + '"] .chat-content') || thread.querySelector('[data-turn-id="' + data.turn_id + '"] .chat-content');
@@ -2060,6 +2329,7 @@
       updateRootActivity({turn_id: data.turn_id, status: 'Writing response…'});
       stick(wasAtBottom);
     }
+    if (type === 'chat_title_changed' && data.title) applyTitle(data.conversation_id, data.title);
     if (type === 'chat_usage_updated') refreshUsage();
     if (type === 'agent_run_complete' && mode === 'resources') {
       window.location.reload();
@@ -2114,6 +2384,9 @@
     api('/v2/api/chat/conversations/' + conversationId).then(function (snapshot) {
       var scroll = captureScroll();
       var active = snapshot.active_turn;
+      // The agent may have named the conversation while the notification that
+      // said so was missed; the snapshot is the one that always arrives.
+      if (snapshot.title) applyTitle(snapshot.id, snapshot.title);
       syncThread(snapshot);
       if (active) {
         activeTurn = active.id;
@@ -2129,6 +2402,7 @@
       syncPendingAttachments(snapshot.pending_attachments);
       syncDocuments(visibleDocuments(snapshot));
       syncDockList(visibleArtifacts(snapshot));
+      pruneDockList(visibleArtifacts(snapshot));
       syncAgentActivity(snapshot);
       restoreScroll(scroll);
     }).catch(function () {});
