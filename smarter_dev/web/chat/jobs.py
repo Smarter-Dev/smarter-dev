@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from pydantic import Field
 from pydantic_ai import RunContext
 from skrift.auth.services import get_user_permissions
+from skrift.markdown import render_markdown
 from skrift.notifications import NotificationMode
 from skrift.workers import get_handle
 from skrift.workers import handler
@@ -1201,7 +1202,7 @@ async def _build_root_agent(
                 "chat_output_delta",
                 conversation.id,
                 turn.id,
-                content=draft,
+                content_html=render_markdown(draft),
             )
 
     async def accept(kind: str, call_id: str) -> bool:

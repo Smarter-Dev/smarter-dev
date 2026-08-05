@@ -518,6 +518,19 @@ class ChatApiController(Controller):
                 )
             ).scalars()
         )
+        active_partial = (
+            next(
+                (
+                    message.content
+                    for message in messages
+                    if message.turn_id == active_turn.id
+                    and message.role == "assistant"
+                ),
+                "",
+            )
+            if active_turn
+            else ""
+        )
         return {
             "id": str(conversation.id),
             "mode": "chat",
@@ -531,15 +544,8 @@ class ChatApiController(Controller):
                 {
                     "id": str(active_turn.id),
                     "status": active_turn.status,
-                    "partial": next(
-                        (
-                            message.content
-                            for message in messages
-                            if message.turn_id == active_turn.id
-                            and message.role == "assistant"
-                        ),
-                        "",
-                    ),
+                    "partial": active_partial,
+                    "partial_html": render_markdown(active_partial),
                     "started_at": active_turn.created_at.isoformat(),
                 }
                 if active_turn
