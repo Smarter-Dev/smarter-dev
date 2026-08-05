@@ -15,6 +15,7 @@ from uuid import UUID
 from uuid import uuid4
 
 from pydantic import BaseModel
+from pydantic import Field
 from pydantic_ai import RunContext
 from skrift.auth.services import get_user_permissions
 from skrift.notifications import NotificationMode
@@ -36,6 +37,9 @@ from smarter_dev.web.chat.compaction import should_compact_history
 from smarter_dev.web.chat.compaction import version_fingerprint
 from smarter_dev.web.chat.concurrency import RedisSubagentSemaphore
 from smarter_dev.web.chat.concurrency import SemaphoreUnavailable
+from smarter_dev.web.chat.conversations import ConversationTitleError
+from smarter_dev.web.chat.conversations import name_if_unnamed
+from smarter_dev.web.chat.conversations import normalize_title
 from smarter_dev.web.chat.dispatch import cancel_dispatch
 from smarter_dev.web.chat.dispatch import create_dispatch
 from smarter_dev.web.chat.dispatch import dispatch_one
@@ -44,17 +48,24 @@ from smarter_dev.web.chat.document_stream import stream_document_body
 from smarter_dev.web.chat.documents import ARTIFACT_ORIGIN_CREATED
 from smarter_dev.web.chat.documents import MAX_DOCUMENT_MARKDOWN_CHARS
 from smarter_dev.web.chat.documents import MAX_DOCUMENT_READ_CHARS
+from smarter_dev.web.chat.documents import REPLACING_STATUSES
 from smarter_dev.web.chat.documents import MarkdownDocumentError
 from smarter_dev.web.chat.documents import append_document_body
+from smarter_dev.web.chat.documents import apply_document_patches
 from smarter_dev.web.chat.documents import attachment_kind
 from smarter_dev.web.chat.documents import begin_document
 from smarter_dev.web.chat.documents import clean_document_body
 from smarter_dev.web.chat.documents import document_body_bytes
 from smarter_dev.web.chat.documents import document_word_count
+from smarter_dev.web.chat.documents import edit_document_body
 from smarter_dev.web.chat.documents import find_artifact
+from smarter_dev.web.chat.documents import find_name_clash
+from smarter_dev.web.chat.documents import find_readable_document
 from smarter_dev.web.chat.documents import finish_document
 from smarter_dev.web.chat.documents import load_upload
 from smarter_dev.web.chat.documents import readable_artifacts
+from smarter_dev.web.chat.documents import retire_failed_overwrite
+from smarter_dev.web.chat.documents import supersede_replaced_documents
 from smarter_dev.web.chat.documents import validate_document_request
 from smarter_dev.web.chat.entitlements import has_chat
 from smarter_dev.web.chat.entitlements import has_ultra_chat
@@ -118,6 +129,23 @@ class ChatSubagentPayload(BaseModel):
 
 class ChatAccountDeletionPayload(BaseModel):
     request_id: str
+
+
+# The docstring and field descriptions here are not documentation for us: they
+# are the tool schema the provider sees, so the exactly-once rule is stated
+# where the model reads the arguments rather than only in the error it gets for
+# breaking it. Keep them written for the model.
+class DocumentPatch(BaseModel):
+    """One exact passage of a document, and what to replace it with."""
+
+    old: str = Field(
+        description=(
+            "The exact text to replace, copied verbatim from the file including "
+            "indentation. Must appear exactly once — include surrounding lines "
+            "if it would otherwise be ambiguous."
+        )
+    )
+    new: str = Field(description="The text to put in its place. May be empty to delete.")
 
 
 async def _notify_safe(
@@ -227,7 +255,12 @@ async def _record_tool_result(
 
 
 def _document_receipt(
-    *, title: str, filename: str, markdown: str, truncated: bool
+    *,
+    title: str,
+    filename: str,
+    markdown: str,
+    truncated: bool,
+    replaced: bool = False,
 ) -> str:
     """What the main conversation is told about a document it just wrote.
 
@@ -241,8 +274,9 @@ def _document_receipt(
         f"{document_body_bytes(markdown):,} bytes, "
         f"~{document_word_count(markdown):,} words"
     )
+    verb = "replaced" if replaced else "saved"
     lead = (
-        f"Document saved: {title} ({filename}) — {scale}."
+        f"Document {verb}: {title} ({filename}) — {scale}."
         if not truncated
         else (
             f"Document saved but TRUNCATED at the output ceiling: {title} "
@@ -349,6 +383,63 @@ async def _settle_document(
         conversation_id,
         turn_id,
         **payload,
+    )
+
+
+async def _publish_superseded(
+    *,
+    document_ids: list[UUID],
+    owner_id: UUID,
+    conversation_id: UUID,
+    turn_id: UUID,
+) -> None:
+    """Tell the open page which document rows have stopped being files."""
+    for document_id in document_ids:
+        payload = {"id": str(document_id), "status": "superseded"}
+        await _event(
+            turn_id,
+            "chat_document_superseded",
+            {**payload, "turn_id": str(turn_id)},
+        )
+        await _notify_safe(
+            owner_id,
+            "chat_document_superseded",
+            conversation_id,
+            turn_id,
+            **payload,
+        )
+
+
+async def _abandon_overwrite(
+    *,
+    document_id: UUID,
+    replacing: UUID | None,
+    owner_id: UUID,
+    conversation_id: UUID,
+    turn_id: UUID,
+) -> None:
+    """Throw away a replacement that never became a file.
+
+    Only ever called when this write was overwriting something: an ordinary
+    write that stops half way leaves its partial file on the shelf, because
+    there is nothing else there. A failed overwrite is different — leaving the
+    wreck would put two readable files behind one name, which is precisely what
+    the overwrite flag exists to prevent.
+    """
+    if replacing is None:
+        return
+    try:
+        async with get_db_session_context() as session:
+            await retire_failed_overwrite(session, document_id=document_id)
+            await session.commit()
+    except Exception:
+        logger.exception("Could not retire abandoned overwrite %s", document_id)
+        return
+    await _publish_superseded(
+        document_ids=[document_id],
+        owner_id=owner_id,
+        conversation_id=conversation_id,
+        turn_id=turn_id,
     )
 
 
@@ -1061,10 +1152,14 @@ async def _build_root_agent(
             worker_lease_token=turn.worker_lease_token,
         ),
     )
+    # The agent names the conversation itself, and only while it is unnamed —
+    # both the instruction and the tool disappear once anyone has named it, so a
+    # later turn cannot be talked into renaming the owner's chat.
+    needs_title = not conversation.title_is_custom
     agent = Agent(
         metered,
         output_type=str,
-        system_prompt=effective_system_prompt(child=False),
+        system_prompt=effective_system_prompt(child=False, needs_title=needs_title),
         model_settings=model_settings_for(model, reasoning),
     )
     counter_lock = asyncio.Lock()
@@ -1307,9 +1402,17 @@ async def _build_root_agent(
         )
 
     async def write_document(
-        ctx: RunContext, reason: str, filename: str, title: str
+        ctx: RunContext,
+        reason: str,
+        filename: str,
+        title: str,
+        overwrite: bool = False,
     ) -> str:
-        """Create a Markdown document; your next message becomes its contents."""
+        """Create a Markdown document; your next message becomes its contents.
+
+        Set overwrite=True only to replace an existing file of the same name
+        outright. Use edit_document for a change to part of one.
+        """
         call_id = ctx.tool_call_id or uuid4().hex
         if not await accept("tool", call_id):
             return "Tool limit reached. Conclude with available information."
@@ -1327,12 +1430,38 @@ async def _build_root_agent(
             await _record_tool_result(turn.id, "write_document", result)
             await _done_thinking("write_document")
             return result
+        # Writing over a file has to be asked for. Left implicit, a second write
+        # of the same name simply shadows the first: reads resolve to the newer
+        # one and the reader is left with two files they cannot tell apart.
+        async with get_db_session_context() as session:
+            clash = await find_name_clash(
+                session,
+                conversation_id=conversation.id,
+                filename=requested.filename,
+                turn_id=turn.id,
+                tool_call_id=call_id,
+            )
+        if clash is not None and not overwrite:
+            result = (
+                f"error: {clash.filename} already exists in this conversation. "
+                "To change part of it, call edit_document(filename, patches). To "
+                "replace it entirely, call write_document again with "
+                "overwrite=True. To keep both, choose a different filename."
+            )
+            await _record_tool_result(turn.id, "write_document", result)
+            await _done_thinking("write_document")
+            return result
+        replacing = clash.id if clash is not None else None
         await _publish_activity(
             owner_id=owner_id,
             conversation_id=conversation.id,
             turn_id=turn.id,
             tool="write_document",
-            status=f"Writing {requested.filename}",
+            status=(
+                f"Rewriting {requested.filename}"
+                if replacing
+                else f"Writing {requested.filename}"
+            ),
         )
         lease = turn.worker_lease_token or ""
         async with get_db_session_context() as session:
@@ -1455,10 +1584,39 @@ async def _build_root_agent(
                 conversation_id=conversation.id,
                 status="stopped",
             )
+            await _abandon_overwrite(
+                document_id=document_id,
+                replacing=replacing,
+                owner_id=owner_id,
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+            )
             raise
 
         body = clean_document_body(streamed.markdown)
         status = "failed" if not body else ("truncated" if streamed.truncated else "complete")
+        # An overwrite only displaces the old file once this one is real. Short
+        # of that the replacement is the thing that gets retired, so the reader
+        # keeps the version they already had rather than the wreck of this one.
+        if replacing is not None and status not in REPLACING_STATUSES:
+            await _abandon_overwrite(
+                document_id=document_id,
+                replacing=replacing,
+                owner_id=owner_id,
+                conversation_id=conversation.id,
+                turn_id=turn.id,
+            )
+            result = (
+                f"error: the rewrite of {requested.filename} produced no usable "
+                "content, so the existing file was left exactly as it was. "
+                "Nothing has been lost. Try again, or leave it alone."
+            )
+            await _record_tool_result(turn.id, "write_document", result)
+            await _done_thinking("write_document")
+            after = await _tool_state(
+                owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
+            )
+            return _format_tool_result(result, after)
         async with get_db_session_context() as session:
             document = await finish_document(
                 session,
@@ -1467,6 +1625,16 @@ async def _build_root_agent(
                 worker_lease_token=lease,
                 markdown=body,
                 status=status,
+            )
+            retired = (
+                await supersede_replaced_documents(
+                    session,
+                    conversation_id=conversation.id,
+                    filename=document.filename,
+                    keep_id=document_id,
+                )
+                if replacing is not None
+                else []
             )
             terminal = {
                 "id": str(document_id),
@@ -1490,6 +1658,12 @@ async def _build_root_agent(
             turn.id,
             **terminal,
         )
+        await _publish_superseded(
+            document_ids=retired,
+            owner_id=owner_id,
+            conversation_id=conversation.id,
+            turn_id=turn.id,
+        )
         if status == "failed":
             result = (
                 f"error: the document write for {requested.filename} produced no "
@@ -1502,6 +1676,7 @@ async def _build_root_agent(
                 filename=requested.filename,
                 markdown=body,
                 truncated=streamed.truncated,
+                replaced=bool(retired),
             )
         await _record_tool_result(turn.id, "write_document", result)
         await _done_thinking("write_document")
@@ -1676,12 +1851,191 @@ async def _build_root_agent(
         )
         return _format_tool_result(result, after)
 
+    async def edit_document(
+        ctx: RunContext, filename: str, patches: list[DocumentPatch]
+    ) -> str:
+        """Change parts of a document you wrote, by exact find-and-replace.
+
+        Each patch replaces one exact passage. Patches apply in order, so a
+        later one sees the earlier one's result, and if any patch fails none of
+        them are applied.
+        """
+        if not await accept("tool", ctx.tool_call_id or uuid4().hex):
+            return "Tool limit reached. Conclude with available information."
+        before = await _tool_state(
+            owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
+        )
+        if before.hard_cutoff:
+            return USAGE_LIMIT_RESULT
+        wanted = (filename or "").strip()
+
+        async def respond(message: str) -> str:
+            await _record_tool_result(turn.id, "edit_document", message)
+            await _done_thinking("edit_document")
+            after = await _tool_state(
+                owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
+            )
+            return _format_tool_result(message, after)
+
+        if not wanted:
+            return await respond("error: filename is required.")
+        await _publish_activity(
+            owner_id=owner_id,
+            conversation_id=conversation.id,
+            turn_id=turn.id,
+            tool="edit_document",
+            status=f"Editing {wanted[:160]}",
+        )
+        async with get_db_session_context() as session:
+            document = await find_readable_document(
+                session, conversation_id=conversation.id, filename=wanted
+            )
+            available = (
+                await readable_artifacts(session, conversation_id=conversation.id)
+                if document is None
+                else []
+            )
+        if document is None:
+            # An upload resolving here is worth saying out loud: it is a real
+            # file with that name, just not one this tool may touch.
+            upload = next(
+                (
+                    artifact
+                    for artifact in available
+                    if artifact.is_upload and artifact.filename.lower() == wanted.lower()
+                ),
+                None,
+            )
+            if upload is not None:
+                return await respond(
+                    f"error: {upload.filename} is a file the user uploaded, not one "
+                    "you wrote, so it cannot be edited. Write a new document if you "
+                    "need a changed version."
+                )
+            catalog = (
+                "\n".join(_artifact_line(item) for item in available) or "(none yet)"
+            )
+            return await respond(
+                f"error: no document named {wanted!r} in this conversation.\n\n"
+                f"Files available:\n{catalog}"
+            )
+        try:
+            edited = apply_document_patches(
+                document.markdown_content,
+                [(patch.old, patch.new) for patch in patches],
+            )
+        except MarkdownDocumentError as exc:
+            return await respond(f"error: {exc}")
+
+        async with get_db_session_context() as session:
+            settled = await edit_document_body(
+                session,
+                document_id=document.id,
+                turn_id=turn.id,
+                worker_lease_token=turn.worker_lease_token or "",
+                markdown=edited,
+            )
+            metadata = {
+                "id": str(settled.id),
+                "assistant_message_id": str(settled.assistant_message_id),
+                "title": settled.title,
+                "filename": settled.filename,
+                "size_bytes": settled.size_bytes,
+                "status": settled.status,
+                "origin": ARTIFACT_ORIGIN_CREATED,
+                "kind": "markdown",
+            }
+            await session.commit()
+        await _event(
+            turn.id, "chat_document_edited", {**metadata, "turn_id": str(turn.id)}
+        )
+        await _notify_safe(
+            owner_id,
+            "chat_document_edited",
+            conversation.id,
+            turn.id,
+            **metadata,
+        )
+        count = len(patches)
+        result = (
+            f"Edited {settled.filename}: {count} "
+            f"{'replacement' if count == 1 else 'replacements'} applied — now "
+            f"{settled.size_bytes:,} bytes, ~{document_word_count(edited):,} words. "
+            "The user's copy is already updated. Do not paste the file or its "
+            "changes into your reply; say what you changed and why, briefly. Call "
+            f'read_document("{settled.filename}") if you need its contents again.'
+        )
+        return await respond(result)
+
+    # Naming is housekeeping this system asked for, so it does not spend the
+    # turn's tool allowance — a five-tool efficiency turn should not lose a
+    # fifth of its budget to a database write. It is bounded on its own instead,
+    # so a model that misreads the result cannot loop on it.
+    title_attempts = 0
+
+    async def set_chat_title(ctx: RunContext, title: str) -> str:
+        """Name this conversation. Call once, early, with a brief subject name."""
+        nonlocal title_attempts
+        title_attempts += 1
+        if title_attempts > 3:
+            return "This conversation's name is settled. Do not call this again."
+        before = await _tool_state(
+            owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
+        )
+        if before.hard_cutoff:
+            return USAGE_LIMIT_RESULT
+        try:
+            named = normalize_title(title)
+        except ConversationTitleError as exc:
+            result = f"error: {exc}"
+            await _record_tool_result(turn.id, "set_chat_title", result)
+            await _done_thinking("set_chat_title")
+            return result
+        await _publish_activity(
+            owner_id=owner_id,
+            conversation_id=conversation.id,
+            turn_id=turn.id,
+            tool="set_chat_title",
+            status=f"Naming this chat “{named}”",
+        )
+        async with get_db_session_context() as session:
+            applied = await name_if_unnamed(
+                session, conversation_id=conversation.id, title=named
+            )
+        if not applied:
+            result = "This conversation has already been named. Leave it as it is."
+            await _record_tool_result(turn.id, "set_chat_title", result)
+            await _done_thinking("set_chat_title")
+            after = await _tool_state(
+                owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
+            )
+            return _format_tool_result(result, after)
+        conversation.title = named
+        conversation.title_is_custom = True
+        await _notify_safe(
+            owner_id,
+            "chat_title_changed",
+            conversation.id,
+            turn.id,
+            title=named,
+        )
+        result = f"This conversation is now named {named!r}."
+        await _record_tool_result(turn.id, "set_chat_title", result)
+        await _done_thinking("set_chat_title")
+        after = await _tool_state(
+            owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
+        )
+        return _format_tool_result(result, after)
+
     agent.tool(search_web, name="web_search")
     agent.tool(read_web, name="web_read")
     agent.tool(run_code_tool, name="run_code")
     agent.tool(write_document)
+    agent.tool(edit_document)
     agent.tool(read_document)
     agent.tool(list_documents)
+    if needs_title:
+        agent.tool(set_chat_title)
 
     if policy.subagents_enabled:
 

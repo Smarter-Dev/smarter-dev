@@ -69,6 +69,46 @@ def group_conversations(conversations: list, now: datetime) -> list[dict]:
     ]
 
 
+async def _rail_context(session: AsyncSession, user_id: UUID) -> dict:
+    """The history rail: live conversations grouped by recency, archived below.
+
+    Archiving is filing, not deleting, so an archived conversation keeps its URL
+    and stays reachable — it just moves out of the way into a shut drawer at the
+    foot of the rail instead of competing with what the owner is working on.
+    """
+    conversations = list(
+        (
+            await session.execute(
+                select(WebChatConversation)
+                .where(
+                    WebChatConversation.owner_user_id == user_id,
+                    WebChatConversation.archived_at.is_(None),
+                )
+                .order_by(WebChatConversation.updated_at.desc())
+                .limit(50)
+            )
+        ).scalars()
+    )
+    archived = list(
+        (
+            await session.execute(
+                select(WebChatConversation)
+                .where(
+                    WebChatConversation.owner_user_id == user_id,
+                    WebChatConversation.archived_at.is_not(None),
+                )
+                .order_by(WebChatConversation.archived_at.desc())
+                .limit(50)
+            )
+        ).scalars()
+    )
+    return {
+        "conversations": conversations,
+        "conversation_groups": group_conversations(conversations, datetime.now(UTC)),
+        "archived_conversations": archived,
+    }
+
+
 async def _catalog_context(session: AsyncSession, settings) -> dict:
     """Enabled models rendered into the page so the selects work without JS.
 
@@ -150,7 +190,11 @@ async def _chat_context(
         (
             await session.execute(
                 select(WebChatDocument)
-                .where(WebChatDocument.conversation_id == conversation.id)
+                .where(
+                    WebChatDocument.conversation_id == conversation.id,
+                    # An overwritten file is no longer in the conversation.
+                    WebChatDocument.status != "superseded",
+                )
                 .order_by(WebChatDocument.created_at)
             )
         ).scalars()
@@ -265,18 +309,6 @@ async def chat_index(request: Request, db_session: AsyncSession) -> Template:
             status_code=403, detail="Chat is not enabled for your account."
         )
     settings = await ensure_settings(db_session)
-    conversations = list(
-        (
-            await db_session.execute(
-                select(WebChatConversation)
-                .where(
-                    WebChatConversation.owner_user_id == user_id,
-                )
-                .order_by(WebChatConversation.updated_at.desc())
-                .limit(50)
-            )
-        ).scalars()
-    )
     return Template(
         "chat/index.html",
         context={
@@ -285,10 +317,7 @@ async def chat_index(request: Request, db_session: AsyncSession) -> Template:
             "versions": {},
             "mode": "chat",
             "settings": settings,
-            "conversations": conversations,
-            "conversation_groups": group_conversations(
-                conversations, datetime.now(UTC)
-            ),
+            **await _rail_context(db_session, user_id),
             "ultra_chat": has_ultra_chat(permissions),
             "seo_meta": {
                 "robots": "noindex,nofollow",
@@ -319,27 +348,12 @@ async def chat_conversation(
         context = await _chat_context(db_session, web)
         settings = await ensure_settings(db_session)
         selected_model = get_model(web.selected_model_key)
-        conversations = list(
-            (
-                await db_session.execute(
-                    select(WebChatConversation)
-                    .where(
-                        WebChatConversation.owner_user_id == user_id,
-                    )
-                    .order_by(WebChatConversation.updated_at.desc())
-                    .limit(50)
-                )
-            ).scalars()
-        )
         return Template(
             "chat/index.html",
             context={
                 "conversation": web,
                 "mode": "chat",
-                "conversations": conversations,
-                "conversation_groups": group_conversations(
-                    conversations, datetime.now(UTC)
-                ),
+                **await _rail_context(db_session, user_id),
                 "model": selected_model,
                 "model_reasoning_levels": [
                     level.value for level in selected_model.reasoning_levels

@@ -9,9 +9,11 @@ arrives in pieces rather than all at once.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,8 +33,26 @@ MAX_DOCUMENT_MARKDOWN_CHARS = 100_000
 MAX_DOCUMENT_READ_CHARS = 60_000
 
 # Terminal states. Only "complete" is safe to download or reread verbatim.
-DOCUMENT_STATUSES = ("streaming", "complete", "truncated", "stopped", "failed")
+# "superseded" is the one a write never produces: it is applied to the row a
+# successful overwrite replaced, so the old file stops being part of the
+# conversation without being destroyed.
+DOCUMENT_STATUSES = (
+    "streaming",
+    "complete",
+    "truncated",
+    "stopped",
+    "failed",
+    "superseded",
+)
 READABLE_STATUSES = ("complete", "truncated", "stopped")
+# What an overwrite has to reach before it is allowed to replace what was there.
+# A stopped or failed write is half a file, and half a file must never be the
+# thing that displaces a whole one.
+REPLACING_STATUSES = ("complete", "truncated")
+
+# One edit call may carry several patches, but not an unbounded number: they
+# are real tool arguments and every one of them costs context.
+MAX_DOCUMENT_PATCHES = 20
 
 
 class MarkdownDocumentError(ValueError):
@@ -103,6 +123,64 @@ def clean_document_body(markdown: str) -> str:
 
 def document_word_count(markdown: str) -> int:
     return len((markdown or "").split())
+
+
+def apply_document_patches(body: str, patches: Sequence[tuple[str, str]]) -> str:
+    """Apply ordered find/replace patches to a document body.
+
+    Each patch's target must appear exactly once in the text *as it stands* —
+    zero matches means the model is working from a stale idea of the file, and
+    several means it has not said which one it meant. Both are mistakes worth
+    naming rather than guessing at, so either aborts the whole call: the result
+    is a new string, and nothing is written until every patch has landed.
+
+    Patches apply in order and each sees the previous one's result, which is what
+    lets a single call make several related changes to the same region.
+    """
+    if not patches:
+        raise MarkdownDocumentError("At least one patch is required.")
+    if len(patches) > MAX_DOCUMENT_PATCHES:
+        raise MarkdownDocumentError(
+            f"Too many patches in one edit (max {MAX_DOCUMENT_PATCHES}). "
+            "Split the change across several calls."
+        )
+    working = body or ""
+    for index, (old, new) in enumerate(patches, start=1):
+        if not old:
+            raise MarkdownDocumentError(
+                f"Patch {index}: the text to replace is required. To add content "
+                "to the file, anchor the patch on the line it follows."
+            )
+        if old == new:
+            raise MarkdownDocumentError(
+                f"Patch {index}: the replacement is identical to the original, "
+                "so this patch would do nothing."
+            )
+        found = working.count(old)
+        if found == 0:
+            raise MarkdownDocumentError(
+                f"Patch {index}: that text is not in the file. Read it back with "
+                "read_document to see its current contents, then patch what is "
+                "actually there. No patch in this call was applied."
+            )
+        if found > 1:
+            raise MarkdownDocumentError(
+                f"Patch {index}: that text appears {found} times, so it is "
+                "ambiguous. Include more surrounding lines to make it unique. "
+                "No patch in this call was applied."
+            )
+        working = working.replace(old, new, 1)
+    if not working.strip():
+        raise MarkdownDocumentError(
+            "That edit would empty the file. Overwrite it with write_document if "
+            "it should be replaced outright."
+        )
+    if len(working) > MAX_DOCUMENT_MARKDOWN_CHARS:
+        raise MarkdownDocumentError(
+            f"That edit would push the file past {MAX_DOCUMENT_MARKDOWN_CHARS:,} "
+            "characters. Make it shorter, or split the content into a second file."
+        )
+    return working
 
 
 async def _assert_lease(
@@ -273,6 +351,92 @@ async def finish_document(
     return document
 
 
+async def edit_document_body(
+    session: AsyncSession,
+    *,
+    document_id: UUID,
+    turn_id: UUID,
+    worker_lease_token: str,
+    markdown: str,
+) -> WebChatDocument:
+    """Replace a settled document's body with the patched version.
+
+    The lease checked here is the *editing* turn's, not the one that wrote the
+    file: an edit happens turns later, and the write that produced the document
+    is long finished. The status is left as it was — patching a truncated file
+    does not make it whole, and saying otherwise would be a lie the reader acts
+    on.
+    """
+    updated = await session.execute(
+        update(WebChatDocument)
+        .where(
+            WebChatDocument.id == document_id,
+            WebChatDocument.status.in_(READABLE_STATUSES),
+            select(WebChatTurn.id)
+            .where(
+                WebChatTurn.id == turn_id,
+                WebChatTurn.worker_lease_token == worker_lease_token,
+            )
+            .exists(),
+        )
+        .values(markdown_content=markdown, size_bytes=document_body_bytes(markdown))
+    )
+    if not updated.rowcount:
+        raise RunSuperseded()
+    document = await session.get(WebChatDocument, document_id)
+    if document is None:
+        raise RunSuperseded()
+    await session.refresh(document)
+    return document
+
+
+async def supersede_replaced_documents(
+    session: AsyncSession, *, conversation_id: UUID, filename: str, keep_id: UUID
+) -> list[UUID]:
+    """Retire every other readable document sharing this name.
+
+    Called once an overwrite has actually produced a file, never before — the
+    point of the whole arrangement is that a write which dies half way through
+    leaves the previous version standing. Returns what it retired so the panel
+    can drop those rows without waiting for a reload.
+    """
+    retired = list(
+        (
+            await session.execute(
+                select(WebChatDocument.id).where(
+                    WebChatDocument.conversation_id == conversation_id,
+                    WebChatDocument.id != keep_id,
+                    WebChatDocument.status.in_(READABLE_STATUSES),
+                    func.lower(WebChatDocument.filename) == filename.lower(),
+                )
+            )
+        ).scalars()
+    )
+    if not retired:
+        return []
+    await session.execute(
+        update(WebChatDocument)
+        .where(WebChatDocument.id.in_(retired))
+        .values(status="superseded")
+    )
+    return retired
+
+
+async def retire_failed_overwrite(
+    session: AsyncSession, *, document_id: UUID
+) -> None:
+    """Discard the half-written replacement, leaving the original in place.
+
+    Without this an abandoned overwrite would leave two readable files with one
+    name — exactly the silent shadowing the overwrite flag exists to prevent.
+    """
+    await session.execute(
+        update(WebChatDocument)
+        .where(WebChatDocument.id == document_id)
+        .values(status="superseded")
+    )
+
+
 async def readable_documents(
     session: AsyncSession, *, conversation_id: UUID
 ) -> list[WebChatDocument]:
@@ -294,6 +458,35 @@ async def readable_documents(
             )
         ).scalars()
     )
+
+
+async def find_name_clash(
+    session: AsyncSession,
+    *,
+    conversation_id: UUID,
+    filename: str,
+    turn_id: UUID,
+    tool_call_id: str,
+) -> WebChatDocument | None:
+    """The readable document this write would shadow, if there is one.
+
+    A retried tool call must not collide with the document it created on its
+    first delivery, so the row belonging to this exact call is excluded — it is
+    the same write finishing, not a second one.
+    """
+    wanted = (filename or "").strip().lower()
+    if not wanted:
+        return None
+    candidates = await readable_documents(session, conversation_id=conversation_id)
+    matches = [
+        document
+        for document in candidates
+        if document.filename.lower() == wanted
+        and not (
+            document.turn_id == turn_id and document.tool_call_id == tool_call_id
+        )
+    ]
+    return matches[-1] if matches else None
 
 
 async def find_readable_document(
@@ -425,7 +618,10 @@ async def conversation_artifacts(
         (
             await session.execute(
                 select(WebChatDocument).where(
-                    WebChatDocument.conversation_id == conversation_id
+                    WebChatDocument.conversation_id == conversation_id,
+                    # A superseded row is bookkeeping for an overwrite that
+                    # happened, not a file in the conversation.
+                    WebChatDocument.status != "superseded",
                 )
             )
         ).scalars()

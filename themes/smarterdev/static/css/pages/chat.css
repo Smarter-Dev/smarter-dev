@@ -100,10 +100,21 @@
 }
 .chat-history-group:first-child { padding-top: .5rem }
 
+/* The row is the hover target so the link and its menu button light up
+   together; the link itself still spans the row, so the click target for
+   "open this chat" is unchanged. */
+.chat-history-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
 /* Block, not flex: `text-overflow: ellipsis` needs a block container, and a
    long title must truncate rather than run past the rail. */
 .chat-history a {
   display: block;
+  flex: 1 1 auto;
+  min-width: 0;
   min-height: var(--p-tap);
   padding: 0 1rem;
   line-height: var(--p-tap);
@@ -116,6 +127,7 @@
   white-space: nowrap;
   transition: color .18s, background .18s;
 }
+.chat-history-row:hover a,
 .chat-history a:hover {
   color: var(--p-text);
   background: var(--p-recess);
@@ -125,6 +137,124 @@
   background: var(--p-surface);
   border-left-color: var(--p-accent);
 }
+/* An explicit `display` beats the UA's [hidden], and the rename field stands in
+   for the link while it is being edited. */
+.chat-history a[hidden] { display: none }
+
+/* Sits over the end of the title rather than beside it: reserving a column for
+   a control that is usually invisible would cost every title 2rem of width. It
+   fades the title out underneath itself so a long name does not run into it. */
+.chat-history-more {
+  position: absolute;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: var(--p-tap);
+  padding: 0;
+  color: var(--p-dim);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  opacity: 0;
+  /* Invisible is not the same as absent: without this the right 2rem of every
+     row would swallow the click meant for the link underneath it. Keyboard
+     focus is unaffected, so it can still be tabbed to. */
+  pointer-events: none;
+  transition: opacity .18s, color .18s;
+}
+.chat-history-more::before {
+  content: "";
+  position: absolute;
+  right: 100%;
+  width: 1.75rem;
+  height: 100%;
+  background: linear-gradient(to right, transparent, var(--p-recess));
+  /* Decoration only — it hangs over the title, and must not eat its click. */
+  pointer-events: none;
+}
+.chat-history-row:hover .chat-history-more,
+.chat-history-more:focus-visible,
+.chat-history-more[aria-expanded="true"] { opacity: 1; pointer-events: auto }
+.chat-history-more:hover,
+.chat-history-more[aria-expanded="true"] { color: var(--p-text) }
+.chat-history-more svg { width: 14px; height: 14px; fill: currentColor }
+/* The current row's own background is what the fade has to land on. */
+.chat-history-row:has(a[aria-current="page"]) .chat-history-more::before {
+  background: linear-gradient(to right, transparent, var(--p-surface));
+}
+
+/* Rename happens in place, so the row does not move while it is being read. */
+.chat-history-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--p-tap);
+  padding: 0 .85rem;
+  color: var(--p-text);
+  font-family: var(--body);
+  font-size: .85rem;
+  background: var(--p-recess);
+  border: 1px solid var(--p-accent);
+  border-radius: 0;
+}
+.chat-history-rename:focus { outline: none }
+
+/* The archived drawer borrows the group heading's type so it reads as one more
+   band in the same list, not a different kind of thing. */
+.chat-history-archive > summary {
+  display: flex;
+  align-items: center;
+  gap: .45rem;
+  list-style: none;
+  cursor: pointer;
+}
+.chat-history-archive > summary::-webkit-details-marker { display: none }
+.chat-history-archive > summary:hover { color: var(--p-muted) }
+.chat-history-archive > summary::after {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: translateY(-2px) rotate(-45deg);
+  transition: transform .18s;
+}
+.chat-history-archive[open] > summary::after { transform: translateY(0) rotate(45deg) }
+.chat-history-archive-count {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: .7rem;
+  color: var(--p-dim);
+}
+
+/* Outside the rail, because the rail scrolls and clips. chat.js pins it to the
+   button that opened it. */
+.chat-row-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 9.5rem;
+  padding: .3rem 0;
+  background: var(--p-float);
+  border: 1px solid var(--p-line-strong);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .55);
+}
+.chat-row-menu[hidden] { display: none }
+.chat-row-menu button {
+  display: block;
+  width: 100%;
+  padding: .45rem .85rem;
+  color: var(--p-muted);
+  font-family: var(--body);
+  font-size: .82rem;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  transition: color .14s, background .14s;
+}
+.chat-row-menu button:hover { color: var(--p-text); background: var(--p-recess) }
+.chat-row-menu button.is-danger { color: var(--p-bad) }
+.chat-row-menu button.is-danger:hover { color: var(--p-bad); background: var(--p-bad-wash) }
 
 /* Connection state: one quiet line, and the only thing that changes about it
    is the mark's colour. */
@@ -793,6 +923,20 @@
     overflow-y: hidden;
   }
   .chat-history-group { display: none }
+  .chat-history-row { flex: 0 0 auto }
+  /* No hover on a touch strip, so the menu is simply always there — and the
+     title fade it wears on the rail would have nothing to fade into here. */
+  .chat-history-more { opacity: 1; pointer-events: auto; height: 34px }
+  .chat-history-more::before { display: none }
+  .chat-history-row a { padding-right: 2rem }
+  /* The drawer keeps its heading here even though the recency bands lose
+     theirs: without it archived chats would have no way back. */
+  .chat-history-archive { flex: 0 0 auto }
+  .chat-history-archive > summary.chat-history-group {
+    display: flex;
+    padding: 0 .6rem;
+    min-height: 34px;
+  }
   .chat-history a {
     flex: 0 0 auto;
     max-width: 12rem;

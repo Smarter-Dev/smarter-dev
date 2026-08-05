@@ -30,10 +30,19 @@ from smarter_dev.web.chat.attachments import validate_attachment
 from smarter_dev.web.chat.compaction import _split_cut_point
 from smarter_dev.web.chat.compaction import compact_safely
 from smarter_dev.web.chat.compaction import should_compact_history
+from smarter_dev.web.chat.conversations import MAX_TITLE_CHARS
+from smarter_dev.web.chat.conversations import ConversationTitleError
+from smarter_dev.web.chat.conversations import derive_title
+from smarter_dev.web.chat.conversations import normalize_title
 from smarter_dev.web.chat.document_stream import WITHHELD_SIBLING_RESULT
 from smarter_dev.web.chat.document_stream import build_fork_messages
 from smarter_dev.web.chat.document_stream import stream_document_body
+from smarter_dev.web.chat.documents import DOCUMENT_STATUSES
+from smarter_dev.web.chat.documents import MAX_DOCUMENT_MARKDOWN_CHARS
+from smarter_dev.web.chat.documents import READABLE_STATUSES
+from smarter_dev.web.chat.documents import REPLACING_STATUSES
 from smarter_dev.web.chat.documents import MarkdownDocumentError
+from smarter_dev.web.chat.documents import apply_document_patches
 from smarter_dev.web.chat.documents import attachment_kind
 from smarter_dev.web.chat.documents import clean_document_body
 from smarter_dev.web.chat.documents import validate_document_request
@@ -200,6 +209,40 @@ def test_subagent_attempt_cap_counts_accepted_attempts():
         False,
     ]
     assert counters.subagent_attempts == 3
+
+
+def test_title_guidance_only_reaches_a_root_agent_that_still_needs_a_name():
+    unnamed = effective_system_prompt(child=False, needs_title=True)
+    named = effective_system_prompt(child=False, needs_title=False)
+    assert "set_chat_title" in unnamed
+    assert "set_chat_title" not in named
+    assert "set_chat_title" not in effective_system_prompt(child=True, needs_title=True)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("  Durable Queue Design  ", "Durable Queue Design"),
+        ("Two\nlines\tapart", "Two lines apart"),
+        ("collapse    the    gaps", "collapse the gaps"),
+    ],
+)
+def test_titles_are_folded_to_one_clean_line(raw, expected):
+    assert normalize_title(raw) == expected
+
+
+def test_unusable_titles_are_refused_and_long_ones_are_clipped():
+    for empty in ("", "   ", "\n\t", None):
+        with pytest.raises(ConversationTitleError):
+            normalize_title(empty)
+    clipped = normalize_title("z" * (MAX_TITLE_CHARS + 40))
+    assert len(clipped) == MAX_TITLE_CHARS + 1 and clipped.endswith("…")
+
+
+def test_derived_title_is_the_opening_of_the_question():
+    assert derive_title("Explain durable queues") == "Explain durable queues"
+    long = derive_title("word " * 60)
+    assert long.endswith("…") and len(long) == 80
 
 
 def test_children_cannot_recurse_and_prompt_omits_guidance():
@@ -698,3 +741,77 @@ def test_binary_tool_returns_leave_a_pointer_in_durable_history():
         decode_model_messages(encode_model_messages(stripped))[0].parts[1].content
         == kept
     )
+
+
+def test_patches_apply_in_order_and_each_sees_the_last_ones_result():
+    body = "# Report\n\nThe queue is slow.\n\nEnd.\n"
+    edited = apply_document_patches(
+        body,
+        [
+            ("The queue is slow.", "The queue is slow under burst load."),
+            ("under burst load.", "under burst load, by about 40%."),
+        ],
+    )
+    assert edited == (
+        "# Report\n\nThe queue is slow under burst load, by about 40%.\n\nEnd.\n"
+    )
+
+
+def test_a_patch_may_delete_by_replacing_with_nothing():
+    assert apply_document_patches("keep\ndrop\n", [("drop\n", "")]) == "keep\n"
+
+
+@pytest.mark.parametrize(
+    ("body", "patches", "expected"),
+    [
+        ("one two\n", [("three", "four")], "not in the file"),
+        ("dup\ndup\n", [("dup", "x")], "appears 2 times"),
+        ("text\n", [("text", "text")], "identical to the original"),
+        ("text\n", [("", "x")], "text to replace is required"),
+        ("text\n", [], "At least one patch"),
+        ("only\n", [("only\n", "   ")], "would empty the file"),
+    ],
+)
+def test_unusable_patches_are_refused_with_the_reason(body, patches, expected):
+    with pytest.raises(MarkdownDocumentError) as exc:
+        apply_document_patches(body, patches)
+    assert expected in str(exc.value)
+
+
+def test_a_failed_patch_abandons_every_patch_in_the_call():
+    body = "alpha\nbeta\n"
+    with pytest.raises(MarkdownDocumentError):
+        apply_document_patches(body, [("alpha", "ALPHA"), ("missing", "x")])
+    # The function is pure, so "nothing was applied" is literally true: the
+    # caller still holds the original and never reached the durable write.
+    assert body == "alpha\nbeta\n"
+
+
+def test_patch_count_and_result_size_are_bounded():
+    with pytest.raises(MarkdownDocumentError) as too_many:
+        apply_document_patches(
+            "x" * 40, [(f"{index}", f"{index}!") for index in range(21)]
+        )
+    assert "Too many patches" in str(too_many.value)
+
+    body = "a" + "b" * 40
+    with pytest.raises(MarkdownDocumentError) as too_big:
+        apply_document_patches(body, [("a", "c" * (MAX_DOCUMENT_MARKDOWN_CHARS + 1))])
+    assert "characters" in str(too_big.value)
+
+
+def test_overwrite_only_displaces_a_file_once_the_new_one_is_real():
+    # The statuses a replacement must reach before the old file is retired.
+    # "stopped" and "failed" are deliberately absent: half a file must never be
+    # what displaces a whole one.
+    assert REPLACING_STATUSES == ("complete", "truncated")
+    assert "superseded" in DOCUMENT_STATUSES
+    assert "superseded" not in READABLE_STATUSES
+
+
+def test_document_guidance_teaches_editing_and_the_overwrite_rule():
+    prompt = effective_system_prompt(child=False)
+    assert "edit_document(filename, patches)" in prompt
+    assert "overwrite=True" in prompt
+    # Children have no document tools at all, so none of this reaches them.
+    assert "edit_document" not in effective_system_prompt(child=True)
