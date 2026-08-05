@@ -755,6 +755,54 @@ async def test_conversation_snapshot_carries_rendered_markdown_and_all_versions(
 
 
 @pytest.mark.asyncio
+async def test_active_turn_snapshot_carries_rendered_partial_markdown(
+    db_session, monkeypatch
+):
+    user, conversation = await _seed_chat(db_session)
+
+    async def entitled(*_args, **_kwargs):
+        return {"sudo-r"}
+
+    monkeypatch.setattr(chat_api, "require_entitled", entitled)
+    turn = WebChatTurn(
+        conversation_id=conversation.id,
+        sequence=1,
+        submission_key="streaming-markdown-turn",
+        response_version_group=uuid4(),
+        response_sequence=2,
+        model_key=conversation.selected_model_key,
+        reasoning_level=conversation.reasoning_level,
+        status="running",
+    )
+    db_session.add(turn)
+    await db_session.flush()
+    db_session.add(
+        WebChatMessage(
+            conversation_id=conversation.id,
+            turn_id=turn.id,
+            sequence=2,
+            role="assistant",
+            content="# Streaming\n\n- first\n- second",
+            version_group=turn.response_version_group,
+            version_number=1,
+            is_active=True,
+        )
+    )
+    await db_session.commit()
+
+    snapshot = await ChatApiController.get_conversation.fn(
+        object.__new__(ChatApiController),
+        conversation.id,
+        _request(user.id),
+        db_session,
+    )
+
+    assert snapshot["active_turn"]["partial"] == "# Streaming\n\n- first\n- second"
+    assert "<h1>Streaming</h1>" in snapshot["active_turn"]["partial_html"]
+    assert "<li>first</li>" in snapshot["active_turn"]["partial_html"]
+
+
+@pytest.mark.asyncio
 async def test_active_ambiguous_reservation_cannot_be_reused(db_session):
     user, conversation = await _seed_chat(db_session)
     kwargs = {
@@ -816,6 +864,7 @@ async def test_resources_ask_is_idempotent_and_rejects_inactive_user(
 
 def test_browser_contract_includes_csrf_recovery_and_live_updates():
     javascript = Path("themes/smarterdev/static/js/chat.js").read_text()
+    worker = Path("smarter_dev/web/chat/jobs.py").read_text()
     template = Path("themes/smarterdev/templates/chat/index.html").read_text()
     assert "X-CSRF-Token" in javascript
     assert "sk:notification" in javascript
@@ -837,6 +886,13 @@ def test_browser_contract_includes_csrf_recovery_and_live_updates():
     assert "content_html" in javascript
     assert "data-version-group" in javascript and "data-regenerate" in javascript
     assert "captureScroll" in javascript and "restoreScroll" in javascript
+    output_delta = javascript.split("if (type === 'chat_output_delta')")[1].split(
+        "if (type === 'chat_title_changed')"
+    )[0]
+    assert "pending.innerHTML = data.content_html" in output_delta
+    assert "pending.textContent = data.content" not in output_delta
+    assert "target.innerHTML = active.partial_html" in javascript
+    assert "content_html=render_markdown(draft)" in worker
     assert "data-root-activity" in template
     assert "data-chat-agent-panel" in template
     assert "data-activity-timer" in template

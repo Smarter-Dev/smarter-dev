@@ -2276,7 +2276,6 @@
   function handleTerminal(data, type) {
     var wasAtBottom = atBottom();
     var pending = thread.querySelector('[data-pending-turn="' + data.turn_id + '"] .chat-content');
-    if (pending && data.content !== undefined) pending.textContent = data.content || '';
     stick(wasAtBottom);
     if (type === 'chat_turn_error' || type === 'agent_run_error') {
       if (pending) pending.textContent = data.detail || 'The run failed.';
@@ -2325,7 +2324,7 @@
     if (type === 'chat_output_delta') {
       var wasAtBottom = atBottom();
       var pending = thread.querySelector('[data-pending-turn="' + data.turn_id + '"] .chat-content') || thread.querySelector('[data-turn-id="' + data.turn_id + '"] .chat-content');
-      if (pending) pending.textContent = data.content || '';
+      if (pending) pending.innerHTML = data.content_html || '';
       updateRootActivity({turn_id: data.turn_id, status: 'Writing response…'});
       stick(wasAtBottom);
     }
@@ -2392,7 +2391,7 @@
         activeTurn = active.id;
         setStatus(active.status === 'stopping' ? 'Stopping…' : 'Working…');
         var target = thread.querySelector('[data-pending-turn="' + active.id + '"] .chat-content') || thread.querySelector('[data-turn-id="' + active.id + '"] .chat-content');
-        if (target && active.partial) target.textContent = active.partial;
+        if (target && active.partial) target.innerHTML = active.partial_html || '';
         setBusy(true);
       } else if (activeTurn) {
         finishTurn();
