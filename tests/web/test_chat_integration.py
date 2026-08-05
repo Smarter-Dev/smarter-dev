@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import UTC
+from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,21 +25,30 @@ from smarter_dev.web import agent_api
 from smarter_dev.web.agent_api import AskBody
 from smarter_dev.web.agent_api import ResourcesAgentApiController
 from smarter_dev.web.chat import api as chat_api
+from smarter_dev.web.chat import controller as chat_controller
 from smarter_dev.web.chat import dispatch as chat_dispatch
 from smarter_dev.web.chat.api import ChatApiController
+from smarter_dev.web.chat.api import ConversationUpdateBody
 from smarter_dev.web.chat.api import ReasoningBody
 from smarter_dev.web.chat.api import TurnBody
+from smarter_dev.web.chat.conversations import name_if_unnamed
 from smarter_dev.web.chat.csrf import require_api_csrf
 from smarter_dev.web.chat.dispatch import ensure_submission_handler
 from smarter_dev.web.chat.documents import append_document_body
+from smarter_dev.web.chat.documents import apply_document_patches
 from smarter_dev.web.chat.documents import begin_document
 from smarter_dev.web.chat.documents import conversation_artifacts
+from smarter_dev.web.chat.documents import edit_document_body
 from smarter_dev.web.chat.documents import find_artifact
+from smarter_dev.web.chat.documents import find_name_clash
 from smarter_dev.web.chat.documents import find_readable_document
 from smarter_dev.web.chat.documents import finish_document
+from smarter_dev.web.chat.documents import retire_failed_overwrite
+from smarter_dev.web.chat.documents import supersede_replaced_documents
 from smarter_dev.web.chat.jobs import _upload_manifest
 from smarter_dev.web.chat.limits import OperationAlreadyReserved
 from smarter_dev.web.chat.limits import reserve_operation
+from smarter_dev.web.chat.runtime import RunSuperseded
 from smarter_dev.web.chat.settings import ensure_settings
 from smarter_dev.web.chat.usage import record_settled_chat_usage
 from smarter_dev.web.models import AgentConversation
@@ -1078,3 +1089,603 @@ async def test_uploads_are_artifacts_listed_for_the_model_and_shelved_in_the_pan
             controller, conversation.id, notes.id, _request(stranger.id), db_session
         )
     assert exc.value.status_code == 404
+
+
+class _StubBackend:
+    """A storage backend that records deletions, and can be told to fail one."""
+
+    def __init__(self, fail: set[str] | None = None):
+        self.deleted: list[str] = []
+        self.fail = fail or set()
+
+    async def delete(self, key: str) -> None:
+        if key in self.fail:
+            raise RuntimeError("store unavailable")
+        self.deleted.append(key)
+
+
+def _request_with_storage(user_id, backend, *, token: str = "csrf-token"):
+    class _Manager:
+        async def get(self, _name):
+            return backend
+
+    return SimpleNamespace(
+        session={SESSION_USER_ID: str(user_id), CSRF_SESSION_KEY: token},
+        headers={"X-CSRF-Token": token},
+        app=SimpleNamespace(state=SimpleNamespace(storage_manager=_Manager())),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_named_conversation_is_never_renamed_behind_the_owners_back(
+    db_session, monkeypatch
+):
+    """The stand-in title only stands in while nothing has actually named it."""
+    user, conversation = await _seed_chat(db_session)
+
+    async def entitled(*_args, **_kwargs):
+        return {"sudo-r"}
+
+    async def do_not_dispatch(_dispatch_id):
+        return None
+
+    monkeypatch.setattr(chat_api, "require_entitled", entitled)
+    monkeypatch.setattr(chat_api, "_try_dispatch", do_not_dispatch)
+    controller = object.__new__(ChatApiController)
+
+    renamed = await ChatApiController.update_conversation.fn(
+        controller,
+        conversation.id,
+        ConversationUpdateBody(title="  Outbox\n  Design  "),
+        _request(user.id),
+        db_session,
+    )
+    assert renamed["title"] == "Outbox Design"
+    assert renamed["archived"] is False
+
+    await ChatApiController.submit_turn.fn(
+        controller,
+        conversation.id,
+        TurnBody(content="Explain durable queues", submission_key="first"),
+        _request(user.id),
+        db_session,
+    )
+
+    await db_session.refresh(conversation)
+    assert conversation.title == "Outbox Design"
+    assert conversation.title_is_custom is True
+
+    with pytest.raises(HTTPException) as exc:
+        await ChatApiController.update_conversation.fn(
+            controller,
+            conversation.id,
+            ConversationUpdateBody(title="   "),
+            _request(user.id),
+            db_session,
+        )
+    assert exc.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_an_unnamed_conversation_still_takes_the_first_message_as_a_title(
+    db_session, monkeypatch
+):
+    user, conversation = await _seed_chat(db_session)
+
+    async def entitled(*_args, **_kwargs):
+        return {"sudo-r"}
+
+    async def do_not_dispatch(_dispatch_id):
+        return None
+
+    monkeypatch.setattr(chat_api, "require_entitled", entitled)
+    monkeypatch.setattr(chat_api, "_try_dispatch", do_not_dispatch)
+    controller = object.__new__(ChatApiController)
+
+    await ChatApiController.submit_turn.fn(
+        controller,
+        conversation.id,
+        TurnBody(content="Explain durable queues", submission_key="first"),
+        _request(user.id),
+        db_session,
+    )
+    await db_session.refresh(conversation)
+    assert conversation.title == "Explain durable queues"
+    # Still nobody's choice, so the agent's set_chat_title tool stays available.
+    assert conversation.title_is_custom is False
+
+
+@pytest.mark.asyncio
+async def test_archiving_is_reversible_and_keeps_the_conversation(
+    db_session, monkeypatch
+):
+    user, conversation = await _seed_chat(db_session)
+
+    async def entitled(*_args, **_kwargs):
+        return {"sudo-r"}
+
+    monkeypatch.setattr(chat_api, "require_entitled", entitled)
+    controller = object.__new__(ChatApiController)
+
+    archived = await ChatApiController.update_conversation.fn(
+        controller,
+        conversation.id,
+        ConversationUpdateBody(archived=True),
+        _request(user.id),
+        db_session,
+    )
+    await db_session.refresh(conversation)
+    assert archived["archived"] is True and conversation.archived_at is not None
+
+    restored = await ChatApiController.update_conversation.fn(
+        controller,
+        conversation.id,
+        ConversationUpdateBody(archived=False),
+        _request(user.id),
+        db_session,
+    )
+    await db_session.refresh(conversation)
+    assert restored["archived"] is False and conversation.archived_at is None
+    assert await db_session.get(WebChatConversation, conversation.id) is not None
+
+
+@pytest.mark.asyncio
+async def test_deleting_a_conversation_destroys_its_transcript_and_its_uploads(
+    db_session, monkeypatch
+):
+    user, conversation = await _seed_chat(db_session)
+
+    async def entitled(*_args, **_kwargs):
+        return {"sudo-r"}
+
+    async def do_not_dispatch(_dispatch_id):
+        return None
+
+    monkeypatch.setattr(chat_api, "require_entitled", entitled)
+    monkeypatch.setattr(chat_api, "_try_dispatch", do_not_dispatch)
+    controller = object.__new__(ChatApiController)
+    created = await ChatApiController.submit_turn.fn(
+        controller,
+        conversation.id,
+        TurnBody(content="Delete me", submission_key="doomed"),
+        _request(user.id),
+        db_session,
+    )
+    turn_id = UUID(created["turn_id"])
+    turn = await db_session.get(WebChatTurn, turn_id)
+    turn.status = "complete"
+    upload = WebChatAttachment(
+        conversation_id=conversation.id,
+        owner_user_id=user.id,
+        turn_id=turn_id,
+        storage_key=uuid4().hex,
+        original_name="notes.md",
+        media_type="text/markdown",
+        size_bytes=42,
+        sha256=uuid4().hex,
+        extracted_text="private",
+        status="ready",
+    )
+    db_session.add(upload)
+    await db_session.commit()
+    backend = _StubBackend()
+
+    result = await ChatApiController.delete_conversation.fn(
+        controller,
+        conversation.id,
+        _request_with_storage(user.id, backend),
+        db_session,
+    )
+
+    assert result == {"status": "deleted"}
+    assert backend.deleted == [upload.storage_key]
+    assert await db_session.get(WebChatConversation, conversation.id) is None
+    assert await db_session.scalar(select(func.count(WebChatTurn.id))) == 0
+    assert await db_session.scalar(select(func.count(WebChatMessage.id))) == 0
+    assert await db_session.scalar(select(func.count(WebChatAttachment.id))) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_stranded_upload_leaves_the_conversation_deletable_again(
+    db_session, monkeypatch
+):
+    """A store that will not delete must not leave private files unreferenced.
+
+    The conversation survives so the owner can retry, and the row stays behind
+    marked ``deleting`` — which is exactly what the orphan reconciler collects.
+    """
+    user, conversation = await _seed_chat(db_session)
+
+    async def entitled(*_args, **_kwargs):
+        return {"sudo-r"}
+
+    monkeypatch.setattr(chat_api, "require_entitled", entitled)
+    controller = object.__new__(ChatApiController)
+    upload = WebChatAttachment(
+        conversation_id=conversation.id,
+        owner_user_id=user.id,
+        turn_id=None,
+        storage_key=uuid4().hex,
+        original_name="notes.md",
+        media_type="text/markdown",
+        size_bytes=42,
+        sha256=uuid4().hex,
+        extracted_text="private",
+        status="ready",
+    )
+    db_session.add(upload)
+    await db_session.commit()
+    backend = _StubBackend(fail={upload.storage_key})
+
+    with pytest.raises(HTTPException) as exc:
+        await ChatApiController.delete_conversation.fn(
+            controller,
+            conversation.id,
+            _request_with_storage(user.id, backend),
+            db_session,
+        )
+
+    assert exc.value.status_code == 502
+    await db_session.refresh(upload)
+    assert upload.status == "deleting"
+    assert await db_session.get(WebChatConversation, conversation.id) is not None
+
+
+@pytest.mark.asyncio
+async def test_deleting_is_refused_while_a_turn_is_still_running(
+    db_session, monkeypatch
+):
+    user, conversation = await _seed_chat(db_session)
+
+    async def entitled(*_args, **_kwargs):
+        return {"sudo-r"}
+
+    async def do_not_dispatch(_dispatch_id):
+        return None
+
+    monkeypatch.setattr(chat_api, "require_entitled", entitled)
+    monkeypatch.setattr(chat_api, "_try_dispatch", do_not_dispatch)
+    controller = object.__new__(ChatApiController)
+    await ChatApiController.submit_turn.fn(
+        controller,
+        conversation.id,
+        TurnBody(content="Still going", submission_key="busy"),
+        _request(user.id),
+        db_session,
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await ChatApiController.delete_conversation.fn(
+            controller,
+            conversation.id,
+            _request_with_storage(user.id, _StubBackend()),
+            db_session,
+        )
+
+    assert exc.value.status_code == 409
+    assert await db_session.get(WebChatConversation, conversation.id) is not None
+
+
+@pytest.mark.asyncio
+async def test_the_rail_hides_archived_chats_in_their_own_drawer(
+    db_session, monkeypatch
+):
+    user, live = await _seed_chat(db_session)
+    filed = WebChatConversation(
+        owner_user_id=user.id,
+        intelligence_mode="efficient",
+        selected_model_key=live.selected_model_key,
+        reasoning_level=live.reasoning_level,
+        title="Last month's spike",
+        status="idle",
+        archived_at=datetime.now(UTC),
+    )
+    db_session.add(filed)
+    await db_session.commit()
+
+    rail = await chat_controller._rail_context(db_session, user.id)
+
+    assert [row.id for row in rail["conversations"]] == [live.id]
+    assert [row.id for row in rail["archived_conversations"]] == [filed.id]
+    assert all(
+        row.id != filed.id
+        for group in rail["conversation_groups"]
+        for row in group["items"]
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_agents_name_never_overwrites_one_the_owner_chose(db_session):
+    """The tool writes only while the conversation is still unnamed.
+
+    The owner can rename from the rail while a turn is running, so the agent's
+    name has to lose that race rather than quietly win it.
+    """
+    _user, conversation = await _seed_chat(db_session)
+
+    assert await name_if_unnamed(
+        db_session, conversation_id=conversation.id, title="Durable Queue Design"
+    )
+    await db_session.refresh(conversation)
+    assert conversation.title == "Durable Queue Design"
+    assert conversation.title_is_custom is True
+
+    assert not await name_if_unnamed(
+        db_session, conversation_id=conversation.id, title="Something Else"
+    )
+    await db_session.refresh(conversation)
+    assert conversation.title == "Durable Queue Design"
+
+
+async def _seed_document(
+    db_session, user, conversation, *, filename, body, key, status="complete"
+):
+    """A settled document plus the turn and assistant message that wrote it."""
+    turn = WebChatTurn(
+        conversation_id=conversation.id,
+        sequence=await db_session.scalar(
+            select(func.count(WebChatTurn.id)).where(
+                WebChatTurn.conversation_id == conversation.id
+            )
+        )
+        + 1,
+        submission_key=key,
+        response_version_group=uuid4(),
+        response_sequence=2,
+        model_key=conversation.selected_model_key,
+        reasoning_level=conversation.reasoning_level,
+        # Settled: only one turn of a conversation may be active at a time, and
+        # the write that produced this document is long finished.
+        status="complete",
+        worker_lease_token=f"lease-{key}",
+    )
+    db_session.add(turn)
+    await db_session.flush()
+    assistant = WebChatMessage(
+        conversation_id=conversation.id,
+        turn_id=turn.id,
+        sequence=turn.sequence * 2,
+        role="assistant",
+        content="",
+        version_group=turn.response_version_group,
+    )
+    db_session.add(assistant)
+    await db_session.flush()
+    document = WebChatDocument(
+        conversation_id=conversation.id,
+        turn_id=turn.id,
+        assistant_message_id=assistant.id,
+        tool_call_id=f"call-{key}",
+        title=filename.removesuffix(".md").title(),
+        filename=filename,
+        markdown_content=body,
+        size_bytes=len(body.encode()),
+        status=status,
+    )
+    db_session.add(document)
+    await db_session.commit()
+    return turn, document
+
+
+@pytest.mark.asyncio
+async def test_a_second_write_of_one_name_is_a_clash_but_a_retry_is_not(db_session):
+    """The clash check has to tell a new write apart from a redelivered one."""
+    user, conversation = await _seed_chat(db_session)
+    turn, document = await _seed_document(
+        db_session,
+        user,
+        conversation,
+        filename="report.md",
+        body="# Report\n\nOriginal.\n",
+        key="first-write",
+    )
+
+    # A different call writing the same name: a real clash.
+    assert (
+        await find_name_clash(
+            db_session,
+            conversation_id=conversation.id,
+            filename="report.md",
+            turn_id=turn.id,
+            tool_call_id="a-different-call",
+        )
+    ).id == document.id
+
+    # The same call delivered twice must not collide with its own document.
+    assert (
+        await find_name_clash(
+            db_session,
+            conversation_id=conversation.id,
+            filename="report.md",
+            turn_id=turn.id,
+            tool_call_id="call-first-write",
+        )
+        is None
+    )
+
+    # A name nothing has taken is free.
+    assert (
+        await find_name_clash(
+            db_session,
+            conversation_id=conversation.id,
+            filename="notes.md",
+            turn_id=turn.id,
+            tool_call_id="another-call",
+        )
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_successful_overwrite_retires_the_file_it_replaced(db_session):
+    user, conversation = await _seed_chat(db_session)
+    _first_turn, original = await _seed_document(
+        db_session,
+        user,
+        conversation,
+        filename="report.md",
+        body="# Report\n\nVersion one.\n",
+        key="first-write",
+    )
+    _second_turn, replacement = await _seed_document(
+        db_session,
+        user,
+        conversation,
+        filename="report.md",
+        body="# Report\n\nVersion two.\n",
+        key="second-write",
+    )
+
+    retired = await supersede_replaced_documents(
+        db_session,
+        conversation_id=conversation.id,
+        filename="report.md",
+        keep_id=replacement.id,
+    )
+    await db_session.commit()
+
+    assert retired == [original.id]
+    await db_session.refresh(original)
+    assert original.status == "superseded"
+    # The row survives — this is a retirement, not a deletion.
+    assert original.markdown_content == "# Report\n\nVersion one.\n"
+
+    # One name, one file, from every direction that resolves one.
+    resolved = await find_readable_document(
+        db_session, conversation_id=conversation.id, filename="report.md"
+    )
+    assert resolved.id == replacement.id
+    shelf = await conversation_artifacts(db_session, conversation_id=conversation.id)
+    assert [item.id for item in shelf] == [replacement.id]
+
+
+@pytest.mark.asyncio
+async def test_an_abandoned_overwrite_leaves_the_original_standing(db_session):
+    """The whole point of writing into a new row rather than resetting the old."""
+    user, conversation = await _seed_chat(db_session)
+    _first_turn, original = await _seed_document(
+        db_session,
+        user,
+        conversation,
+        filename="report.md",
+        body="# Report\n\nThe good version.\n",
+        key="first-write",
+    )
+    _second_turn, wreck = await _seed_document(
+        db_session,
+        user,
+        conversation,
+        filename="report.md",
+        body="# Rep",
+        key="crashed-write",
+        status="stopped",
+    )
+
+    await retire_failed_overwrite(db_session, document_id=wreck.id)
+    await db_session.commit()
+
+    await db_session.refresh(original)
+    await db_session.refresh(wreck)
+    assert original.status == "complete"
+    assert wreck.status == "superseded"
+    resolved = await find_readable_document(
+        db_session, conversation_id=conversation.id, filename="report.md"
+    )
+    assert resolved.id == original.id
+    assert resolved.markdown_content == "# Report\n\nThe good version.\n"
+
+
+@pytest.mark.asyncio
+async def test_editing_rewrites_the_body_under_the_editing_turns_lease(db_session):
+    """An edit happens turns after the write, so it carries its own lease."""
+    user, conversation = await _seed_chat(db_session)
+    write_turn, document = await _seed_document(
+        db_session,
+        user,
+        conversation,
+        filename="report.md",
+        body="# Report\n\nThe queue is slow.\n",
+        key="first-write",
+        status="truncated",
+    )
+    edit_turn = WebChatTurn(
+        conversation_id=conversation.id,
+        sequence=9,
+        submission_key="edit-turn",
+        response_version_group=uuid4(),
+        response_sequence=2,
+        model_key=conversation.selected_model_key,
+        status="running",
+        worker_lease_token="edit-lease",
+    )
+    db_session.add(edit_turn)
+    await db_session.commit()
+
+    patched = apply_document_patches(
+        document.markdown_content,
+        [("The queue is slow.", "The queue is slow under burst load.")],
+    )
+    settled = await edit_document_body(
+        db_session,
+        document_id=document.id,
+        turn_id=edit_turn.id,
+        worker_lease_token="edit-lease",
+        markdown=patched,
+    )
+    await db_session.commit()
+
+    assert settled.markdown_content.endswith("under burst load.\n")
+    assert settled.size_bytes == len(patched.encode())
+    # Patching a truncated file does not make it whole.
+    assert settled.status == "truncated"
+    # The card stays under the reply that wrote it, not the one that edited it.
+    assert settled.turn_id == write_turn.id
+
+    # A worker whose lease has moved on cannot write.
+    with pytest.raises(RunSuperseded):
+        await edit_document_body(
+            db_session,
+            document_id=document.id,
+            turn_id=edit_turn.id,
+            worker_lease_token="a-stale-lease",
+            markdown="anything",
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_superseded_document_is_neither_served_nor_downloadable(
+    db_session, monkeypatch
+):
+    user, conversation = await _seed_chat(db_session)
+    _turn, document = await _seed_document(
+        db_session,
+        user,
+        conversation,
+        filename="report.md",
+        body="# Report\n\nOld.\n",
+        key="first-write",
+    )
+    document.status = "superseded"
+    await db_session.commit()
+
+    async def entitled(*_args, **_kwargs):
+        return {"sudo-r"}
+
+    monkeypatch.setattr(chat_api, "require_entitled", entitled)
+    controller = object.__new__(ChatApiController)
+
+    for handler in (
+        ChatApiController.get_document,
+        ChatApiController.download_document,
+    ):
+        with pytest.raises(HTTPException) as exc:
+            await handler.fn(
+                controller, conversation.id, document.id, _request(user.id), db_session
+            )
+        assert exc.value.status_code == 410
+
+    snapshot = await ChatApiController.get_conversation.fn(
+        controller, conversation.id, _request(user.id), db_session
+    )
+    assert snapshot["artifacts"] == []
+    assert snapshot["documents"] == []

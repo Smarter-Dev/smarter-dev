@@ -8,6 +8,23 @@
 {% set model_keys = models|map(attribute='key')|list %}
 {% set current_model = (models|selectattr('key', 'equalto', conversation.selected_model_key)|list|first) if conversation else none %}
 {% set groups = conversation_groups|default([]) %}
+{% set archived = archived_conversations|default([]) %}
+{% set current_is_archived = conversation and mode == 'chat' and conversation.archived_at %}
+{# A history row is a link plus the menu that acts on it. Only Chat rows carry
+   the menu: a Resources answer has no title of its own to change and no private
+   uploads to destroy, so the rail there stays a plain list of links. #}
+{% macro history_row(item, archived=false) -%}
+{%- set current = conversation and item.id == conversation.id -%}
+<div class="chat-history-row" data-history-row data-conversation-id="{{ item.id }}" data-archived="{{ 'true' if archived else 'false' }}">
+  <a href="/chat/{{ item.id }}" {% if current %}aria-current="page"{% endif %} data-history-title>{{ item.title or 'Untitled chat' }}</a>
+  {%- if mode == 'chat' %}
+  <button type="button" class="chat-history-more" data-history-menu aria-haspopup="true" aria-expanded="false">
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.35"/><circle cx="8" cy="8" r="1.35"/><circle cx="8" cy="13" r="1.35"/></svg>
+    <span class="p-sr">Actions for {{ item.title or 'Untitled chat' }}</span>
+  </button>
+  {%- endif %}
+</div>
+{%- endmacro %}
 {# Openers for a blank conversation. Concrete tasks, not capability boasts —
    they exist to show what this thing is for, so they read as work. #}
 {% set starters = ['Review a stack trace', 'Plan a Discord bot', 'Research model pricing', 'Explain this repo'] %}
@@ -51,8 +68,16 @@
     <nav class="chat-history">
       {% for group in groups %}
       <p class="p-label chat-history-group">{{ group.label }}</p>
-      {% for item in group['items'] %}<a href="/chat/{{ item.id }}" {% if conversation and item.id == conversation.id %}aria-current="page"{% endif %}>{{ item.title or 'Untitled chat' }}</a>{% endfor %}
+      {% for item in group['items'] %}{{ history_row(item) }}{% endfor %}
       {% endfor %}
+      {% if archived %}
+      {# Filed away, not gone. Shut by default unless the reader is looking at
+         one, in which case the drawer it lives in ought to be open. #}
+      <details class="chat-history-archive" data-history-archive {% if conversation and current_is_archived %}open{% endif %}>
+        <summary class="p-label chat-history-group">Archived<span class="chat-history-archive-count">{{ archived|length }}</span></summary>
+        {% for item in archived %}{{ history_row(item, archived=true) }}{% endfor %}
+      </details>
+      {% endif %}
     </nav>
     {# Connection is worth one line at the bottom of the rail and nothing more:
        it only matters when it is wrong. #}
@@ -277,5 +302,17 @@
 </div>
 
 <div class="p-backdrop" data-model-dialog hidden><div role="dialog" aria-modal="true" class="p-dialog chat-dialog"><h2>Confirm model change</h2><p data-model-warning></p><div class="chat-dialog-actions"><button type="button" class="p-btn" data-model-cancel>Cancel</button><button type="button" class="p-btn is-primary" data-model-confirm>Confirm change</button></div></div></div>
+
+{% if mode == 'chat' %}
+{# One menu, moved to whichever row asked for it. The rail scrolls and clips, so
+   this lives outside it and is positioned against the button that opened it. #}
+<div class="chat-row-menu" data-row-menu role="menu" hidden>
+  <button type="button" role="menuitem" data-row-action="rename">Rename</button>
+  <button type="button" role="menuitem" data-row-action="archive">Archive</button>
+  <button type="button" role="menuitem" class="is-danger" data-row-action="delete">Delete</button>
+</div>
+
+<div class="p-backdrop" data-delete-dialog hidden><div role="dialog" aria-modal="true" aria-labelledby="chat-delete-title" class="p-dialog chat-dialog"><h2 id="chat-delete-title">Delete this chat?</h2><p>“<span data-delete-title></span>” and everything in it — every message, document, and uploaded file — will be destroyed. This cannot be undone.</p><div class="chat-dialog-actions"><button type="button" class="p-btn" data-delete-cancel>Cancel</button><button type="button" class="p-btn is-danger" data-delete-confirm>Delete chat</button></div></div></div>
+{% endif %}
 {% endblock %}
 {% block page_scripts %}<script src="{{ theme_url('js/sdanswer.js') }}" defer></script><script src="{{ theme_url('js/chat.js') }}" defer></script>{% endblock %}

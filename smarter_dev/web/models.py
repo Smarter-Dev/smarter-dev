@@ -4321,6 +4321,15 @@ class WebChatConversation(Base):
     selected_model_key: Mapped[str] = mapped_column(String(100), nullable=False)
     reasoning_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A title nobody chose is fair game to overwrite: the first message's opening
+    # words stand in until the agent names the conversation. Once the agent or
+    # the owner has named it, nothing rewrites it behind their back.
+    title_is_custom: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="idle")
     next_sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     current_context_tokens: Mapped[int] = mapped_column(
