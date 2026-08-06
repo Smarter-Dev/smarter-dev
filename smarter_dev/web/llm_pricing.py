@@ -172,8 +172,10 @@ _patch_provider(
     ),
 )
 
-# GPT-5.6 Luna — not yet in genai-prices. Rates effective 2026-07-30
-# after OpenAI's 80% price cut.
+# GPT-5.6 Luna DIRECT-OpenAI rates, effective 2026-07-30 after OpenAI's 80%
+# price cut. Luna moved to the OpenRouter route on 2026-08-06 (see
+# _OPENROUTER_PRICES); this patch stays so rows written before the move —
+# and any direct-OpenAI env pin — keep pricing at OpenAI's own rates.
 _patch_provider(
     "openai",
     types.ModelInfo(
@@ -321,9 +323,20 @@ _DIGITALOCEAN_PRICES: dict[str, types.ModelPrice] = {
 }
 
 # Models served through OpenRouter. USD per million tokens;
-# cache is cached-input/read pricing. Cache writes bill at the input rate.
+# cache is cached-input/read pricing. Cache writes bill at the input rate
+# unless a cache_write_mtok tier is supplied.
 # Rates read from GET https://openrouter.ai/api/v1/models (2026-08).
 _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
+    # Luna moved here from direct OpenAI on 2026-08-06: the same OpenAI
+    # upstream at half the rate. OpenRouter's long-context override (>272K
+    # prompt tokens: $0.20/$0.90) has no tier here; chat compacts far below
+    # 272K, so the base rate is the honest one for our traffic.
+    "openai/gpt-5.6-luna": types.ModelPrice(
+        input_mtok=Decimal("0.10"),
+        output_mtok=Decimal("0.60"),
+        cache_read_mtok=Decimal("0.01"),
+        cache_write_mtok=Decimal("0.125"),
+    ),
     "poolside/laguna-xs-2.1": types.ModelPrice(
         input_mtok=Decimal("0.06"),
         output_mtok=Decimal("0.12"),
@@ -403,13 +416,16 @@ def _direct_model_cost(
     genai-prices assumes): they are a SUBSET of ``input_tokens``. The
     uncached share bills at the input rate, cached reads at the model's
     prompt-caching rate when it has one (otherwise plain input), and cache
-    writes at plain input when no separate write tier was supplied. The uncached
-    share is clamped at zero in case a provider reports cache tokens
-    without folding them into ``input_tokens``.
+    writes at the model's write tier when it has one (otherwise plain
+    input). The uncached share is clamped at zero in case a provider
+    reports cache tokens without folding them into ``input_tokens``.
     """
     input_rate = price.input_mtok
     cache_read_rate = (
         price.cache_read_mtok if price.cache_read_mtok is not None else input_rate
+    )
+    cache_write_rate = (
+        price.cache_write_mtok if price.cache_write_mtok is not None else input_rate
     )
     uncached_input_tokens = max(
         input_tokens - cache_read_tokens - cache_write_tokens, 0
@@ -418,7 +434,7 @@ def _direct_model_cost(
         Decimal(uncached_input_tokens) * input_rate
         + Decimal(output_tokens) * price.output_mtok
         + Decimal(cache_read_tokens) * cache_read_rate
-        + Decimal(cache_write_tokens) * input_rate
+        + Decimal(cache_write_tokens) * cache_write_rate
     ) / _TOKENS_PER_MTOK
 
 
