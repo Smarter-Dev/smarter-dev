@@ -1,0 +1,111 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Chat Memory - {{ guild.name }} - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Chat Memory</h1>
+            <p><a href="/admin/bot/guilds/{{ guild.id }}">&larr; {{ guild.name }}</a></p>
+        </hgroup>
+
+        <p class="sk-text-muted">
+            The chat agent's three memory layers for this guild. Short-term memory is the
+            conversation itself &mdash; see
+            <a href="/admin/chat-conversations?guild_id={{ guild.id }}">its conversations</a>.
+        </p>
+
+        <div class="sk-panel" style="margin-bottom:1.5rem;">
+            <div class="sk-panel-head">
+                Long-term memory
+                {% if blob and not blob.memory_enabled %}
+                <span class="sk-badge sk-badge-danger" style="margin-left:0.5rem;">disabled &mdash; hidden from the bot</span>
+                {% endif %}
+            </div>
+            <div class="sk-panel-body">
+                {% if blob and blob.content %}
+                <div style="border:1px solid var(--sk-border-color, #e0e0e0); border-radius:6px; padding:1rem; margin-bottom:1rem;">
+                    {{ blob.content | markdown }}
+                </div>
+                <p class="sk-text-muted" style="font-size:0.85rem;">
+                    Revision {{ blob.revision }}
+                    &middot; last dream {{ blob.last_dream_at.strftime('%Y-%m-%d %H:%M UTC') if blob.last_dream_at else 'never' }}
+                    &middot; {{ blob.notes_consumed }} note(s) consumed
+                    {% if blob.model_name %}&middot; {{ blob.model_name }}{% endif %}
+                </p>
+                {% elif blob %}
+                <p class="sk-text-muted">The blob exists but is empty &mdash; the agent sees no long-term memory.</p>
+                {% else %}
+                <p class="sk-text-muted">No memory yet &mdash; this guild has never been dreamed.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="sk-panel" style="margin-bottom:1.5rem;">
+            <div class="sk-panel-head">Mid-term notes ({{ notes|length }})</div>
+            <div class="sk-panel-body">
+                {% if notes %}
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr>
+                            <th>Kept</th>
+                            <th>Channel</th>
+                            <th>Note</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for note in notes %}
+                        <tr>
+                            <td style="white-space:nowrap;">{{ note.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td><code>#{{ note.channel_name or note.channel_id }}</code></td>
+                            <td>{{ note.content }}</td>
+                            <td>
+                                {% if note.created_at < notes_since %}
+                                <span class="sk-badge" title="Written before today (UTC); outside the agent's context window until the next dream consumes it.">stale</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <p class="sk-text-muted" style="font-size:0.85rem;">
+                    The agent sees today's notes (UTC); the nightly dream folds notes into
+                    the long-term blob and deletes them. A <em>stale</em> badge means a note
+                    survived past its day &mdash; usually a failed dream.
+                </p>
+                {% else %}
+                <p class="sk-text-muted">No notes waiting &mdash; the last dream consumed them, or none were kept today.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Dream history ({{ revisions|length }})</div>
+            <div class="sk-panel-body">
+                {% if revisions %}
+                {% for rev in revisions %}
+                <details style="margin-bottom:0.75rem;">
+                    <summary style="cursor:pointer;">
+                        Revision {{ rev.revision }}
+                        <span class="sk-text-muted" style="font-size:0.85rem;">
+                            &middot; {{ rev.created_at.strftime('%Y-%m-%d %H:%M UTC') }}
+                            &middot; {{ rev.notes_consumed }} note(s) consumed
+                            {% if rev.model_name %}&middot; {{ rev.model_name }}{% endif %}
+                        </span>
+                    </summary>
+                    <div style="border:1px solid var(--sk-border-color, #e0e0e0); border-radius:6px; padding:1rem; margin-top:0.5rem;">
+                        {{ rev.content | markdown }}
+                    </div>
+                </details>
+                {% endfor %}
+                {% else %}
+                <p class="sk-text-muted">No dream revisions recorded yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
