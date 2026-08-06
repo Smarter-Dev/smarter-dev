@@ -32,12 +32,23 @@ Thumbs.db
 # Documentation
 README.md
 *.md
+docs/
 
 # Planning
 planning/
+reports/
 
 # GitHub
 .github/
+
+# Not used at runtime. This list must stay in sync with the tag-input
+# excludes in .github/workflows/deploy.yaml: anything the image tag ignores
+# must be out of the build context too, or the image could change without
+# the tag changing.
+k8s/
+tests/
+.claude/
+_meta
 
 # Assets not needed in container
 grow-together-landing-page.png
