@@ -101,7 +101,6 @@ def test_gemini_lineup_reflects_current_releases():
 
 def test_gpt_5_6_lineup_is_selectable():
     expected = {
-        "gpt-5-6-luna": "gpt-5.6-luna",
         "gpt-5-6-sol": "gpt-5.6-sol",
         "gpt-5-6-terra": "gpt-5.6-terra",
     }
@@ -112,6 +111,28 @@ def test_gpt_5_6_lineup_is_selectable():
         assert model.family == "GPT"
         assert model.provider is ModelProvider.OPENAI
         assert model.default_reasoning in model.reasoning_levels
+
+
+def test_luna_routes_through_openrouter():
+    # Switched 2026-08-06 for OpenRouter's 50% rate ($0.10/$0.60 against
+    # OpenAI direct's $0.20/$1.20). Probed live through OpenRouter: every
+    # effort none→max returns 200 from the OpenAI upstream, so the full
+    # GPT-5.6 ladder stays.
+    luna = get_model("gpt-5-6-luna")
+    assert luna is not None
+    assert luna.provider is ModelProvider.OPENROUTER
+    assert luna.model_id == "openai/gpt-5.6-luna"
+    assert luna.family == "GPT"
+    assert luna.supports_vision is True
+    assert luna.reasoning_levels == (
+        ReasoningLevel.NONE,
+        ReasoningLevel.LOW,
+        ReasoningLevel.MEDIUM,
+        ReasoningLevel.HIGH,
+        ReasoningLevel.XHIGH,
+        ReasoningLevel.MAX,
+    )
+    assert luna.default_reasoning is ReasoningLevel.MEDIUM
 
 
 def test_claude_opus_5_is_selectable():
@@ -212,7 +233,12 @@ def test_provider_routing_by_family():
         if model.family == "Gemini":
             assert model.provider is ModelProvider.GOOGLE
         elif model.family == "GPT":
-            assert model.provider is ModelProvider.OPENAI
+            # Luna rides OpenRouter (same OpenAI upstream, half the rate);
+            # the rest of the GPT lineup is served direct.
+            assert model.provider in (
+                ModelProvider.OPENAI,
+                ModelProvider.OPENROUTER,
+            )
         elif model.family == "Claude":
             assert model.provider is ModelProvider.ANTHROPIC
         elif model.family in ("Poolside", "Grok"):

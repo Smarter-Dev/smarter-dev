@@ -425,7 +425,7 @@ async def test_summarize_web_content_fails_over_to_gemini_and_logs_critical(capl
     record_failover.assert_called_once()
     assert record_failover.call_args.kwargs == {
         "operation": "web_summarizer",
-        "primary_model": "gpt-5.6-luna",
+        "primary_model": "openai/gpt-5.6-luna",
         "fallback_model": "gemini-3.1-flash-lite",
         "error": primary_agent.run.side_effect,
     }

@@ -202,6 +202,17 @@ spec:
                     limits:
                         cpu: 300m
                         memory: 384Mi
+                # A fresh pod needs ~100s to import the app at the 300m CPU
+                # limit; without a startup budget the liveness probe kills it
+                # at ~90s and the rollout flaps. The startup probe allows up
+                # to 4 minutes, then the normal liveness cadence takes over.
+                startupProbe:
+                    httpGet:
+                        path: /api/health
+                        port: 8000
+                    periodSeconds: 15
+                    timeoutSeconds: 5
+                    failureThreshold: 16
                 livenessProbe:
                     httpGet:
                         path: /api/health
