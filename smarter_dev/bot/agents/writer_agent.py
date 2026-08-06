@@ -106,7 +106,7 @@ def _identity_directive(model_id: str) -> str:
     )
 
 
-def build_writer_prompt(brief: WriterBrief) -> str:
+def build_writer_prompt(brief: WriterBrief, *, long_term: str | None = None) -> str:
     """Render ``brief`` into the writer's user message (pure function).
 
     Deterministically lays out the attributed message summaries, the search
@@ -114,10 +114,28 @@ def build_writer_prompt(brief: WriterBrief) -> str:
     When ``brief.send_voice`` is True it appends an explicit instruction to also
     produce a short spoken-form ``voice_summary``; when False, no voice text is
     added. Empty sections are omitted. Does not mutate ``brief``.
+
+    Memory comes in by two different routes on purpose. ``long_term`` is the
+    guild's memory blob, injected verbatim by the engine — it is the writer's
+    identity in this server, and routing it through the cheap drafter would let a
+    small model paraphrase the persona afresh every single turn. ``brief.remembered``
+    is situational: the lines from today's notes and this hour's actions that the
+    drafter judged the reply would be worse without. Both are laid out before the
+    conversation so the ordering runs far to near, and both are framed as the
+    writer's own memory rather than as findings to cite.
     """
     sections: list[str] = [
         f"Write your reply in {brief.response_language}.",
     ]
+
+    if long_term and long_term.strip():
+        sections.append(
+            f"What you remember about this place:\n{long_term.strip()}"
+        )
+
+    if brief.remembered:
+        remembered = "\n".join(f"- {line}" for line in brief.remembered)
+        sections.append(f"Also on your mind right now:\n{remembered}")
 
     if brief.message_summaries:
         summaries = "\n".join(f"- {summary}" for summary in brief.message_summaries)

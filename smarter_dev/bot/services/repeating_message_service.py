@@ -15,11 +15,13 @@ from typing import Any
 
 import hikari
 
+from smarter_dev.bot.guild_event_recorder import record_guild_event
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.base import BaseService
 from smarter_dev.bot.services.cache_manager import CacheManager
 from smarter_dev.bot.services.exceptions import ServiceError
 from smarter_dev.bot.services.models import ServiceHealth
+from smarter_dev.shared.guild_event_log import bot_message_event
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +179,7 @@ class RepeatingMessageService(BaseService):
         try:
             channel_id = message_data.get("channel_id")
             message_content = message_data.get("message_content", "")
-            message_data.get("guild_id")
+            guild_id = message_data.get("guild_id")
 
             if not channel_id or not message_content:
                 logger.warning(f"Repeating message {message_id} missing required fields")
@@ -186,7 +188,9 @@ class RepeatingMessageService(BaseService):
             logger.info(f"Processing repeating message {message_id} for channel {channel_id}")
 
             # Send the message
-            success = await self._send_message_with_retry(channel_id, message_content, message_id)
+            success = await self._send_message_with_retry(
+                channel_id, message_content, message_id, guild_id=guild_id
+            )
 
             if success:
                 # Mark the message as sent and update next send time
@@ -216,13 +220,16 @@ class RepeatingMessageService(BaseService):
             logger.error(f"Failed to get due repeating messages: {e}")
             return []
 
-    async def _send_message_with_retry(self, channel_id: str, message_content: str, message_id: str, max_retries: int = 3) -> bool:
+    async def _send_message_with_retry(self, channel_id: str, message_content: str, message_id: str, *, guild_id: str | None, max_retries: int = 3) -> bool:
         """Send a message to a Discord channel with retry logic.
 
         Args:
             channel_id: Discord channel ID
             message_content: Message text to send (already formatted with role mentions)
             message_id: Message ID for logging
+            guild_id: Guild the reminder belongs to, so a delivered message can be
+                written into the bot's short-term memory of its own hour. A
+                message row without one is simply not remembered.
             max_retries: Maximum number of retry attempts
 
         Returns:
@@ -232,6 +239,16 @@ class RepeatingMessageService(BaseService):
             try:
                 await self._send_message_to_channel(channel_id, message_content)
                 logger.info(f"Successfully sent repeating message {message_id} to channel {channel_id}")
+                if guild_id:
+                    await record_guild_event(
+                        self._bot,
+                        bot_message_event(
+                            guild_id=str(guild_id),
+                            summary="a repeating message",
+                            channel_id=str(channel_id),
+                            source="announcement",
+                        ),
+                    )
                 return True
             except ServiceError as e:
                 if "Channel not found" in str(e) or "Invalid channel ID" in str(e):

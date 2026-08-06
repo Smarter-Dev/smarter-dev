@@ -14,7 +14,9 @@ from typing import TYPE_CHECKING
 
 import hikari
 
+from smarter_dev.bot.guild_event_recorder import record_guild_event
 from smarter_dev.shared.database import get_db_session_context
+from smarter_dev.shared.guild_event_log import mod_action_event
 from smarter_dev.web.crud import AttachmentFilterConfigOperations
 
 if TYPE_CHECKING:
@@ -140,6 +142,26 @@ async def check_attachment_filter(
                     logger.info(
                         f"Deleted message from {event.author} in guild {guild_id_str} "
                         f"due to blocked attachment: {reported['filename']}"
+                    )
+                    # TODO(§3.8): an attachment delete writes no ModerationAction
+                    # row today, so the bot's short-term memory is captured here.
+                    # When feature-parity §3.8 gives it a row it will flow through
+                    # dispatch_mod_action — drop this call then, or the delete
+                    # lands in the log twice.
+                    await record_guild_event(
+                        bot,
+                        mod_action_event(
+                            {
+                                "action_type": "delete",
+                                "target_username": event.author.username,
+                                "reason": (
+                                    f"blocked attachment: {reported['filename']}"
+                                ),
+                                "source": "handler",
+                                "channel_id": str(event.channel_id),
+                            },
+                            guild_id=guild_id_str,
+                        ),
                     )
 
                 # Send message

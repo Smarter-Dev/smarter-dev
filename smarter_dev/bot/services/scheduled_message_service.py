@@ -14,11 +14,13 @@ from typing import Any
 
 import hikari
 
+from smarter_dev.bot.guild_event_recorder import record_guild_event
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.base import BaseService
 from smarter_dev.bot.services.cache_manager import CacheManager
 from smarter_dev.bot.services.exceptions import ServiceError
 from smarter_dev.bot.services.models import ServiceHealth
+from smarter_dev.shared.guild_event_log import bot_message_event
 
 logger = logging.getLogger(__name__)
 
@@ -271,7 +273,9 @@ class ScheduledMessageService(BaseService):
                 squad_message = self._format_scheduled_message_with_mention(
                     title, description, squad_info.get("role_id")
                 )
-                success = await self._send_message_with_retry(channel_id, squad_message, title)
+                success = await self._send_message_with_retry(
+                    channel_id, squad_message, title, guild_id=guild_id
+                )
                 if success:
                     successful_sends += 1
                 else:
@@ -286,7 +290,9 @@ class ScheduledMessageService(BaseService):
             logger.info(f"Sending {'custom' if announcement_channel_message else 'primary'} message to {len(announcement_channels)} campaign channels")
 
             for channel_id in announcement_channels:
-                success = await self._send_message_with_retry(channel_id, campaign_message, title)
+                success = await self._send_message_with_retry(
+                    channel_id, campaign_message, title, guild_id=guild_id
+                )
                 if success:
                     successful_sends += 1
                 else:
@@ -304,14 +310,22 @@ class ScheduledMessageService(BaseService):
                 squad_message = self._format_scheduled_message_with_mention(
                     title, description, squad_info.get("role_id")
                 )
-                success = await self._send_message_with_retry(channel_id, squad_message, title, max_retries=5)
+                success = await self._send_message_with_retry(
+                    channel_id, squad_message, title, guild_id=guild_id, max_retries=5
+                )
                 if success:
                     successful_sends += 1
 
             # Retry failed campaign channels
             for channel_id in failed_campaign_channels:
                 if campaign_message:
-                    success = await self._send_message_with_retry(channel_id, campaign_message, title, max_retries=5)
+                    success = await self._send_message_with_retry(
+                        channel_id,
+                        campaign_message,
+                        title,
+                        guild_id=guild_id,
+                        max_retries=5,
+                    )
                     if success:
                         successful_sends += 1
 
@@ -326,13 +340,15 @@ class ScheduledMessageService(BaseService):
         else:
             logger.error(f"Failed to send scheduled message '{title}' to any channels")
 
-    async def _send_message_with_retry(self, channel_id: str, message: str, title: str, max_retries: int = 3) -> bool:
+    async def _send_message_with_retry(self, channel_id: str, message: str, title: str, *, guild_id: str, max_retries: int = 3) -> bool:
         """Send a message to a Discord channel with retry logic.
 
         Args:
             channel_id: Discord channel ID
             message: Message text to send
             title: Message title for logging
+            guild_id: Guild the announcement belongs to, so a delivered message
+                can be written into the bot's short-term memory of its own hour
             max_retries: Maximum number of retry attempts
 
         Returns:
@@ -342,6 +358,15 @@ class ScheduledMessageService(BaseService):
             try:
                 await self._send_message_to_channel(channel_id, message)
                 logger.info(f"Successfully sent scheduled message '{title}' to channel {channel_id}")
+                await record_guild_event(
+                    self._bot,
+                    bot_message_event(
+                        guild_id=guild_id,
+                        summary=f'the scheduled message "{title}"',
+                        channel_id=str(channel_id),
+                        source="announcement",
+                    ),
+                )
                 return True
             except ServiceError as e:
                 if "Channel not found" in str(e) or "Invalid channel ID" in str(e):

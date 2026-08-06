@@ -576,7 +576,7 @@ async def check_content_filters(
         )
 
     if recorded_reasons:
-        await _record_deletions(event, recorded_reasons)
+        await _record_deletions(bot, event, recorded_reasons)
 
     return ContentFilterResult(
         blocked_tld_links=tuple(blocked_tld_links),
@@ -757,9 +757,13 @@ async def _post_mod_log(
 
 
 async def _record_deletions(
-    event: hikari.GuildMessageCreateEvent, reasons: list[str]
+    bot: RESTAware, event: hikari.GuildMessageCreateEvent, reasons: list[str]
 ) -> None:
     """Write one ``ModerationAction`` per fired filter and fire ``mod_action``.
+
+    ``bot`` is threaded through only so the dispatch can also write the delete
+    into the guild's short-term event log — the chat agent has to be able to own
+    a filter delete it made, the same as any other action of its account.
 
     Failures propagate: a missing audit row is a real problem, and unlike the
     slash commands there is no user-facing response that would otherwise lie.
@@ -781,4 +785,4 @@ async def _record_deletions(
         ]
         await session.commit()
     for action in actions:
-        await dispatch_mod_action(action)
+        await dispatch_mod_action(action, bot=bot)

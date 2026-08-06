@@ -14,6 +14,8 @@ from pydantic import Field
 from pydantic import field_validator
 from pydantic import model_validator
 
+from smarter_dev.shared.guild_event_log import GuildEvent
+
 
 class Author(BaseModel):
     """A Discord user referenced in the conversation."""
@@ -104,6 +106,62 @@ class Me(BaseModel):
     username: str
 
 
+class MemoryNote(BaseModel):
+    """One thing the agent kept earlier today, as the prompt will show it.
+
+    A read-only view of a ``chat_agent_memory_notes`` row: the note's own words
+    plus where and when it was written, which is all the ``<from-today>`` block
+    renders. The channel is denormalised into ``channel_name`` at write time, so
+    a note can name its room without a Discord round trip.
+    """
+
+    text: str
+    channel_id: str | None = None
+    channel_name: str | None = None
+    created_at: datetime
+
+
+class GuildEventView(BaseModel):
+    """Something the bot's own account did, as the prompt will show it.
+
+    The renderable half of a
+    :class:`~smarter_dev.shared.guild_event_log.GuildEvent`. Moderation events
+    carry structured fields (so the line can put the duration inline and the
+    reason after the colon) while message-shaped events carry ``summary`` — the
+    *purpose* of what was sent, never its body.
+    """
+
+    at: datetime
+    kind: str
+    channel_id: str | None = None
+    channel_name: str | None = None
+    summary: str = ""
+    action: str | None = None
+    target_username: str | None = None
+    target_user_id: str | None = None
+    moderator_username: str | None = None
+    reason: str | None = None
+    duration_seconds: int | None = None
+    source: str | None = None
+
+    @classmethod
+    def from_guild_event(cls, event: GuildEvent) -> "GuildEventView":
+        """Build the view for one logged event, copying nothing but its fields."""
+        return cls(
+            at=event.at,
+            kind=event.kind,
+            channel_id=event.channel_id,
+            channel_name=event.channel_name,
+            summary=event.summary,
+            action=event.action,
+            target_username=event.target_username,
+            moderator_username=event.moderator_username,
+            reason=event.reason,
+            duration_seconds=event.duration_seconds,
+            source=event.source,
+        )
+
+
 class InitialAgentInput(BaseModel):
     """Input for the first turn of an engagement.
 
@@ -132,6 +190,25 @@ class InitialAgentInput(BaseModel):
     now_utc: datetime
     topic: str | None = None
     notes: str | None = None
+    long_term_memory: str | None = Field(
+        default=None,
+        description=(
+            "The guild's long-term memory blob, rendered verbatim. Sent on the "
+            "initial turn only — it stays in history and prompt-cached after."
+        ),
+    )
+    long_term_memory_updated_at: datetime | None = Field(
+        default=None,
+        description="When the blob was last rewritten by a dream, if it ever was.",
+    )
+    memory_notes: list[MemoryNote] = Field(
+        default_factory=list,
+        description="Notes the agent kept since midnight UTC, newest capped server-side.",
+    )
+    guild_events: list[GuildEventView] = Field(
+        default_factory=list,
+        description="The last hour of things the bot's own account did in this guild.",
+    )
 
 
 class FollowupAgentInput(BaseModel):
@@ -155,6 +232,25 @@ class FollowupAgentInput(BaseModel):
     now_utc: datetime
     topic: str | None = None
     notes: str | None = None
+    long_term_memory: str | None = Field(
+        default=None,
+        description=(
+            "Normally None — the blob rides in history from the initial turn. "
+            "Set only to re-emit it after a compaction drained that history, "
+            "which would otherwise amputate the bot's identity mid-engagement."
+        ),
+    )
+    long_term_memory_updated_at: datetime | None = Field(
+        default=None,
+        description="When the blob was last rewritten by a dream, if it ever was.",
+    )
+    new_guild_events: list[GuildEventView] = Field(
+        default_factory=list,
+        description=(
+            "Only what the bot's account did since the last turn — the full "
+            "hour went out at activation."
+        ),
+    )
 
 
 class MessageScore(BaseModel):
@@ -340,6 +436,14 @@ class WriterBrief(BaseModel):
             "text, code, or logs."
         ),
     )
+    remembered: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Lines from what you remember or what you did that the reply would "
+            "be worse without — the writer treats these as its own memory, not "
+            "as findings. Usually empty."
+        ),
+    )
     send_voice: bool = Field(
         default=False,
         description="True ONLY when the user explicitly asked for a voice message.",
@@ -362,6 +466,9 @@ class WriterBrief(BaseModel):
 
     @model_validator(mode="after")
     def _require_content(self) -> "WriterBrief":
+        # `remembered` is deliberately NOT counted here: memory colours a reply,
+        # it is never the substance of one. A brief carrying only remembered
+        # lines has nothing for the writer to actually answer.
         if not (self.message_summaries or self.search_findings or self.questions):
             raise ValueError(
                 "WriterBrief requires at least one of `message_summaries`, "

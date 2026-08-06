@@ -12,7 +12,20 @@ import json
 import httpx
 import pytest
 
+from smarter_dev.web import admin_actions
 from smarter_dev.web.admin_actions import AdminActionError, AdminActor
+
+
+@pytest.fixture(autouse=True)
+def recorded_events(monkeypatch) -> list:
+    """Captures the short-term event log writes instead of reaching Redis."""
+    events: list = []
+
+    async def capture_event(event, **kwargs) -> None:
+        events.append(event)
+
+    monkeypatch.setattr(admin_actions, "record_guild_event", capture_event)
+    return events
 
 
 def _actor(requests: list[httpx.Request], status_code: int = 204) -> AdminActor:
@@ -544,3 +557,45 @@ async def test_search_guild_members_query_over_fetches_window():
     # Always over-fetch Discord's 100 window, regardless of the caller's limit.
     assert search.url.params["limit"] == "100"
     assert search.url.params["query"] == "alice"
+
+
+# -- short-term event log: what the bot's account did for a handler ----------
+
+
+async def test_ban_is_written_to_the_event_log(recorded_events):
+    await _actor([]).ban_user("U1", reason="scam")
+
+    assert len(recorded_events) == 1
+    event = recorded_events[0]
+    assert event.kind == "mod_action"
+    assert event.guild_id == "G1"
+    assert event.action == "ban"
+    assert event.target_username == "U1"
+    assert event.reason == "scam"
+    assert event.source == "handler"
+
+
+async def test_timeout_records_its_duration(recorded_events):
+    await _actor([]).timeout_user("U1", duration_seconds=900)
+
+    assert recorded_events[0].action == "timeout"
+    assert recorded_events[0].duration_seconds == 900
+
+
+async def test_kick_and_delete_are_written_to_the_event_log(recorded_events):
+    await _actor([]).kick_user("U1")
+    await _actor([]).delete_message("C1", "M1")
+
+    assert [event.action for event in recorded_events] == ["kick", "delete"]
+    assert recorded_events[1].channel_id == "C1"
+
+
+async def test_a_no_op_against_a_departed_member_is_never_remembered(recorded_events):
+    """Nothing happened, so the bot has nothing to remember doing."""
+    assert "already absent" in await _actor([], status_code=404).ban_user("U1")
+    assert "already absent" in await _actor([], status_code=404).kick_user("U1")
+    assert "already deleted" in await _actor([], status_code=404).delete_message(
+        "C1", "M1"
+    )
+
+    assert recorded_events == []

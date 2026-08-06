@@ -48,8 +48,11 @@ from typing import TYPE_CHECKING
 
 import hikari
 
+from smarter_dev.bot.guild_event_recorder import record_guild_event
 from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
 from smarter_dev.shared.database import get_db_session_context
+from smarter_dev.shared.guild_event_log import GuildEvent
+from smarter_dev.shared.guild_event_log import mod_action_event
 from smarter_dev.web.crud import ModerationActionOperations
 from smarter_dev.web.crud import ModerationFilterConfigOperations
 from smarter_dev.web.models import ModerationFilterConfig
@@ -1098,7 +1101,7 @@ async def check_spam_engine(
         guild_state.record_warning(author_id, timestamp)
 
     if decision.should_delete_message:
-        await _delete_offending_message(bot, event)
+        await _delete_offending_message(bot, event, decision)
         await _post_scam_log(
             bot,
             event,
@@ -1134,6 +1137,12 @@ async def _warn_author(
         logger.warning(
             "Cannot post spam warning in channel %s (missing permissions)", event.channel_id
         )
+        return
+    # TODO(§3.8): a spam warning writes no ModerationAction row today, so the
+    # short-term event log is captured here. When feature-parity §3.8 gives it a
+    # row it will flow through dispatch_mod_action — drop this call then, or the
+    # warning lands in the bot's memory twice.
+    await record_guild_event(bot, _spam_action_event(event, "warn", decision.reasons))
 
 
 async def _mute_author(
@@ -1221,7 +1230,7 @@ async def _record_timeout_action(
             trigger_message_id=str(event.message_id),
         )
         await session.commit()
-    await dispatch_mod_action(action)
+    await dispatch_mod_action(action, bot=bot)
 
 
 async def _post_mute_alert(
@@ -1268,17 +1277,46 @@ async def _post_mute_alert(
 async def _delete_offending_message(
     bot: BotApp,
     event: hikari.GuildMessageCreateEvent,
+    decision: SpamDecision,
 ) -> None:
-    """Delete the offending message; a 404 means someone else already did."""
+    """Delete the offending message; a 404 means someone else already did.
+
+    ``decision`` is here for its reasons: the delete carries no audit row, so
+    the short-term event log is the only place that records WHY the bot removed
+    the message, and "I deleted a message" without the why is useless to it.
+    """
     try:
         await bot.rest.delete_message(event.channel_id, event.message_id)
     except hikari.NotFoundError:
         logger.debug("Offending message %s was already deleted", event.message_id)
+        return
     except hikari.ForbiddenError:
         logger.warning(
             "Cannot delete offending message in channel %s (missing permissions)",
             event.channel_id,
         )
+        return
+    # TODO(§3.8): same as the warn above — no ModerationAction row exists for a
+    # spam delete yet, so it is captured here rather than via dispatch_mod_action.
+    await record_guild_event(bot, _spam_action_event(event, "delete", decision.reasons))
+
+
+def _spam_action_event(
+    event: hikari.GuildMessageCreateEvent,
+    action_type: str,
+    reasons: Sequence[str],
+) -> GuildEvent:
+    """The short-term-memory event for a row-less spam action, as the bot recalls it."""
+    return mod_action_event(
+        {
+            "action_type": action_type,
+            "target_username": event.author.username,
+            "reason": ", ".join(reasons),
+            "source": MOD_ACTION_SOURCE,
+            "channel_id": str(event.channel_id),
+        },
+        guild_id=str(event.guild_id),
+    )
 
 
 async def _post_scam_log(

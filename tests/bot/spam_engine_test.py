@@ -823,6 +823,7 @@ def engine_harness(monkeypatch):
     )
     recorded_actions: list[dict] = []
     dispatched: list = []
+    recorded_events: list = []
 
     async def fake_get_config(session, guild_id):
         return harness.config
@@ -831,8 +832,8 @@ def engine_harness(monkeypatch):
         recorded_actions.append(kwargs)
         return SimpleNamespace(**kwargs)
 
-    async def fake_dispatch(action) -> None:
-        dispatched.append(action)
+    async def fake_dispatch(action, *, bot=None) -> None:
+        dispatched.append((action, bot))
 
     async def _noop(*args, **kwargs) -> None:
         return None
@@ -845,8 +846,12 @@ def engine_harness(monkeypatch):
         spam_engine.moderation_filter_config_ops, "get_config", fake_get_config
     )
     monkeypatch.setattr(spam_engine.mod_action_ops, "create_action", fake_create_action)
+    async def fake_record_event(bot, event, **kwargs) -> None:
+        recorded_events.append(event)
+
     monkeypatch.setattr(spam_engine, "dispatch_mod_action", fake_dispatch)
     monkeypatch.setattr(spam_engine, "get_db_session_context", fake_session_context)
+    monkeypatch.setattr(spam_engine, "record_guild_event", fake_record_event)
 
     spam_engine.reset_spam_states()
     rest = _FakeRest()
@@ -857,6 +862,7 @@ def engine_harness(monkeypatch):
         state=spam_engine.GuildSpamState(),
         recorded_actions=recorded_actions,
         dispatched=dispatched,
+        recorded_events=recorded_events,
     )
     return harness
 
@@ -1447,6 +1453,87 @@ async def test_missing_send_permission_does_not_break_the_warn_path(engine_harne
 
     assert decision.action == spam_engine.SPAM_ACTION_WARN
     assert engine_harness.rest.created_messages == []
+
+
+# ---------------------------------------------------------------------------
+# Short-term event log: the warn and the delete carry no ModerationAction row,
+# so they are captured here rather than riding the mod_action dispatch.
+# ---------------------------------------------------------------------------
+
+
+async def test_spam_warning_is_written_to_the_event_log(engine_harness):
+    await _flood(engine_harness, 6)
+
+    assert len(engine_harness.recorded_events) == 1
+    event = engine_harness.recorded_events[0]
+    assert event.kind == "mod_action"
+    assert event.guild_id == str(GUILD_ID)
+    assert event.action == "warn"
+    assert event.target_username == "spammer"
+    assert event.channel_id == str(CHANNEL_ID)
+    assert spam_engine.SPAM_REASON_MESSAGE_RATE in event.reason
+    assert event.source == spam_engine.MOD_ACTION_SOURCE
+
+
+async def test_unsendable_warning_is_never_remembered(engine_harness):
+    """No warning reached the channel, so the bot must not claim it warned."""
+    engine_harness.rest.create_message_raises = hikari.ForbiddenError(
+        url="url", headers={}, raw_body=b"", message="cannot send"
+    )
+
+    await _flood(engine_harness, 6)
+
+    assert engine_harness.recorded_events == []
+
+
+async def test_spam_delete_is_written_to_the_event_log(engine_harness):
+    await spam_engine.check_spam_engine(
+        engine_harness.bot,
+        _event("claim it https://dlscord.gift/abc123"),
+        state=engine_harness.state,
+        now=NOW,
+    )
+
+    deletes = [
+        event for event in engine_harness.recorded_events if event.action == "delete"
+    ]
+    assert len(deletes) == 1
+    assert deletes[0].guild_id == str(GUILD_ID)
+    assert deletes[0].target_username == "spammer"
+    assert deletes[0].channel_id == str(CHANNEL_ID)
+    assert spam_engine.SPAM_REASON_SCAM_LINK in deletes[0].reason
+    # The timeout itself rides the mod_action dispatch (it has an audit row), so
+    # the engine must not also capture it here and double-log the mute.
+    assert [event.action for event in engine_harness.recorded_events] == ["delete"]
+
+
+async def test_already_deleted_message_is_never_remembered(engine_harness):
+    """Someone else removed it — the bot didn't, so it can't say it did."""
+    engine_harness.rest.delete_raises = hikari.NotFoundError(
+        url="url", headers={}, raw_body=b"", message="already deleted"
+    )
+
+    await spam_engine.check_spam_engine(
+        engine_harness.bot,
+        _event("claim it https://dlscord.gift/abc123"),
+        state=engine_harness.state,
+        now=NOW,
+    )
+
+    assert engine_harness.recorded_events == []
+
+
+async def test_spam_mute_dispatches_with_the_bot_for_the_event_log(engine_harness):
+    await spam_engine.check_spam_engine(
+        engine_harness.bot,
+        _event("@everyone claim your free nitro now"),
+        state=engine_harness.state,
+        now=NOW,
+    )
+
+    assert len(engine_harness.dispatched) == 1
+    _, dispatched_bot = engine_harness.dispatched[0]
+    assert dispatched_bot is engine_harness.bot
 
 
 def test_uncached_guild_or_member_resolves_to_no_permissions():

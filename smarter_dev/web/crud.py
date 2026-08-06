@@ -13,6 +13,8 @@ from uuid import UUID
 from datetime import UTC, datetime, timezone, date
 
 from sqlalchemy import select, update, delete, func, desc, and_, or_
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.exc import IntegrityError, NoResultFound
@@ -48,6 +50,12 @@ from smarter_dev.web.models import (
     ModerationConfig,
     ModerationAction,
     ChannelModelOverride,
+    ChatAgentGuildMemory,
+    ChatAgentMemoryNote,
+    ChatAgentMemoryRevision,
+    MAX_NOTES_PER_GUILD_PER_DAY,
+    MEMORY_NOTES_CONTEXT_LIMIT,
+    MEMORY_REVISIONS_KEPT,
 )
 
 logger = logging.getLogger(__name__)
@@ -5881,3 +5889,273 @@ async def list_channel_model_overrides(
         .order_by(ChannelModelOverride.channel_id)
     )
     return list(result.scalars().all())
+
+
+# ============================================================================
+# Chat agent guild memory operations
+# ============================================================================
+#
+# The persistent half of the chat agent's three-layer memory: the long-term
+# per-guild blob, the mid-term notes the ``remember`` tool writes, and the
+# revision history the nightly dream leaves behind. Two very different callers
+# share these functions — the bot reaches them over the API controller
+# (``api_native/chat_memory.py``), the dream session calls them directly in the
+# web image — so they are plain functions taking an ``AsyncSession`` and the
+# caller owns the transaction and commits.
+#
+# Every time boundary is a caller-supplied ``datetime``; nothing here reads the
+# clock. That keeps the midnight-UTC day policy in exactly one place per tier
+# and makes the whole layer trivially testable.
+
+
+async def get_guild_memory_blob(
+    session: AsyncSession, guild_id: str
+) -> ChatAgentGuildMemory | None:
+    """Return the guild's long-term memory row, or ``None`` if it has never dreamed."""
+    result = await session.execute(
+        select(ChatAgentGuildMemory).where(ChatAgentGuildMemory.guild_id == guild_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def upsert_guild_memory_blob(
+    session: AsyncSession,
+    *,
+    guild_id: str,
+    content: str,
+    notes_consumed: int,
+    model_name: str | None,
+    dreamed_at: datetime,
+) -> ChatAgentGuildMemory:
+    """Write the night's blob for ``guild_id``, bumping ``revision`` atomically.
+
+    ``INSERT ... ON CONFLICT (guild_id) DO UPDATE`` (dialect-switched exactly
+    like :func:`smarter_dev.web.handler_guild_memory.persist_guild_memory`) so
+    the revision is incremented *by the database* rather than read-then-written:
+    a retried CronJob overlapping a manual dream can never have both runs write
+    the same revision number, and a guild's first-ever dream can never lose to a
+    UNIQUE violation.
+
+    ``memory_enabled`` is deliberately absent from the update set — a dream must
+    never undo the per-guild forget button.
+    """
+    insert = pg_insert if session.bind.dialect.name == "postgresql" else sqlite_insert
+    statement = insert(ChatAgentGuildMemory).values(
+        guild_id=guild_id,
+        content=content,
+        revision=1,
+        last_dream_at=dreamed_at,
+        notes_consumed=notes_consumed,
+        model_name=model_name,
+        updated_at=dreamed_at,
+    )
+    statement = statement.on_conflict_do_update(
+        index_elements=["guild_id"],
+        set_={
+            "content": content,
+            "revision": ChatAgentGuildMemory.__table__.c.revision + 1,
+            "last_dream_at": dreamed_at,
+            "notes_consumed": notes_consumed,
+            "model_name": model_name,
+            "updated_at": dreamed_at,
+        },
+    )
+    await session.execute(statement)
+    await session.flush()
+    record = await get_guild_memory_blob(session, guild_id)
+    await session.refresh(record)
+    return record
+
+
+async def list_notes_since(
+    session: AsyncSession,
+    guild_id: str,
+    since: datetime,
+    limit: int = MEMORY_NOTES_CONTEXT_LIMIT,
+) -> list[ChatAgentMemoryNote]:
+    """The guild's most recent notes written at/after ``since``, newest first."""
+    result = await session.execute(
+        select(ChatAgentMemoryNote)
+        .where(
+            ChatAgentMemoryNote.guild_id == guild_id,
+            ChatAgentMemoryNote.created_at >= since,
+        )
+        .order_by(ChatAgentMemoryNote.created_at.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def list_notes_before(
+    session: AsyncSession, guild_id: str, cutoff: datetime
+) -> list[ChatAgentMemoryNote]:
+    """Every note the guild wrote before ``cutoff``, oldest first.
+
+    This is the dream's input: unbounded (a whole day is bounded by
+    :data:`MAX_NOTES_PER_GUILD_PER_DAY` already) and chronological, because the
+    dream reads the day the way it happened.
+    """
+    result = await session.execute(
+        select(ChatAgentMemoryNote)
+        .where(
+            ChatAgentMemoryNote.guild_id == guild_id,
+            ChatAgentMemoryNote.created_at < cutoff,
+        )
+        .order_by(ChatAgentMemoryNote.created_at.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def count_notes_since(
+    session: AsyncSession, guild_id: str, since: datetime
+) -> int:
+    """How many notes the guild has written at/after ``since``."""
+    result = await session.execute(
+        select(func.count())
+        .select_from(ChatAgentMemoryNote)
+        .where(
+            ChatAgentMemoryNote.guild_id == guild_id,
+            ChatAgentMemoryNote.created_at >= since,
+        )
+    )
+    return int(result.scalar_one())
+
+
+async def create_memory_note(
+    session: AsyncSession,
+    *,
+    guild_id: str,
+    channel_id: str,
+    content: str,
+    created_at: datetime,
+    day_start: datetime,
+    channel_name: str | None = None,
+    engagement_id: UUID | None = None,
+    daily_cap: int = MAX_NOTES_PER_GUILD_PER_DAY,
+) -> ChatAgentMemoryNote | None:
+    """Keep one note for ``guild_id``, or return ``None`` if it must not be kept.
+
+    ``None`` means one of two soft refusals, both of which the caller reports
+    back to the agent as a truthful sentence rather than an error: the guild has
+    already written ``daily_cap`` notes since ``day_start``, or this exact text
+    was already kept in the same window. Neither is exceptional — an agent
+    re-noticing something it already noticed is normal — so nothing raises.
+
+    ``created_at`` is stamped explicitly rather than left to the column default
+    so the row's timestamp and the window the caps were checked against are the
+    same instant on every dialect.
+    """
+    if await count_notes_since(session, guild_id, day_start) >= daily_cap:
+        return None
+    duplicate = await session.execute(
+        select(ChatAgentMemoryNote.id).where(
+            ChatAgentMemoryNote.guild_id == guild_id,
+            ChatAgentMemoryNote.content == content,
+            ChatAgentMemoryNote.created_at >= day_start,
+        )
+    )
+    if duplicate.first() is not None:
+        return None
+    record = ChatAgentMemoryNote(
+        guild_id=guild_id,
+        channel_id=channel_id,
+        channel_name=channel_name,
+        content=content,
+        engagement_id=engagement_id,
+        created_at=created_at,
+        updated_at=created_at,
+    )
+    session.add(record)
+    await session.flush()
+    return record
+
+
+async def delete_notes_by_id(session: AsyncSession, note_ids: list[UUID]) -> int:
+    """Delete exactly the named notes; return how many rows went.
+
+    The dream deletes by id and never by ``created_at < cutoff``: a note written
+    while the dream was running must not be destroyed unread.
+    """
+    if not note_ids:
+        return 0
+    result = await session.execute(
+        delete(ChatAgentMemoryNote).where(ChatAgentMemoryNote.id.in_(note_ids))
+    )
+    return int(result.rowcount or 0)
+
+
+async def record_memory_revision(
+    session: AsyncSession,
+    *,
+    guild_id: str,
+    content: str,
+    revision: int,
+    notes_consumed: int,
+    model_name: str | None,
+) -> ChatAgentMemoryRevision:
+    """Append one night's dream output to the guild's revision history."""
+    record = ChatAgentMemoryRevision(
+        guild_id=guild_id,
+        content=content,
+        revision=revision,
+        notes_consumed=notes_consumed,
+        model_name=model_name,
+    )
+    session.add(record)
+    await session.flush()
+    return record
+
+
+async def prune_memory_revisions(
+    session: AsyncSession, guild_id: str, keep: int = MEMORY_REVISIONS_KEPT
+) -> int:
+    """Keep the ``keep`` newest revisions for ``guild_id``; return how many went."""
+    survivors = (
+        select(ChatAgentMemoryRevision.id)
+        .where(ChatAgentMemoryRevision.guild_id == guild_id)
+        .order_by(ChatAgentMemoryRevision.revision.desc())
+        .limit(keep)
+        .scalar_subquery()
+    )
+    result = await session.execute(
+        delete(ChatAgentMemoryRevision).where(
+            ChatAgentMemoryRevision.guild_id == guild_id,
+            ChatAgentMemoryRevision.id.not_in(survivors),
+        )
+    )
+    return int(result.rowcount or 0)
+
+
+async def guilds_needing_dream(session: AsyncSession, cutoff: datetime) -> list[str]:
+    """Guild ids the dream session should visit for the night ending at ``cutoff``.
+
+    Two sources, unioned: guilds with notes waiting from before ``cutoff``, and
+    guilds that already have a memory row but have not been dreamed since it.
+    The second half is what makes quiet guilds — the majority — still get their
+    ``last_dream_at`` stamped, which is also what makes a CronJob retry a no-op.
+
+    Guilds whose ``memory_enabled`` is false are filtered out of both halves:
+    that flag is the per-guild forget button, and a dream would rebuild exactly
+    what it was pressed to erase.
+    """
+    guilds_with_pending_notes = await session.scalars(
+        select(ChatAgentMemoryNote.guild_id)
+        .where(ChatAgentMemoryNote.created_at < cutoff)
+        .distinct()
+    )
+    guilds_not_dreamed_tonight = await session.scalars(
+        select(ChatAgentGuildMemory.guild_id).where(
+            ChatAgentGuildMemory.memory_enabled.is_(True),
+            or_(
+                ChatAgentGuildMemory.last_dream_at.is_(None),
+                ChatAgentGuildMemory.last_dream_at < cutoff,
+            ),
+        )
+    )
+    guilds_opted_out = await session.scalars(
+        select(ChatAgentGuildMemory.guild_id).where(
+            ChatAgentGuildMemory.memory_enabled.is_(False)
+        )
+    )
+    candidates = set(guilds_with_pending_notes) | set(guilds_not_dreamed_tonight)
+    return sorted(candidates - set(guilds_opted_out))

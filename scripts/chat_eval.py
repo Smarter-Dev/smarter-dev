@@ -20,8 +20,28 @@ Scenario YAML schema:
       id: "100"
       name: "general"
       description: "main chat"  # optional
-    topic: null                  # optional durable memory
-    notes: null                  # optional durable memory
+    topic: null                  # optional per-channel scratchpad
+    notes: null                  # optional per-channel scratchpad
+    long_term_memory: |          # optional; the guild's dream-written blob
+      ## Who's here
+      - alice (id 1) builds shaders.
+    long_term_memory_updated: "2026-08-05"   # optional; the blob's date
+    memory_notes:                # optional; what the agent kept earlier today
+      - text: "alice (id 1) got soft shadows working."
+        channel: "dev-help"      # optional
+        minutes_ago: 180         # optional (default 120)
+    guild_events:                # optional; what the bot's ACCOUNT did this hour
+      - kind: "mod_action"       # mod_action | bot_message | bot_dm
+        action: "timeout"        # mod_action only
+        target: "mallory"        # optional
+        target_id: "8"           # optional
+        reason: "invite-link spam after a warning"   # optional
+        duration_seconds: 600    # optional
+        channel: "general"       # optional
+        source: "ai"             # ai | handler | manual (manual is attributed)
+        moderator: "zech"        # optional; required for `source: manual`
+        summary: "the timeout notice"   # message-shaped events only
+        minutes_ago: 50          # optional (default 30)
     authors:
       - user_id: "1"
         username: "alice"
@@ -65,8 +85,10 @@ from smarter_dev.bot.agents.chat_models import (  # noqa: E402
     Author,
     ChannelInfo,
     FollowupAgentInput,
+    GuildEventView,
     InitialAgentInput,
     Me,
+    MemoryNote,
     Message,
     MessageAttachment,
 )
@@ -122,6 +144,52 @@ class _StubBot:
         self.rest = _StubRest()
 
 
+def _parse_memory_notes(raw: Any) -> list[MemoryNote]:
+    """Parse a scenario's ``memory_notes`` into ``<from-today>`` view models.
+
+    Timestamps are synthetic (``minutes_ago`` back from now) so a scenario stays
+    reproducible no matter what day it is run on.
+    """
+    if not raw or not isinstance(raw, list):
+        return []
+    now = datetime.now(UTC)
+    return [
+        MemoryNote(
+            text=entry["text"],
+            channel_id=str(entry["channel_id"]) if entry.get("channel_id") else None,
+            channel_name=entry.get("channel"),
+            created_at=now - timedelta(minutes=int(entry.get("minutes_ago", 120))),
+        )
+        for entry in raw
+        if isinstance(entry, dict) and entry.get("text")
+    ]
+
+
+def _parse_guild_events(raw: Any) -> list[GuildEventView]:
+    """Parse a scenario's ``guild_events`` into ``<what-i-did>`` view models."""
+    if not raw or not isinstance(raw, list):
+        return []
+    now = datetime.now(UTC)
+    return [
+        GuildEventView(
+            at=now - timedelta(minutes=int(entry.get("minutes_ago", 30))),
+            kind=entry.get("kind", "mod_action"),
+            channel_id=str(entry["channel_id"]) if entry.get("channel_id") else None,
+            channel_name=entry.get("channel"),
+            summary=entry.get("summary", ""),
+            action=entry.get("action"),
+            target_username=entry.get("target"),
+            target_user_id=str(entry["target_id"]) if entry.get("target_id") else None,
+            moderator_username=entry.get("moderator"),
+            reason=entry.get("reason"),
+            duration_seconds=entry.get("duration_seconds"),
+            source=entry.get("source"),
+        )
+        for entry in raw
+        if isinstance(entry, dict)
+    ]
+
+
 @dataclass
 class _ParsedScenario:
     me: Me
@@ -132,6 +200,10 @@ class _ParsedScenario:
     topic: str | None
     notes: str | None
     kind: str  # "initial" or "followup"
+    long_term_memory: str | None
+    long_term_memory_updated_at: datetime | None
+    memory_notes: list[MemoryNote]
+    guild_events: list[GuildEventView]
 
 
 def _parse_scenario(path: Path) -> _ParsedScenario:
@@ -216,6 +288,7 @@ def _parse_scenario(path: Path) -> _ParsedScenario:
     if kind not in ("initial", "followup"):
         raise SystemExit(f"Scenario error: kind must be 'initial' or 'followup', got {kind!r}")
 
+    blob_date = data.get("long_term_memory_updated")
     return _ParsedScenario(
         me=me,
         channel=channel,
@@ -225,6 +298,14 @@ def _parse_scenario(path: Path) -> _ParsedScenario:
         topic=data.get("topic"),
         notes=data.get("notes"),
         kind=kind,
+        long_term_memory=data.get("long_term_memory"),
+        long_term_memory_updated_at=(
+            datetime.fromisoformat(str(blob_date)).replace(tzinfo=UTC)
+            if blob_date
+            else None
+        ),
+        memory_notes=_parse_memory_notes(data.get("memory_notes")),
+        guild_events=_parse_guild_events(data.get("guild_events")),
     )
 
 
@@ -240,6 +321,10 @@ def _build_call(scenario: _ParsedScenario) -> tuple[str, list[Any]]:
             now_utc=datetime.now(UTC),
             topic=scenario.topic,
             notes=scenario.notes,
+            long_term_memory=scenario.long_term_memory,
+            long_term_memory_updated_at=scenario.long_term_memory_updated_at,
+            memory_notes=scenario.memory_notes,
+            guild_events=scenario.guild_events,
         )
         return build_agent_call(agent_input, prior_history=[])
 
@@ -272,6 +357,9 @@ def _build_call(scenario: _ParsedScenario) -> tuple[str, list[Any]]:
         now_utc=datetime.now(UTC),
         topic=scenario.topic,
         notes=scenario.notes,
+        # A follow-up carries only the event delta; the blob and today's notes
+        # already went out on the activation turn the history stands in for.
+        new_guild_events=scenario.guild_events,
     )
     return build_agent_call(agent_input, prior_history=prior_history)
 

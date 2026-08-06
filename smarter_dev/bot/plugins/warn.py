@@ -134,7 +134,7 @@ async def warn_user(ctx: lightbulb.Context) -> None:
                 channel_id=str(ctx.channel_id),
             )
             await session.commit()
-        await dispatch_mod_action(action)
+        await dispatch_mod_action(action, bot=ctx.bot)
     except Exception:
         logger.exception("Failed to record warn action to moderation log")
 

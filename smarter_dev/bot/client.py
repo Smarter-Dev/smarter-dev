@@ -26,6 +26,7 @@ from smarter_dev.bot.audit_logger import log_message_edit
 from smarter_dev.bot.content_filter import check_content_filters
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.exceptions import ServiceError
+from smarter_dev.bot.services.guild_chat_memory_service import GuildChatMemoryService
 from smarter_dev.bot.services.latex_renderer import LatexRenderer
 from smarter_dev.bot.spam_engine import check_spam_engine
 from smarter_dev.bot.spam_engine import release_guild_spam_state
@@ -555,6 +556,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         advent_of_code_service = AdventOfCodeService(api_client, cache_manager, bot)
         voice_service = VoiceService(api_client, cache_manager, settings)
         model_override_service = ModelOverrideService(api_client, cache_manager)
+        guild_chat_memory_service = GuildChatMemoryService(api_client, cache_manager)
         latex_renderer = LatexRenderer()
 
         # Initialize chat agent memory (Redis-backed; non-critical)
@@ -613,6 +615,10 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         logger.info("Initializing model override service...")
         await model_override_service.initialize()
         logger.info("✓ Model override service initialized")
+
+        logger.info("Initializing guild chat memory service...")
+        await guild_chat_memory_service.initialize()
+        logger.info("✓ Guild chat memory service initialized")
 
         logger.info("Initializing LaTeX renderer...")
         try:
@@ -720,6 +726,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         bot.d["chat_memory_redis"] = chat_memory_redis
         bot.d["voice_service"] = voice_service
         bot.d["model_override_service"] = model_override_service
+        bot.d["guild_chat_memory_service"] = guild_chat_memory_service
         bot.d["latex_renderer"] = latex_renderer
 
         # Store services in d for plugin access (primary)
@@ -734,6 +741,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             "advent_of_code_service": advent_of_code_service,
             "voice_service": voice_service,
             "model_override_service": model_override_service,
+            "guild_chat_memory_service": guild_chat_memory_service,
             "latex_renderer": latex_renderer,
         }
 

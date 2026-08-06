@@ -13,6 +13,7 @@ from uuid import UUID
 from pydantic import BaseModel, Field, ConfigDict, field_validator, field_serializer
 
 from smarter_dev.shared.model_catalog import ReasoningLevel, is_valid_model_key
+from smarter_dev.web.models import MAX_MEMORY_NOTE_CHARS
 
 
 class BaseAPIModel(BaseModel):
@@ -885,3 +886,100 @@ class ChannelModelOverrideRead(BaseAPIModel):
     @field_serializer("created_at", "updated_at")
     def _serialize_datetime(self, value: datetime) -> str:
         return value.isoformat()
+
+
+# ============================================================================
+# Chat Agent Guild Memory Schemas
+# ============================================================================
+
+
+class ChatMemoryNoteRead(BaseAPIModel):
+    """One mid-term note the agent kept earlier today."""
+
+    id: UUID = Field(description="Note id")
+    channel_id: str = Field(description="Channel the note was written in")
+    channel_name: str | None = Field(
+        None, description="Channel name as it was at write time, or null"
+    )
+    content: str = Field(description="The note, in the agent's own first person")
+    created_at: datetime = Field(description="When the note was kept")
+
+    @field_serializer("created_at")
+    def _serialize_created_at(self, value: datetime) -> str:
+        return value.isoformat()
+
+
+class ChatMemoryBundleRead(BaseAPIModel):
+    """Everything a chat activation needs from persistent memory, in one payload.
+
+    A guild with no memory yet answers 200 with ``content``/``revision`` null and
+    an empty ``notes`` list — never a 404. The first activation in a brand-new
+    guild is the normal case, not an error, and the bot's memory service is
+    required never to raise.
+    """
+
+    guild_id: str = Field(description="Discord guild ID")
+    content: str | None = Field(
+        None, description="The long-term memory blob, or null if there is none yet"
+    )
+    revision: int | None = Field(
+        None, description="How many dreams have written the blob, or null"
+    )
+    updated_at: datetime | None = Field(
+        None, description="When the blob was last written, or null"
+    )
+    memory_enabled: bool = Field(
+        description="False when this guild's memory is switched off; the blob "
+        "and notes are then withheld"
+    )
+    notes_since: datetime = Field(
+        description="Midnight UTC of the current day — the window the notes "
+        "were selected from, decided server-side"
+    )
+    notes: list[ChatMemoryNoteRead] = Field(
+        default_factory=list,
+        description="Today's notes, newest first, capped server-side",
+    )
+
+    @field_serializer("updated_at", "notes_since")
+    def _serialize_datetime(self, value: datetime | None) -> str | None:
+        return None if value is None else value.isoformat()
+
+
+class ChatMemoryNoteCreate(BaseAPIModel):
+    """Request body for the ``remember`` tool keeping one thought."""
+
+    channel_id: str = Field(min_length=1, description="Channel the note came from")
+    channel_name: str | None = Field(
+        None,
+        max_length=120,
+        description="Channel name, denormalised so the dream never needs Discord",
+    )
+    content: str = Field(
+        min_length=1,
+        max_length=MAX_MEMORY_NOTE_CHARS,
+        description="The note itself — one thought, first person",
+    )
+    engagement_id: UUID | None = Field(
+        None, description="Soft link to the engagement the note came from"
+    )
+
+
+class ChatMemoryNoteSaveResult(BaseAPIModel):
+    """Whether the note was kept, and if not, why — never an error.
+
+    A refused save is a normal outcome the agent is told about in plain words
+    (``duplicate`` = it already kept this exact thought today, ``daily_cap`` =
+    the guild has hit its runaway guard), so this stays a 200.
+    """
+
+    saved: bool = Field(description="Whether a note row was written")
+    reason: str | None = Field(
+        None, description="'duplicate' or 'daily_cap' when saved is false"
+    )
+    id: UUID | None = Field(None, description="Note id when saved")
+    created_at: datetime | None = Field(None, description="When it was kept")
+
+    @field_serializer("created_at")
+    def _serialize_created_at(self, value: datetime | None) -> str | None:
+        return None if value is None else value.isoformat()

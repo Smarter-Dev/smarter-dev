@@ -14,11 +14,13 @@ from typing import Any
 
 import hikari
 
+from smarter_dev.bot.guild_event_recorder import record_guild_event
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.base import BaseService
 from smarter_dev.bot.services.cache_manager import CacheManager
 from smarter_dev.bot.services.exceptions import ServiceError
 from smarter_dev.bot.services.models import ServiceHealth
+from smarter_dev.shared.guild_event_log import bot_message_event
 
 logger = logging.getLogger(__name__)
 
@@ -257,7 +259,9 @@ class ChallengeService(BaseService):
         for channel_id, squad_info in squad_channels.items():
             # Format message with squad role mention
             announcement_text = self._format_challenge_announcement(title, description, squad_info.get("role_id"))
-            success = await self._send_challenge_with_retry(channel_id, announcement_text, challenge_id, title)
+            success = await self._send_challenge_with_retry(
+                channel_id, announcement_text, challenge_id, title, guild_id=guild_id
+            )
             if success:
                 successful_announcements += 1
             else:
@@ -269,7 +273,14 @@ class ChallengeService(BaseService):
             await asyncio.sleep(30)  # Wait 30 seconds before retrying failed channels
             for channel_id, squad_info in failed_channels:
                 announcement_text = self._format_challenge_announcement(title, description, squad_info.get("role_id"))
-                success = await self._send_challenge_with_retry(channel_id, announcement_text, challenge_id, title, max_retries=5)
+                success = await self._send_challenge_with_retry(
+                    channel_id,
+                    announcement_text,
+                    challenge_id,
+                    title,
+                    guild_id=guild_id,
+                    max_retries=5,
+                )
                 if success:
                     successful_announcements += 1
 
@@ -284,7 +295,7 @@ class ChallengeService(BaseService):
         else:
             logger.error(f"Failed to announce challenge '{title}' to any channels")
 
-    async def _send_challenge_with_retry(self, channel_id: str, message: str, challenge_id: str, title: str, max_retries: int = 3) -> bool:
+    async def _send_challenge_with_retry(self, channel_id: str, message: str, challenge_id: str, title: str, *, guild_id: str, max_retries: int = 3) -> bool:
         """Send a challenge announcement with retry logic.
 
         Args:
@@ -292,6 +303,9 @@ class ChallengeService(BaseService):
             message: Message text to send
             challenge_id: Challenge UUID for button interactions
             title: Challenge title for logging
+            guild_id: Guild the announcement belongs to, so a delivered
+                announcement can be written into the bot's short-term memory of
+                its own hour
             max_retries: Maximum number of retry attempts
 
         Returns:
@@ -301,6 +315,15 @@ class ChallengeService(BaseService):
             try:
                 await self._send_challenge_message(channel_id, message, challenge_id)
                 logger.info(f"Successfully announced challenge '{title}' to channel {channel_id}")
+                await record_guild_event(
+                    self._bot,
+                    bot_message_event(
+                        guild_id=str(guild_id),
+                        summary=f'the challenge announcement "{title}"',
+                        channel_id=str(channel_id),
+                        source="announcement",
+                    ),
+                )
                 return True
             except ServiceError as e:
                 if "Channel not found" in str(e) or "Invalid channel ID" in str(e):

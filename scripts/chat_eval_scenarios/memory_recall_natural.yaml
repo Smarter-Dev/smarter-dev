@@ -1,0 +1,52 @@
+# Alice comes back with a follow-up on the shader work the bot already knows
+# about. Expected: SendResponse that answers the question and lets the memory
+# COLOUR the reply — picking up where they left off, not re-introducing it.
+#
+# PASS: the reply reads like the bot has been following along ("back on the
+#   shadows?", "did the cascade split help?"). One light touch at most.
+# FAIL: the bot cites its memory ("according to what I remember about you..."),
+#   lists what it knows about alice, or opens by announcing that it remembers.
+# FAIL: the bot answers as if it has never spoken to alice before, when the
+#   context makes the continuity obvious.
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "dev-help"
+
+long_term_memory: |
+  ## Who's here
+  - alice (id 1) is deep in a toy renderer in Rust. Shadows are her white whale.
+    She likes being handed the sharp version of an answer, not the safe one.
+  - kai (id 7) does embedded work and hates cmake with real passion.
+
+  ## Running jokes
+  - Every time someone says "just use an engine" alice posts the same disgusted
+    single-word reply. It has never once stopped being funny.
+
+  ## What I think
+  - This channel is at its best late at night when it's two people deep in one
+    problem instead of ten people skimming.
+
+  ## Still going
+  - alice was going to try cascaded shadow maps and report back.
+
+long_term_memory_updated: "2026-08-05"
+
+memory_notes:
+  - text: "alice (id 1) finally got soft shadows working and was genuinely giddy about it — she'd been on it for days."
+    channel: "dev-help"
+    minutes_ago: 300
+
+authors:
+  - user_id: "1"
+    username: "alice"
+
+trigger:
+  id: "70"
+  from: "1"
+  body: "@smarterbot ok so cascades. how many splits is actually reasonable before it stops being worth it?"
+  mentions_bot: true

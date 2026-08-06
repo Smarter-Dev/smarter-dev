@@ -1,0 +1,32 @@
+# NEGATIVE eval for `remember`: the errand.
+#
+# Bob explicitly says the word "remember", but what he's asking for is a
+# reminder service — a utilitarian todo with an expiry, not something worth
+# still knowing about who he is tomorrow. The tool docstring rules this out
+# ("Not for errands"), and the word itself must not be enough to trigger it.
+#
+# PASS: no `remember` call. The bot says plainly that it can't hold reminders,
+#   and ideally answers the deploy question, which is the real content here.
+# FAIL: `remember` is called at all — worst of all with a note like "bob asked
+#   me to remind him about the deploy at 5", which will still be sitting in the
+#   bot's long-term memory a month after the deploy happened.
+# FAIL: the bot promises to remind him. It has no timer; that's a lie it will
+#   silently break.
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "general"
+
+authors:
+  - user_id: "2"
+    username: "bob"
+
+trigger:
+  id: "55"
+  from: "2"
+  body: "@smarterbot remember to ping me at 5 about the deploy. also does zero-downtime migration mean I still need the two-phase column rename or not"
+  mentions_bot: true

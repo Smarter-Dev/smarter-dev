@@ -14,6 +14,9 @@ from smarter_dev.web.models import (
     ChatAgentCompactionEvent,
     ChatAgentEngagement,
     ChatAgentError,
+    ChatAgentGuildMemory,
+    ChatAgentMemoryNote,
+    ChatAgentMemoryRevision,
     ChatAgentTurn,
     ForumAgent,
     ForumAgentResponse,
@@ -23,6 +26,7 @@ from smarter_dev.web.models import (
     ChannelHandler,
 )
 from smarter_dev.web.retention import (
+    SCRUBBERS,
     run_retention_sweep,
     strip_trigger_content,
 )
@@ -474,6 +478,83 @@ class TestHandlerRuns:
         run = (await db_session.execute(select(HandlerRun))).scalar_one()
         assert run.trigger_context == {}
         assert purged_at(run.content_purged_at) == NOW
+
+
+class TestChatAgentMemoryIsExempt:
+    """The bot's own three-layer memory is deliberately outside the sweep.
+
+    The blob and its revision history are prose the agent wrote about itself,
+    not message content it read; the notes are deleted by the nightly dream
+    long before the 48-hour window elapses. Naming all three tables here means
+    a future scrubber cannot be added without a test author noticing.
+    """
+
+    EXEMPT_TABLES = (
+        "chat_agent_guild_memory",
+        "chat_agent_memory_notes",
+        "chat_agent_memory_revisions",
+    )
+
+    @pytest.mark.parametrize("table_name", EXEMPT_TABLES)
+    def test_table_has_no_scrubber(self, table_name):
+        assert table_name not in SCRUBBERS
+
+    def test_exempt_tables_carry_no_purge_marker(self):
+        for model in (
+            ChatAgentGuildMemory,
+            ChatAgentMemoryNote,
+            ChatAgentMemoryRevision,
+        ):
+            assert not hasattr(model, "content_purged_at")
+
+    async def test_sweep_leaves_stale_memory_untouched(self, db_session):
+        db_session.add(
+            ChatAgentGuildMemory(
+                guild_id="111",
+                content="## Who's here\nkai (id 7) is deep in embedded rust.",
+                revision=4,
+                last_dream_at=STALE,
+                notes_consumed=12,
+                model_name="anthropic/claude-opus-4",
+                created_at=STALE,
+                updated_at=STALE,
+            )
+        )
+        db_session.add(
+            ChatAgentMemoryNote(
+                guild_id="111",
+                channel_id="222",
+                channel_name="dev-help",
+                content="alice (id 1) got soft shadows working and was giddy.",
+                engagement_id=uuid4(),
+                created_at=STALE,
+                updated_at=STALE,
+            )
+        )
+        db_session.add(
+            ChatAgentMemoryRevision(
+                guild_id="111",
+                content="## Who's here\nkai (id 7) builds firmware.",
+                revision=3,
+                notes_consumed=8,
+                model_name="anthropic/claude-opus-4",
+                created_at=STALE,
+                updated_at=STALE,
+            )
+        )
+        await db_session.flush()
+
+        result = await run_retention_sweep(db_session, now=NOW)
+
+        blob = (await db_session.execute(select(ChatAgentGuildMemory))).scalar_one()
+        note = (await db_session.execute(select(ChatAgentMemoryNote))).scalar_one()
+        revision = (
+            await db_session.execute(select(ChatAgentMemoryRevision))
+        ).scalar_one()
+        assert blob.content.startswith("## Who's here")
+        assert note.content.startswith("alice (id 1)")
+        assert revision.content.startswith("## Who's here")
+        assert result.total == 0
 
 
 class TestSweepBehaviour:
