@@ -6006,6 +6006,25 @@ async def list_notes_before(
     return list(result.scalars().all())
 
 
+async def list_guild_notes(
+    session: AsyncSession, guild_id: str, limit: int = 100
+) -> list[ChatAgentMemoryNote]:
+    """Every surviving note for the guild, newest first, no time filter.
+
+    The admin preview's view of the mid-term layer: unlike
+    :func:`list_notes_since` (the agent's day-bounded context window), this
+    shows notes from before today too — exactly the rows a failed dream
+    would leave stranded, which is what an operator needs to see.
+    """
+    result = await session.execute(
+        select(ChatAgentMemoryNote)
+        .where(ChatAgentMemoryNote.guild_id == guild_id)
+        .order_by(ChatAgentMemoryNote.created_at.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
 async def count_notes_since(
     session: AsyncSession, guild_id: str, since: datetime
 ) -> int:
@@ -6104,6 +6123,19 @@ async def record_memory_revision(
     session.add(record)
     await session.flush()
     return record
+
+
+async def list_memory_revisions(
+    session: AsyncSession, guild_id: str, limit: int = MEMORY_REVISIONS_KEPT
+) -> list[ChatAgentMemoryRevision]:
+    """The guild's dream history, newest revision first."""
+    result = await session.execute(
+        select(ChatAgentMemoryRevision)
+        .where(ChatAgentMemoryRevision.guild_id == guild_id)
+        .order_by(ChatAgentMemoryRevision.revision.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
 
 
 async def prune_memory_revisions(
