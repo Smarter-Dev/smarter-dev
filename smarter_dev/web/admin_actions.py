@@ -17,8 +17,10 @@ from datetime import timezone
 from typing import ClassVar
 from urllib.parse import quote
 
+from smarter_dev.shared.guild_event_log import mod_action_event
 from smarter_dev.web.discord_rest import DiscordBotClient
 from smarter_dev.web.discord_rest import DiscordRestError
+from smarter_dev.web.guild_event_recorder import record_guild_event
 from smarter_dev.web.webhook_urls import parse_discord_webhook_url
 
 # Discord channel types 10/11/12: announcement, public, and private threads.
@@ -108,6 +110,7 @@ class AdminActor(DiscordBotClient):
             if error.status_code == 404:
                 return f"ban target {user_id} already absent"
             raise
+        await self._remember_action("ban", user_id, reason=reason)
         return f"banned {user_id}"
 
     async def add_role(
@@ -156,6 +159,7 @@ class AdminActor(DiscordBotClient):
             if error.status_code == 404:
                 return f"kick target {user_id} already absent"
             raise
+        await self._remember_action("kick", user_id)
         return f"kicked {user_id}"
 
     async def timeout_user(self, user_id: str, duration_seconds: int = 600) -> str:
@@ -173,6 +177,9 @@ class AdminActor(DiscordBotClient):
             if error.status_code == 404:
                 return f"timeout target {user_id} already absent"
             raise
+        await self._remember_action(
+            "timeout", user_id, duration_seconds=int(duration_seconds)
+        )
         return f"timed out {user_id} for {int(duration_seconds)}s"
 
     async def delete_message(self, channel_id: str, message_id: str) -> str:
@@ -185,7 +192,45 @@ class AdminActor(DiscordBotClient):
             if error.status_code == 404:
                 return f"message {message_id} already deleted"
             raise
+        await self._remember_action("delete", None, channel_id=channel_id)
         return f"deleted message {message_id}"
+
+    async def _remember_action(
+        self,
+        action_type: str,
+        target_user_id: str | None,
+        *,
+        reason: str | None = None,
+        duration_seconds: int | None = None,
+        channel_id: str | None = None,
+    ) -> None:
+        """Write a completed moderation action into the guild's event log.
+
+        None of these actions writes a ``ModerationAction`` row, so this is the
+        only record the chat agent can read when someone asks it about the ban
+        it just carried out for a handler. Only actually-performed actions land
+        here: the 404 no-op paths return before reaching this.
+
+        TODO(§3.8): when feature-parity §3.8 routes handler moderation through
+        ``ModerationAction`` + ``dispatch_mod_action``, delete these calls — the
+        dispatch will record the same actions and the log would carry each twice.
+
+        The worker tier knows the target only by snowflake, so the id is what
+        goes into ``target_username``; the renderer shows what it's given.
+        """
+        await record_guild_event(
+            mod_action_event(
+                {
+                    "action_type": action_type,
+                    "target_username": target_user_id,
+                    "reason": reason,
+                    "duration_seconds": duration_seconds,
+                    "channel_id": channel_id,
+                    "source": "handler",
+                },
+                guild_id=self.guild_id,
+            )
+        )
 
     async def delete_webhook(self, webhook_url: str) -> bool:
         """DELETE a leaked ``discord.com/api/webhooks/<id>/<token>`` URL.

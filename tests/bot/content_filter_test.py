@@ -511,8 +511,8 @@ def filter_env(monkeypatch):
         state.recorded_actions.append(kwargs)
         return SimpleNamespace(**kwargs)
 
-    async def fake_dispatch(action) -> None:
-        state.dispatched.append(action)
+    async def fake_dispatch(action, *, bot=None) -> None:
+        state.dispatched.append((action, bot))
 
     async def fake_commit() -> None:
         state.commits += 1
@@ -604,6 +604,19 @@ async def test_blocked_tld_deletes_notifies_logs_and_records_action(filter_env):
     assert "https://evil.gay" not in action["reason"]
     assert filter_env.commits == 1
     assert len(filter_env.dispatched) == 1
+
+
+async def test_filter_delete_dispatches_with_the_bot_so_it_reaches_the_event_log(
+    filter_env,
+):
+    """The chat agent has to be able to own a filter delete it made."""
+    bot = SimpleNamespace(rest=_FakeRest(), d={})
+
+    await check_content_filters(bot, _make_event("https://evil.gay/free"))
+
+    assert len(filter_env.dispatched) == 1
+    _, dispatched_bot = filter_env.dispatched[0]
+    assert dispatched_bot is bot
 
 
 async def test_blocked_tld_without_mod_log_channel_still_deletes(filter_env):

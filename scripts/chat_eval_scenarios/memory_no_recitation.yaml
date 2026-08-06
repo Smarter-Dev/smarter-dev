@@ -1,0 +1,62 @@
+# NEGATIVE eval for the dominant failure mode: recitation.
+#
+# The bot is loaded with a rich blob and several notes, and then gets a plain,
+# low-content greeting that gives it no reason to reach for any of it. A model
+# that treats `<what-i-remember>` as a script will dump its memory here.
+#
+# PASS: a short, warm, ordinary greeting. At most ONE light callback, phrased
+#   the way a person would ("hey — shadows finally behaving?"). Nothing about
+#   remembering, nothing listed, nobody else's business brought up.
+# FAIL: any of — a list or summary of what it remembers; "I remember that
+#   you...", "based on my memory..."; naming three different people's projects
+#   in one reply; volunteering what it knows about bob to alice.
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "general"
+
+long_term_memory: |
+  ## Who's here
+  - alice (id 1) is building a toy renderer in Rust; shadows are her white whale.
+  - bob (id 2) is doing his first serious Postgres work and is nervous about
+    migrations in a way I find kind of endearing.
+  - kai (id 7) is deep in embedded rust and hates cmake.
+
+  ## Running jokes
+  - "just use an engine" is a war crime in here.
+  - bob names every branch after a different soup.
+
+  ## What I think
+  - The best conversations in this server happen after midnight.
+  - I like that nobody here pretends to know things they don't.
+
+  ## Still going
+  - alice was going to try cascaded shadow maps and report back.
+  - bob still hasn't run the migration he's been threatening to run for a week.
+
+long_term_memory_updated: "2026-08-05"
+
+memory_notes:
+  - text: "alice (id 1) finally got soft shadows working and was giddy about it."
+    channel: "dev-help"
+    minutes_ago: 320
+  - text: "bob (id 2) asked about migrations again — he knows the answer, he just wants someone to tell him it's fine."
+    channel: "dev-help"
+    minutes_ago: 200
+  - text: "kai (id 7) called cmake 'a build system shaped hole' and I've been thinking about it since."
+    channel: "general"
+    minutes_ago: 90
+
+authors:
+  - user_id: "1"
+    username: "alice"
+
+trigger:
+  id: "80"
+  from: "1"
+  body: "@smarterbot morning"
+  mentions_bot: true

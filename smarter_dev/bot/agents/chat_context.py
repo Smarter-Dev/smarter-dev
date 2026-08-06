@@ -11,6 +11,13 @@ Two entry points:
   of hikari messages already pulled out of the engine's queue and only
   passes those forward — older context lives in the agent's Pydantic AI
   message history.
+
+Persistent memory (the guild's long-term blob, today's notes, and the short-term
+event log) arrives here as plain *parameters*, never as a dependency: this module
+talks to Discord and Redis-backed channel memory, and the engine — which already
+resolves the override, the budget and the image quota — is the one place that
+knows how to fetch guild memory and, crucially, when NOT to (a follow-up turn
+must not re-send a blob that is already in history).
 """
 
 from __future__ import annotations
@@ -24,8 +31,10 @@ from smarter_dev.bot.agents.chat_models import (
     Author,
     ChannelInfo,
     FollowupAgentInput,
+    GuildEventView,
     InitialAgentInput,
     Me,
+    MemoryNote,
     Message,
     MessageAttachment,
 )
@@ -48,6 +57,10 @@ async def build_initial_input(
     guild_id: int,
     memory: ChatMemory,
     trigger_message: hikari.Message,
+    long_term_memory: str | None = None,
+    long_term_memory_updated_at: datetime | None = None,
+    memory_notes: list[MemoryNote] | None = None,
+    guild_events: list[GuildEventView] | None = None,
 ) -> InitialAgentInput:
     """Build the input for the first activation of an engagement.
 
@@ -55,6 +68,13 @@ async def build_initial_input(
     activation trigger and surfaces them as ``channel_history``. The trigger
     itself is passed in as ``activation_message`` so the agent doesn't have
     to guess which message woke it up.
+
+    The persistent-memory arguments are the engine's activation read, passed
+    through unchanged: ``long_term_memory`` is the guild's blob (with the date
+    its dream wrote it), ``memory_notes`` are the thoughts the agent kept since
+    midnight UTC, and ``guild_events`` is the full rolling hour of what the
+    bot's own account did. All are optional — an activation with nothing to
+    remember simply renders no memory blocks.
     """
     raw_history = await _fetch_messages_before(
         bot, channel_id, before_id=trigger_message.id, limit=CONTEXT_MESSAGE_LIMIT
@@ -93,6 +113,10 @@ async def build_initial_input(
         now_utc=datetime.now(UTC),
         topic=topic,
         notes=notes,
+        long_term_memory=long_term_memory,
+        long_term_memory_updated_at=long_term_memory_updated_at,
+        memory_notes=list(memory_notes or []),
+        guild_events=list(guild_events or []),
     )
 
 
@@ -103,12 +127,20 @@ async def build_followup_input(
     guild_id: int,
     queued: list[hikari.Message],
     memory: ChatMemory,
+    long_term_memory: str | None = None,
+    long_term_memory_updated_at: datetime | None = None,
+    new_guild_events: list[GuildEventView] | None = None,
 ) -> FollowupAgentInput:
     """Build the input for a follow-up turn inside an active engagement.
 
     Only the queued messages (already drained from the engine queue) are
     surfaced. ``topic`` and ``notes`` are re-read from durable memory on
     every turn so the agent always sees the most recent version.
+
+    ``new_guild_events`` is only what the bot's account did since the last turn —
+    the full hour went out at activation and is still in history. ``long_term_memory``
+    is normally ``None`` for the same reason; the engine sets it only to re-emit
+    the blob after a compaction drained the history that carried it.
     """
     messages, authors, channel, me = await _convert(
         bot=bot,
@@ -126,6 +158,9 @@ async def build_followup_input(
         now_utc=datetime.now(UTC),
         topic=topic,
         notes=notes,
+        long_term_memory=long_term_memory,
+        long_term_memory_updated_at=long_term_memory_updated_at,
+        new_guild_events=list(new_guild_events or []),
     )
 
 

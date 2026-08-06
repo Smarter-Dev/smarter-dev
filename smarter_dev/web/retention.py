@@ -26,6 +26,19 @@ What is deliberately *not* swept here:
   Those come from the members intent, not the message-content intent, and the
   audit trail is worthless without knowing who an action was about.
 
+The chat agent's three-layer memory — ``chat_agent_guild_memory``,
+``chat_agent_memory_notes`` and ``chat_agent_memory_revisions`` — is exempt by
+design, and the exemption is pinned by a test in ``tests/web/test_retention.py``.
+The blob and its revision history are prose the agent wrote *about itself*
+rather than message text it read: no verbatim quotes, no private or sensitive
+detail, only who these people are to it. Scrubbing that on a 48-hour window
+would not protect anyone's words, it would just give the bot amnesia every
+other day. The mid-term notes are exempt for a different reason — they are
+deleted outright by the nightly dream session that consumes them, so they live
+well under a day by construction and never reach a retention cutoff. Adding a
+scrubber for any of the three needs the same explicit sign-off the exemption
+got, plus a matching row in ``docs/data-retention.md``.
+
 Every scrubber is idempotent: rows already stamped ``content_purged_at`` are
 skipped, so re-running the sweep costs one indexed lookup per table.
 """

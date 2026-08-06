@@ -8,11 +8,24 @@ from collections.abc import Callable
 import httpx
 import pytest
 
+from smarter_dev.web import handler_emitter
 from smarter_dev.web.handler_emitter import (
     DiscordEmitError,
     DiscordEmitter,
     _snowflake_created_at,
 )
+
+
+@pytest.fixture(autouse=True)
+def recorded_events(monkeypatch) -> list:
+    """Captures the short-term event log writes instead of reaching Redis."""
+    events: list = []
+
+    async def capture_event(event, **kwargs) -> None:
+        events.append(event)
+
+    monkeypatch.setattr(handler_emitter, "record_guild_event", capture_event)
+    return events
 
 
 def _emitter(
@@ -649,6 +662,67 @@ async def test_send_dm_raises_on_5xx():
         await _routed_emitter(
             _dm_handler(requests, post_status=500)
         ).send_dm("U9", "hi")
+
+
+# -- short-term event log: what the bot's account said ----------------------
+
+
+async def test_create_message_is_written_to_the_event_log(recorded_events):
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text='{"id": "M9"}')
+
+    await _routed_emitter(handle).create_message("C1", "the weekly standup reminder")
+
+    assert len(recorded_events) == 1
+    event = recorded_events[0]
+    assert event.kind == "bot_message"
+    assert event.guild_id == "G1"
+    assert event.channel_id == "C1"
+    assert event.summary == "the weekly standup reminder"
+    assert event.source == "handler"
+
+
+async def test_an_emitter_without_a_guild_records_nothing(recorded_events):
+    requests: list[httpx.Request] = []
+    await _emitter(requests, body='{"id": "M9"}').create_message("C1", "hello")
+
+    assert recorded_events == []
+
+
+async def test_an_undelivered_message_is_never_remembered(recorded_events):
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, text="channel is gone")
+
+    result = await _routed_emitter(handle).create_message(
+        "C1", "into the void", tolerate_missing_target=True
+    )
+
+    assert result is False
+    assert recorded_events == []
+
+
+async def test_send_dm_is_remembered_by_purpose_never_by_body(recorded_events):
+    requests: list[httpx.Request] = []
+    await _routed_emitter(_dm_handler(requests)).send_dm("U9", "you were timed out")
+
+    assert len(recorded_events) == 1
+    event = recorded_events[0]
+    assert event.kind == "bot_dm"
+    assert event.guild_id == "G1"
+    assert "U9" in event.summary
+    # The register rule AND the privacy rule: a DM's body is never kept.
+    assert "you were timed out" not in event.summary
+    assert event.channel_id is None
+
+
+async def test_a_closed_door_dm_is_never_remembered(recorded_events):
+    requests: list[httpx.Request] = []
+    result = await _routed_emitter(_dm_handler(requests, post_status=403)).send_dm(
+        "U9", "hi"
+    )
+
+    assert result is False
+    assert recorded_events == []
 
 
 # -- get_role_members (E5) --------------------------------------------------

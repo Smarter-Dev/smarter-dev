@@ -36,6 +36,25 @@ from smarter_dev.shared.database import Base
 # See :mod:`smarter_dev.web.retention`.
 CONTENT_RETENTION_WINDOW = timedelta(hours=48)
 
+# The chat agent's three-layer per-guild memory. These caps are the schema's
+# contract with the prompts that talk about them, so they live next to the
+# retention window rather than inside the runtime that enforces them.
+#
+# The long-term blob is a whole persona in 2000 characters: small enough to
+# ride along in every activation prompt, and tight enough that the nightly
+# dream has to choose what still matters instead of accreting forever.
+MAX_MEMORY_BLOB_CHARS = 2000
+# One mid-term note is one thought, not a transcript excerpt.
+MAX_MEMORY_NOTE_CHARS = 500
+# Runaway guard on the ``remember`` tool: a day that wants more than this is a
+# malfunction, not a memorable day.
+MAX_NOTES_PER_GUILD_PER_DAY = 200
+# How many of today's notes an activation carries into the prompt (newest first).
+MEMORY_NOTES_CONTEXT_LIMIT = 25
+# Nights of dream output kept per guild, so a bad dream can be diagnosed
+# without keeping cold history in the hot blob row.
+MEMORY_REVISIONS_KEPT = 5
+
 
 class CampaignSignup(Base):
     """Email/Discord signups for marketing campaigns (e.g. sudo launch).
@@ -5221,6 +5240,161 @@ class ChatAgentCompactionEvent(Base):
         return (
             f"<ChatAgentCompactionEvent(kind='{self.event_kind}', "
             f"{self.original_chars}c->{self.summary_chars}c)>"
+        )
+
+
+class ChatAgentGuildMemory(Base):
+    """What the chat agent remembers about one guild, long-term.
+
+    Exactly one row per guild: a markdown document of at most
+    :data:`MAX_MEMORY_BLOB_CHARS` characters that the agent writes about
+    itself — who the people here are to it, the running jokes, the opinions it
+    has formed. It is loaded whole at every chat activation and rewritten once
+    a night by the dream session, which is the only writer of ``content``.
+
+    This is authored prose, not captured message content, so it is exempt from
+    the retention sweep (see :mod:`smarter_dev.web.retention`).
+    """
+
+    __tablename__ = "chat_agent_guild_memory"
+    __table_args__ = (
+        UniqueConstraint("guild_id", name="uq_chat_agent_guild_memory_guild_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(
+        String(MAX_MEMORY_BLOB_CHARS),
+        nullable=False,
+        default="",
+        doc="The markdown blob, verbatim as the last dream wrote it.",
+    )
+    revision: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        doc="Bumped by every successful dream; the upsert increments atomically.",
+    )
+    last_dream_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        doc=(
+            "When a dream last ran for this guild — stamped even on the quiet "
+            "nights where there were no notes and no model call, so a CronJob "
+            "retry is a no-op."
+        ),
+    )
+    notes_consumed: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        doc="How many mid-term notes the last dream folded in.",
+    )
+    model_name: Mapped[str | None] = mapped_column(
+        String(100), nullable=True, doc="Model that wrote the current blob."
+    )
+    memory_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+        doc=(
+            "Per-guild kill switch. Setting it false (with an emptied "
+            "``content``) is the forget button: dreams skip the guild and "
+            "activations load nothing."
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ChatAgentGuildMemory(guild_id='{self.guild_id}', "
+            f"revision={self.revision}, chars={len(self.content or '')})>"
+        )
+
+
+class ChatAgentMemoryNote(Base):
+    """One thing the chat agent chose to keep during a conversation.
+
+    Written by the ``remember`` tool, read back into the same day's
+    activations, and consumed by that night's dream — which deletes the notes
+    it folded into the blob. Nothing here is meant to outlive a day, which is
+    why the retention sweep leaves it alone: the dream is the deleter.
+
+    ``engagement_id`` is a soft link with no foreign key on purpose. A note
+    outliving the engagement that produced it is normal and fine, and a memory
+    must never be cascade-deleted by engagement housekeeping.
+    """
+
+    __tablename__ = "chat_agent_memory_notes"
+    __table_args__ = (
+        Index("ix_chat_agent_memory_notes_guild_created", "guild_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    channel_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    channel_name: Mapped[str | None] = mapped_column(
+        String(120),
+        nullable=True,
+        doc=(
+            "Denormalised at write time so the dream session can render "
+            "'#dev-help' without ever talking to Discord."
+        ),
+    )
+    content: Mapped[str] = mapped_column(
+        String(MAX_MEMORY_NOTE_CHARS),
+        nullable=False,
+        doc="The note in the agent's own first person, one thought per row.",
+    )
+    engagement_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        nullable=True,
+        doc="Soft link to the engagement the note came from. Deliberately no FK.",
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<ChatAgentMemoryNote(guild_id='{self.guild_id}', "
+            f"channel='{self.channel_name}')>"
+        )
+
+
+class ChatAgentMemoryRevision(Base):
+    """A past night's dream output for one guild.
+
+    Kept so a blob that went wrong can be read back and diagnosed — pruned to
+    :data:`MEMORY_REVISIONS_KEPT` rows per guild. It lives in its own table so
+    the hot per-activation blob read never drags cold history along with it.
+    """
+
+    __tablename__ = "chat_agent_memory_revisions"
+    __table_args__ = (
+        Index(
+            "ix_chat_agent_memory_revisions_guild_revision",
+            "guild_id",
+            "revision",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    content: Mapped[str] = mapped_column(
+        String(MAX_MEMORY_BLOB_CHARS), nullable=False
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    notes_consumed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    model_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    def __repr__(self) -> str:
+        return (
+            f"<ChatAgentMemoryRevision(guild_id='{self.guild_id}', "
+            f"revision={self.revision})>"
         )
 
 

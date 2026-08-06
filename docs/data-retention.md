@@ -70,6 +70,20 @@ expires, because it is about what we did, not about what anyone said.
   the result is a user-facing artifact with its own lifecycle.
 - `agent_conversations` / `agent_messages` — the website's own agent chat, not
   Discord.
+- The chat agent's own memory. Three tables, exempt for two different reasons:
+
+  | Table | What it holds | Why it is exempt |
+  | --- | --- | --- |
+  | `chat_agent_guild_memory` | One ≤2000-character markdown document per guild: who the people here are to the bot, the running jokes, the opinions it has formed. | Prose the bot wrote about itself, not message text it read. |
+  | `chat_agent_memory_revisions` | The last five nights of that document, per guild. | Same — it is the history of the bot's own writing. |
+  | `chat_agent_memory_notes` | Notes the bot keeps mid-conversation, in its own words. | Deleted outright by the nightly job that folds them into the document — they live under a day and never reach a 48-hour cutoff. |
+
+  The rule the bot is held to when writing any of it is *remember the person,
+  not the transcript*: no verbatim quotes, and nothing private, sensitive, or
+  shared in confidence. So there is nobody's message content in here to scrub —
+  only what the bot made of a day. A guild that would rather it forgot has a
+  switch: `memory_enabled` on its row turns the memory off and blanks the
+  document.
 - Identity fields everywhere: user ids, usernames, display names, snowflakes.
   These come from the members intent, not the message-content intent, and an
   abuse record is worthless without knowing who it concerns.

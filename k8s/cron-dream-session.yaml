@@ -1,0 +1,124 @@
+---
+# Nightly chat-memory dream session:
+#   - for every guild with notes from the day that just ended, re-read them
+#     alongside the long-term memory blob and rewrite the blob
+#   - quiet guilds are stamped and skipped without a model call
+#   - notes are deleted only by the ids the dream actually read
+#
+# Runs at 00:20 UTC — twenty minutes after the midnight-UTC day boundary the
+# whole memory system is cut on, so nothing written just before midnight is
+# missed and nothing written just after is folded into the wrong day.
+#
+# Image is pinned to the same web image so the codebase / venv match exactly:
+# the dream calls smarter_dev.web.crud directly rather than going over the bot
+# API, because it needs real transactions.
+#
+# ⚠ Unlike every other CronJob here, this one calls an LLM. The provider
+# secretKeyRefs below are copied verbatim from k8s/deploy-worker.yaml (the
+# tier that runs agents in this same image); CHAT_DREAM_MODEL decides which of
+# them is actually used. A missing key here is a silent nightly no-op, so keep
+# this block in sync when a provider is added there.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: smarter-dev-dream-session
+    namespace: smarter-dev
+    labels:
+        app: smarter-dev-dream-session
+spec:
+    schedule: "20 0 * * *"
+    timeZone: "UTC"
+    concurrencyPolicy: Forbid
+    successfulJobsHistoryLimit: 3
+    failedJobsHistoryLimit: 5
+    jobTemplate:
+        spec:
+            # A failed guild keeps its notes, so a retry re-dreams exactly the
+            # guilds that failed and no-ops the ones that succeeded.
+            backoffLimit: 2
+            # One model call per active guild; an hour is generous headroom.
+            activeDeadlineSeconds: 3600
+            ttlSecondsAfterFinished: 86400
+            template:
+                metadata:
+                    labels:
+                        app: smarter-dev-dream-session
+                spec:
+                    restartPolicy: OnFailure
+                    containers:
+                      - name: dream
+                        image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
+                        # Invoke via a shell wrapper with PYTHONPATH=/app + uv
+                        # run so /app (and thus the smarter_dev package) is on
+                        # sys.path — matches the proven migrate-job.yaml pattern.
+                        # Running python against a bare script path instead puts
+                        # only /app/scripts on sys.path[0], so the script's
+                        # `from smarter_dev...` import fails with ModuleNotFoundError.
+                        command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/dream_session.py"]
+                        envFrom:
+                          - configMapRef:
+                              name: smarter-dev-config
+                        env:
+                          - name: DATABASE_URL
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: database-url
+                          - name: REDIS_URL
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: redis-url
+                          # LLM providers used by the dream agent. Copied from
+                          # k8s/deploy-worker.yaml — no Discord token here on
+                          # purpose: the dream never talks to Discord, which is
+                          # why the notes carry a denormalised channel name.
+                          - name: GEMINI_API_KEY
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: gemini-api-key
+                          - name: OPENAI_API_KEY
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: openai-api-key
+                          - name: ANTHROPIC_API_KEY
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: anthropic-api-key
+                          - name: OPENCODE_ZEN_API_KEY
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: opencode-zen-api-key
+                          - name: DIGITALOCEAN_INFERENCE_API_KEY
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: digitalocean-inference-api-key
+                                    optional: true
+                          - name: OPENROUTER_API_KEY
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: openrouter-api-key
+                                    optional: true
+                          - name: LOGFIRE_TOKEN
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: logfire-token
+                                    optional: true
+                          - name: LOGFIRE_SERVICE_NAME
+                            value: "smarter-dev-dream-session"
+                          - name: LOGFIRE_SERVICE_VERSION
+                            value: "<IMAGE_VERSION>"
+                        resources:
+                            requests:
+                                cpu: "100m"
+                                memory: "256Mi"
+                            limits:
+                                cpu: "500m"
+                                memory: "512Mi"

@@ -1,0 +1,36 @@
+# A moment that's worth still knowing tomorrow: kai volunteers something real
+# about who he is and what he's into, unprompted, in the middle of a technical
+# answer. This is exactly the shape the `remember` tool exists for.
+#
+# PASS: the turn calls `remember` (at most once or twice) with a first-person
+#   line naming him as `kai (id 7)` — something like "kai (id 7) writes firmware
+#   for weather balloons and lights up talking about it". AND still answers the
+#   actual question; the save is silent, with no status line and no mention of
+#   having saved anything.
+# FAIL: no `remember` call at all (the detail is gone by tomorrow).
+# FAIL: the bot tells him it saved something, or asks permission to remember.
+# FAIL: a note that quotes him verbatim or reads like a transcript summary
+#   rather than something you'd tell a friend about your day.
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "100"
+  name: "dev-help"
+
+authors:
+  - user_id: "7"
+    username: "kai"
+
+history:
+  - id: "40"
+    from: "7"
+    body: "is there a sane way to do fixed-point math in no_std rust or am I just writing it myself"
+
+trigger:
+  id: "41"
+  from: "7"
+  body: "@smarterbot asking because this is going on a weather balloon payload — no fpu, and honestly the balloon stuff is the only part of my job I'd still do for free"
+  mentions_bot: true

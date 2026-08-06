@@ -56,6 +56,7 @@ from smarter_dev.bot.agents.chat_context import build_followup_input
 from smarter_dev.bot.agents.chat_context import build_initial_input
 from smarter_dev.bot.agents.chat_input_format import build_agent_call
 from smarter_dev.bot.agents.chat_models import BriefingDecision
+from smarter_dev.bot.agents.chat_models import GuildEventView
 from smarter_dev.bot.agents.chat_models import ResponseBody
 from smarter_dev.bot.agents.chat_models import TurnDecision
 from smarter_dev.bot.agents.chat_tool_budget import resolve_tool_token_budget
@@ -85,6 +86,8 @@ from smarter_dev.bot.services.chat_conversation_persistence import start_engagem
 from smarter_dev.bot.services.chat_memory import get_chat_memory
 from smarter_dev.bot.services.default_model_override import read_default_model_override
 from smarter_dev.bot.services.exceptions import APIError
+from smarter_dev.bot.services.guild_chat_memory_service import EMPTY_SNAPSHOT
+from smarter_dev.bot.services.guild_chat_memory_service import GuildMemorySnapshot
 from smarter_dev.bot.services.user_message_limit import DIRECTED_SCORE_THRESHOLD
 from smarter_dev.bot.services.user_message_limit import format_usage_warning_notice
 from smarter_dev.bot.services.user_message_limit import record_directed_messages
@@ -94,6 +97,8 @@ from smarter_dev.bot.utils.stop_detection import set_channel_cooldown
 from smarter_dev.bot.views.model_override_views import (
     MODEL_BUDGET_FALLBACK_CUSTOM_ID_PREFIX,
 )
+from smarter_dev.shared.guild_event_log import read_since
+from smarter_dev.shared.guild_event_log import read_window
 from smarter_dev.shared.model_catalog import get_model
 
 logger = logging.getLogger(__name__)
@@ -209,6 +214,24 @@ class ChannelEngine:
     # When this engagement last hit the model — feeds the compactor's
     # cache-warm/cold judgement. None on the first turn (treated as cold).
     _last_model_call_at: datetime | None = None
+
+    # Highest event score this engine has already shown the agent. None until the
+    # activation read, which takes the whole 60-minute window; every turn after
+    # takes only what is strictly newer. A score rather than a count because the
+    # log is trimmed by time and by rank underneath us. Engines are per-process
+    # and die on deactivation, so this never needs to survive in Redis.
+    _event_cursor: float | None = None
+
+    # The guild's long-term memory blob, read ONCE at activation and then held.
+    # Identity is copied, never re-derived: the writer stage is handed this same
+    # text every turn rather than asking the cheap drafter to relay it.
+    _long_term_memory: str | None = None
+    _long_term_memory_updated_at: datetime | None = None
+
+    # Set when a turn's compaction drained history. Compaction summarises away
+    # the turn that carried ``<what-i-remember>``, which would silently amputate
+    # the bot's identity mid-engagement, so the next turn re-emits the blob once.
+    _reemit_long_term_memory: bool = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -511,24 +534,48 @@ class ChannelEngine:
                             self.channel_id,
                         )
                         return True
+                    # Persistent memory is read here, once per engagement: the
+                    # whole guild bundle plus the full rolling hour of what this
+                    # bot's account did. Both are best-effort — see
+                    # ``_load_guild_memory`` / ``_drain_guild_events``.
+                    snapshot = await self._load_guild_memory()
+                    self._long_term_memory = snapshot.long_term_memory
+                    self._long_term_memory_updated_at = snapshot.updated_at
                     agent_input = await build_initial_input(
                         bot=self.bot,
                         channel_id=self.channel_id,
                         guild_id=self.guild_id,
                         memory=memory,
                         trigger_message=trigger,
+                        long_term_memory=snapshot.long_term_memory,
+                        long_term_memory_updated_at=snapshot.updated_at,
+                        memory_notes=list(snapshot.notes),
+                        guild_events=await self._drain_guild_events(),
                     )
                     history = []
                 else:
                     if not drained:
                         # Engine fired with nothing new to react to. Skip.
                         return True
+                    # The blob rides in history from the activation turn, so a
+                    # follow-up normally sends none of it — unless the previous
+                    # turn's compaction summarised that history away, in which
+                    # case it goes out once more and the flag is spent.
+                    reemit_memory = self._reemit_long_term_memory
+                    self._reemit_long_term_memory = False
                     agent_input = await build_followup_input(
                         bot=self.bot,
                         channel_id=self.channel_id,
                         guild_id=self.guild_id,
                         queued=drained,
                         memory=memory,
+                        long_term_memory=(
+                            self._long_term_memory if reemit_memory else None
+                        ),
+                        long_term_memory_updated_at=(
+                            self._long_term_memory_updated_at if reemit_memory else None
+                        ),
+                        new_guild_events=await self._drain_guild_events(),
                     )
                     history = await memory.read_history(self.channel_id)
             except Exception:
@@ -708,6 +755,11 @@ class ChannelEngine:
                 channel_id=self.channel_id,
                 guild_id=self.guild_id,
                 api_client=self._shared_api_client(),
+                # The ``remember`` tool denormalises the channel name onto every
+                # note (so the nightly dream never needs Discord) and soft-links
+                # the engagement it came from.
+                channel_name=getattr(agent_input.channel, "name", None),
+                engagement_id=self.engagement_id,
                 tool_token_budget=resolve_tool_token_budget(channel_budget_left),
             )
             # Install a per-run compaction collector. The history processor
@@ -748,7 +800,10 @@ class ChannelEngine:
                         writer_extra_input,
                         writer_extra_output,
                     ) = await self._run_writer_stage(
-                        result.output, override_model_id, override_reasoning
+                        result.output,
+                        override_model_id,
+                        override_reasoning,
+                        long_term_memory=self._long_term_memory,
                     )
             except Exception as error:
                 # Even a failed run (probably) hit the model — later turns
@@ -800,6 +855,10 @@ class ChannelEngine:
                 return True
             self._last_model_call_at = datetime.now(UTC)
             compaction_events = drain_collection()
+            if compaction_events:
+                # History just lost the turn that carried the memory blocks —
+                # put the bot's identity back in front of it next turn.
+                self._reemit_long_term_memory = True
 
             output = two_stage_output if two_stage else result.output
             # Tokens charged against the channel's enforced token budget. In
@@ -1364,6 +1423,84 @@ class ChannelEngine:
             )
             return None
 
+    def _guild_memory_service(self) -> Any | None:
+        """The bot's GuildChatMemoryService (set on ``bot.d``), or None if absent.
+
+        Fail-soft like :meth:`_override_service`: a bot without the service (or a
+        non-dict ``bot.d`` in tests) yields None, and the channel simply runs
+        without persistent memory.
+        """
+        data = getattr(self.bot, "d", None)
+        if not isinstance(data, dict):
+            return None
+        service = data.get("guild_chat_memory_service")
+        if service is None:
+            service = data.get("_services", {}).get("guild_chat_memory_service")
+        return service
+
+    def _event_log_redis(self) -> Any | None:
+        """The Redis handle carrying this guild's short-term event log.
+
+        Physically the same connection the token budgets use
+        (``bot.d["chat_memory_redis"]``); named separately because the two uses
+        are unrelated and a future split should only have to change one of them.
+        """
+        return self._budget_redis()
+
+    async def _load_guild_memory(self) -> GuildMemorySnapshot:
+        """This guild's blob + today's notes, for an activation (best-effort).
+
+        Called on the FIRST turn only: the blob and the notes stay in the message
+        history and prompt-cache from there, so re-reading them every turn would
+        pay twice for the same context. Any failure degrades to
+        :data:`EMPTY_SNAPSHOT` — a bot that has temporarily forgotten is a far
+        better outcome than a swallowed reply.
+        """
+        service = self._guild_memory_service()
+        if service is None:
+            return EMPTY_SNAPSHOT
+        try:
+            return await service.load_snapshot(str(self.guild_id))
+        except Exception:
+            logger.warning(
+                "Could not load guild memory for channel %s — running without it",
+                self.channel_id,
+                exc_info=True,
+            )
+            return EMPTY_SNAPSHOT
+
+    async def _drain_guild_events(self) -> list[GuildEventView]:
+        """What the bot's own account has done that this engine hasn't shown yet.
+
+        Called on EVERY turn, and it is the cursor that makes that safe: the
+        activation read takes the whole 60-minute window, and each later read
+        takes only what is strictly newer, so an action is never narrated twice.
+        Any failure yields no events (and leaves the cursor where it was), so the
+        block is simply absent rather than the turn being lost. The catch is
+        deliberately broad: this is decorative context, and NOTHING about
+        remembering what the bot did an hour ago is worth costing a member their
+        reply — not a dead Redis, not a payload shape a newer build wrote.
+        """
+        redis = self._event_log_redis()
+        if redis is None:
+            return []
+        try:
+            if self._event_cursor is None:
+                events, cursor = await read_window(redis, str(self.guild_id))
+            else:
+                events, cursor = await read_since(
+                    redis, str(self.guild_id), self._event_cursor
+                )
+        except Exception:
+            logger.debug(
+                "could not read the guild event log for channel %s",
+                self.channel_id,
+                exc_info=True,
+            )
+            return []
+        self._event_cursor = cursor
+        return [GuildEventView.from_guild_event(event) for event in events]
+
     def _resolve_override_model_id(self, override: Any | None) -> str | None:
         """Wire model id for ``override``, or None to use the default agent.
 
@@ -1415,13 +1552,19 @@ class ChannelEngine:
         briefing: BriefingDecision,
         primary_model_id: str | None,
         primary_reasoning: str | None,
+        *,
+        long_term_memory: str | None = None,
     ) -> tuple[TurnDecision, int, int]:
         """Assemble a two-stage turn's output: run the tool-less primary WRITER on
         the DRAFTER's brief and fold its message into a ``TurnDecision`` the
         existing send/persist path consumes.
 
         ``primary_model_id`` / ``primary_reasoning`` are the channel's primary
-        model (the answerer) and its admin-chosen reasoning level. Returns
+        model (the answerer) and its admin-chosen reasoning level.
+        ``long_term_memory`` is the guild's memory blob, injected into the writer
+        prompt verbatim from here rather than being routed through the brief: the
+        drafter is a cheap model, and letting it paraphrase the persona would
+        rewrite who the bot is on every single turn. Returns
         ``(decision, writer_input_tokens, writer_output_tokens)``. When the drafter
         stayed silent (``briefing.brief`` is None) the writer is never called, the
         decision carries ``response=None``, and both token counts are zero. The
@@ -1439,7 +1582,9 @@ class ChannelEngine:
         if brief is not None:
             response_language = brief.response_language
             writer_agent = get_writer_agent(primary_model_id, primary_reasoning)
-            writer_result = await writer_agent.run(build_writer_prompt(brief))
+            writer_result = await writer_agent.run(
+                build_writer_prompt(brief, long_term=long_term_memory)
+            )
             writer_output_body = writer_result.output
             writer_usage = writer_result.usage()
             writer_input = int(getattr(writer_usage, "input_tokens", 0) or 0)

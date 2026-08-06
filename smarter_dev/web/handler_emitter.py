@@ -19,7 +19,13 @@ from datetime import datetime, timezone
 from typing import ClassVar
 from urllib.parse import quote
 
+from smarter_dev.shared.guild_event_log import (
+    BOT_DM_KIND,
+    BOT_MESSAGE_KIND,
+    bot_message_event,
+)
 from smarter_dev.web.discord_rest import DiscordBotClient, DiscordRestError
+from smarter_dev.web.guild_event_recorder import record_guild_event
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +180,9 @@ class DiscordEmitter(DiscordBotClient):
             if tolerate_missing_target and error.status_code in (403, 404):
                 return False
             raise
+        await self._remember_send(
+            summary=content, kind=BOT_MESSAGE_KIND, channel_id=channel_id
+        )
         return str(response.json().get("id", ""))
 
     async def send_dm(self, user_id: str, content: str) -> str | bool:
@@ -202,7 +211,34 @@ class DiscordEmitter(DiscordBotClient):
             if error.status_code in (403, 404):
                 return False
             raise
+        # The purpose of the DM, never its body: the bot may recall that it wrote
+        # to someone, not what it said to them privately.
+        await self._remember_send(
+            summary=f"a handler message to user {user_id}", kind=BOT_DM_KIND
+        )
         return str(response.json().get("id", ""))
+
+    async def _remember_send(
+        self, *, summary: str, kind: str, channel_id: str | None = None
+    ) -> None:
+        """Note a delivered handler send in the guild's short-term event log.
+
+        The chat agent reads that log to own what its account did this hour, so
+        a handler's message is as much "something the bot said" as one of its
+        own replies. A no-op for an emitter built without a guild (the
+        message-only construction): an event with no guild has nowhere to live.
+        """
+        if not self.guild_id:
+            return
+        await record_guild_event(
+            bot_message_event(
+                guild_id=self.guild_id,
+                summary=summary,
+                kind=kind,
+                channel_id=channel_id,
+                source="handler",
+            )
+        )
 
     async def _resolve_dm_channel(self, user_id: str) -> str:
         """The user's DM channel id, opening + caching it once per fire."""

@@ -79,6 +79,7 @@ controllers:
   - smarter_dev.web.api_native.image_quota:ImageQuotaController
   - smarter_dev.web.api_native.activity:ActivityController
   - smarter_dev.web.api_native.model_overrides:ChannelModelOverrideController
+  - smarter_dev.web.api_native.chat_memory:ChatMemoryController
   - smarter_dev.web.api_native.handlers:HandlerController
   - smarter_dev.web.api_native.admin_handlers:AdminHandlerController
   - smarter_dev.web.api_native.admin:AdminController

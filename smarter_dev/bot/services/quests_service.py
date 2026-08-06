@@ -13,10 +13,12 @@ from datetime import datetime
 from typing import Any
 
 import hikari
+from smarter_dev.bot.guild_event_recorder import record_guild_event
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.base import BaseService
 from smarter_dev.bot.services.cache_manager import CacheManager
 from smarter_dev.bot.services.models import ServiceHealth
+from smarter_dev.shared.guild_event_log import bot_message_event
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +167,9 @@ class QuestService(BaseService):
             message = self._format_quest_announcement(
                 title, description, squad_info.get("role_id")
             )
-            await self._send_quest_message(channel_id, message, quest_id)
+            await self._send_quest_message(
+                channel_id, message, quest_id, guild_id=guild_id, title=title
+            )
 
         try:
             await self._api_client.post(f"/quests/{quest_id}/mark-announced")
@@ -191,7 +195,16 @@ class QuestService(BaseService):
         channel_id: str,
         message: str,
         quest_id: str,
+        *,
+        guild_id: str,
+        title: str,
     ) -> None:
+        """Post one squad channel's quest announcement and pin it.
+
+        ``guild_id`` and ``title`` are carried in so the delivered announcement
+        can be written into the bot's short-term memory of its own hour — the
+        chat agent has to be able to own an announcement it posted.
+        """
         channel_id_int = int(channel_id)
 
         get_input_button = hikari.impl.InteractiveButtonBuilder(
@@ -217,6 +230,16 @@ class QuestService(BaseService):
             content=message,
             components=[row],
             role_mentions=True,
+        )
+
+        await record_guild_event(
+            self._bot,
+            bot_message_event(
+                guild_id=str(guild_id),
+                summary=f'the daily quest announcement "{title}"',
+                channel_id=str(channel_id),
+                source="announcement",
+            ),
         )
 
         await self._pin_message_with_retry(channel_id_int, msg.id)

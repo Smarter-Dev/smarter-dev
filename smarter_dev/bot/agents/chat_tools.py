@@ -28,6 +28,8 @@ from smarter_dev.bot.agents.url_registry import resolve_escaped_url
 from smarter_dev.bot.agents.web_summarizer import summarize_web_content
 from smarter_dev.bot.utils import web_fetch
 from smarter_dev.shared.config import get_settings
+from smarter_dev.shared.guild_event_log import chat_memory_enabled
+from smarter_dev.web.models import MAX_MEMORY_NOTE_CHARS
 from smarter_dev.web.research_tools import brave_search
 from smarter_dev.web.search_previews import mark_search_preview_failed
 from smarter_dev.web.search_previews import populate_search_preview
@@ -109,11 +111,21 @@ class ChatDeps:
     channel_id: int
     guild_id: int
     # APIClient for the handler-management + image-quota tools; built from
-    # settings on demand when not supplied (see handler_tools / _quota_api).
+    # settings on demand when not supplied (see handler_tools / _bot_api).
     api_client: Any = None
+    # Channel name, denormalised onto every memory note so the nightly dream can
+    # say "#dev-help" without ever talking to Discord.
+    channel_name: str | None = None
+    # UUID of the engagement this run belongs to, soft-linked onto saved notes.
+    engagement_id: Any = None
     # Images generated this turn, drained by the engine and attached to the
     # outgoing reply. Fresh per run (a new ChatDeps is built each turn).
     pending_images: list[GeneratedImage] = field(default_factory=list)
+    # How many memories ``remember`` has kept this run, and what they said —
+    # fresh per run like pending_images. They bound one conversation's appetite
+    # and stop the same thought being written twice in a single turn.
+    memories_saved_this_turn: int = 0
+    saved_memory_texts: list[str] = field(default_factory=list)
     # Tokens this turn may spend before its tools are withdrawn (see
     # chat_tool_budget). None/0 means unlimited; the engine sizes it per turn
     # from what the channel's budget has left.
@@ -441,8 +453,8 @@ _MIME_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp"}
 
 
 @asynccontextmanager
-async def _quota_api(ctx: RunContext[ChatDeps]):
-    """Yield an APIClient for the image-quota endpoints.
+async def _bot_api(ctx: RunContext[ChatDeps]):
+    """Yield an APIClient for the tools that talk to the web API.
 
     Reuse a client injected on the deps (engine/tests) and leave it open;
     otherwise build one from settings and close it on exit.
@@ -483,7 +495,7 @@ def _format_remaining(status: dict) -> str:
 async def generate_image(ctx: RunContext[ChatDeps], prompt: str) -> str:
     """Generate an image attached to this turn's reply. ONLY diagrams whose subject is software, CS, or math — nothing else. `prompt` is a detailed illustrator brief, reviewed before drawing; rate-limited per server — when metadata shows quota remaining 0, don't call until it resets, say images are rate-limited and answer in text."""
     guild_id = str(ctx.deps.guild_id)
-    async with _quota_api(ctx) as api:
+    async with _bot_api(ctx) as api:
         # 1. Cheap gate: if the hour's budget is already spent, don't spend a
         #    review call or a generation — tell the agent when to try again.
         try:
@@ -558,6 +570,102 @@ async def generate_image(ctx: RunContext[ChatDeps], prompt: str) -> str:
     return f"Image generated and attached to your reply. {_format_remaining(reserved)}"
 
 
+# -- memory --------------------------------------------------------------
+
+CHAT_MEMORY_NOTES_PATH = "/guilds/{guild_id}/chat-memory/notes"
+
+# One conversation may keep at most this many memories. Not a cost control — a
+# turn that wants a dozen memories is summarizing the transcript, which is
+# exactly what this memory is not for.
+MAX_MEMORIES_PER_TURN = 3
+
+# Every answer is a sentence the agent reads, never an exception: a failed save
+# must cost the turn a note, never the reply (same discipline as the tool
+# budget's refusal string).
+REMEMBER_SAVED = "got it — that one's staying with me."
+REMEMBER_TRIMMED = "kept it, trimmed a bit."
+REMEMBER_TURN_LIMIT = "that's plenty for one conversation — you'll be back."
+REMEMBER_DUPLICATE = "you already noted that one."
+REMEMBER_DAILY_CAP = "that's all i can hold from today — tomorrow's a fresh page."
+REMEMBER_EMPTY = "there was nothing in that one to keep."
+REMEMBER_API_FAILURE = "couldn't save that note right now."
+
+_SERVER_REFUSALS = {
+    "duplicate": REMEMBER_DUPLICATE,
+    "daily_cap": REMEMBER_DAILY_CAP,
+}
+
+
+def _already_kept_this_run(text: str, kept: list[str]) -> bool:
+    """Whether this run already kept the same thought, ignoring case/spacing."""
+    normalized = " ".join(text.split()).casefold()
+    return any(" ".join(kept_text.split()).casefold() == normalized for kept_text in kept)
+
+
+async def remember(ctx: RunContext[ChatDeps], text: str) -> str:
+    """Keep something. Use it when a moment is worth still knowing tomorrow — who someone is and what they're into, a joke that landed, an opinion you formed, something you're curious about, how a conversation left you. Write it in first person, one thought per call, the way you'd tell a friend about your day; name people as `username (id 123)`. Not for errands, not for summarizing what you just said, and not for anything private or sensitive someone would rather you forgot. Tonight you'll re-read everything you kept today and decide what stays with you for good."""
+    note = (text or "").strip()
+    if not note:
+        return REMEMBER_EMPTY
+    if not chat_memory_enabled():
+        # The tool POSTs directly rather than through GuildChatMemoryService,
+        # so it owns its own reading of the global kill switch — otherwise a
+        # deployment that turned memory off would stop reading and event-logging
+        # but keep writing notes.
+        return REMEMBER_API_FAILURE
+    if ctx.deps.memories_saved_this_turn >= MAX_MEMORIES_PER_TURN:
+        return REMEMBER_TURN_LIMIT
+    if _already_kept_this_run(note, ctx.deps.saved_memory_texts):
+        return REMEMBER_DUPLICATE
+
+    trimmed = len(note) > MAX_MEMORY_NOTE_CHARS
+    note = note[:MAX_MEMORY_NOTE_CHARS]
+
+    payload = {
+        "channel_id": str(ctx.deps.channel_id),
+        "channel_name": ctx.deps.channel_name,
+        "content": note,
+        "engagement_id": (
+            None if ctx.deps.engagement_id is None else str(ctx.deps.engagement_id)
+        ),
+    }
+    try:
+        async with _bot_api(ctx) as api:
+            result = (
+                await api.post(
+                    CHAT_MEMORY_NOTES_PATH.format(guild_id=ctx.deps.guild_id),
+                    json_data=payload,
+                )
+            ).json()
+    except Exception as e:  # noqa: BLE001 — a lost note never costs the reply
+        logger.warning(
+            "remember: could not save note (guild=%s channel=%s): %s",
+            ctx.deps.guild_id,
+            ctx.deps.channel_id,
+            e,
+        )
+        return REMEMBER_API_FAILURE
+
+    if not result.get("saved"):
+        # A refusal is a normal 200 — the guild already has this thought today,
+        # or it has kept as much as one day is allowed to keep.
+        reason = result.get("reason")
+        logger.info(
+            "remember: note refused (guild=%s reason=%s)", ctx.deps.guild_id, reason
+        )
+        return _SERVER_REFUSALS.get(reason, REMEMBER_API_FAILURE)
+
+    ctx.deps.memories_saved_this_turn += 1
+    ctx.deps.saved_memory_texts.append(note)
+    logger.info(
+        "remember: kept a note (guild=%s channel=%s chars=%d)",
+        ctx.deps.guild_id,
+        ctx.deps.channel_id,
+        len(note),
+    )
+    return REMEMBER_TRIMMED if trimmed else REMEMBER_SAVED
+
+
 def chat_tool_functions() -> list:
     """Return the list of tool callables to register with the chat agent."""
     return [
@@ -568,4 +676,5 @@ def chat_tool_functions() -> list:
         report_behavior,
         run_code,
         generate_image,
+        remember,
     ]

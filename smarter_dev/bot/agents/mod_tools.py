@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 import hikari
 import lightbulb
 
+from smarter_dev.bot.guild_event_recorder import record_guild_event
 from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
 from smarter_dev.bot.plugins.timeout import parse_duration
 from smarter_dev.bot.purge_core import (
@@ -28,6 +29,7 @@ from smarter_dev.bot.purge_core import (
     select_purgeable_messages,
 )
 from smarter_dev.shared.database import get_db_session_context
+from smarter_dev.shared.guild_event_log import mod_action_event
 from smarter_dev.web.crud import ModerationActionOperations
 from smarter_dev.web.models import ModerationAction
 
@@ -207,8 +209,9 @@ def create_moderation_tools(
             )
             await session.commit()
         # Fire the mod_action trigger so a mod-log handler formats the AI action
-        # (best-effort; never breaks the triage tool).
-        await dispatch_mod_action(action)
+        # (best-effort; never breaks the triage tool). The bot goes along so the
+        # same call writes the action into the guild's short-term event log.
+        await dispatch_mod_action(action, bot=bot)
         return action
 
     # ── Action tools ─────────────────────────────────────────────────
@@ -382,6 +385,23 @@ def create_moderation_tools(
                 "message_id": message_id,
                 "reason": reason,
             })
+
+            # TODO(§3.8): a single delete writes no ModerationAction row today, so
+            # the bot's short-term memory is captured here. Once feature-parity
+            # §3.8 gives it a row it will flow through dispatch_mod_action — drop
+            # this call then, or the delete lands in the log twice.
+            await record_guild_event(
+                bot,
+                mod_action_event(
+                    {
+                        "action_type": "delete",
+                        "reason": reason,
+                        "source": "ai",
+                        "channel_id": channel_id,
+                    },
+                    guild_id=guild_id,
+                ),
+            )
 
             return {
                 "success": True,
