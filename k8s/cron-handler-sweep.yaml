@@ -67,6 +67,56 @@ spec:
                                 secretKeyRef:
                                     name: smarter-dev-secrets
                                     key: discord-bot-token
+                          # Skrift settings validation requires secret_key,
+                          # and app.yaml interpolates the rest at config-load
+                          # time (auth providers + object storage), so the
+                          # process won't boot without them even though the
+                          # sweep never uses auth, sessions, or storage.
+                          - name: SECRET_KEY
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: secret-key
+                          - name: DISCORD_APPLICATION_ID
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: discord-application-id
+                          - name: DISCORD_APPLICATION_SECRET
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: discord-client-secret
+                          - name: GITHUB_CLIENT_ID
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: github-client-id
+                          - name: GITHUB_CLIENT_SECRET
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: github-client-secret
+                          - name: GOOGLE_CLIENT_ID
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: google-client-id
+                          - name: GOOGLE_CLIENT_SECRET
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: google-client-secret
+                          - name: SPACES_ACCESS_KEY
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: spaces-access-key
+                          - name: SPACES_SECRET_KEY
+                            valueFrom:
+                                secretKeyRef:
+                                    name: smarter-dev-secrets
+                                    key: spaces-secret-key
                         resources:
                             requests:
                                 cpu: "50m"
