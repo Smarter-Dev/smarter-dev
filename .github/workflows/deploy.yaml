@@ -3,6 +3,11 @@ on:
     branches:
       - main
 
+# One deploy at a time, in push order. Without this, two quick pushes race
+# each other through migrate + rollout.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
 
 jobs:
   build-and-deploy:
@@ -12,22 +17,42 @@ jobs:
 
     - name: Checkout the repo
       uses: actions/checkout@main
+      with:
+        # Full history: the image tag is derived from the last commit that
+        # touched build inputs, which a shallow clone can't answer.
+        fetch-depth: 0
 
-    - name: Get latest commit SHA for the version tag
-      run: echo $GITHUB_SHA > $GITHUB_WORKSPACE/_meta
+    # Tag images by the last commit that touched anything that lands in (or
+    # shapes) the images, instead of always using HEAD. A push that only edits
+    # CI, manifests, tests, or docs reuses the previous tag, so the registry
+    # already has the image and every `kubectl apply` below becomes a no-op —
+    # no rebuild, no pod rolls. The exclude list must mirror .dockerignore:
+    # anything excluded here has to be out of the build context too, or the
+    # image could change without the tag changing. `:(glob,exclude)*.md`
+    # matches root-level markdown only — nested .md files (agent prompts under
+    # smarter_dev/) ship in the image and must keep busting the tag.
+    - name: Compute image tag from build inputs
+      run: |
+        TAG=$(git log -1 --format=%h --abbrev=7 -- . \
+          ':(exclude).github' \
+          ':(exclude).claude' \
+          ':(exclude)k8s' \
+          ':(exclude)tests' \
+          ':(exclude)planning' \
+          ':(exclude)docs' \
+          ':(exclude)reports' \
+          ':(glob,exclude)*.md')
+        echo "image tag: $TAG (last commit that touched build inputs)"
+        echo "IMAGE_TAG=$TAG" >> "$GITHUB_ENV"
 
     - name: Update deployment files with new image tag
       run: |
-        TAG=$(echo $GITHUB_SHA | head -c7)
-        sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy.yaml
-        sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy-bot.yaml
-        sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy-worker.yaml
-        sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/deploy-chat-child-worker.yaml
-        sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/cron-sudo-sweep.yaml
-        sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/cron-retention-sweep.yaml
-        sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/cron-handler-sweep.yaml
-        sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/cron-dream-session.yaml
-        sed -i 's|<IMAGE_VERSION>|'${TAG}'|' $GITHUB_WORKSPACE/k8s/migrate-job.yaml
+        for f in deploy.yaml deploy-bot.yaml deploy-worker.yaml \
+                 deploy-chat-child-worker.yaml cron-sudo-sweep.yaml \
+                 cron-retention-sweep.yaml cron-handler-sweep.yaml \
+                 cron-dream-session.yaml migrate-job.yaml; do
+          sed -i 's|<IMAGE_VERSION>|'${IMAGE_TAG}'|' $GITHUB_WORKSPACE/k8s/$f
+        done
 
     - name: Install doctl
       uses: digitalocean/action-doctl@v2
@@ -43,17 +68,37 @@ jobs:
         DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
       run: docker login -u $DOCKER_USERNAME -p $DOCKER_PASSWORD
 
-    - name: Build web container image
-      run: docker build -f Dockerfile.web -t zzmmrmn/smarter-dev-website:$(echo $GITHUB_SHA | head -c7) .
+    - name: Set up Docker buildx
+      uses: docker/setup-buildx-action@v3
 
-    - name: Build bot container image
-      run: docker build -f Dockerfile.bot -t zzmmrmn/smarter-dev-bot:$(echo $GITHUB_SHA | head -c7) .
+    # Each build is skipped outright when the registry already has this tag
+    # (the tag encodes the build inputs, so same tag = same image). When a
+    # build does run, the :buildcache ref restores the dependency layers
+    # (apt, uv sync, npm ci) from the registry — runners are ephemeral, so
+    # without it every code change pays the full dependency install.
+    - name: Build and push web image (if inputs changed)
+      run: |
+        IMAGE=zzmmrmn/smarter-dev-website:${IMAGE_TAG}
+        if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+          echo "$IMAGE already in registry; skipping build"
+        else
+          docker buildx build --push \
+            --cache-from type=registry,ref=zzmmrmn/smarter-dev-website:buildcache \
+            --cache-to type=registry,ref=zzmmrmn/smarter-dev-website:buildcache,mode=max \
+            -f Dockerfile.web -t "$IMAGE" .
+        fi
 
-    - name: Push web image to Docker Hub
-      run: docker push zzmmrmn/smarter-dev-website:$(echo $GITHUB_SHA | head -c7)
-
-    - name: Push bot image to Docker Hub
-      run: docker push zzmmrmn/smarter-dev-bot:$(echo $GITHUB_SHA | head -c7)
+    - name: Build and push bot image (if inputs changed)
+      run: |
+        IMAGE=zzmmrmn/smarter-dev-bot:${IMAGE_TAG}
+        if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+          echo "$IMAGE already in registry; skipping build"
+        else
+          docker buildx build --push \
+            --cache-from type=registry,ref=zzmmrmn/smarter-dev-bot:buildcache \
+            --cache-to type=registry,ref=zzmmrmn/smarter-dev-bot:buildcache,mode=max \
+            -f Dockerfile.bot -t "$IMAGE" .
+        fi
 
     - name: Create namespace if not exists
       run: kubectl apply -f $GITHUB_WORKSPACE/k8s/namespace.yaml
