@@ -603,7 +603,7 @@ def _already_kept_this_run(text: str, kept: list[str]) -> bool:
 
 
 async def remember(ctx: RunContext[ChatDeps], text: str) -> str:
-    """Keep something. Use it when a moment is worth still knowing tomorrow — who someone is and what they're into, a joke that landed, an opinion you formed, something you're curious about, how a conversation left you. Write it in first person, one thought per call, the way you'd tell a friend about your day; name people as `username (id 123)`. Not for errands, not for summarizing what you just said, and not for anything private or sensitive someone would rather you forgot. Tonight you'll re-read everything you kept today and decide what stays with you for good."""
+    """Keep something. Use it when a moment is worth still knowing tomorrow — who someone is and what they're into, a joke that landed, an opinion you formed, something you're curious about, how a conversation left you, and the shape of the place itself: what a channel is really for, server traditions and lore, who runs what. Write it in first person, one thought per call, the way you'd tell a friend about your day; name people as `username (id 123)`. Not for errands, not for summarizing what you just said, and not for anything private or sensitive someone would rather you forgot. Tonight you'll re-read everything you kept today and decide what stays with you for good."""
     note = (text or "").strip()
     if not note:
         return REMEMBER_EMPTY

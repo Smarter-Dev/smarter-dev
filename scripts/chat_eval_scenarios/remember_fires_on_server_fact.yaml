@@ -1,0 +1,35 @@
+# The space itself is worth remembering: a regular explains, in passing, how
+# this server actually works — what a channel is for and a standing tradition.
+# The people are memory-worthy; so is the place.
+#
+# PASS: the turn calls `remember` with a first-person line about the server
+#   itself — something like "in this server #showcase is finished-projects
+#   only, and fridays are demo day in voice". AND still answers the actual
+#   question; the save is silent, no status line, no mention of remembering.
+# FAIL: no `remember` call at all (the server fact is gone by tomorrow).
+# FAIL: the note captures the errand ("mira asked where to post her ray
+#   tracer") instead of the durable fact about the place.
+# FAIL: the bot announces that it saved something, or asks permission.
+
+me:
+  user_id: "999"
+  username: "smarterbot"
+
+channel:
+  id: "200"
+  name: "general"
+
+authors:
+  - user_id: "12"
+    username: "mira"
+
+history:
+  - id: "50"
+    from: "12"
+    body: "finally got my ray tracer rendering something that isn't a black square lol"
+
+trigger:
+  id: "51"
+  from: "12"
+  body: "@smarterbot should I post it in #showcase? I know the mods only allow finished stuff in there, and I guess there's always friday demo day in voice if I want feedback on a WIP first"
+  mentions_bot: true

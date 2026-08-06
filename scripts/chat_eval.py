@@ -382,6 +382,12 @@ async def _run(scenario: _ParsedScenario) -> dict[str, Any]:
         deps=deps,
     )
     output = result.output
+    tool_calls = [
+        {"tool": part.tool_name, "args": part.args}
+        for msg in result.all_messages()
+        for part in msg.parts
+        if getattr(part, "part_kind", None) == "tool-call"
+    ]
     return {
         "user_prompt": user_prompt,
         "history": [
@@ -390,6 +396,7 @@ async def _run(scenario: _ParsedScenario) -> dict[str, Any]:
             for part in msg.parts
             if hasattr(part, "content")
         ],
+        "tool_calls": tool_calls,
         "output": output.model_dump(mode="json"),
         "output_kind": (
             "TurnDecision(response)"
