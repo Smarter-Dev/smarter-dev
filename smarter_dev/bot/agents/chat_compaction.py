@@ -102,7 +102,7 @@ TRANSCRIPT_TOOL_CLAMP = 1_500
 
 COMPACTED_PREFIX = "[compacted history]"
 
-DEFAULT_COMPACT_MODEL = "gpt-5.6-luna"
+DEFAULT_COMPACT_MODEL = "openai/gpt-5.6-luna"
 COMPACT_MODEL_ENV_VAR = "CHAT_AGENT_COMPACT_MODEL"
 # The summarizer runs at fixed low reasoning; persisted with each compaction
 # event so the dashboard can attribute its spend.
@@ -110,13 +110,16 @@ SUMMARIZER_REASONING_LEVEL = ReasoningLevel.LOW
 # Mirrors chat_agent.MODEL_ENV_VAR — chat_agent imports this module, so
 # importing back would be circular.
 CHAT_MODEL_ENV_VAR = "CHAT_AGENT_MODEL"
-DEFAULT_CHAT_MODEL = "gpt-5.6-luna"
+DEFAULT_CHAT_MODEL = "openai/gpt-5.6-luna"
 
 # $/Mtok (input, cached_input, output), matched by id prefix. Cached rate
 # defaults to 10% of input when the provider hasn't published one.
+# "openai/gpt-5.6-luna" is Luna on the OpenRouter route (the default);
+# "gpt-5.6-luna" is a direct-OpenAI env pin at OpenAI's own rates.
 _PRICES: dict[str, tuple[float, float, float]] = {
     "gemini-3.1-flash-lite": (0.25, 0.025, 1.50),
     "gemini-3-flash": (0.15, 0.0375, 0.60),
+    "openai/gpt-5.6-luna": (0.10, 0.01, 0.60),
     "gpt-5.6-luna": (0.20, 0.02, 1.20),
     "gpt-5.6-terra": (2.00, 0.20, 12.00),
     "gpt-5.4-nano": (0.20, 0.02, 1.25),

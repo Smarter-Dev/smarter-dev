@@ -30,11 +30,17 @@ from pydantic import BaseModel
 from pydantic import Field
 from pydantic_ai import Agent
 from pydantic_ai import RunContext
+from pydantic_ai.models import Model
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.google import GoogleModelSettings
 from pydantic_ai.providers.google import GoogleProvider
+from pydantic_ai.settings import ModelSettings
 
 from smarter_dev.shared.config import get_settings
+from smarter_dev.shared.model_catalog import MODEL_CATALOG
+from smarter_dev.shared.model_catalog import ReasoningLevel
+from smarter_dev.shared.model_router import build_model_for
+from smarter_dev.shared.model_router import model_settings_for
 from smarter_dev.web.handler_lint import lint_script
 from smarter_dev.web.handler_schedule import ScheduleError
 from smarter_dev.web.handler_schedule import validate_time_trigger_settings
@@ -537,6 +543,34 @@ def _build_google_model(model_id: str) -> GoogleModel:
     return GoogleModel(model_id, provider=GoogleProvider(api_key=api_key))
 
 
+def _build_judge_model(model_id: str) -> Model:
+    """Build the model behind a judge, honoring the catalog's provider routing.
+
+    Judge models are configured by wire id. A catalog id routes through the
+    shared model router (Luna, the admin second judge's default, is served via
+    OpenRouter); anything else is assumed to be a Gemini id, matching the
+    author/primary-judge defaults.
+    """
+    catalog_model = next(
+        (model for model in MODEL_CATALOG if model.model_id == model_id), None
+    )
+    if catalog_model is not None:
+        return build_model_for(catalog_model)
+    return _build_google_model(model_id)
+
+
+def _judge_model_settings(model_id: str) -> ModelSettings:
+    """Reasoning settings for a judge: MEDIUM effort in each provider's dialect."""
+    catalog_model = next(
+        (model for model in MODEL_CATALOG if model.model_id == model_id), None
+    )
+    if catalog_model is not None:
+        settings = model_settings_for(catalog_model, ReasoningLevel.MEDIUM)
+        if settings is not None:
+            return settings
+    return _HANDLER_THINKING
+
+
 # Author and judge both think at MEDIUM: writing a sandbox-correct script and
 # catching subtle violations (e.g. a disallowed import) is worth the deliberation.
 _HANDLER_THINKING = GoogleModelSettings(
@@ -794,10 +828,10 @@ def _get_admin_author_agent() -> Agent[_AdminAuthorDeps, AdminHandlerPlan]:
 def _get_admin_judge_agent(model_id: str) -> Agent[None, JudgeVerdict]:
     if model_id not in _admin_judge_agents:
         _admin_judge_agents[model_id] = Agent(
-            _build_google_model(model_id),
+            _build_judge_model(model_id),
             output_type=JudgeVerdict,
             system_prompt=ADMIN_JUDGE_PROMPT,
-            model_settings=_HANDLER_THINKING,
+            model_settings=_judge_model_settings(model_id),
         )
     return _admin_judge_agents[model_id]
 

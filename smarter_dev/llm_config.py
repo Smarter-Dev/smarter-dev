@@ -15,7 +15,9 @@ from google import genai
 if TYPE_CHECKING:
     import dspy
 
-DEFAULT_LLM_MODEL = "gpt-5.6-luna"
+# Luna via OpenRouter (2026-08-06): the same OpenAI upstream at half the
+# rate. litellm routes "openrouter/<upstream>/<model>" ids to OpenRouter.
+DEFAULT_LLM_MODEL = "openrouter/openai/gpt-5.6-luna"
 
 
 def get_llm_model(model_type: str = "fast") -> dspy.LM:
@@ -132,7 +134,9 @@ def get_gemini_client_for_tts(model_name: str | None = None):
 
 def _get_provider_from_model(model_name: str) -> str:
     """Determine provider from model name."""
-    if model_name.startswith("gpt-") or model_name.startswith("openai/"):
+    if model_name.startswith("openrouter/"):
+        return "openrouter"
+    elif model_name.startswith("gpt-") or model_name.startswith("openai/"):
         return "openai"
     elif model_name.startswith("gemini/"):
         return "gemini"
@@ -150,7 +154,14 @@ def _get_api_key_for_model(model_name: str) -> str | None:
     """
     provider = _get_provider_from_model(model_name)
 
-    if provider == "openai":
+    if provider == "openrouter":
+        return (
+            os.getenv("OPENROUTER_API_KEY")
+            or os.getenv("OPEN_ROUTER")
+            or dotenv.get_key(".env", "OPENROUTER_API_KEY")
+            or dotenv.get_key(".env", "OPEN_ROUTER")
+        )
+    elif provider == "openai":
         return os.getenv("OPENAI_API_KEY") or dotenv.get_key(".env", "OPENAI_API_KEY")
     elif provider == "gemini":
         return os.getenv("GEMINI_API_KEY") or dotenv.get_key(".env", "GEMINI_API_KEY")
@@ -172,7 +183,7 @@ def _get_api_key_for_model(model_name: str) -> str | None:
 
 def _is_reasoning_model(model_name: str) -> bool:
     """Check if model is a reasoning model requiring special parameters."""
-    unprefixed = model_name.removeprefix("openai/")
+    unprefixed = model_name.removeprefix("openrouter/").removeprefix("openai/")
     return unprefixed.startswith(("o1", "gpt-5"))
 
 
