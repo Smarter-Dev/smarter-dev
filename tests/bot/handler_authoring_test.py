@@ -8,10 +8,15 @@ from __future__ import annotations
 from datetime import UTC
 from datetime import datetime
 
+from pydantic_ai.models.google import GoogleModel
+from pydantic_ai.models.openai import OpenAIChatModel
+
 from smarter_dev.bot.agents.handler_authoring import AdminHandlerPlan
 from smarter_dev.bot.agents.handler_authoring import HandlerPlan
 from smarter_dev.bot.agents.handler_authoring import JudgeVerdict
 from smarter_dev.bot.agents.handler_authoring import _build_admin_author_prompt
+from smarter_dev.bot.agents.handler_authoring import _build_judge_model
+from smarter_dev.shared.config import Settings
 from smarter_dev.bot.agents.handler_authoring import _build_author_prompt
 from smarter_dev.bot.agents.handler_authoring import checklist_failures
 from smarter_dev.bot.agents.handler_authoring import describe_trigger
@@ -824,3 +829,26 @@ async def test_pipeline_accepts_conditional_literal_role_grant():
     assert result.ok
     assert result.settings == {"allowed_role_ids": ["888160821673349140"]}
     assert "add_role" in result.script
+
+
+# ---------------------------------------------------------------------------
+# Admin judge model routing
+# ---------------------------------------------------------------------------
+
+
+def test_judge_model_builder_routes_catalog_ids_through_model_router(monkeypatch):
+    # The admin second judge defaults to Luna, which the catalog serves via
+    # OpenRouter — building it as a Google model would send a GPT id to the
+    # Gemini API. Catalog wire ids must route through the shared router;
+    # anything else is assumed to be a Gemini id.
+    monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
+    luna = _build_judge_model("openai/gpt-5.6-luna")
+    assert isinstance(luna, OpenAIChatModel)
+
+    gemini = _build_judge_model("gemini-3-flash-preview")
+    assert isinstance(gemini, GoogleModel)
+
+
+def test_admin_second_judge_default_is_catalog_luna():
+    default = Settings.model_fields["handler_admin_second_judge_model"].default
+    assert default == "openai/gpt-5.6-luna"

@@ -110,6 +110,24 @@ class TestOpenRouterPricing:
         )
         assert cost == Decimal("0.042")
 
+    def test_luna_openrouter_rates(self):
+        # Luna moved to OpenRouter 2026-08-06: $0.10/M in + $0.60/M out,
+        # half the direct-OpenAI rate.
+        assert calc_cost(1_000_000, 1_000_000, "openai/gpt-5.6-luna") == Decimal(
+            "0.70"
+        )
+
+    def test_luna_openrouter_cache_read_and_write_rates(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=800_000,
+            cache_write_tokens=100_000,
+            model_name="openrouter:openai/gpt-5.6-luna",
+        )
+        # 100k fresh @ $0.10 + 800k read @ $0.01 + 100k write @ $0.125.
+        assert cost == Decimal("0.0305")
+
     def test_grok_4_5_rates(self):
         assert calc_cost(1_000_000, 1_000_000, "x-ai/grok-4.5") == Decimal("8.00")
 
@@ -188,8 +206,10 @@ class TestOpenAIPricing:
         # 100k fresh @ $5 + 800k read @ $0.50 + 100k write @ $6.25.
         assert cost == Decimal("1.525")
 
-    def test_luna_reduced_rates(self):
-        # Effective 2026-07-30: $0.20/M input + $1.20/M output.
+    def test_luna_direct_openai_rates_for_historical_rows(self):
+        # Luna moved to OpenRouter 2026-08-06; rows written before the move
+        # carry the flat direct-OpenAI id and must keep pricing at OpenAI's
+        # $0.20/$1.20 rate (effective 2026-07-30).
         assert calc_cost(1_000_000, 1_000_000, "gpt-5.6-luna") == Decimal("1.40")
 
     def test_luna_cache_read_and_write_rates(self):

@@ -128,22 +128,24 @@ SMALL = "hello"
 # ---------------------------------------------------------------------------
 
 
-def test_default_chat_and_compaction_models_are_luna():
-    assert DEFAULT_CHAT_MODEL == "gpt-5.6-luna"
-    assert DEFAULT_COMPACT_MODEL == "gpt-5.6-luna"
+def test_default_chat_and_compaction_models_are_luna_via_openrouter():
+    assert DEFAULT_CHAT_MODEL == "openai/gpt-5.6-luna"
+    assert DEFAULT_COMPACT_MODEL == "openai/gpt-5.6-luna"
 
 
 def test_should_fold_luna_default_cold_threshold(monkeypatch):
     monkeypatch.delenv("CHAT_AGENT_MODEL", raising=False)
-    # (p + n*c)(F - S) >= Sigma crosses at F ~= 9375 tokens.
+    # (p + n*c)(F - S) >= Sigma crosses at F ~= 9375 tokens. The OpenRouter
+    # move halved every Luna rate, which scales both sides equally — the
+    # crossing point is unchanged.
     assert not _should_fold(9_000, 3_000, cache_warm=False)
     assert _should_fold(10_000, 3_000, cache_warm=False)
 
 
 def test_should_fold_luna_default_never_warm_below_cap(monkeypatch):
     monkeypatch.delenv("CHAT_AGENT_MODEL", raising=False)
-    # Cached savings (0.02*n) accrue slower than the summariser's own input
-    # rate (0.20) — below the latency cap, no F makes a warm fold profitable.
+    # Cached savings (0.01*n) accrue slower than the summariser's own input
+    # rate (0.10) — below the latency cap, no F makes a warm fold profitable.
     assert not _should_fold(HARD_FOLD_TOKENS - 1, 0, cache_warm=True)
 
 
@@ -154,14 +156,25 @@ def test_hard_cap_folds_regardless_of_economics(monkeypatch):
     assert _should_fold(HARD_FOLD_TOKENS, 0, cache_warm=True)
 
 
-def test_explicit_luna_uses_reduced_rate_threshold(monkeypatch):
+def test_explicit_openrouter_luna_uses_reduced_rate_threshold(monkeypatch):
+    monkeypatch.setenv("CHAT_AGENT_MODEL", "openai/gpt-5.6-luna")
+    assert not _should_fold(9_000, 3_000, cache_warm=False)
+    assert _should_fold(10_000, 3_000, cache_warm=False)
+
+
+def test_explicit_direct_openai_luna_keeps_same_threshold(monkeypatch):
+    # An env pin of BOTH models to the direct-OpenAI id prices at OpenAI's
+    # rates; those are exactly 2x the OpenRouter rates, so the thresholds
+    # match. (Pinning only the chat model mixes a 2x chat rate with a 1x
+    # summarizer rate and genuinely shifts the crossing point.)
     monkeypatch.setenv("CHAT_AGENT_MODEL", "gpt-5.6-luna")
+    monkeypatch.setenv("CHAT_AGENT_COMPACT_MODEL", "gpt-5.6-luna")
     assert not _should_fold(9_000, 3_000, cache_warm=False)
     assert _should_fold(10_000, 3_000, cache_warm=False)
 
 
 def test_should_fold_luna_warm_threshold(monkeypatch):
-    monkeypatch.setenv("CHAT_AGENT_MODEL", "gpt-5.6-luna")
+    monkeypatch.setenv("CHAT_AGENT_MODEL", "openai/gpt-5.6-luna")
     # Luna-on-Luna compaction is not economical while warm below the hard cap.
     assert not _should_fold(15_000, 3_000, cache_warm=True)
     assert _should_fold(17_000, 3_000, cache_warm=True)

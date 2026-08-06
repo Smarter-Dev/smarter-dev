@@ -126,7 +126,7 @@ async def summarize_web_content(
         )
         record_llm_failover(
             operation="web_summarizer",
-            primary_model="gpt-5.6-luna",
+            primary_model=get_model(PRIMARY_MODEL_KEY).model_id,
             fallback_model="gemini-3.1-flash-lite",
             error=exc,
         )

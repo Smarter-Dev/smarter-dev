@@ -32,7 +32,7 @@ from smarter_dev.web.research_tools import brave_search
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "gpt-5.6-luna"
+DEFAULT_MODEL = "openai/gpt-5.6-luna"
 MODEL_ENV_VAR = "HANDLER_AGENT_MODEL"
 
 _GATHER_PROMPT = (

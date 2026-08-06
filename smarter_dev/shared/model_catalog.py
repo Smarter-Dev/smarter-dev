@@ -374,12 +374,17 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         reasoning_levels=_OPENAI_5X,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
+    # Luna is OpenAI's model but is served through OpenRouter (2026-08-06):
+    # same OpenAI upstream at half the rate ($0.10/$0.60 against direct's
+    # $0.20/$1.20). Probed live: OpenRouter passes reasoning_effort through to
+    # the upstream — every level none→max returns 200 — so the full 5.6
+    # ladder stays.
     CatalogModel(
         key="gpt-5-6-luna",
         label="GPT-5.6 Luna",
         family="GPT",
-        provider=ModelProvider.OPENAI,
-        model_id="gpt-5.6-luna",
+        provider=ModelProvider.OPENROUTER,
+        model_id="openai/gpt-5.6-luna",
         supports_vision=True,
         reasoning_levels=_OPENAI_56,
         default_reasoning=ReasoningLevel.MEDIUM,

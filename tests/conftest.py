@@ -31,6 +31,20 @@ TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 TEST_REDIS_URL = "redis://localhost:6379/15"  # Use a different DB for tests
 
 
+@pytest.fixture(autouse=True)
+def _dummy_openrouter_key(monkeypatch):
+    """Provide a placeholder OpenRouter key when the environment has none.
+
+    Unlike the other provider SDKs, pydantic-ai's OpenRouterProvider refuses
+    an empty api_key at construction, so building any OpenRouter-served
+    catalog model (Luna is the chat default) needs a value present. Tests
+    that assert key-resolution behavior set or delete the vars themselves,
+    which overrides this fixture's value.
+    """
+    if not os.environ.get("OPENROUTER_API_KEY"):
+        monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+
+
 @pytest.fixture(scope="function")
 def event_loop():
     """Create an instance of the default event loop for each test function."""
