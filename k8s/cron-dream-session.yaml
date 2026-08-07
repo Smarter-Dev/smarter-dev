@@ -5,9 +5,20 @@
 #   - quiet guilds are stamped and skipped without a model call
 #   - notes are deleted only by the ids the dream actually read
 #
-# Runs at 00:20 UTC — twenty minutes after the midnight-UTC day boundary the
-# whole memory system is cut on, so nothing written just before midnight is
-# missed and nothing written just after is folded into the wrong day.
+# Runs at 00:00 UTC, on the midnight-UTC day boundary the whole memory system is
+# cut on, so the blob is rewritten the moment yesterday's notes stop being
+# readable rather than twenty minutes into the blind spot.
+#
+# Firing on the boundary rather than after it is safe because of two properties
+# on the read side, and it is worth knowing which is which:
+#   - ``dream_cutoff`` snaps to the upcoming midnight within a five-minute
+#     tolerance, so cron jitter or clock skew that fires the job a moment early
+#     still folds the day that is ending. Without that snap an early fire would
+#     truncate to the *previous* date and skip a whole day.
+#   - A note whose transaction started before midnight but commits just after is
+#     invisible to this run, and that is fine: notes are deleted by explicit id,
+#     never by ``created_at < cutoff``, so an unread note stays put and tomorrow
+#     night folds two days at once.
 #
 # Image is pinned to the same web image so the codebase / venv match exactly:
 # the dream calls smarter_dev.web.crud directly rather than going over the bot
@@ -26,7 +37,7 @@ metadata:
     labels:
         app: smarter-dev-dream-session
 spec:
-    schedule: "20 0 * * *"
+    schedule: "0 0 * * *"
     timeZone: "UTC"
     concurrencyPolicy: Forbid
     successfulJobsHistoryLimit: 3

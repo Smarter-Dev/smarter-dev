@@ -204,16 +204,36 @@ SessionFactory = Callable[[], contextlib.AbstractAsyncContextManager[AsyncSessio
 # -- pure helpers --------------------------------------------------------------
 
 
-def dream_cutoff(now: datetime) -> datetime:
-    """Midnight UTC of ``now``'s UTC date — the exclusive end of the folded day.
+# How early the dream may fire and still be treated as "at" the upcoming
+# midnight. The CronJob is scheduled for 00:00 UTC, and a job that fires even a
+# few milliseconds early would otherwise see ``now`` still on the previous date
+# and truncate to *that* day's midnight — folding the day before last and
+# leaving a full day of notes unread. Generous enough to absorb cron jitter and
+# node clock skew, far too small to swallow a deliberate mid-day manual run.
+CUTOFF_SNAP_TOLERANCE = timedelta(minutes=5)
 
-    Everything written strictly before this instant is what tonight's dream
-    reads. ``now`` must be timezone-aware: guessing a zone here would silently
-    fold the wrong day, so it is an error instead.
+
+def dream_cutoff(now: datetime) -> datetime:
+    """The midnight-UTC boundary this run folds up to, exclusive.
+
+    Normally midnight UTC of ``now``'s own date, so everything written strictly
+    before that instant is what tonight's dream reads. Within
+    :data:`CUTOFF_SNAP_TOLERANCE` of the *upcoming* midnight the boundary snaps
+    forward to it instead, so an early fire folds the day that is ending rather
+    than the one before it — the two cases must agree, because 23:59:59.9 and
+    00:00:00.1 are the same run as far as the schedule is concerned.
+
+    ``now`` must be timezone-aware: guessing a zone here would silently fold the
+    wrong day, so it is an error instead.
     """
     if now.tzinfo is None:
         raise ValueError("dream_cutoff requires a timezone-aware datetime")
-    return now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    moment = now.astimezone(UTC)
+    day_start = moment.replace(hour=0, minute=0, second=0, microsecond=0)
+    next_midnight = day_start + timedelta(days=1)
+    if next_midnight - moment <= CUTOFF_SNAP_TOLERANCE:
+        return next_midnight
+    return day_start
 
 
 def dream_day(cutoff: datetime) -> date:
