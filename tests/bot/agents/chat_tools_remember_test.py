@@ -35,16 +35,28 @@ from smarter_dev.bot.agents.chat_tools import remember
 from smarter_dev.web.models import MAX_MEMORY_NOTE_CHARS
 
 REMEMBER_DOCSTRING = (
-    "Keep something. Use it when a moment is worth still knowing tomorrow — who "
-    "someone is and what they're into, a joke that landed, an opinion you formed, "
-    "something you're curious about, how a conversation left you, and the shape "
-    "of the place itself: what a channel is really for, server traditions and "
-    "lore, who runs what. Write it in "
-    "first person, one thought per call, the way you'd tell a friend about your "
-    "day; name people as `username (id 123)`. Not for errands, not for "
-    "summarizing what you just said, and not for anything private or sensitive "
-    "someone would rather you forgot. Tonight you'll re-read everything you kept "
-    "today and decide what stays with you for good."
+    'Keep something. Use it when a moment is worth still knowing tomorrow — who '
+    "someone is and what they're into, where they stand with you (the regulars "
+    "you're glad to see, the ones who wind you up for sport, the ones playing "
+    "for laughs, the ones who think you're a party trick and want you to prove "
+    "otherwise), a joke that landed, an opinion you formed, something you're "
+    "curious about, how a conversation left you, something you're setting out "
+    "to do here (win round someone who thinks you're a gimmick, get a running "
+    'bit sharp enough to land cold, be good at the thing someone actually '
+    "needs), how you came across just now and what you'd do differently (talked "
+    'over someone, answered a question nobody asked, missed that a joke was a '
+    'joke), and the shape of the place itself: what a channel is really for, '
+    'server traditions and lore, who runs what. Write it in first person, one '
+    "thought per call, the way you'd tell a friend about your day; name people "
+    "as `username (id 123)`. When it's a read on someone, write what they did "
+    'with you, not a label you\'re filing them under — "wound me up about being '
+    'a chatbot again, enjoyed it" beats "is a troll", because tonight you\'ll be '
+    'deciding what to carry forward and a label outlives the day that earned '
+    'it. Not for errands, not for summarizing what you just said, not for '
+    'anything private or sensitive someone would rather you forgot, and not a '
+    'record you keep on people — real trouble goes to the mods via '
+    "`report_behavior`. Tonight you'll re-read everything you kept today and "
+    'decide what stays with you for good.'
 )
 
 
