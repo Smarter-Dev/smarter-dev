@@ -69,6 +69,29 @@ async def test_fenced_response_sends_text_image_text_in_order():
     assert calls[2].kwargs == {"content": "after"}
 
 
+async def test_delimiter_response_sends_text_image_text_in_order():
+    renderer = MagicMock()
+    renderer.render = AsyncMock(
+        return_value=RenderedLatex(data=b"PNG", filename="equation.png")
+    )
+    create_message = AsyncMock()
+    engine = _engine(create_message, renderer)
+
+    sent = await engine._send_fenced_response(
+        "area is $$\\pi r^2$$ done",
+        reply_to=101,
+    )
+
+    assert sent is True
+    renderer.render.assert_awaited_once_with("\\pi r^2")
+    calls = create_message.await_args_list
+    assert len(calls) == 3
+    assert calls[0].kwargs == {"content": "area is", "reply": 101}
+    assert "attachment" in calls[1].kwargs
+    assert "reply" not in calls[1].kwargs
+    assert calls[2].kwargs == {"content": "done"}
+
+
 async def test_response_starting_with_latex_puts_reply_anchor_on_image():
     renderer = MagicMock()
     renderer.render = AsyncMock(return_value=RenderedLatex(data=b"PNG"))
@@ -157,7 +180,7 @@ async def test_missing_renderer_sends_original_fence():
     assert create_message.await_args.kwargs["content"] == "```latex\nx\n```"
 
 
-def test_both_answer_prompts_require_latex_fences():
+def test_both_answer_prompts_instruct_latex_delimiters():
     root = Path(__file__).resolve().parents[3]
     prompt_paths = [
         root / "smarter_dev/bot/agents/prompts/chat_agent.md",
@@ -166,8 +189,13 @@ def test_both_answer_prompts_require_latex_fences():
 
     for prompt_path in prompt_paths:
         prompt = prompt_path.read_text(encoding="utf-8")
-        assert "fenced block whose language is exactly `latex`" in prompt
-        assert "Never use `$`, `$$`, `\\(`, or `\\[`" in prompt
+        # New guidance: standard delimiters, not the ```latex fence.
+        assert "write math with standard LaTeX delimiters" in prompt
+        assert "$$…$$" in prompt and "\\(…\\)" in prompt
+        assert "A lone `$` is never treated as math" in prompt
+        # The old fence-only instruction and its blanket ban are gone.
+        assert "fenced block whose language is exactly `latex`" not in prompt
+        assert "Never use `$`, `$$`, `\\(`, or `\\[`" not in prompt
 
 
 @pytest.mark.asyncio
