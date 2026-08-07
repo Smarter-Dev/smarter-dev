@@ -16,6 +16,7 @@ import contextlib
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import UTC
+from datetime import date
 from datetime import datetime
 from datetime import timedelta
 from datetime import timezone
@@ -26,10 +27,12 @@ from sqlalchemy import select
 
 from scripts import dream_session
 from smarter_dev.web import chat_memory_dream
+from smarter_dev.web.chat_memory_dream import CUTOFF_SNAP_TOLERANCE
 from smarter_dev.web.chat_memory_dream import DreamOutcome
 from smarter_dev.web.chat_memory_dream import DreamSessionSummary
 from smarter_dev.web.chat_memory_dream import build_dream_user_message
 from smarter_dev.web.chat_memory_dream import dream_cutoff
+from smarter_dev.web.chat_memory_dream import dream_day
 from smarter_dev.web.chat_memory_dream import enforce_blob_limit
 from smarter_dev.web.chat_memory_dream import get_dream_agent
 from smarter_dev.web.chat_memory_dream import run_dream_session
@@ -146,16 +149,52 @@ async def _seed_blob(session, *, content: str, guild_id: str = _GUILD):
 @pytest.mark.parametrize(
     ("now", "expected"),
     [
-        (datetime(2026, 8, 7, 0, 20, tzinfo=UTC), datetime(2026, 8, 7, tzinfo=UTC)),
         (datetime(2026, 8, 7, 0, 0, tzinfo=UTC), datetime(2026, 8, 7, tzinfo=UTC)),
-        (
-            datetime(2026, 8, 7, 23, 59, 59, tzinfo=UTC),
-            datetime(2026, 8, 7, tzinfo=UTC),
-        ),
+        (datetime(2026, 8, 7, 0, 20, tzinfo=UTC), datetime(2026, 8, 7, tzinfo=UTC)),
+        # Well clear of the snap tolerance, so a deliberate mid-day or late
+        # manual run still folds only the day that has already ended.
+        (datetime(2026, 8, 7, 15, 0, tzinfo=UTC), datetime(2026, 8, 7, tzinfo=UTC)),
+        (datetime(2026, 8, 7, 23, 0, tzinfo=UTC), datetime(2026, 8, 7, tzinfo=UTC)),
     ],
 )
 def test_dream_cutoff_is_midnight_utc_of_the_current_day(now, expected):
     assert dream_cutoff(now) == expected
+
+
+@pytest.mark.parametrize(
+    "now",
+    [
+        datetime(2026, 8, 7, 23, 59, 59, 900000, tzinfo=UTC),
+        datetime(2026, 8, 7, 23, 59, 58, tzinfo=UTC),
+        datetime(2026, 8, 7, 23, 59, tzinfo=UTC),
+        datetime(2026, 8, 7, 23, 55, tzinfo=UTC),
+    ],
+)
+def test_dream_cutoff_snaps_forward_when_the_job_fires_early(now):
+    """Cron jitter must not cost a whole day.
+
+    The CronJob is scheduled for 00:00 UTC. Firing a moment early leaves ``now``
+    on the previous date, and plain truncation would fold the day *before* the
+    one that just ended — silently skipping 24h of notes. Anything inside the
+    tolerance folds the same day the on-time run would.
+    """
+    assert dream_cutoff(now) == datetime(2026, 8, 8, tzinfo=UTC)
+    assert dream_day(dream_cutoff(now)) == date(2026, 8, 7)
+
+
+def test_dream_cutoff_agrees_across_the_midnight_boundary():
+    """A hair before and a hair after midnight are the same scheduled run."""
+    just_before = dream_cutoff(datetime(2026, 8, 7, 23, 59, 59, tzinfo=UTC))
+    just_after = dream_cutoff(datetime(2026, 8, 8, 0, 0, 1, tzinfo=UTC))
+    assert just_before == just_after == datetime(2026, 8, 8, tzinfo=UTC)
+
+
+def test_dream_cutoff_does_not_snap_outside_the_tolerance():
+    """Just beyond the window is a normal run, not an early fire."""
+    outside = datetime(2026, 8, 7, tzinfo=UTC) + timedelta(days=1) - (
+        CUTOFF_SNAP_TOLERANCE + timedelta(seconds=1)
+    )
+    assert dream_cutoff(outside) == datetime(2026, 8, 7, tzinfo=UTC)
 
 
 def test_dream_cutoff_converts_other_zones_before_truncating():

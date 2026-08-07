@@ -4,10 +4,25 @@ from __future__ import annotations
 
 from typing import Optional
 
+from dotenv import load_dotenv
 from pydantic import Field
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
 from pydantic_settings import SettingsConfigDict
+
+# ``Settings`` reads ``.env`` into *itself*, but plenty of code reads provider
+# credentials straight off the environment instead — ``model_router.build_model_for``
+# takes every API key from ``os.getenv``. In a container those come from the
+# deployment's secrets and this is a no-op; running from a checkout they only
+# ever arrived because importing ``dspy`` pulled in litellm, which calls
+# ``load_dotenv()`` at import time. That made local credentials depend on an
+# unrelated library being imported first, and it broke the moment the DSPy agents
+# stopped being imported eagerly. Load the file here instead, at the seam every
+# consumer already goes through, so the dependency is stated rather than lucky.
+#
+# ``override=False`` (the default) keeps real environment variables authoritative,
+# so a deployed process is never shadowed by a stray ``.env``.
+load_dotenv()
 
 
 class Settings(BaseSettings):
