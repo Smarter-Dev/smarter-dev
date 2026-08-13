@@ -342,6 +342,8 @@ _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
         output_mtok=Decimal("0.12"),
         cache_read_mtok=Decimal("0.03"),
     ),
+    # Laguna S left the catalog on 2026-08-13; kept so rows written while it
+    # was selectable keep pricing at the rate they ran under.
     "poolside/laguna-s-2.1": types.ModelPrice(
         input_mtok=Decimal("0.10"),
         output_mtok=Decimal("0.20"),
@@ -350,11 +352,26 @@ _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
     # Grok 4.5 doubles every rate once a single prompt exceeds 200K tokens
     # ($4/$12/$0.60). This table has no length tier, so long-context turns
     # under-bill; chat compacts well below 200K, so the base rate is the
-    # honest one for our traffic.
+    # honest one for our traffic. Retired 2026-08-13 in favour of 4.6; kept
+    # for historical rows.
     "x-ai/grok-4.5": types.ModelPrice(
         input_mtok=Decimal("2.00"),
         output_mtok=Decimal("6.00"),
         cache_read_mtok=Decimal("0.30"),
+    ),
+    # Grok 4.6 carries 4.5's headline rate and the same >200K doubling
+    # ($4/$12/$1.00), but charges more for cached reads: $0.50 against $0.30.
+    "x-ai/grok-4.6": types.ModelPrice(
+        input_mtok=Decimal("2.00"),
+        output_mtok=Decimal("6.00"),
+        cache_read_mtok=Decimal("0.50"),
+    ),
+    # Qwen3.8 2.4T A95B. Every OpenRouter endpoint quotes the same rate, so
+    # there is no route-dependent price to model here.
+    "qwen/qwen3.8-2.4t-a95b": types.ModelPrice(
+        input_mtok=Decimal("2.00"),
+        output_mtok=Decimal("6.00"),
+        cache_read_mtok=Decimal("0.20"),
     ),
 }
 

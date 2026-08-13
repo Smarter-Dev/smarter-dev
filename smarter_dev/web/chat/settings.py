@@ -23,7 +23,10 @@ from smarter_dev.web.models import ChatSettings
 from smarter_dev.web.models import ChatSpendLimit
 
 DEFAULT_MODEL = "gemini-3-1-flash-lite"
-DEFAULT_SUMMARIZER = "poolside-laguna-s-2-1"
+# Laguna S 2.1 held this slot until it left the catalog on 2026-08-13. DeepSeek
+# V4 Flash is the closest replacement the catalog still carries: $0.14/$0.28 per
+# M against Laguna's $0.10/$0.20, and the cheapest remaining tool-capable model.
+DEFAULT_SUMMARIZER = "deepseek-v4"
 COST_TIERS = frozenset({"low", "medium", "high", "ultra"})
 
 

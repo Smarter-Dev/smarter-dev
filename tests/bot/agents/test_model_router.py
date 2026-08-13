@@ -22,8 +22,8 @@ _OPENAI_MODEL = get_model("gpt-5-4")
 _ANTHROPIC_MODEL = get_model("claude-sonnet-5")
 _ANTHROPIC_NO_REASONING_MODEL = get_model("claude-haiku-4-5")
 _OPENCODE_ZEN_MODEL = get_model("kimi-k3")
-_OPENROUTER_MODEL = get_model("poolside-laguna-s-2-1")
-_OPENROUTER_REASONING_MODEL = get_model("grok-4-5")
+_OPENROUTER_MODEL = get_model("qwen3-8-2-4t")
+_OPENROUTER_REASONING_MODEL = get_model("grok-4-6")
 
 
 def test_digitalocean_threads_base_url_and_key(monkeypatch):
@@ -216,8 +216,8 @@ def test_model_settings_per_provider_uses_model_default():
     assert anthropic_settings["anthropic_effort"] == "high"
     # Claude Haiku 4.5 has no effort knob -> no settings at all.
     assert model_settings_for(_ANTHROPIC_NO_REASONING_MODEL) is None
-    # Poolside does not publish a reasoning-effort contract for these models.
-    assert model_settings_for(_OPENROUTER_MODEL) is None
+    # Kimi K3 declares no effort contract on Zen -> no settings at all.
+    assert model_settings_for(_OPENCODE_ZEN_MODEL) is None
 
 
 def test_model_settings_applies_selected_reasoning_level():

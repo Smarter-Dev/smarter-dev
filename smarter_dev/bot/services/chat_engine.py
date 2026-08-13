@@ -150,6 +150,17 @@ _BUDGET_EXHAUSTED_NOTICE_TEMPLATE = (
     "up {reset_tag}."
 )
 
+# Posted when the channel is pinned to a model the catalog no longer carries,
+# which stops the channel outright. Channels pin a model deliberately and
+# usually advertise which one they run, so answering on the default model
+# instead would misrepresent what replied — better to say nothing until an
+# admin repins. Throttled on the same cooldown as the budget notice.
+_MODEL_UNAVAILABLE_NOTICE_TEMPLATE = (
+    "This channel is set to use `{model_key}`, which is no longer available. "
+    "I won't answer here until an administrator picks a new model with "
+    "`/chat-bot-settings`."
+)
+
 # Appended to a text reply when a generated image can't be attached because the
 # bot is missing the "Attach Files" permission — so the answer still lands and
 # the gap is explained instead of silent.
@@ -232,6 +243,11 @@ class ChannelEngine:
     # the turn that carried ``<what-i-remember>``, which would silently amputate
     # the bot's identity mid-engagement, so the next turn re-emits the blob once.
     _reemit_long_term_memory: bool = False
+
+    # Set once this engine has told the channel its pinned model is gone. Backs
+    # up the Redis throttle so a channel still gets the notice exactly once when
+    # Redis is unreachable, rather than on every activation (or never).
+    _model_unavailable_notified: bool = False
 
     # ------------------------------------------------------------------
     # Public API
@@ -619,6 +635,32 @@ class ChannelEngine:
                 if override is not None and budget_redis is not None
                 else False
             )
+            # A channel pinned to a model the catalog no longer carries stops
+            # rather than quietly answering on the default: these channels pin a
+            # model deliberately and usually advertise which one they run, so a
+            # silent substitution would misrepresent what replied. Checked
+            # before the budget gate so the channel hears about the dead pin
+            # even while it is over budget.
+            unavailable_model_key = self._unavailable_model_key(
+                override, fallback_active=fallback_active
+            )
+            if unavailable_model_key is not None:
+                logger.warning(
+                    "[%s] Channel %s pins unavailable model_key %r — "
+                    "stopping the turn",
+                    request_id,
+                    self.channel_id,
+                    unavailable_model_key,
+                )
+                await self._maybe_notice_model_unavailable(
+                    budget_redis,
+                    model_key=unavailable_model_key,
+                    reply_to=error_reply_to,
+                )
+                # Skipped before start_engagement — same contract as the
+                # over-budget skip: report the first activation as NOT consumed
+                # so the engagement still starts once an admin repins.
+                return False
             if fallback_active:
                 # Free fallback model in effect — its spend does not count
                 # against the cap, so no budget check. Reasoning stays unset so
@@ -1501,13 +1543,40 @@ class ChannelEngine:
         self._event_cursor = cursor
         return [GuildEventView.from_guild_event(event) for event in events]
 
+    def _unavailable_model_key(
+        self, override: Any | None, *, fallback_active: bool
+    ) -> str | None:
+        """The dead model key that stops this turn, or ``None`` to proceed.
+
+        Reports the key of the model that would actually serve *this* turn — the
+        fallback while a free-fallback window is active, the primary otherwise —
+        when the catalog no longer carries it. A window with no fallback
+        configured falls through to the primary, mirroring
+        :meth:`_resolve_fallback_model_id`.
+
+        A channel with no override, or one pinning no model, runs the server
+        default and is never stopped: nothing was advertised to contradict.
+        """
+        if override is None:
+            return None
+        if fallback_active:
+            fallback_key = getattr(override, "fallback_model_key", None)
+            if fallback_key is not None:
+                return fallback_key if get_model(fallback_key) is None else None
+        model_key = override.model_key
+        if model_key is None:
+            return None
+        return model_key if get_model(model_key) is None else None
+
     def _resolve_override_model_id(self, override: Any | None) -> str | None:
         """Wire model id for ``override``, or None to use the default agent.
 
         A ``model_key`` of ``None`` means the override pins no model (budgets/
         behaviour only — the channel keeps the server default). A stored
         ``model_key`` the catalog no longer knows (stale) falls back to the
-        default model with a warning rather than crashing the turn.
+        default model with a warning rather than crashing the turn — kept as
+        defence in depth, since :meth:`_unavailable_model_key` now stops such a
+        turn before it reaches here.
         """
         if override is None or override.model_key is None:
             return None
@@ -1956,6 +2025,49 @@ class ChannelEngine:
             await self._post_notice(
                 notice, reply_to=reply_to, components=components
             )
+
+    async def _maybe_notice_model_unavailable(
+        self,
+        redis: Any,
+        *,
+        model_key: str,
+        reply_to: int | None,
+    ) -> None:
+        """Post the model-unavailable notice, throttled to once per hour.
+
+        Mirrors :meth:`_maybe_notice_budget_exhausted`: a Redis ``SET NX EX``
+        per channel means only the turn that wins the key posts, so a busy
+        channel gets one notice per cooldown rather than one per activation.
+
+        Without a usable Redis the throttle degrades to a per-engine flag rather
+        than to silence — a channel that has been stopped needs to hear why at
+        least once, and the notice matters more here than for the budget notice,
+        which the channel would eventually work out for itself.
+        """
+        if redis is not None:
+            try:
+                if not await redis.set(
+                    f"modelmissing-notice:{self.channel_id}",
+                    "1",
+                    nx=True,
+                    ex=BUDGET_NOTICE_COOLDOWN_SECONDS,
+                ):
+                    return
+            except RedisError:
+                logger.debug(
+                    "could not claim model-unavailable throttle for channel %s",
+                    self.channel_id,
+                    exc_info=True,
+                )
+                if self._model_unavailable_notified:
+                    return
+        elif self._model_unavailable_notified:
+            return
+        self._model_unavailable_notified = True
+        await self._post_notice(
+            _MODEL_UNAVAILABLE_NOTICE_TEMPLATE.format(model_key=model_key),
+            reply_to=reply_to,
+        )
 
     def _build_fallback_offer(
         self, fallback_model_key: str | None, reset_epoch: int

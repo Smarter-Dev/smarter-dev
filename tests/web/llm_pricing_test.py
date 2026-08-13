@@ -129,6 +129,7 @@ class TestOpenRouterPricing:
         assert cost == Decimal("0.0305")
 
     def test_grok_4_5_rates(self):
+        # Retired 2026-08-13; rows written while it was selectable still price.
         assert calc_cost(1_000_000, 1_000_000, "x-ai/grok-4.5") == Decimal("8.00")
 
     def test_grok_4_5_cache_rate(self):
@@ -141,6 +142,37 @@ class TestOpenRouterPricing:
         )
         # 400K uncached at $2/M + 600K cached reads at $0.30/M.
         assert cost == Decimal("0.98")
+
+    def test_grok_4_6_rates(self):
+        assert calc_cost(1_000_000, 1_000_000, "x-ai/grok-4.6") == Decimal("8.00")
+
+    def test_grok_4_6_cache_rate(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=600_000,
+            cache_write_tokens=0,
+            model_name="openrouter:x-ai/grok-4.6",
+        )
+        # 400K uncached at $2/M + 600K cached reads at $0.50/M — 4.6 reads
+        # cost more than 4.5's $0.30.
+        assert cost == Decimal("1.10")
+
+    def test_qwen3_8_rates(self):
+        assert calc_cost(1_000_000, 1_000_000, "qwen/qwen3.8-2.4t-a95b") == Decimal(
+            "8.00"
+        )
+
+    def test_qwen3_8_cache_rate(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=600_000,
+            cache_write_tokens=0,
+            model_name="openrouter:qwen/qwen3.8-2.4t-a95b",
+        )
+        # 400K uncached at $2/M + 600K cached reads at $0.20/M.
+        assert cost == Decimal("0.92")
 
 
 class TestOpenCodeZenPricing:

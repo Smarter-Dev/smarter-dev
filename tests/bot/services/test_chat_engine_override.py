@@ -550,13 +550,21 @@ async def test_over_budget_on_first_activation_recovers_when_budget_frees(
 
 
 @pytest.mark.asyncio
-async def test_unknown_model_key_falls_back_to_default(fake_memory, fake_redis):
-    """A stale/unknown stored model_key falls back to the default model
-    without crashing the turn (budget still enforced since an override exists)."""
+async def test_unknown_model_key_stops_the_turn_with_a_notice(
+    fake_memory, fake_redis
+):
+    """A stale/unknown stored model_key stops the channel with a notice.
+
+    Channels are pinned to a model on purpose and usually advertise which one
+    they run, so quietly answering on the default model would misrepresent what
+    replied. The turn is skipped before any model call and the channel is told
+    an admin has to repin it.
+    """
     agent_mock = MagicMock()
     agent_mock.run = AsyncMock(return_value=_result(_send()))
     engine, _ = _make_engine(_override("this-model-was-removed"), fake_redis)
 
+    start_engagement = AsyncMock(return_value="engagement-1")
     get_agent = patch(
         "smarter_dev.bot.services.chat_engine.get_chat_agent",
         return_value=agent_mock,
@@ -568,11 +576,50 @@ async def test_unknown_model_key_falls_back_to_default(fake_memory, fake_redis):
         new=AsyncMock(return_value=None),
     ), patch(
         "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.start_engagement", new=start_engagement
     ):
-        await engine._run_once(first_activation=True)
+        consumed = await engine._run_once(first_activation=True)
 
-    get_agent_mock.assert_called_once_with(None, None)
-    agent_mock.run.assert_awaited_once()
+    get_agent_mock.assert_not_called()
+    agent_mock.run.assert_not_awaited()
+    # Same contract as the over-budget skip: the activation is not consumed, so
+    # the engagement still starts once an admin repins the channel.
+    assert consumed is False
+    start_engagement.assert_not_awaited()
+
+    posted = engine.bot.rest.create_message.await_args.kwargs.get("content", "")
+    assert "no longer available" in posted.lower()
+    assert "/chat-bot-settings" in posted
+    # Admins need the dead key to know what to repin from.
+    assert "this-model-was-removed" in posted
+
+
+@pytest.mark.asyncio
+async def test_unavailable_model_notice_is_throttled_per_channel(
+    fake_memory, fake_redis
+):
+    """Only the turn that wins the Redis throttle posts — a busy channel gets
+    one notice per cooldown, not one per activation."""
+    agent_mock = MagicMock()
+    agent_mock.run = AsyncMock(return_value=_result(_send()))
+    engine, _ = _make_engine(_override("this-model-was-removed"), fake_redis)
+    fake_redis.set = AsyncMock(return_value=None)  # another turn already claimed it
+
+    with _patches(agent_mock=agent_mock, fake_memory=fake_memory)[0], _patches(
+        agent_mock=agent_mock, fake_memory=fake_memory
+    )[1], _patches(agent_mock=agent_mock, fake_memory=fake_memory)[2], patch(
+        "smarter_dev.bot.services.chat_engine.over_budget_reset_epoch",
+        new=AsyncMock(return_value=None),
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
+    ):
+        consumed = await engine._run_once(first_activation=True)
+
+    # Still stopped — the throttle silences the notice, never the block.
+    assert consumed is False
+    agent_mock.run.assert_not_awaited()
+    engine.bot.rest.create_message.assert_not_awaited()
 
 
 # --------------------------------------------------------------------------- #
@@ -873,11 +920,16 @@ async def test_fallback_persisted_turn_records_fallback_model(fake_memory, fake_
 
 
 @pytest.mark.asyncio
-async def test_fallback_stale_key_falls_back_to_primary_model(
+async def test_fallback_stale_key_stops_the_turn_with_a_notice(
     fake_memory, fake_redis
 ):
-    """A stale/unknown fallback key while the window is active degrades to the
-    primary override model rather than crashing the turn."""
+    """A stale/unknown fallback key stops the turn while the window is active.
+
+    The fallback model is the one actually answering during the window, and it
+    is what the channel opted into, so silently reverting to the primary would
+    both misrepresent the answer and spend the primary's budget outside the cap
+    the fallback window exists to respect.
+    """
     agent_mock = MagicMock()
     agent_mock.run = AsyncMock(return_value=_result(_send()))
     engine, _ = _make_engine(
@@ -900,10 +952,43 @@ async def test_fallback_stale_key_falls_back_to_primary_model(
     ), patch(
         "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
     ):
+        consumed = await engine._run_once(first_activation=True)
+
+    get_agent_mock.assert_not_called()
+    agent_mock.run.assert_not_awaited()
+    assert consumed is False
+    posted = engine.bot.rest.create_message.await_args.kwargs.get("content", "")
+    assert "no longer available" in posted.lower()
+    assert "this-model-was-removed" in posted
+
+
+@pytest.mark.asyncio
+async def test_fallback_window_without_configured_fallback_runs_primary(
+    fake_memory, fake_redis
+):
+    """No fallback configured at all still runs the primary — the channel's
+    advertised model answers, so there is nothing to misrepresent."""
+    agent_mock = MagicMock()
+    agent_mock.run = AsyncMock(return_value=_result(_send()))
+    engine, _ = _make_engine(
+        _override("gemma-4-31b", hourly=100, fallback_model_key=None), fake_redis
+    )
+    fake_redis.exists = AsyncMock(return_value=1)
+
+    get_agent = patch(
+        "smarter_dev.bot.services.chat_engine.get_chat_agent",
+        return_value=agent_mock,
+    )
+    with get_agent as get_agent_mock, _patches(
+        agent_mock=agent_mock, fake_memory=fake_memory
+    )[1], _patches(agent_mock=agent_mock, fake_memory=fake_memory)[2], patch(
+        "smarter_dev.bot.services.chat_engine.over_budget_reset_epoch",
+        new=AsyncMock(return_value=None),
+    ), patch(
+        "smarter_dev.bot.services.chat_engine.add_usage", new=AsyncMock()
+    ):
         await engine._run_once(first_activation=True)
 
-    # Primary override model ("gemma-4-31b" -> wire id "gemma-4-31B-it"), not the stale
-    # fallback key.
     get_agent_mock.assert_called_once_with("gemma-4-31B-it", None)
     agent_mock.run.assert_awaited_once()
 
