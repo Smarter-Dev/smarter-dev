@@ -989,7 +989,7 @@ async def test_fallback_window_without_configured_fallback_runs_primary(
     ):
         await engine._run_once(first_activation=True)
 
-    get_agent_mock.assert_called_once_with("gemma-4-31B-it", None)
+    get_agent_mock.assert_called_once_with("google/gemma-4-31b-it", None)
     agent_mock.run.assert_awaited_once()
 
 

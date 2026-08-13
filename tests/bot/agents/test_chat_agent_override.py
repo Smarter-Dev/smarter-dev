@@ -76,7 +76,9 @@ def test_resolved_reasoning_level_returns_supported_choice():
 
 def test_resolved_reasoning_level_clamps_unsupported_choice():
     # Gemini's thinking_level tops out at "high"; "max" clamps down to it.
-    assert resolved_reasoning_level("gemini-3.1-flash-lite", "max") == "high"
+    # 3.5 Flash Lite, since 3.1 left the catalog on 2026-08-13 — the wire id is
+    # still in service elsewhere, but it no longer resolves to a catalog model.
+    assert resolved_reasoning_level("gemini-3.5-flash-lite", "max") == "high"
 
 
 def test_resolved_reasoning_level_falls_back_to_model_default():
@@ -86,7 +88,7 @@ def test_resolved_reasoning_level_falls_back_to_model_default():
 
 def test_resolved_reasoning_level_none_for_model_without_knob():
     # Gemma 4 31B has no reasoning ladder -> always None.
-    assert resolved_reasoning_level("gemma-4-31B-it", "high") is None
+    assert resolved_reasoning_level("google/gemma-4-31b-it", "high") is None
 
 
 def test_resolved_reasoning_level_none_for_adhoc_model():

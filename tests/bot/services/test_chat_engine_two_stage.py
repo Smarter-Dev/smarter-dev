@@ -306,7 +306,7 @@ async def test_two_stage_worker_briefs_writer_writes_and_sends(
     # The DRAFTER (worker) runs the cheap drafter model; the primary answers as
     # the WRITER, honouring its reasoning level (None here).
     get_worker.assert_called_once_with("gpt-5.4", None)
-    get_writer.assert_called_once_with("gemma-4-31B-it", None)
+    get_writer.assert_called_once_with("google/gemma-4-31b-it", None)
     worker_agent.run.assert_awaited_once()
     writer_agent.run.assert_awaited_once()
 

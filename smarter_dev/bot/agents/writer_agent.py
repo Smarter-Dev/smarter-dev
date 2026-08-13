@@ -31,22 +31,11 @@ from smarter_dev.bot.agents.chat_models import WriterOutput
 from smarter_dev.bot.agents.model_router import model_settings_for
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
-from smarter_dev.shared.model_catalog import ModelProvider
 from smarter_dev.shared.model_catalog import parse_reasoning_level
 
 WRITER_SYSTEM_PROMPT = (
     Path(__file__).parent / "prompts" / "writer_agent.md"
 ).read_text(encoding="utf-8")
-
-
-# Providers whose models need PromptedOutput instead of tool/json_schema output.
-# Both serve the same open-weights families over an OpenAI-compatible endpoint
-# that is uneven on structured output; prompted JSON is the one mode every one
-# of them handles.
-_PROMPTED_OUTPUT_PROVIDERS = (
-    ModelProvider.DIGITALOCEAN,
-    ModelProvider.OPENCODE_ZEN,
-)
 
 
 def _catalog_model_for_id(model_id: str) -> CatalogModel | None:
@@ -60,13 +49,15 @@ def _catalog_model_for_id(model_id: str) -> CatalogModel | None:
 def _output_type_for(model_id: str) -> type[WriterOutput] | PromptedOutput:
     """Structured-output mode for ``model_id``.
 
-    Mirrors :func:`chat_agent._output_type_for`: DigitalOcean-hosted models get
-    ``PromptedOutput`` (schema in the prompt, JSON text back) because DO's
-    OpenAI-compatible endpoint is uneven on tool-call / json_schema output;
-    every other provider returns ``WriterOutput`` via the default tool output.
+    Mirrors :func:`chat_agent._output_type_for`: open-weight models get
+    ``PromptedOutput`` (schema in the prompt, JSON text back) because the
+    OpenAI-compatible endpoints serving them are uneven on tool-call /
+    json_schema output; proprietary models return ``WriterOutput`` via the
+    default tool output. See ``CatalogModel.needs_prompted_output`` — the
+    property follows the model, not whichever endpoint currently serves it.
     """
     catalog_model = _catalog_model_for_id(model_id)
-    if catalog_model is not None and catalog_model.provider in _PROMPTED_OUTPUT_PROVIDERS:
+    if catalog_model is not None and catalog_model.needs_prompted_output:
         return PromptedOutput(WriterOutput)
     return WriterOutput
 

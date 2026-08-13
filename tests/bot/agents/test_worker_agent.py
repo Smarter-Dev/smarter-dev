@@ -51,7 +51,7 @@ def test_worker_agent_do_model_uses_prompted_briefing_decision():
     """DigitalOcean-hosted models get PromptedOutput wrapping BriefingDecision,
     exactly like the chat agent does for its own output type."""
     _reset_caches()
-    agent = get_worker_agent("gemma-4-31B-it")
+    agent = get_worker_agent("google/gemma-4-31b-it")
     assert isinstance(agent._output_type, PromptedOutput)
     assert agent._output_type.outputs is BriefingDecision
 

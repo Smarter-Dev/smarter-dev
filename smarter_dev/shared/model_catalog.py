@@ -75,6 +75,71 @@ ALL_REASONING_LEVELS: tuple[ReasoningLevel, ...] = tuple(ReasoningLevel)
 
 
 @dataclass(frozen=True)
+class OpenRouterRouting:
+    """Constraints on which OpenRouter endpoints may serve a model.
+
+    OpenRouter fronts one model id with many independent endpoints that differ
+    in *precision*, not just price — the same wire id can be served bf16 by one
+    provider and fp4 by another, and by default routing sorts by price, which
+    means the cheapest (often most aggressively quantized) endpoint wins. These
+    fields are passed through as the request's ``provider`` block.
+
+    The house rule these encode: never accept an endpoint quantized below what
+    the model's own authors publish, and never silently pay more than the rate
+    :mod:`smarter_dev.web.llm_pricing` records for the model.
+
+    Attributes:
+        quantizations: Allow-list of precisions. Endpoints that declare
+            something else — or declare nothing — are excluded, so this is only
+            usable where the authors' own precision is declared. Empty means no
+            precision filter (see ``order``/``ignore`` instead).
+        order: Endpoint tags to try first, in order. Later entries are
+            fallbacks, and routing continues past them unless
+            ``allow_fallbacks`` is false.
+        ignore: Endpoint tags never to use. Names a *specific* endpoint rather
+            than a precision, for the case where an endpoint is distrusted on
+            evidence rather than on its declared quantization.
+        allow_fallbacks: Whether routing may leave ``order`` when those
+            endpoints are unavailable. Kept true: a precision floor plus
+            failover is strictly better than pinning one provider, which just
+            trades quantization risk for downtime risk.
+        max_price_input_mtok: Cost ceiling per million input tokens.
+        max_price_output_mtok: Cost ceiling per million output tokens.
+    """
+
+    quantizations: tuple[str, ...] = ()
+    order: tuple[str, ...] = ()
+    ignore: tuple[str, ...] = ()
+    allow_fallbacks: bool = True
+    max_price_input_mtok: float | None = None
+    max_price_output_mtok: float | None = None
+
+    def as_provider_block(self) -> dict:
+        """Render the OpenRouter ``provider`` request block.
+
+        Only the constraints actually set are emitted, so a model with no
+        opinion sends no block at all rather than a wall of defaults.
+        """
+        block: dict = {}
+        if self.quantizations:
+            block["quantizations"] = list(self.quantizations)
+        if self.order:
+            block["order"] = list(self.order)
+        if self.ignore:
+            block["ignore"] = list(self.ignore)
+        if not self.allow_fallbacks:
+            block["allow_fallbacks"] = False
+        max_price: dict = {}
+        if self.max_price_input_mtok is not None:
+            max_price["prompt"] = self.max_price_input_mtok
+        if self.max_price_output_mtok is not None:
+            max_price["completion"] = self.max_price_output_mtok
+        if max_price:
+            block["max_price"] = max_price
+        return block
+
+
+@dataclass(frozen=True)
 class CatalogModel:
     """One selectable model.
 
@@ -105,6 +170,9 @@ class CatalogModel:
     max_output_tokens: int = 16_384
     supports_vision: bool = False
     supports_tools: bool = True
+    # Only meaningful for OPENROUTER models — every other provider serves one
+    # endpoint, so there is nothing to choose between.
+    openrouter_routing: OpenRouterRouting | None = None
 
     def __post_init__(self) -> None:
         if self.default_reasoning is not None and (
@@ -128,6 +196,35 @@ class CatalogModel:
     def vision_capable(self) -> bool:
         """Compatibility alias used by attachment and admin code."""
         return self.supports_vision
+
+    @property
+    def needs_prompted_output(self) -> bool:
+        """Whether structured output has to be prompted rather than tool-called.
+
+        The property belongs to the *model*, not the endpoint serving it: the
+        open-weight families are uneven on tool-choice and json_schema output
+        wherever they are hosted, and prompted JSON is the one mode all of them
+        handle. Digital Ocean and Zen serve nothing else, so everything there
+        qualifies; OpenRouter mixes open weights in with Grok and OpenAI's Luna,
+        which do structured output natively and must not be downgraded.
+        """
+        if self.provider in (
+            ModelProvider.DIGITALOCEAN,
+            ModelProvider.OPENCODE_ZEN,
+        ):
+            return True
+        if self.provider is ModelProvider.OPENROUTER:
+            return self.family in OPEN_WEIGHT_FAMILIES
+        return False
+
+
+# Families whose weights are published, whatever endpoint happens to serve
+# them. These are the models with uneven structured-output support, and the set
+# a precision/quantization question can even be asked about — a proprietary
+# model has exactly one build, served by its owner.
+OPEN_WEIGHT_FAMILIES: frozenset[str] = frozenset(
+    {"Kimi", "GLM", "DeepSeek", "Gemma", "Qwen", "MiniMax"}
+)
 
 
 # The model families the admin override exposes.
@@ -213,12 +310,24 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
     # Kimi K2.6 was retired here on 2026-08-02 — Kimi K3 on Zen supersedes it,
     # and the freed slot went to Grok 4.5. Its pricing and provider mapping are
     # deliberately retained (llm_pricing, usage_invoice) for historical rows.
+    # Gemma left Digital Ocean on 2026-08-13. Google publishes Gemma as bf16
+    # weights and serves no endpoint of its own, so bf16 IS the reference build
+    # and OpenRouter carries four of them — the cheapest (open-inference, at
+    # $0.08/$0.35) undercuts DO's undeclared $0.18/$0.50 outright. Precision
+    # floor rather than a pin: open-inference sat at 92.7% 30-day uptime, and
+    # the filter lets routing fail over to coreweave/venice/novita bf16 without
+    # ever dropping to the fp4 endpoints that share this model id.
     CatalogModel(
         key="gemma-4-31b",
         label="Gemma 4 31B",
         family="Gemma",
-        provider=ModelProvider.DIGITALOCEAN,
-        model_id="gemma-4-31B-it",
+        provider=ModelProvider.OPENROUTER,
+        model_id="google/gemma-4-31b-it",
+        openrouter_routing=OpenRouterRouting(
+            quantizations=("bf16",),
+            max_price_input_mtok=0.14,
+            max_price_output_mtok=0.40,
+        ),
     ),
     CatalogModel(
         key="qwen3-5-397b",
@@ -252,54 +361,114 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         provider=ModelProvider.OPENCODE_ZEN,
         model_id="minimax-m3",
     ),
+    # Qwen3.6 Plus left Zen on 2026-08-13: Alibaba, the model's author, is the
+    # ONLY endpoint OpenRouter carries for it, at $0.325/$1.95 against Zen's
+    # $0.50/$3.00. Same build, same lab, 35% less. No routing constraints — a
+    # single-endpoint model has nothing to choose between, and a precision
+    # filter would only be able to make it fail.
     CatalogModel(
         key="qwen3-6-plus",
         label="Qwen3.6 Plus",
         family="Qwen",
-        provider=ModelProvider.OPENCODE_ZEN,
-        model_id="qwen3.6-plus",
+        provider=ModelProvider.OPENROUTER,
+        model_id="qwen/qwen3.6-plus",
         reasoning_levels=_OPEN_EFFORT,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
+    # GLM left Zen on 2026-08-13. Z.AI serves its own model at fp8, so fp8 is
+    # the reference build, not a downgrade — and Zen charges exactly Z.AI's
+    # $1.40/$4.40 while a dozen fp8 endpoints sell the same precision for half.
+    # The floor admits fp8 and bf16 only, so routing can never quietly drop to
+    # one of the fp4 endpoints sharing this id.
     CatalogModel(
         key="glm-5-2",
         label="GLM-5.2 (Zhipu)",
         family="GLM",
-        provider=ModelProvider.OPENCODE_ZEN,
-        model_id="glm-5.2",
+        provider=ModelProvider.OPENROUTER,
+        model_id="z-ai/glm-5.2",
         reasoning_levels=_OPEN_EFFORT,
         default_reasoning=ReasoningLevel.MEDIUM,
+        openrouter_routing=OpenRouterRouting(
+            quantizations=("fp8", "bf16"),
+            max_price_input_mtok=0.80,
+            max_price_output_mtok=3.20,
+        ),
     ),
+    # DeepSeek V4 Pro, added 2026-08-13 into the slot 3.1 Flash Lite vacated.
+    # Same routing shape as Flash below and for the same measured reason: the
+    # authors' own endpoint never actually takes our traffic, so plan around
+    # what does. Sampling put baidu/fp8 on 5 of 6 requests at $0.4225/$0.845 —
+    # half what Digital Ocean charges and a QUARTER of Zen's $1.74/$3.48, which
+    # is priced to shed demand while Zen is compute-starved on this model.
+    # 1M context; text-only, so no vision.
+    CatalogModel(
+        key="deepseek-v4-pro",
+        label="DeepSeek V4 Pro",
+        family="DeepSeek",
+        provider=ModelProvider.OPENROUTER,
+        model_id="deepseek/deepseek-v4-pro",
+        context_window=1_048_576,
+        reasoning_levels=_OPEN_EFFORT,
+        default_reasoning=ReasoningLevel.MEDIUM,
+        openrouter_routing=OpenRouterRouting(
+            order=("deepseek",),
+            max_price_input_mtok=0.60,
+            max_price_output_mtok=1.20,
+        ),
+    ),
+    # DeepSeek left Zen on 2026-08-13 for the authors' own endpoint. This one is
+    # a reliability move first and a cost move second: DeepSeek rate-limits
+    # OpenCode's traffic on Flash, and this model is the default summarizer.
+    # Same $0.14/$0.28 Zen charges, with cache reads at $0.0028 against Zen's
+    # $0.028 — a tenfold cut on the axis a summarizer actually spends.
+    #
+    # No precision filter: DeepSeek declares no quantization on its own
+    # endpoint, so any allow-list would exclude the reference build itself.
+    # Order puts the authors first and the price ceiling keeps every fallback at
+    # or below their rate. Digital Ocean is excluded by name on evidence — at
+    # $0.068/$0.168 it undercuts every *declared fp4* endpoint of this model,
+    # which is not a discount a full-precision build can fund.
     CatalogModel(
         key="deepseek-v4",
         label="DeepSeek V4 Flash",
         family="DeepSeek",
-        provider=ModelProvider.OPENCODE_ZEN,
-        model_id="deepseek-v4-flash",
+        provider=ModelProvider.OPENROUTER,
+        model_id="deepseek/deepseek-v4-flash",
         reasoning_levels=_OPEN_EFFORT,
         default_reasoning=ReasoningLevel.MEDIUM,
+        openrouter_routing=OpenRouterRouting(
+            order=("deepseek",),
+            ignore=("digitalocean",),
+            max_price_input_mtok=0.14,
+            max_price_output_mtok=0.28,
+        ),
     ),
     # --- Gemini via Google ---
+    # Gemini 3 Flash left the catalog on 2026-08-13 — the oldest Flash we
+    # carried, and still on a *preview* wire id — to make room for 3.7 Flash.
+    # Like 3.1 Flash Lite before it, the wire id stays in service outside the
+    # catalog: the resources agent's reframer/gap-filler/author and the blogging
+    # scout and research agents all pin ``gemini-3-flash-preview`` directly, so
+    # its price patch and provider mapping remain live rather than historical.
     CatalogModel(
-        key="gemini-3-flash",
-        label="Gemini 3 Flash",
+        key="gemini-3-7-flash",
+        label="Gemini 3.7 Flash",
         family="Gemini",
         provider=ModelProvider.GOOGLE,
-        model_id="gemini-3-flash-preview",
+        model_id="gemini-3.7-flash",
         supports_vision=True,
-        reasoning_levels=_GEMINI_THINKING,
-        default_reasoning=ReasoningLevel.HIGH,
-    ),
-    CatalogModel(
-        key="gemini-3-1-flash-lite",
-        label="Gemini 3.1 Flash Lite",
-        family="Gemini",
-        provider=ModelProvider.GOOGLE,
-        model_id="gemini-3.1-flash-lite",
-        supports_vision=True,
+        # Verified against the Gemini models API, not assumed: 1M in, 64K out.
+        context_window=1_048_576,
+        max_output_tokens=65_536,
         reasoning_levels=_GEMINI_THINKING,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
+    # Gemini 3.1 Flash Lite left the catalog on 2026-08-13, superseded by 3.5
+    # Flash Lite in the same class (3.6 Flash is a different class, not a
+    # replacement), freeing the last slot for DeepSeek V4 Pro. The wire id is
+    # still live: title generation, media reading, image prompt review and the
+    # blogging agents all pin it directly rather than through the catalog, so
+    # its price patch and provider mapping stay load-bearing, not historical.
     CatalogModel(
         key="gemini-3-1-pro",
         label="Gemini 3.1 Pro",
@@ -454,6 +623,19 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         context_window=262_144,
         reasoning_levels=_OPEN_EFFORT,
         default_reasoning=ReasoningLevel.MEDIUM,
+        # The weak spot in this catalog: Alibaba does not serve these weights on
+        # OpenRouter, so there is no author build to match, and the only
+        # endpoints that declare a precision declare fp4 and nvfp4. Every route
+        # bills the same $2/$6, so price reveals nothing either. The best
+        # available position is to exclude the two endpoints KNOWN to be
+        # quantized and take the undeclared ones, which is a weaker guarantee
+        # than every other model here gets. The ceiling admits together
+        # ($2.50/$6.25) as the only fallback once digital ocean is out.
+        openrouter_routing=OpenRouterRouting(
+            ignore=("deepinfra", "modal"),
+            max_price_input_mtok=2.50,
+            max_price_output_mtok=6.25,
+        ),
     ),
     # --- Grok via OpenRouter ---
     # xAI has no first-party key here, so Grok routes through OpenRouter's

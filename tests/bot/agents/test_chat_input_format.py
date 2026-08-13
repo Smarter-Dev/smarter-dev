@@ -47,9 +47,9 @@ def test_metadata_carries_model_identity_with_reasoning():
 
 def test_metadata_model_without_reasoning_omits_the_attribute():
     user_prompt, _ = build_agent_call(
-        _initial_input(), [], model_name="gemma-4-31B-it", reasoning_level=None
+        _initial_input(), [], model_name="google/gemma-4-31b-it", reasoning_level=None
     )
-    assert '<your-model id="gemma-4-31B-it" name="Gemma 4 31B"/>' in user_prompt
+    assert '<your-model id="google/gemma-4-31b-it" name="Gemma 4 31B"/>' in user_prompt
 
 
 def test_metadata_adhoc_model_id_renders_without_label():

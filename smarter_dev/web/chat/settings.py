@@ -22,7 +22,16 @@ from smarter_dev.web.models import ChatCatalogModel
 from smarter_dev.web.models import ChatSettings
 from smarter_dev.web.models import ChatSpendLimit
 
-DEFAULT_MODEL = "gemini-3-1-flash-lite"
+# The model that answers by default. Whatever sits here must also be enabled in
+# chat_catalog_models — validate_settings_input rejects a disabled default.
+# Luna is both the better default and the cheaper one: $0.10/$0.60 per M through
+# OpenRouter against Gemini 3.5 Flash Lite's $0.30/$2.50.
+DEFAULT_MODEL = "gpt-5-6-luna"
+# Where auxiliary work goes when the model configured for it fails. Deliberately
+# a DIFFERENT vendor from DEFAULT_MODEL — a fallback that shares an upstream
+# with the thing it is backstopping is not a fallback. 3.5 Flash Lite supersedes
+# 3.1 in its own class; 3.6 Flash is a different class, not a replacement.
+DEFAULT_FALLBACK_MODEL = "gemini-3-5-flash-lite"
 # Laguna S 2.1 held this slot until it left the catalog on 2026-08-13. DeepSeek
 # V4 Flash is the closest replacement the catalog still carries: $0.14/$0.28 per
 # M against Laguna's $0.10/$0.20, and the cheapest remaining tool-capable model.
@@ -115,9 +124,9 @@ async def ensure_settings(session: AsyncSession) -> ChatSettings:
             default_reasoning="medium",
             default_intelligence_mode=IntelligenceMode.EFFICIENT.value,
             summarizer_model_key=DEFAULT_SUMMARIZER,
-            summarizer_fallback_model_key=DEFAULT_MODEL,
+            summarizer_fallback_model_key=DEFAULT_FALLBACK_MODEL,
             compaction_model_key=DEFAULT_MODEL,
-            compaction_fallback_model_key=None,
+            compaction_fallback_model_key=DEFAULT_FALLBACK_MODEL,
         )
         session.add(settings)
     existing = set(
@@ -130,7 +139,8 @@ async def ensure_settings(session: AsyncSession) -> ChatSettings:
                     model_key=model.key,
                     enabled=model.key == DEFAULT_MODEL,
                     cost_tier="low"
-                    if model.key in {DEFAULT_MODEL, DEFAULT_SUMMARIZER}
+                    if model.key
+                    in {DEFAULT_MODEL, DEFAULT_SUMMARIZER, DEFAULT_FALLBACK_MODEL}
                     else "medium",
                     sort_order=order,
                 )

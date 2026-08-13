@@ -7,17 +7,22 @@ from unittest.mock import patch
 
 import pytest
 
-from smarter_dev.bot.agents import model_router
-from smarter_dev.bot.agents.model_router import build_model_for
-from smarter_dev.bot.agents.model_router import model_settings_for
+# The bot-side module is a re-export shim; patch the real implementation or
+# the rebinding lands on the alias and the router keeps its own globals.
+from smarter_dev.shared import model_router
+from smarter_dev.shared.model_router import build_model_for
+from smarter_dev.shared.model_router import model_settings_for
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ModelProvider
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import get_model
 
-_DO_MODEL = get_model("gemma-4-31b")  # open weights, no reasoning knob
-_DO_REASONING_MODEL = get_model("glm-5-2")  # open weights with reasoning knob
-_GOOGLE_MODEL = get_model("gemini-3-1-flash-lite")
+# Qwen3.5 397B is the ONLY model Digital Ocean still serves — Gemma, GLM and
+# DeepSeek moved to author-precision OpenRouter endpoints on 2026-08-13 — so it
+# stands in for both the plain-routing and the reasoning-knob cases here.
+_DO_MODEL = get_model("qwen3-5-397b")
+_DO_REASONING_MODEL = get_model("qwen3-5-397b")
+_GOOGLE_MODEL = get_model("gemini-3-5-flash-lite")
 _OPENAI_MODEL = get_model("gpt-5-4")
 _ANTHROPIC_MODEL = get_model("claude-sonnet-5")
 _ANTHROPIC_NO_REASONING_MODEL = get_model("claude-haiku-4-5")
@@ -178,6 +183,68 @@ def test_openrouter_reasoning_model_builds_a_chat_model(monkeypatch):
     )
 
 
+def test_openrouter_routing_constraints_ride_on_every_request():
+    """Endpoint constraints go out as the OpenRouter ``provider`` block.
+
+    OpenRouter fronts one model id with endpoints at different precisions and
+    picks by price, so a request that loses this block does not fail — it just
+    quietly gets the most quantized endpoint. That makes the block a
+    correctness concern, not a tuning knob.
+    """
+    glm = get_model("glm-5-2")
+    settings = model_settings_for(glm)
+    provider = settings["extra_body"]["provider"]
+    # Z.AI serves its own model at fp8, so fp8 is the floor, not a downgrade.
+    assert provider["quantizations"] == ["fp8", "bf16"]
+    # A ceiling means a fallback can never silently cost more than the rate
+    # llm_pricing records for this model.
+    assert provider["max_price"] == {"prompt": 0.80, "completion": 3.20}
+    # Reasoning still rides along on the same settings object.
+    assert settings["openai_reasoning_effort"] == "medium"
+
+
+def test_openrouter_routing_applies_without_a_reasoning_level():
+    """A model with no reasoning knob still carries its endpoint constraints.
+
+    Regression guard: settings used to short-circuit to None whenever no
+    reasoning level resolved, which would have dropped the provider block for
+    any OpenRouter model that has no effort ladder.
+    """
+    gemma = get_model("gemma-4-31b")
+    assert gemma.supports_reasoning is False
+    settings = model_settings_for(gemma)
+    assert settings is not None
+    assert "openai_reasoning_effort" not in settings
+    assert settings["extra_body"]["provider"]["quantizations"] == ["bf16"]
+
+
+def test_deepseek_prefers_authors_endpoint_and_excludes_digital_ocean():
+    """DeepSeek declares no quantization, so precision comes from the source.
+
+    An allow-list would exclude the authors' own endpoint along with everything
+    else undeclared, so this one orders rather than filters — and names Digital
+    Ocean specifically, which undercuts every declared fp4 endpoint of this
+    model and so cannot plausibly be serving the full build.
+    """
+    provider = model_settings_for(get_model("deepseek-v4"))["extra_body"]["provider"]
+    assert provider["order"] == ["deepseek"]
+    assert provider["ignore"] == ["digitalocean"]
+    assert "quantizations" not in provider
+    # Every fallback stays at or under what the authors themselves charge.
+    assert provider["max_price"] == {"prompt": 0.14, "completion": 0.28}
+    # Fallbacks stay enabled: DeepSeek is actively rate-limiting heavy callers,
+    # so pinning a single endpoint trades quantization risk for downtime risk.
+    assert "allow_fallbacks" not in provider
+
+
+def test_unconstrained_openrouter_model_sends_no_provider_block():
+    """Qwen3.6 Plus has exactly one endpoint — its author's — so constraining it
+    could only ever make it fail."""
+    settings = model_settings_for(get_model("qwen3-6-plus"))
+    assert "extra_body" not in settings
+    assert settings["openai_reasoning_effort"] == "medium"
+
+
 def test_openrouter_reasoning_effort_is_sent_as_openai_effort():
     default_settings = model_settings_for(_OPENROUTER_REASONING_MODEL)
     assert default_settings["openai_reasoning_effort"] == "medium"
@@ -199,8 +266,6 @@ def test_unhandled_provider_raises():
 
 
 def test_model_settings_per_provider_uses_model_default():
-    # No reasoning knob -> no settings at all.
-    assert model_settings_for(_DO_MODEL) is None
     # Gemini 3.1 Flash Lite defaults to MEDIUM thinking.
     google_settings = model_settings_for(_GOOGLE_MODEL)
     assert google_settings["google_thinking_config"] == {"thinking_level": "MEDIUM"}
@@ -236,4 +301,4 @@ def test_model_settings_clamps_unsupported_reasoning_level():
     google_settings = model_settings_for(_GOOGLE_MODEL, ReasoningLevel.MAX)
     assert google_settings["google_thinking_config"] == {"thinking_level": "HIGH"}
     # A model with no reasoning knob ignores any requested level.
-    assert model_settings_for(_DO_MODEL, ReasoningLevel.HIGH) is None
+    assert model_settings_for(_OPENCODE_ZEN_MODEL, ReasoningLevel.HIGH) is None

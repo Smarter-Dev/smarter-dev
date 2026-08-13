@@ -177,7 +177,7 @@ def test_distinct_model_ids_yield_distinct_writer_agents():
 
 def test_digitalocean_writer_agent_uses_prompted_output_and_no_tools():
     _reset_cache()
-    agent = get_writer_agent("glm-5.2")
+    agent = get_writer_agent("z-ai/glm-5.2")
     assert isinstance(agent.output_type, PromptedOutput)
     assert list(agent._function_toolset.tools.keys()) == []
 

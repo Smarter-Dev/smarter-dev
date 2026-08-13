@@ -128,7 +128,7 @@ async def _seed_chat(db_session):
     conversation = WebChatConversation(
         owner_user_id=user.id,
         intelligence_mode="efficient",
-        selected_model_key="gemini-3-1-flash-lite",
+        selected_model_key="gpt-5-6-luna",
         reasoning_level="medium",
         title="New Chat",
         status="idle",
@@ -305,7 +305,7 @@ async def test_reservation_settlement_is_idempotent_and_attributes_actual_overag
         conversation_id=conversation.id,
     )
     assert reservation is not None and decision.allowed and decision.in_overage
-    model = get_model("gemini-3-1-flash-lite")
+    model = get_model("gemini-3-5-flash-lite")
 
     first = await record_settled_chat_usage(
         db_session,
@@ -313,7 +313,10 @@ async def test_reservation_settlement_is_idempotent_and_attributes_actual_overag
         operation_type="primary",
         model=model,
         tier="r",
-        input_tokens=4_400_000,
+        # 4M input at 3.5 Flash Lite's $0.30/M settles at $1.20 — deliberately
+        # NOT the $1.10 reserved above, so the assertions below can only pass if
+        # settlement uses the ACTUAL cost rather than the estimate.
+        input_tokens=4_000_000,
         output_tokens=0,
         cache_read_tokens=0,
         cache_write_tokens=0,
@@ -345,8 +348,9 @@ async def test_reservation_settlement_is_idempotent_and_attributes_actual_overag
         )
     )
     assert first.id == second.id
-    assert first.cost_usd == Decimal("1.1")
-    assert first.overage_cost_usd == Decimal("0.1")
+    assert first.cost_usd == Decimal("1.2")
+    # Everything past the $1 limit is overage.
+    assert first.overage_cost_usd == Decimal("0.2")
     assert stored_reservation.status == "settled"
     assert await db_session.scalar(select(func.count(UsageCostRow.id))) == 1
 

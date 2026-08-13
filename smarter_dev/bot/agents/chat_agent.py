@@ -41,7 +41,6 @@ from smarter_dev.bot.agents.model_router import build_model_for
 from smarter_dev.bot.agents.model_router import model_settings_for
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
-from smarter_dev.shared.model_catalog import ModelProvider
 from smarter_dev.shared.model_catalog import parse_reasoning_level
 from smarter_dev.shared.model_catalog import resolve_reasoning_level
 
@@ -63,16 +62,6 @@ WORKER_SYSTEM_PROMPT = (
 
 def _model_id() -> str:
     return os.getenv(MODEL_ENV_VAR, DEFAULT_MODEL)
-
-
-# Providers whose models need PromptedOutput instead of tool/json_schema output.
-# Both serve the same open-weights families over an OpenAI-compatible endpoint
-# that is uneven on structured output; prompted JSON is the one mode every one
-# of them handles.
-_PROMPTED_OUTPUT_PROVIDERS = (
-    ModelProvider.DIGITALOCEAN,
-    ModelProvider.OPENCODE_ZEN,
-)
 
 
 def _catalog_model_for_id(model_id: str) -> CatalogModel | None:
@@ -111,23 +100,22 @@ def _output_type_for(
 ) -> type | PromptedOutput:
     """Structured-output mode for ``model_id`` returning ``output_type``.
 
-    Gemini/OpenAI models return ``output_type`` via pydantic_ai's default
-    tool-call output. DigitalOcean-hosted models get ``PromptedOutput`` (schema
-    in the prompt, JSON text back): DO's OpenAI-compatible endpoint is uneven —
+    Gemini/OpenAI/Claude models return ``output_type`` via pydantic_ai's default
+    tool-call output. Open-weight models get ``PromptedOutput`` (schema in the
+    prompt, JSON text back): their OpenAI-compatible endpoints are uneven —
     tool_choice="required" 500s on Kimi/GLM and stalls Qwen, and with "auto"
     the reasoning models answer in plain text instead of calling the output
     tool; ``response_format`` json_schema is likewise only partially supported.
     Prompted JSON is the one mode every hosted model handles. The chat agent
     passes ``AgentReturn``; the worker agent passes ``BriefingDecision``.
+
+    The test is ``CatalogModel.needs_prompted_output``, which follows the model
+    rather than the endpoint — the same weights behave the same way whether
+    Digital Ocean, Zen or an OpenRouter endpoint is serving them, and OpenRouter
+    also carries Grok and Luna, which must keep native tool output.
     """
     catalog_model = _catalog_model_for_id(model_id)
-    # OpenCode Zen serves the same open-weights models (Kimi/GLM/Qwen/DeepSeek/
-    # MiniMax) over the same OpenAI-compatible surface, so it inherits the same
-    # structured-output weakness — the endpoint changed, the model did not.
-    if (
-        catalog_model is not None
-        and catalog_model.provider in _PROMPTED_OUTPUT_PROVIDERS
-    ):
+    if catalog_model is not None and catalog_model.needs_prompted_output:
         return PromptedOutput(output_type)
     return output_type
 

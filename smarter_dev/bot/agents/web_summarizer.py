@@ -29,7 +29,7 @@ from smarter_dev.shared.observability import record_llm_failover
 logger = logging.getLogger(__name__)
 
 PRIMARY_MODEL_KEY = "gpt-5-6-luna"
-FALLBACK_MODEL_KEY = "gemini-3-1-flash-lite"
+FALLBACK_MODEL_KEY = "gemini-3-5-flash-lite"
 
 SYSTEM_PROMPT = """\
 You summarize fetched web content to satisfy a specific INSTRUCTION from \
