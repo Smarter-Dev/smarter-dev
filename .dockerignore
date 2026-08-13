@@ -49,6 +49,9 @@ k8s/
 tests/
 .claude/
 _meta
+# services/ builds its own images from its own scoped contexts (e.g.
+# services/media), so it must never leak into the web/bot contexts.
+services/
 
 # Assets not needed in container
 grow-together-landing-page.png

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 import hikari
 
 from smarter_dev.bot.services.exceptions import ServiceError
+from smarter_dev.bot.utils.error_responses import respond_with_error_card
 from smarter_dev.bot.utils.image_embeds import get_generator
 from smarter_dev.bot.utils.webhooks import get_or_create_webhook
 from smarter_dev.bot.utils.webhooks import send_webhook_message
@@ -114,13 +115,12 @@ async def handle_beacon_modal_submit(
                     break
 
         if not message_content or not message_content.strip():
-            generator = get_generator()
-            image_file = generator.create_error_embed("Message content cannot be empty!")
             try:
-                await event.interaction.create_initial_response(
+                await respond_with_error_card(
+                    event.interaction.create_initial_response,
+                    "Message content cannot be empty!",
                     hikari.ResponseType.MESSAGE_CREATE,
-                    attachment=image_file,
-                    flags=hikari.MessageFlag.EPHEMERAL
+                    flags=hikari.MessageFlag.EPHEMERAL,
                 )
             except (hikari.NotFoundError, hikari.BadRequestError):
                 logger.warning("Failed to respond to modal interaction - interaction expired")
@@ -141,15 +141,12 @@ async def handle_beacon_modal_submit(
                 minutes_remaining = max(1, seconds_remaining // 60)
                 time_str = f"{minutes_remaining} minute{'s' if minutes_remaining != 1 else ''}"
 
-            generator = get_generator()
-            image_file = generator.create_error_embed(
-                f"Please wait {time_str} before sending another beacon message."
-            )
             try:
-                await event.interaction.create_initial_response(
+                await respond_with_error_card(
+                    event.interaction.create_initial_response,
+                    f"Please wait {time_str} before sending another beacon message.",
                     hikari.ResponseType.MESSAGE_CREATE,
-                    attachment=image_file,
-                    flags=hikari.MessageFlag.EPHEMERAL
+                    flags=hikari.MessageFlag.EPHEMERAL,
                 )
             except (hikari.NotFoundError, hikari.BadRequestError):
                 logger.warning("Failed to respond to modal interaction - interaction expired")
@@ -163,13 +160,12 @@ async def handle_beacon_modal_submit(
             )
 
             if not user_squad_response.is_in_squad:
-                generator = get_generator()
-                image_file = generator.create_error_embed("You must be in a squad to send beacon messages!")
                 try:
-                    await event.interaction.create_initial_response(
+                    await respond_with_error_card(
+                        event.interaction.create_initial_response,
+                        "You must be in a squad to send beacon messages!",
                         hikari.ResponseType.MESSAGE_CREATE,
-                        attachment=image_file,
-                        flags=hikari.MessageFlag.EPHEMERAL
+                        flags=hikari.MessageFlag.EPHEMERAL,
                     )
                 except (hikari.NotFoundError, hikari.BadRequestError):
                     logger.warning("Failed to respond to modal interaction - interaction expired")
@@ -179,13 +175,12 @@ async def handle_beacon_modal_submit(
 
         except ServiceError as e:
             logger.error(f"Error getting user squad for beacon: {e}")
-            generator = get_generator()
-            image_file = generator.create_error_embed("Failed to verify squad membership. Please try again later.")
             try:
-                await event.interaction.create_initial_response(
+                await respond_with_error_card(
+                    event.interaction.create_initial_response,
+                    "Failed to verify squad membership. Please try again later.",
                     hikari.ResponseType.MESSAGE_CREATE,
-                    attachment=image_file,
-                    flags=hikari.MessageFlag.EPHEMERAL
+                    flags=hikari.MessageFlag.EPHEMERAL,
                 )
             except (hikari.NotFoundError, hikari.BadRequestError):
                 logger.warning("Failed to respond to modal interaction - interaction expired")
@@ -193,8 +188,6 @@ async def handle_beacon_modal_submit(
 
         # Verify we're in the correct channel
         if not squad.announcement_channel or str(event.interaction.channel_id) != squad.announcement_channel:
-            generator = get_generator()
-
             # Try to get the channel name for a more helpful error message
             error_message = "Beacon messages can only be sent in your squad's announcement channel!"
             if squad.announcement_channel:
@@ -209,12 +202,12 @@ async def handle_beacon_modal_submit(
                     logger.debug(f"Could not fetch channel name for {squad.announcement_channel}: {e}")
                     error_message = "Beacon messages can only be sent in your squad's announcement channel!"
 
-            image_file = generator.create_error_embed(error_message)
             try:
-                await event.interaction.create_initial_response(
+                await respond_with_error_card(
+                    event.interaction.create_initial_response,
+                    error_message,
                     hikari.ResponseType.MESSAGE_CREATE,
-                    attachment=image_file,
-                    flags=hikari.MessageFlag.EPHEMERAL
+                    flags=hikari.MessageFlag.EPHEMERAL,
                 )
             except (hikari.NotFoundError, hikari.BadRequestError):
                 logger.warning("Failed to respond to modal interaction - interaction expired")
@@ -227,15 +220,12 @@ async def handle_beacon_modal_submit(
         )
 
         if not webhook:
-            generator = get_generator()
-            image_file = generator.create_error_embed(
-                "Bot lacks webhook permissions in this channel. Please contact an administrator."
-            )
             try:
-                await event.interaction.create_initial_response(
+                await respond_with_error_card(
+                    event.interaction.create_initial_response,
+                    "Bot lacks webhook permissions in this channel. Please contact an administrator.",
                     hikari.ResponseType.MESSAGE_CREATE,
-                    attachment=image_file,
-                    flags=hikari.MessageFlag.EPHEMERAL
+                    flags=hikari.MessageFlag.EPHEMERAL,
                 )
             except (hikari.NotFoundError, hikari.BadRequestError):
                 logger.warning("Failed to respond to modal interaction - interaction expired")
@@ -280,26 +270,24 @@ async def handle_beacon_modal_submit(
 
             logger.info(f"User {user.username} sent beacon message in squad {squad.name}")
         else:
-            generator = get_generator()
-            image_file = generator.create_error_embed("Failed to send beacon message. Please try again later.")
             try:
-                await event.interaction.create_initial_response(
+                await respond_with_error_card(
+                    event.interaction.create_initial_response,
+                    "Failed to send beacon message. Please try again later.",
                     hikari.ResponseType.MESSAGE_CREATE,
-                    attachment=image_file,
-                    flags=hikari.MessageFlag.EPHEMERAL
+                    flags=hikari.MessageFlag.EPHEMERAL,
                 )
             except (hikari.NotFoundError, hikari.BadRequestError):
                 logger.warning("Failed to respond to modal interaction - interaction expired")
 
     except Exception as e:
         logger.exception(f"Error handling beacon modal submission: {e}")
-        generator = get_generator()
-        image_file = generator.create_error_embed("An unexpected error occurred. Please try again later.")
         try:
-            await event.interaction.create_initial_response(
+            await respond_with_error_card(
+                event.interaction.create_initial_response,
+                "An unexpected error occurred. Please try again later.",
                 hikari.ResponseType.MESSAGE_CREATE,
-                attachment=image_file,
-                flags=hikari.MessageFlag.EPHEMERAL
+                flags=hikari.MessageFlag.EPHEMERAL,
             )
         except (hikari.NotFoundError, hikari.BadRequestError):
             logger.warning("Failed to respond to modal interaction - interaction expired")

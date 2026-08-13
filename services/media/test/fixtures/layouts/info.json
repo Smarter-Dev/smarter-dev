@@ -1,0 +1,74 @@
+{
+  "card": "info",
+  "background": "background.png",
+  "canvas": {
+    "width": 960,
+    "height": 540
+  },
+  "ops": [
+    {
+      "op": "text",
+      "x": 65,
+      "y": 65,
+      "text": "SQUAD SWITCHING",
+      "font": "title_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 64,
+      "text": "SQUAD SWITCHING",
+      "font": "title_medium",
+      "fill": "#3b82f6"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 119,
+      "text": "LOCKED",
+      "font": "title_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 118,
+      "text": "LOCKED",
+      "font": "title_medium",
+      "fill": "#3b82f6"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 201,
+      "text": "A campaign is running in this server, so squad",
+      "font": "text_large",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 200,
+      "text": "A campaign is running in this server, so squad",
+      "font": "text_large",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 240,
+      "text": "membership is frozen until it wraps up on August 14th.",
+      "font": "text_large",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 239,
+      "text": "membership is frozen until it wraps up on August 14th.",
+      "font": "text_large",
+      "fill": "#FFFFFF"
+    }
+  ]
+}

@@ -34,6 +34,22 @@ services:
       retries: 5
     restart: unless-stopped
 
+  media:
+    build:
+      context: ./services/media
+    container_name: smarter_dev_media
+    environment:
+      - MEDIA_API_KEY=dev-media-key-not-secret
+      - MEDIA_PORT=8080
+    ports:
+      - "8083:8080"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
   web:
     build:
       context: .
@@ -44,10 +60,14 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      media:
+        condition: service_healthy
     env_file: .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://smarter_dev:smarter_dev_password@postgres:5432/smarter_dev
       - REDIS_URL=redis://:smarter_dev_redis_password@redis:6379/0
+      - MEDIA_SERVICE_URL=http://media:8080
+      - MEDIA_API_KEY=dev-media-key-not-secret
     ports:
       - "8002:8000"
     volumes:

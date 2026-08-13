@@ -1,0 +1,3282 @@
+{
+  "fonts": {
+    "title_large": {
+      "file": "BrunoAceSC-Regular.ttf",
+      "px": 60,
+      "ascent": 58,
+      "descent": 16
+    },
+    "title_medium": {
+      "file": "BrunoAceSC-Regular.ttf",
+      "px": 48,
+      "ascent": 46,
+      "descent": 13
+    },
+    "title_small": {
+      "file": "BrunoAceSC-Regular.ttf",
+      "px": 36,
+      "ascent": 35,
+      "descent": 10
+    },
+    "text_large": {
+      "file": "Anta-Regular.ttf",
+      "px": 32,
+      "ascent": 31,
+      "descent": 9
+    },
+    "text_medium": {
+      "file": "Anta-Regular.ttf",
+      "px": 28,
+      "ascent": 27,
+      "descent": 8
+    },
+    "text_small": {
+      "file": "Anta-Regular.ttf",
+      "px": 24,
+      "ascent": 24,
+      "descent": 7
+    },
+    "text_tiny": {
+      "file": "Anta-Regular.ttf",
+      "px": 20,
+      "ascent": 20,
+      "descent": 6
+    }
+  },
+  "measurements": [
+    {
+      "font": "title_large",
+      "text": "",
+      "bbox": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "advance": 0
+    },
+    {
+      "font": "title_large",
+      "text": " ",
+      "bbox": [
+        0,
+        58,
+        23,
+        58
+      ],
+      "advance": 23
+    },
+    {
+      "font": "title_large",
+      "text": "  7 days: 2x • 14 days: 4x • 30 days: 8x • 60 days: 16x",
+      "bbox": [
+        0,
+        16,
+        1906,
+        58
+      ],
+      "advance": 1906
+    },
+    {
+      "font": "title_large",
+      "text": "!\"#$%&'()*+,-./0123456789:;<=>?@",
+      "bbox": [
+        0,
+        7,
+        1113,
+        65
+      ],
+      "advance": 1113
+    },
+    {
+      "font": "title_large",
+      "text": "... and 2 more members",
+      "bbox": [
+        0,
+        16,
+        821,
+        58
+      ],
+      "advance": 821
+    },
+    {
+      "font": "title_large",
+      "text": "1,234,567",
+      "bbox": [
+        0,
+        16,
+        327,
+        61
+      ],
+      "advance": 327
+    },
+    {
+      "font": "title_large",
+      "text": "A",
+      "bbox": [
+        0,
+        16,
+        58,
+        58
+      ],
+      "advance": 58
+    },
+    {
+      "font": "title_large",
+      "text": "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`",
+      "bbox": [
+        0,
+        7,
+        1539,
+        69
+      ],
+      "advance": 1538
+    },
+    {
+      "font": "title_large",
+      "text": "AV",
+      "bbox": [
+        0,
+        16,
+        111,
+        58
+      ],
+      "advance": 111
+    },
+    {
+      "font": "title_large",
+      "text": "Balance:",
+      "bbox": [
+        0,
+        16,
+        329,
+        58
+      ],
+      "advance": 329
+    },
+    {
+      "font": "title_large",
+      "text": "Campaign active - Switching disabled",
+      "bbox": [
+        0,
+        16,
+        1357,
+        58
+      ],
+      "advance": 1357
+    },
+    {
+      "font": "title_large",
+      "text": "Wg",
+      "bbox": [
+        0,
+        16,
+        106,
+        58
+      ],
+      "advance": 106
+    },
+    {
+      "font": "title_large",
+      "text": "abcdefghijklmnopqrstuvwxyz{|}~",
+      "bbox": [
+        0,
+        7,
+        1207,
+        65
+      ],
+      "advance": 1207
+    },
+    {
+      "font": "title_large",
+      "text": "café naïve Ünter",
+      "bbox": [
+        0,
+        6,
+        627,
+        58
+      ],
+      "advance": 627
+    },
+    {
+      "font": "title_large",
+      "text": "emoji 😀 here",
+      "bbox": [
+        0,
+        3,
+        441,
+        73
+      ],
+      "advance": 441
+    },
+    {
+      "font": "title_large",
+      "text": "日本語テキスト",
+      "bbox": [
+        0,
+        3,
+        210,
+        73
+      ],
+      "advance": 210
+    },
+    {
+      "font": "title_medium",
+      "text": "",
+      "bbox": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "advance": 0
+    },
+    {
+      "font": "title_medium",
+      "text": " ",
+      "bbox": [
+        0,
+        46,
+        18,
+        46
+      ],
+      "advance": 18
+    },
+    {
+      "font": "title_medium",
+      "text": "  7 days: 2x • 14 days: 4x • 30 days: 8x • 60 days: 16x",
+      "bbox": [
+        0,
+        12,
+        1519,
+        46
+      ],
+      "advance": 1519
+    },
+    {
+      "font": "title_medium",
+      "text": "!\"#$%&'()*+,-./0123456789:;<=>?@",
+      "bbox": [
+        0,
+        4,
+        891,
+        52
+      ],
+      "advance": 891
+    },
+    {
+      "font": "title_medium",
+      "text": "... and 2 more members",
+      "bbox": [
+        0,
+        12,
+        654,
+        46
+      ],
+      "advance": 654
+    },
+    {
+      "font": "title_medium",
+      "text": "1,234,567",
+      "bbox": [
+        0,
+        12,
+        263,
+        49
+      ],
+      "advance": 263
+    },
+    {
+      "font": "title_medium",
+      "text": "A",
+      "bbox": [
+        0,
+        12,
+        46,
+        46
+      ],
+      "advance": 46
+    },
+    {
+      "font": "title_medium",
+      "text": "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`",
+      "bbox": [
+        0,
+        4,
+        1231,
+        55
+      ],
+      "advance": 1231
+    },
+    {
+      "font": "title_medium",
+      "text": "AV",
+      "bbox": [
+        0,
+        12,
+        88,
+        46
+      ],
+      "advance": 88
+    },
+    {
+      "font": "title_medium",
+      "text": "AVAILABLE SQUADS",
+      "bbox": [
+        0,
+        12,
+        638,
+        50
+      ],
+      "advance": 638
+    },
+    {
+      "font": "title_medium",
+      "text": "BYTES BALANCE",
+      "bbox": [
+        0,
+        12,
+        533,
+        46
+      ],
+      "advance": 533
+    },
+    {
+      "font": "title_medium",
+      "text": "BYTES LEADERBOARD",
+      "bbox": [
+        0,
+        12,
+        716,
+        46
+      ],
+      "advance": 716
+    },
+    {
+      "font": "title_medium",
+      "text": "BYTES TRANSFERRED SUCCESSFULLY",
+      "bbox": [
+        0,
+        12,
+        1224,
+        46
+      ],
+      "advance": 1224
+    },
+    {
+      "font": "title_medium",
+      "text": "Balance:",
+      "bbox": [
+        0,
+        12,
+        263,
+        46
+      ],
+      "advance": 263
+    },
+    {
+      "font": "title_medium",
+      "text": "Bytes Info",
+      "bbox": [
+        0,
+        12,
+        314,
+        46
+      ],
+      "advance": 314
+    },
+    {
+      "font": "title_medium",
+      "text": "Campaign active - Switching disabled",
+      "bbox": [
+        0,
+        12,
+        1089,
+        46
+      ],
+      "advance": 1089
+    },
+    {
+      "font": "title_medium",
+      "text": "DAILY CLAIMED",
+      "bbox": [
+        0,
+        12,
+        481,
+        46
+      ],
+      "advance": 481
+    },
+    {
+      "font": "title_medium",
+      "text": "DEV",
+      "bbox": [
+        0,
+        12,
+        129,
+        46
+      ],
+      "advance": 129
+    },
+    {
+      "font": "title_medium",
+      "text": "ERROR",
+      "bbox": [
+        0,
+        12,
+        222,
+        46
+      ],
+      "advance": 222
+    },
+    {
+      "font": "title_medium",
+      "text": "LOCKED",
+      "bbox": [
+        0,
+        12,
+        254,
+        46
+      ],
+      "advance": 254
+    },
+    {
+      "font": "title_medium",
+      "text": "NIGHTSHADE COLLECTIVE",
+      "bbox": [
+        0,
+        12,
+        801,
+        46
+      ],
+      "advance": 801
+    },
+    {
+      "font": "title_medium",
+      "text": "SELECT A SQUAD TO JOIN",
+      "bbox": [
+        0,
+        12,
+        817,
+        50
+      ],
+      "advance": 817
+    },
+    {
+      "font": "title_medium",
+      "text": "SQUAD SWITCHING",
+      "bbox": [
+        0,
+        12,
+        574,
+        50
+      ],
+      "advance": 574
+    },
+    {
+      "font": "title_medium",
+      "text": "TRANSACTION HISTORY",
+      "bbox": [
+        0,
+        12,
+        744,
+        46
+      ],
+      "advance": 744
+    },
+    {
+      "font": "title_medium",
+      "text": "TRANSFER COOLDOWN",
+      "bbox": [
+        0,
+        12,
+        721,
+        46
+      ],
+      "advance": 721
+    },
+    {
+      "font": "title_medium",
+      "text": "WELCOME TO SMARTER",
+      "bbox": [
+        0,
+        12,
+        743,
+        46
+      ],
+      "advance": 743
+    },
+    {
+      "font": "title_medium",
+      "text": "Wg",
+      "bbox": [
+        0,
+        12,
+        85,
+        46
+      ],
+      "advance": 85
+    },
+    {
+      "font": "title_medium",
+      "text": "abcdefghijklmnopqrstuvwxyz{|}~",
+      "bbox": [
+        0,
+        4,
+        966,
+        52
+      ],
+      "advance": 966
+    },
+    {
+      "font": "title_medium",
+      "text": "café naïve Ünter",
+      "bbox": [
+        0,
+        4,
+        502,
+        46
+      ],
+      "advance": 502
+    },
+    {
+      "font": "title_medium",
+      "text": "emoji 😀 here",
+      "bbox": [
+        0,
+        2,
+        353,
+        58
+      ],
+      "advance": 353
+    },
+    {
+      "font": "title_medium",
+      "text": "日本語テキスト",
+      "bbox": [
+        0,
+        2,
+        168,
+        58
+      ],
+      "advance": 168
+    },
+    {
+      "font": "title_small",
+      "text": "",
+      "bbox": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "advance": 0
+    },
+    {
+      "font": "title_small",
+      "text": " ",
+      "bbox": [
+        0,
+        35,
+        14,
+        35
+      ],
+      "advance": 14
+    },
+    {
+      "font": "title_small",
+      "text": "  7 days: 2x • 14 days: 4x • 30 days: 8x • 60 days: 16x",
+      "bbox": [
+        0,
+        10,
+        1143,
+        35
+      ],
+      "advance": 1142
+    },
+    {
+      "font": "title_small",
+      "text": "!\"#$%&'()*+,-./0123456789:;<=>?@",
+      "bbox": [
+        0,
+        5,
+        666,
+        40
+      ],
+      "advance": 666
+    },
+    {
+      "font": "title_small",
+      "text": "... and 2 more members",
+      "bbox": [
+        0,
+        10,
+        493,
+        35
+      ],
+      "advance": 493
+    },
+    {
+      "font": "title_small",
+      "text": "1,234,567",
+      "bbox": [
+        0,
+        10,
+        196,
+        37
+      ],
+      "advance": 196
+    },
+    {
+      "font": "title_small",
+      "text": "A",
+      "bbox": [
+        0,
+        10,
+        35,
+        35
+      ],
+      "advance": 35
+    },
+    {
+      "font": "title_small",
+      "text": "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`",
+      "bbox": [
+        0,
+        4,
+        925,
+        42
+      ],
+      "advance": 924
+    },
+    {
+      "font": "title_small",
+      "text": "AV",
+      "bbox": [
+        0,
+        10,
+        67,
+        35
+      ],
+      "advance": 67
+    },
+    {
+      "font": "title_small",
+      "text": "Balance:",
+      "bbox": [
+        0,
+        10,
+        199,
+        35
+      ],
+      "advance": 199
+    },
+    {
+      "font": "title_small",
+      "text": "Campaign active - Switching disabled",
+      "bbox": [
+        0,
+        10,
+        816,
+        35
+      ],
+      "advance": 816
+    },
+    {
+      "font": "title_small",
+      "text": "Wg",
+      "bbox": [
+        0,
+        10,
+        63,
+        35
+      ],
+      "advance": 63
+    },
+    {
+      "font": "title_small",
+      "text": "abcdefghijklmnopqrstuvwxyz{|}~",
+      "bbox": [
+        0,
+        4,
+        721,
+        40
+      ],
+      "advance": 721
+    },
+    {
+      "font": "title_small",
+      "text": "café naïve Ünter",
+      "bbox": [
+        0,
+        3,
+        378,
+        35
+      ],
+      "advance": 378
+    },
+    {
+      "font": "title_small",
+      "text": "emoji 😀 here",
+      "bbox": [
+        0,
+        2,
+        266,
+        44
+      ],
+      "advance": 266
+    },
+    {
+      "font": "title_small",
+      "text": "日本語テキスト",
+      "bbox": [
+        0,
+        2,
+        126,
+        44
+      ],
+      "advance": 126
+    },
+    {
+      "font": "text_large",
+      "text": "",
+      "bbox": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "advance": 0
+    },
+    {
+      "font": "text_large",
+      "text": " ",
+      "bbox": [
+        0,
+        31,
+        9,
+        31
+      ],
+      "advance": 9
+    },
+    {
+      "font": "text_large",
+      "text": "  7 days: 2x • 14 days: 4x • 30 days: 8x • 60 days: 16x",
+      "bbox": [
+        0,
+        9,
+        804,
+        37
+      ],
+      "advance": 804
+    },
+    {
+      "font": "text_large",
+      "text": "!\"#$%&'()*+,-./0123456789:;<=>?@",
+      "bbox": [
+        0,
+        5,
+        542,
+        37
+      ],
+      "advance": 542
+    },
+    {
+      "font": "text_large",
+      "text": "... and 2 more members",
+      "bbox": [
+        0,
+        9,
+        349,
+        31
+      ],
+      "advance": 349
+    },
+    {
+      "font": "text_large",
+      "text": "1,234,567",
+      "bbox": [
+        0,
+        9,
+        149,
+        33
+      ],
+      "advance": 149
+    },
+    {
+      "font": "text_large",
+      "text": "A",
+      "bbox": [
+        0,
+        9,
+        21,
+        31
+      ],
+      "advance": 21
+    },
+    {
+      "font": "text_large",
+      "text": "A campaign is running in this server, so squad",
+      "bbox": [
+        0,
+        9,
+        689,
+        37
+      ],
+      "advance": 689
+    },
+    {
+      "font": "text_large",
+      "text": "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`",
+      "bbox": [
+        0,
+        5,
+        626,
+        37
+      ],
+      "advance": 626
+    },
+    {
+      "font": "text_large",
+      "text": "AV",
+      "bbox": [
+        0,
+        9,
+        42,
+        31
+      ],
+      "advance": 42
+    },
+    {
+      "font": "text_large",
+      "text": "Balance:",
+      "bbox": [
+        0,
+        9,
+        129,
+        31
+      ],
+      "advance": 129
+    },
+    {
+      "font": "text_large",
+      "text": "Campaign active - Switching disabled",
+      "bbox": [
+        0,
+        9,
+        558,
+        37
+      ],
+      "advance": 558
+    },
+    {
+      "font": "text_large",
+      "text": "New balance: 18,420 bytes.",
+      "bbox": [
+        0,
+        9,
+        408,
+        37
+      ],
+      "advance": 408
+    },
+    {
+      "font": "text_large",
+      "text": "Use /bytes balance to see your total, /bytes send to",
+      "bbox": [
+        0,
+        7,
+        810,
+        37
+      ],
+      "advance": 810
+    },
+    {
+      "font": "text_large",
+      "text": "Wg",
+      "bbox": [
+        0,
+        9,
+        44,
+        37
+      ],
+      "advance": 44
+    },
+    {
+      "font": "text_large",
+      "text": "You can send bytes again in 6 hours.",
+      "bbox": [
+        0,
+        9,
+        559,
+        37
+      ],
+      "advance": 559
+    },
+    {
+      "font": "text_large",
+      "text": "You do not have enough bytes for that transfer. Your",
+      "bbox": [
+        0,
+        9,
+        797,
+        37
+      ],
+      "advance": 797
+    },
+    {
+      "font": "text_large",
+      "text": "You earn bytes for showing up and helping out.",
+      "bbox": [
+        0,
+        9,
+        703,
+        37
+      ],
+      "advance": 703
+    },
+    {
+      "font": "text_large",
+      "text": "You picked up 80 bytes today (Day 27 streak, 4x",
+      "bbox": [
+        0,
+        5,
+        742,
+        37
+      ],
+      "advance": 742
+    },
+    {
+      "font": "text_large",
+      "text": "abcdefghijklmnopqrstuvwxyz{|}~",
+      "bbox": [
+        0,
+        5,
+        485,
+        37
+      ],
+      "advance": 485
+    },
+    {
+      "font": "text_large",
+      "text": "balance is 640 bytes and you tried to send 1,200.",
+      "bbox": [
+        0,
+        9,
+        744,
+        37
+      ],
+      "advance": 744
+    },
+    {
+      "font": "text_large",
+      "text": "café naïve Ünter",
+      "bbox": [
+        0,
+        3,
+        246,
+        31
+      ],
+      "advance": 246
+    },
+    {
+      "font": "text_large",
+      "text": "emoji 😀 here",
+      "bbox": [
+        0,
+        9,
+        178,
+        37
+      ],
+      "advance": 178
+    },
+    {
+      "font": "text_large",
+      "text": "membership is frozen until it wraps up on August 14th.",
+      "bbox": [
+        0,
+        9,
+        811,
+        37
+      ],
+      "advance": 811
+    },
+    {
+      "font": "text_large",
+      "text": "multiplier).",
+      "bbox": [
+        0,
+        5,
+        153,
+        37
+      ],
+      "advance": 153
+    },
+    {
+      "font": "text_large",
+      "text": "pass some along, and /squads list to find a crew to",
+      "bbox": [
+        0,
+        7,
+        777,
+        37
+      ],
+      "advance": 777
+    },
+    {
+      "font": "text_large",
+      "text": "run with.",
+      "bbox": [
+        0,
+        9,
+        127,
+        31
+      ],
+      "advance": 127
+    },
+    {
+      "font": "text_large",
+      "text": "日本語テキスト",
+      "bbox": [
+        0,
+        14,
+        112,
+        31
+      ],
+      "advance": 112
+    },
+    {
+      "font": "text_medium",
+      "text": "",
+      "bbox": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "advance": 0
+    },
+    {
+      "font": "text_medium",
+      "text": " ",
+      "bbox": [
+        0,
+        27,
+        8,
+        27
+      ],
+      "advance": 8
+    },
+    {
+      "font": "text_medium",
+      "text": "  7 days: 2x • 14 days: 4x • 30 days: 8x • 60 days: 16x",
+      "bbox": [
+        0,
+        8,
+        700,
+        32
+      ],
+      "advance": 700
+    },
+    {
+      "font": "text_medium",
+      "text": "!\"#$%&'()*+,-./0123456789:;<=>?@",
+      "bbox": [
+        0,
+        5,
+        472,
+        32
+      ],
+      "advance": 472
+    },
+    {
+      "font": "text_medium",
+      "text": "... and 2 more members",
+      "bbox": [
+        0,
+        8,
+        304,
+        27
+      ],
+      "advance": 304
+    },
+    {
+      "font": "text_medium",
+      "text": "1,234,567",
+      "bbox": [
+        0,
+        8,
+        129,
+        29
+      ],
+      "advance": 129
+    },
+    {
+      "font": "text_medium",
+      "text": "17 members",
+      "bbox": [
+        0,
+        8,
+        155,
+        27
+      ],
+      "advance": 155
+    },
+    {
+      "font": "text_medium",
+      "text": "A",
+      "bbox": [
+        0,
+        8,
+        19,
+        27
+      ],
+      "advance": 19
+    },
+    {
+      "font": "text_medium",
+      "text": "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`",
+      "bbox": [
+        0,
+        5,
+        550,
+        32
+      ],
+      "advance": 550
+    },
+    {
+      "font": "text_medium",
+      "text": "AV",
+      "bbox": [
+        0,
+        8,
+        38,
+        27
+      ],
+      "advance": 38
+    },
+    {
+      "font": "text_medium",
+      "text": "Account overview for nyxbyte",
+      "bbox": [
+        0,
+        8,
+        389,
+        32
+      ],
+      "advance": 389
+    },
+    {
+      "font": "text_medium",
+      "text": "Balance:",
+      "bbox": [
+        0,
+        8,
+        112,
+        27
+      ],
+      "advance": 112
+    },
+    {
+      "font": "text_medium",
+      "text": "Campaign active - Switching disabled",
+      "bbox": [
+        0,
+        8,
+        486,
+        32
+      ],
+      "advance": 486
+    },
+    {
+      "font": "text_medium",
+      "text": "Choose a squad from the menu below.",
+      "bbox": [
+        0,
+        8,
+        497,
+        32
+      ],
+      "advance": 497
+    },
+    {
+      "font": "text_medium",
+      "text": "Join Cost",
+      "bbox": [
+        0,
+        8,
+        119,
+        27
+      ],
+      "advance": 119
+    },
+    {
+      "font": "text_medium",
+      "text": "Members",
+      "bbox": [
+        0,
+        8,
+        119,
+        27
+      ],
+      "advance": 119
+    },
+    {
+      "font": "text_medium",
+      "text": "Settings for Smarter Dev",
+      "bbox": [
+        0,
+        8,
+        326,
+        32
+      ],
+      "advance": 326
+    },
+    {
+      "font": "text_medium",
+      "text": "Squad Name",
+      "bbox": [
+        0,
+        8,
+        165,
+        32
+      ],
+      "advance": 165
+    },
+    {
+      "font": "text_medium",
+      "text": "Systems folks who live in the terminal. We take on the gnarly",
+      "bbox": [
+        0,
+        8,
+        789,
+        32
+      ],
+      "advance": 789
+    },
+    {
+      "font": "text_medium",
+      "text": "Wg",
+      "bbox": [
+        0,
+        8,
+        39,
+        32
+      ],
+      "advance": 39
+    },
+    {
+      "font": "text_medium",
+      "text": "abcdefghijklmnopqrstuvwxyz{|}~",
+      "bbox": [
+        0,
+        5,
+        421,
+        32
+      ],
+      "advance": 421
+    },
+    {
+      "font": "text_medium",
+      "text": "café naïve Ünter",
+      "bbox": [
+        0,
+        3,
+        216,
+        27
+      ],
+      "advance": 216
+    },
+    {
+      "font": "text_medium",
+      "text": "emoji 😀 here",
+      "bbox": [
+        0,
+        8,
+        156,
+        32
+      ],
+      "advance": 156
+    },
+    {
+      "font": "text_medium",
+      "text": "infrastructure bounties and hand out post-mortems like candy.",
+      "bbox": [
+        0,
+        8,
+        819,
+        32
+      ],
+      "advance": 819
+    },
+    {
+      "font": "text_medium",
+      "text": "日本語テキスト",
+      "bbox": [
+        0,
+        11,
+        98,
+        28
+      ],
+      "advance": 98
+    },
+    {
+      "font": "text_small",
+      "text": "",
+      "bbox": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "advance": 0
+    },
+    {
+      "font": "text_small",
+      "text": " ",
+      "bbox": [
+        0,
+        24,
+        7,
+        24
+      ],
+      "advance": 7
+    },
+    {
+      "font": "text_small",
+      "text": "  7 days: 2x • 14 days: 4x • 30 days: 8x • 60 days: 16x",
+      "bbox": [
+        0,
+        8,
+        606,
+        28
+      ],
+      "advance": 606
+    },
+    {
+      "font": "text_small",
+      "text": "!\"#$%&'()*+,-./0123456789:;<=>?@",
+      "bbox": [
+        0,
+        4,
+        404,
+        28
+      ],
+      "advance": 404
+    },
+    {
+      "font": "text_small",
+      "text": "+ Daily (4x)",
+      "bbox": [
+        0,
+        4,
+        128,
+        28
+      ],
+      "advance": 128
+    },
+    {
+      "font": "text_small",
+      "text": "+ Daily Reward",
+      "bbox": [
+        0,
+        8,
+        166,
+        28
+      ],
+      "advance": 166
+    },
+    {
+      "font": "text_small",
+      "text": "+ Welcome Bonus",
+      "bbox": [
+        0,
+        8,
+        202,
+        24
+      ],
+      "advance": 202
+    },
+    {
+      "font": "text_small",
+      "text": "+1,200",
+      "bbox": [
+        0,
+        8,
+        77,
+        26
+      ],
+      "advance": 77
+    },
+    {
+      "font": "text_small",
+      "text": "+100",
+      "bbox": [
+        0,
+        8,
+        55,
+        24
+      ],
+      "advance": 55
+    },
+    {
+      "font": "text_small",
+      "text": "+18,420",
+      "bbox": [
+        0,
+        8,
+        91,
+        26
+      ],
+      "advance": 91
+    },
+    {
+      "font": "text_small",
+      "text": "+20",
+      "bbox": [
+        0,
+        8,
+        47,
+        24
+      ],
+      "advance": 47
+    },
+    {
+      "font": "text_small",
+      "text": "+340",
+      "bbox": [
+        0,
+        8,
+        62,
+        24
+      ],
+      "advance": 62
+    },
+    {
+      "font": "text_small",
+      "text": "+80",
+      "bbox": [
+        0,
+        8,
+        46,
+        24
+      ],
+      "advance": 46
+    },
+    {
+      "font": "text_small",
+      "text": "- Joined Nightshade Collective",
+      "bbox": [
+        0,
+        8,
+        339,
+        28
+      ],
+      "advance": 339
+    },
+    {
+      "font": "text_small",
+      "text": "-250",
+      "bbox": [
+        0,
+        8,
+        58,
+        24
+      ],
+      "advance": 58
+    },
+    {
+      "font": "text_small",
+      "text": "-500",
+      "bbox": [
+        0,
+        8,
+        58,
+        24
+      ],
+      "advance": 58
+    },
+    {
+      "font": "text_small",
+      "text": "-75",
+      "bbox": [
+        0,
+        8,
+        41,
+        24
+      ],
+      "advance": 41
+    },
+    {
+      "font": "text_small",
+      "text": "... and 2 more members",
+      "bbox": [
+        0,
+        8,
+        264,
+        24
+      ],
+      "advance": 264
+    },
+    {
+      "font": "text_small",
+      "text": "04/08/26",
+      "bbox": [
+        0,
+        5,
+        125,
+        24
+      ],
+      "advance": 125
+    },
+    {
+      "font": "text_small",
+      "text": "04/30/26",
+      "bbox": [
+        0,
+        5,
+        126,
+        24
+      ],
+      "advance": 126
+    },
+    {
+      "font": "text_small",
+      "text": "05/21/26",
+      "bbox": [
+        0,
+        5,
+        119,
+        24
+      ],
+      "advance": 119
+    },
+    {
+      "font": "text_small",
+      "text": "06/03/26",
+      "bbox": [
+        0,
+        5,
+        126,
+        24
+      ],
+      "advance": 126
+    },
+    {
+      "font": "text_small",
+      "text": "06/16/26",
+      "bbox": [
+        0,
+        5,
+        117,
+        24
+      ],
+      "advance": 117
+    },
+    {
+      "font": "text_small",
+      "text": "06/23/26",
+      "bbox": [
+        0,
+        5,
+        126,
+        24
+      ],
+      "advance": 126
+    },
+    {
+      "font": "text_small",
+      "text": "06/29/26",
+      "bbox": [
+        0,
+        5,
+        125,
+        24
+      ],
+      "advance": 125
+    },
+    {
+      "font": "text_small",
+      "text": "07-23",
+      "bbox": [
+        0,
+        8,
+        73,
+        24
+      ],
+      "advance": 73
+    },
+    {
+      "font": "text_small",
+      "text": "07-26",
+      "bbox": [
+        0,
+        8,
+        72,
+        24
+      ],
+      "advance": 72
+    },
+    {
+      "font": "text_small",
+      "text": "07-29",
+      "bbox": [
+        0,
+        8,
+        72,
+        24
+      ],
+      "advance": 72
+    },
+    {
+      "font": "text_small",
+      "text": "07-31",
+      "bbox": [
+        0,
+        8,
+        65,
+        24
+      ],
+      "advance": 65
+    },
+    {
+      "font": "text_small",
+      "text": "07/07/26",
+      "bbox": [
+        0,
+        5,
+        125,
+        24
+      ],
+      "advance": 125
+    },
+    {
+      "font": "text_small",
+      "text": "07/12/26",
+      "bbox": [
+        0,
+        5,
+        118,
+        24
+      ],
+      "advance": 118
+    },
+    {
+      "font": "text_small",
+      "text": "07/18/26",
+      "bbox": [
+        0,
+        5,
+        117,
+        24
+      ],
+      "advance": 117
+    },
+    {
+      "font": "text_small",
+      "text": "07/23/26",
+      "bbox": [
+        0,
+        5,
+        126,
+        24
+      ],
+      "advance": 126
+    },
+    {
+      "font": "text_small",
+      "text": "07/26/26",
+      "bbox": [
+        0,
+        5,
+        125,
+        24
+      ],
+      "advance": 125
+    },
+    {
+      "font": "text_small",
+      "text": "07/29/26",
+      "bbox": [
+        0,
+        5,
+        125,
+        24
+      ],
+      "advance": 125
+    },
+    {
+      "font": "text_small",
+      "text": "08-02",
+      "bbox": [
+        0,
+        8,
+        73,
+        24
+      ],
+      "advance": 73
+    },
+    {
+      "font": "text_small",
+      "text": "08-04",
+      "bbox": [
+        0,
+        8,
+        72,
+        24
+      ],
+      "advance": 72
+    },
+    {
+      "font": "text_small",
+      "text": "08-05",
+      "bbox": [
+        0,
+        8,
+        73,
+        24
+      ],
+      "advance": 73
+    },
+    {
+      "font": "text_small",
+      "text": "08-06",
+      "bbox": [
+        0,
+        8,
+        72,
+        24
+      ],
+      "advance": 72
+    },
+    {
+      "font": "text_small",
+      "text": "08/01/26",
+      "bbox": [
+        0,
+        5,
+        118,
+        24
+      ],
+      "advance": 118
+    },
+    {
+      "font": "text_small",
+      "text": "08/03/26",
+      "bbox": [
+        0,
+        5,
+        126,
+        24
+      ],
+      "advance": 126
+    },
+    {
+      "font": "text_small",
+      "text": "1",
+      "bbox": [
+        0,
+        8,
+        8,
+        24
+      ],
+      "advance": 8
+    },
+    {
+      "font": "text_small",
+      "text": "1 days",
+      "bbox": [
+        0,
+        8,
+        70,
+        28
+      ],
+      "advance": 70
+    },
+    {
+      "font": "text_small",
+      "text": "1,234,567",
+      "bbox": [
+        0,
+        8,
+        113,
+        26
+      ],
+      "advance": 113
+    },
+    {
+      "font": "text_small",
+      "text": "1,245",
+      "bbox": [
+        0,
+        8,
+        61,
+        26
+      ],
+      "advance": 61
+    },
+    {
+      "font": "text_small",
+      "text": "1,990",
+      "bbox": [
+        0,
+        8,
+        60,
+        26
+      ],
+      "advance": 60
+    },
+    {
+      "font": "text_small",
+      "text": "1.",
+      "bbox": [
+        0,
+        8,
+        14,
+        24
+      ],
+      "advance": 14
+    },
+    {
+      "font": "text_small",
+      "text": "10",
+      "bbox": [
+        0,
+        8,
+        24,
+        24
+      ],
+      "advance": 24
+    },
+    {
+      "font": "text_small",
+      "text": "10.",
+      "bbox": [
+        0,
+        8,
+        30,
+        24
+      ],
+      "advance": 30
+    },
+    {
+      "font": "text_small",
+      "text": "100 bytes",
+      "bbox": [
+        0,
+        8,
+        111,
+        28
+      ],
+      "advance": 111
+    },
+    {
+      "font": "text_small",
+      "text": "11,340",
+      "bbox": [
+        0,
+        8,
+        69,
+        26
+      ],
+      "advance": 69
+    },
+    {
+      "font": "text_small",
+      "text": "11.",
+      "bbox": [
+        0,
+        8,
+        22,
+        24
+      ],
+      "advance": 22
+    },
+    {
+      "font": "text_small",
+      "text": "12 days",
+      "bbox": [
+        0,
+        8,
+        86,
+        28
+      ],
+      "advance": 86
+    },
+    {
+      "font": "text_small",
+      "text": "12.",
+      "bbox": [
+        0,
+        8,
+        30,
+        24
+      ],
+      "advance": 30
+    },
+    {
+      "font": "text_small",
+      "text": "12/25",
+      "bbox": [
+        0,
+        5,
+        72,
+        24
+      ],
+      "advance": 72
+    },
+    {
+      "font": "text_small",
+      "text": "13.",
+      "bbox": [
+        0,
+        8,
+        30,
+        24
+      ],
+      "advance": 30
+    },
+    {
+      "font": "text_small",
+      "text": "14.",
+      "bbox": [
+        0,
+        8,
+        29,
+        24
+      ],
+      "advance": 29
+    },
+    {
+      "font": "text_small",
+      "text": "15,075",
+      "bbox": [
+        0,
+        8,
+        77,
+        26
+      ],
+      "advance": 77
+    },
+    {
+      "font": "text_small",
+      "text": "15.",
+      "bbox": [
+        0,
+        8,
+        30,
+        24
+      ],
+      "advance": 30
+    },
+    {
+      "font": "text_small",
+      "text": "17/25",
+      "bbox": [
+        0,
+        5,
+        71,
+        24
+      ],
+      "advance": 71
+    },
+    {
+      "font": "text_small",
+      "text": "18,170 bytes",
+      "bbox": [
+        0,
+        8,
+        139,
+        28
+      ],
+      "advance": 139
+    },
+    {
+      "font": "text_small",
+      "text": "18,420",
+      "bbox": [
+        0,
+        8,
+        76,
+        26
+      ],
+      "advance": 76
+    },
+    {
+      "font": "text_small",
+      "text": "18,420 bytes",
+      "bbox": [
+        0,
+        8,
+        147,
+        28
+      ],
+      "advance": 147
+    },
+    {
+      "font": "text_small",
+      "text": "18/25",
+      "bbox": [
+        0,
+        5,
+        71,
+        24
+      ],
+      "advance": 71
+    },
+    {
+      "font": "text_small",
+      "text": "2",
+      "bbox": [
+        0,
+        8,
+        16,
+        24
+      ],
+      "advance": 16
+    },
+    {
+      "font": "text_small",
+      "text": "2.",
+      "bbox": [
+        0,
+        8,
+        22,
+        24
+      ],
+      "advance": 22
+    },
+    {
+      "font": "text_small",
+      "text": "2026-08-06",
+      "bbox": [
+        0,
+        8,
+        145,
+        24
+      ],
+      "advance": 145
+    },
+    {
+      "font": "text_small",
+      "text": "24,680",
+      "bbox": [
+        0,
+        8,
+        83,
+        26
+      ],
+      "advance": 83
+    },
+    {
+      "font": "text_small",
+      "text": "25 bytes",
+      "bbox": [
+        0,
+        8,
+        103,
+        28
+      ],
+      "advance": 103
+    },
+    {
+      "font": "text_small",
+      "text": "250 bytes",
+      "bbox": [
+        0,
+        8,
+        119,
+        28
+      ],
+      "advance": 119
+    },
+    {
+      "font": "text_small",
+      "text": "27 days",
+      "bbox": [
+        0,
+        8,
+        93,
+        28
+      ],
+      "advance": 93
+    },
+    {
+      "font": "text_small",
+      "text": "3",
+      "bbox": [
+        0,
+        8,
+        16,
+        24
+      ],
+      "advance": 16
+    },
+    {
+      "font": "text_small",
+      "text": "3 days",
+      "bbox": [
+        0,
+        8,
+        78,
+        28
+      ],
+      "advance": 78
+    },
+    {
+      "font": "text_small",
+      "text": "3,265",
+      "bbox": [
+        0,
+        8,
+        69,
+        26
+      ],
+      "advance": 69
+    },
+    {
+      "font": "text_small",
+      "text": "3.",
+      "bbox": [
+        0,
+        8,
+        22,
+        24
+      ],
+      "advance": 22
+    },
+    {
+      "font": "text_small",
+      "text": "350 bytes (Sale)",
+      "bbox": [
+        0,
+        4,
+        191,
+        28
+      ],
+      "advance": 191
+    },
+    {
+      "font": "text_small",
+      "text": "4",
+      "bbox": [
+        0,
+        8,
+        15,
+        24
+      ],
+      "advance": 15
+    },
+    {
+      "font": "text_small",
+      "text": "4.",
+      "bbox": [
+        0,
+        8,
+        21,
+        24
+      ],
+      "advance": 21
+    },
+    {
+      "font": "text_small",
+      "text": "41 days",
+      "bbox": [
+        0,
+        8,
+        85,
+        28
+      ],
+      "advance": 85
+    },
+    {
+      "font": "text_small",
+      "text": "5",
+      "bbox": [
+        0,
+        8,
+        16,
+        24
+      ],
+      "advance": 16
+    },
+    {
+      "font": "text_small",
+      "text": "5 days",
+      "bbox": [
+        0,
+        8,
+        78,
+        28
+      ],
+      "advance": 78
+    },
+    {
+      "font": "text_small",
+      "text": "5,000 bytes",
+      "bbox": [
+        0,
+        8,
+        141,
+        28
+      ],
+      "advance": 141
+    },
+    {
+      "font": "text_small",
+      "text": "5,480",
+      "bbox": [
+        0,
+        8,
+        68,
+        26
+      ],
+      "advance": 68
+    },
+    {
+      "font": "text_small",
+      "text": "5.",
+      "bbox": [
+        0,
+        8,
+        22,
+        24
+      ],
+      "advance": 22
+    },
+    {
+      "font": "text_small",
+      "text": "500 bytes",
+      "bbox": [
+        0,
+        8,
+        119,
+        28
+      ],
+      "advance": 119
+    },
+    {
+      "font": "text_small",
+      "text": "6",
+      "bbox": [
+        0,
+        8,
+        15,
+        24
+      ],
+      "advance": 15
+    },
+    {
+      "font": "text_small",
+      "text": "6 hours",
+      "bbox": [
+        0,
+        8,
+        86,
+        24
+      ],
+      "advance": 86
+    },
+    {
+      "font": "text_small",
+      "text": "6,260",
+      "bbox": [
+        0,
+        8,
+        68,
+        26
+      ],
+      "advance": 68
+    },
+    {
+      "font": "text_small",
+      "text": "6.",
+      "bbox": [
+        0,
+        8,
+        21,
+        24
+      ],
+      "advance": 21
+    },
+    {
+      "font": "text_small",
+      "text": "6/10",
+      "bbox": [
+        0,
+        5,
+        55,
+        24
+      ],
+      "advance": 55
+    },
+    {
+      "font": "text_small",
+      "text": "640",
+      "bbox": [
+        0,
+        8,
+        46,
+        24
+      ],
+      "advance": 46
+    },
+    {
+      "font": "text_small",
+      "text": "7",
+      "bbox": [
+        0,
+        8,
+        15,
+        24
+      ],
+      "advance": 15
+    },
+    {
+      "font": "text_small",
+      "text": "7,710",
+      "bbox": [
+        0,
+        8,
+        60,
+        26
+      ],
+      "advance": 60
+    },
+    {
+      "font": "text_small",
+      "text": "7.",
+      "bbox": [
+        0,
+        8,
+        21,
+        24
+      ],
+      "advance": 21
+    },
+    {
+      "font": "text_small",
+      "text": "750 bytes",
+      "bbox": [
+        0,
+        8,
+        118,
+        28
+      ],
+      "advance": 118
+    },
+    {
+      "font": "text_small",
+      "text": "8",
+      "bbox": [
+        0,
+        8,
+        15,
+        24
+      ],
+      "advance": 15
+    },
+    {
+      "font": "text_small",
+      "text": "8 days",
+      "bbox": [
+        0,
+        8,
+        77,
+        28
+      ],
+      "advance": 77
+    },
+    {
+      "font": "text_small",
+      "text": "8,925",
+      "bbox": [
+        0,
+        8,
+        68,
+        26
+      ],
+      "advance": 68
+    },
+    {
+      "font": "text_small",
+      "text": "8.",
+      "bbox": [
+        0,
+        8,
+        21,
+        24
+      ],
+      "advance": 21
+    },
+    {
+      "font": "text_small",
+      "text": "9",
+      "bbox": [
+        0,
+        8,
+        15,
+        24
+      ],
+      "advance": 15
+    },
+    {
+      "font": "text_small",
+      "text": "9.",
+      "bbox": [
+        0,
+        8,
+        21,
+        24
+      ],
+      "advance": 21
+    },
+    {
+      "font": "text_small",
+      "text": "< Sam Whitfield",
+      "bbox": [
+        0,
+        8,
+        171,
+        24
+      ],
+      "advance": 171
+    },
+    {
+      "font": "text_small",
+      "text": "< der_kompilator_9000",
+      "bbox": [
+        0,
+        8,
+        266,
+        28
+      ],
+      "advance": 266
+    },
+    {
+      "font": "text_small",
+      "text": "> Quinn Alvarez",
+      "bbox": [
+        0,
+        8,
+        176,
+        28
+      ],
+      "advance": 176
+    },
+    {
+      "font": "text_small",
+      "text": "> mochi",
+      "bbox": [
+        0,
+        8,
+        88,
+        24
+      ],
+      "advance": 88
+    },
+    {
+      "font": "text_small",
+      "text": "A",
+      "bbox": [
+        0,
+        8,
+        16,
+        24
+      ],
+      "advance": 16
+    },
+    {
+      "font": "text_small",
+      "text": "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`",
+      "bbox": [
+        0,
+        4,
+        470,
+        28
+      ],
+      "advance": 470
+    },
+    {
+      "font": "text_small",
+      "text": "AV",
+      "bbox": [
+        0,
+        8,
+        32,
+        24
+      ],
+      "advance": 32
+    },
+    {
+      "font": "text_small",
+      "text": "Active",
+      "bbox": [
+        0,
+        8,
+        71,
+        24
+      ],
+      "advance": 71
+    },
+    {
+      "font": "text_small",
+      "text": "Ada L.",
+      "bbox": [
+        0,
+        8,
+        72,
+        24
+      ],
+      "advance": 72
+    },
+    {
+      "font": "text_small",
+      "text": "Amount:",
+      "bbox": [
+        0,
+        8,
+        93,
+        24
+      ],
+      "advance": 93
+    },
+    {
+      "font": "text_small",
+      "text": "Balance:",
+      "bbox": [
+        0,
+        8,
+        98,
+        24
+      ],
+      "advance": 98
+    },
+    {
+      "font": "text_small",
+      "text": "Campaign active - Switching disabled",
+      "bbox": [
+        0,
+        8,
+        420,
+        28
+      ],
+      "advance": 420
+    },
+    {
+      "font": "text_small",
+      "text": "Copper Wren",
+      "bbox": [
+        0,
+        8,
+        142,
+        28
+      ],
+      "advance": 142
+    },
+    {
+      "font": "text_small",
+      "text": "Daily Activity Reward:",
+      "bbox": [
+        0,
+        8,
+        241,
+        28
+      ],
+      "advance": 241
+    },
+    {
+      "font": "text_small",
+      "text": "Default",
+      "bbox": [
+        0,
+        8,
+        81,
+        24
+      ],
+      "advance": 81
+    },
+    {
+      "font": "text_small",
+      "text": "Drifters",
+      "bbox": [
+        0,
+        8,
+        83,
+        24
+      ],
+      "advance": 83
+    },
+    {
+      "font": "text_small",
+      "text": "Firebreak",
+      "bbox": [
+        0,
+        8,
+        104,
+        24
+      ],
+      "advance": 104
+    },
+    {
+      "font": "text_small",
+      "text": "Free",
+      "bbox": [
+        0,
+        8,
+        50,
+        24
+      ],
+      "advance": 50
+    },
+    {
+      "font": "text_small",
+      "text": "From:",
+      "bbox": [
+        0,
+        8,
+        62,
+        24
+      ],
+      "advance": 62
+    },
+    {
+      "font": "text_small",
+      "text": "Join Cost",
+      "bbox": [
+        0,
+        8,
+        103,
+        24
+      ],
+      "advance": 103
+    },
+    {
+      "font": "text_small",
+      "text": "Last Daily:",
+      "bbox": [
+        0,
+        8,
+        119,
+        28
+      ],
+      "advance": 119
+    },
+    {
+      "font": "text_small",
+      "text": "Max Transfer:",
+      "bbox": [
+        0,
+        8,
+        155,
+        24
+      ],
+      "advance": 155
+    },
+    {
+      "font": "text_small",
+      "text": "Member for 120 days",
+      "bbox": [
+        0,
+        8,
+        235,
+        28
+      ],
+      "advance": 235
+    },
+    {
+      "font": "text_small",
+      "text": "Members",
+      "bbox": [
+        0,
+        8,
+        103,
+        24
+      ],
+      "advance": 103
+    },
+    {
+      "font": "text_small",
+      "text": "Net Change:",
+      "bbox": [
+        0,
+        8,
+        138,
+        28
+      ],
+      "advance": 138
+    },
+    {
+      "font": "text_small",
+      "text": "New Balance:",
+      "bbox": [
+        0,
+        8,
+        152,
+        24
+      ],
+      "advance": 152
+    },
+    {
+      "font": "text_small",
+      "text": "New Member Balance:",
+      "bbox": [
+        0,
+        8,
+        248,
+        24
+      ],
+      "advance": 248
+    },
+    {
+      "font": "text_small",
+      "text": "Nightshade Collective",
+      "bbox": [
+        0,
+        8,
+        244,
+        28
+      ],
+      "advance": 244
+    },
+    {
+      "font": "text_small",
+      "text": "Priya N.",
+      "bbox": [
+        0,
+        8,
+        85,
+        28
+      ],
+      "advance": 85
+    },
+    {
+      "font": "text_small",
+      "text": "Quinn Alvarez",
+      "bbox": [
+        0,
+        8,
+        155,
+        28
+      ],
+      "advance": 155
+    },
+    {
+      "font": "text_small",
+      "text": "Reason:",
+      "bbox": [
+        0,
+        8,
+        92,
+        24
+      ],
+      "advance": 92
+    },
+    {
+      "font": "text_small",
+      "text": "Sam Whitfield",
+      "bbox": [
+        0,
+        8,
+        150,
+        24
+      ],
+      "advance": 150
+    },
+    {
+      "font": "text_small",
+      "text": "Status",
+      "bbox": [
+        0,
+        8,
+        76,
+        24
+      ],
+      "advance": 76
+    },
+    {
+      "font": "text_small",
+      "text": "Streak Bonuses:",
+      "bbox": [
+        0,
+        8,
+        188,
+        24
+      ],
+      "advance": 188
+    },
+    {
+      "font": "text_small",
+      "text": "Streak:",
+      "bbox": [
+        0,
+        8,
+        80,
+        24
+      ],
+      "advance": 80
+    },
+    {
+      "font": "text_small",
+      "text": "The Long Tail Analy...",
+      "bbox": [
+        0,
+        8,
+        240,
+        28
+      ],
+      "advance": 240
+    },
+    {
+      "font": "text_small",
+      "text": "Theo Brandt",
+      "bbox": [
+        0,
+        8,
+        140,
+        24
+      ],
+      "advance": 140
+    },
+    {
+      "font": "text_small",
+      "text": "To:",
+      "bbox": [
+        0,
+        8,
+        35,
+        24
+      ],
+      "advance": 35
+    },
+    {
+      "font": "text_small",
+      "text": "Total Received:",
+      "bbox": [
+        0,
+        8,
+        174,
+        24
+      ],
+      "advance": 174
+    },
+    {
+      "font": "text_small",
+      "text": "Total Sent:",
+      "bbox": [
+        0,
+        8,
+        123,
+        24
+      ],
+      "advance": 123
+    },
+    {
+      "font": "text_small",
+      "text": "Transfer Cooldown:",
+      "bbox": [
+        0,
+        8,
+        216,
+        24
+      ],
+      "advance": 216
+    },
+    {
+      "font": "text_small",
+      "text": "User 99001122",
+      "bbox": [
+        0,
+        8,
+        170,
+        24
+      ],
+      "advance": 170
+    },
+    {
+      "font": "text_small",
+      "text": "Wg",
+      "bbox": [
+        0,
+        8,
+        33,
+        28
+      ],
+      "advance": 33
+    },
+    {
+      "font": "text_small",
+      "text": "Your Balance: 18,420 bytes",
+      "bbox": [
+        0,
+        8,
+        311,
+        28
+      ],
+      "advance": 311
+    },
+    {
+      "font": "text_small",
+      "text": "Your Membership:",
+      "bbox": [
+        0,
+        8,
+        201,
+        28
+      ],
+      "advance": 201
+    },
+    {
+      "font": "text_small",
+      "text": "abcdefghijklmnopqrstuvwxyz{|}~",
+      "bbox": [
+        0,
+        4,
+        365,
+        28
+      ],
+      "advance": 365
+    },
+    {
+      "font": "text_small",
+      "text": "bitrot_barnaby_th...",
+      "bbox": [
+        0,
+        8,
+        221,
+        28
+      ],
+      "advance": 221
+    },
+    {
+      "font": "text_small",
+      "text": "café naïve Ünter",
+      "bbox": [
+        0,
+        3,
+        186,
+        24
+      ],
+      "advance": 186
+    },
+    {
+      "font": "text_small",
+      "text": "der_kompilator_...",
+      "bbox": [
+        0,
+        8,
+        200,
+        28
+      ],
+      "advance": 200
+    },
+    {
+      "font": "text_small",
+      "text": "der_kompilator_9000",
+      "bbox": [
+        0,
+        8,
+        245,
+        28
+      ],
+      "advance": 245
+    },
+    {
+      "font": "text_small",
+      "text": "emoji 😀 here",
+      "bbox": [
+        0,
+        8,
+        135,
+        28
+      ],
+      "advance": 135
+    },
+    {
+      "font": "text_small",
+      "text": "lambda_lou",
+      "bbox": [
+        0,
+        8,
+        129,
+        26
+      ],
+      "advance": 129
+    },
+    {
+      "font": "text_small",
+      "text": "mochi",
+      "bbox": [
+        0,
+        8,
+        67,
+        24
+      ],
+      "advance": 67
+    },
+    {
+      "font": "text_small",
+      "text": "nyxbyte",
+      "bbox": [
+        0,
+        8,
+        91,
+        28
+      ],
+      "advance": 91
+    },
+    {
+      "font": "text_small",
+      "text": "onyx",
+      "bbox": [
+        0,
+        12,
+        55,
+        28
+      ],
+      "advance": 55
+    },
+    {
+      "font": "text_small",
+      "text": "packet_gremlin",
+      "bbox": [
+        0,
+        8,
+        173,
+        28
+      ],
+      "advance": 173
+    },
+    {
+      "font": "text_small",
+      "text": "quietstorm",
+      "bbox": [
+        0,
+        8,
+        121,
+        28
+      ],
+      "advance": 121
+    },
+    {
+      "font": "text_small",
+      "text": "rustacean_rae",
+      "bbox": [
+        0,
+        8,
+        166,
+        26
+      ],
+      "advance": 166
+    },
+    {
+      "font": "text_small",
+      "text": "thanks for the code review",
+      "bbox": [
+        0,
+        8,
+        300,
+        24
+      ],
+      "advance": 300
+    },
+    {
+      "font": "text_small",
+      "text": "zerocool",
+      "bbox": [
+        0,
+        8,
+        97,
+        24
+      ],
+      "advance": 97
+    },
+    {
+      "font": "text_small",
+      "text": "日本語テキスト",
+      "bbox": [
+        0,
+        10,
+        84,
+        25
+      ],
+      "advance": 84
+    },
+    {
+      "font": "text_tiny",
+      "text": "",
+      "bbox": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "advance": 0
+    },
+    {
+      "font": "text_tiny",
+      "text": " ",
+      "bbox": [
+        0,
+        20,
+        6,
+        20
+      ],
+      "advance": 6
+    },
+    {
+      "font": "text_tiny",
+      "text": "  7 days: 2x • 14 days: 4x • 30 days: 8x • 60 days: 16x",
+      "bbox": [
+        0,
+        6,
+        517,
+        24
+      ],
+      "advance": 517
+    },
+    {
+      "font": "text_tiny",
+      "text": "!\"#$%&'()*+,-./0123456789:;<=>?@",
+      "bbox": [
+        0,
+        4,
+        340,
+        24
+      ],
+      "advance": 340
+    },
+    {
+      "font": "text_tiny",
+      "text": "... and 2 more members",
+      "bbox": [
+        0,
+        6,
+        225,
+        20
+      ],
+      "advance": 225
+    },
+    {
+      "font": "text_tiny",
+      "text": "1,234,567",
+      "bbox": [
+        0,
+        6,
+        95,
+        21
+      ],
+      "advance": 95
+    },
+    {
+      "font": "text_tiny",
+      "text": "A",
+      "bbox": [
+        0,
+        6,
+        13,
+        20
+      ],
+      "advance": 13
+    },
+    {
+      "font": "text_tiny",
+      "text": "ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`",
+      "bbox": [
+        0,
+        4,
+        391,
+        24
+      ],
+      "advance": 391
+    },
+    {
+      "font": "text_tiny",
+      "text": "AV",
+      "bbox": [
+        0,
+        6,
+        26,
+        20
+      ],
+      "advance": 26
+    },
+    {
+      "font": "text_tiny",
+      "text": "Balance:",
+      "bbox": [
+        0,
+        6,
+        83,
+        20
+      ],
+      "advance": 83
+    },
+    {
+      "font": "text_tiny",
+      "text": "Campaign active - Switching disabled",
+      "bbox": [
+        0,
+        6,
+        357,
+        24
+      ],
+      "advance": 357
+    },
+    {
+      "font": "text_tiny",
+      "text": "Wg",
+      "bbox": [
+        0,
+        6,
+        28,
+        24
+      ],
+      "advance": 28
+    },
+    {
+      "font": "text_tiny",
+      "text": "abcdefghijklmnopqrstuvwxyz{|}~",
+      "bbox": [
+        0,
+        4,
+        308,
+        24
+      ],
+      "advance": 308
+    },
+    {
+      "font": "text_tiny",
+      "text": "café naïve Ünter",
+      "bbox": [
+        0,
+        3,
+        160,
+        20
+      ],
+      "advance": 160
+    },
+    {
+      "font": "text_tiny",
+      "text": "emoji 😀 here",
+      "bbox": [
+        0,
+        6,
+        114,
+        24
+      ],
+      "advance": 114
+    },
+    {
+      "font": "text_tiny",
+      "text": "日本語テキスト",
+      "bbox": [
+        0,
+        9,
+        70,
+        20
+      ],
+      "advance": 70
+    }
+  ]
+}

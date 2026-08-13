@@ -13,21 +13,21 @@ def test_chat_agent_has_no_blog_functionality():
 
 
 def test_system_prompt_distinguishes_search_from_reading():
-    assert "Search is the discovery step" in SYSTEM_PROMPT
-    assert "Reading is the evidence step" in SYSTEM_PROMPT
-    assert "quick, low-stakes answer" in SYSTEM_PROMPT
-    assert "For an accurate or deep answer" in SYSTEM_PROMPT
+    assert "`web_search` discovers snippets" in SYSTEM_PROMPT
+    assert "for an accurate or deep answer" in SYSTEM_PROMPT
+    assert "`web_read` the best result before replying" in SYSTEM_PROMPT
 
 
 def test_web_search_description_requires_reading_for_deep_answers():
     description = web_search.__doc__ or ""
-    assert "first stage of web research" in description
-    assert "Snippets are enough for quick" in description
-    assert "call ``web_read``" in description
-    assert "before replying" in description
+    assert "result snippets" in description
+    assert "accurate or deep answers" in description
+    assert "web_read" in description
+    assert "best result" in description
 
 
-def test_web_read_description_identifies_evidence_stage():
+def test_web_read_description_guides_the_summary_with_an_instruction():
     description = web_read.__doc__ or ""
-    assert "evidence stage after ``web_search``" in description
-    assert "accurate, deep, precise, nuanced, verified" in description
+    assert "Read a URL" in description
+    assert "message <attachment>" in description
+    assert "summary guided by `instruction`" in description

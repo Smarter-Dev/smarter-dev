@@ -1,0 +1,218 @@
+{
+  "card": "history",
+  "background": "background.png",
+  "canvas": {
+    "width": 960,
+    "height": 540
+  },
+  "ops": [
+    {
+      "op": "text",
+      "x": 65,
+      "y": 65,
+      "text": "TRANSACTION HISTORY",
+      "font": "title_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 64,
+      "text": "TRANSACTION HISTORY",
+      "font": "title_medium",
+      "fill": "#3b82f6"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 174,
+      "text": "08-06",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 184,
+      "y": 174,
+      "text": "+ Daily (4x)",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 850,
+      "y": 174,
+      "text": "+80",
+      "font": "text_small",
+      "fill": "#11FF00"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 200,
+      "text": "08-05",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 184,
+      "y": 200,
+      "text": "> Quinn Alvarez",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 838,
+      "y": 200,
+      "text": "-250",
+      "font": "text_small",
+      "fill": "#FF6B6B"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 226,
+      "text": "08-04",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 184,
+      "y": 226,
+      "text": "- Joined Nightshade Collective",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 838,
+      "y": 226,
+      "text": "-500",
+      "font": "text_small",
+      "fill": "#FF6B6B"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 252,
+      "text": "08-02",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 184,
+      "y": 252,
+      "text": "< der_kompilator_9000",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 819,
+      "y": 252,
+      "text": "+1,200",
+      "font": "text_small",
+      "fill": "#11FF00"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 278,
+      "text": "07-31",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 184,
+      "y": 278,
+      "text": "+ Welcome Bonus",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 841,
+      "y": 278,
+      "text": "+100",
+      "font": "text_small",
+      "fill": "#11FF00"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 304,
+      "text": "07-29",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 184,
+      "y": 304,
+      "text": "> mochi",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 855,
+      "y": 304,
+      "text": "-75",
+      "font": "text_small",
+      "fill": "#FF6B6B"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 330,
+      "text": "07-26",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 184,
+      "y": 330,
+      "text": "+ Daily Reward",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 849,
+      "y": 330,
+      "text": "+20",
+      "font": "text_small",
+      "fill": "#11FF00"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 356,
+      "text": "07-23",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 184,
+      "y": 356,
+      "text": "< Sam Whitfield",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 834,
+      "y": 356,
+      "text": "+340",
+      "font": "text_small",
+      "fill": "#11FF00"
+    }
+  ]
+}

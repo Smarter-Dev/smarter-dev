@@ -1,0 +1,138 @@
+{
+  "card": "balance",
+  "background": "background.png",
+  "canvas": {
+    "width": 960,
+    "height": 540
+  },
+  "ops": [
+    {
+      "op": "text",
+      "x": 65,
+      "y": 65,
+      "text": "BYTES BALANCE",
+      "font": "title_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 64,
+      "text": "BYTES BALANCE",
+      "font": "title_medium",
+      "fill": "#3b82f6"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 143,
+      "text": "Account overview for nyxbyte",
+      "font": "text_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 142,
+      "text": "Account overview for nyxbyte",
+      "font": "text_medium",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 206,
+      "text": "Balance:",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 749,
+      "y": 206,
+      "text": "18,420 bytes",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 242,
+      "text": "Streak:",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 803,
+      "y": 242,
+      "text": "27 days",
+      "font": "text_small",
+      "fill": "#FF6B35"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 278,
+      "text": "Last Daily:",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 751,
+      "y": 278,
+      "text": "2026-08-06",
+      "font": "text_small",
+      "fill": "#B0B0B0"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 318,
+      "text": "Total Received:",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 813,
+      "y": 318,
+      "text": "24,680",
+      "font": "text_small",
+      "fill": "#11FF00"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 354,
+      "text": "Total Sent:",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 828,
+      "y": 354,
+      "text": "6,260",
+      "font": "text_small",
+      "fill": "#FF9999"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 390,
+      "text": "Net Change:",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 805,
+      "y": 390,
+      "text": "+18,420",
+      "font": "text_small",
+      "fill": "#11FF00"
+    }
+  ]
+}

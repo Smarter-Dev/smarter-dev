@@ -1,0 +1,58 @@
+{
+  "card": "error",
+  "background": "error-background.png",
+  "canvas": {
+    "width": 960,
+    "height": 540
+  },
+  "ops": [
+    {
+      "op": "text",
+      "x": 65,
+      "y": 65,
+      "text": "ERROR",
+      "font": "title_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 64,
+      "text": "ERROR",
+      "font": "title_medium",
+      "fill": "#FF0004"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 147,
+      "text": "You do not have enough bytes for that transfer. Your",
+      "font": "text_large",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 146,
+      "text": "You do not have enough bytes for that transfer. Your",
+      "font": "text_large",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 186,
+      "text": "balance is 640 bytes and you tried to send 1,200.",
+      "font": "text_large",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 185,
+      "text": "balance is 640 bytes and you tried to send 1,200.",
+      "font": "text_large",
+      "fill": "#FFFFFF"
+    }
+  ]
+}

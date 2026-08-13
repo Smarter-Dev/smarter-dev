@@ -1,0 +1,106 @@
+{
+  "card": "simple",
+  "background": "background.png",
+  "canvas": {
+    "width": 960,
+    "height": 540
+  },
+  "ops": [
+    {
+      "op": "text",
+      "x": 65,
+      "y": 65,
+      "text": "WELCOME TO SMARTER",
+      "font": "title_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 64,
+      "text": "WELCOME TO SMARTER",
+      "font": "title_medium",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 115,
+      "text": "DEV",
+      "font": "title_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 114,
+      "text": "DEV",
+      "font": "title_medium",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 197,
+      "text": "You earn bytes for showing up and helping out.",
+      "font": "text_large",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 196,
+      "text": "You earn bytes for showing up and helping out.",
+      "font": "text_large",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 289,
+      "text": "Use /bytes balance to see your total, /bytes send to",
+      "font": "text_large",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 288,
+      "text": "Use /bytes balance to see your total, /bytes send to",
+      "font": "text_large",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 328,
+      "text": "pass some along, and /squads list to find a crew to",
+      "font": "text_large",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 327,
+      "text": "pass some along, and /squads list to find a crew to",
+      "font": "text_large",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 367,
+      "text": "run with.",
+      "font": "text_large",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 366,
+      "text": "run with.",
+      "font": "text_large",
+      "fill": "#FFFFFF"
+    }
+  ]
+}

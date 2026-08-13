@@ -1,25 +1,23 @@
-"""Render TeX expressions through one long-lived local MathJax worker."""
+"""Render TeX expressions through the internal media service."""
 
 from __future__ import annotations
 
-import asyncio
-import base64
-import json
 import logging
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+
+from smarter_dev.bot.services.media_client import MediaClient
+from smarter_dev.bot.services.media_client import MediaRenderError
+from smarter_dev.shared.config import Settings
+from smarter_dev.shared.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 MAX_LATEX_SOURCE_CHARS = 1_800
 MAX_RENDERED_BYTES = 8 * 1024 * 1024
-RENDER_TIMEOUT_SECONDS = 5.0
-STARTUP_TIMEOUT_SECONDS = 30.0
 
 
 class LatexRenderError(RuntimeError):
-    """Raised when the local renderer cannot produce a usable PNG."""
+    """Raised when the media service cannot produce a usable PNG."""
 
 
 @dataclass(frozen=True)
@@ -32,31 +30,36 @@ class RenderedLatex:
 
 
 class LatexRenderer:
-    """Serialises requests through a lazily started MathJax Node process."""
+    """Turns fenced ``latex`` blocks into PNGs via the media service."""
 
     def __init__(
         self,
-        worker_path: Path | None = None,
+        media_client: MediaClient | None = None,
         *,
-        timeout_seconds: float = RENDER_TIMEOUT_SECONDS,
-        startup_timeout_seconds: float = STARTUP_TIMEOUT_SECONDS,
+        settings: Settings | None = None,
     ) -> None:
-        repository_root = Path(__file__).resolve().parents[3]
-        self.worker_path = worker_path or (
-            repository_root / "latex_renderer" / "worker.mjs"
-        )
-        self.timeout_seconds = timeout_seconds
-        self.startup_timeout_seconds = startup_timeout_seconds
-        self._process: asyncio.subprocess.Process | None = None
-        self._lock = asyncio.Lock()
-        self._next_id = 0
+        self._injected_client = media_client
+        self._settings = settings
+        self._owned_client: MediaClient | None = None
+
+    @property
+    def media_client(self) -> MediaClient:
+        """The media service client this renderer sends requests through."""
+        if self._injected_client is not None:
+            return self._injected_client
+        if self._owned_client is None:
+            self._owned_client = MediaClient.from_settings(
+                self._settings or get_settings()
+            )
+        return self._owned_client
 
     async def initialize(self) -> None:
-        """Start the worker and exercise the full render path before serving chat."""
-        await self.render("x")
+        """Confirm the media service is reachable before serving chat."""
+        await self.media_client.health()
+        logger.info("Media service is reachable for LaTeX rendering")
 
     async def render(self, source: str) -> RenderedLatex:
-        """Render ``source`` as PNG, restarting the worker after protocol errors."""
+        """Render ``source`` as a PNG attachment."""
         source = source.strip()
         if not source:
             raise LatexRenderError("LaTeX source must not be empty")
@@ -65,99 +68,22 @@ class LatexRenderer:
                 f"LaTeX source exceeds {MAX_LATEX_SOURCE_CHARS} characters"
             )
 
-        async with self._lock:
-            process = await self._ensure_process()
-            self._next_id += 1
-            request_id = self._next_id
-            request = json.dumps(
-                {"id": request_id, "source": source},
-                ensure_ascii=False,
-            ).encode("utf-8")
+        try:
+            rendered = await self.media_client.render_latex(source)
+        except MediaRenderError as exc:
+            raise LatexRenderError(str(exc)) from exc
 
-            try:
-                assert process.stdin is not None
-                assert process.stdout is not None
-                process.stdin.write(request + b"\n")
-                await process.stdin.drain()
-                line = await asyncio.wait_for(
-                    process.stdout.readline(),
-                    timeout=self.timeout_seconds,
-                )
-                response: dict[str, Any] = json.loads(line)
-            except TimeoutError as exc:
-                await self._stop_process()
-                raise LatexRenderError("LaTeX rendering timed out") from exc
-            except (BrokenPipeError, EOFError, json.JSONDecodeError) as exc:
-                await self._stop_process()
-                raise LatexRenderError("LaTeX renderer stopped unexpectedly") from exc
-
-            if response.get("id") != request_id:
-                await self._stop_process()
-                raise LatexRenderError("LaTeX renderer returned an invalid response")
-            if response.get("error"):
-                raise LatexRenderError(str(response["error"]))
-
-            encoded = response.get("png")
-            if not isinstance(encoded, str):
-                await self._stop_process()
-                raise LatexRenderError("LaTeX renderer returned no image")
-            try:
-                data = base64.b64decode(encoded, validate=True)
-            except ValueError as exc:
-                await self._stop_process()
-                raise LatexRenderError("LaTeX renderer returned invalid image data") from exc
-            if not data or len(data) > MAX_RENDERED_BYTES:
-                raise LatexRenderError("Rendered LaTeX image has an invalid size")
-            return RenderedLatex(data=data)
+        if not rendered.data or len(rendered.data) > MAX_RENDERED_BYTES:
+            raise LatexRenderError("Rendered LaTeX image has an invalid size")
+        return RenderedLatex(
+            data=rendered.data,
+            filename=rendered.filename,
+            mime_type=rendered.mime_type,
+        )
 
     async def close(self) -> None:
-        """Stop the worker if it was started."""
-        async with self._lock:
-            await self._stop_process()
-
-    async def _ensure_process(self) -> asyncio.subprocess.Process:
-        process = self._process
-        if process is not None and process.returncode is None:
-            return process
-        try:
-            process = await asyncio.create_subprocess_exec(
-                "node",
-                str(self.worker_path),
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL,
-                cwd=str(self.worker_path.parent),
-            )
-        except OSError as exc:
-            raise LatexRenderError("LaTeX renderer could not start") from exc
-        self._process = process
-        try:
-            assert process.stdout is not None
-            line = await asyncio.wait_for(
-                process.stdout.readline(),
-                timeout=self.startup_timeout_seconds,
-            )
-            response: dict[str, Any] = json.loads(line)
-        except TimeoutError as exc:
-            await self._stop_process()
-            raise LatexRenderError("LaTeX renderer startup timed out") from exc
-        except (EOFError, json.JSONDecodeError) as exc:
-            await self._stop_process()
-            raise LatexRenderError("LaTeX renderer failed during startup") from exc
-        if response != {"ready": True}:
-            await self._stop_process()
-            raise LatexRenderError("LaTeX renderer returned invalid startup data")
-        logger.info("LaTeX renderer worker is ready")
-        return process
-
-    async def _stop_process(self) -> None:
-        process = self._process
-        self._process = None
-        if process is None or process.returncode is not None:
-            return
-        process.terminate()
-        try:
-            await asyncio.wait_for(process.wait(), timeout=2.0)
-        except TimeoutError:
-            process.kill()
-            await process.wait()
+        """Dispose the media client, if this renderer built its own."""
+        owned_client = self._owned_client
+        self._owned_client = None
+        if owned_client is not None:
+            await owned_client.aclose()

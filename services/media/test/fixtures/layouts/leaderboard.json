@@ -1,0 +1,322 @@
+{
+  "card": "leaderboard",
+  "background": "background.png",
+  "canvas": {
+    "width": 960,
+    "height": 540
+  },
+  "ops": [
+    {
+      "op": "text",
+      "x": 65,
+      "y": 65,
+      "text": "BYTES LEADERBOARD",
+      "font": "title_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 64,
+      "text": "BYTES LEADERBOARD",
+      "font": "title_medium",
+      "fill": "#3b82f6"
+    },
+    {
+      "op": "text",
+      "x": 90,
+      "y": 174,
+      "text": "1",
+      "font": "text_small",
+      "fill": "#FFD700"
+    },
+    {
+      "op": "text",
+      "x": 124,
+      "y": 174,
+      "text": "nyxbyte",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 371,
+      "y": 174,
+      "text": "27 days",
+      "font": "text_small",
+      "fill": "#11FF00"
+    },
+    {
+      "op": "text",
+      "x": 820,
+      "y": 174,
+      "text": "18,420",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 86,
+      "y": 200,
+      "text": "2",
+      "font": "text_small",
+      "fill": "#C0C0C0"
+    },
+    {
+      "op": "text",
+      "x": 124,
+      "y": 200,
+      "text": "Quinn Alvarez",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 378,
+      "y": 200,
+      "text": "12 days",
+      "font": "text_small",
+      "fill": "#11FF00"
+    },
+    {
+      "op": "text",
+      "x": 819,
+      "y": 200,
+      "text": "15,075",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 86,
+      "y": 226,
+      "text": "3",
+      "font": "text_small",
+      "fill": "#CD7F32"
+    },
+    {
+      "op": "text",
+      "x": 124,
+      "y": 226,
+      "text": "der_kompilator_...",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 827,
+      "y": 226,
+      "text": "11,340",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 86,
+      "y": 252,
+      "text": "4",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 124,
+      "y": 252,
+      "text": "mochi",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 386,
+      "y": 252,
+      "text": "5 days",
+      "font": "text_small",
+      "fill": "#11FF00"
+    },
+    {
+      "op": "text",
+      "x": 828,
+      "y": 252,
+      "text": "8,925",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 86,
+      "y": 278,
+      "text": "5",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 124,
+      "y": 278,
+      "text": "Sam Whitfield",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 379,
+      "y": 278,
+      "text": "41 days",
+      "font": "text_small",
+      "fill": "#11FF00"
+    },
+    {
+      "op": "text",
+      "x": 836,
+      "y": 278,
+      "text": "7,710",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 86,
+      "y": 304,
+      "text": "6",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 124,
+      "y": 304,
+      "text": "packet_gremlin",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 828,
+      "y": 304,
+      "text": "5,480",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 86,
+      "y": 330,
+      "text": "7",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 124,
+      "y": 330,
+      "text": "Ada L.",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 386,
+      "y": 330,
+      "text": "3 days",
+      "font": "text_small",
+      "fill": "#11FF00"
+    },
+    {
+      "op": "text",
+      "x": 827,
+      "y": 330,
+      "text": "3,265",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 86,
+      "y": 356,
+      "text": "8",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 124,
+      "y": 356,
+      "text": "zerocool",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 394,
+      "y": 356,
+      "text": "1 days",
+      "font": "text_small",
+      "fill": "#11FF00"
+    },
+    {
+      "op": "text",
+      "x": 836,
+      "y": 356,
+      "text": "1,990",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 86,
+      "y": 382,
+      "text": "9",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 124,
+      "y": 382,
+      "text": "User 99001122",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 835,
+      "y": 382,
+      "text": "1,245",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 82,
+      "y": 408,
+      "text": "10",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 124,
+      "y": 408,
+      "text": "rustacean_rae",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 387,
+      "y": 408,
+      "text": "8 days",
+      "font": "text_small",
+      "fill": "#11FF00"
+    },
+    {
+      "op": "text",
+      "x": 850,
+      "y": 408,
+      "text": "640",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    }
+  ]
+}

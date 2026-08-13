@@ -165,6 +165,20 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Internal media service (LaTeX rendering, audio transcode, image cards)
+    media_service_url: str = Field(
+        default="",
+        description="Base URL of the internal media service, no trailing slash",
+    )
+    media_api_key: str = Field(
+        default="",
+        description="Shared bearer token for the internal media service",
+    )
+    media_request_timeout_seconds: float = Field(
+        default=15.0,
+        description="Total timeout for one media-service call, in seconds",
+    )
+
     # Web Application
     web_session_secret: str = Field(
         default="dev-session-secret-change-in-production",

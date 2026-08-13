@@ -1,0 +1,205 @@
+{
+  "card": "squad-list",
+  "background": "background.png",
+  "canvas": {
+    "width": 960,
+    "height": 540
+  },
+  "ops": [
+    {
+      "op": "text",
+      "x": 65,
+      "y": 65,
+      "text": "AVAILABLE SQUADS",
+      "font": "title_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 64,
+      "text": "AVAILABLE SQUADS",
+      "font": "title_medium",
+      "fill": "#3b82f6"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 178,
+      "text": "Squad Name",
+      "font": "text_medium",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 544,
+      "y": 178,
+      "text": "Members",
+      "font": "text_medium",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 777,
+      "y": 178,
+      "text": "Join Cost",
+      "font": "text_medium",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "ellipse",
+      "cx": 72,
+      "cy": 229,
+      "r": 6,
+      "fill": "#9B59B6"
+    },
+    {
+      "op": "text",
+      "x": 88,
+      "y": 217,
+      "text": "Nightshade Collective",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 592,
+      "y": 217,
+      "text": "18/25",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 705,
+      "y": 217,
+      "text": "350 bytes (Sale)",
+      "font": "text_small",
+      "fill": "#FF6B35"
+    },
+    {
+      "op": "ellipse",
+      "cx": 72,
+      "cy": 257,
+      "r": 6,
+      "fill": "#E67E22"
+    },
+    {
+      "op": "text",
+      "x": 88,
+      "y": 245,
+      "text": "Copper Wren",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 591,
+      "y": 245,
+      "text": "12/25",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 777,
+      "y": 245,
+      "text": "500 bytes",
+      "font": "text_small",
+      "fill": "#11FF00"
+    },
+    {
+      "op": "ellipse",
+      "cx": 72,
+      "cy": 285,
+      "r": 6,
+      "fill": "#3498DB"
+    },
+    {
+      "op": "text",
+      "x": 88,
+      "y": 273,
+      "text": "The Long Tail Analy...",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 648,
+      "y": 273,
+      "text": "9",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 778,
+      "y": 273,
+      "text": "750 bytes",
+      "font": "text_small",
+      "fill": "#11FF00"
+    },
+    {
+      "op": "ellipse",
+      "cx": 72,
+      "cy": 313,
+      "r": 6,
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 88,
+      "y": 301,
+      "text": "Drifters",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 815,
+      "y": 301,
+      "text": "Default",
+      "font": "text_small",
+      "fill": "#f59e0b"
+    },
+    {
+      "op": "ellipse",
+      "cx": 72,
+      "cy": 341,
+      "r": 6,
+      "fill": "#E74C3C"
+    },
+    {
+      "op": "text",
+      "x": 88,
+      "y": 329,
+      "text": "Firebreak",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 608,
+      "y": 329,
+      "text": "6/10",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 846,
+      "y": 329,
+      "text": "Free",
+      "font": "text_small",
+      "fill": "#11FF00"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 435,
+      "text": "Campaign active - Switching disabled",
+      "font": "text_small",
+      "fill": "#f59e0b"
+    }
+  ]
+}

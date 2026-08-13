@@ -14,6 +14,8 @@ import hikari
 import lightbulb
 
 from smarter_dev.bot.services.exceptions import ServiceError
+from smarter_dev.bot.utils.error_responses import respond_with_card
+from smarter_dev.bot.utils.error_responses import respond_with_error_card
 from smarter_dev.bot.utils.image_embeds import get_generator
 from smarter_dev.bot.views.beacon_views import create_beacon_message_modal
 from smarter_dev.bot.views.beacon_views import is_user_on_cooldown
@@ -107,18 +109,21 @@ async def list_command(ctx: lightbulb.Context) -> None:
         service = getattr(ctx.bot, "d", {}).get("_services", {}).get("squads_service")
 
     if not service:
-        generator = get_generator()
-        image_file = generator.create_error_embed("Bot services are not initialized. Please try again later.")
-        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        await respond_with_error_card(
+            ctx.respond,
+            "Bot services are not initialized. Please try again later.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
         return
 
     try:
         squads = await service.list_squads(str(ctx.guild_id))
 
         if not squads:
-            generator = get_generator()
-            image_file = generator.create_error_embed("No squads have been created yet!")
-            await ctx.respond(attachment=image_file)
+            await respond_with_error_card(
+                ctx.respond,
+                "No squads have been created yet!",
+            )
             return
 
         # Sort squads to put default squad at the bottom
@@ -167,14 +172,18 @@ async def list_command(ctx: lightbulb.Context) -> None:
 
     except ServiceError as e:
         logger.error(f"Service error in squad list command: {e}")
-        generator = get_generator()
-        image_file = generator.create_error_embed("Failed to get squads. Please try again later.")
-        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        await respond_with_error_card(
+            ctx.respond,
+            "Failed to get squads. Please try again later.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
     except Exception as e:
         logger.exception(f"Unexpected error in squad list command: {e}")
-        generator = get_generator()
-        image_file = generator.create_error_embed("An unexpected error occurred. Please try again later.")
-        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        await respond_with_error_card(
+            ctx.respond,
+            "An unexpected error occurred. Please try again later.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
 
 
 async def joinable_squad_autocomplete(
@@ -238,9 +247,10 @@ async def _handle_direct_squad_join(
         )
 
         if not selected_squad:
-            generator = get_generator()
-            image_file = generator.create_error_embed(f"Squad '{squad_name}' not found or cannot be joined!")
-            await ctx.edit_last_response(attachment=image_file)
+            await respond_with_error_card(
+                ctx.edit_last_response,
+                f"Squad '{squad_name}' not found or cannot be joined!",
+            )
             return
 
         # Get user's balance and current squad
@@ -250,9 +260,10 @@ async def _handle_direct_squad_join(
 
         # Check if user is already in this squad (same as dropdown logic)
         if current_squad and current_squad.id == selected_squad.id:
-            generator = get_generator()
-            image_file = generator.create_error_embed(f"You're already in the {selected_squad.name} squad!")
-            await ctx.edit_last_response(attachment=image_file)
+            await respond_with_error_card(
+                ctx.edit_last_response,
+                f"You're already in the {selected_squad.name} squad!",
+            )
             return
 
         # Get username for transaction records (same as dropdown logic)
@@ -274,6 +285,7 @@ async def _handle_direct_squad_join(
         if not result.success:
             generator = get_generator()
             image_file = generator.create_error_embed(result.reason)
+            fallback_text = result.reason
         else:
             # Assign Discord role for the new squad (same as dropdown logic)
             try:
@@ -326,14 +338,16 @@ async def _handle_direct_squad_join(
 
             generator = get_generator()
             image_file = generator.create_success_embed("SQUAD JOINED", description)
+            fallback_text = description
 
-        await ctx.edit_last_response(attachment=image_file)
+        await respond_with_card(ctx.edit_last_response, image_file, fallback_text)
 
     except Exception as e:
         logger.exception(f"Error in direct squad join: {e}")
-        generator = get_generator()
-        image_file = generator.create_error_embed(f"Failed to join squad: {str(e)}")
-        await ctx.edit_last_response(attachment=image_file)
+        await respond_with_error_card(
+            ctx.edit_last_response,
+            f"Failed to join squad: {str(e)}",
+        )
 
 
 @squads_group.child
@@ -356,9 +370,10 @@ async def join_command(ctx: lightbulb.Context) -> None:
         bytes_service = getattr(ctx.bot, "d", {}).get("_services", {}).get("bytes_service")
 
     if not squads_service or not bytes_service:
-        generator = get_generator()
-        image_file = generator.create_error_embed("Bot services are not initialized. Please try again later.")
-        await ctx.edit_last_response(attachment=image_file)
+        await respond_with_error_card(
+            ctx.edit_last_response,
+            "Bot services are not initialized. Please try again later.",
+        )
         return
 
     # Check if there's an active campaign that would prevent squad switching
@@ -371,11 +386,10 @@ async def join_command(ctx: lightbulb.Context) -> None:
         if current_squad and not getattr(current_squad, "is_default", False):
             has_active_campaign = await squads_service._check_active_campaign(str(ctx.guild_id))
             if has_active_campaign:
-                generator = get_generator()
-                image_file = generator.create_error_embed(
-                    "Squad switching is disabled during active challenge campaigns to prevent spying on other squads."
+                await respond_with_error_card(
+                    ctx.edit_last_response,
+                    "Squad switching is disabled during active challenge campaigns to prevent spying on other squads.",
                 )
-                await ctx.edit_last_response(attachment=image_file)
                 return
     except Exception as e:
         logger.warning(f"Error checking campaign status: {e}")
@@ -395,18 +409,20 @@ async def join_command(ctx: lightbulb.Context) -> None:
         squads = await squads_service.list_squads(str(ctx.guild_id))
 
         if not squads:
-            generator = get_generator()
-            image_file = generator.create_error_embed("No squads available to join!")
-            await ctx.edit_last_response(attachment=image_file)
+            await respond_with_error_card(
+                ctx.edit_last_response,
+                "No squads available to join!",
+            )
             return
 
         # Filter out inactive squads and default squads for joining
         active_squads = [squad for squad in squads if squad.is_active and not getattr(squad, "is_default", False)]
 
         if not active_squads:
-            generator = get_generator()
-            image_file = generator.create_error_embed("No squads available to join!")
-            await ctx.edit_last_response(attachment=image_file)
+            await respond_with_error_card(
+                ctx.edit_last_response,
+                "No squads available to join!",
+            )
             return
 
         # Get user's balance and current squad (defaults to fresh balance data)
@@ -439,14 +455,16 @@ async def join_command(ctx: lightbulb.Context) -> None:
 
     except ServiceError as e:
         logger.error(f"Service error in squad join command: {e}")
-        generator = get_generator()
-        image_file = generator.create_error_embed("Failed to load squad selection. Please try again later.")
-        await ctx.edit_last_response(attachment=image_file)
+        await respond_with_error_card(
+            ctx.edit_last_response,
+            "Failed to load squad selection. Please try again later.",
+        )
     except Exception as e:
         logger.exception(f"Unexpected error in squad join command: {e}")
-        generator = get_generator()
-        image_file = generator.create_error_embed("An unexpected error occurred. Please try again later.")
-        await ctx.edit_last_response(attachment=image_file)
+        await respond_with_error_card(
+            ctx.edit_last_response,
+            "An unexpected error occurred. Please try again later.",
+        )
 
 
 
@@ -464,9 +482,11 @@ async def info_command(ctx: lightbulb.Context) -> None:
 
     if not service:
         logger.error("Squad service not found in bot services")
-        generator = get_generator()
-        image_file = generator.create_error_embed("Bot services are not initialized. Please try again later.")
-        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        await respond_with_error_card(
+            ctx.respond,
+            "Bot services are not initialized. Please try again later.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
         return
 
     logger.info(f"Squad service found, calling get_user_squad for user {ctx.user.id}")
@@ -477,9 +497,11 @@ async def info_command(ctx: lightbulb.Context) -> None:
 
         if not user_squad_response.is_in_squad:
             logger.info("User is not in any squad")
-            generator = get_generator()
-            image_file = generator.create_error_embed("You are not currently in any squad!")
-            await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+            await respond_with_error_card(
+                ctx.respond,
+                "You are not currently in any squad!",
+                flags=hikari.MessageFlag.EPHEMERAL,
+            )
             return
 
         logger.info("User is in a squad, continuing with squad info")
@@ -510,14 +532,18 @@ async def info_command(ctx: lightbulb.Context) -> None:
 
     except ServiceError as e:
         logger.error(f"Service error in squad info command: {e}")
-        generator = get_generator()
-        image_file = generator.create_error_embed("Failed to get squad information. Please try again later.")
-        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        await respond_with_error_card(
+            ctx.respond,
+            "Failed to get squad information. Please try again later.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
     except Exception as e:
         logger.exception(f"Unexpected error in squad info command: {e}")
-        generator = get_generator()
-        image_file = generator.create_error_embed("An unexpected error occurred. Please try again later.")
-        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        await respond_with_error_card(
+            ctx.respond,
+            "An unexpected error occurred. Please try again later.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
 
 
 async def squad_autocomplete(
@@ -564,9 +590,11 @@ async def members_command(ctx: lightbulb.Context) -> None:
         service = getattr(ctx.bot, "d", {}).get("_services", {}).get("squads_service")
 
     if not service:
-        generator = get_generator()
-        image_file = generator.create_error_embed("Bot services are not initialized. Please try again later.")
-        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        await respond_with_error_card(
+            ctx.respond,
+            "Bot services are not initialized. Please try again later.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
         return
 
     try:
@@ -582,18 +610,22 @@ async def members_command(ctx: lightbulb.Context) -> None:
             )
 
             if not target_squad:
-                generator = get_generator()
-                image_file = generator.create_error_embed(f"Squad '{squad_name}' not found!")
-                await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+                await respond_with_error_card(
+                    ctx.respond,
+                    f"Squad '{squad_name}' not found!",
+                    flags=hikari.MessageFlag.EPHEMERAL,
+                )
                 return
         else:
             # Use user's current squad
             user_squad_response = await service.get_user_squad(str(ctx.guild_id), str(ctx.user.id))
 
             if not user_squad_response.is_in_squad:
-                generator = get_generator()
-                image_file = generator.create_error_embed("You are not in any squad! Specify a squad name to view its members.")
-                await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+                await respond_with_error_card(
+                    ctx.respond,
+                    "You are not in any squad! Specify a squad name to view its members.",
+                    flags=hikari.MessageFlag.EPHEMERAL,
+                )
                 return
 
             target_squad = user_squad_response.squad
@@ -627,14 +659,18 @@ async def members_command(ctx: lightbulb.Context) -> None:
 
     except ServiceError as e:
         logger.error(f"Service error in squad members command: {e}")
-        generator = get_generator()
-        image_file = generator.create_error_embed("Failed to get squad members. Please try again later.")
-        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        await respond_with_error_card(
+            ctx.respond,
+            "Failed to get squad members. Please try again later.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
     except Exception as e:
         logger.exception(f"Unexpected error in squad members command: {e}")
-        generator = get_generator()
-        image_file = generator.create_error_embed("An unexpected error occurred. Please try again later.")
-        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        await respond_with_error_card(
+            ctx.respond,
+            "An unexpected error occurred. Please try again later.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
 
 
 @plugin.command
@@ -648,9 +684,11 @@ async def beacon_command(ctx: lightbulb.Context) -> None:
         service = getattr(ctx.bot, "d", {}).get("_services", {}).get("squads_service")
 
     if not service:
-        generator = get_generator()
-        image_file = generator.create_error_embed("Bot services are not initialized. Please try again later.")
-        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        await respond_with_error_card(
+            ctx.respond,
+            "Bot services are not initialized. Please try again later.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
         return
 
     try:
@@ -669,32 +707,34 @@ async def beacon_command(ctx: lightbulb.Context) -> None:
                 minutes_remaining = max(1, seconds_remaining // 60)
                 time_str = f"{minutes_remaining} minute{'s' if minutes_remaining != 1 else ''}"
 
-            generator = get_generator()
-            image_file = generator.create_error_embed(
-                f"Please wait {time_str} before sending another beacon message."
+            await respond_with_error_card(
+                ctx.respond,
+                f"Please wait {time_str} before sending another beacon message.",
+                flags=hikari.MessageFlag.EPHEMERAL,
             )
-            await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
             return
 
         # Get user's current squad
         user_squad_response = await service.get_user_squad(str(ctx.guild_id), str(ctx.user.id))
 
         if not user_squad_response.is_in_squad:
-            generator = get_generator()
-            image_file = generator.create_error_embed("You must be in a squad to send beacon messages!")
-            await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+            await respond_with_error_card(
+                ctx.respond,
+                "You must be in a squad to send beacon messages!",
+                flags=hikari.MessageFlag.EPHEMERAL,
+            )
             return
 
         squad = user_squad_response.squad
 
         # Check if we're in the correct channel
         if not squad.announcement_channel:
-            generator = get_generator()
-            image_file = generator.create_error_embed(
+            await respond_with_error_card(
+                ctx.respond,
                 f"Your squad ({squad.name}) doesn't have an announcement channel configured. "
-                "Contact an administrator to set one up."
+                "Contact an administrator to set one up.",
+                flags=hikari.MessageFlag.EPHEMERAL,
             )
-            await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
             return
 
         if str(ctx.channel_id) != squad.announcement_channel:
@@ -710,10 +750,12 @@ async def beacon_command(ctx: lightbulb.Context) -> None:
                 # Use the generic message as fallback
                 pass
 
-            generator = get_generator()
-            image_file = generator.create_error_embed(error_message)
             try:
-                await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+                await respond_with_error_card(
+                    ctx.respond,
+                    error_message,
+                    flags=hikari.MessageFlag.EPHEMERAL,
+                )
             except (hikari.BadRequestError, hikari.NotFoundError):
                 logger.warning("Failed to respond to beacon command - interaction may have expired")
             return
@@ -728,14 +770,18 @@ async def beacon_command(ctx: lightbulb.Context) -> None:
 
     except ServiceError as e:
         logger.error(f"Service error in beacon command: {e}")
-        generator = get_generator()
-        image_file = generator.create_error_embed("Failed to verify squad membership. Please try again later.")
-        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        await respond_with_error_card(
+            ctx.respond,
+            "Failed to verify squad membership. Please try again later.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
     except Exception as e:
         logger.exception(f"Unexpected error in beacon command: {e}")
-        generator = get_generator()
-        image_file = generator.create_error_embed("An unexpected error occurred. Please try again later.")
-        await ctx.respond(attachment=image_file, flags=hikari.MessageFlag.EPHEMERAL)
+        await respond_with_error_card(
+            ctx.respond,
+            "An unexpected error occurred. Please try again later.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
 
 
 

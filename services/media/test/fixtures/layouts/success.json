@@ -1,0 +1,74 @@
+{
+  "card": "success",
+  "background": "success-background.png",
+  "canvas": {
+    "width": 960,
+    "height": 540
+  },
+  "ops": [
+    {
+      "op": "text",
+      "x": 65,
+      "y": 65,
+      "text": "DAILY CLAIMED",
+      "font": "title_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 64,
+      "text": "DAILY CLAIMED",
+      "font": "title_medium",
+      "fill": "#11FF00"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 147,
+      "text": "You picked up 80 bytes today (Day 27 streak, 4x",
+      "font": "text_large",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 146,
+      "text": "You picked up 80 bytes today (Day 27 streak, 4x",
+      "font": "text_large",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 186,
+      "text": "multiplier).",
+      "font": "text_large",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 185,
+      "text": "multiplier).",
+      "font": "text_large",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 235,
+      "text": "New balance: 18,420 bytes.",
+      "font": "text_large",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 234,
+      "text": "New balance: 18,420 bytes.",
+      "font": "text_large",
+      "fill": "#FFFFFF"
+    }
+  ]
+}

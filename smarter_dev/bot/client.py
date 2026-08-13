@@ -28,9 +28,11 @@ from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.exceptions import ServiceError
 from smarter_dev.bot.services.guild_chat_memory_service import GuildChatMemoryService
 from smarter_dev.bot.services.latex_renderer import LatexRenderer
+from smarter_dev.bot.services.media_client import MediaClient
 from smarter_dev.bot.spam_engine import check_spam_engine
 from smarter_dev.bot.spam_engine import release_guild_spam_state
 from smarter_dev.bot.utils.embeds import create_error_embed
+from smarter_dev.bot.utils.image_embeds import close_generator
 from smarter_dev.shared.config import Settings
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.observability import configure_observability
@@ -503,6 +505,13 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
     """Set up bot services and dependencies."""
     logger.info("Setting up bot services...")
 
+    # Outside the catch-all below on purpose: a bot that cannot reach the media
+    # service cannot render a single card or equation, so a missing or
+    # unreachable service is a startup failure rather than a degraded start.
+    media_client = MediaClient.from_settings(get_settings())
+    await media_client.health()
+    logger.info("✓ Media service is reachable")
+
     try:
         # Get settings
         settings = get_settings()
@@ -554,10 +563,12 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             api_client, cache_manager, bot
         )
         advent_of_code_service = AdventOfCodeService(api_client, cache_manager, bot)
-        voice_service = VoiceService(api_client, cache_manager, settings)
+        voice_service = VoiceService(
+            api_client, cache_manager, settings, media_client=media_client
+        )
         model_override_service = ModelOverrideService(api_client, cache_manager)
         guild_chat_memory_service = GuildChatMemoryService(api_client, cache_manager)
-        latex_renderer = LatexRenderer()
+        latex_renderer = LatexRenderer(media_client)
 
         # Initialize chat agent memory (Redis-backed; non-critical)
         import redis.asyncio as redis_async
@@ -619,15 +630,6 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         logger.info("Initializing guild chat memory service...")
         await guild_chat_memory_service.initialize()
         logger.info("✓ Guild chat memory service initialized")
-
-        logger.info("Initializing LaTeX renderer...")
-        try:
-            await latex_renderer.initialize()
-            logger.info("✓ LaTeX renderer initialized")
-        except Exception:
-            logger.exception(
-                "LaTeX renderer warmup failed — fenced equations will retry lazily"
-            )
 
         # Verify service health
         logger.info("Verifying service health...")
@@ -728,6 +730,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         bot.d["model_override_service"] = model_override_service
         bot.d["guild_chat_memory_service"] = guild_chat_memory_service
         bot.d["latex_renderer"] = latex_renderer
+        bot.d["media_client"] = media_client
 
         # Store services in d for plugin access (primary)
         bot.d["_services"] = {
@@ -743,6 +746,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             "model_override_service": model_override_service,
             "guild_chat_memory_service": guild_chat_memory_service,
             "latex_renderer": latex_renderer,
+            "media_client": media_client,
         }
 
         logger.info("✓ Bot services setup complete")
@@ -1121,8 +1125,10 @@ async def cleanup_bot_services(bot: lightbulb.BotApp) -> None:
         if hasattr(bot, "d") and "cache_manager" in bot.d and bot.d["cache_manager"]:
             await bot.d["cache_manager"].cleanup()
 
-        if hasattr(bot, "d") and "latex_renderer" in bot.d:
-            await bot.d["latex_renderer"].close()
+        if hasattr(bot, "d") and "media_client" in bot.d:
+            await bot.d["media_client"].aclose()
+
+        await close_generator()
 
         # Clean up API client
         if hasattr(bot, "d") and "api_client" in bot.d:

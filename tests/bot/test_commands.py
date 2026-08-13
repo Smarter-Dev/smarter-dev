@@ -26,6 +26,8 @@ from smarter_dev.bot.services.exceptions import (
     NotInSquadError,
     ServiceError
 )
+from smarter_dev.bot.services.media_client import MediaServiceUnavailableError
+from smarter_dev.bot.utils import error_responses
 
 
 @pytest.fixture
@@ -101,20 +103,26 @@ def mock_squads_service():
     return service
 
 
+def _mock_card(name: str) -> Mock:
+    """A stand-in attachment whose lazy media read succeeds."""
+    return Mock(name=name, read=AsyncMock(return_value=b"png"))
+
+
 @pytest.fixture
-def mock_image_generator():
+def mock_image_generator(monkeypatch):
     """Create a mock image generator that returns a Mock file for each embed method."""
     generator = Mock()
-    generator.create_balance_embed.return_value = Mock(name="balance_image")
-    generator.create_error_embed.return_value = Mock(name="error_image")
-    generator.create_success_embed.return_value = Mock(name="success_image")
-    generator.create_leaderboard_embed.return_value = Mock(name="leaderboard_image")
-    generator.create_history_embed.return_value = Mock(name="history_image")
-    generator.create_config_embed.return_value = Mock(name="config_image")
-    generator.create_squad_list_embed.return_value = Mock(name="squad_list_image")
-    generator.create_squad_info_embed.return_value = Mock(name="squad_info_image")
-    generator.create_squad_join_selector_embed.return_value = Mock(name="squad_join_image")
-    generator.create_simple_embed.return_value = Mock(name="simple_image")
+    generator.create_balance_embed.return_value = _mock_card("balance_image")
+    generator.create_error_embed.return_value = _mock_card("error_image")
+    generator.create_success_embed.return_value = _mock_card("success_image")
+    generator.create_leaderboard_embed.return_value = _mock_card("leaderboard_image")
+    generator.create_history_embed.return_value = _mock_card("history_image")
+    generator.create_config_embed.return_value = _mock_card("config_image")
+    generator.create_squad_list_embed.return_value = _mock_card("squad_list_image")
+    generator.create_squad_info_embed.return_value = _mock_card("squad_info_image")
+    generator.create_squad_join_selector_embed.return_value = _mock_card("squad_join_image")
+    generator.create_simple_embed.return_value = _mock_card("simple_image")
+    monkeypatch.setattr(error_responses, "get_generator", lambda: generator)
     return generator
 
 
@@ -524,3 +532,28 @@ class TestCommandErrorHandling:
         mock_image_generator.create_error_embed.assert_called_once()
         error_message = mock_image_generator.create_error_embed.call_args[0][0]
         assert "Failed to retrieve balance" in error_message
+
+    async def test_media_outage_still_reports_the_error(
+        self, mock_context, mock_bytes_service, mock_image_generator
+    ):
+        """A media outage must not leave the user with no response at all."""
+        mock_context.bot = Mock()
+        mock_context.bot.d = {
+            'bytes_service': mock_bytes_service,
+            '_services': {'bytes_service': mock_bytes_service}
+        }
+        mock_bytes_service.get_balance.side_effect = ServiceError("Service unavailable")
+        mock_image_generator.create_error_embed.return_value = Mock(
+            name="error_image",
+            read=AsyncMock(side_effect=MediaServiceUnavailableError("media down")),
+        )
+
+        from smarter_dev.bot.plugins.bytes import balance_command
+
+        with patch('smarter_dev.bot.plugins.bytes.get_generator', return_value=mock_image_generator):
+            await balance_command(mock_context)
+
+        mock_context.respond.assert_called_once()
+        _, kwargs = mock_context.respond.call_args
+        assert "attachment" not in kwargs
+        assert "Failed to retrieve balance" in kwargs["content"]

@@ -14,6 +14,8 @@ from uuid import UUID
 import hikari
 
 from smarter_dev.bot.utils.embeds import create_success_embed
+from smarter_dev.bot.utils.error_responses import respond_with_card
+from smarter_dev.bot.utils.error_responses import respond_with_error_card
 from smarter_dev.bot.utils.image_embeds import get_generator
 
 if TYPE_CHECKING:
@@ -252,21 +254,19 @@ class SquadSelectView:
                     await event.interaction.create_initial_response(
                         hikari.ResponseType.DEFERRED_MESSAGE_UPDATE
                     )
-                    generator = get_generator()
-                    image_file = generator.create_error_embed("Processing your previous selection...")
-                    await event.interaction.edit_initial_response(
-                        attachment=image_file,
-                        components=[]
+                    await respond_with_error_card(
+                        event.interaction.edit_initial_response,
+                        "Processing your previous selection...",
+                        components=[],
                     )
                 except Exception:
                     # If defer fails, try direct response
                     try:
-                        generator = get_generator()
-                        image_file = generator.create_error_embed("Processing your previous selection...")
-                        await event.interaction.create_initial_response(
+                        await respond_with_error_card(
+                            event.interaction.create_initial_response,
+                            "Processing your previous selection...",
                             hikari.ResponseType.MESSAGE_UPDATE,
-                            attachment=image_file,
-                            components=[]
+                            components=[],
                         )
                     except Exception:
                         # Give up gracefully
@@ -293,12 +293,11 @@ class SquadSelectView:
                 # If we can't defer, the interaction may have already expired
                 # Try to send a follow-up message instead
                 try:
-                    generator = get_generator()
-                    image_file = generator.create_error_embed("This interaction has expired. Please try the command again.")
-                    await event.interaction.create_initial_response(
+                    await respond_with_error_card(
+                        event.interaction.create_initial_response,
+                        "This interaction has expired. Please try the command again.",
                         hikari.ResponseType.MESSAGE_UPDATE,
-                        attachment=image_file,
-                        components=[]
+                        components=[],
                     )
                 except Exception:
                     # Give up gracefully
@@ -312,21 +311,19 @@ class SquadSelectView:
             # Find selected squad
             selected_squad = next((s for s in self.squads if s.id == self.selected_squad_id), None)
             if not selected_squad:
-                generator = get_generator()
-                image_file = generator.create_error_embed("Selected squad not found!")
-                await event.interaction.edit_initial_response(
-                    attachment=image_file,
-                    components=[]
+                await respond_with_error_card(
+                    event.interaction.edit_initial_response,
+                    "Selected squad not found!",
+                    components=[],
                 )
                 return
 
             # Check if user is already in this squad
             if self.current_squad and self.current_squad.id == selected_squad.id:
-                generator = get_generator()
-                image_file = generator.create_error_embed(f"You're already in the {selected_squad.name} squad!")
-                await event.interaction.edit_initial_response(
-                    attachment=image_file,
-                    components=[]
+                await respond_with_error_card(
+                    event.interaction.edit_initial_response,
+                    f"You're already in the {selected_squad.name} squad!",
+                    components=[],
                 )
                 return
 
@@ -351,6 +348,7 @@ class SquadSelectView:
             if not result.success:
                 generator = get_generator()
                 image_file = generator.create_error_embed(result.reason)
+                fallback_text = result.reason
             else:
                 # Assign Discord role for the new squad
                 try:
@@ -403,16 +401,20 @@ class SquadSelectView:
 
                 generator = get_generator()
                 image_file = generator.create_success_embed("SQUAD JOINED", description)
+                fallback_text = description
 
         except Exception as e:
             logger.exception(f"Error processing squad selection: {e}")
             generator = get_generator()
-            image_file = generator.create_error_embed(f"Failed to join squad: {str(e)}")
+            fallback_text = f"Failed to join squad: {str(e)}"
+            image_file = generator.create_error_embed(fallback_text)
 
         try:
-            await event.interaction.edit_initial_response(
-                attachment=image_file,
-                components=[]
+            await respond_with_card(
+                event.interaction.edit_initial_response,
+                image_file,
+                fallback_text,
+                components=[],
             )
 
             # Clean up view registration after successful interaction

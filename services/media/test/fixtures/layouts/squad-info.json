@@ -1,0 +1,130 @@
+{
+  "card": "squad-info",
+  "background": "background.png",
+  "canvas": {
+    "width": 960,
+    "height": 540
+  },
+  "ops": [
+    {
+      "op": "text",
+      "x": 65,
+      "y": 65,
+      "text": "NIGHTSHADE COLLECTIVE",
+      "font": "title_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 64,
+      "text": "NIGHTSHADE COLLECTIVE",
+      "font": "title_medium",
+      "fill": "#3b82f6"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 143,
+      "text": "Systems folks who live in the terminal. We take on the gnarly",
+      "font": "text_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 142,
+      "text": "Systems folks who live in the terminal. We take on the gnarly",
+      "font": "text_medium",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 177,
+      "text": "infrastructure bounties and hand out post-mortems like candy.",
+      "font": "text_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 176,
+      "text": "infrastructure bounties and hand out post-mortems like candy.",
+      "font": "text_medium",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 258,
+      "text": "Members",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 207,
+      "y": 258,
+      "text": "17/25",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 286,
+      "text": "Join Cost",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 207,
+      "y": 286,
+      "text": "350 bytes (Sale)",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 314,
+      "text": "Status",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 207,
+      "y": 314,
+      "text": "Active",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 359,
+      "text": "Your Membership:",
+      "font": "text_small",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 358,
+      "text": "Your Membership:",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 84,
+      "y": 394,
+      "text": "Member for 120 days",
+      "font": "text_small",
+      "fill": "#11FF00"
+    }
+  ]
+}
