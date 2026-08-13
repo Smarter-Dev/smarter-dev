@@ -88,6 +88,15 @@ spec:
                     failureThreshold: 3
                 securityContext:
                     runAsNonRoot: true
+                    # Spelled numerically because runAsNonRoot alone cannot
+                    # admit this image: the Dockerfile ends on `USER node`, and
+                    # the kubelet refuses to start a container whose image
+                    # declares a NAMED user, since it cannot prove that name is
+                    # not root. 1000 is what `node` resolves to in
+                    # node:22-bookworm-slim. Keep the two in sync — changing the
+                    # Dockerfile's USER without changing this fails the pod at
+                    # container-create time, not at build time.
+                    runAsUser: 1000
                     allowPrivilegeEscalation: false
                     capabilities:
                         drop: ["ALL"]
