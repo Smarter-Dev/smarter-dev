@@ -27,6 +27,7 @@ def _provider_keys(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
     monkeypatch.setenv("DIGITALOCEAN_INFERENCE_API_KEY", "test-do-key")
+    monkeypatch.setenv("OPENCODE_ZEN_API_KEY", "test-zen-key")
 
 
 def _reset_cache():

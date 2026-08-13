@@ -1,0 +1,77 @@
+{
+  "transactions": [
+    {
+      "created_at": "2026-08-06T09:00:00",
+      "giver_id": "SYSTEM",
+      "giver_username": "System",
+      "receiver_id": "234981726354091520",
+      "receiver_username": "nyxbyte",
+      "amount": 80,
+      "reason": "Daily reward (Day 27, 4x multiplier)"
+    },
+    {
+      "created_at": "2026-08-05T07:00:00",
+      "giver_id": "234981726354091520",
+      "giver_username": "nyxbyte",
+      "receiver_id": "112233445566778899",
+      "receiver_username": "Quinn Alvarez",
+      "amount": 250,
+      "reason": "thanks for the code review"
+    },
+    {
+      "created_at": "2026-08-04T11:00:00",
+      "giver_id": "234981726354091520",
+      "giver_username": "nyxbyte",
+      "receiver_id": "SYSTEM",
+      "receiver_username": "System",
+      "amount": 500,
+      "reason": "Squad join fee: Nightshade Collective"
+    },
+    {
+      "created_at": "2026-08-02T12:00:00",
+      "giver_id": "998877665544332211",
+      "giver_username": "der_kompilator_9000",
+      "receiver_id": "234981726354091520",
+      "receiver_username": "nyxbyte",
+      "amount": 1200,
+      "reason": "bounty payout"
+    },
+    {
+      "created_at": "2026-07-31T12:00:00",
+      "giver_id": "SYSTEM",
+      "giver_username": "System",
+      "receiver_id": "234981726354091520",
+      "receiver_username": "nyxbyte",
+      "amount": 100,
+      "reason": "New member welcome bonus"
+    },
+    {
+      "created_at": "2026-07-29T12:00:00",
+      "giver_id": "234981726354091520",
+      "giver_username": "nyxbyte",
+      "receiver_id": "445566778899001122",
+      "receiver_username": "mochi",
+      "amount": 75,
+      "reason": null
+    },
+    {
+      "created_at": "2026-07-26T12:00:00",
+      "giver_id": "SYSTEM",
+      "giver_username": "System",
+      "receiver_id": "234981726354091520",
+      "receiver_username": "nyxbyte",
+      "amount": 20,
+      "reason": "Daily reward (Day 3)"
+    },
+    {
+      "created_at": "2026-07-23T12:00:00",
+      "giver_id": "556677889900112233",
+      "giver_username": "Sam Whitfield",
+      "receiver_id": "234981726354091520",
+      "receiver_username": "nyxbyte",
+      "amount": 340,
+      "reason": "split the jam prize"
+    }
+  ],
+  "user_id": "234981726354091520"
+}

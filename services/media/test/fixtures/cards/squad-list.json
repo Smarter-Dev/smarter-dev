@@ -1,0 +1,74 @@
+{
+  "squads": [
+    {
+      "name": "Nightshade Collective",
+      "description": "Systems folks who live in the terminal. We take on the gnarly infrastructure bounties and hand out post-mortems like candy.",
+      "member_count": 18,
+      "max_members": 25,
+      "switch_cost": 500,
+      "current_join_cost": 350,
+      "has_join_sale": true,
+      "role_id": "401122334455667701",
+      "is_default": false,
+      "is_active": true
+    },
+    {
+      "name": "Copper Wren",
+      "description": "Front-end and design crew.",
+      "member_count": 12,
+      "max_members": 25,
+      "switch_cost": 500,
+      "current_join_cost": 500,
+      "has_join_sale": false,
+      "role_id": "401122334455667702",
+      "is_default": false,
+      "is_active": true
+    },
+    {
+      "name": "The Long Tail Analytics Guild",
+      "description": "Data wranglers.",
+      "member_count": 9,
+      "max_members": null,
+      "switch_cost": 750,
+      "current_join_cost": 750,
+      "has_join_sale": false,
+      "role_id": "401122334455667703",
+      "is_default": false,
+      "is_active": true
+    },
+    {
+      "name": "Drifters",
+      "description": "Everyone starts here.",
+      "member_count": 204,
+      "max_members": null,
+      "switch_cost": 0,
+      "current_join_cost": 0,
+      "has_join_sale": false,
+      "role_id": "401122334455667704",
+      "is_default": true,
+      "is_active": true
+    },
+    {
+      "name": "Firebreak",
+      "description": "Incident response volunteers.",
+      "member_count": 6,
+      "max_members": 10,
+      "switch_cost": 0,
+      "current_join_cost": 0,
+      "has_join_sale": false,
+      "role_id": "401122334455667705",
+      "is_default": false,
+      "is_active": true
+    }
+  ],
+  "guild_name": "Smarter Dev",
+  "current_squad_id": "7f0a2c1e-1111-4a00-9c11-000000000001",
+  "guild_roles": {
+    "401122334455667701": 10181046,
+    "401122334455667702": 15105570,
+    "401122334455667703": 3447003,
+    "401122334455667704": 0,
+    "401122334455667705": 15158332
+  },
+  "has_active_campaign": true
+}

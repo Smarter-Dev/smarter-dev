@@ -13,6 +13,8 @@ from smarter_dev.bot.services.chat_engine import ChannelEngine
 from smarter_dev.bot.services.latex_renderer import LatexRenderer
 from smarter_dev.bot.services.latex_renderer import LatexRenderError
 from smarter_dev.bot.services.latex_renderer import RenderedLatex
+from smarter_dev.bot.services.media_client import MediaServiceUnavailableError
+from smarter_dev.bot.services.media_client import RenderedMedia
 
 
 def _forbidden() -> hikari.ForbiddenError:
@@ -199,50 +201,27 @@ def test_both_answer_prompts_instruct_latex_delimiters():
 
 
 @pytest.mark.asyncio
-async def test_real_worker_renders_png_when_node_dependencies_are_installed():
-    root = Path(__file__).resolve().parents[3]
-    worker = root / "latex_renderer" / "worker.mjs"
-    dependencies = root / "latex_renderer" / "node_modules"
-    if not dependencies.exists():
-        pytest.skip("Node renderer dependencies are not installed")
+async def test_renderer_sends_fenced_source_to_the_media_service():
+    media_client = AsyncMock()
+    media_client.render_latex.return_value = RenderedMedia(
+        data=b"\x89PNG\r\n\x1a\nfake", filename="latex.png", mime_type="image/png"
+    )
+    create_message = AsyncMock()
+    engine = _engine(create_message, LatexRenderer(media_client))
 
-    renderer = LatexRenderer(worker_path=worker)
-    try:
-        result = await renderer.render(r"E = mc^2")
-    finally:
-        await renderer.close()
+    await engine._send_fenced_response("```latex\nE = mc^2\n```", reply_to=None)
 
-    assert result.mime_type == "image/png"
-    assert result.data.startswith(b"\x89PNG\r\n\x1a\n")
+    media_client.render_latex.assert_awaited_once_with("E = mc^2")
+    assert "attachment" in create_message.await_args.kwargs
 
 
 @pytest.mark.asyncio
-async def test_worker_startup_has_a_separate_readiness_timeout(tmp_path):
-    worker = tmp_path / "slow-worker.mjs"
-    worker.write_text(
-        """
-import { createInterface } from "node:readline";
-await new Promise(resolve => setTimeout(resolve, 75));
-process.stdout.write(JSON.stringify({ready: true}) + "\\n");
-const lines = createInterface({input: process.stdin, crlfDelay: Infinity});
-for await (const line of lines) {
-  const request = JSON.parse(line);
-  process.stdout.write(JSON.stringify({
-    id: request.id,
-    png: Buffer.from("PNG").toString("base64"),
-  }) + "\\n");
-}
-""",
-        encoding="utf-8",
-    )
-    renderer = LatexRenderer(
-        worker_path=worker,
-        timeout_seconds=0.05,
-        startup_timeout_seconds=1.0,
-    )
-    try:
-        result = await renderer.render("x")
-    finally:
-        await renderer.close()
+async def test_media_outage_sends_the_original_fence():
+    media_client = AsyncMock()
+    media_client.render_latex.side_effect = MediaServiceUnavailableError("down")
+    create_message = AsyncMock()
+    engine = _engine(create_message, LatexRenderer(media_client))
 
-    assert result.data == b"PNG"
+    await engine._send_fenced_response("```latex\nx\n```", reply_to=None)
+
+    assert create_message.await_args.kwargs["content"] == "```latex\nx\n```"

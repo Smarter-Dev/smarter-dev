@@ -1,0 +1,58 @@
+{
+  "card": "squad-join-selector",
+  "background": "background.png",
+  "canvas": {
+    "width": 960,
+    "height": 540
+  },
+  "ops": [
+    {
+      "op": "text",
+      "x": 65,
+      "y": 65,
+      "text": "SELECT A SQUAD TO JOIN",
+      "font": "title_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 64,
+      "text": "SELECT A SQUAD TO JOIN",
+      "font": "title_medium",
+      "fill": "#3b82f6"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 147,
+      "text": "Choose a squad from the menu below.",
+      "font": "text_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 146,
+      "text": "Choose a squad from the menu below.",
+      "font": "text_medium",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 201,
+      "text": "Your Balance: 18,420 bytes",
+      "font": "text_small",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 200,
+      "text": "Your Balance: 18,420 bytes",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    }
+  ]
+}

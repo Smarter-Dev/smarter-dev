@@ -110,6 +110,16 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: brave-search-api-key
+                  # Internal media service (LaTeX, audio transcode, cards).
+                  # MEDIA_SERVICE_URL comes from the smarter-dev-config
+                  # ConfigMap via envFrom above. The secret key is kebab-case,
+                  # the env var is screaming snake — both spellings are
+                  # load-bearing.
+                  - name: MEDIA_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: media-api-key
                 resources:
                     requests:
                         cpu: 50m

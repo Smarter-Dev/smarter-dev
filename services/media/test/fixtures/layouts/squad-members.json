@@ -1,0 +1,410 @@
+{
+  "card": "squad-members",
+  "background": "background.png",
+  "canvas": {
+    "width": 960,
+    "height": 540
+  },
+  "ops": [
+    {
+      "op": "text",
+      "x": 65,
+      "y": 65,
+      "text": "NIGHTSHADE COLLECTIVE",
+      "font": "title_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 64,
+      "text": "NIGHTSHADE COLLECTIVE",
+      "font": "title_medium",
+      "fill": "#3b82f6"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 143,
+      "text": "17 members",
+      "font": "text_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 142,
+      "text": "17 members",
+      "font": "text_medium",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 201,
+      "text": "1.",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 104,
+      "y": 201,
+      "text": "nyxbyte",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 771,
+      "y": 201,
+      "text": "04/08/26",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 227,
+      "text": "2.",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 104,
+      "y": 227,
+      "text": "Quinn Alvarez",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 770,
+      "y": 227,
+      "text": "04/30/26",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 253,
+      "text": "3.",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 104,
+      "y": 253,
+      "text": "der_kompilator_9000",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 777,
+      "y": 253,
+      "text": "05/21/26",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 279,
+      "text": "4.",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 104,
+      "y": 279,
+      "text": "mochi",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 770,
+      "y": 279,
+      "text": "06/03/26",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 305,
+      "text": "5.",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 104,
+      "y": 305,
+      "text": "Sam Whitfield",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 779,
+      "y": 305,
+      "text": "06/16/26",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 331,
+      "text": "6.",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 104,
+      "y": 331,
+      "text": "packet_gremlin",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 770,
+      "y": 331,
+      "text": "06/23/26",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 357,
+      "text": "7.",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 104,
+      "y": 357,
+      "text": "Ada L.",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 771,
+      "y": 357,
+      "text": "06/29/26",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 383,
+      "text": "8.",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 104,
+      "y": 383,
+      "text": "zerocool",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 771,
+      "y": 383,
+      "text": "07/07/26",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 409,
+      "text": "9.",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 104,
+      "y": 409,
+      "text": "quietstorm",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 778,
+      "y": 409,
+      "text": "07/12/26",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 435,
+      "text": "10.",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 104,
+      "y": 435,
+      "text": "rustacean_rae",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 779,
+      "y": 435,
+      "text": "07/18/26",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 461,
+      "text": "11.",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 104,
+      "y": 461,
+      "text": "bitrot_barnaby_th...",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 770,
+      "y": 461,
+      "text": "07/23/26",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 487,
+      "text": "12.",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 104,
+      "y": 487,
+      "text": "Priya N.",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 771,
+      "y": 487,
+      "text": "07/26/26",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 513,
+      "text": "13.",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 104,
+      "y": 513,
+      "text": "onyx",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 771,
+      "y": 513,
+      "text": "07/29/26",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 539,
+      "text": "14.",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 104,
+      "y": 539,
+      "text": "lambda_lou",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 778,
+      "y": 539,
+      "text": "08/01/26",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 565,
+      "text": "15.",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 104,
+      "y": 565,
+      "text": "Theo Brandt",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 770,
+      "y": 565,
+      "text": "08/03/26",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 601,
+      "text": "... and 2 more members",
+      "font": "text_small",
+      "fill": "#888888"
+    }
+  ]
+}

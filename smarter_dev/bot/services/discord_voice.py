@@ -4,17 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import math
 import re
-import shutil
 import struct
-import subprocess
-import tempfile
 import wave
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
-from pathlib import Path
 
 import aiohttp
 from google.genai import types
@@ -22,6 +19,7 @@ from google.genai import types
 from smarter_dev.bot.services.base import APIClientProtocol
 from smarter_dev.bot.services.base import BaseService
 from smarter_dev.bot.services.base import CacheManagerProtocol
+from smarter_dev.bot.services.media_client import MediaClient
 from smarter_dev.bot.services.models import ServiceHealth
 from smarter_dev.llm_config import get_gemini_client_for_tts
 from smarter_dev.shared.config import Settings
@@ -121,18 +119,20 @@ async def send_voice_message(
         )
 
 
-def write_wave_file(
-    filename: Path,
+def build_wave_bytes(
     pcm: bytes,
     sample_rate: int,
     channels: int,
     sample_width: int,
-) -> None:
-    with wave.open(str(filename), "wb") as wf:
-        wf.setnchannels(channels)
-        wf.setsampwidth(sample_width)
-        wf.setframerate(sample_rate)
-        wf.writeframes(pcm)
+) -> bytes:
+    """Package raw PCM into an in-memory WAV container."""
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as writer:
+        writer.setnchannels(channels)
+        writer.setsampwidth(sample_width)
+        writer.setframerate(sample_rate)
+        writer.writeframes(pcm)
+    return buffer.getvalue()
 
 
 def pcm_duration_secs(
@@ -143,49 +143,6 @@ def pcm_duration_secs(
 ) -> float:
     bytes_per_second = sample_rate * channels * sample_width
     return len(pcm) / bytes_per_second
-
-
-async def convert_wav_to_opus_ogg(
-    wav_path: Path,
-    ogg_path: Path,
-    bitrate: str,
-) -> None:
-    ffmpeg = get_ffmpeg_exe()
-    process = await asyncio.create_subprocess_exec(
-        ffmpeg,
-        "-y",
-        "-i",
-        str(wav_path),
-        "-c:a",
-        "libopus",
-        "-b:a",
-        bitrate,
-        "-vbr",
-        "on",
-        str(ogg_path),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-    _, stderr = await process.communicate()
-    if process.returncode != 0:
-        error = stderr.decode("utf-8", errors="replace")
-        raise RuntimeError(f"ffmpeg failed: {error}")
-
-
-def get_ffmpeg_exe() -> str:
-    ffmpeg = shutil.which("ffmpeg")
-    if ffmpeg:
-        return ffmpeg
-
-    try:
-        import imageio_ffmpeg
-    except ImportError as e:
-        raise RuntimeError(
-            "ffmpeg is required for Discord voice messages. Install ffmpeg or "
-            "the imageio-ffmpeg package."
-        ) from e
-
-    return imageio_ffmpeg.get_ffmpeg_exe()
 
 
 def waveform_from_pcm(
@@ -314,9 +271,18 @@ class VoiceService(BaseService):
         api_client: APIClientProtocol,
         cache_manager: CacheManagerProtocol | None = None,
         settings: Settings | None = None,
+        media_client: MediaClient | None = None,
     ):
         super().__init__(api_client, cache_manager, service_name="VoiceService")
         self._settings = settings or get_settings()
+        self._media_client = media_client
+
+    @property
+    def media_client(self) -> MediaClient:
+        """The media service client used to transcode voice messages."""
+        if self._media_client is None:
+            self._media_client = MediaClient.from_settings(self._settings)
+        return self._media_client
 
     async def synthesize_and_send(
         self,
@@ -358,46 +324,39 @@ class VoiceService(BaseService):
         pcm = tts_result.pcm
         usage = tts_result.usage
 
-        with tempfile.TemporaryDirectory() as tmp:
-            wav = Path(tmp) / "voice.wav"
-            ogg = Path(tmp) / "voice.ogg"
+        wav = build_wave_bytes(
+            pcm,
+            self._settings.voice_tts_sample_rate,
+            self._settings.voice_tts_channels,
+            self._settings.voice_tts_sample_width,
+        )
+        ogg_bytes = await self.media_client.transcode_wav_to_opus_ogg(
+            wav,
+            bitrate=self._settings.voice_opus_bitrate,
+        )
 
-            await asyncio.to_thread(
-                write_wave_file,
-                wav,
+        await send_voice_message(
+            token=str(token),
+            channel_id=channel_id,
+            ogg_bytes=ogg_bytes,
+            duration=pcm_duration_secs(
                 pcm,
                 self._settings.voice_tts_sample_rate,
                 self._settings.voice_tts_channels,
                 self._settings.voice_tts_sample_width,
-            )
-            await convert_wav_to_opus_ogg(
-                wav,
-                ogg,
-                self._settings.voice_opus_bitrate,
-            )
-
-            await send_voice_message(
-                token=str(token),
-                channel_id=channel_id,
-                ogg_bytes=ogg.read_bytes(),
-                duration=pcm_duration_secs(
-                    pcm,
-                    self._settings.voice_tts_sample_rate,
-                    self._settings.voice_tts_channels,
-                    self._settings.voice_tts_sample_width,
-                ),
-                waveform=waveform_from_pcm(
-                    pcm,
-                    self._settings.voice_tts_sample_width,
-                ),
-                reply_to_message_id=reply_to_message_id,
-            )
+            ),
+            waveform=waveform_from_pcm(
+                pcm,
+                self._settings.voice_tts_sample_width,
+            ),
+            reply_to_message_id=reply_to_message_id,
+        )
         return usage
 
     async def health_check(self) -> ServiceHealth:
         try:
             _, model = get_gemini_client_for_tts(self._settings.voice_tts_model)
-            get_ffmpeg_exe()
+            await self.media_client.health()
             return ServiceHealth(
                 service_name=self.service_name,
                 is_healthy=True,
@@ -406,6 +365,7 @@ class VoiceService(BaseService):
                     "tts_model": model,
                     "tts_voice": self._settings.voice_tts_voice,
                     "max_input_chars": self._settings.voice_max_input_chars,
+                    "media_service_url": self.media_client.base_url,
                 },
             )
         except Exception as e:

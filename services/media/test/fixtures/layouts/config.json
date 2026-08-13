@@ -1,0 +1,202 @@
+{
+  "card": "config",
+  "background": "background.png",
+  "canvas": {
+    "width": 960,
+    "height": 540
+  },
+  "ops": [
+    {
+      "op": "text",
+      "x": 65,
+      "y": 65,
+      "text": "Bytes Info",
+      "font": "title_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 64,
+      "text": "Bytes Info",
+      "font": "title_medium",
+      "fill": "#3b82f6"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 143,
+      "text": "Settings for Smarter Dev",
+      "font": "text_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 142,
+      "text": "Settings for Smarter Dev",
+      "font": "text_medium",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 207,
+      "text": "Daily Activity Reward:",
+      "font": "text_small",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 206,
+      "text": "Daily Activity Reward:",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 774,
+      "y": 207,
+      "text": "25 bytes",
+      "font": "text_small",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 773,
+      "y": 206,
+      "text": "25 bytes",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 235,
+      "text": "New Member Balance:",
+      "font": "text_small",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 234,
+      "text": "New Member Balance:",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 766,
+      "y": 235,
+      "text": "100 bytes",
+      "font": "text_small",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 765,
+      "y": 234,
+      "text": "100 bytes",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 263,
+      "text": "Max Transfer:",
+      "font": "text_small",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 262,
+      "text": "Max Transfer:",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 736,
+      "y": 263,
+      "text": "5,000 bytes",
+      "font": "text_small",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 735,
+      "y": 262,
+      "text": "5,000 bytes",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 291,
+      "text": "Transfer Cooldown:",
+      "font": "text_small",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 290,
+      "text": "Transfer Cooldown:",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 791,
+      "y": 291,
+      "text": "6 hours",
+      "font": "text_small",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 790,
+      "y": 290,
+      "text": "6 hours",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 339,
+      "text": "Streak Bonuses:",
+      "font": "text_small",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 338,
+      "text": "Streak Bonuses:",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 65,
+      "y": 371,
+      "text": "  7 days: 2x • 14 days: 4x • 30 days: 8x • 60 days: 16x",
+      "font": "text_small",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 370,
+      "text": "  7 days: 2x • 14 days: 4x • 30 days: 8x • 60 days: 16x",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    }
+  ]
+}

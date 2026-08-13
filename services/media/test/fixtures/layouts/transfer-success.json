@@ -1,0 +1,106 @@
+{
+  "card": "transfer-success",
+  "background": "success-background.png",
+  "canvas": {
+    "width": 960,
+    "height": 540
+  },
+  "ops": [
+    {
+      "op": "text",
+      "x": 65,
+      "y": 65,
+      "text": "BYTES TRANSFERRED SUCCESSFULLY",
+      "font": "title_medium",
+      "fill": "#000000"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 64,
+      "text": "BYTES TRANSFERRED SUCCESSFULLY",
+      "font": "title_medium",
+      "fill": "#11FF00"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 142,
+      "text": "From:",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 805,
+      "y": 142,
+      "text": "nyxbyte",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 178,
+      "text": "To:",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 741,
+      "y": 178,
+      "text": "Quinn Alvarez",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 214,
+      "text": "Amount:",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 777,
+      "y": 214,
+      "text": "250 bytes",
+      "font": "text_small",
+      "fill": "#00E1FF"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 250,
+      "text": "Reason:",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 596,
+      "y": 250,
+      "text": "thanks for the code review",
+      "font": "text_small",
+      "fill": "#B0B0B0"
+    },
+    {
+      "op": "text",
+      "x": 64,
+      "y": 286,
+      "text": "New Balance:",
+      "font": "text_small",
+      "fill": "#FFFFFF"
+    },
+    {
+      "op": "text",
+      "x": 757,
+      "y": 286,
+      "text": "18,170 bytes",
+      "font": "text_small",
+      "fill": "#11FF00"
+    }
+  ]
+}

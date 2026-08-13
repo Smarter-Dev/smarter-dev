@@ -1,0 +1,15 @@
+{
+  "config": {
+    "daily_amount": 25,
+    "starting_balance": 100,
+    "max_transfer": 5000,
+    "transfer_cooldown_hours": 6,
+    "streak_bonuses": {
+      "7": 2,
+      "14": 4,
+      "30": 8,
+      "60": 16
+    }
+  },
+  "guild_name": "Smarter Dev"
+}

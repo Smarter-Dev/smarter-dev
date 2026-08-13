@@ -9,10 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import tempfile
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
@@ -275,11 +273,11 @@ class ChatConversationsAdminController(Controller):
         # Lazy import: pulls in google.genai + aiohttp, which the website
         # otherwise doesn't need and were tipping the pod over OOM at boot.
         from smarter_dev.bot.services.discord_voice import (
+            build_wave_bytes,
             clean_transcript_for_tts,
-            convert_wav_to_opus_ogg,
             generate_tts,
-            write_wave_file,
         )
+        from smarter_dev.bot.services.media_client import MediaClient
 
         stmt = select(ChatAgentTurn).where(ChatAgentTurn.id == turn_id)
         turn = (await db_session.execute(stmt)).scalar_one_or_none()
@@ -309,21 +307,19 @@ class ChatConversationsAdminController(Controller):
             logger.exception("Voice replay TTS generation failed for turn %s", turn_id)
             raise NotFoundException(detail="Voice synthesis failed")
 
-        with tempfile.TemporaryDirectory() as tmp:
-            wav = Path(tmp) / "voice.wav"
-            ogg = Path(tmp) / "voice.ogg"
-            await asyncio.to_thread(
-                write_wave_file,
-                wav,
-                tts_result.pcm,
-                settings.voice_tts_sample_rate,
-                settings.voice_tts_channels,
-                settings.voice_tts_sample_width,
+        wav = build_wave_bytes(
+            tts_result.pcm,
+            settings.voice_tts_sample_rate,
+            settings.voice_tts_channels,
+            settings.voice_tts_sample_width,
+        )
+        media_client = MediaClient.from_settings(settings)
+        try:
+            audio_bytes = await media_client.transcode_wav_to_opus_ogg(
+                wav, bitrate=settings.voice_opus_bitrate
             )
-            await convert_wav_to_opus_ogg(
-                wav, ogg, settings.voice_opus_bitrate
-            )
-            audio_bytes = ogg.read_bytes()
+        finally:
+            await media_client.aclose()
 
         return Response(
             content=audio_bytes,

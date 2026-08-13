@@ -1,0 +1,76 @@
+{
+  "entries": [
+    {
+      "rank": 1,
+      "user_id": "234981726354091520",
+      "balance": 18420,
+      "streak_count": 27
+    },
+    {
+      "rank": 2,
+      "user_id": "112233445566778899",
+      "balance": 15075,
+      "streak_count": 12
+    },
+    {
+      "rank": 3,
+      "user_id": "998877665544332211",
+      "balance": 11340,
+      "streak_count": 0
+    },
+    {
+      "rank": 4,
+      "user_id": "445566778899001122",
+      "balance": 8925,
+      "streak_count": 5
+    },
+    {
+      "rank": 5,
+      "user_id": "556677889900112233",
+      "balance": 7710,
+      "streak_count": 41
+    },
+    {
+      "rank": 6,
+      "user_id": "667788990011223344",
+      "balance": 5480,
+      "streak_count": 0
+    },
+    {
+      "rank": 7,
+      "user_id": "778899001122334455",
+      "balance": 3265,
+      "streak_count": 3
+    },
+    {
+      "rank": 8,
+      "user_id": "889900112233445566",
+      "balance": 1990,
+      "streak_count": 1
+    },
+    {
+      "rank": 9,
+      "user_id": "990011223344556677",
+      "balance": 1245,
+      "streak_count": 0
+    },
+    {
+      "rank": 10,
+      "user_id": "001122334455667788",
+      "balance": 640,
+      "streak_count": 8
+    }
+  ],
+  "guild_name": "Smarter Dev",
+  "user_display_names": {
+    "234981726354091520": "nyxbyte",
+    "112233445566778899": "Quinn Alvarez",
+    "998877665544332211": "der_kompilator_9000",
+    "445566778899001122": "mochi",
+    "556677889900112233": "Sam Whitfield",
+    "667788990011223344": "packet_gremlin",
+    "778899001122334455": "Ada L.",
+    "889900112233445566": "zerocool",
+    "001122334455667788": "rustacean_rae"
+  }
+}

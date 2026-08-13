@@ -195,7 +195,9 @@ class TestSquadSelectView:
         mock_event.interaction = mock_interaction
 
         with patch('smarter_dev.bot.views.squad_views.get_generator') as mock_gen:
-            mock_gen.return_value.create_success_embed.return_value = Mock(name="success_image")
+            mock_gen.return_value.create_success_embed.return_value = Mock(
+                name="success_image", read=AsyncMock(return_value=b"png")
+            )
             await view.handle_interaction(mock_event)
 
         # Verify service was called with 5 args (includes username)

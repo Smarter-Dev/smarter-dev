@@ -1,0 +1,101 @@
+{
+  "squad": {
+    "name": "Nightshade Collective",
+    "description": "Systems folks who live in the terminal. We take on the gnarly infrastructure bounties and hand out post-mortems like candy.",
+    "member_count": 18,
+    "max_members": 25,
+    "switch_cost": 500,
+    "current_join_cost": 350,
+    "has_join_sale": true,
+    "role_id": "401122334455667701",
+    "is_default": false,
+    "is_active": true
+  },
+  "members": [
+    {
+      "user_id": "234981726354091520",
+      "username": "nyxbyte",
+      "joined_at": "2026-04-08T12:00:00"
+    },
+    {
+      "user_id": "112233445566778899",
+      "username": "Quinn Alvarez",
+      "joined_at": "2026-04-30T12:00:00"
+    },
+    {
+      "user_id": "998877665544332211",
+      "username": "der_kompilator_9000",
+      "joined_at": "2026-05-21T12:00:00"
+    },
+    {
+      "user_id": "445566778899001122",
+      "username": "mochi",
+      "joined_at": "2026-06-03T12:00:00"
+    },
+    {
+      "user_id": "556677889900112233",
+      "username": "Sam Whitfield",
+      "joined_at": "2026-06-16T12:00:00"
+    },
+    {
+      "user_id": "667788990011223344",
+      "username": "packet_gremlin",
+      "joined_at": "2026-06-23T12:00:00"
+    },
+    {
+      "user_id": "778899001122334455",
+      "username": "Ada L.",
+      "joined_at": "2026-06-29T12:00:00"
+    },
+    {
+      "user_id": "889900112233445566",
+      "username": "zerocool",
+      "joined_at": "2026-07-07T12:00:00"
+    },
+    {
+      "user_id": "990011223344556677",
+      "username": "quietstorm",
+      "joined_at": "2026-07-12T12:00:00"
+    },
+    {
+      "user_id": "001122334455667788",
+      "username": "rustacean_rae",
+      "joined_at": "2026-07-18T12:00:00"
+    },
+    {
+      "user_id": "110022334455667799",
+      "username": "bitrot_barnaby_the_third",
+      "joined_at": "2026-07-23T12:00:00"
+    },
+    {
+      "user_id": "220033445566778800",
+      "username": "Priya N.",
+      "joined_at": "2026-07-26T12:00:00"
+    },
+    {
+      "user_id": "330044556677889911",
+      "username": "onyx",
+      "joined_at": "2026-07-29T12:00:00"
+    },
+    {
+      "user_id": "440055667788990022",
+      "username": "lambda_lou",
+      "joined_at": "2026-08-01T12:00:00"
+    },
+    {
+      "user_id": "550066778899001133",
+      "username": "Theo Brandt",
+      "joined_at": "2026-08-03T12:00:00"
+    },
+    {
+      "user_id": "660077889900112244",
+      "username": "newcomer_nina",
+      "joined_at": "2026-08-05T12:00:00"
+    },
+    {
+      "user_id": "770088990011223355",
+      "username": "gray_goose",
+      "joined_at": "2026-08-06T03:00:00"
+    }
+  ]
+}

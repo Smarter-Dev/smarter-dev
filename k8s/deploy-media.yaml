@@ -1,0 +1,112 @@
+---
+# Internal media service: LaTeX rendering, audio transcode, and card images.
+# ClusterIP only — no Ingress. The bot reaches it at
+# http://smarter-dev-media:8080 and authenticates with the shared bearer
+# token in smarter-dev-secrets/media-api-key.
+#
+# The image placeholder below is MEDIA_VERSION, not the IMAGE_VERSION token
+# every other manifest uses: this deployment is tagged from its own build
+# inputs (services/media), so app commits never roll media and media commits
+# never roll web/bot. The sed loop in .github/workflows/deploy.yaml that
+# rewrites the app token must not include this file — it gets its own sed
+# pass driven by MEDIA_IMAGE_TAG.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    name: smarter-dev-media
+    namespace: smarter-dev
+    labels:
+        app: smarter-dev-media
+spec:
+    strategy:
+        type: RollingUpdate
+        rollingUpdate:
+            maxSurge: 1
+            maxUnavailable: 0
+    selector:
+        matchLabels:
+            app: smarter-dev-media
+            tier: backend
+    # Two replicas: card painting is synchronous native work on Node's single
+    # thread, so a burst of cards must not stall a LaTeX render.
+    replicas: 2
+    template:
+        metadata:
+            labels:
+                app: smarter-dev-media
+                tier: backend
+        spec:
+            containers:
+              - name: media
+                image: zzmmrmn/smarter-dev-media:<MEDIA_VERSION>
+                ports:
+                  - containerPort: 8080
+                    name: http
+                env:
+                  - name: MEDIA_PORT
+                    value: "8080"
+                  - name: MEDIA_LOG_LEVEL
+                    value: "info"
+                  - name: MEDIA_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: media-api-key
+                # Node baseline ~50Mi, MathJax post-init ~80Mi, three decoded
+                # 960x540 backgrounds ~6Mi, sharp/libvips ~60Mi, plus
+                # per-request canvases. CPU is bursty (rasterisation), so the
+                # limit is 10x the request.
+                resources:
+                    requests:
+                        cpu: 50m
+                        memory: 256Mi
+                    limits:
+                        cpu: 500m
+                        memory: 512Mi
+                # /health answers 503 until MathJax finishes initialising, so
+                # the startup probe is what gates traffic on a cold pod.
+                startupProbe:
+                    httpGet:
+                        path: /health
+                        port: 8080
+                    periodSeconds: 2
+                    failureThreshold: 30
+                readinessProbe:
+                    httpGet:
+                        path: /health
+                        port: 8080
+                    periodSeconds: 10
+                    timeoutSeconds: 3
+                    failureThreshold: 2
+                livenessProbe:
+                    httpGet:
+                        path: /health
+                        port: 8080
+                    initialDelaySeconds: 10
+                    periodSeconds: 30
+                    timeoutSeconds: 5
+                    failureThreshold: 3
+                securityContext:
+                    runAsNonRoot: true
+                    allowPrivilegeEscalation: false
+                    capabilities:
+                        drop: ["ALL"]
+            restartPolicy: Always
+---
+apiVersion: v1
+kind: Service
+metadata:
+    name: smarter-dev-media
+    namespace: smarter-dev
+    labels:
+        app: smarter-dev-media
+        tier: backend
+spec:
+    type: ClusterIP
+    ports:
+      - port: 8080
+        targetPort: 8080
+        name: http
+    selector:
+        app: smarter-dev-media
+        tier: backend

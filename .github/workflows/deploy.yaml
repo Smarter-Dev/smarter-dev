@@ -41,9 +41,26 @@ jobs:
           ':(exclude)planning' \
           ':(exclude)docs' \
           ':(exclude)reports' \
+          ':(exclude)services' \
           ':(glob,exclude)*.md')
         echo "image tag: $TAG (last commit that touched build inputs)"
         echo "IMAGE_TAG=$TAG" >> "$GITHUB_ENV"
+
+    # The media service gets its own tag scope so app commits never rebuild it
+    # and media commits never rebuild web/bot. This is a positive pathspec
+    # rather than another exclude list, because the media build context is
+    # services/media/ rather than the repo root. It carries no excludes on
+    # purpose: it must be a superset of what services/media/.dockerignore
+    # lets into the context. Erring wide only costs a redundant (cached)
+    # rebuild; erring narrow would let the image change without the tag.
+    - name: Compute media image tag from media build inputs
+      run: |
+        MEDIA_TAG=$(git log -1 --format=%h --abbrev=7 -- services/media)
+        if [ -z "$MEDIA_TAG" ]; then
+          echo "::error::no commit found touching services/media build inputs"; exit 1
+        fi
+        echo "media image tag: $MEDIA_TAG"
+        echo "MEDIA_IMAGE_TAG=$MEDIA_TAG" >> "$GITHUB_ENV"
 
     - name: Update deployment files with new image tag
       run: |
@@ -53,6 +70,11 @@ jobs:
                  cron-dream-session.yaml migrate-job.yaml; do
           sed -i 's|<IMAGE_VERSION>|'${IMAGE_TAG}'|' $GITHUB_WORKSPACE/k8s/$f
         done
+
+    # Deliberately not part of the loop above: deploy-media.yaml carries
+    # <MEDIA_VERSION>, which tracks the media tag scope, not the app tag.
+    - name: Update media deployment file with media image tag
+      run: sed -i "s|<MEDIA_VERSION>|${MEDIA_IMAGE_TAG}|" "$GITHUB_WORKSPACE/k8s/deploy-media.yaml"
 
     - name: Install doctl
       uses: digitalocean/action-doctl@v2
@@ -100,6 +122,21 @@ jobs:
             -f Dockerfile.bot -t "$IMAGE" .
         fi
 
+    # Build context is services/media, not the repo root, so this image can
+    # never pick up unrelated repo files. Its tag comes from the media-only
+    # pathspec above, so an app-only push skips this build outright.
+    - name: Build and push media image (if inputs changed)
+      run: |
+        IMAGE=zzmmrmn/smarter-dev-media:${MEDIA_IMAGE_TAG}
+        if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+          echo "$IMAGE already in registry; skipping build"
+        else
+          docker buildx build --push \
+            --cache-from type=registry,ref=zzmmrmn/smarter-dev-media:buildcache \
+            --cache-to type=registry,ref=zzmmrmn/smarter-dev-media:buildcache,mode=max \
+            -f services/media/Dockerfile -t "$IMAGE" services/media
+        fi
+
     - name: Create namespace if not exists
       run: kubectl apply -f $GITHUB_WORKSPACE/k8s/namespace.yaml
 
@@ -137,6 +174,10 @@ jobs:
 
     - name: Deploy web, bot, and scheduled services
       run: |
+        # Media rolls first and is waited on: bot startup health-checks the
+        # media service and refuses to come up without it.
+        kubectl apply -f "$GITHUB_WORKSPACE/k8s/deploy-media.yaml"
+        kubectl rollout status deployment/smarter-dev-media
         kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy-bot.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/site.yaml

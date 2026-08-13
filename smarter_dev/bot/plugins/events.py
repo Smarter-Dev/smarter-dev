@@ -25,6 +25,7 @@ from smarter_dev.bot.plugins.model_override import handle_model_override_reset
 from smarter_dev.bot.plugins.model_override import handle_model_override_save
 from smarter_dev.bot.plugins.model_override import handle_model_override_select
 from smarter_dev.bot.plugins.model_override import handle_model_override_drafter_select
+from smarter_dev.bot.utils.error_responses import respond_with_error_card
 from smarter_dev.bot.views.beacon_views import handle_beacon_modal_submit
 
 logger = logging.getLogger(__name__)
@@ -86,13 +87,11 @@ async def handle_modal_interaction(event: hikari.InteractionCreateEvent) -> None
         # Try to respond with error message
         try:
             if not event.interaction.is_responded():
-                from smarter_dev.bot.utils.image_embeds import get_generator
-                generator = get_generator()
-                image_file = generator.create_error_embed("An error occurred while processing your request.")
-                await event.interaction.create_initial_response(
+                await respond_with_error_card(
+                    event.interaction.create_initial_response,
+                    "An error occurred while processing your request.",
                     hikari.ResponseType.MESSAGE_CREATE,
-                    attachment=image_file,
-                    flags=hikari.MessageFlag.EPHEMERAL
+                    flags=hikari.MessageFlag.EPHEMERAL,
                 )
         except Exception as e2:
             logger.error(f"Failed to send modal error response: {e2}")

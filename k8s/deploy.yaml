@@ -195,6 +195,14 @@ spec:
                         key: google-client-secret
                   - name: SKRIFT_ENV
                     value: "production"
+                  # Internal media service, used by the admin voice replay to
+                  # transcode WAV to Ogg/Opus. MEDIA_SERVICE_URL comes from the
+                  # config map; MediaClient refuses to build without both.
+                  - name: MEDIA_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: media-api-key
                 resources:
                     requests:
                         cpu: 75m

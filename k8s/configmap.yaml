@@ -30,6 +30,12 @@ data:
   # Site base URL
   SITE_BASE_URL: "https://smarter.dev"
 
+  # Internal media service (LaTeX, audio transcode, cards). ClusterIP DNS name
+  # from k8s/deploy-media.yaml; no trailing slash. The matching MEDIA_API_KEY is
+  # a secret, wired per-deployment.
+  MEDIA_SERVICE_URL: "http://smarter-dev-media:8080"
+  MEDIA_REQUEST_TIMEOUT_SECONDS: "15"
+
   # LLM Model Configuration. Luna is served through OpenRouter (2026-08-06):
   # the same OpenAI upstream at half the rate. The LLM_* vars feed litellm
   # (dspy), which wants the "openrouter/<upstream>/<model>" form; the agent

@@ -14,6 +14,8 @@ import hikari
 from smarter_dev.bot.services.exceptions import InsufficientBalanceError
 from smarter_dev.bot.services.exceptions import ServiceError
 from smarter_dev.bot.services.exceptions import ValidationError
+from smarter_dev.bot.utils.error_responses import respond_with_card
+from smarter_dev.bot.utils.error_responses import respond_with_error_card
 from smarter_dev.bot.utils.image_embeds import get_generator
 
 if TYPE_CHECKING:
@@ -120,12 +122,11 @@ class SendBytesModalHandler:
                             reason = text_input.value if text_input.value else None
 
             if not amount_str:
-                generator = get_generator()
-                image_file = generator.create_error_embed("Amount is required.")
-                await interaction.create_initial_response(
+                await respond_with_error_card(
+                    interaction.create_initial_response,
+                    "Amount is required.",
                     hikari.ResponseType.MESSAGE_CREATE,
-                    attachment=image_file,
-                    flags=hikari.MessageFlag.EPHEMERAL
+                    flags=hikari.MessageFlag.EPHEMERAL,
                 )
                 return
 
@@ -133,35 +134,30 @@ class SendBytesModalHandler:
             try:
                 amount = int(amount_str)
             except ValueError:
-                generator = get_generator()
-                image_file = generator.create_error_embed("Amount must be a valid number.")
-                await interaction.create_initial_response(
+                await respond_with_error_card(
+                    interaction.create_initial_response,
+                    "Amount must be a valid number.",
                     hikari.ResponseType.MESSAGE_CREATE,
-                    attachment=image_file,
-                    flags=hikari.MessageFlag.EPHEMERAL
+                    flags=hikari.MessageFlag.EPHEMERAL,
                 )
                 return
 
             # Validate amount range
             if amount < 1:
-                generator = get_generator()
-                image_file = generator.create_error_embed("Amount must be at least 1 byte.")
-                await interaction.create_initial_response(
+                await respond_with_error_card(
+                    interaction.create_initial_response,
+                    "Amount must be at least 1 byte.",
                     hikari.ResponseType.MESSAGE_CREATE,
-                    attachment=image_file,
-                    flags=hikari.MessageFlag.EPHEMERAL
+                    flags=hikari.MessageFlag.EPHEMERAL,
                 )
                 return
 
             if amount > self.max_transfer:
-                generator = get_generator()
-                image_file = generator.create_error_embed(
-                    f"Amount cannot exceed {self.max_transfer:,} bytes (server limit)."
-                )
-                await interaction.create_initial_response(
+                await respond_with_error_card(
+                    interaction.create_initial_response,
+                    f"Amount cannot exceed {self.max_transfer:,} bytes (server limit).",
                     hikari.ResponseType.MESSAGE_CREATE,
-                    attachment=image_file,
-                    flags=hikari.MessageFlag.EPHEMERAL
+                    flags=hikari.MessageFlag.EPHEMERAL,
                 )
                 return
 
@@ -223,45 +219,43 @@ class SendBytesModalHandler:
                     )
             else:
                 # Error messages should be private (ephemeral)
-                await interaction.create_initial_response(
+                await respond_with_card(
+                    interaction.create_initial_response,
+                    image_file,
+                    result.reason,
                     hikari.ResponseType.MESSAGE_CREATE,
-                    attachment=image_file,
-                    flags=hikari.MessageFlag.EPHEMERAL
+                    flags=hikari.MessageFlag.EPHEMERAL,
                 )
 
         except InsufficientBalanceError as e:
             logger.info(f"Insufficient balance for transfer: {e}")
-            generator = get_generator()
-            image_file = generator.create_error_embed(str(e))
-            await interaction.create_initial_response(
+            await respond_with_error_card(
+                interaction.create_initial_response,
+                str(e),
                 hikari.ResponseType.MESSAGE_CREATE,
-                attachment=image_file,
-                flags=hikari.MessageFlag.EPHEMERAL
+                flags=hikari.MessageFlag.EPHEMERAL,
             )
         except ValidationError as e:
             logger.info(f"Validation error in transfer: {e}")
-            generator = get_generator()
-            image_file = generator.create_error_embed(str(e))
-            await interaction.create_initial_response(
+            await respond_with_error_card(
+                interaction.create_initial_response,
+                str(e),
                 hikari.ResponseType.MESSAGE_CREATE,
-                attachment=image_file,
-                flags=hikari.MessageFlag.EPHEMERAL
+                flags=hikari.MessageFlag.EPHEMERAL,
             )
         except ServiceError as e:
             logger.error(f"Service error in transfer: {e}")
-            generator = get_generator()
-            image_file = generator.create_error_embed("Transfer failed. Please try again later.")
-            await interaction.create_initial_response(
+            await respond_with_error_card(
+                interaction.create_initial_response,
+                "Transfer failed. Please try again later.",
                 hikari.ResponseType.MESSAGE_CREATE,
-                attachment=image_file,
-                flags=hikari.MessageFlag.EPHEMERAL
+                flags=hikari.MessageFlag.EPHEMERAL,
             )
         except Exception as e:
             logger.exception(f"Unexpected error in bytes transfer modal: {e}")
-            generator = get_generator()
-            image_file = generator.create_error_embed("An unexpected error occurred. Please try again later.")
-            await interaction.create_initial_response(
+            await respond_with_error_card(
+                interaction.create_initial_response,
+                "An unexpected error occurred. Please try again later.",
                 hikari.ResponseType.MESSAGE_CREATE,
-                attachment=image_file,
-                flags=hikari.MessageFlag.EPHEMERAL
+                flags=hikari.MessageFlag.EPHEMERAL,
             )
