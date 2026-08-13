@@ -27,8 +27,29 @@ class TestDigitalOceanPricing:
     def test_gemma_4_rates(self):
         assert calc_cost(1_000_000, 1_000_000, "gemma-4-31B-it") == Decimal("0.68")
 
+    def test_gemini_flash_promotional_rates(self):
+        # 3.6 and 3.7 Flash share $0.75/$3.75 through 2026-12-31, reverting to
+        # $1.50/$7.50 on 2027-01-01. The $1.50/$7.50 recorded before today was
+        # Google's actual rate until they announced this 50% cut on 2026-08-13.
+        assert calc_cost(1_000_000, 1_000_000, "gemini-3.6-flash") == Decimal("4.50")
+        assert calc_cost(1_000_000, 1_000_000, "gemini-3.7-flash") == Decimal("4.50")
+
+    def test_gemini_3_flash_preview_still_prices_after_leaving_the_catalog(self):
+        # The resources agent and blogging scout/research agents still pin this
+        # wire id directly, so it must keep costing — it is live, not historical.
+        #
+        # $3.50 rather than the $0.15/$0.60 this module patches in: genai-prices
+        # already ships a matching entry, and _patch_provider APPENDS, so the
+        # snapshot's own $0.50/$3.00 is found first and our patch never applies.
+        # Asserted as-is to pin the real behaviour rather than the intended one.
+        assert calc_cost(1_000_000, 1_000_000, "gemini-3-flash-preview") == Decimal(
+            "3.50"
+        )
+
     def test_qwen_35_rates(self):
-        assert calc_cost(1_000_000, 1_000_000, "qwen3.5-397b-a17b") == Decimal("2.835")
+        # DO cut this from $0.385/$2.45 after the table was first written;
+        # re-read from their pricing page on 2026-08-13.
+        assert calc_cost(1_000_000, 1_000_000, "qwen3.5-397b-a17b") == Decimal("2.227")
 
     def test_small_token_counts_stay_exact_decimal(self):
         # 110 input + 45 output on kimi-k2.6:
@@ -157,6 +178,48 @@ class TestOpenRouterPricing:
         # 400K uncached at $2/M + 600K cached reads at $0.50/M — 4.6 reads
         # cost more than 4.5's $0.30.
         assert cost == Decimal("1.10")
+
+    def test_author_precision_routes_priced_at_their_measured_endpoint(self):
+        # Moved off Zen/DO on 2026-08-13. Rates are measured from what actually
+        # served a sample, not quoted from the endpoint we would prefer —
+        # OpenRouter load-balances across the whole eligible pool.
+        assert calc_cost(1_000_000, 1_000_000, "google/gemma-4-31b-it") == Decimal(
+            "0.48"
+        )
+        assert calc_cost(1_000_000, 1_000_000, "qwen/qwen3.6-plus") == Decimal("2.275")
+        assert calc_cost(1_000_000, 1_000_000, "z-ai/glm-5.2") == Decimal("3.074")
+        assert calc_cost(
+            1_000_000, 1_000_000, "deepseek/deepseek-v4-flash"
+        ) == Decimal("0.26")
+
+    def test_deepseek_move_beats_zen_on_every_axis(self):
+        # The move is a win even though routing never reaches the authors' own
+        # endpoint: streamlake/fp8 is cheaper than Zen on input, output AND
+        # cache — the axis a summarizer actually spends on.
+        moved = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=1_000_000,
+            cache_write_tokens=0,
+            model_name="openrouter:deepseek/deepseek-v4-flash",
+        )
+        zen = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=1_000_000,
+            cache_write_tokens=0,
+            model_name="opencode_zen:deepseek-v4-flash",
+        )
+        assert moved == Decimal("0.0173")
+        assert zen == Decimal("0.028")
+        assert moved < zen
+
+    def test_retired_zen_and_do_ids_still_price_for_historical_rows(self):
+        # The models moved; rows written before the move carry the old wire ids
+        # and must keep costing at the rate they actually ran under.
+        assert calc_cost(1_000_000, 1_000_000, "deepseek-v4-flash") == Decimal("0.42")
+        assert calc_cost(1_000_000, 1_000_000, "qwen3.6-plus") == Decimal("3.50")
+        assert calc_cost(1_000_000, 1_000_000, "gemma-4-31B-it") == Decimal("0.68")
 
     def test_qwen3_8_rates(self):
         assert calc_cost(1_000_000, 1_000_000, "qwen/qwen3.8-2.4t-a95b") == Decimal(

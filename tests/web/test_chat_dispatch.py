@@ -75,7 +75,7 @@ async def _seed_turn(db_session, user, **kwargs):
     conversation = WebChatConversation(
         owner_user_id=user.id,
         intelligence_mode="efficient",
-        selected_model_key="gemini-3-1-flash-lite",
+        selected_model_key="gpt-5-6-luna",
         reasoning_level="medium",
         title="New Chat",
         status="running",

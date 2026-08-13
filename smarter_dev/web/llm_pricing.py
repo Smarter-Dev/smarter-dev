@@ -92,16 +92,41 @@ _patch_provider(
     ),
 )
 
-# Gemini 3.6 Flash — not yet in genai-prices
+# Gemini 3.6 and 3.7 Flash — not yet in genai-prices. Both carry the SAME
+# promotional rate, $0.75/$3.75/$0.075, through 2026-12-31; on 2027-01-01 both
+# revert to $1.50/$7.50/$0.15. Read from the live pricing page on 2026-08-13.
+#
+# The $1.50/$7.50 recorded here until now was NOT wrong — it was Google's rate
+# until they announced this 50% promotion on 2026-08-13, part of a broader round
+# of mid/low-tier cuts (Luna 80% off, Sonnet 33% off). This module holds the rate
+# in force today (see Claude Sonnet 5's introductory rate above) and per-turn
+# costs are persisted at ingest, so this changes new usage only and leaves
+# settled rows correctly priced at what they actually cost. The reversion on
+# 2027-01-01 is a scheduled edit, not a surprise — revisit both entries then.
+#
+# NOTE the match ordering trap: "gemini-3.7-flash" must not be matched by a
+# broader prefix, so keep each id exact-versioned as below.
 _patch_provider(
     "google",
     types.ModelInfo(
         id="gemini-3.6-flash",
         match=types.ClauseStartsWith(starts_with="gemini-3.6-flash"),
         prices=types.ModelPrice(
-            input_mtok=Decimal("1.50"),
-            output_mtok=Decimal("7.50"),
-            cache_read_mtok=Decimal("0.15"),
+            input_mtok=Decimal("0.75"),
+            output_mtok=Decimal("3.75"),
+            cache_read_mtok=Decimal("0.075"),
+        ),
+    ),
+)
+_patch_provider(
+    "google",
+    types.ModelInfo(
+        id="gemini-3.7-flash",
+        match=types.ClauseStartsWith(starts_with="gemini-3.7-flash"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("0.75"),
+            output_mtok=Decimal("3.75"),
+            cache_read_mtok=Decimal("0.075"),
         ),
     ),
 )
@@ -315,9 +340,14 @@ _DIGITALOCEAN_PRICES: dict[str, types.ModelPrice] = {
         input_mtok=Decimal("0.18"),
         output_mtok=Decimal("0.50"),
     ),
+    # Re-read from DO's live pricing page on 2026-08-13. DO cut this rate from
+    # $0.385/$2.45 after the table was first written on 2026-07-21 (the
+    # 2026-07-24 Wayback snapshot still shows the old figure, so the original
+    # entry was right when recorded). Rows written before this edit keep the
+    # rate they were costed at; only new usage prices at the cut rate.
     "qwen3.5-397b-a17b": types.ModelPrice(
-        input_mtok=Decimal("0.385"),
-        output_mtok=Decimal("2.45"),
+        input_mtok=Decimal("0.302"),
+        output_mtok=Decimal("1.925"),
         cache_read_mtok=Decimal("0.111"),
     ),
 }
@@ -372,6 +402,60 @@ _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
         input_mtok=Decimal("2.00"),
         output_mtok=Decimal("6.00"),
         cache_read_mtok=Decimal("0.20"),
+    ),
+    # --- Moved off Zen / Digital Ocean onto author-precision routes 2026-08-13.
+    #
+    # These rates are MEASURED, not quoted. OpenRouter load-balances across every
+    # endpoint a model's OpenRouterRouting admits rather than always taking the
+    # cheapest, so the headline price of the endpoint we would prefer is not what
+    # traffic actually bills at. Each figure below is the endpoint that served
+    # the majority of a 6-request sample on 2026-08-13, and each is bounded above
+    # by that entry's max_price ceiling.
+    #
+    # This table holds ONE rate per wire id, so it cannot represent a pool
+    # honestly — a turn served by a different endpoint in the pool bills at this
+    # rate regardless. The durable fix is to read the exact per-call figure that
+    # OpenRouter already returns on ``usage.cost`` instead of inferring it here.
+    #
+    # Gemma: bf16 pool, sampled across open-inference/coreweave/venice/novita
+    # ($0.08-$0.14 in, $0.34-$0.40 out). Priced mid-pool. Still under DO's
+    # $0.18/$0.50, which was undeclared precision.
+    "google/gemma-4-31b-it": types.ModelPrice(
+        input_mtok=Decimal("0.12"),
+        output_mtok=Decimal("0.36"),
+        cache_read_mtok=Decimal("0.09"),
+    ),
+    # Qwen3.6 Plus: Alibaba's own and only endpoint, so this rate is exact — no
+    # pool, nothing to average. No cache tier published, so cached reads fall
+    # through to the input rate.
+    "qwen/qwen3.6-plus": types.ModelPrice(
+        input_mtok=Decimal("0.325"),
+        output_mtok=Decimal("1.95"),
+    ),
+    # GLM-5.2: fp8 pool. Sampling never reached sail-research's $0.50/$3.15 —
+    # gmicloud and novita split every request at ~$0.742/$2.332, so that is what
+    # this bills at. Against Z.AI's own $1.40/$4.40 for the same fp8 build.
+    "z-ai/glm-5.2": types.ModelPrice(
+        input_mtok=Decimal("0.742"),
+        output_mtok=Decimal("2.332"),
+        cache_read_mtok=Decimal("0.1378"),
+    ),
+    # DeepSeek V4 Pro: baidu/fp8 served 5 of 6, streamlake/fp8 the other one,
+    # never the authors' endpoint. Priced at baidu's rate. Against Zen's
+    # $1.74/$3.48 for the same model this is a quarter of the cost.
+    "deepseek/deepseek-v4-pro": types.ModelPrice(
+        input_mtok=Decimal("0.4225"),
+        output_mtok=Decimal("0.845"),
+        cache_read_mtok=Decimal("0.035"),
+    ),
+    # DeepSeek V4 Flash: streamlake/fp8 served 6 of 6, never the authors' own
+    # endpoint — consistent with DeepSeek rate-limiting heavy callers. So the
+    # authors' $0.0028 cache read is NOT what we get; streamlake's $0.0173 is,
+    # which still beats the $0.028 Zen charged, at 38% less input and output.
+    "deepseek/deepseek-v4-flash": types.ModelPrice(
+        input_mtok=Decimal("0.0867"),
+        output_mtok=Decimal("0.1733"),
+        cache_read_mtok=Decimal("0.0173"),
     ),
 }
 

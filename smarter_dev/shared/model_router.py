@@ -128,8 +128,15 @@ def model_settings_for(
     :func:`resolve_reasoning_level`, so an invalid pick is clamped rather than
     passed through verbatim. A model with no reasoning knob (or one that resolves
     to no level) gets ``None`` — the provider's own default applies.
+
+    OpenRouter models are the exception to that last part: their endpoint
+    constraints (see :class:`OpenRouterRouting`) have to ride on every request
+    whether or not a reasoning level applies, because dropping them means
+    OpenRouter silently picks by price and price tracks quantization.
     """
     effective = resolve_reasoning_level(model, reasoning_level)
+    if model.provider is ModelProvider.OPENROUTER:
+        return _openrouter_settings(model, effective)
     if effective is None:
         return None
     if model.provider is ModelProvider.GOOGLE:
@@ -146,3 +153,26 @@ def model_settings_for(
             anthropic_effort=effective.value,
         )
     return OpenAIChatModelSettings(openai_reasoning_effort=effective.value)
+
+
+def _openrouter_settings(
+    model: CatalogModel, effective: ReasoningLevel | None
+) -> ModelSettings | None:
+    """Chat-model settings for an OpenRouter model: effort plus endpoint policy.
+
+    The ``provider`` block goes through ``extra_body`` because it is
+    OpenRouter's own extension to the OpenAI chat schema, not something the
+    OpenAI SDK models. Returns ``None`` when the model asks for neither, so an
+    unconstrained model still sends a bare request.
+    """
+    settings: dict = {}
+    if effective is not None:
+        settings["openai_reasoning_effort"] = effective.value
+    routing = model.openrouter_routing
+    if routing is not None:
+        provider_block = routing.as_provider_block()
+        if provider_block:
+            settings["extra_body"] = {"provider": provider_block}
+    if not settings:
+        return None
+    return OpenAIChatModelSettings(**settings)

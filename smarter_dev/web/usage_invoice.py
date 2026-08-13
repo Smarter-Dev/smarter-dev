@@ -68,6 +68,25 @@ _PROVIDER_BY_FLAT_MODEL_ID.setdefault("poolside/laguna-xs-2.1", "openrouter")
 # replaced 4.5.
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("poolside/laguna-s-2.1", "openrouter")
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("x-ai/grok-4.5", "openrouter")
+# Also 2026-08-13: four models moved to OpenRouter endpoints that match their
+# authors' published precision. The models are still in the catalog under new
+# wire ids, so these old ids are now historical-only and would otherwise fall
+# to "unknown" and drop out of the per-provider invoice breakdown.
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("gemma-4-31B-it", "digitalocean")
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("qwen3.6-plus", "opencode_zen")
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("deepseek-v4-flash", "opencode_zen")
+# "glm-5.2" is the one id both DO and Zen used; Zen served it most recently and
+# for far longer, so historical rows attribute there.
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("glm-5.2", "opencode_zen")
+# Gemini 3.1 Flash Lite left the CATALOG on 2026-08-13 but not the codebase:
+# title generation, media reading, image prompt review and the blogging agents
+# all pin this wire id directly. So this mapping is live, not historical — new
+# rows carry this id and would otherwise land under "unknown".
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("gemini-3.1-flash-lite", "google")
+# Same shape: Gemini 3 Flash left the catalog for 3.7 on 2026-08-13, but the
+# resources agent and the blogging scout/research agents still pin this wire id
+# directly, so this mapping is live rather than historical.
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("gemini-3-flash-preview", "google")
 # Laguna S briefly ran on Zen's free tier before its rate limiting sent it
 # back to OpenRouter; rows from that window carry the free id.
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("laguna-s-2.1-free", "opencode_zen")
