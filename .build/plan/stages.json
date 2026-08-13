@@ -1,14 +1,26 @@
 [
   {
-    "id": "delimiter-latex-parser",
-    "title": "Detect delimiter-based LaTeX expressions in the section parser",
-    "path": ".build/plan/01-delimiter-latex-parser.md",
-    "summary": "Extend split_latex_sections to break replies on standard LaTeX delimiters ($$, \\[, \\(, $) alongside existing ```latex fences, reusing the renderer and dispatch unchanged."
+    "id": "thread-model-and-scoped-history",
+    "title": "Thread boundaries in the data model, and history scoped to a thread",
+    "path": ".build/plan/01-thread-model-and-scoped-history.md",
+    "summary": "Add a chat_mode flag on WebChatConversation, a web_chat_threads table, and smarter_dev/web/chat/threads.py; floor the worker's _structured_history (and its compaction lookup) to the current thread so a boundary hides earlier messages from the model. Backend only — no conversation is marked quick yet, so existing chats are byte-identical."
   },
   {
-    "id": "chat-prompt-delimiters",
-    "title": "Teach the chat prompts to use standard LaTeX delimiters",
-    "path": ".build/plan/02-chat-prompt-delimiters.md",
-    "summary": "Flip the chat_agent and writer_agent prompts to instruct standard LaTeX delimiters instead of ```latex fences, and confirm end-to-end image dispatch is unchanged."
+    "id": "quick-chat-surface",
+    "title": "The Quick chat surface: route, rail entry, and thread dividers",
+    "path": ".build/plan/02-quick-chat-surface.md",
+    "summary": "Add GET /chat/quick, which gets-or-creates one perpetual Quick chat per person and pins it above the rail's recency groups, and render thread boundaries as dividers in all three places the stream is built — the Jinja loop, controller._chat_context, and chat.js syncThread. Nothing draws a boundary yet; dividers are tested against directly-inserted thread rows."
+  },
+  {
+    "id": "agent-thread-break-tool",
+    "title": "The agent's start_new_thread tool",
+    "path": ".build/plan/03-agent-thread-break-tool.md",
+    "summary": "Give the root chat agent a start_new_thread(reason) tool plus a QUICK_THREAD_GUIDANCE prompt section, registered only in a Quick chat that has prior exchanges and capped to one call per turn, so a clear topic break draws a boundary in front of the message being answered and every later turn starts on a clean context."
+  },
+  {
+    "id": "idle-thread-evaluator",
+    "title": "The idle evaluator: DeepSeek V4 Flash decides after a long gap",
+    "path": ".build/plan/04-idle-thread-evaluator.md",
+    "summary": "Add admin-only thread evaluator settings (model defaulting to the catalog's deepseek-v4, a fallback, and an idle threshold defaulting to 15 minutes) and a fail-open classifier that runs before _structured_history when a Quick chat has been idle past the threshold, drawing a boundary so the chat model never loads the previous subject. Completes the feature."
   }
 ]
