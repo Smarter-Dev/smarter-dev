@@ -141,15 +141,15 @@ MODEL_FAMILIES: tuple[str, ...] = (
     "Gemini",
     "GPT",
     "Claude",
-    "Poolside",
     "Grok",
 )
 
 
 # Who *made* each family, which is not who serves it: Grok is served through
 # OpenRouter but the lab is xAI, and the open weights run on Digital Ocean /
-# OpenCode Zen regardless of origin. `provider` answers "which SDK"; this
-# answers "whose model", which is what a reader wants next to the name.
+# OpenCode Zen / OpenRouter regardless of origin. `provider` answers "which
+# SDK"; this answers "whose model", which is what a reader wants next to the
+# name.
 MODEL_VENDORS: dict[str, str] = {
     "Kimi": "Moonshot",
     "GLM": "Zhipu",
@@ -160,7 +160,6 @@ MODEL_VENDORS: dict[str, str] = {
     "Gemini": "Google",
     "GPT": "OpenAI",
     "Claude": "Anthropic",
-    "Poolside": "Poolside",
     "Grok": "xAI",
 }
 
@@ -202,8 +201,8 @@ _CLAUDE_EFFORT = (
 
 # Curated catalog. Kept <= 24 entries so the whole set fits in one Discord
 # string-select (25-option limit, leaving room for a "server default" sentinel).
-# Gemini -> Google, GPT -> OpenAI, Claude -> Anthropic, Poolside and Grok ->
-# OpenRouter, and the open weights -> Digital Ocean / OpenCode Zen, both
+# Gemini -> Google, GPT -> OpenAI, Claude -> Anthropic, Grok -> OpenRouter,
+# and the open weights -> Digital Ocean / OpenCode Zen / OpenRouter, all
 # OpenAI-compatible. Model ids reflect the latest releases as of mid-2026
 # (verified against provider model listings); they are wire ids and can be
 # re-verified without a migration.
@@ -438,34 +437,38 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         reasoning_levels=_CLAUDE_EFFORT,
         default_reasoning=ReasoningLevel.HIGH,
     ),
-    # --- Poolside via OpenRouter ---
-    # Deliberately NOT on Zen: Zen carries no paid Laguna S, only
-    # "laguna-s-2.1-free", and that free pool throttles — measured at 1 in 6
-    # calls returning 429 provider_rate_limit_exceeded at ~1 req/s, with no
-    # published quota to engineer against. chat_engine has no 429 retry, so each
-    # throttle is a dead chat turn. It also retains conversation content for
-    # training and is promo-limited. OpenRouter's paid route is $0.10/$0.20 per
-    # M — cents a month at chat volume — and buys reliability outright.
+    # --- Qwen3.8 via OpenRouter ---
+    # The 2.4T A95B weights are NOT on our Digital Ocean account — GET
+    # /v1/models lists qwen3.8-max but no A95B, and an unknown DO id 403s — so
+    # OpenRouter is the only route that can serve it. No premium for that:
+    # OpenRouter's cheapest endpoint for it *is* DigitalOcean-served, at the
+    # same $2/$6 per M as every other route. Capabilities from GET
+    # /api/v1/models/qwen/qwen3.8-2.4t-a95b/endpoints (2026-08): 262K context,
+    # text-only input (no vision), tools, and a reasoning_effort knob.
     CatalogModel(
-        key="poolside-laguna-s-2-1",
-        label="Laguna S 2.1",
-        family="Poolside",
+        key="qwen3-8-2-4t",
+        label="Qwen3.8 2.4T A95B",
+        family="Qwen",
         provider=ModelProvider.OPENROUTER,
-        model_id="poolside/laguna-s-2.1",
+        model_id="qwen/qwen3.8-2.4t-a95b",
+        context_window=262_144,
+        reasoning_levels=_OPEN_EFFORT,
+        default_reasoning=ReasoningLevel.MEDIUM,
     ),
     # --- Grok via OpenRouter ---
     # xAI has no first-party key here, so Grok routes through OpenRouter's
-    # OpenAI-compatible /chat/completions like Laguna does. Capabilities
-    # verified against GET /api/v1/models/x-ai/grok-4.5/endpoints (2026-08):
-    # 500K context, text+image input, tools, and a reasoning_effort knob.
-    # OpenRouter normalizes low/medium/high effort for every route, so the
-    # standard open-effort ladder applies.
+    # OpenAI-compatible /chat/completions. Capabilities verified against GET
+    # /api/v1/models/x-ai/grok-4.6/endpoints (2026-08): 500K context,
+    # text+image input, tools, and a reasoning_effort knob. OpenRouter
+    # normalizes low/medium/high effort for every route, so the standard
+    # open-effort ladder applies. 4.6 replaced 4.5 on 2026-08-13 at the same
+    # $2/$6 headline rate.
     CatalogModel(
-        key="grok-4-5",
-        label="Grok 4.5 (xAI)",
+        key="grok-4-6",
+        label="Grok 4.6 (xAI)",
         family="Grok",
         provider=ModelProvider.OPENROUTER,
-        model_id="x-ai/grok-4.5",
+        model_id="x-ai/grok-4.6",
         supports_vision=True,
         context_window=500_000,
         reasoning_levels=_OPEN_EFFORT,

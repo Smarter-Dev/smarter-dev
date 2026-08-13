@@ -147,30 +147,48 @@ def test_claude_opus_5_is_selectable():
     assert opus.default_reasoning in opus.reasoning_levels
 
 
-def test_poolside_model_stays_on_openrouter():
-    # Zen only carries the free Laguna S, whose pool throttles, so Poolside
-    # stays on the paid OpenRouter route. Laguna XS left the catalog to keep
-    # the Discord select under its cap.
-    model = get_model("poolside-laguna-s-2-1")
-    assert model is not None
-    assert model.model_id == "poolside/laguna-s-2.1"
-    assert model.family == "Poolside"
-    assert model.provider is ModelProvider.OPENROUTER
-    assert model.supports_reasoning is False
+def test_poolside_left_the_catalog():
+    # Laguna S 2.1 was retired on 2026-08-13, taking the whole Poolside family
+    # with it. Its pricing stays in llm_pricing for historical usage rows.
+    assert get_model("poolside-laguna-s-2-1") is None
     assert get_model("poolside-laguna-xs-2-1") is None
+    assert "Poolside" not in MODEL_FAMILIES
 
 
 def test_grok_routes_through_openrouter_with_verified_capabilities():
-    # We hold no first-party xAI key, so Grok rides OpenRouter like Laguna.
-    # Capabilities verified against OpenRouter's endpoints API (2026-08).
-    model = get_model("grok-4-5")
+    # We hold no first-party xAI key, so Grok rides OpenRouter. Capabilities
+    # verified against OpenRouter's endpoints API (2026-08). Grok 4.5 was
+    # retired for 4.6 on 2026-08-13.
+    assert get_model("grok-4-5") is None
+    model = get_model("grok-4-6")
     assert model is not None
-    assert model.model_id == "x-ai/grok-4.5"
+    assert model.model_id == "x-ai/grok-4.6"
     assert model.family == "Grok"
     assert model.provider is ModelProvider.OPENROUTER
     assert model.supports_vision is True
     assert model.supports_tools is True
     assert model.context_window == 500_000
+    assert model.reasoning_levels == (
+        ReasoningLevel.LOW,
+        ReasoningLevel.MEDIUM,
+        ReasoningLevel.HIGH,
+    )
+    assert model.default_reasoning is ReasoningLevel.MEDIUM
+
+
+def test_qwen3_8_routes_through_openrouter_not_digital_ocean():
+    # DO's live account carries qwen3.8-max but not the 2.4T A95B weights, so
+    # OpenRouter is the only route that can serve it (its cheapest OpenRouter
+    # endpoint is in fact DO-served, at the same $2/$6 as every other route).
+    # Text-only: OpenRouter reports input_modalities ["text"].
+    model = get_model("qwen3-8-2-4t")
+    assert model is not None
+    assert model.model_id == "qwen/qwen3.8-2.4t-a95b"
+    assert model.family == "Qwen"
+    assert model.provider is ModelProvider.OPENROUTER
+    assert model.supports_vision is False
+    assert model.supports_tools is True
+    assert model.context_window == 262_144
     assert model.reasoning_levels == (
         ReasoningLevel.LOW,
         ReasoningLevel.MEDIUM,
@@ -241,10 +259,15 @@ def test_provider_routing_by_family():
             )
         elif model.family == "Claude":
             assert model.provider is ModelProvider.ANTHROPIC
-        elif model.family in ("Poolside", "Grok"):
+        elif model.family == "Grok":
             assert model.provider is ModelProvider.OPENROUTER
         elif model.family in _OPEN_WEIGHTS_FAMILIES:
-            assert model.provider in _OPEN_WEIGHTS_PROVIDERS
+            # Open weights normally ride DO or Zen, but Qwen3.8 2.4T A95B is on
+            # neither account, so it rides OpenRouter like Luna does.
+            assert model.provider in (
+                *_OPEN_WEIGHTS_PROVIDERS,
+                ModelProvider.OPENROUTER,
+            )
         else:  # pragma: no cover - guarded by test_catalog_entries_are_well_formed
             raise AssertionError(f"unexpected family {model.family}")
 

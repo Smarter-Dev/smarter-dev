@@ -46,7 +46,7 @@ except ImportError:
 FIXTURE_DIR = Path(__file__).parents[1] / "fixtures" / "web_summarizer"
 MODEL_KEYS = (
     "gemini-3-1-flash-lite",
-    "poolside-laguna-s-2-1",
+    "deepseek-v4",
     "gpt-5-4-nano",
 )
 

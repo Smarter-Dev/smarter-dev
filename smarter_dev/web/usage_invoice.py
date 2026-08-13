@@ -64,6 +64,10 @@ _PROVIDER_BY_FLAT_MODEL_ID.setdefault("deepseek-4-flash", "digitalocean")
 # Retired on 2026-08-02 when Kimi K3 superseded it and Grok 4.5 took its slot.
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("kimi-k2.6", "digitalocean")
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("poolside/laguna-xs-2.1", "openrouter")
+# Retired on 2026-08-13: Laguna S left the catalog outright and Grok 4.6
+# replaced 4.5.
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("poolside/laguna-s-2.1", "openrouter")
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("x-ai/grok-4.5", "openrouter")
 # Laguna S briefly ran on Zen's free tier before its rate limiting sent it
 # back to OpenRouter; rows from that window carry the free id.
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("laguna-s-2.1-free", "opencode_zen")
