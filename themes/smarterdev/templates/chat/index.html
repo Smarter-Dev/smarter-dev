@@ -10,6 +10,9 @@
 {% set groups = conversation_groups|default([]) %}
 {% set archived = archived_conversations|default([]) %}
 {% set current_is_archived = conversation and mode == 'chat' and conversation.archived_at %}
+{# The owner's one perpetual Quick chat. Absent in Resources mode and until the
+   first visit to /chat/quick creates it. #}
+{% set quick_pin = quick_conversation|default(none) %}
 {# A history row is a link plus the menu that acts on it. Only Chat rows carry
    the menu: a Resources answer has no title of its own to change and no private
    uploads to destroy, so the rail there stays a plain list of links. #}
@@ -66,6 +69,14 @@
       <a href="{{ '/resources' if mode == 'resources' else '/chat' }}" class="p-btn is-accent chat-new">+ New {{ 'question' if mode == 'resources' else 'chat' }}</a>
     </div>
     <nav class="chat-history">
+      {% if quick_pin %}
+      {# Pinned above the recency bands and deliberately menu-less: the Quick
+         chat is a fixed surface, so renaming, archiving or deleting it would
+         only leave its owner with no Quick chat and no obvious way back. #}
+      <div class="chat-history-row is-pinned" data-quick-chat-row>
+        <a href="/chat/quick" {% if conversation and mode == 'chat' and quick_pin.id == conversation.id %}aria-current="page"{% endif %} data-history-title>{{ quick_pin.title or 'Quick chat' }}</a>
+      </div>
+      {% endif %}
       {% for group in groups %}
       <p class="p-label chat-history-group">{{ group.label }}</p>
       {% for item in group['items'] %}{{ history_row(item) }}{% endfor %}
@@ -133,6 +144,7 @@
         <div class="chat-empty">
           <h2>What are you building?</h2>
           <p>Chats stay private to your account and are kept after you close the tab.</p>
+          {% if mode == 'chat' %}<p class="chat-empty-quick">Or drop a thought into your <a href="/chat/quick">Quick chat</a> — one running conversation that splits itself by subject.</p>{% endif %}
           <div class="chat-start-settings">
             <p>Start in
               <select class="p-select" data-chat-new-intelligence aria-label="Intelligence mode">
@@ -160,6 +172,16 @@
         </div>
         {% endif %}
         {% for message in messages %}
+        {%- set thread_break = (thread_breaks|default({})).get(message.sequence) %}
+        {%- if thread_break %}
+        {# Where the agent's context restarts. A boundary marker, not a heading:
+           the messages above stay in the same scroll, the model just stops
+           reading them. chat.js redraws the identical element on reconnect. #}
+        <div class="chat-thread-break" data-thread-break data-thread-id="{{ thread_break.id }}"
+             data-start-sequence="{{ thread_break.start_sequence }}" role="separator">
+          <span class="chat-thread-break-label">{{ thread_break.title or 'New thread' }}</span>
+        </div>
+        {%- endif %}
         <article class="chat-message chat-message-{{ message.role }}{% if message.role == 'user' %} p-card{% endif %}{% if mode == 'resources' and message.role == 'assistant' %} ai-turn-assistant{% endif %}"
                  {% if mode == 'resources' and message.role == 'assistant' and message.sdanswer_blocks %}data-has-sdanswer="1"{% endif %}
                  data-message-id="{{ message.id }}"
