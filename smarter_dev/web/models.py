@@ -4286,12 +4286,35 @@ class ChatSettings(Base):
     compaction_fallback_model_key: Mapped[str | None] = mapped_column(
         String(100), nullable=True
     )
+    # The model that decides, after a long silence in a Quick chat, whether the
+    # returning message is a new subject. An administrator setting like the
+    # summarizer and the compaction model: the person chatting never sees it.
+    thread_evaluator_model_key: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        default="deepseek-v4",
+        server_default=text("'deepseek-v4'"),
+    )
+    thread_evaluator_fallback_model_key: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
+    )
+    # How long a Quick chat must sit idle before the evaluator is worth running.
+    # A setting rather than a constant because it will want tuning against real
+    # behaviour.
+    thread_idle_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=15, server_default=text("15")
+    )
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     updated_by_user_id: Mapped[UUID | None] = mapped_column(
         PostgresUUID(as_uuid=True), nullable=True
     )
 
-    __table_args__ = (CheckConstraint("id = 1", name="chat_settings_singleton"),)
+    __table_args__ = (
+        CheckConstraint("id = 1", name="chat_settings_singleton"),
+        CheckConstraint(
+            "thread_idle_minutes > 0", name="chat_settings_thread_idle_minutes"
+        ),
+    )
 
 
 class ChatCatalogModel(Base):

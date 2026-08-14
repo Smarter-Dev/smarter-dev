@@ -66,6 +66,23 @@ def validated_thread_break_reason(reason: str) -> str:
     return stated
 
 
+def clamped_thread_break_reason(reason: str) -> str | None:
+    """The evaluator's stated reason, trimmed to what the column and the UI expect.
+
+    The agent's reason is *validated* because a malformed one is a sign the model
+    should not be drawing the line at all, and refusing it costs nothing — the
+    model simply answers without a boundary. The evaluator's reason has already
+    been paid for and its verdict is separate from its wording, so a long or
+    ragged sentence is clamped rather than thrown away with the verdict.
+    """
+    stated = "".join(
+        " " if ord(character) < 32 else character for character in reason
+    ).strip()
+    if not stated:
+        return None
+    return stated[:THREAD_BREAK_REASON_LIMIT]
+
+
 async def current_thread(
     session: AsyncSession, *, conversation_id: UUID
 ) -> WebChatThread | None:
