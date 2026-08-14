@@ -1721,6 +1721,37 @@
     });
   }
 
+  // Which user article the live divider goes above. The turn is the precise
+  // answer, but two common cases have no user article carrying it: the sender's
+  // own optimistic bubble is only named once the POST returns, and a regenerate
+  // runs under a turn id the user message never had. The line always belongs in
+  // front of the newest message in the stream, so fall back to that rather than
+  // dropping the divider until the turn finishes.
+  function liveThreadBreakAnchor(turnId) {
+    var named = turnId
+      ? thread.querySelector('.chat-message-user[data-turn-id="' + turnId + '"]')
+      : null;
+    if (named) return named;
+    var userArticles = thread.querySelectorAll('.chat-message-user');
+    return userArticles.length ? userArticles[userArticles.length - 1] : null;
+  }
+
+  // The agent drew a line mid-turn. Put the divider above the message being
+  // answered right away instead of waiting for the turn to finish, and build it
+  // with the reconcile's own builder so the element the browser shows now is the
+  // element the reconcile adopts later — matched on data-thread-id.
+  function insertLiveThreadBreak(data) {
+    if (mode !== 'chat' || !thread || !data.thread_id) return;
+    if (thread.querySelector('[data-thread-break][data-thread-id="' + data.thread_id + '"]')) return;
+    var anchor = liveThreadBreakAnchor(data.turn_id);
+    if (!anchor) return;
+    thread.insertBefore(threadBreakElement({
+      id: data.thread_id,
+      start_sequence: data.start_sequence,
+      title: data.title
+    }, null), anchor);
+  }
+
   function createActivity(startedAt, label) {
     var activity = document.createElement('div');
     activity.className = 'chat-agent-activity';
@@ -2213,6 +2244,9 @@
       if (mode === 'resources') resourceRunning = true;
       assistant.dataset.pendingTurn = activeTurn || '';
       assistant.dataset.turnId = activeTurn || '';
+      // Name the reader's own bubble too. It went in before the turn existed, and
+      // a mid-turn divider anchors on the turn it belongs to.
+      if (activeTurn) user.dataset.turnId = activeTurn;
       flushPendingDocuments();
       updateRootActivity({
         turn_id: activeTurn,
@@ -2375,6 +2409,7 @@
       stick(wasAtBottom);
     }
     if (type === 'chat_title_changed' && data.title) applyTitle(data.conversation_id, data.title);
+    if (type === 'chat_thread_started') insertLiveThreadBreak(data);
     if (type === 'chat_usage_updated') refreshUsage();
     if (type === 'agent_run_complete' && mode === 'resources') {
       window.location.reload();

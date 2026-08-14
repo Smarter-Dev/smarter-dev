@@ -31,6 +31,40 @@ if TYPE_CHECKING:
 QUICK_CHAT_MODE = "quick"
 STANDARD_CHAT_MODE = "standard"
 
+THREAD_BREAK_REASON_LIMIT = 500
+# What the agent is told once the line exists. Both sentences end the same way
+# because the model's job after either is identical: answer the message it was
+# handed, without reaching back over the line.
+THREAD_STARTED_RESULT = (
+    "A new thread has started. Answer their message; nothing above the line is "
+    "yours to refer to."
+)
+THREAD_ALREADY_STARTED_RESULT = (
+    "The line is already drawn for this message. Answer their message; nothing "
+    "above the line is yours to refer to."
+)
+
+
+def validated_thread_break_reason(reason: str) -> str:
+    """The agent's stated reason for the boundary, or a raised ValueError.
+
+    Demanding a written reason is part of the "clear topic break" rule and not
+    only bookkeeping: a model that cannot name the old subject and the new one
+    usually should not be drawing a line. The shape rules mirror
+    ``SubagentDispatch.validated`` so every free-text tool argument in this
+    package is bounded the same way.
+    """
+    stated = reason.strip()
+    if not stated:
+        raise ValueError("reason is required")
+    if len(stated) > THREAD_BREAK_REASON_LIMIT:
+        raise ValueError(
+            f"reason must be at most {THREAD_BREAK_REASON_LIMIT} characters"
+        )
+    if any(ord(character) < 32 for character in stated):
+        raise ValueError("reason contains control characters")
+    return stated
+
 
 async def current_thread(
     session: AsyncSession, *, conversation_id: UUID
