@@ -25,6 +25,7 @@ from skrift.workers import handler
 from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.model_catalog import get_model
@@ -90,6 +91,7 @@ from smarter_dev.web.chat.spend import WIND_DOWN_WARNING
 from smarter_dev.web.chat.spend import append_wind_down
 from smarter_dev.web.chat.subagents import child_reasoning
 from smarter_dev.web.chat.subagents import effective_system_prompt
+from smarter_dev.web.chat.threads import history_floor
 from smarter_dev.web.chat.toolsets import ExecutionCounters
 from smarter_dev.web.chat.toolsets import run_code as execute_code
 from smarter_dev.web.chat.toolsets import web_read_optional
@@ -622,8 +624,13 @@ async def _preflight(
 
 
 async def _active_messages_before(
-    conversation_id: UUID, response_sequence: int
+    conversation_id: UUID, response_sequence: int, from_sequence: int = 0
 ) -> list[WebChatMessage]:
+    """Assistant rows the agent may read, oldest first.
+
+    ``from_sequence`` is the Quick chat thread floor; the default of 0 is every
+    row, which is what every standard conversation gets.
+    """
     async with get_db_session_context() as session:
         return list(
             (
@@ -634,6 +641,7 @@ async def _active_messages_before(
                         WebChatMessage.role == "assistant",
                         WebChatMessage.is_active.is_(True),
                         WebChatMessage.sequence < response_sequence,
+                        WebChatMessage.sequence >= from_sequence,
                     )
                     .order_by(WebChatMessage.sequence)
                 )
@@ -641,10 +649,59 @@ async def _active_messages_before(
         )
 
 
+async def _current_branch_fingerprint(
+    session: AsyncSession,
+    *,
+    conversation: WebChatConversation,
+    response_sequence: int,
+) -> str:
+    """Re-read the branch ``_structured_history`` fingerprinted, through ``session``.
+
+    Two places compare-and-swap against the fingerprint the turn was generated
+    from — the reply write in ``run_chat_turn`` and the fold write in
+    ``_maybe_compact`` — and both must re-read the same window that fingerprint
+    was taken over. In a Quick chat that window is the current thread, not the
+    whole conversation: an unfloored re-read would carry the previous threads'
+    replies, so the two could never agree and every turn behind a boundary would
+    abort as a branch change. Sharing this one function is what keeps them
+    agreeing.
+    """
+    floor = await history_floor(session, conversation=conversation)
+    rows = list(
+        (
+            await session.execute(
+                select(WebChatMessage)
+                .where(
+                    WebChatMessage.conversation_id == conversation.id,
+                    WebChatMessage.role == "assistant",
+                    WebChatMessage.is_active.is_(True),
+                    WebChatMessage.sequence < response_sequence,
+                    WebChatMessage.sequence >= floor,
+                )
+                .order_by(WebChatMessage.sequence)
+            )
+        ).scalars()
+    )
+    return version_fingerprint(
+        [
+            {
+                "id": str(row.id),
+                "version_number": row.version_number,
+                "is_active": True,
+            }
+            for row in rows
+        ]
+    )
+
+
 async def _structured_history(
     conversation: WebChatConversation, turn: WebChatTurn
 ) -> tuple[list, list[WebChatMessage], str]:
-    rows = await _active_messages_before(conversation.id, turn.response_sequence)
+    async with get_db_session_context() as session:
+        floor = await history_floor(session, conversation=conversation)
+    rows = await _active_messages_before(
+        conversation.id, turn.response_sequence, from_sequence=floor
+    )
     branch = [
         {"id": str(row.id), "version_number": row.version_number, "is_active": True}
         for row in rows
@@ -656,6 +713,11 @@ async def _structured_history(
             .where(
                 WebChatCompaction.conversation_id == conversation.id,
                 WebChatCompaction.status == "complete",
+                # A snapshot taken before the thread boundary summarizes the
+                # previous subject; seeding from it would drag the old thread
+                # back in behind the floor's back. One taken after the boundary
+                # was itself built from thread-scoped history, so it is safe.
+                WebChatCompaction.through_sequence >= floor,
             )
             .order_by(WebChatCompaction.through_sequence.desc())
             .limit(1)
@@ -872,30 +934,14 @@ async def _maybe_compact(
             .where(WebChatConversation.id == conversation.id)
             .with_for_update()
         )
-        # CAS prevents a simultaneous version switch from accepting a stale summary.
-        current_rows = list(
-            (
-                await session.execute(
-                    select(WebChatMessage)
-                    .where(
-                        WebChatMessage.conversation_id == conversation.id,
-                        WebChatMessage.role == "assistant",
-                        WebChatMessage.is_active.is_(True),
-                        WebChatMessage.sequence < turn.response_sequence,
-                    )
-                    .order_by(WebChatMessage.sequence)
-                )
-            ).scalars()
-        )
-        current_fingerprint = version_fingerprint(
-            [
-                {
-                    "id": str(row.id),
-                    "version_number": row.version_number,
-                    "is_active": True,
-                }
-                for row in current_rows
-            ]
+        # CAS prevents a simultaneous version switch from accepting a stale
+        # summary. It reads through _current_branch_fingerprint so it covers the
+        # same window branch_fingerprint was taken over, and off the locked row
+        # so the thread floor it applies is the committed one.
+        current_fingerprint = await _current_branch_fingerprint(
+            session,
+            conversation=durable,
+            response_sequence=turn.response_sequence,
         )
         if current_fingerprint != branch_fingerprint:
             return history
@@ -2551,29 +2597,14 @@ async def run_chat_turn(payload: ChatTurnPayload) -> dict:
             )
             if durable_turn is None or durable_conversation is None:
                 raise LeaseSuperseded("turn worker lease was superseded")
-            current_branch_rows = list(
-                (
-                    await session.execute(
-                        select(WebChatMessage)
-                        .where(
-                            WebChatMessage.conversation_id == conversation.id,
-                            WebChatMessage.role == "assistant",
-                            WebChatMessage.is_active.is_(True),
-                            WebChatMessage.sequence < turn.response_sequence,
-                        )
-                        .order_by(WebChatMessage.sequence)
-                    )
-                ).scalars()
-            )
-            current_branch = version_fingerprint(
-                [
-                    {
-                        "id": str(row.id),
-                        "version_number": row.version_number,
-                        "is_active": True,
-                    }
-                    for row in current_branch_rows
-                ]
+            # Reads through _current_branch_fingerprint so it covers the same
+            # window branch_fingerprint was taken over — the current thread in a
+            # Quick chat, the whole conversation everywhere else. It reads off
+            # the locked row so the thread floor it applies is the committed one.
+            current_branch = await _current_branch_fingerprint(
+                session,
+                conversation=durable_conversation,
+                response_sequence=turn.response_sequence,
             )
             if current_branch != branch_fingerprint:
                 raise RuntimeError("conversation branch changed during generation")
