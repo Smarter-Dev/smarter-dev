@@ -1037,10 +1037,11 @@ class TestOrderingAgainstTheAgent:
             settings=_evaluator_settings(),
             agent=_new_subject_agent(),
         )
-        history, rows, _fingerprint = await jobs._structured_history(conversation, turn)
+        branch = await jobs._structured_history(conversation, turn)
+        history = branch.messages
 
         assert history == []
-        assert rows == []
+        assert branch.rows == []
 
         built = []
         build_agent = pydantic_ai.Agent

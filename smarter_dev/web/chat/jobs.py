@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import logging
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
@@ -659,30 +660,53 @@ async def _active_messages_before(
         )
 
 
+@dataclass(frozen=True, slots=True)
+class BranchedHistory:
+    """The context a turn generates against, and the branch it was read from.
+
+    ``floor`` travels with ``fingerprint`` because neither means anything alone:
+    the fingerprint covers the assistant rows at or above that floor, so a
+    compare-and-swap that re-reads at any other floor is comparing two different
+    windows. The floor a turn read at is fixed for the life of the turn even
+    when the conversation's own floor moves during it.
+    """
+
+    messages: list
+    rows: list[WebChatMessage]
+    fingerprint: str
+    floor: int
+
+
 async def _current_branch_fingerprint(
     session: AsyncSession,
     *,
-    conversation: WebChatConversation,
+    conversation_id: UUID,
     response_sequence: int,
+    floor: int,
 ) -> str:
     """Re-read the branch ``_structured_history`` fingerprinted, through ``session``.
 
     Two places compare-and-swap against the fingerprint the turn was generated
     from — the reply write in ``run_chat_turn`` and the fold write in
     ``_maybe_compact`` — and both must re-read the same window that fingerprint
-    was taken over. In a Quick chat that window is the current thread, not the
-    whole conversation: an unfloored re-read would carry the previous threads'
-    replies, so the two could never agree and every turn behind a boundary would
-    abort as a branch change. Sharing this one function is what keeps them
-    agreeing.
+    was taken over. In a Quick chat that window is a thread, not the whole
+    conversation: an unfloored re-read would carry the previous threads' replies,
+    so the two could never agree and every turn behind a boundary would abort as
+    a branch change.
+
+    ``floor`` is the caller's, not the conversation's, and that is the point. A
+    turn that draws its own boundary moves the committed floor above everything
+    it generated against; re-reading at the committed floor would fingerprint an
+    empty window and throw the finished reply away. The question here is whether
+    the branch changed underneath the turn, so the window stays where the turn
+    read it — ``BranchedHistory.floor``.
     """
-    floor = await history_floor(session, conversation=conversation)
     rows = list(
         (
             await session.execute(
                 select(WebChatMessage)
                 .where(
-                    WebChatMessage.conversation_id == conversation.id,
+                    WebChatMessage.conversation_id == conversation_id,
                     WebChatMessage.role == "assistant",
                     WebChatMessage.is_active.is_(True),
                     WebChatMessage.sequence < response_sequence,
@@ -704,9 +728,26 @@ async def _current_branch_fingerprint(
     )
 
 
+def _cached_context_after_turn(
+    *, history: list, delta: list, generation_floor: int, committed_floor: int
+) -> list:
+    """What the conversation caches as its context once the reply is written.
+
+    Normally that is everything the model was handed plus what this turn added.
+    When a boundary was drawn during the turn the committed floor has risen
+    above everything ``history`` holds: those messages are the thread the person
+    has left, and caching them would hand the next turn the subject the boundary
+    exists to drop. Only the delta — this message and this reply — is inside the
+    new thread.
+    """
+    if committed_floor > generation_floor:
+        return list(delta)
+    return [*history, *delta]
+
+
 async def _structured_history(
     conversation: WebChatConversation, turn: WebChatTurn
-) -> tuple[list, list[WebChatMessage], str]:
+) -> BranchedHistory:
     async with get_db_session_context() as session:
         floor = await history_floor(session, conversation=conversation)
     rows = await _active_messages_before(
@@ -765,7 +806,9 @@ async def _structured_history(
 
                 logger.exception("Ignoring invalid Chat history payload %s", row.id)
                 history.append(ModelResponse(parts=[TextPart(content=row.content)]))
-    return history, rows, branch_fingerprint
+    return BranchedHistory(
+        messages=history, rows=rows, fingerprint=branch_fingerprint, floor=floor
+    )
 
 
 async def _run_text_agent(
@@ -869,15 +912,14 @@ async def _run_aux_with_fallback(
 
 async def _maybe_compact(
     *,
-    history: list,
-    rows: list[WebChatMessage],
-    branch_fingerprint: str,
+    branch: BranchedHistory,
     conversation: WebChatConversation,
     turn: WebChatTurn,
     owner_id: UUID,
     selected_model,
     settings: ChatSettings,
 ) -> list:
+    history = branch.messages
     configured = compaction_model_key(
         conversation.intelligence_mode,
         selected_model_key=selected_model.key,
@@ -937,7 +979,7 @@ async def _maybe_compact(
     result = await compact_model_history(history, summarize=summarize)
     if not result.changed:
         return history
-    through = max((row.sequence for row in rows), default=0)
+    through = max((row.sequence for row in branch.rows), default=0)
     async with get_db_session_context() as session:
         durable = await session.scalar(
             select(WebChatConversation)
@@ -945,15 +987,15 @@ async def _maybe_compact(
             .with_for_update()
         )
         # CAS prevents a simultaneous version switch from accepting a stale
-        # summary. It reads through _current_branch_fingerprint so it covers the
-        # same window branch_fingerprint was taken over, and off the locked row
-        # so the thread floor it applies is the committed one.
+        # summary. It reads through _current_branch_fingerprint at the branch's
+        # own floor so it covers the same window the fingerprint was taken over.
         current_fingerprint = await _current_branch_fingerprint(
             session,
-            conversation=durable,
+            conversation_id=conversation.id,
             response_sequence=turn.response_sequence,
+            floor=branch.floor,
         )
-        if current_fingerprint != branch_fingerprint:
+        if current_fingerprint != branch.fingerprint:
             return history
         session.add(
             WebChatCompaction(
@@ -962,7 +1004,7 @@ async def _maybe_compact(
                 summary=result.summary or "",
                 original_messages=encode_model_messages(result.folded_messages),
                 compacted_messages=encode_model_messages(result.messages),
-                version_fingerprint=branch_fingerprint,
+                version_fingerprint=branch.fingerprint,
                 model_key=configured,
                 reasoning_level=None,
                 status="complete",
@@ -2669,9 +2711,8 @@ async def run_chat_turn(payload: ChatTurnPayload) -> dict:
             turn=turn,
             settings=settings,
         )
-        history, prior_rows, branch_fingerprint = await _structured_history(
-            conversation, turn
-        )
+        branch = await _structured_history(conversation, turn)
+        history = branch.messages
         async with get_db_session_context() as session:
             user_turn_id = turn.regenerates_turn_id or turn.id
             user_message = await session.scalar(
@@ -2709,9 +2750,7 @@ async def run_chat_turn(payload: ChatTurnPayload) -> dict:
             if initial_spend.hard_cutoff:
                 raise HardSpendCutoff("Chat hard spend cutoff reached")
             history = await _maybe_compact(
-                history=history,
-                rows=prior_rows,
-                branch_fingerprint=branch_fingerprint,
+                branch=branch,
                 conversation=conversation,
                 turn=turn,
                 owner_id=owner_id,
@@ -2841,17 +2880,22 @@ async def run_chat_turn(payload: ChatTurnPayload) -> dict:
             )
             if durable_turn is None or durable_conversation is None:
                 raise LeaseSuperseded("turn worker lease was superseded")
-            # Reads through _current_branch_fingerprint so it covers the same
-            # window branch_fingerprint was taken over — the current thread in a
-            # Quick chat, the whole conversation everywhere else. It reads off
-            # the locked row so the thread floor it applies is the committed one.
+            # Reads through _current_branch_fingerprint at the floor the history
+            # was read at, so it covers the same window the fingerprint was taken
+            # over. Reading at the committed floor instead would abort every turn
+            # that drew its own boundary: start_new_thread moves that floor above
+            # the whole window mid-turn.
             current_branch = await _current_branch_fingerprint(
                 session,
-                conversation=durable_conversation,
+                conversation_id=conversation.id,
                 response_sequence=turn.response_sequence,
+                floor=branch.floor,
             )
-            if current_branch != branch_fingerprint:
+            if current_branch != branch.fingerprint:
                 raise RuntimeError("conversation branch changed during generation")
+            committed_floor = await history_floor(
+                session, conversation=durable_conversation
+            )
             durable_placeholder = await session.get(WebChatMessage, placeholder.id)
             stopped = durable_turn.stop_requested_at is not None
             durable_placeholder.content = output
@@ -2866,7 +2910,12 @@ async def run_chat_turn(payload: ChatTurnPayload) -> dict:
             durable_turn.subagent_attempts = counters.subagent_attempts
             durable_conversation.status = "idle"
             durable_conversation.context_state = encode_model_messages(
-                [*history, *decode_model_messages(model_delta)]
+                _cached_context_after_turn(
+                    history=history,
+                    delta=decode_model_messages(model_delta),
+                    generation_floor=branch.floor,
+                    committed_floor=committed_floor,
+                )
             )
             durable_conversation.context_revision += 1
             abandoned = await _close_streaming_documents(session, turn.id)

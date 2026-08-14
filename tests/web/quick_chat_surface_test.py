@@ -9,6 +9,8 @@ reconcile API both read, so the two cannot draw different streams.
 
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -130,6 +132,11 @@ async def _seed_exchanges(db_session, conversation, count: int) -> None:
 
 
 async def _seed_threads(db_session, conversation, starts: list[int]) -> None:
+    """Boundaries as they are really written: one row per line actually drawn.
+
+    Nothing writes a row for the thread a Quick chat opens in, so the first row
+    a conversation has is a boundary with messages above it like any other.
+    """
     for index, start in enumerate(starts):
         db_session.add(
             WebChatThread(
@@ -137,7 +144,7 @@ async def _seed_threads(db_session, conversation, starts: list[int]) -> None:
                 sequence=index + 1,
                 start_sequence=start,
                 title=f"Subject {index + 1}",
-                origin="agent" if index else "initial",
+                origin="agent",
                 reason=None,
             )
         )
@@ -396,7 +403,7 @@ class TestThreadSnapshots:
         assert [item["start_sequence"] for item in page["threads"]] == [1, 3, 5]
         assert [item["sequence"] for item in page["threads"]] == [1, 2, 3]
         assert page["threads"][0]["title"] == "Subject 1"
-        assert page["threads"][0]["origin"] == "initial"
+        assert page["threads"][0]["origin"] == "agent"
 
     @pytest.mark.asyncio
     async def test_a_standard_conversation_has_no_threads(
@@ -449,22 +456,26 @@ class TestThreadSnapshots:
 
 class TestDividerRendering:
     @pytest.mark.asyncio
-    async def test_three_threads_draw_two_dividers(self, db_session):
+    async def test_every_boundary_draws_its_own_divider(self, db_session):
+        """Including the first one drawn: it is a line like any other.
+
+        A Quick chat opens with no thread row at all, so the first row it ever
+        gets is a boundary the agent or the evaluator drew mid-conversation.
+        Skipping it would hide the line the person just watched appear.
+        """
         user = await _seed_user(db_session)
         conversation = await _seed_conversation(
             db_session, user, chat_mode="quick", title="Quick chat"
         )
         await _seed_exchanges(db_session, conversation, 3)
-        await _seed_threads(db_session, conversation, [1, 3, 5])
+        await _seed_threads(db_session, conversation, [3, 5])
         context = await _page_context(db_session, conversation)
 
         html = _render_chat_page(context)
 
         assert html.count("data-thread-break") == 2
+        assert "Subject 1" in html
         assert "Subject 2" in html
-        assert "Subject 3" in html
-        # The opening thread has nothing above it to divide.
-        assert "Subject 1" not in html
         breaks = [
             fragment.split('data-start-sequence="', 1)[1].split('"', 1)[0]
             for fragment in html.split("data-thread-break")[1:]
@@ -480,7 +491,7 @@ class TestDividerRendering:
             db_session, user, chat_mode="quick", title="Quick chat"
         )
         await _seed_exchanges(db_session, conversation, 3)
-        await _seed_threads(db_session, conversation, [1, 3, 5])
+        await _seed_threads(db_session, conversation, [3, 5])
         context = await _page_context(db_session, conversation)
         third = next(item for item in context["messages"] if item["sequence"] == 3)
 
@@ -509,6 +520,25 @@ class TestDividerRendering:
 
 class TestReconcileKeepsDividers:
     """The client sweep is keyed separately, or reconciles pile up dividers."""
+
+    @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+    def test_the_reconcile_keeps_every_boundary_the_snapshot_carries(self, tmp_path):
+        """Run the real function; a dropped boundary is a deleted divider."""
+        source = _CHAT_JS.read_text()
+        function = "function threadBreaks(" + source.split(
+            "function threadBreaks(", 1
+        )[1].split("\n  function ", 1)[0]
+        harness = (
+            Path(__file__).parent / "js" / "thread_breaks_harness.js"
+        ).read_text()
+        script = tmp_path / "thread_breaks.js"
+        script.write_text(harness.replace("// <CHAT_JS_FUNCTIONS>", function))
+
+        result = subprocess.run(
+            ["node", str(script)], capture_output=True, text=True, check=False
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
 
     def test_sync_thread_sweeps_dividers_by_their_own_keep_set(self):
         source = _CHAT_JS.read_text()

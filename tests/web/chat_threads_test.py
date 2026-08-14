@@ -39,6 +39,7 @@ from smarter_dev.web.chat.threads import current_thread
 from smarter_dev.web.chat.threads import derive_thread_title
 from smarter_dev.web.chat.threads import history_floor
 from smarter_dev.web.chat.threads import open_thread
+from smarter_dev.web.chat.threads import thread_breaks
 from smarter_dev.web.llm_pricing import ModelPriceRates
 from smarter_dev.web.models import WebChatCompaction
 from smarter_dev.web.models import WebChatConversation
@@ -416,10 +417,10 @@ class TestStructuredHistoryScoping:
         )
         turn = await _seed_current_turn(db_session, conversation, ordinal=7)
 
-        history, rows, _ = await jobs._structured_history(conversation, turn)
+        branch = await jobs._structured_history(conversation, turn)
 
-        assert [row.sequence for row in rows] == [10, 12]
-        assert _reply_texts(history) == ["reply 5", "reply 6"]
+        assert [row.sequence for row in branch.rows] == [10, 12]
+        assert _reply_texts(branch.messages) == ["reply 5", "reply 6"]
 
     async def test_a_standard_conversation_reads_everything(
         self, db_session, jobs_session
@@ -429,10 +430,10 @@ class TestStructuredHistoryScoping:
         await _seed_exchanges(db_session, conversation, count=6)
         turn = await _seed_current_turn(db_session, conversation, ordinal=7)
 
-        history, rows, _ = await jobs._structured_history(conversation, turn)
+        branch = await jobs._structured_history(conversation, turn)
 
-        assert [row.sequence for row in rows] == [2, 4, 6, 8, 10, 12]
-        assert _reply_texts(history) == [f"reply {n}" for n in range(1, 7)]
+        assert [row.sequence for row in branch.rows] == [2, 4, 6, 8, 10, 12]
+        assert _reply_texts(branch.messages) == [f"reply {n}" for n in range(1, 7)]
 
     async def test_a_compaction_below_the_boundary_is_ignored(
         self, db_session, jobs_session
@@ -476,11 +477,11 @@ class TestStructuredHistoryScoping:
         await db_session.commit()
         turn = await _seed_current_turn(db_session, conversation, ordinal=7)
 
-        history, rows, _ = await jobs._structured_history(conversation, turn)
+        branch = await jobs._structured_history(conversation, turn)
 
-        assert [row.sequence for row in rows] == [10, 12]
-        assert "stale summary" not in _reply_texts(history)
-        assert _reply_texts(history) == ["reply 5", "reply 6"]
+        assert [row.sequence for row in branch.rows] == [10, 12]
+        assert "stale summary" not in _reply_texts(branch.messages)
+        assert _reply_texts(branch.messages) == ["reply 5", "reply 6"]
 
     async def test_a_compaction_above_the_boundary_is_used(
         self, db_session, jobs_session
@@ -524,10 +525,10 @@ class TestStructuredHistoryScoping:
         await db_session.commit()
         turn = await _seed_current_turn(db_session, conversation, ordinal=7)
 
-        history, rows, _ = await jobs._structured_history(conversation, turn)
+        branch = await jobs._structured_history(conversation, turn)
 
-        assert [row.sequence for row in rows] == [10, 12]
-        assert _reply_texts(history) == ["thread summary", "reply 6"]
+        assert [row.sequence for row in branch.rows] == [10, 12]
+        assert _reply_texts(branch.messages) == ["thread summary", "reply 6"]
 
 
 class TestActiveMessagesFloor:
@@ -556,8 +557,9 @@ class TestCurrentBranchFingerprint:
     ``run_chat_turn`` refuses to write the reply when the branch it generated
     against has moved, and ``_maybe_compact`` refuses to store the fold for the
     same reason. Both compare against the fingerprint ``_structured_history``
-    returned, so both re-reads must cover the same window — the current thread
-    in a Quick chat, the whole conversation everywhere else.
+    returned, so both re-reads must cover the same window — the rows at or above
+    the floor the history was read at, which in a Quick chat is the thread the
+    turn started in and everywhere else is the whole conversation.
     """
 
     async def test_it_matches_structured_history_in_a_quick_chat(
@@ -581,15 +583,16 @@ class TestCurrentBranchFingerprint:
             reason="topic change",
         )
         turn = await _seed_current_turn(db_session, conversation, ordinal=7)
-        _, _, branch_fingerprint = await jobs._structured_history(conversation, turn)
+        branch = await jobs._structured_history(conversation, turn)
 
         current_branch = await jobs._current_branch_fingerprint(
             db_session,
-            conversation=conversation,
+            conversation_id=conversation.id,
             response_sequence=turn.response_sequence,
+            floor=branch.floor,
         )
 
-        assert current_branch == branch_fingerprint
+        assert current_branch == branch.fingerprint
 
     async def test_it_matches_structured_history_in_a_standard_conversation(
         self, db_session, jobs_session
@@ -598,15 +601,50 @@ class TestCurrentBranchFingerprint:
         conversation = await _seed_conversation(db_session, user)
         await _seed_exchanges(db_session, conversation, count=6)
         turn = await _seed_current_turn(db_session, conversation, ordinal=7)
-        _, _, branch_fingerprint = await jobs._structured_history(conversation, turn)
+        branch = await jobs._structured_history(conversation, turn)
 
         current_branch = await jobs._current_branch_fingerprint(
             db_session,
-            conversation=conversation,
+            conversation_id=conversation.id,
             response_sequence=turn.response_sequence,
+            floor=branch.floor,
         )
 
-        assert current_branch == branch_fingerprint
+        assert current_branch == branch.fingerprint
+
+    async def test_a_boundary_this_turn_drew_itself_still_matches(
+        self, db_session, jobs_session
+    ):
+        """The turn's own ``start_new_thread`` call must not cost it its reply.
+
+        The tool draws the line in front of the message being answered, so the
+        committed floor ends the turn above every reply the turn generated
+        against. The question the compare-and-swap asks is whether the branch
+        changed, not whether the floor moved, so it re-reads at the floor the
+        history was taken at.
+        """
+        user = await _seed_user(db_session)
+        conversation = await _seed_conversation(db_session, user, chat_mode="quick")
+        await _seed_exchanges(db_session, conversation, count=3)
+        turn = await _seed_current_turn(db_session, conversation, ordinal=4)
+        branch = await jobs._structured_history(conversation, turn)
+        await open_thread(
+            db_session,
+            conversation_id=conversation.id,
+            start_sequence=turn.response_sequence - 1,
+            title="A new subject",
+            origin="agent",
+            reason="pytest mocks → Postgres pricing",
+        )
+
+        current_branch = await jobs._current_branch_fingerprint(
+            db_session,
+            conversation_id=conversation.id,
+            response_sequence=turn.response_sequence,
+            floor=branch.floor,
+        )
+
+        assert current_branch == branch.fingerprint
 
     async def test_a_version_switch_still_changes_the_fingerprint(
         self, db_session, jobs_session
@@ -624,18 +662,19 @@ class TestCurrentBranchFingerprint:
             reason="topic change",
         )
         turn = await _seed_current_turn(db_session, conversation, ordinal=7)
-        _, _, branch_fingerprint = await jobs._structured_history(conversation, turn)
+        branch = await jobs._structured_history(conversation, turn)
         in_thread_reply = next(row for row in assistants if row.sequence == 10)
         in_thread_reply.version_number += 1
         await db_session.commit()
 
         current_branch = await jobs._current_branch_fingerprint(
             db_session,
-            conversation=conversation,
+            conversation_id=conversation.id,
             response_sequence=turn.response_sequence,
+            floor=branch.floor,
         )
 
-        assert current_branch != branch_fingerprint
+        assert current_branch != branch.fingerprint
 
 
 class TestMaybeCompactFloor:
@@ -662,9 +701,7 @@ class TestMaybeCompactFloor:
             reason="topic change",
         )
         turn = await _seed_current_turn(db_session, conversation, ordinal=7)
-        history, rows, branch_fingerprint = await jobs._structured_history(
-            conversation, turn
-        )
+        branch = await jobs._structured_history(conversation, turn)
         folded = [ModelResponse(parts=[TextPart(content="folded")])]
         rates = ModelPriceRates(
             input_mtok=Decimal("1"),
@@ -689,9 +726,7 @@ class TestMaybeCompactFloor:
         monkeypatch.setattr(jobs, "compact_model_history", fake_compact_model_history)
 
         compacted = await jobs._maybe_compact(
-            history=history,
-            rows=rows,
-            branch_fingerprint=branch_fingerprint,
+            branch=branch,
             conversation=conversation,
             turn=turn,
             owner_id=user.id,
@@ -710,7 +745,97 @@ class TestMaybeCompactFloor:
         )
         assert stored is not None
         assert stored.through_sequence == 12
-        assert stored.version_fingerprint == branch_fingerprint
+        assert stored.version_fingerprint == branch.fingerprint
+
+
+class TestCachedContextAfterTurn:
+    """What the conversation caches once the reply is written.
+
+    The cache is what the context meter reads and what the next turn is charged
+    for, so it has to hold the thread the conversation is now in — not the one
+    the turn started in.
+    """
+
+    def _history(self) -> list:
+        return [ModelResponse(parts=[TextPart(content="reply 1")])]
+
+    def _delta(self) -> list:
+        return [
+            ModelRequest(parts=[UserPromptPart(content="prompt 2")]),
+            ModelResponse(parts=[TextPart(content="reply 2")]),
+        ]
+
+    def test_an_unmoved_floor_keeps_the_history_in_front(self):
+        history = self._history()
+        delta = self._delta()
+
+        cached = jobs._cached_context_after_turn(
+            history=history, delta=delta, generation_floor=0, committed_floor=0
+        )
+
+        assert cached == [*history, *delta]
+
+    def test_a_boundary_drawn_mid_turn_caches_only_the_new_thread(self):
+        """The history belongs to the thread that just ended."""
+        history = self._history()
+        delta = self._delta()
+
+        cached = jobs._cached_context_after_turn(
+            history=history, delta=delta, generation_floor=0, committed_floor=3
+        )
+
+        assert cached == delta
+
+    def test_it_leaves_what_it_is_handed_alone(self):
+        history = self._history()
+        delta = self._delta()
+
+        jobs._cached_context_after_turn(
+            history=history, delta=delta, generation_floor=0, committed_floor=0
+        )
+
+        assert len(history) == 1
+        assert len(delta) == 2
+
+
+class TestThreadBreaks:
+    """Nothing writes an opening row, so every stored row is a real boundary."""
+
+    def test_the_first_boundary_drawn_still_draws_a_divider(self):
+        drawn_first = {
+            "id": "thread-1",
+            "sequence": 1,
+            "start_sequence": 5,
+            "title": "Postgres pricing",
+            "origin": "agent",
+        }
+
+        breaks = thread_breaks([drawn_first])
+
+        assert breaks == {5: drawn_first}
+
+    def test_every_boundary_is_keyed_by_the_message_it_sits_above(self):
+        threads = [
+            {
+                "id": "thread-1",
+                "sequence": 1,
+                "start_sequence": 5,
+                "title": "Postgres pricing",
+                "origin": "agent",
+            },
+            {
+                "id": "thread-2",
+                "sequence": 2,
+                "start_sequence": 11,
+                "title": "Deploying the bot",
+                "origin": "evaluator",
+            },
+        ]
+
+        breaks = thread_breaks(threads)
+
+        assert sorted(breaks) == [5, 11]
+        assert breaks[11]["title"] == "Deploying the bot"
 
 
 class TestThreadIdentity:
