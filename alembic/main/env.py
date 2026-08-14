@@ -116,6 +116,7 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "web_chat_model_changes",
     "web_chat_runtime_events",
     "web_chat_subagents",
+    "web_chat_threads",
     "web_chat_turns",
     "webhook_events_processed",
     "work_dispatches",
@@ -146,7 +147,12 @@ def include_object(obj, name, type_, reflected, compare_to):
 
 
 def do_run_migrations(connection: Connection) -> None:
-    connection.execute(text(f"SET search_path TO {SCHEMA}, public"))
+    # SET search_path takes an identifier, not a bind parameter, so it has to be
+    # interpolated. SCHEMA is the module constant "skrift" a few lines above and
+    # never comes from a request, an environment variable or the database.
+    connection.execute(
+        text(f"SET search_path TO {SCHEMA}, public")  # nosemgrep: avoid-sqlalchemy-text
+    )
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
