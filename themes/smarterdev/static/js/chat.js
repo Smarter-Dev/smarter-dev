@@ -1635,12 +1635,14 @@
   }
 
   // A Quick chat's thread boundaries, keyed by the message sequence each one is
-  // drawn above. The opening thread starts the conversation and has nothing
-  // above it to divide, which is the same rule the page template applies.
+  // drawn above. Every stored boundary gets a divider — the opening thread has
+  // no row at all — which is the same rule the page template applies. A
+  // boundary dropped here is swept out of the stream by the reconcile below,
+  // live divider included.
   function threadBreaks(snapshot) {
     var breaks = {};
     (snapshot.threads || []).forEach(function (boundary) {
-      if (boundary.sequence > 1) breaks[boundary.start_sequence] = boundary;
+      breaks[boundary.start_sequence] = boundary;
     });
     return breaks;
   }

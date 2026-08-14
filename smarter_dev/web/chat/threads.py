@@ -209,12 +209,14 @@ async def thread_snapshots(
 def thread_breaks(threads: list[dict]) -> dict[int, dict]:
     """Dividers keyed by the message sequence they are drawn above.
 
-    The opening thread is left out: it starts the conversation, so there is
-    nothing above it to divide. chat.js applies the same rule to the snapshot.
+    Every stored row is a line someone drew mid-conversation, so every one of
+    them gets a divider. A Quick chat opens in a thread that has no row at all —
+    nothing writes one, because the opening thread has nothing above it to
+    divide — which means the first row a conversation ever gets is an ordinary
+    boundary with messages above it. Skipping it would delete the divider the
+    person just watched appear. chat.js applies the same rule to the snapshot.
     """
-    return {
-        thread["start_sequence"]: thread for thread in threads if thread["sequence"] > 1
-    }
+    return {thread["start_sequence"]: thread for thread in threads}
 
 
 def derive_thread_title(content: str) -> str:

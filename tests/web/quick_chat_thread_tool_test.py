@@ -602,16 +602,38 @@ class TestTheNextTurnStartsAtTheLine:
         await _thread_tool(agent)(None, "prompt 2 was about something else")
 
         next_turn = await _seed_running_turn(db_session, conversation, ordinal=4)
-        history, rows, _ = await jobs._structured_history(conversation, next_turn)
+        branch = await jobs._structured_history(conversation, next_turn)
 
-        assert [row.sequence for row in rows] == [6]
+        assert [row.sequence for row in branch.rows] == [6]
         assert [
             part.content
-            for message in history
+            for message in branch.messages
             if isinstance(message, ModelResponse)
             for part in message.parts
             if isinstance(part, TextPart)
         ] == ["reply 3"]
+
+
+class TestTheTurnThatDrewTheLineStillAnswers:
+    """The boundary is drawn mid-turn, so the reply write outlives it.
+
+    Only a full worker run reaches the compare-and-swap that guards that write,
+    so the wiring is read as source: it re-reads the branch at the floor the
+    history was taken at, and it caches the context the committed floor allows.
+    Read at the committed floor instead, the turn would fingerprint an empty
+    window, throw the finished reply away, and answer again on no history.
+    """
+
+    def test_the_reply_write_reads_the_branch_at_the_generation_floor(self):
+        body = _JOBS_SOURCE.split("async def run_chat_turn(", 1)[1]
+
+        assert "floor=branch.floor," in body
+
+    def test_the_cached_context_is_floored_by_the_committed_boundary(self):
+        body = _JOBS_SOURCE.split("async def run_chat_turn(", 1)[1]
+
+        assert "_cached_context_after_turn(" in body
+        assert "committed_floor=committed_floor," in body
 
 
 class TestLiveDivider:
