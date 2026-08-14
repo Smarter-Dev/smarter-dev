@@ -154,7 +154,12 @@ async def _seed_exchanges(
 
 
 async def _seed_running_turn(
-    db_session, conversation: WebChatConversation, *, ordinal: int
+    db_session,
+    conversation: WebChatConversation,
+    *,
+    ordinal: int,
+    kind: str = "message",
+    regenerates_turn_id=None,
 ) -> WebChatTurn:
     turn = WebChatTurn(
         conversation_id=conversation.id,
@@ -164,6 +169,8 @@ async def _seed_running_turn(
         response_sequence=ordinal * 2,
         model_key=MODEL_KEY,
         status="running",
+        kind=kind,
+        regenerates_turn_id=regenerates_turn_id,
     )
     db_session.add(turn)
     await db_session.commit()
@@ -342,6 +349,46 @@ class TestToolAvailability:
 
         agent = await _root_agent(
             monkeypatch, conversation=conversation, turn=turn, history=[]
+        )
+
+        assert "start_new_thread" not in _tool_names(agent)
+
+    async def test_a_regenerate_turn_cannot_draw_a_line(
+        self, db_session, jobs_session, monkeypatch
+    ):
+        """A regeneration replays an answer; it must never move a boundary.
+
+        The evaluator already refuses a regenerate turn, and the tool has to
+        obey the same rule or the agent could redraw history on a re-run.
+        """
+        user = await _seed_user(db_session)
+        conversation = await _seed_conversation(db_session, user)
+        turn = await _seed_running_turn(
+            db_session, conversation, ordinal=2, kind="regenerate"
+        )
+
+        agent = await _root_agent(
+            monkeypatch, conversation=conversation, turn=turn, history=_SOME_HISTORY
+        )
+
+        assert "start_new_thread" not in _tool_names(agent)
+        assert all(
+            QUICK_THREAD_GUIDANCE not in prompt for prompt in agent._system_prompts
+        )
+
+    async def test_a_turn_that_points_at_the_one_it_replaces_cannot_either(
+        self, db_session, jobs_session, monkeypatch
+    ):
+        """``regenerates_turn_id`` set is the same case wearing the other flag."""
+        user = await _seed_user(db_session)
+        conversation = await _seed_conversation(db_session, user)
+        replaced = (await _seed_exchanges(db_session, conversation, count=1))[0]
+        turn = await _seed_running_turn(
+            db_session, conversation, ordinal=2, regenerates_turn_id=replaced.id
+        )
+
+        agent = await _root_agent(
+            monkeypatch, conversation=conversation, turn=turn, history=_SOME_HISTORY
         )
 
         assert "start_new_thread" not in _tool_names(agent)

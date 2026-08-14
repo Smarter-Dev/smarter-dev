@@ -146,7 +146,7 @@ async def ensure_quick_conversation(
 ) -> WebChatConversation:
     """Get-or-create the caller's Quick chat.
 
-    ``/chat/quick`` is a fixed URL rather than a create button, so every visit
+    ``/chat`` is a fixed URL rather than a create button, so every visit
     runs this and all but the first are a plain select. Two tabs opening the URL
     at the same moment both reach the insert; the partial unique index fails the
     loser, which then adopts the winner's row rather than raising at a person
@@ -388,7 +388,7 @@ async def _web_chat_page(
     conversation: WebChatConversation,
     permissions,
 ) -> Template:
-    """The one web-chat page render, shared by ``/chat/{id}`` and ``/chat/quick``.
+    """The one web-chat page render, shared by ``/chat`` and ``/chat/{id}``.
 
     A Quick chat is an ordinary conversation in every respect this page cares
     about — same composer, same selects, same documents dock — so it renders
@@ -422,8 +422,15 @@ async def _web_chat_page(
     )
 
 
-@get("/chat")
-async def chat_index(request: Request, db_session: AsyncSession) -> Template:
+@get("/chat/new")
+async def chat_new(request: Request, db_session: AsyncSession) -> Template:
+    """The empty shell an ordinary multi-turn conversation starts from.
+
+    This is where ``/chat`` used to land, and it is load-bearing beyond
+    convenience: ``intelligence_mode`` is fixed when a conversation is created
+    and immutable afterwards, so the select on this page is the only place it
+    can ever be chosen.
+    """
     user_id = require_user_id(request)
     user = await db_session.get(User, user_id)
     permissions = await get_user_permissions(db_session, user_id)
@@ -451,13 +458,13 @@ async def chat_index(request: Request, db_session: AsyncSession) -> Template:
     )
 
 
-@get("/chat/quick")
+@get("/chat")
 async def chat_quick(request: Request, db_session: AsyncSession) -> Template:
-    """The Quick chat: one perpetual conversation per person at a fixed URL.
+    """The Quick chat: one perpetual conversation per person, and the default view.
 
-    Registered ahead of ``/chat/{conversation_id:uuid}``. The two cannot collide
-    anyway — ``quick`` is not a UUID — but the order makes the intent obvious to
-    the next reader instead of resting on a parameter type.
+    A ``GET`` that can write a row is a deliberate exception here: it is a
+    get-or-create for the caller's own workspace, it is idempotent, and the
+    route is behind auth and marked ``noindex,nofollow``.
     """
     user_id = require_user_id(request)
     user = await db_session.get(User, user_id)
@@ -473,6 +480,12 @@ async def chat_quick(request: Request, db_session: AsyncSession) -> Template:
         conversation=conversation,
         permissions=permissions,
     )
+
+
+@get("/chat/quick")
+async def legacy_quick_chat_redirect() -> Redirect:
+    """The Quick chat's first URL, kept alive for anything that bookmarked it."""
+    return Redirect(path="/chat", status_code=308)
 
 
 @get("/chat/{conversation_id:uuid}")

@@ -1419,7 +1419,17 @@ async def _build_root_agent(
     # the tool exists exactly when the current thread already holds an exchange.
     # A brand-new Quick chat and the first message after a boundary both arrive
     # with empty history, and neither offers it.
-    quick_thread = conversation.chat_mode == QUICK_CHAT_MODE and bool(history)
+    #
+    # A regeneration is refused outright: it replays an answer to a message that
+    # was already placed, so letting it draw a line would move a boundary after
+    # the fact. ``_maybe_open_evaluator_thread`` refuses the same turns, and the
+    # two rules have to agree.
+    is_regeneration = turn.kind == "regenerate" or turn.regenerates_turn_id is not None
+    quick_thread = (
+        conversation.chat_mode == QUICK_CHAT_MODE
+        and bool(history)
+        and not is_regeneration
+    )
     agent = Agent(
         metered,
         output_type=str,

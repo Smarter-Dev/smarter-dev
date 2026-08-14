@@ -7,9 +7,9 @@
   },
   {
     "id": "quick-chat-surface",
-    "title": "The Quick chat surface: route, rail entry, and thread dividers",
+    "title": "The Quick chat surface: it becomes /chat, with thread dividers",
     "path": ".build/plan/02-quick-chat-surface.md",
-    "summary": "Add GET /chat/quick, which gets-or-creates one perpetual Quick chat per person and pins it above the rail's recency groups, and render thread boundaries as dividers in all three places the stream is built — the Jinja loop, controller._chat_context, and chat.js syncThread. Nothing draws a boundary yet; dividers are tested against directly-inserted thread rows."
+    "summary": "Make GET /chat the person's perpetual Quick chat (get-or-create) and move today's empty new-chat state to GET /chat/new where \"+ New chat\" now points; pin the Quick chat above the rail's recency groups, refuse to delete or archive it, and render thread boundaries as dividers in all three places the stream is built — the Jinja loop, controller._chat_context, and chat.js syncThread. Nothing draws a boundary yet; dividers are tested against directly-inserted thread rows."
   },
   {
     "id": "agent-thread-break-tool",

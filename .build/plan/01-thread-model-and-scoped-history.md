@@ -26,18 +26,21 @@ tool on a clear topic break (stage 03), or the person came back after a long gap
 and a cheap evaluator model judged the new message to be a new subject
 (stage 04). This stage builds the boundary itself and makes it mean something.
 
-## Assumptions
+## Settled with the reviewer
 
-These are my reading of the goal; they are on the review thread and may come back
-corrected. If a plan-review note contradicts one, the note wins.
+These were open questions during planning and have since been answered. They are
+decisions now, not guesses:
 
-- **A Quick chat is one perpetual conversation per person**, not a per-message
-  toggle and not a new row in the history rail per topic. Hence a flag on the
-  conversation plus threads inside it, rather than a new conversation type.
+- **A Quick chat is one perpetual conversation per person** — a single thread in
+  the sidebar, pinned to the top, and the default chat view. Hence a flag on the
+  conversation plus threads inside it, rather than a new conversation type or a
+  rail row per topic.
+- **A thread boundary changes what the agent reads, not what the person sees.**
+  In the reviewer's words: the user can still see them all, the agent only sees
+  what was sent since the start of the current thread. Older messages, uploads
+  and written documents all stay visible and downloadable.
 - **Threads never nest and never reopen.** They are a straight sequence: at any
   moment exactly one is current, and it is the last one started.
-- **A thread boundary resets what the model reads, not what the person sees.**
-  Older messages, uploads and written documents all stay visible and downloadable.
 
 ## Context you need before starting
 
