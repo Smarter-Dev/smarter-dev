@@ -91,7 +91,13 @@ from smarter_dev.web.chat.spend import WIND_DOWN_WARNING
 from smarter_dev.web.chat.spend import append_wind_down
 from smarter_dev.web.chat.subagents import child_reasoning
 from smarter_dev.web.chat.subagents import effective_system_prompt
+from smarter_dev.web.chat.threads import QUICK_CHAT_MODE
+from smarter_dev.web.chat.threads import THREAD_ALREADY_STARTED_RESULT
+from smarter_dev.web.chat.threads import THREAD_STARTED_RESULT
+from smarter_dev.web.chat.threads import derive_thread_title
 from smarter_dev.web.chat.threads import history_floor
+from smarter_dev.web.chat.threads import open_thread
+from smarter_dev.web.chat.threads import validated_thread_break_reason
 from smarter_dev.web.chat.toolsets import ExecutionCounters
 from smarter_dev.web.chat.toolsets import run_code as execute_code
 from smarter_dev.web.chat.toolsets import web_read_optional
@@ -110,6 +116,7 @@ from smarter_dev.web.models import WebChatDocument
 from smarter_dev.web.models import WebChatMessage
 from smarter_dev.web.models import WebChatRuntimeEvent
 from smarter_dev.web.models import WebChatSubagent
+from smarter_dev.web.models import WebChatThread
 from smarter_dev.web.models import WebChatTurn
 from smarter_dev.web.models import WorkDispatch
 
@@ -1164,6 +1171,57 @@ async def _tool_state(
     return decision
 
 
+async def _open_agent_thread(
+    *,
+    owner_id: UUID,
+    conversation: WebChatConversation,
+    turn: WebChatTurn,
+    reason: str,
+    user_message_content: str,
+) -> None:
+    """Draw the boundary in front of the message this turn is answering.
+
+    The agent can only recognise a topic break after it has been handed the
+    previous thread, so the line goes above the message it is reading rather
+    than below it: this turn finishes on the context it already paid for, and
+    every turn after it starts clean.
+
+    ``open_thread`` returns None when a boundary already starts there, which
+    means a retry of this same turn drew it before the worker died. The line is
+    where it should be either way, so both paths announce the same boundary —
+    the live notification is ephemeral, so the first attempt's may never have
+    reached the browser.
+    """
+    start_sequence = turn.response_sequence - 1
+    async with get_db_session_context() as session:
+        thread = await open_thread(
+            session,
+            conversation_id=conversation.id,
+            start_sequence=start_sequence,
+            title=derive_thread_title(user_message_content),
+            origin="agent",
+            reason=reason,
+        )
+        if thread is None:
+            thread = await session.scalar(
+                select(WebChatThread).where(
+                    WebChatThread.conversation_id == conversation.id,
+                    WebChatThread.start_sequence == start_sequence,
+                )
+            )
+        if thread is None:
+            raise RuntimeError("the Chat thread boundary vanished as it was drawn")
+        payload = {
+            "thread_id": str(thread.id),
+            "start_sequence": thread.start_sequence,
+            "title": thread.title,
+        }
+    await _event(turn.id, "chat_thread_started", payload)
+    await _notify_safe(
+        owner_id, "chat_thread_started", conversation.id, turn.id, **payload
+    )
+
+
 async def _build_root_agent(
     *,
     model,
@@ -1178,6 +1236,7 @@ async def _build_root_agent(
     tier: str,
     settings: ChatSettings,
     draft_message_id: UUID,
+    user_message_content: str,
 ):
     from pydantic_ai import Agent
     from pydantic_ai import PartDeltaEvent
@@ -1203,10 +1262,17 @@ async def _build_root_agent(
     # both the instruction and the tool disappear once anyone has named it, so a
     # later turn cannot be talked into renaming the owner's chat.
     needs_title = not conversation.title_is_custom
+    # The line can only be drawn where there is something to break away from, so
+    # the tool exists exactly when the current thread already holds an exchange.
+    # A brand-new Quick chat and the first message after a boundary both arrive
+    # with empty history, and neither offers it.
+    quick_thread = conversation.chat_mode == QUICK_CHAT_MODE and bool(history)
     agent = Agent(
         metered,
         output_type=str,
-        system_prompt=effective_system_prompt(child=False, needs_title=needs_title),
+        system_prompt=effective_system_prompt(
+            child=False, needs_title=needs_title, quick_thread=quick_thread
+        ),
         model_settings=model_settings_for(model, reasoning),
     )
     counter_lock = asyncio.Lock()
@@ -2074,6 +2140,57 @@ async def _build_root_agent(
         )
         return _format_tool_result(result, after)
 
+    # Drawing a line is a structural change to the conversation, not research,
+    # so like naming it is deliberately outside the shared tool budget: a turn
+    # that has spent its allowance on searches is exactly the turn that most
+    # needs the next one to start clean. Once per turn is the whole cap.
+    thread_break_drawn = False
+
+    async def start_new_thread(ctx: RunContext, reason: str) -> str:
+        """Start a new thread because the person has clearly changed the subject.
+
+        Pass a short reason naming the old subject and the new one.
+        """
+        nonlocal thread_break_drawn
+        # A raised error here becomes a retry prompt, which can cost the person
+        # their reply over a line that is already drawn. Say so and move on.
+        if thread_break_drawn:
+            return THREAD_ALREADY_STARTED_RESULT
+        try:
+            stated_reason = validated_thread_break_reason(reason)
+        except ValueError as exc:
+            result = f"error: {exc}"
+            await _record_tool_result(turn.id, "start_new_thread", result)
+            await _done_thinking("start_new_thread")
+            return result
+        before = await _tool_state(
+            owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
+        )
+        if before.hard_cutoff:
+            return USAGE_LIMIT_RESULT
+        await _publish_activity(
+            owner_id=owner_id,
+            conversation_id=conversation.id,
+            turn_id=turn.id,
+            tool="start_new_thread",
+            status="Starting a new thread",
+        )
+        await _open_agent_thread(
+            owner_id=owner_id,
+            conversation=conversation,
+            turn=turn,
+            reason=stated_reason,
+            user_message_content=user_message_content,
+        )
+        thread_break_drawn = True
+        result = THREAD_STARTED_RESULT
+        await _record_tool_result(turn.id, "start_new_thread", result)
+        await _done_thinking("start_new_thread")
+        after = await _tool_state(
+            owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
+        )
+        return _format_tool_result(result, after)
+
     agent.tool(search_web, name="web_search")
     agent.tool(read_web, name="web_read")
     agent.tool(run_code_tool, name="run_code")
@@ -2083,6 +2200,8 @@ async def _build_root_agent(
     agent.tool(list_documents)
     if needs_title:
         agent.tool(set_chat_title)
+    if quick_thread:
+        agent.tool(start_new_thread)
 
     if policy.subagents_enabled:
 
@@ -2561,6 +2680,10 @@ async def run_chat_turn(payload: ChatTurnPayload) -> dict:
                         tier=tier,
                         settings=settings,
                         draft_message_id=placeholder.id,
+                        # The thread tool titles the boundary from what the
+                        # person actually wrote, so it needs the message without
+                        # the upload manifest `prompt` may carry.
+                        user_message_content=user_message.content,
                     )
             except HardSpendCutoff:
                 await _mark_cutoff(turn.id)
