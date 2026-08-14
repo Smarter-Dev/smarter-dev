@@ -26,23 +26,27 @@ This completes the feature.
   `smarter_dev/web/chat/threads.py` (`current_thread`, `history_floor`,
   `open_thread`, `derive_thread_title`).
 - `_structured_history` in `jobs.py` is floored to the current thread.
-- `/chat/quick` and the rail entry; dividers render in the template, in
+- `GET /chat` is the Quick chat (the old empty state moved to `/chat/new`), it is
+  pinned in the rail, and dividers render in the template, in
   `chat.js syncThread`, and live from a `chat_thread_started` notification.
 - The agent's `start_new_thread` tool and its `QUICK_THREAD_GUIDANCE` prompt
   section.
 
-## Assumptions
+## Settled with the reviewer
 
-On the review thread, may come back corrected:
-
-- **Fifteen minutes is an administrator setting defaulting to 15**, not a
-  constant, because it will want tuning against real behaviour.
-- **The evaluator fails open.** If the model errors, times out, or is
+- **The idle threshold is tunable, defaulting to 15 minutes** — an administrator
+  setting, not a constant, because it will want tuning against real behaviour.
+- **The evaluator must not block.** If the model errors, times out, or is
   unconfigured, the message is treated as a continuation and the turn proceeds.
-  A classifier must never be able to block someone's reply.
-- **The evaluator is DeepSeek V4 Flash by default but administrator-changeable**,
-  with an optional fallback, matching how every other auxiliary model on the Chat
-  settings page works.
+  A classifier must never be able to cost someone their reply.
+
+A design choice of mine, not the reviewer's, and open to challenge:
+
+- **The evaluator model is administrator-changeable** with an optional fallback,
+  defaulting to DeepSeek V4 Flash, matching how every other auxiliary model on the
+  Chat settings page works. The reviewer specified DeepSeek V4 Flash and said the
+  person chatting does not choose it; making it an admin setting rather than a
+  hardcoded constant is my reading of how this codebase treats such models.
 
 ## Context you need before starting
 

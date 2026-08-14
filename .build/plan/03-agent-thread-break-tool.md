@@ -19,23 +19,29 @@ has something in it to break away from.
   `history_floor`, `open_thread`, `derive_thread_title`.
 - `_structured_history` in `smarter_dev/web/chat/jobs.py` is floored to the
   current thread, compaction lookup included.
-- `/chat/quick` exists, gets-or-creates one Quick chat per person, and the rail
-  pins it.
+- `GET /chat` gets-or-creates one perpetual Quick chat per person and is the
+  default chat view; the old empty state moved to `/chat/new`; the rail pins the
+  Quick chat above the recency groups.
 - Thread dividers render from a `threads` list, in the template and in
   `chat.js` `syncThread`.
 
-## Assumptions
+## Settled with the reviewer
 
-On the review thread, may come back corrected:
+- **The agent answers the current message normally, and it is the *next* turn
+  whose history starts at the boundary.** The reviewer's wording: answer, then on
+  the next turn the chat history only goes back to the user's last prompt. So the
+  boundary lands in front of the message being answered — that message and its
+  reply open the new thread — and the turn that drew the line finishes on the
+  context it had already been handed. The agent can only recognise a topic break
+  after seeing the previous thread, so those tokens are already spent;
+  re-running the turn on a clean context would double the cost of exactly the
+  turn we are trying to make cheap.
 
-- **The boundary lands in front of the message being answered, and the agent
-  finishes the turn on the context it already has.** The agent can only recognise
-  a topic break *after* it has been handed the previous thread, so those tokens
-  are already spent; re-running the turn on a clean context would double the cost
-  of exactly the turn we are trying to make cheap. Every turn after this one
-  starts clean, which is where the saving is.
+A design choice of mine, not the reviewer's, and open to challenge:
+
 - **"Only on a clear topic break" is enforced structurally, not just asked for.**
-  The tool is absent when there is nothing to break from, it demands a written
+  The tool is absent when there is nothing to break from (and on regenerate
+  turns — a regeneration must never move a boundary), it demands a written
   reason, and it refuses a second call in the same turn.
 
 ## Context you need before starting

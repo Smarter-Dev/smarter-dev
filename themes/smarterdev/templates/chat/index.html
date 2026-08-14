@@ -11,7 +11,7 @@
 {% set archived = archived_conversations|default([]) %}
 {% set current_is_archived = conversation and mode == 'chat' and conversation.archived_at %}
 {# The owner's one perpetual Quick chat. Absent in Resources mode and until the
-   first visit to /chat/quick creates it. #}
+   first visit to /chat creates it. #}
 {% set quick_pin = quick_conversation|default(none) %}
 {# A history row is a link plus the menu that acts on it. Only Chat rows carry
    the menu: a Resources answer has no title of its own to change and no private
@@ -66,7 +66,7 @@
 
   <aside class="chat-sidebar" id="chat-history-rail" aria-label="Chat history">
     <div class="chat-sidebar-head">
-      <a href="{{ '/resources' if mode == 'resources' else '/chat' }}" class="p-btn is-accent chat-new">+ New {{ 'question' if mode == 'resources' else 'chat' }}</a>
+      <a href="{{ '/resources' if mode == 'resources' else '/chat/new' }}" class="p-btn is-accent chat-new">+ New {{ 'question' if mode == 'resources' else 'chat' }}</a>
     </div>
     <nav class="chat-history">
       {% if quick_pin %}
@@ -74,7 +74,7 @@
          chat is a fixed surface, so renaming, archiving or deleting it would
          only leave its owner with no Quick chat and no obvious way back. #}
       <div class="chat-history-row is-pinned" data-quick-chat-row>
-        <a href="/chat/quick" {% if conversation and mode == 'chat' and quick_pin.id == conversation.id %}aria-current="page"{% endif %} data-history-title>{{ quick_pin.title or 'Quick chat' }}</a>
+        <a href="/chat" {% if conversation and mode == 'chat' and quick_pin.id == conversation.id %}aria-current="page"{% endif %} data-history-title>{{ quick_pin.title or 'Quick chat' }}</a>
       </div>
       {% endif %}
       {% for group in groups %}
@@ -144,7 +144,7 @@
         <div class="chat-empty">
           <h2>What are you building?</h2>
           <p>Chats stay private to your account and are kept after you close the tab.</p>
-          {% if mode == 'chat' %}<p class="chat-empty-quick">Or drop a thought into your <a href="/chat/quick">Quick chat</a> — one running conversation that splits itself by subject.</p>{% endif %}
+          {% if mode == 'chat' %}<p class="chat-empty-quick">Or drop a thought into your <a href="/chat">Quick chat</a> — one running conversation that splits itself by subject.</p>{% endif %}
           <div class="chat-start-settings">
             <p>Start in
               <select class="p-select" data-chat-new-intelligence aria-label="Intelligence mode">

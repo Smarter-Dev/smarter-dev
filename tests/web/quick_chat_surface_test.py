@@ -1,8 +1,9 @@
 """The Quick chat front door: its route, its rail entry, and its dividers.
 
-Three things have to hold together here. ``/chat/quick`` is a fixed URL that
+Three things have to hold together here. ``/chat`` is the Quick chat itself: it
 gets-or-creates one perpetual conversation per person, so visiting it twice must
-not leave two. The rail pins that conversation instead of filing it by recency.
+not leave two, and the empty "start a new chat" page it used to show now lives
+at ``/chat/new``. The rail pins the Quick chat instead of filing it by recency.
 And the thread dividers are rendered from a payload the page template and the
 reconcile API both read, so the two cannot draw different streams.
 """
@@ -47,6 +48,8 @@ _CHAT_CSS = _PROJECT_ROOT / "themes" / "smarterdev" / "static" / "css" / "pages"
 _CHAT_JS = _PROJECT_ROOT / "themes" / "smarterdev" / "static" / "js" / "chat.js"
 
 _QUICK_HANDLER = "smarter_dev.web.chat.controller:chat_quick"
+_NEW_HANDLER = "smarter_dev.web.chat.controller:chat_new"
+_LEGACY_QUICK_HANDLER = "smarter_dev.web.chat.controller:legacy_quick_chat_redirect"
 _UUID_HANDLER = "smarter_dev.web.chat.controller:chat_conversation"
 
 
@@ -271,23 +274,27 @@ class TestQuickChatRoute:
         assert failure.value.status_code == 403
         assert await _quick_chat_count(db_session, user.id) == 0
 
-    def test_the_route_is_registered_in_both_app_configs(self):
+    def test_the_routes_are_registered_in_both_app_configs(self):
         for name in ("app.yaml", "app.development.yaml"):
             handlers = yaml.safe_load((_PROJECT_ROOT / name).read_text())["controllers"]
             assert _QUICK_HANDLER in handlers, name
+            assert _NEW_HANDLER in handlers, name
+            assert _LEGACY_QUICK_HANDLER in handlers, name
             # Registered ahead of the UUID route, as the stage requires.
             assert handlers.index(_QUICK_HANDLER) < handlers.index(_UUID_HANDLER), name
+            assert handlers.index(_NEW_HANDLER) < handlers.index(_UUID_HANDLER), name
 
-    def test_the_quick_segment_does_not_shadow_the_uuid_route(self):
-        """``/chat/quick`` reaches the new handler, not the UUID one."""
+    def test_the_named_segments_do_not_shadow_the_uuid_route(self):
+        """``/chat/new`` and the legacy ``/chat/quick`` beat the UUID route."""
 
         async def provide_session() -> None:
             return None
 
         app = Litestar(
             route_handlers=[
-                chat_controller.chat_index,
                 chat_controller.chat_quick,
+                chat_controller.chat_new,
+                chat_controller.legacy_quick_chat_redirect,
                 chat_controller.chat_conversation,
             ],
             dependencies={"db_session": Provide(provide_session)},
@@ -305,10 +312,71 @@ class TestQuickChatRoute:
                 root_node=router.root_route_map_node,
             )[1]
 
-        assert resolve("/chat/quick").handler_name.endswith("chat_quick")
+        assert resolve("/chat").handler_name.endswith("chat_quick")
+        assert resolve("/chat/new").handler_name.endswith("chat_new")
+        assert resolve("/chat/quick").handler_name.endswith(
+            "legacy_quick_chat_redirect"
+        )
         assert resolve("/chat/" + str(uuid4())).handler_name.endswith(
             "chat_conversation"
         )
+
+    @pytest.mark.asyncio
+    async def test_the_old_quick_url_redirects_to_the_default_view(self):
+        """Bookmarks from before the swap keep working."""
+        response = await chat_controller.legacy_quick_chat_redirect.fn()
+
+        assert response.status_code == 308
+        assert response.url == "/chat"
+
+
+class TestNewChatRoute:
+    @pytest.mark.asyncio
+    async def test_it_renders_the_empty_state(self, db_session, monkeypatch):
+        """The regression guard for the route split: intelligence is chosen here.
+
+        ``intelligence_mode`` is immutable once a conversation exists, so this
+        page is the only place it can ever be picked.
+        """
+        user = await _seed_user(db_session)
+        _entitle(monkeypatch, chat_controller)
+
+        response = await chat_controller.chat_new.fn(_request(user.id), db_session)
+
+        assert response.context["conversation"] is None
+        assert response.context["messages"] == []
+        assert response.context["mode"] == "chat"
+        html = _render_chat_page(
+            {**response.context, "model_reasoning_levels": [], "catalog_models": []}
+        )
+        assert "data-chat-new-intelligence" in html
+        assert 'class="chat-empty"' in html
+        assert await _quick_chat_count(db_session, user.id) == 0
+
+    @pytest.mark.asyncio
+    async def test_a_user_without_chat_is_refused(self, db_session, monkeypatch):
+        user = await _seed_user(db_session)
+        _entitle(monkeypatch, chat_controller, roles=("member",))
+
+        with pytest.raises(HTTPException) as failure:
+            await chat_controller.chat_new.fn(_request(user.id), db_session)
+
+        assert failure.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_a_conversation_uuid_still_reaches_the_conversation_page(
+        self, db_session, monkeypatch
+    ):
+        user = await _seed_user(db_session)
+        _entitle(monkeypatch, chat_controller)
+        conversation = await _seed_conversation(db_session, user)
+
+        response = await chat_controller.chat_conversation.fn(
+            conversation.id, _request(user.id), db_session
+        )
+
+        assert response.context["conversation"].id == conversation.id
+        assert response.context["quick_chat"] is False
 
 
 class TestRailPinning:
@@ -354,7 +422,7 @@ class TestRailPinning:
         html = _render_chat_page(context)
 
         pinned = html.split("data-quick-chat-row", 1)[1].split("</div>", 1)[0]
-        assert 'href="/chat/quick"' in pinned
+        assert 'href="/chat"' in pinned
         assert 'aria-current="page"' in pinned
         assert "data-history-menu" not in pinned
 
@@ -374,7 +442,28 @@ class TestRailPinning:
 
         html = _render_chat_page(context)
 
-        assert 'href="/chat/quick"' in html.split('class="chat-empty"', 1)[1]
+        assert 'href="/chat"' in html.split('class="chat-empty"', 1)[1]
+        assert "/chat/quick" not in html
+
+    @pytest.mark.asyncio
+    async def test_the_new_chat_button_points_at_the_empty_state(self, db_session):
+        """``/chat`` is the Quick chat now, so "+ New chat" has to say so."""
+        user = await _seed_user(db_session)
+        context = {
+            "conversation": None,
+            "mode": "chat",
+            "messages": [],
+            "versions": {},
+            "settings": await ensure_settings(db_session),
+            "catalog_models": [],
+            "ultra_chat": False,
+            **await chat_controller._rail_context(db_session, user.id),
+        }
+
+        html = _render_chat_page(context)
+
+        head = html.split('class="chat-sidebar-head"', 1)[1].split("</div>", 1)[0]
+        assert 'href="/chat/new"' in head
 
 
 class TestThreadSnapshots:
