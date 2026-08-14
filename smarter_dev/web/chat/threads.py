@@ -126,6 +126,46 @@ async def open_thread(
     return thread
 
 
+async def thread_snapshots(
+    session: AsyncSession, *, conversation_id: UUID
+) -> list[dict]:
+    """Every boundary in the conversation, oldest first, as plain JSON data.
+
+    The page template and the reconcile API both draw dividers from this one
+    list. Building it twice is how the server render and the client render come
+    to disagree, and a disagreement there silently deletes dividers on the next
+    reconnect.
+    """
+    rows = (
+        await session.execute(
+            select(WebChatThread)
+            .where(WebChatThread.conversation_id == conversation_id)
+            .order_by(WebChatThread.sequence)
+        )
+    ).scalars()
+    return [
+        {
+            "id": str(row.id),
+            "sequence": row.sequence,
+            "start_sequence": row.start_sequence,
+            "title": row.title,
+            "origin": row.origin,
+        }
+        for row in rows
+    ]
+
+
+def thread_breaks(threads: list[dict]) -> dict[int, dict]:
+    """Dividers keyed by the message sequence they are drawn above.
+
+    The opening thread is left out: it starts the conversation, so there is
+    nothing above it to divide. chat.js applies the same rule to the snapshot.
+    """
+    return {
+        thread["start_sequence"]: thread for thread in threads if thread["sequence"] > 1
+    }
+
+
 def derive_thread_title(content: str) -> str:
     """The divider's label: the opening of the message that started the thread.
 

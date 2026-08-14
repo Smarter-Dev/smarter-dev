@@ -1634,6 +1634,35 @@
     });
   }
 
+  // A Quick chat's thread boundaries, keyed by the message sequence each one is
+  // drawn above. The opening thread starts the conversation and has nothing
+  // above it to divide, which is the same rule the page template applies.
+  function threadBreaks(snapshot) {
+    var breaks = {};
+    (snapshot.threads || []).forEach(function (boundary) {
+      if (boundary.sequence > 1) breaks[boundary.start_sequence] = boundary;
+    });
+    return breaks;
+  }
+
+  function threadBreakElement(boundary, existing) {
+    var divider = existing;
+    if (!divider) {
+      divider = document.createElement('div');
+      divider.className = 'chat-thread-break';
+      divider.dataset.threadBreak = '';
+      divider.setAttribute('role', 'separator');
+      var label = document.createElement('span');
+      label.className = 'chat-thread-break-label';
+      divider.appendChild(label);
+    }
+    divider.dataset.threadId = boundary.id;
+    divider.dataset.startSequence = boundary.start_sequence;
+    divider.querySelector('.chat-thread-break-label').textContent =
+      boundary.title || 'New thread';
+    return divider;
+  }
+
   // Rebuild the thread from the durable snapshot: active versions only, rendered
   // markdown, regenerate/version controls, and no stale placeholders. This is the
   // client-side equivalent of the server-rendered page after a reload.
@@ -1651,10 +1680,21 @@
     var empty = thread.querySelector('.chat-empty');
     if (empty && messages.length) empty.remove();
     var kept = [];
+    var keptBreaks = [];
     var adopted = [];
+    var breaks = threadBreaks(snapshot);
     messages.filter(function (message) {
       return message.role !== 'assistant' || message.is_active;
     }).forEach(function (message) {
+      var boundary = breaks[message.sequence];
+      if (boundary) {
+        var divider = threadBreakElement(
+          boundary,
+          thread.querySelector('[data-thread-break][data-thread-id="' + boundary.id + '"]')
+        );
+        thread.insertBefore(divider, statusEl || null);
+        keptBreaks.push(divider);
+      }
       var article = thread.querySelector('[data-message-id="' + message.id + '"]') || adoptArticle(message, adopted);
       if (article && !article.dataset.messageId) adopted.push(article);
       article = messageArticle(message, article);
@@ -1672,6 +1712,12 @@
     });
     Array.prototype.forEach.call(thread.querySelectorAll('.chat-message'), function (article) {
       if (kept.indexOf(article) === -1) article.remove();
+    });
+    // Dividers need their own sweep: a `.chat-thread-break` is not a
+    // `.chat-message`, so the sweep above would leave a boundary that has moved
+    // or been withdrawn sitting in the stream for the rest of the session.
+    Array.prototype.forEach.call(thread.querySelectorAll('[data-thread-break]'), function (divider) {
+      if (keptBreaks.indexOf(divider) === -1) divider.remove();
     });
   }
 

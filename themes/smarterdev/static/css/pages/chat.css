@@ -109,6 +109,14 @@
   align-items: center;
 }
 
+/* The Quick chat sits above the recency bands with a rule under it, so the
+   groups below read as a separate list rather than as more of the same. */
+.chat-history-row.is-pinned {
+  margin-bottom: .35rem;
+  padding-bottom: .35rem;
+  border-bottom: 1px solid var(--p-line);
+}
+
 /* Block, not flex: `text-overflow: ellipsis` needs a block container, and a
    long title must truncate rather than run past the rail. */
 .chat-history a {
@@ -415,6 +423,39 @@
 
 .chat-message + .chat-message { margin-top: 2rem }
 
+/* Where a Quick chat's subject changed and the agent's context restarted. A
+   rule with the subject sitting on it, in the same small-caps dim register as
+   the rail's recency headings — it marks a boundary, it does not announce a
+   section, so it must not read louder than the messages either side of it. */
+.chat-thread-break {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  margin: 2.5rem 0 2rem;
+  color: var(--p-dim);
+}
+.chat-thread-break::before,
+.chat-thread-break::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: var(--p-line);
+}
+.chat-thread-break-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--heading);
+  font-weight: 400;
+  font-size: .5rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The divider replaces the gap between the two messages it separates. */
+.chat-thread-break + .chat-message { margin-top: 0 }
+
 /* The reader's own turn is a raised card, pushed right: it is a quotation of
    what they said, not part of the answer. The surface is `.p-card` from the
    product system; only the placement is specific to a thread. */
@@ -563,6 +604,7 @@
   letter-spacing: .04em;
   line-height: 1.4;
 }
+.chat-empty-quick { color: var(--p-dim) }
 .chat-empty > p {
   margin-top: 1rem;
   font-size: .9rem;

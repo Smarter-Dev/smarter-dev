@@ -17,6 +17,7 @@ from skrift.auth.session_keys import SESSION_USER_ID
 from skrift.db.models.user import User
 from skrift.markdown import render_markdown
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -25,12 +26,16 @@ from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.shared.model_catalog import model_vendor
 from smarter_dev.web.agent_api import resources_quota_state
 from smarter_dev.web.chat.api import require_user_id
+from smarter_dev.web.chat.api import resolved_conversation_settings
 from smarter_dev.web.chat.api import turn_meta
 from smarter_dev.web.chat.documents import attachment_kind
 from smarter_dev.web.chat.documents import conversation_artifacts
 from smarter_dev.web.chat.entitlements import has_chat
 from smarter_dev.web.chat.entitlements import has_ultra_chat
 from smarter_dev.web.chat.settings import ensure_settings
+from smarter_dev.web.chat.threads import QUICK_CHAT_MODE
+from smarter_dev.web.chat.threads import thread_breaks
+from smarter_dev.web.chat.threads import thread_snapshots
 from smarter_dev.web.models import AgentConversation
 from smarter_dev.web.models import ChatCatalogModel
 from smarter_dev.web.models import ResourceAgentRun
@@ -40,6 +45,10 @@ from smarter_dev.web.models import WebChatDocument
 from smarter_dev.web.models import WebChatMessage
 from smarter_dev.web.models import WebChatTurn
 from smarter_dev.web.sdanswer import enrich_answer
+
+# The Quick chat's fixed name. It is a surface rather than a subject, so this is
+# a label, not a title anything is allowed to rewrite.
+QUICK_CHAT_TITLE = "Quick chat"
 
 
 def group_conversations(conversations: list, now: datetime) -> list[dict]:
@@ -75,6 +84,10 @@ async def _rail_context(session: AsyncSession, user_id: UUID) -> dict:
     Archiving is filing, not deleting, so an archived conversation keeps its URL
     and stays reachable — it just moves out of the way into a shut drawer at the
     foot of the rail instead of competing with what the owner is working on.
+
+    The Quick chat is deliberately not one of the grouped rows. It is a fixed
+    surface rather than a filed conversation, so it is returned on its own and
+    pinned above the recency bands instead of drifting down them.
     """
     conversations = list(
         (
@@ -83,6 +96,7 @@ async def _rail_context(session: AsyncSession, user_id: UUID) -> dict:
                 .where(
                     WebChatConversation.owner_user_id == user_id,
                     WebChatConversation.archived_at.is_(None),
+                    WebChatConversation.chat_mode != QUICK_CHAT_MODE,
                 )
                 .order_by(WebChatConversation.updated_at.desc())
                 .limit(50)
@@ -106,7 +120,68 @@ async def _rail_context(session: AsyncSession, user_id: UUID) -> dict:
         "conversations": conversations,
         "conversation_groups": group_conversations(conversations, datetime.now(UTC)),
         "archived_conversations": archived,
+        "quick_conversation": await _live_quick_conversation(session, user_id),
     }
+
+
+async def _live_quick_conversation(
+    session: AsyncSession, user_id: UUID
+) -> WebChatConversation | None:
+    """The owner's one unarchived Quick chat, or None before they open one.
+
+    ``uq_web_chat_one_live_quick`` is what makes "one" true, so this can select
+    without an ordering and without worrying about picking the wrong row.
+    """
+    return await session.scalar(
+        select(WebChatConversation).where(
+            WebChatConversation.owner_user_id == user_id,
+            WebChatConversation.chat_mode == QUICK_CHAT_MODE,
+            WebChatConversation.archived_at.is_(None),
+        )
+    )
+
+
+async def ensure_quick_conversation(
+    session: AsyncSession, user_id: UUID, permissions
+) -> WebChatConversation:
+    """Get-or-create the caller's Quick chat.
+
+    ``/chat/quick`` is a fixed URL rather than a create button, so every visit
+    runs this and all but the first are a plain select. Two tabs opening the URL
+    at the same moment both reach the insert; the partial unique index fails the
+    loser, which then adopts the winner's row rather than raising at a person
+    who did nothing wrong.
+    """
+    existing = await _live_quick_conversation(session, user_id)
+    if existing is not None:
+        return existing
+    intelligence_mode, model_key, reasoning_level = (
+        await resolved_conversation_settings(session, permissions=permissions)
+    )
+    conversation = WebChatConversation(
+        owner_user_id=user_id,
+        intelligence_mode=intelligence_mode,
+        selected_model_key=model_key,
+        reasoning_level=reasoning_level,
+        # Named up front and marked custom: the Quick chat is a place, not a
+        # subject, so nothing — agent or evaluator — should rename it.
+        title=QUICK_CHAT_TITLE,
+        title_is_custom=True,
+        chat_mode=QUICK_CHAT_MODE,
+        status="idle",
+        next_sequence=1,
+    )
+    session.add(conversation)
+    try:
+        await session.commit()
+    except IntegrityError:
+        await session.rollback()
+        winner = await _live_quick_conversation(session, user_id)
+        if winner is None:
+            # Not the race, then. Something else rejected the row; say so.
+            raise
+        return winner
+    return conversation
 
 
 async def _catalog_context(session: AsyncSession, settings) -> dict:
@@ -290,13 +365,61 @@ async def _chat_context(
         )
     ]
     artifacts.sort(key=lambda item: (item["created_at"] is None, item["created_at"]))
+    # The same list the reconcile API ships, plus a lookup the message loop can
+    # index by sequence — scanning the thread list inside the Jinja loop would
+    # be quadratic and would put the "thread 1 draws nothing" rule in a second
+    # place.
+    threads = await thread_snapshots(session, conversation_id=conversation.id)
     return {
         "messages": rendered,
         "versions": versions,
         "active_turn": active_turn,
         "documents": documents,
         "artifacts": artifacts,
+        "threads": threads,
+        "thread_breaks": thread_breaks(threads),
     }
+
+
+async def _web_chat_page(
+    session: AsyncSession,
+    *,
+    user_id: UUID,
+    conversation: WebChatConversation,
+    permissions,
+) -> Template:
+    """The one web-chat page render, shared by ``/chat/{id}`` and ``/chat/quick``.
+
+    A Quick chat is an ordinary conversation in every respect this page cares
+    about — same composer, same selects, same documents dock — so it renders
+    through exactly the same context rather than a parallel one that could drift.
+    """
+    context = await _chat_context(session, conversation)
+    settings = await ensure_settings(session)
+    selected_model = get_model(conversation.selected_model_key)
+    return Template(
+        "chat/index.html",
+        context={
+            "conversation": conversation,
+            "mode": "chat",
+            "quick_chat": conversation.chat_mode == QUICK_CHAT_MODE,
+            **await _rail_context(session, user_id),
+            "model": selected_model,
+            "model_reasoning_levels": [
+                level.value for level in selected_model.reasoning_levels
+            ]
+            if selected_model
+            else [],
+            "settings": settings,
+            "ultra_chat": has_ultra_chat(permissions),
+            "seo_meta": {
+                "robots": "noindex,nofollow",
+                "description": conversation.title or "Smarter Dev Chat",
+            },
+            **await _catalog_context(session, settings),
+            **context,
+        },
+    )
 
 
 @get("/chat")
@@ -328,6 +451,30 @@ async def chat_index(request: Request, db_session: AsyncSession) -> Template:
     )
 
 
+@get("/chat/quick")
+async def chat_quick(request: Request, db_session: AsyncSession) -> Template:
+    """The Quick chat: one perpetual conversation per person at a fixed URL.
+
+    Registered ahead of ``/chat/{conversation_id:uuid}``. The two cannot collide
+    anyway — ``quick`` is not a UUID — but the order makes the intent obvious to
+    the next reader instead of resting on a parameter type.
+    """
+    user_id = require_user_id(request)
+    user = await db_session.get(User, user_id)
+    permissions = await get_user_permissions(db_session, user_id)
+    if user is None or not user.is_active or not has_chat(permissions):
+        raise HTTPException(
+            status_code=403, detail="Chat is not enabled for your account."
+        )
+    conversation = await ensure_quick_conversation(db_session, user_id, permissions)
+    return await _web_chat_page(
+        db_session,
+        user_id=user_id,
+        conversation=conversation,
+        permissions=permissions,
+    )
+
+
 @get("/chat/{conversation_id:uuid}")
 async def chat_conversation(
     conversation_id: UUID, request: Request, db_session: AsyncSession
@@ -345,30 +492,8 @@ async def chat_conversation(
             or not has_chat(permissions)
         ):
             raise NotFoundException()
-        context = await _chat_context(db_session, web)
-        settings = await ensure_settings(db_session)
-        selected_model = get_model(web.selected_model_key)
-        return Template(
-            "chat/index.html",
-            context={
-                "conversation": web,
-                "mode": "chat",
-                **await _rail_context(db_session, user_id),
-                "model": selected_model,
-                "model_reasoning_levels": [
-                    level.value for level in selected_model.reasoning_levels
-                ]
-                if selected_model
-                else [],
-                "settings": settings,
-                "ultra_chat": has_ultra_chat(permissions),
-                "seo_meta": {
-                    "robots": "noindex,nofollow",
-                    "description": web.title or "Smarter Dev Chat",
-                },
-                **await _catalog_context(db_session, settings),
-                **context,
-            },
+        return await _web_chat_page(
+            db_session, user_id=user_id, conversation=web, permissions=permissions
         )
 
     # Resources remain link-shareable and retain their quota mechanics, but use
