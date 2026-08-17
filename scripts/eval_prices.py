@@ -47,6 +47,20 @@ CUSTOM_PRICES: dict[str, dict[str, tuple[str, str, str, str | None, str | None]]
         # $2.00 in / $12.00 out / $0.20 cached-read / $2.50 cache-write.
         "gpt-5.6-terra": ("GPT 5.6 Terra", "2", "12", "0.2", "2.5"),
     },
+    "openrouter": {
+        # DeepSeek V4 Flash on the deepseek-origin route the bot pins (see
+        # OpenRouterRouting in model_catalog / llm_pricing).
+        # $0.0867 in / $0.1733 out / $0.0173 cached-read.
+        "deepseek/deepseek-v4-flash": (
+            "DeepSeek V4 Flash", "0.0867", "0.1733", "0.0173", None,
+        ),
+        # Kimi K3 at the OpenCode Zen list rate ($3/$15/$0.30, see
+        # llm_pricing._OPENCODE_ZEN_PRICES). Registered under openrouter for
+        # both the Zen route (genai-prices has no zen provider; the eval maps
+        # Zen models here) and the moonshotai OpenRouter fallback.
+        "kimi-k3": ("Kimi K3", "3", "15", "0.3", None),
+        "moonshotai/kimi-k3": ("Kimi K3 (Moonshot)", "3", "15", "0.3", None),
+    },
 }
 
 
