@@ -121,11 +121,15 @@ def build_agent_system_prompt(
 
 
 def build_kimi_agent(
-    model: Model | str, *, system_prompt: str, extra_tools: list = ()
+    model: Model | str,
+    *,
+    system_prompt: str,
+    extra_tools: list = (),
+    deps_type: type = AgentDeps,
 ) -> Agent:
     agent = Agent(
         model,
-        deps_type=AgentDeps,
+        deps_type=deps_type,
         output_type=str,
         system_prompt=system_prompt,
     )
