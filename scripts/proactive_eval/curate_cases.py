@@ -140,10 +140,14 @@ def _load_scored_responses(
         for line in fixture_path.read_text(encoding="utf-8").splitlines()
     ]
     labels = json.loads(
-        (data_dir / f"{fixture_stem}.labels.json").read_text(encoding="utf-8")
+        (fixture_path.parent / f"{fixture_stem}.labels.json").read_text(
+            encoding="utf-8"
+        )
     )["labels"]
     meta = json.loads(
-        (data_dir / f"{fixture_stem}.meta.json").read_text(encoding="utf-8")
+        (fixture_path.parent / f"{fixture_stem}.meta.json").read_text(
+            encoding="utf-8"
+        )
     )
     cache_dir = data_dir / ".score_cache" / run_path.stem
     scored = []
