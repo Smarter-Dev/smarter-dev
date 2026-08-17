@@ -32,6 +32,27 @@ from scripts.proactive_eval.twopass.watcher import (  # noqa: E402
 WATCHER_CONTEXT_SIZE = 30
 
 
+def bot_directed_message_ids(
+    new_messages: list, env: ChannelEnvironment, bot_user_id: str
+) -> list[str]:
+    """Messages that mention the bot or reply to one of its messages.
+
+    These wake the agent deterministically — no LLM judgment involved.
+    """
+    directed = []
+    for message in new_messages:
+        if bot_user_id in message.mention_user_ids:
+            directed.append(message.id)
+            continue
+        if message.reply_to_id is not None:
+            target = env.lookup(message.reply_to_id)
+            if target is not None and (
+                target.is_bot or target.author_id == bot_user_id
+            ):
+                directed.append(message.id)
+    return directed
+
+
 def build_wake_brief(decision: WatcherDecision, env: ChannelEnvironment) -> str:
     snippet_messages = [
         message
@@ -76,13 +97,33 @@ class TwoPassAdapter:
             visible=[*context.history, *context.new_messages],
             bot_user_id=context.bot_user_id,
         )
-        decision, watcher_usage = await self.watcher.decide(
-            instructions=self.instruction_store.current(),
-            context_transcript=env.render(context.history[-self.context_size :]),
-            new_transcript=env.render(context.new_messages),
+        forced_ids = bot_directed_message_ids(
+            context.new_messages, env, context.bot_user_id
         )
-        _merge_usage(usage_by_model, self.watcher_model_id, watcher_usage)
-        details: dict = {"watcher": decision.model_dump()}
+        if forced_ids:
+            decision = WatcherDecision(
+                wake=True,
+                reason="bot mentioned or replied to (deterministic wake)",
+                relevant_message_ids=forced_ids,
+                summary=(
+                    "A new message mentions the bot or replies to one of its "
+                    "messages."
+                ),
+            )
+            details: dict = {
+                "watcher": {**decision.model_dump(), "deterministic": True}
+            }
+        else:
+            decision, watcher_usage = await self.watcher.decide(
+                instructions=self.instruction_store.current(),
+                context_transcript=env.render(
+                    context.history[-self.context_size :]
+                ),
+                new_transcript=env.render(context.new_messages),
+                bot_user_id=context.bot_user_id,
+            )
+            _merge_usage(usage_by_model, self.watcher_model_id, watcher_usage)
+            details = {"watcher": decision.model_dump()}
 
         actions = WakeActions()
         if decision.wake:

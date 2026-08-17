@@ -39,9 +39,17 @@ one-paragraph summary of what is going on."""
 
 
 def build_watcher_prompt(
-    *, instructions: str, context_transcript: str, new_transcript: str
+    *,
+    instructions: str,
+    context_transcript: str,
+    new_transcript: str,
+    bot_user_id: str,
 ) -> str:
     return f"""\
+The bot's Discord user id is {bot_user_id}: `<@{bot_user_id}>` inside a \
+message is a mention of the bot, and transcript lines marked [BOT] are the \
+bot's own messages.
+
 WAKE CRITERIA:
 {instructions}
 
@@ -88,12 +96,14 @@ class WatcherRunner:
         instructions: str,
         context_transcript: str,
         new_transcript: str,
+        bot_user_id: str,
     ) -> tuple[WatcherDecision, dict]:
         result = await self._agent.run(
             build_watcher_prompt(
                 instructions=instructions,
                 context_transcript=context_transcript,
                 new_transcript=new_transcript,
+                bot_user_id=bot_user_id,
             )
         )
         return result.output, usage_dict(result.usage())

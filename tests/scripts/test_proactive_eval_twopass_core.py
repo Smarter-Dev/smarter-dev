@@ -79,6 +79,7 @@ def test_watcher_prompt_carries_instructions_and_blocks():
         instructions="WAKE ON X",
         context_transcript="ctx lines",
         new_transcript="new lines",
+        bot_user_id="B0",
     )
     assert "WAKE ON X" in prompt
     assert prompt.index("ctx lines") < prompt.index("new lines")
@@ -97,7 +98,8 @@ async def test_watcher_runner_returns_decision_and_usage():
         prompted_output=False,
     )
     decision, usage = await runner.decide(
-        instructions="i", context_transcript="c", new_transcript="n"
+        instructions="i", context_transcript="c", new_transcript="n",
+        bot_user_id="B1",
     )
     assert decision.wake is True
     assert decision.relevant_message_ids == ["2"]
@@ -244,6 +246,71 @@ def _adapter(decision: watcher.WatcherDecision, runner=None) -> adapter.TwoPassA
         watcher_model_id="watcher-model",
         agent_model_id="agent-model",
     )
+
+
+def _mention_message(message_id: str, offset: int, mention: str) -> FixtureMessage:
+    base = _message(message_id, offset)
+    return FixtureMessage(
+        **{**base.__dict__, "mention_user_ids": (mention,)}
+    )
+
+
+def test_bot_directed_ids_detect_mentions_and_replies_to_bot():
+    bot_message = FixtureMessage(
+        **{**_message("5", 5).__dict__, "is_bot": True, "author_id": "B1"}
+    )
+    reply_to_bot = FixtureMessage(
+        **{**_message("6", 6).__dict__, "reply_to_id": "5"}
+    )
+    mention = _mention_message("7", 7, "B1")
+    other_mention = _mention_message("8", 8, "999")
+    plain = _message("9", 9)
+    env = environment.ChannelEnvironment(
+        visible=[bot_message, reply_to_bot, mention, other_mention, plain],
+        bot_user_id="B1",
+    )
+    assert adapter.bot_directed_message_ids(
+        [reply_to_bot, mention, other_mention, plain], env, "B1"
+    ) == ["6", "7"]
+
+
+class _ExplodingWatcher:
+    async def decide(self, **kwargs):  # pragma: no cover - must not run
+        raise AssertionError("watcher must not be consulted on a mention")
+
+
+async def test_adapter_wakes_deterministically_on_bot_mention():
+    messages = [_message("1", 0), _mention_message("2", 5, "B1")]
+    runner = _StubAgentRunner()
+    two_pass = adapter.TwoPassAdapter(
+        watcher=_ExplodingWatcher(),
+        agent_runner=runner,
+        skim=None,
+        instruction_store=environment.InstructionStore(seed="SEED"),
+        watcher_model_id="watcher-model",
+        agent_model_id="agent-model",
+    )
+    result = await two_pass.activate(
+        ActivationContext(
+            channel_name="c", guild_name="g", bot_user_id="B1",
+            activated_at=T + timedelta(seconds=10),
+            history=[messages[0]], new_messages=[messages[1]],
+        )
+    )
+    assert result.details["watcher"]["deterministic"] is True
+    assert result.details["watcher"]["relevant_message_ids"] == ["2"]
+    assert "[id=2]" in runner.briefs[0]
+    assert len(result.responses) == 1  # the stub agent replied
+    # No watcher model usage — only the agent spent tokens.
+    assert set(result.usage_by_model) == {"agent-model"}
+
+
+def test_watcher_prompt_names_the_bot_user_id():
+    prompt = watcher.build_watcher_prompt(
+        instructions="i", context_transcript="c", new_transcript="n",
+        bot_user_id="B1",
+    )
+    assert "<@B1>" in prompt
 
 
 async def test_adapter_stays_silent_when_watcher_declines():
