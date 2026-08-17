@@ -93,12 +93,26 @@ class ProposedResponse:
 
 
 @dataclass(frozen=True)
+class ProposedReaction:
+    message_id: str
+    emoji: str
+
+
+@dataclass(frozen=True)
 class ActivationResult:
     responses: list[ProposedResponse]
     input_tokens: int
     output_tokens: int
     cache_read_tokens: int
     model_id: str
+    # Reactions are recorded in the run record but not scored.
+    reactions: tuple[ProposedReaction, ...] = ()
+    # Multi-model adapters (two-pass) break usage down per model id here;
+    # cost accounting prices each entry at its own list price.
+    usage_by_model: dict[str, dict] | None = None
+    # Adapter-specific extras (watcher decision, instruction updates, …),
+    # recorded verbatim on the activation. Must be JSON-serializable.
+    details: dict | None = None
 
 
 class ProactiveBotAdapter(Protocol):
@@ -163,15 +177,19 @@ async def run_simulation(
     history_size: int,
     activation_cost: Callable[[ActivationResult], float],
     fixture_name: str = "",
+    windows: list[tuple[datetime, datetime]] | None = None,
 ) -> dict:
     """Replay the fixture day through the adapter; return the run record.
 
     Sequential by design: responses injected in window N are part of the
-    timeline that later windows draw their history from.
+    timeline that later windows draw their history from. ``windows``
+    overrides the fixed-cadence schedule with a precomputed one (e.g. the
+    two-pass burst windows).
     """
-    windows = activation_windows(
-        messages[0].timestamp, messages[-1].timestamp, cadence_seconds
-    )
+    if windows is None:
+        windows = activation_windows(
+            messages[0].timestamp, messages[-1].timestamp, cadence_seconds
+        )
     started_at = datetime.now(UTC)
     timeline: list[FixtureMessage] = []
     message_cursor = 0
@@ -207,24 +225,32 @@ async def run_simulation(
         )
         result = await adapter.activate(context)
         cost_usd = float(activation_cost(result))
-        activations.append(
-            {
-                "index": index,
-                "window_start": window_start.isoformat(),
-                "window_end": window_end.isoformat(),
-                "skipped": False,
-                "new_message_count": len(new_messages),
-                "history_count": len(history),
-                "responses": [
-                    {"reply_to_id": r.reply_to_id, "content": r.content}
-                    for r in result.responses
-                ],
-                "input_tokens": result.input_tokens,
-                "output_tokens": result.output_tokens,
-                "cache_read_tokens": result.cache_read_tokens,
-                "cost_usd": cost_usd,
-            }
-        )
+        activation_record = {
+            "index": index,
+            "window_start": window_start.isoformat(),
+            "window_end": window_end.isoformat(),
+            "skipped": False,
+            "new_message_count": len(new_messages),
+            "history_count": len(history),
+            "responses": [
+                {"reply_to_id": r.reply_to_id, "content": r.content}
+                for r in result.responses
+            ],
+            "input_tokens": result.input_tokens,
+            "output_tokens": result.output_tokens,
+            "cache_read_tokens": result.cache_read_tokens,
+            "cost_usd": cost_usd,
+        }
+        if result.reactions:
+            activation_record["reactions"] = [
+                {"message_id": r.message_id, "emoji": r.emoji}
+                for r in result.reactions
+            ]
+        if result.usage_by_model is not None:
+            activation_record["usage_by_model"] = result.usage_by_model
+        if result.details is not None:
+            activation_record["details"] = result.details
+        activations.append(activation_record)
         timeline.extend(new_messages)
         for response_index, response in enumerate(result.responses):
             timeline.append(

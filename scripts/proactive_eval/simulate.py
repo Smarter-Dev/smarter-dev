@@ -65,33 +65,55 @@ def _provider_id_for(model_id: str) -> str:
             return _PROVIDER_IDS.get(model.provider, model.provider.name.lower())
     if model_id.startswith(("gpt-", "openai/")):
         return "openai"
+    if "/" in model_id:
+        return "openrouter"
     return "google"
 
 
-def model_cost_calculator(model_id: str) -> Callable[[ActivationResult], float]:
-    """USD cost of one activation's usage at the model's list price.
+def _usage_cost(
+    model_id: str, input_tokens: int, output_tokens: int, cache_read_tokens: int
+) -> float:
+    """List-price USD for one model's usage; zero usage skips the lookup."""
+    if not (input_tokens or output_tokens or cache_read_tokens):
+        return 0.0
+    priced = calc_price(
+        Usage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+        ),
+        model_ref=model_id,
+        provider_id=_provider_id_for(model_id),
+    )
+    return float(priced.total_price)
 
-    Zero-usage results (silent adapter, skipped work) cost nothing and skip
-    the price lookup entirely, so unpriceable model ids only fail once real
-    tokens are spent.
+
+def model_cost_calculator(model_id: str) -> Callable[[ActivationResult], float]:
+    """USD cost of one activation at list price.
+
+    Multi-model results (``usage_by_model`` set) price each entry at its own
+    model's list price; otherwise the whole usage is priced on ``model_id``.
+    Zero-usage entries cost nothing and skip the price lookup entirely, so
+    unpriceable model ids only fail once real tokens are spent.
     """
-    provider_id = _provider_id_for(model_id)
 
     def activation_cost(result: ActivationResult) -> float:
-        if not (
-            result.input_tokens or result.output_tokens or result.cache_read_tokens
-        ):
-            return 0.0
-        priced = calc_price(
-            Usage(
-                input_tokens=result.input_tokens,
-                output_tokens=result.output_tokens,
-                cache_read_tokens=result.cache_read_tokens,
-            ),
-            model_ref=model_id,
-            provider_id=provider_id,
+        if result.usage_by_model is not None:
+            return sum(
+                _usage_cost(
+                    usage_model_id,
+                    usage.get("input_tokens", 0),
+                    usage.get("output_tokens", 0),
+                    usage.get("cache_read_tokens", 0),
+                )
+                for usage_model_id, usage in result.usage_by_model.items()
+            )
+        return _usage_cost(
+            model_id,
+            result.input_tokens,
+            result.output_tokens,
+            result.cache_read_tokens,
         )
-        return float(priced.total_price)
 
     return activation_cost
 
