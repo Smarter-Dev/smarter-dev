@@ -542,6 +542,9 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         from smarter_dev.bot.services.discord_voice import VoiceService
         from smarter_dev.bot.services.forum_agent_service import ForumAgentService
         from smarter_dev.bot.services.model_override_service import ModelOverrideService
+        from smarter_dev.bot.services.proactive_settings_service import (
+            ProactiveSettingsService,
+        )
         from smarter_dev.bot.services.quests_service import QuestService
         from smarter_dev.bot.services.repeating_message_service import (
             RepeatingMessageService,
@@ -567,6 +570,9 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             api_client, cache_manager, settings, media_client=media_client
         )
         model_override_service = ModelOverrideService(api_client, cache_manager)
+        proactive_settings_service = ProactiveSettingsService(
+            api_client, cache_manager
+        )
         guild_chat_memory_service = GuildChatMemoryService(api_client, cache_manager)
         latex_renderer = LatexRenderer(media_client)
 
@@ -626,6 +632,10 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         logger.info("Initializing model override service...")
         await model_override_service.initialize()
         logger.info("✓ Model override service initialized")
+
+        logger.info("Initializing proactive settings service...")
+        await proactive_settings_service.initialize()
+        logger.info("✓ Proactive settings service initialized")
 
         logger.info("Initializing guild chat memory service...")
         await guild_chat_memory_service.initialize()
@@ -728,6 +738,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         bot.d["chat_memory_redis"] = chat_memory_redis
         bot.d["voice_service"] = voice_service
         bot.d["model_override_service"] = model_override_service
+        bot.d["proactive_settings_service"] = proactive_settings_service
         bot.d["guild_chat_memory_service"] = guild_chat_memory_service
         bot.d["latex_renderer"] = latex_renderer
         bot.d["media_client"] = media_client
@@ -744,6 +755,7 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             "advent_of_code_service": advent_of_code_service,
             "voice_service": voice_service,
             "model_override_service": model_override_service,
+            "proactive_settings_service": proactive_settings_service,
             "guild_chat_memory_service": guild_chat_memory_service,
             "latex_renderer": latex_renderer,
             "media_client": media_client,

@@ -6033,3 +6033,37 @@ class ChannelModelOverride(Base):
     # (the primary ``model_key`` is the answering WRITER, ``drafter_model`` the
     # cheap context-gathering worker); NULL keeps today's single-agent behaviour.
     drafter_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class ProactiveChannelSettings(Base):
+    """Per-channel switch and watcher state for the proactive chat bot.
+
+    Set via the admin ``/proactive`` slash command. ``enabled`` gates the
+    whole two-pass loop for the channel (default off everywhere).
+    ``watch_addendum`` is the agent-written extension of the watcher's wake
+    criteria — the agent's only cross-wake continuity channel, persisted so
+    it survives bot restarts. Exactly one row per channel; the slash
+    command's PUT is an upsert.
+    """
+
+    __tablename__ = "proactive_channel_settings"
+    __table_args__ = (
+        UniqueConstraint(
+            "channel_id", name="uq_proactive_channel_settings_channel_id"
+        ),
+        Index("ix_proactive_channel_settings_guild_id", "guild_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    channel_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    # Agent-written extension of the watcher wake criteria; empty means the
+    # seed policy alone.
+    watch_addendum: Mapped[str] = mapped_column(
+        Text, nullable=False, default="", server_default=""
+    )

@@ -983,3 +983,32 @@ class ChatMemoryNoteSaveResult(BaseAPIModel):
     @field_serializer("created_at")
     def _serialize_created_at(self, value: datetime | None) -> str | None:
         return None if value is None else value.isoformat()
+
+
+class ProactiveChannelSettingsWrite(BaseAPIModel):
+    """Request body for the per-channel proactive-bot settings (upsert)."""
+
+    enabled: bool = Field(
+        description="Whether the two-pass proactive bot watches this channel"
+    )
+    watch_addendum: str = Field(
+        "",
+        max_length=4000,
+        description="Agent-written extension of the watcher wake criteria; "
+        "empty means the seed policy alone",
+    )
+
+
+class ProactiveChannelSettingsRead(BaseAPIModel):
+    """Response model for a channel's proactive-bot settings."""
+
+    guild_id: str = Field(description="Discord guild ID")
+    channel_id: str = Field(description="Discord channel ID")
+    enabled: bool = Field(
+        description="Whether the two-pass proactive bot watches this channel"
+    )
+    watch_addendum: str = Field(
+        description="Agent-written extension of the watcher wake criteria"
+    )
+    created_at: datetime = Field(description="Row creation time")
+    updated_at: datetime = Field(description="Row last-update time")
