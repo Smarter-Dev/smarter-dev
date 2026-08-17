@@ -345,6 +345,68 @@ def test_label_fixture_reuses_cached_chunks(tmp_path):
     assert len(third_judge.calls) == 3
 
 
+class _FlakyJudge(_StubJudge):
+    """Omits an id on the first N calls, answers correctly afterwards.
+
+    Mirrors the live failure: claude-sonnet-5 skipped one ordinary message
+    out of a 60-message chunk.
+    """
+
+    def __init__(self, bad_calls: int):
+        super().__init__()
+        self.bad_calls = bad_calls
+
+    def __call__(self, prompt: str, model: str) -> label_day.JudgeReply:
+        reply = super().__call__(prompt, model)
+        if len(self.calls) <= self.bad_calls:
+            payload = json.loads(
+                labels._FENCED_JSON_PATTERN.search(reply.result_text).group(1)
+            )
+            payload.popitem()
+            reply = label_day.judge_reply_from_raw(
+                {"result": _fenced(payload), "total_cost_usd": 0.01}
+            )
+        return reply
+
+
+def test_label_fixture_retries_a_chunk_whose_reply_drops_an_id(tmp_path):
+    records = [_record(str(n)) for n in range(1, 4)]
+    fixture_path = _write_fixture(tmp_path, records)
+    judge = _FlakyJudge(bad_calls=1)
+
+    doc, _ = label_day.label_fixture(
+        fixture_path,
+        judge=judge,
+        judge_model="claude-sonnet-5",
+        chunk_size=10,
+        context_size=2,
+        force=False,
+    )
+
+    assert len(judge.calls) == 2  # first reply dropped an id, retried once
+    assert set(doc["labels"]) == {"1", "2", "3"}
+
+
+def test_label_fixture_fails_and_leaves_no_cache_when_judge_stays_invalid(tmp_path):
+    records = [_record(str(n)) for n in range(1, 4)]
+    fixture_path = _write_fixture(tmp_path, records)
+    judge = _FlakyJudge(bad_calls=99)
+
+    with pytest.raises(ValueError, match="chunk 0"):
+        label_day.label_fixture(
+            fixture_path,
+            judge=judge,
+            judge_model="claude-sonnet-5",
+            chunk_size=10,
+            context_size=2,
+            force=False,
+        )
+
+    assert len(judge.calls) == 1 + label_day.JUDGE_PARSE_RETRIES
+    cache_dir = tmp_path / ".label_cache" / "G1-💬general-2026-07-20"
+    assert list(cache_dir.iterdir()) == []  # bad replies are never cached
+
+
 def test_label_fixture_fails_fast_on_invalid_cached_chunk(tmp_path):
     records = [_record("1")]
     fixture_path = _write_fixture(tmp_path, records)

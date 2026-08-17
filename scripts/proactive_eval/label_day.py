@@ -41,6 +41,9 @@ from scripts.proactive_eval.labels import (  # noqa: E402
 )
 
 JUDGE_TIMEOUT_SECONDS = 300
+# The judge occasionally drops one id from a chunk; re-ask the whole chunk
+# this many times before failing the run.
+JUDGE_PARSE_RETRIES = 2
 DEFAULT_JUDGE_MODEL = "claude-sonnet-5"
 DEFAULT_CHUNK_SIZE = 60
 DEFAULT_CONTEXT_SIZE = 20
@@ -121,30 +124,53 @@ def label_fixture(
     total_cost_usd = 0.0
     for chunk in chunks:
         cache_path = cache_dir / f"chunk-{chunk.index:02d}.json"
+        expected_ids = [target["id"] for target in chunk.targets]
         if cache_path.exists():
             reply = judge_reply_from_raw(
                 json.loads(cache_path.read_text(encoding="utf-8"))
             )
+            total_cost_usd += reply.cost_usd
+            try:
+                parsed = parse_judge_output(reply.result_text, expected_ids)
+            except ValueError as error:
+                raise ValueError(
+                    f"chunk {chunk.index} (cache, {cache_path}): {error} "
+                    f"— delete the file or rerun with --force"
+                ) from error
             source = "cache"
         else:
             prompt = render_chunk_prompt(
                 chunk, tags=tags, bot_user_id=meta["bot_user_id"]
             )
-            reply = judge(prompt, judge_model)
+            parsed = None
+            parse_error: ValueError | None = None
+            for attempt in range(1 + JUDGE_PARSE_RETRIES):
+                reply = judge(prompt, judge_model)
+                total_cost_usd += reply.cost_usd
+                try:
+                    parsed = parse_judge_output(reply.result_text, expected_ids)
+                except ValueError as error:
+                    parse_error = error
+                    print(
+                        f"chunk {chunk.index}: invalid judge reply on attempt "
+                        f"{attempt + 1}: {error}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    continue
+                break
+            if parsed is None:
+                raise ValueError(
+                    f"chunk {chunk.index} (judge, after "
+                    f"{1 + JUDGE_PARSE_RETRIES} attempts): {parse_error}"
+                ) from parse_error
+            # Only validated replies are cached, so a rerun never resumes
+            # from a reply the parser already rejected.
             cache_path.write_text(
                 json.dumps(reply.raw, ensure_ascii=False), encoding="utf-8"
             )
             source = "judge"
-        expected_ids = [target["id"] for target in chunk.targets]
-        try:
-            chunk_outputs.append(
-                parse_judge_output(reply.result_text, expected_ids)
-            )
-        except ValueError as error:
-            raise ValueError(
-                f"chunk {chunk.index} ({source}, {cache_path}): {error}"
-            ) from error
-        total_cost_usd += reply.cost_usd
+        chunk_outputs.append(parsed)
         print(
             f"chunk {chunk.index + 1}/{len(chunks)}: "
             f"{len(expected_ids)} messages labeled from {source}",
