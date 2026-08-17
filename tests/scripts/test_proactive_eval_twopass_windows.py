@@ -10,6 +10,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(REPO_ROOT / "scripts"))  # flat eval_prices import
 
 from scripts.proactive_eval import simulation  # noqa: E402
 from scripts.proactive_eval.twopass import windows  # noqa: E402
@@ -177,3 +178,38 @@ def test_provider_fallback_treats_slug_ids_as_openrouter():
     from scripts.proactive_eval import simulate
 
     assert simulate._provider_id_for("moonshotai/kimi-k3") == "openrouter"
+
+
+def test_twopass_models_are_priceable_at_list_price():
+    import eval_prices
+
+    eval_prices.install()
+    from scripts.proactive_eval import simulate
+
+    kimi = simulate._usage_cost("moonshotai/kimi-k3", 1_000_000, 1_000_000, 0)
+    assert kimi == pytest.approx(18.0)  # $3 in + $15 out
+    deepseek = simulate._usage_cost(
+        "deepseek/deepseek-v4-flash", 1_000_000, 1_000_000, 0
+    )
+    assert deepseek == pytest.approx(0.26)  # $0.0867 + $0.1733
+
+
+def test_kimi_routes_via_openrouter_without_zen_key(monkeypatch):
+    from scripts.proactive_eval.twopass import models
+
+    monkeypatch.delenv("OPENCODE_ZEN_API_KEY", raising=False)
+    monkeypatch.setenv("OPEN_ROUTER_API_KEY", "test-key")
+    assert models.resolve_agent_model_id("kimi-k3") == "moonshotai/kimi-k3"
+
+    monkeypatch.setenv("OPENCODE_ZEN_API_KEY", "zen-key")
+    assert models.resolve_agent_model_id("kimi-k3") == "kimi-k3"
+
+
+def test_kimi_fails_fast_with_no_provider_keys(monkeypatch):
+    from scripts.proactive_eval.twopass import models
+
+    for name in ("OPENCODE_ZEN_API_KEY", "OPENROUTER_API_KEY",
+                 "OPEN_ROUTER", "OPEN_ROUTER_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(SystemExit, match="OPENCODE_ZEN_API_KEY"):
+        models.resolve_agent_model_id("kimi-k3")

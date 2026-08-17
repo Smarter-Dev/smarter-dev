@@ -45,9 +45,28 @@ from scripts.proactive_eval.simulation import (  # noqa: E402
     format_cost_summary,
     run_simulation,
 )
+from scripts.proactive_eval.twopass.adapter import TwoPassAdapter  # noqa: E402
+from scripts.proactive_eval.twopass.agent import (  # noqa: E402
+    KimiAgentRunner,
+    build_agent_system_prompt,
+    build_kimi_agent,
+)
+from scripts.proactive_eval.twopass.environment import InstructionStore  # noqa: E402
+from scripts.proactive_eval.twopass.models import (  # noqa: E402
+    build_twopass_model,
+    ensure_openrouter_key_alias,
+    resolve_agent_model_id,
+)
+from scripts.proactive_eval.twopass.watcher import SkimRunner, WatcherRunner  # noqa: E402
+from scripts.proactive_eval.twopass.windows import two_pass_windows  # noqa: E402
 from smarter_dev.shared.model_catalog import MODEL_CATALOG, ModelProvider  # noqa: E402
 
 eval_prices.install()
+
+RESPONSE_POLICY_PATH = Path(__file__).resolve().parent / "response-policy.md"
+DEFAULT_BASELINE_MODEL = "gemini-3.5-flash-lite"
+DEFAULT_TWOPASS_AGENT_MODEL = "kimi-k3"
+DEFAULT_TWOPASS_WATCHER_MODEL = "deepseek/deepseek-v4-flash"
 
 RUNS_DIR = Path(__file__).resolve().parent / "data" / "runs"
 
@@ -145,13 +164,60 @@ def _default_out_path(
     )
 
 
+def _build_twopass_adapter(
+    args: argparse.Namespace, messages: list[FixtureMessage], meta: dict
+) -> tuple[TwoPassAdapter, str]:
+    ensure_openrouter_key_alias()
+    agent_model_id = resolve_agent_model_id(
+        args.model or DEFAULT_TWOPASS_AGENT_MODEL
+    )
+    watcher_model_id = args.watcher_model
+    response_policy = RESPONSE_POLICY_PATH.read_text(encoding="utf-8")
+    skim = SkimRunner(build_twopass_model(watcher_model_id))
+
+    async def compaction_summarize(text: str) -> str:
+        # Compaction is rare (~100k tokens of agent history); its skim cost
+        # is logged but not attributed to an activation.
+        summary, usage = await skim.skim(text)
+        print(f"history compaction: {usage}", file=sys.stderr, flush=True)
+        return summary
+
+    kimi_agent = build_kimi_agent(
+        build_twopass_model(agent_model_id),
+        system_prompt=build_agent_system_prompt(
+            bot_display_name=_bot_display_name(messages, meta["bot_user_id"]),
+            channel_name=meta["channel_name"],
+            guild_name=meta["guild_name"],
+            response_policy=response_policy,
+        ),
+    )
+    adapter = TwoPassAdapter(
+        watcher=WatcherRunner(build_twopass_model(watcher_model_id)),
+        agent_runner=KimiAgentRunner(
+            agent=kimi_agent, summarize=compaction_summarize
+        ),
+        skim=skim,
+        instruction_store=InstructionStore(seed=response_policy),
+        watcher_model_id=watcher_model_id,
+        agent_model_id=agent_model_id,
+    )
+    return adapter, agent_model_id
+
+
 async def run(args: argparse.Namespace) -> None:
     messages, meta = _load_fixture(args.fixture)
+    windows = None
+    cadence_seconds = args.every
     if args.adapter == "silent":
         adapter = SilentAdapter()
         model_id = "none"
+    elif args.adapter == "twopass":
+        adapter, agent_model_id = _build_twopass_adapter(args, messages, meta)
+        model_id = f"{agent_model_id}+{args.watcher_model}"
+        windows = two_pass_windows([m.timestamp for m in messages])
+        cadence_seconds = 0  # event-driven; see the burst parameters
     else:
-        model_id = args.model
+        model_id = args.model or DEFAULT_BASELINE_MODEL
         adapter = BaselineAdapter(
             model_id=model_id,
             bot_display_name=_bot_display_name(messages, meta["bot_user_id"]),
@@ -167,10 +233,11 @@ async def run(args: argparse.Namespace) -> None:
         adapter=adapter,
         adapter_name=args.adapter,
         model_id=model_id,
-        cadence_seconds=args.every,
+        cadence_seconds=cadence_seconds,
         history_size=args.history_size,
         activation_cost=model_cost_calculator(model_id),
         fixture_name=args.fixture.name,
+        windows=windows,
     )
     out_path = args.out or _default_out_path(
         args.fixture, args.adapter, model_id, args.every
@@ -198,8 +265,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("fixture", type=Path)
     parser.add_argument("--every", type=int, default=300)
-    parser.add_argument("--model", default="gemini-3.5-flash-lite")
-    parser.add_argument("--adapter", choices=("baseline", "silent"), default="baseline")
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="agent model (default: gemini-3.5-flash-lite for baseline, "
+        "kimi-k3 for twopass)",
+    )
+    parser.add_argument(
+        "--adapter",
+        choices=("baseline", "silent", "twopass"),
+        default="baseline",
+    )
+    parser.add_argument("--watcher-model", default=DEFAULT_TWOPASS_WATCHER_MODEL)
     parser.add_argument("--history-size", type=int, default=60)
     parser.add_argument("--out", type=Path, default=None)
     return parser
