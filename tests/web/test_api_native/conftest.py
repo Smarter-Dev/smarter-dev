@@ -676,6 +676,53 @@ def model_override_crud_mock() -> Iterator[Mock]:
 
 
 # --------------------------------------------------------------------------- #
+# Proactive-settings fixtures (proactive bot channel toggle)
+# --------------------------------------------------------------------------- #
+
+
+@pytest.fixture
+def proactive_settings_client(session_mock: AsyncMock) -> Iterator[TestClient]:
+    """Client serving the proactive-settings controller with guards bypassed."""
+    from smarter_dev.web.api_native import proactive_settings as proactive_module
+    from smarter_dev.web.api_native.proactive_settings import (
+        ProactiveChannelSettingsController,
+    )
+
+    original_guards = list(proactive_module.BOT_API_GUARDS)
+    proactive_module.BOT_API_GUARDS.clear()
+    try:
+        with create_test_client(
+            route_handlers=[ProactiveChannelSettingsController],
+            plugins=[PydanticPlugin()],
+            dependencies={
+                "db_session": Provide(lambda: session_mock, sync_to_thread=False)
+            },
+        ) as client:
+            yield client
+    finally:
+        proactive_module.BOT_API_GUARDS[:] = original_guards
+
+
+@pytest.fixture
+def proactive_settings_crud_mock() -> Iterator[Mock]:
+    """Patch the two crud functions the proactive-settings controller calls."""
+    with (
+        patch(
+            "smarter_dev.web.api_native.proactive_settings.get_proactive_channel_settings",
+            new=AsyncMock(),
+        ) as get_mock,
+        patch(
+            "smarter_dev.web.api_native.proactive_settings.upsert_proactive_channel_settings",
+            new=AsyncMock(),
+        ) as upsert_mock,
+    ):
+        namespace = Mock()
+        namespace.get = get_mock
+        namespace.upsert = upsert_mock
+        yield namespace
+
+
+# --------------------------------------------------------------------------- #
 # Image-quota fixtures (unit U8 — image_quota router)
 # --------------------------------------------------------------------------- #
 

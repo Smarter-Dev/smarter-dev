@@ -50,6 +50,7 @@ from smarter_dev.web.models import (
     ModerationConfig,
     ModerationAction,
     ChannelModelOverride,
+    ProactiveChannelSettings,
     ChatAgentGuildMemory,
     ChatAgentMemoryNote,
     ChatAgentMemoryRevision,
@@ -6191,3 +6192,42 @@ async def guilds_needing_dream(session: AsyncSession, cutoff: datetime) -> list[
     )
     candidates = set(guilds_with_pending_notes) | set(guilds_not_dreamed_tonight)
     return sorted(candidates - set(guilds_opted_out))
+
+
+async def get_proactive_channel_settings(
+    session: AsyncSession, guild_id: str, channel_id: str
+) -> ProactiveChannelSettings | None:
+    """Return the proactive settings for ``channel_id``, or ``None``."""
+    result = await session.execute(
+        select(ProactiveChannelSettings).where(
+            ProactiveChannelSettings.guild_id == guild_id,
+            ProactiveChannelSettings.channel_id == channel_id,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def upsert_proactive_channel_settings(
+    session: AsyncSession,
+    guild_id: str,
+    channel_id: str,
+    enabled: bool,
+    watch_addendum: str,
+) -> ProactiveChannelSettings:
+    """Insert or update the single proactive-settings row for ``channel_id``."""
+    record = await get_proactive_channel_settings(session, guild_id, channel_id)
+    if record is None:
+        record = ProactiveChannelSettings(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            enabled=enabled,
+            watch_addendum=watch_addendum,
+        )
+        session.add(record)
+    else:
+        record.guild_id = guild_id
+        record.enabled = enabled
+        record.watch_addendum = watch_addendum
+    await session.flush()
+    await session.refresh(record)
+    return record
