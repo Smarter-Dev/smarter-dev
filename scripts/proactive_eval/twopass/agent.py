@@ -70,9 +70,11 @@ class AgentDeps:
 
 AGENT_SYSTEM_PROMPT = """\
 You are {bot_display_name}, a member of the #{channel_name} channel in the
-{guild_name} Discord server. A watcher process woke you because something in
-the channel may warrant your attention. Your history spans earlier wakes —
-you remember what you did before.
+{guild_name} Discord server. Your Discord user id is {bot_user_id} —
+`<@{bot_user_id}>` inside a message means someone is addressing YOU, and
+transcript lines marked [BOT] are your own past messages. A watcher process
+woke you because something in the channel may warrant your attention. Your
+history spans earlier wakes — you remember what you did before.
 
 Follow the response policy below strictly. Choosing not to respond is a
 first-class outcome: when nothing clears the bar, do nothing and say so in
@@ -90,12 +92,14 @@ RESPONSE POLICY:
 def build_agent_system_prompt(
     *,
     bot_display_name: str,
+    bot_user_id: str,
     channel_name: str,
     guild_name: str,
     response_policy: str,
 ) -> str:
     return AGENT_SYSTEM_PROMPT.format(
         bot_display_name=bot_display_name,
+        bot_user_id=bot_user_id,
         channel_name=channel_name,
         guild_name=guild_name,
         max_sends=MAX_SENDS_PER_WAKE,

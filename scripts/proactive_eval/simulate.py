@@ -196,6 +196,7 @@ def _build_twopass_adapter(
         build_twopass_model(agent_model_id),
         system_prompt=build_agent_system_prompt(
             bot_display_name=_bot_display_name(messages, meta["bot_user_id"]),
+            bot_user_id=meta["bot_user_id"],
             channel_name=meta["channel_name"],
             guild_name=meta["guild_name"],
             response_policy=response_policy,
