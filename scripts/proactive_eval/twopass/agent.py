@@ -68,6 +68,24 @@ class AgentDeps:
     budget: ToolBudget
 
 
+# Condensed operating rules — the full rationale lives in
+# scripts/proactive_eval/response-policy.md; keep the two in sync.
+OPERATING_POLICY_BRIEF = """\
+Mode 1 — participating: you are in a conversation only when someone \
+@mentions you, replies to your message, or follows up on what you said. \
+While they keep engaging you, respond freely and conversationally.
+Mode 2 — cold entry: everything else. Then:
+- Respond only to open bids to the room or things addressed to you; never \
+to a message directed at another person (their replies, @mentions of \
+others, or a back-and-forth between two people).
+- Contribute real help; never fact-dumps or "well, actually" corrections.
+- Frame it as a one-off: no questions that pull people into conversation \
+with you, no phrasing that presumes you are part of the thread.
+- The bar is higher for you than for a human; "wouldn't be out of place" \
+is not enough.
+- Never send content-free messages (greetings-back, bare acknowledgments).
+- Silence is the default; most wakes end with no message sent."""
+
 AGENT_SYSTEM_PROMPT = """\
 You are {bot_display_name}, a member of the #{channel_name} channel in the
 {guild_name} Discord server. Your Discord user id is {bot_user_id} —
@@ -76,9 +94,9 @@ transcript lines marked [BOT] are your own past messages. A watcher process
 woke you because something in the channel may warrant your attention. Your
 history spans earlier wakes — you remember what you did before.
 
-Follow the response policy below strictly. Choosing not to respond is a
-first-class outcome: when nothing clears the bar, do nothing and say so in
-your final note. At most {max_sends} messages per wake.
+Choosing not to respond is a first-class outcome: when nothing clears the
+bar, do nothing and say so in your final note. At most {max_sends} messages
+per wake.
 
 The watcher that decides when to wake you is stateless — it forgets
 everything between calls. If a follow-up matters ("wake me if X posts their
@@ -95,7 +113,7 @@ def build_agent_system_prompt(
     bot_user_id: str,
     channel_name: str,
     guild_name: str,
-    response_policy: str,
+    response_policy: str | None = None,
 ) -> str:
     return AGENT_SYSTEM_PROMPT.format(
         bot_display_name=bot_display_name,
@@ -103,11 +121,13 @@ def build_agent_system_prompt(
         channel_name=channel_name,
         guild_name=guild_name,
         max_sends=MAX_SENDS_PER_WAKE,
-        response_policy=response_policy,
+        response_policy=response_policy or OPERATING_POLICY_BRIEF,
     )
 
 
-def build_kimi_agent(model: Model | str, *, system_prompt: str) -> Agent:
+def build_kimi_agent(
+    model: Model | str, *, system_prompt: str, extra_tools: list = ()
+) -> Agent:
     agent = Agent(
         model,
         deps_type=AgentDeps,
@@ -206,6 +226,11 @@ def build_kimi_agent(model: Model | str, *, system_prompt: str) -> Agent:
             return BUDGET_EXHAUSTED
         ctx.deps.instruction_store.update(addendum)
         return "Watch instructions updated."
+
+    # Parity tools (web search, code run, …) register here; in replay evals
+    # the Discord/API-bound ones are stubbed by the caller.
+    for tool_function in extra_tools:
+        agent.tool(tool_function)
 
     return agent
 
