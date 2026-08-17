@@ -22,15 +22,23 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
-import subprocess
 import sys
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+# JudgeReply/judge_reply_from_raw/run_judge/JUDGE_PARSE_RETRIES are
+# re-exported here: they lived in this module before judge.py existed and
+# callers (including the stage-2 tests) still import them from label_day.
+from scripts.proactive_eval.judge import (  # noqa: E402,F401
+    DEFAULT_JUDGE_MODEL,
+    JUDGE_PARSE_RETRIES,
+    JudgeReply,
+    judge_reply_from_raw,
+    run_judge,
+)
 from scripts.proactive_eval.labels import (  # noqa: E402
     build_labels_document,
     chunk_messages,
@@ -40,50 +48,8 @@ from scripts.proactive_eval.labels import (  # noqa: E402
     speaker_tags,
 )
 
-JUDGE_TIMEOUT_SECONDS = 300
-# The judge occasionally drops one id from a chunk; re-ask the whole chunk
-# this many times before failing the run.
-JUDGE_PARSE_RETRIES = 2
-DEFAULT_JUDGE_MODEL = "claude-sonnet-5"
 DEFAULT_CHUNK_SIZE = 60
 DEFAULT_CONTEXT_SIZE = 20
-
-
-@dataclass
-class JudgeReply:
-    result_text: str
-    cost_usd: float
-    raw: dict
-
-
-def judge_reply_from_raw(raw: dict) -> JudgeReply:
-    cost = raw.get("total_cost_usd")
-    return JudgeReply(
-        result_text=raw["result"],
-        cost_usd=float(cost) if cost is not None else 0.0,
-        raw=raw,
-    )
-
-
-def run_judge(prompt: str, model: str) -> JudgeReply:
-    """One headless Claude Code invocation. The only subprocess in the eval."""
-    command = ["claude", "-p", prompt, "--output-format", "json", "--model", model]
-    try:
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            timeout=JUDGE_TIMEOUT_SECONDS,
-        )
-    except FileNotFoundError as error:
-        raise SystemExit(
-            "claude CLI not found on PATH — install and authenticate Claude Code"
-        ) from error
-    if completed.returncode != 0:
-        raise SystemExit(
-            f"claude exited {completed.returncode}: {completed.stderr[:500]}"
-        )
-    return judge_reply_from_raw(json.loads(completed.stdout))
 
 
 def _load_fixture(fixture_path: Path) -> tuple[list[dict], dict]:
