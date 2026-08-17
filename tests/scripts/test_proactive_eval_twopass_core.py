@@ -156,6 +156,39 @@ async def test_send_cap_stops_at_two_messages():
     assert len(deps.actions.sent) == 2
 
 
+def test_default_system_prompt_is_brief_but_complete():
+    prompt = agent.build_agent_system_prompt(
+        bot_display_name="smarter-bot",
+        bot_user_id="B1",
+        channel_name="💬general",
+        guild_name="Smarter Dev",
+    )
+    assert len(prompt) < 3000  # brief: the full policy doc is ~5k chars
+    for load_bearing in (
+        "smarter-bot", "B1", "stateless", "update_watch_instructions",
+        "one-off", "higher", "Silence",
+    ):
+        assert load_bearing in prompt, load_bearing
+
+
+async def test_extra_tools_register_on_the_agent():
+    deps = _deps()
+    calls = []
+
+    async def custom_probe(ctx) -> str:
+        """A custom probe tool."""
+        calls.append(ctx.deps.env.bot_user_id)
+        return "probed"
+
+    kimi = agent.build_kimi_agent(
+        TestModel(call_tools=["custom_probe"], custom_output_text="done"),
+        system_prompt="s",
+        extra_tools=[custom_probe],
+    )
+    await kimi.run("go", deps=deps)
+    assert calls == ["B1"]
+
+
 # --- history compaction ------------------------------------------------------
 
 

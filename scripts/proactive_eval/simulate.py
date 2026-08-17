@@ -47,6 +47,7 @@ from scripts.proactive_eval.simulation import (  # noqa: E402
 )
 from scripts.proactive_eval.twopass.adapter import TwoPassAdapter  # noqa: E402
 from scripts.proactive_eval.twopass.agent import (  # noqa: E402
+    OPERATING_POLICY_BRIEF,
     KimiAgentRunner,
     build_agent_system_prompt,
     build_kimi_agent,
@@ -63,7 +64,6 @@ from smarter_dev.shared.model_catalog import MODEL_CATALOG, ModelProvider  # noq
 
 eval_prices.install()
 
-RESPONSE_POLICY_PATH = Path(__file__).resolve().parent / "response-policy.md"
 DEFAULT_BASELINE_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_TWOPASS_AGENT_MODEL = "kimi-k3"
 DEFAULT_TWOPASS_WATCHER_MODEL = "deepseek/deepseek-v4-flash"
@@ -187,7 +187,6 @@ def _build_twopass_adapter(
     watcher_model_id = args.watcher_model
     if bot_display_name is None:
         bot_display_name = _bot_display_name(messages, meta["bot_user_id"])
-    response_policy = RESPONSE_POLICY_PATH.read_text(encoding="utf-8")
     skim = SkimRunner(build_twopass_model(watcher_model_id))
 
     async def compaction_summarize(text: str) -> str:
@@ -204,7 +203,6 @@ def _build_twopass_adapter(
             bot_user_id=meta["bot_user_id"],
             channel_name=meta["channel_name"],
             guild_name=meta["guild_name"],
-            response_policy=response_policy,
         ),
     )
     adapter = TwoPassAdapter(
@@ -213,7 +211,9 @@ def _build_twopass_adapter(
             agent=kimi_agent, summarize=compaction_summarize
         ),
         skim=skim,
-        instruction_store=InstructionStore(seed=response_policy),
+        # The condensed brief also seeds the watcher: it rides every watch
+        # call, so brevity is watcher cost.
+        instruction_store=InstructionStore(seed=OPERATING_POLICY_BRIEF),
         watcher_model_id=watcher_model_id,
         agent_model_id=agent_model_id,
     )
