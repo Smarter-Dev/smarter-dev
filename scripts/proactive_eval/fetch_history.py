@@ -64,6 +64,16 @@ def day_bounds_ms(day: date) -> tuple[int, int]:
     return start_ms, end_ms
 
 
+def normalized_channel_name(name: str) -> str:
+    """Drop leading emoji decoration (anything before the first ASCII
+    letter, digit, ``-`` or ``_``) so ``--channel general`` matches the
+    guild's ``💬general``."""
+    for index, character in enumerate(name):
+        if character.isascii() and (character.isalnum() or character in "-_"):
+            return name[index:]
+    return name
+
+
 def retry_after_seconds(error: DiscordRestError) -> float:
     """Pull ``retry_after`` out of a 429 error's embedded response body."""
     message = str(error)
@@ -322,7 +332,8 @@ async def resolve_channel(
                 return channel
         elif (
             channel.get("type") == TEXT_CHANNEL_TYPE
-            and channel["name"].casefold() == channel_name.casefold()
+            and normalized_channel_name(channel["name"]).casefold()
+            == normalized_channel_name(channel_name).casefold()
         ):
             return channel
     wanted = channel_id if channel_id is not None else channel_name
