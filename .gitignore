@@ -74,3 +74,6 @@ reports/image_prompt_review/
 # chat prompt-optimization scratch (scripts/prompt_opt_eval.py)
 scripts/.opt_run/
 scripts/.opt_baseline_descriptions.json
+
+# Proactive-bot eval fixtures (real member messages; never commit)
+scripts/proactive_eval/data/
