@@ -10,6 +10,11 @@ import json
 import re
 from dataclasses import dataclass
 
+from smarter_dev.bot.proactive.transcript import (  # noqa: F401
+    render_transcript_line,
+    speaker_tags,
+)
+
 DIRECTED_AT_CATEGORIES = ("other_user", "anyone", "bot", "ambient")
 OK_TO_RESPOND_CATEGORIES = {"anyone", "bot"}
 LABELABLE_MESSAGE_TYPES = {0, 19}
@@ -56,25 +61,6 @@ def labelable_messages(records: list[dict]) -> list[dict]:
     ]
 
 
-def speaker_tags(records: list[dict]) -> dict[str, str]:
-    """Stable per-author letter tags (A, B, … AA, AB) by first appearance."""
-    tags: dict[str, str] = {}
-    for record in records:
-        author_id = record["author_id"]
-        if author_id not in tags:
-            tags[author_id] = _letter_tag(len(tags))
-    return tags
-
-
-def _letter_tag(index: int) -> str:
-    letters = ""
-    index += 1
-    while index:
-        index, remainder = divmod(index - 1, 26)
-        letters = chr(ord("A") + remainder) + letters
-    return letters
-
-
 def chunk_messages(
     records: list[dict], *, chunk_size: int, context_size: int
 ) -> list[Chunk]:
@@ -96,18 +82,6 @@ def chunk_messages(
             )
         )
     return chunks
-
-
-def render_transcript_line(record: dict, tags: dict[str, str]) -> str:
-    bot_marker = "[BOT] " if record["is_bot"] else ""
-    reply_marker = (
-        f" (reply to id={record['reply_to_id']})" if record["reply_to_id"] else ""
-    )
-    tag = tags[record["author_id"]]
-    return (
-        f"[id={record['id']}] {bot_marker}{tag}·{record['author_display']}"
-        f"{reply_marker}: {record['content']}"
-    )
 
 
 def render_chunk_prompt(
