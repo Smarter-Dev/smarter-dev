@@ -164,6 +164,16 @@ def _default_out_path(
     )
 
 
+def _fixture_name_for_record(fixture_path: Path, out_path: Path) -> str:
+    """The run record's fixture reference, resolved from the runs dir's data
+    dir — keeps subset fixtures under data/cases/ scoreable."""
+    data_dir = out_path.parent.parent
+    try:
+        return str(fixture_path.resolve().relative_to(data_dir.resolve()))
+    except ValueError:
+        return fixture_path.name
+
+
 def _build_twopass_adapter(
     args: argparse.Namespace, messages: list[FixtureMessage], meta: dict
 ) -> tuple[TwoPassAdapter, str]:
@@ -225,6 +235,9 @@ async def run(args: argparse.Namespace) -> None:
             channel_name=meta["channel_name"],
             cadence_seconds=args.every,
         )
+    out_path = args.out or _default_out_path(
+        args.fixture, args.adapter, model_id, cadence_seconds
+    )
     record = await run_simulation(
         messages=messages,
         channel_name=meta["channel_name"],
@@ -236,11 +249,8 @@ async def run(args: argparse.Namespace) -> None:
         cadence_seconds=cadence_seconds,
         history_size=args.history_size,
         activation_cost=model_cost_calculator(model_id),
-        fixture_name=args.fixture.name,
+        fixture_name=_fixture_name_for_record(args.fixture, out_path),
         windows=windows,
-    )
-    out_path = args.out or _default_out_path(
-        args.fixture, args.adapter, model_id, args.every
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(

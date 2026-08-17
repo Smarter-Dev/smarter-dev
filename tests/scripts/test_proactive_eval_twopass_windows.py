@@ -205,6 +205,24 @@ def test_kimi_routes_via_openrouter_without_zen_key(monkeypatch):
     assert models.resolve_agent_model_id("kimi-k3") == "kimi-k3"
 
 
+def test_fixture_name_for_record_is_data_dir_relative(tmp_path):
+    from scripts.proactive_eval import simulate
+
+    data_dir = tmp_path / "data"
+    (data_dir / "cases").mkdir(parents=True)
+    (data_dir / "runs").mkdir()
+    fixture = data_dir / "cases" / "day-cases.jsonl"
+    fixture.write_text("")
+    out_path = data_dir / "runs" / "run.json"
+    assert (
+        simulate._fixture_name_for_record(fixture, out_path)
+        == "cases/day-cases.jsonl"
+    )
+    outside = tmp_path / "elsewhere.jsonl"
+    outside.write_text("")
+    assert simulate._fixture_name_for_record(outside, out_path) == "elsewhere.jsonl"
+
+
 def test_kimi_fails_fast_with_no_provider_keys(monkeypatch):
     from scripts.proactive_eval.twopass import models
 
