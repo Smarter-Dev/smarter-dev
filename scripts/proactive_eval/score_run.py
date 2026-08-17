@@ -112,13 +112,15 @@ def score_run(
     data_dir = run_path.parent.parent
     fixture_path = data_dir / run_record["fixture"]
     fixture_stem = fixture_path.stem
-    labels_path = data_dir / f"{fixture_stem}.labels.json"
+    # Labels and meta are the fixture's siblings, so subset fixtures under
+    # data/cases/ resolve the same way as full days in the data root.
+    labels_path = fixture_path.parent / f"{fixture_stem}.labels.json"
     if not labels_path.exists():
         raise SystemExit(
             f"No labels file at {labels_path} — run label_day on the fixture "
             f"first."
         )
-    meta = _load_json(data_dir / f"{fixture_stem}.meta.json")
+    meta = _load_json(fixture_path.parent / f"{fixture_stem}.meta.json")
     labels = _load_json(labels_path)["labels"]
     fixture_records = [
         json.loads(line)

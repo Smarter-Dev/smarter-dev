@@ -414,6 +414,27 @@ def test_score_run_end_to_end_writes_report_and_caches(tmp_path):
     assert len(forced_stub.calls) == 3
 
 
+def test_score_run_resolves_subset_fixture_labels_as_siblings(tmp_path):
+    """A curated subset lives in data/cases/; its labels/meta sit beside it."""
+    run_path = _write_scenario(tmp_path)
+    data_dir = tmp_path / "data"
+    cases_dir = data_dir / "cases"
+    cases_dir.mkdir()
+    stem = "G1-💬general-2026-07-20"
+    for suffix in (".jsonl", ".meta.json", ".labels.json"):
+        (data_dir / f"{stem}{suffix}").rename(cases_dir / f"{stem}{suffix}")
+    run_record = json.loads(run_path.read_text())
+    run_record["fixture"] = f"cases/{stem}.jsonl"
+    run_path.write_text(json.dumps(run_record))
+
+    _, report_path, metrics = score_run.score_run(
+        run_path, judge_callable=StubJudge(), judge_model="claude-sonnet-5",
+        force=False,
+    )
+    assert metrics["responses_total"] == 3
+    assert report_path.exists()
+
+
 def test_score_run_fails_fast_without_labels(tmp_path):
     run_path = _write_scenario(tmp_path)
     (tmp_path / "data" / "G1-💬general-2026-07-20.labels.json").unlink()
