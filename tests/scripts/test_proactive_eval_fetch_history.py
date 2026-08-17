@@ -419,6 +419,26 @@ async def test_resolve_channel_matches_text_channel_by_name():
     assert channel["id"] == "C2"
 
 
+async def test_resolve_channel_ignores_leading_emoji_decoration():
+    # The real guild's channel is named 💬general; --channel general must
+    # still find it, but "general" must not match "not-general".
+    client = fetch_history.HistoryClient(
+        bot_token="tok",
+        transport=_json_route_transport(
+            {
+                "/api/v10/guilds/G1/channels": [
+                    {"id": "C1", "name": "not-general", "type": 0},
+                    {"id": "C2", "name": "💬general", "type": 0},
+                ]
+            }
+        ),
+    )
+    channel = await fetch_history.resolve_channel(
+        client, "G1", channel_id=None, channel_name="general"
+    )
+    assert channel["id"] == "C2"
+
+
 # --- rate limiting -----------------------------------------------------------
 
 
