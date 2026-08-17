@@ -84,6 +84,34 @@ def test_proactive_agent_registers_native_plus_parity_tools():
     assert PARITY_TOOL_NAMES <= registered
 
 
+def test_replay_tool_surface_matches_production():
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from scripts.proactive_eval.replay_tools import replay_parity_tools
+
+    assert {f.__name__ for f in replay_parity_tools()} == PARITY_TOOL_NAMES
+
+
+async def test_replay_stub_answers_honestly_and_spends_budget():
+    import sys
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    from scripts.proactive_eval import replay_tools
+
+    deps = _deps(budget_limit=8)
+    stub = next(
+        f for f in replay_tools.replay_parity_tools()
+        if f.__name__ == "run_code"
+    )
+    answer = await stub(SimpleNamespace(deps=deps), reason="r", code="c")
+    assert "unavailable in replay" in answer
+    assert deps.budget.used == 1
+
+
 async def test_parity_tools_spend_the_wake_budget():
     deps = _deps(budget_limit=0)  # exhausted from the start
     agent = build_proactive_agent(
