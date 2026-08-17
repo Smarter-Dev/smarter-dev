@@ -1,14 +1,26 @@
 [
   {
-    "id": "delimiter-latex-parser",
-    "title": "Detect delimiter-based LaTeX expressions in the section parser",
-    "path": ".build/plan/01-delimiter-latex-parser.md",
-    "summary": "Extend split_latex_sections to break replies on standard LaTeX delimiters ($$, \\[, \\(, $) alongside existing ```latex fences, reusing the renderer and dispatch unchanged."
+    "id": "history-fetcher",
+    "title": "Discord history fetcher: find the busiest day and pull it",
+    "path": ".build/plan/01-history-fetcher.md",
+    "summary": "Add scripts/proactive_eval/fetch_history.py: scan #general over a lookback window to recommend the busiest day, then pull that full UTC day into a gitignored JSONL fixture plus meta sidecar, reusing DiscordBotClient with mock-transport tests."
   },
   {
-    "id": "chat-prompt-delimiters",
-    "title": "Teach the chat prompts to use standard LaTeX delimiters",
-    "path": ".build/plan/02-chat-prompt-delimiters.md",
-    "summary": "Flip the chat_agent and writer_agent prompts to instruct standard LaTeX delimiters instead of ```latex fences, and confirm end-to-end image dispatch is unchanged."
+    "id": "ground-truth-labels",
+    "title": "Ground-truth labeling with Claude Code as the judge",
+    "path": ".build/plan/02-ground-truth-labels.md",
+    "summary": "Add label_day.py: chunk the fixture day and drive headless Claude Code (claude -p, JSON output) to label every human message as directed at other_user/anyone/bot/ambient, with per-chunk caching, strict parsing, and a merged labels file."
+  },
+  {
+    "id": "activation-simulator",
+    "title": "Periodic-activation simulator, bot adapter interface, cost accounting",
+    "path": ".build/plan/03-activation-simulator.md",
+    "summary": "Add simulate.py plus the ProactiveBotAdapter protocol, a baseline pydantic-ai adapter and a silent adapter: replay the day in cadence windows with injected bot responses, record per-activation token usage, and print/store the day-cost summary with projections."
+  },
+  {
+    "id": "judge-scoring-report",
+    "title": "Judge scoring of a simulation run and the final eval report",
+    "path": ".build/plan/04-judge-scoring-report.md",
+    "summary": "Add score_run.py: combine deterministic label checks with a Claude Code judge pass over every sent response, compute response precision, violations and misses, and render the final markdown report including the cost summary."
   }
 ]
