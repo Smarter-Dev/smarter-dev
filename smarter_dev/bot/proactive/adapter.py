@@ -85,6 +85,10 @@ class TwoPassAdapter:
     watcher_model_id: str
     agent_model_id: str
     context_size: int = WATCHER_CONTEXT_SIZE
+    # Builds the deps object handed to the agent's tools. The default is the
+    # eval's AgentDeps; the production plugin injects a factory that returns
+    # ProactiveDeps carrying the live bot/channel for the parity tools.
+    deps_factory: object = None
 
     async def activate(self, context: ActivationContext) -> ActivationResult:
         usage_by_model: dict[str, dict] = {}
@@ -128,7 +132,8 @@ class TwoPassAdapter:
                 _merge_usage(usage_by_model, self.watcher_model_id, skim_usage)
                 return text
 
-            deps = AgentDeps(
+            build_deps = self.deps_factory or AgentDeps
+            deps = build_deps(
                 env=env,
                 actions=actions,
                 instruction_store=self.instruction_store,
