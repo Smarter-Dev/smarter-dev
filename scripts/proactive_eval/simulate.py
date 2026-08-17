@@ -59,7 +59,9 @@ from scripts.proactive_eval.twopass.models import (  # noqa: E402
     resolve_agent_model_id,
 )
 from scripts.proactive_eval.twopass.watcher import SkimRunner, WatcherRunner  # noqa: E402
+from scripts.proactive_eval.replay_tools import replay_parity_tools  # noqa: E402
 from scripts.proactive_eval.twopass.windows import two_pass_windows  # noqa: E402
+from smarter_dev.bot.proactive.parity import ProactiveDeps  # noqa: E402
 from smarter_dev.shared.model_catalog import MODEL_CATALOG, ModelProvider  # noqa: E402
 
 eval_prices.install()
@@ -204,7 +206,20 @@ def _build_twopass_adapter(
             channel_name=meta["channel_name"],
             guild_name=meta["guild_name"],
         ),
+        # Production tool surface: web tools live, everything Discord/API
+        # bound stubbed (see replay_tools.py).
+        extra_tools=replay_parity_tools(),
+        deps_type=ProactiveDeps,
     )
+
+    def replay_deps_factory(**kwargs):
+        return ProactiveDeps(
+            bot=None,
+            channel_id=0,
+            guild_id=0,
+            channel_name=meta["channel_name"],
+            **kwargs,
+        )
     adapter = TwoPassAdapter(
         watcher=WatcherRunner(build_twopass_model(watcher_model_id)),
         agent_runner=KimiAgentRunner(
@@ -216,6 +231,7 @@ def _build_twopass_adapter(
         instruction_store=InstructionStore(seed=OPERATING_POLICY_BRIEF),
         watcher_model_id=watcher_model_id,
         agent_model_id=agent_model_id,
+        deps_factory=replay_deps_factory,
     )
     return adapter, agent_model_id
 
