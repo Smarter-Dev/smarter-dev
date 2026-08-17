@@ -175,13 +175,18 @@ def _fixture_name_for_record(fixture_path: Path, out_path: Path) -> str:
 
 
 def _build_twopass_adapter(
-    args: argparse.Namespace, messages: list[FixtureMessage], meta: dict
+    args: argparse.Namespace,
+    messages: list[FixtureMessage],
+    meta: dict,
+    bot_display_name: str | None = None,
 ) -> tuple[TwoPassAdapter, str]:
     ensure_openrouter_key_alias()
     agent_model_id = resolve_agent_model_id(
         args.model or DEFAULT_TWOPASS_AGENT_MODEL
     )
     watcher_model_id = args.watcher_model
+    if bot_display_name is None:
+        bot_display_name = _bot_display_name(messages, meta["bot_user_id"])
     response_policy = RESPONSE_POLICY_PATH.read_text(encoding="utf-8")
     skim = SkimRunner(build_twopass_model(watcher_model_id))
 
@@ -195,7 +200,7 @@ def _build_twopass_adapter(
     kimi_agent = build_kimi_agent(
         build_twopass_model(agent_model_id),
         system_prompt=build_agent_system_prompt(
-            bot_display_name=_bot_display_name(messages, meta["bot_user_id"]),
+            bot_display_name=bot_display_name,
             bot_user_id=meta["bot_user_id"],
             channel_name=meta["channel_name"],
             guild_name=meta["guild_name"],
