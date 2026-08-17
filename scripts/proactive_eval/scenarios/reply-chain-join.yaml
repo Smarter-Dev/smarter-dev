@@ -1,0 +1,32 @@
+name: reply-chain-join
+description: >
+  A second user joins the bot's thread by replying to the bot's message.
+  Tests that replies to the bot's own messages wake it regardless of who
+  sends them.
+participants:
+  - {key: alice, id: "901", display: alice}
+  - {key: bob, id: "902", display: bob}
+turns:
+  - key: ask
+    offset: 0
+    author: alice
+    content: "<@BOT> can you explain what a database index actually does under the hood?"
+    mentions_bot: true
+    directed_at: bot
+    reason: direct mention question
+  - key: join
+    offset: 70
+    author: bob
+    reply_to: bot_last
+    requires_bot_reply: true
+    content: "wait does that mean adding indexes everywhere makes writes slower?"
+    directed_at: bot
+    reason: bob joins the thread by replying to the bot's message
+  - key: confirm
+    offset: 135
+    author: alice
+    reply_to: bot_last
+    requires_bot_reply: true
+    content: "huh, so that's why our bulk import crawled after we added those three indexes"
+    directed_at: bot
+    reason: alice continues the exchange with the bot
