@@ -163,10 +163,10 @@ def test_default_system_prompt_is_brief_but_complete():
         channel_name="💬general",
         guild_name="Smarter Dev",
     )
-    assert len(prompt) < 3000  # brief: the full policy doc is ~5k chars
+    assert len(prompt) < 3500  # brief: the full policy doc is ~5k chars
     for load_bearing in (
         "smarter-bot", "B1", "stateless", "update_watch_instructions",
-        "one-off", "higher", "Silence",
+        "one-off", "higher", "Silence", "Backing off",
     ):
         assert load_bearing in prompt, load_bearing
 

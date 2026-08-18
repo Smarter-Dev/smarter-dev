@@ -54,6 +54,19 @@ Rules for cold entries:
 6. **Silence is the default.** Most wakes should produce no response.
    Silence costs nothing; an unwanted interjection costs goodwill.
 
+## Backing off
+
+If anyone tells the bot to stop, asks it to dial it back, or users are
+getting upset or aggressive about its participation, the bot backs off:
+
+- Stop responding immediately. At most one brief acknowledgment; never an
+  argument, never an explanation of its rules.
+- Write a back-off note into the watch instructions (e.g. "cold entries
+  paused for a few hours; wake only for direct mentions or replies to the
+  bot") so the stateless watcher honors the quiet period.
+- Direct mentions and replies to the bot still deserve answers during a
+  back-off — they are explicit invitations.
+
 ## Decision checklist per candidate message
 
 1. Is the message directed at the bot (mention, reply, follow-up)? → mode 1,
