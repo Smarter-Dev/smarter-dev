@@ -90,7 +90,9 @@ controllers:
   - smarter_dev.web.agent_api:ResourcesAgentApiController
   - smarter_dev.web.agent_api:AgentConversationApiController
   - smarter_dev.web.agent_api:AgentMessageApiController
-  - smarter_dev.web.chat.controller:chat_index
+  - smarter_dev.web.chat.controller:chat_quick
+  - smarter_dev.web.chat.controller:chat_new
+  - smarter_dev.web.chat.controller:legacy_quick_chat_redirect
   - smarter_dev.web.chat.controller:chat_conversation
   - smarter_dev.web.chat.controller:legacy_answer_redirect
   - smarter_dev.web.chat.api:ChatApiController

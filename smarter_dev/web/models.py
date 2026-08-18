@@ -4286,12 +4286,35 @@ class ChatSettings(Base):
     compaction_fallback_model_key: Mapped[str | None] = mapped_column(
         String(100), nullable=True
     )
+    # The model that decides, after a long silence in a Quick chat, whether the
+    # returning message is a new subject. An administrator setting like the
+    # summarizer and the compaction model: the person chatting never sees it.
+    thread_evaluator_model_key: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        default="deepseek-v4",
+        server_default=text("'deepseek-v4'"),
+    )
+    thread_evaluator_fallback_model_key: Mapped[str | None] = mapped_column(
+        String(100), nullable=True
+    )
+    # How long a Quick chat must sit idle before the evaluator is worth running.
+    # A setting rather than a constant because it will want tuning against real
+    # behaviour.
+    thread_idle_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=15, server_default=text("15")
+    )
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     updated_by_user_id: Mapped[UUID | None] = mapped_column(
         PostgresUUID(as_uuid=True), nullable=True
     )
 
-    __table_args__ = (CheckConstraint("id = 1", name="chat_settings_singleton"),)
+    __table_args__ = (
+        CheckConstraint("id = 1", name="chat_settings_singleton"),
+        CheckConstraint(
+            "thread_idle_minutes > 0", name="chat_settings_thread_idle_minutes"
+        ),
+    )
 
 
 class ChatCatalogModel(Base):
@@ -4337,6 +4360,13 @@ class WebChatConversation(Base):
         PostgresUUID(as_uuid=True), nullable=False
     )
     intelligence_mode: Mapped[str] = mapped_column(String(40), nullable=False)
+    # A different axis from intelligence_mode, which sits directly above it.
+    # intelligence_mode is how hard the agent works; chat_mode is which surface
+    # the conversation lives on — 'standard' is the classic one-conversation-per-
+    # topic rail, 'quick' is the single perpetual Quick chat cut into threads.
+    chat_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="standard", server_default=text("'standard'")
+    )
     selected_model_key: Mapped[str] = mapped_column(String(100), nullable=False)
     reasoning_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -4362,7 +4392,72 @@ class WebChatConversation(Base):
             "intelligence_mode IN ('maximize_efficiency','efficient','intelligence','maximize_intelligence','ultra_intelligence')",
             name="web_chat_intelligence_mode",
         ),
+        CheckConstraint(
+            "chat_mode IN ('standard','quick')", name="web_chat_chat_mode"
+        ),
         Index("ix_web_chat_conversations_owner_updated", "owner_user_id", "updated_at"),
+        # A person has exactly one live Quick chat, so the get-or-create that
+        # opens it is safe to run twice — a double-click loses the race at the
+        # database rather than producing two perpetual chats.
+        Index(
+            "uq_web_chat_one_live_quick",
+            "owner_user_id",
+            unique=True,
+            postgresql_where=text("chat_mode = 'quick' AND archived_at IS NULL"),
+            sqlite_where=text("chat_mode = 'quick' AND archived_at IS NULL"),
+        ),
+    )
+
+
+class WebChatThread(Base):
+    """One subject inside a Quick chat: where the agent's context restarts.
+
+    A Quick chat is never split into separate conversations — the messages stay
+    in one scroll — so a thread is a boundary drawn through that scroll rather
+    than a container. Membership is derived: a message belongs to the newest
+    thread whose ``start_sequence`` it is at or past. Nothing here points at
+    messages and no message points back, which is what keeps regeneration and
+    version groups untouched by threading.
+
+    There is deliberately no ``current_thread_id`` on the conversation. The
+    current thread is the one with the highest ``start_sequence``, a fact that
+    cannot drift out of sync with the rows it describes.
+    """
+
+    __tablename__ = "web_chat_threads"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    conversation_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("web_chat_conversations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    origin: Mapped[str] = mapped_column(String(16), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "conversation_id", "sequence", name="uq_web_chat_thread_sequence"
+        ),
+        # Load-bearing for idempotence: a worker that retries a turn it already
+        # partly processed tries to open the same boundary twice, and this is
+        # what makes the second attempt a no-op instead of a duplicate divider.
+        UniqueConstraint(
+            "conversation_id", "start_sequence", name="uq_web_chat_thread_start"
+        ),
+        CheckConstraint(
+            "origin IN ('initial','agent','evaluator')", name="web_chat_thread_origin"
+        ),
+        Index(
+            "ix_web_chat_threads_conversation_start",
+            "conversation_id",
+            "start_sequence",
+        ),
     )
 
 

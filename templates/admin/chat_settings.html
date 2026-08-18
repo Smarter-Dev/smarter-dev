@@ -9,9 +9,10 @@
     <label>Default model<select name="default_model_key">{% for model, row in models %}<option value="{{ model.key }}" {% if settings.default_model_key == model.key %}selected{% endif %} {% if not pricing_available[model.key] %}disabled{% endif %}>{{ model.label }}{% if not pricing_available[model.key] %} — pricing unavailable{% endif %}</option>{% endfor %}</select></label>
     <label>Default reasoning<select name="default_reasoning"><option value="">Provider default</option>{% for level in reasoning_levels %}<option value="{{ level.value }}" {% if settings.default_reasoning == level.value %}selected{% endif %}>{{ level.label }}</option>{% endfor %}</select></label>
     <label>Default intelligence<select name="default_intelligence_mode">{% for mode in intelligence_modes %}<option value="{{ mode.value }}" {% if settings.default_intelligence_mode == mode.value %}selected{% endif %}>{{ mode.label }}</option>{% endfor %}</select></label>
+    <label>Quick chat idle threshold (minutes)<input type="number" min="1" step="1" required name="thread_idle_minutes" value="{{ settings.thread_idle_minutes }}"><small>How long a Quick chat must sit idle before the thread evaluator judges the next message.</small></label>
   </fieldset>
   <fieldset><legend>Auxiliary models</legend>
-    {% for field, label in [('summarizer_model_key','Web summarizer'),('summarizer_fallback_model_key','Summarizer fallback'),('compaction_model_key','Compaction'),('compaction_fallback_model_key','Compaction fallback')] %}
+    {% for field, label in [('summarizer_model_key','Web summarizer'),('summarizer_fallback_model_key','Summarizer fallback'),('compaction_model_key','Compaction'),('compaction_fallback_model_key','Compaction fallback'),('thread_evaluator_model_key','Thread evaluator'),('thread_evaluator_fallback_model_key','Thread evaluator fallback')] %}
     <label>{{ label }}<select name="{{ field }}">{% if 'fallback' in field %}<option value="">No fallback</option>{% endif %}{% for model, row in models %}<option value="{{ model.key }}" {% if settings[field] == model.key %}selected{% endif %} {% if not pricing_available[model.key] %}disabled{% endif %}>{{ model.label }}{% if not pricing_available[model.key] %} — pricing unavailable{% endif %}</option>{% endfor %}</select></label>
     {% endfor %}
   </fieldset>

@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import logging
 from contextlib import suppress
+from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
@@ -25,6 +26,7 @@ from skrift.workers import handler
 from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.model_catalog import get_model
@@ -90,6 +92,16 @@ from smarter_dev.web.chat.spend import WIND_DOWN_WARNING
 from smarter_dev.web.chat.spend import append_wind_down
 from smarter_dev.web.chat.subagents import child_reasoning
 from smarter_dev.web.chat.subagents import effective_system_prompt
+from smarter_dev.web.chat.thread_evaluator import classify_incoming_message
+from smarter_dev.web.chat.thread_evaluator import idle_gap
+from smarter_dev.web.chat.threads import QUICK_CHAT_MODE
+from smarter_dev.web.chat.threads import THREAD_ALREADY_STARTED_RESULT
+from smarter_dev.web.chat.threads import THREAD_STARTED_RESULT
+from smarter_dev.web.chat.threads import clamped_thread_break_reason
+from smarter_dev.web.chat.threads import derive_thread_title
+from smarter_dev.web.chat.threads import history_floor
+from smarter_dev.web.chat.threads import open_thread
+from smarter_dev.web.chat.threads import validated_thread_break_reason
 from smarter_dev.web.chat.toolsets import ExecutionCounters
 from smarter_dev.web.chat.toolsets import run_code as execute_code
 from smarter_dev.web.chat.toolsets import web_read_optional
@@ -108,6 +120,7 @@ from smarter_dev.web.models import WebChatDocument
 from smarter_dev.web.models import WebChatMessage
 from smarter_dev.web.models import WebChatRuntimeEvent
 from smarter_dev.web.models import WebChatSubagent
+from smarter_dev.web.models import WebChatThread
 from smarter_dev.web.models import WebChatTurn
 from smarter_dev.web.models import WorkDispatch
 
@@ -622,8 +635,13 @@ async def _preflight(
 
 
 async def _active_messages_before(
-    conversation_id: UUID, response_sequence: int
+    conversation_id: UUID, response_sequence: int, from_sequence: int = 0
 ) -> list[WebChatMessage]:
+    """Assistant rows the agent may read, oldest first.
+
+    ``from_sequence`` is the Quick chat thread floor; the default of 0 is every
+    row, which is what every standard conversation gets.
+    """
     async with get_db_session_context() as session:
         return list(
             (
@@ -634,6 +652,7 @@ async def _active_messages_before(
                         WebChatMessage.role == "assistant",
                         WebChatMessage.is_active.is_(True),
                         WebChatMessage.sequence < response_sequence,
+                        WebChatMessage.sequence >= from_sequence,
                     )
                     .order_by(WebChatMessage.sequence)
                 )
@@ -641,10 +660,99 @@ async def _active_messages_before(
         )
 
 
+@dataclass(frozen=True, slots=True)
+class BranchedHistory:
+    """The context a turn generates against, and the branch it was read from.
+
+    ``floor`` travels with ``fingerprint`` because neither means anything alone:
+    the fingerprint covers the assistant rows at or above that floor, so a
+    compare-and-swap that re-reads at any other floor is comparing two different
+    windows. The floor a turn read at is fixed for the life of the turn even
+    when the conversation's own floor moves during it.
+    """
+
+    messages: list
+    rows: list[WebChatMessage]
+    fingerprint: str
+    floor: int
+
+
+async def _current_branch_fingerprint(
+    session: AsyncSession,
+    *,
+    conversation_id: UUID,
+    response_sequence: int,
+    floor: int,
+) -> str:
+    """Re-read the branch ``_structured_history`` fingerprinted, through ``session``.
+
+    Two places compare-and-swap against the fingerprint the turn was generated
+    from — the reply write in ``run_chat_turn`` and the fold write in
+    ``_maybe_compact`` — and both must re-read the same window that fingerprint
+    was taken over. In a Quick chat that window is a thread, not the whole
+    conversation: an unfloored re-read would carry the previous threads' replies,
+    so the two could never agree and every turn behind a boundary would abort as
+    a branch change.
+
+    ``floor`` is the caller's, not the conversation's, and that is the point. A
+    turn that draws its own boundary moves the committed floor above everything
+    it generated against; re-reading at the committed floor would fingerprint an
+    empty window and throw the finished reply away. The question here is whether
+    the branch changed underneath the turn, so the window stays where the turn
+    read it — ``BranchedHistory.floor``.
+    """
+    rows = list(
+        (
+            await session.execute(
+                select(WebChatMessage)
+                .where(
+                    WebChatMessage.conversation_id == conversation_id,
+                    WebChatMessage.role == "assistant",
+                    WebChatMessage.is_active.is_(True),
+                    WebChatMessage.sequence < response_sequence,
+                    WebChatMessage.sequence >= floor,
+                )
+                .order_by(WebChatMessage.sequence)
+            )
+        ).scalars()
+    )
+    return version_fingerprint(
+        [
+            {
+                "id": str(row.id),
+                "version_number": row.version_number,
+                "is_active": True,
+            }
+            for row in rows
+        ]
+    )
+
+
+def _cached_context_after_turn(
+    *, history: list, delta: list, generation_floor: int, committed_floor: int
+) -> list:
+    """What the conversation caches as its context once the reply is written.
+
+    Normally that is everything the model was handed plus what this turn added.
+    When a boundary was drawn during the turn the committed floor has risen
+    above everything ``history`` holds: those messages are the thread the person
+    has left, and caching them would hand the next turn the subject the boundary
+    exists to drop. Only the delta — this message and this reply — is inside the
+    new thread.
+    """
+    if committed_floor > generation_floor:
+        return list(delta)
+    return [*history, *delta]
+
+
 async def _structured_history(
     conversation: WebChatConversation, turn: WebChatTurn
-) -> tuple[list, list[WebChatMessage], str]:
-    rows = await _active_messages_before(conversation.id, turn.response_sequence)
+) -> BranchedHistory:
+    async with get_db_session_context() as session:
+        floor = await history_floor(session, conversation=conversation)
+    rows = await _active_messages_before(
+        conversation.id, turn.response_sequence, from_sequence=floor
+    )
     branch = [
         {"id": str(row.id), "version_number": row.version_number, "is_active": True}
         for row in rows
@@ -656,6 +764,11 @@ async def _structured_history(
             .where(
                 WebChatCompaction.conversation_id == conversation.id,
                 WebChatCompaction.status == "complete",
+                # A snapshot taken before the thread boundary summarizes the
+                # previous subject; seeding from it would drag the old thread
+                # back in behind the floor's back. One taken after the boundary
+                # was itself built from thread-scoped history, so it is safe.
+                WebChatCompaction.through_sequence >= floor,
             )
             .order_by(WebChatCompaction.through_sequence.desc())
             .limit(1)
@@ -693,7 +806,9 @@ async def _structured_history(
 
                 logger.exception("Ignoring invalid Chat history payload %s", row.id)
                 history.append(ModelResponse(parts=[TextPart(content=row.content)]))
-    return history, rows, branch_fingerprint
+    return BranchedHistory(
+        messages=history, rows=rows, fingerprint=branch_fingerprint, floor=floor
+    )
 
 
 async def _run_text_agent(
@@ -797,15 +912,14 @@ async def _run_aux_with_fallback(
 
 async def _maybe_compact(
     *,
-    history: list,
-    rows: list[WebChatMessage],
-    branch_fingerprint: str,
+    branch: BranchedHistory,
     conversation: WebChatConversation,
     turn: WebChatTurn,
     owner_id: UUID,
     selected_model,
     settings: ChatSettings,
 ) -> list:
+    history = branch.messages
     configured = compaction_model_key(
         conversation.intelligence_mode,
         selected_model_key=selected_model.key,
@@ -865,39 +979,23 @@ async def _maybe_compact(
     result = await compact_model_history(history, summarize=summarize)
     if not result.changed:
         return history
-    through = max((row.sequence for row in rows), default=0)
+    through = max((row.sequence for row in branch.rows), default=0)
     async with get_db_session_context() as session:
         durable = await session.scalar(
             select(WebChatConversation)
             .where(WebChatConversation.id == conversation.id)
             .with_for_update()
         )
-        # CAS prevents a simultaneous version switch from accepting a stale summary.
-        current_rows = list(
-            (
-                await session.execute(
-                    select(WebChatMessage)
-                    .where(
-                        WebChatMessage.conversation_id == conversation.id,
-                        WebChatMessage.role == "assistant",
-                        WebChatMessage.is_active.is_(True),
-                        WebChatMessage.sequence < turn.response_sequence,
-                    )
-                    .order_by(WebChatMessage.sequence)
-                )
-            ).scalars()
+        # CAS prevents a simultaneous version switch from accepting a stale
+        # summary. It reads through _current_branch_fingerprint at the branch's
+        # own floor so it covers the same window the fingerprint was taken over.
+        current_fingerprint = await _current_branch_fingerprint(
+            session,
+            conversation_id=conversation.id,
+            response_sequence=turn.response_sequence,
+            floor=branch.floor,
         )
-        current_fingerprint = version_fingerprint(
-            [
-                {
-                    "id": str(row.id),
-                    "version_number": row.version_number,
-                    "is_active": True,
-                }
-                for row in current_rows
-            ]
-        )
-        if current_fingerprint != branch_fingerprint:
+        if current_fingerprint != branch.fingerprint:
             return history
         session.add(
             WebChatCompaction(
@@ -906,7 +1004,7 @@ async def _maybe_compact(
                 summary=result.summary or "",
                 original_messages=encode_model_messages(result.folded_messages),
                 compacted_messages=encode_model_messages(result.messages),
-                version_fingerprint=branch_fingerprint,
+                version_fingerprint=branch.fingerprint,
                 model_key=configured,
                 reasoning_level=None,
                 status="complete",
@@ -1118,6 +1216,165 @@ async def _tool_state(
     return decision
 
 
+async def _open_thread_boundary(
+    *,
+    owner_id: UUID,
+    conversation: WebChatConversation,
+    turn: WebChatTurn,
+    origin: str,
+    reason: str | None,
+    user_message_content: str,
+) -> None:
+    """Draw the boundary in front of the message this turn is answering.
+
+    Both mechanisms land here — the agent's ``start_new_thread`` tool with
+    ``origin='agent'`` and the idle evaluator with ``origin='evaluator'`` — so
+    the boundary they write and the announcement they publish cannot drift
+    apart.
+
+    The line goes above the message the turn is reading rather than below it.
+    For the agent that is forced: it can only recognise a topic break after it
+    has been handed the previous thread, so this turn finishes on the context it
+    already paid for and every turn after it starts clean. For the evaluator it
+    is a choice, and the same one, because the evaluator runs before the
+    history is built — so its own turn already starts clean.
+
+    ``open_thread`` returns None when a boundary already starts there, which
+    means a retry of this same turn drew it before the worker died. The line is
+    where it should be either way, so both paths announce the same boundary —
+    the live notification is ephemeral, so the first attempt's may never have
+    reached the browser.
+    """
+    start_sequence = turn.response_sequence - 1
+    async with get_db_session_context() as session:
+        thread = await open_thread(
+            session,
+            conversation_id=conversation.id,
+            start_sequence=start_sequence,
+            title=derive_thread_title(user_message_content),
+            origin=origin,
+            reason=reason,
+        )
+        if thread is None:
+            thread = await session.scalar(
+                select(WebChatThread).where(
+                    WebChatThread.conversation_id == conversation.id,
+                    WebChatThread.start_sequence == start_sequence,
+                )
+            )
+        if thread is None:
+            raise RuntimeError("the Chat thread boundary vanished as it was drawn")
+        payload = {
+            "thread_id": str(thread.id),
+            "start_sequence": thread.start_sequence,
+            "title": thread.title,
+        }
+    await _event(turn.id, "chat_thread_started", payload)
+    await _notify_safe(
+        owner_id, "chat_thread_started", conversation.id, turn.id, **payload
+    )
+
+
+async def _maybe_open_evaluator_thread(
+    *,
+    owner_id: UUID,
+    conversation: WebChatConversation,
+    turn: WebChatTurn,
+    settings: ChatSettings,
+    agent=None,
+) -> None:
+    """Ask the idle evaluator whether this message starts a new subject.
+
+    Runs before the agent's history is built, which is where the saving lives:
+    a boundary drawn here means the chat model never loads the old subject at
+    all. Every gate below is a reason not to spend anything, so they are all
+    checked before the model is:
+
+    - a standard conversation is never threaded, whatever the gap;
+    - a regeneration must never move a boundary, or redoing an old reply would
+      silently rewrite what the model was allowed to see for it;
+    - a thread with no prior exchange has nothing to break away from, tested the
+      same way the agent's tool tests it so the two rules cannot drift;
+    - a turn that already has a boundary at its start sequence is a retry of a
+      turn the evaluator already judged. That check comes first, before the gap
+      arithmetic, because it is the one that a retry storm would otherwise pay
+      for over and over.
+
+    ``agent`` is the test seam that :func:`classify_incoming_message` documents.
+    """
+    if conversation.chat_mode != QUICK_CHAT_MODE:
+        return
+    if turn.kind == "regenerate" or turn.regenerates_turn_id is not None:
+        return
+    start_sequence = turn.response_sequence - 1
+    async with get_db_session_context() as session:
+        already_drawn = await session.scalar(
+            select(WebChatThread).where(
+                WebChatThread.conversation_id == conversation.id,
+                WebChatThread.start_sequence == start_sequence,
+            )
+        )
+        if already_drawn is not None:
+            return
+        floor = await history_floor(session, conversation=conversation)
+        # Everything the current thread holds before this message, both roles,
+        # oldest first. The incoming message itself sits at ``start_sequence``
+        # and is excluded: counting it would make every gap zero.
+        thread_messages = list(
+            (
+                await session.execute(
+                    select(WebChatMessage)
+                    .where(
+                        WebChatMessage.conversation_id == conversation.id,
+                        WebChatMessage.is_active.is_(True),
+                        WebChatMessage.sequence >= floor,
+                        WebChatMessage.sequence < start_sequence,
+                    )
+                    .order_by(WebChatMessage.sequence)
+                )
+            ).scalars()
+        )
+        incoming_message = await session.scalar(
+            select(WebChatMessage).where(
+                WebChatMessage.turn_id == turn.id,
+                WebChatMessage.role == "user",
+            )
+        )
+    prior_replies = await _active_messages_before(
+        conversation.id, turn.response_sequence, from_sequence=floor
+    )
+    if not prior_replies or not thread_messages or incoming_message is None:
+        return
+    gap = idle_gap(
+        last_message_at=max(message.created_at for message in thread_messages),
+        turn_created_at=turn.created_at,
+    )
+    if gap <= timedelta(minutes=settings.thread_idle_minutes):
+        return
+    verdict = await classify_incoming_message(
+        settings=settings,
+        conversation=conversation,
+        turn=turn,
+        owner_id=owner_id,
+        gap=gap,
+        recent_messages=thread_messages,
+        incoming=incoming_message.content,
+        agent=agent,
+    )
+    # None is the fail-open signal: the judgement never happened, so the message
+    # is treated as a continuation and the turn proceeds untouched.
+    if verdict is None or verdict.continues_current_thread:
+        return
+    await _open_thread_boundary(
+        owner_id=owner_id,
+        conversation=conversation,
+        turn=turn,
+        origin="evaluator",
+        reason=clamped_thread_break_reason(verdict.reason),
+        user_message_content=incoming_message.content,
+    )
+
+
 async def _build_root_agent(
     *,
     model,
@@ -1132,6 +1389,7 @@ async def _build_root_agent(
     tier: str,
     settings: ChatSettings,
     draft_message_id: UUID,
+    user_message_content: str,
 ):
     from pydantic_ai import Agent
     from pydantic_ai import PartDeltaEvent
@@ -1157,10 +1415,27 @@ async def _build_root_agent(
     # both the instruction and the tool disappear once anyone has named it, so a
     # later turn cannot be talked into renaming the owner's chat.
     needs_title = not conversation.title_is_custom
+    # The line can only be drawn where there is something to break away from, so
+    # the tool exists exactly when the current thread already holds an exchange.
+    # A brand-new Quick chat and the first message after a boundary both arrive
+    # with empty history, and neither offers it.
+    #
+    # A regeneration is refused outright: it replays an answer to a message that
+    # was already placed, so letting it draw a line would move a boundary after
+    # the fact. ``_maybe_open_evaluator_thread`` refuses the same turns, and the
+    # two rules have to agree.
+    is_regeneration = turn.kind == "regenerate" or turn.regenerates_turn_id is not None
+    quick_thread = (
+        conversation.chat_mode == QUICK_CHAT_MODE
+        and bool(history)
+        and not is_regeneration
+    )
     agent = Agent(
         metered,
         output_type=str,
-        system_prompt=effective_system_prompt(child=False, needs_title=needs_title),
+        system_prompt=effective_system_prompt(
+            child=False, needs_title=needs_title, quick_thread=quick_thread
+        ),
         model_settings=model_settings_for(model, reasoning),
     )
     counter_lock = asyncio.Lock()
@@ -2028,6 +2303,58 @@ async def _build_root_agent(
         )
         return _format_tool_result(result, after)
 
+    # Drawing a line is a structural change to the conversation, not research,
+    # so like naming it is deliberately outside the shared tool budget: a turn
+    # that has spent its allowance on searches is exactly the turn that most
+    # needs the next one to start clean. Once per turn is the whole cap.
+    thread_break_drawn = False
+
+    async def start_new_thread(ctx: RunContext, reason: str) -> str:
+        """Start a new thread because the person has clearly changed the subject.
+
+        Pass a short reason naming the old subject and the new one.
+        """
+        nonlocal thread_break_drawn
+        # A raised error here becomes a retry prompt, which can cost the person
+        # their reply over a line that is already drawn. Say so and move on.
+        if thread_break_drawn:
+            return THREAD_ALREADY_STARTED_RESULT
+        try:
+            stated_reason = validated_thread_break_reason(reason)
+        except ValueError as exc:
+            result = f"error: {exc}"
+            await _record_tool_result(turn.id, "start_new_thread", result)
+            await _done_thinking("start_new_thread")
+            return result
+        before = await _tool_state(
+            owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
+        )
+        if before.hard_cutoff:
+            return USAGE_LIMIT_RESULT
+        await _publish_activity(
+            owner_id=owner_id,
+            conversation_id=conversation.id,
+            turn_id=turn.id,
+            tool="start_new_thread",
+            status="Starting a new thread",
+        )
+        await _open_thread_boundary(
+            owner_id=owner_id,
+            conversation=conversation,
+            turn=turn,
+            origin="agent",
+            reason=stated_reason,
+            user_message_content=user_message_content,
+        )
+        thread_break_drawn = True
+        result = THREAD_STARTED_RESULT
+        await _record_tool_result(turn.id, "start_new_thread", result)
+        await _done_thinking("start_new_thread")
+        after = await _tool_state(
+            owner_id=owner_id, conversation=conversation, turn=turn, tier=tier
+        )
+        return _format_tool_result(result, after)
+
     agent.tool(search_web, name="web_search")
     agent.tool(read_web, name="web_read")
     agent.tool(run_code_tool, name="run_code")
@@ -2037,6 +2364,8 @@ async def _build_root_agent(
     agent.tool(list_documents)
     if needs_title:
         agent.tool(set_chat_title)
+    if quick_thread:
+        agent.tool(start_new_thread)
 
     if policy.subagents_enabled:
 
@@ -2383,9 +2712,17 @@ async def run_chat_turn(payload: ChatTurnPayload) -> dict:
         await _notify_safe(
             owner_id, "chat_run_state", conversation.id, turn.id, **run_state
         )
-        history, prior_rows, branch_fingerprint = await _structured_history(
-            conversation, turn
+        # Before the history is built, not after: a boundary drawn here is
+        # already in place when _structured_history floors the history, so the
+        # chat model never loads the subject the person has moved on from.
+        await _maybe_open_evaluator_thread(
+            owner_id=owner_id,
+            conversation=conversation,
+            turn=turn,
+            settings=settings,
         )
+        branch = await _structured_history(conversation, turn)
+        history = branch.messages
         async with get_db_session_context() as session:
             user_turn_id = turn.regenerates_turn_id or turn.id
             user_message = await session.scalar(
@@ -2423,9 +2760,7 @@ async def run_chat_turn(payload: ChatTurnPayload) -> dict:
             if initial_spend.hard_cutoff:
                 raise HardSpendCutoff("Chat hard spend cutoff reached")
             history = await _maybe_compact(
-                history=history,
-                rows=prior_rows,
-                branch_fingerprint=branch_fingerprint,
+                branch=branch,
                 conversation=conversation,
                 turn=turn,
                 owner_id=owner_id,
@@ -2515,6 +2850,10 @@ async def run_chat_turn(payload: ChatTurnPayload) -> dict:
                         tier=tier,
                         settings=settings,
                         draft_message_id=placeholder.id,
+                        # The thread tool titles the boundary from what the
+                        # person actually wrote, so it needs the message without
+                        # the upload manifest `prompt` may carry.
+                        user_message_content=user_message.content,
                     )
             except HardSpendCutoff:
                 await _mark_cutoff(turn.id)
@@ -2551,32 +2890,22 @@ async def run_chat_turn(payload: ChatTurnPayload) -> dict:
             )
             if durable_turn is None or durable_conversation is None:
                 raise LeaseSuperseded("turn worker lease was superseded")
-            current_branch_rows = list(
-                (
-                    await session.execute(
-                        select(WebChatMessage)
-                        .where(
-                            WebChatMessage.conversation_id == conversation.id,
-                            WebChatMessage.role == "assistant",
-                            WebChatMessage.is_active.is_(True),
-                            WebChatMessage.sequence < turn.response_sequence,
-                        )
-                        .order_by(WebChatMessage.sequence)
-                    )
-                ).scalars()
+            # Reads through _current_branch_fingerprint at the floor the history
+            # was read at, so it covers the same window the fingerprint was taken
+            # over. Reading at the committed floor instead would abort every turn
+            # that drew its own boundary: start_new_thread moves that floor above
+            # the whole window mid-turn.
+            current_branch = await _current_branch_fingerprint(
+                session,
+                conversation_id=conversation.id,
+                response_sequence=turn.response_sequence,
+                floor=branch.floor,
             )
-            current_branch = version_fingerprint(
-                [
-                    {
-                        "id": str(row.id),
-                        "version_number": row.version_number,
-                        "is_active": True,
-                    }
-                    for row in current_branch_rows
-                ]
-            )
-            if current_branch != branch_fingerprint:
+            if current_branch != branch.fingerprint:
                 raise RuntimeError("conversation branch changed during generation")
+            committed_floor = await history_floor(
+                session, conversation=durable_conversation
+            )
             durable_placeholder = await session.get(WebChatMessage, placeholder.id)
             stopped = durable_turn.stop_requested_at is not None
             durable_placeholder.content = output
@@ -2591,7 +2920,12 @@ async def run_chat_turn(payload: ChatTurnPayload) -> dict:
             durable_turn.subagent_attempts = counters.subagent_attempts
             durable_conversation.status = "idle"
             durable_conversation.context_state = encode_model_messages(
-                [*history, *decode_model_messages(model_delta)]
+                _cached_context_after_turn(
+                    history=history,
+                    delta=decode_model_messages(model_delta),
+                    generation_floor=branch.floor,
+                    committed_floor=committed_floor,
+                )
             )
             durable_conversation.context_revision += 1
             abandoned = await _close_streaming_documents(session, turn.id)
