@@ -30,6 +30,7 @@ from smarter_dev.bot.proactive.agent import (
     build_agent_system_prompt,
 )
 from smarter_dev.bot.proactive.environment import InstructionStore
+from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
 from smarter_dev.bot.proactive.models import (
     build_twopass_model,
     ensure_openrouter_key_alias,
@@ -120,6 +121,7 @@ class ChannelWatchState:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     agent_runner: KimiAgentRunner | None = None
     last_wake_at: float = 0.0
+    history_loaded: bool = False
 
 
 class ProactiveRuntime:
@@ -131,6 +133,7 @@ class ProactiveRuntime:
         self._watcher: WatcherRunner | None = None
         self._skim: SkimRunner | None = None
         self._agent_model_id: str | None = None
+        self._history_store: ProactiveHistoryStore | None = None
         self.passive_task: asyncio.Task | None = None
 
     # -- lazy model construction (env keys are only needed on first wake) --
@@ -162,6 +165,14 @@ class ProactiveRuntime:
 
     def settings_service(self) -> ProactiveSettingsService | None:
         return self.bot.d.get("proactive_settings_service")
+
+    def history_store(self) -> ProactiveHistoryStore | None:
+        if self._history_store is None:
+            redis_client = self.bot.d.get("chat_memory_redis")
+            if redis_client is None:
+                return None
+            self._history_store = ProactiveHistoryStore(redis_client)
+        return self._history_store
 
     def state_for(self, guild_id: int, channel_id: int) -> ChannelWatchState:
         state = self.states.get(channel_id)
@@ -251,18 +262,31 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
         instruction_store = InstructionStore(seed=OPERATING_POLICY_BRIEF)
         instruction_store.addendum = settings.watch_addendum
 
+        runner = run.agent_runner_for(state)
+        history_store = run.history_store()
+        if history_store is not None and not state.history_loaded:
+            try:
+                runner.history = await history_store.read(int(state.channel_id))
+            except Exception:  # noqa: BLE001 — stored history is a cache
+                logger.exception("failed to load proactive history")
+            state.history_loaded = True
+
+        wake_deps: list[ProactiveDeps] = []
+
         def deps_factory(**kwargs):
-            return ProactiveDeps(
+            deps = ProactiveDeps(
                 bot=run.bot,
                 channel_id=int(state.channel_id),
                 guild_id=int(state.guild_id),
                 channel_name=str(state.channel_id),
                 **kwargs,
             )
+            wake_deps.append(deps)
+            return deps
 
         adapter = TwoPassAdapter(
             watcher=run.watcher(),
-            agent_runner=run.agent_runner_for(state),
+            agent_runner=runner,
             skim=run.skim(),
             instruction_store=instruction_store,
             watcher_model_id=run.watcher_model_id,
@@ -299,6 +323,37 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
                 )
             except Exception:  # noqa: BLE001
                 logger.exception("proactive reaction failed")
+        pending_images = [
+            image for deps in wake_deps for image in deps.pending_images
+        ]
+        if pending_images:
+            reply_target = next(
+                (
+                    int(r.reply_to_id)
+                    for r in result.responses
+                    if r.reply_to_id and r.reply_to_id.isdigit()
+                ),
+                None,
+            )
+            image_kwargs = {
+                "attachments": [
+                    hikari.Bytes(image.data, image.filename, image.mime_type)
+                    for image in pending_images
+                ]
+            }
+            if reply_target is not None:
+                image_kwargs["reply"] = reply_target
+            try:
+                await run.bot.rest.create_message(
+                    int(state.channel_id), **image_kwargs
+                )
+            except Exception:  # noqa: BLE001 — images are best-effort extras
+                logger.exception("proactive image post failed")
+        if history_store is not None:
+            try:
+                await history_store.write(int(state.channel_id), runner.history)
+            except Exception:  # noqa: BLE001 — persistence is best-effort
+                logger.exception("failed to persist proactive history")
         if instruction_store.updates:
             try:
                 await service.set_watch_addendum(

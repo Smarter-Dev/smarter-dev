@@ -235,3 +235,125 @@ async def test_empty_non_passive_wake_is_a_noop(wake_setup):
     state = wake_setup.runtime.state_for(2, 1)
     await proactive.run_wake(state)
     assert wake_setup.adapter.contexts == []
+
+
+class _FakeRedis:
+    def __init__(self):
+        self.data: dict[str, bytes] = {}
+
+    async def get(self, key):
+        return self.data.get(key)
+
+    async def set(self, key, value, ex=None):
+        self.data[key] = value
+
+    async def delete(self, key):
+        self.data.pop(key, None)
+
+
+async def test_history_store_round_trips_and_survives_garbage():
+    from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+    from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
+
+    store = ProactiveHistoryStore(_FakeRedis())
+    assert await store.read(1) == []
+
+    history = [ModelRequest(parts=[UserPromptPart("wake one")])]
+    await store.write(1, history)
+    loaded = await store.read(1)
+    assert "wake one" in str(loaded[0])
+
+    store._redis.data[ProactiveHistoryStore._history_key(1)] = b"not json"
+    assert await store.read(1) == []
+
+
+@pytest.fixture
+def persistence_setup(wake_setup, monkeypatch):
+    from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
+
+    store = ProactiveHistoryStore(_FakeRedis())
+    monkeypatch.setattr(
+        wake_setup.runtime, "history_store", lambda: store
+    )
+    runner = SimpleNamespace(history=["fresh"])
+    monkeypatch.setattr(
+        wake_setup.runtime, "agent_runner_for", lambda state: runner
+    )
+    wake_setup.store = store
+    wake_setup.runner = runner
+    return wake_setup
+
+
+async def test_wake_loads_and_persists_agent_history(persistence_setup):
+    from pydantic_ai.messages import ModelRequest, UserPromptPart
+
+    stored = [ModelRequest(parts=[UserPromptPart("earlier wake")])]
+    await persistence_setup.store.write(1, stored)
+
+    state = persistence_setup.runtime.state_for(2, 1)
+    state.buffer.append(
+        proactive.channel_message_from_hikari(_hikari_message(id=555))
+    )
+
+    async def activate_leaving_history(context):
+        # The runner would normally append the turn; simulate that.
+        persistence_setup.runner.history = list(
+            persistence_setup.runner.history
+        ) + [ModelRequest(parts=[UserPromptPart("this wake")])]
+        return persistence_setup.adapter.result
+
+    persistence_setup.adapter.activate = activate_leaving_history
+    # The stubbed adapter factory must still expose activate.
+    await proactive.run_wake(state)
+
+    # Stored history was loaded into the runner before the wake…
+    assert "earlier wake" in str(persistence_setup.runner.history[0])
+    # …and the post-wake history (with the new turn) was persisted.
+    persisted = await persistence_setup.store.read(1)
+    assert any("this wake" in str(m) for m in persisted)
+    assert state.history_loaded is True
+
+
+async def test_wake_posts_generated_images(persistence_setup):
+    from smarter_dev.bot.agents.chat_tools import GeneratedImage
+
+    state = persistence_setup.runtime.state_for(2, 1)
+    state.buffer.append(
+        proactive.channel_message_from_hikari(_hikari_message(id=555))
+    )
+    captured_factory = {}
+
+    original_factory = proactive.TwoPassAdapter
+
+    def factory_with_images(**kwargs):
+        captured_factory["deps_factory"] = kwargs["deps_factory"]
+        return persistence_setup.adapter
+
+    # wake_setup already stubbed TwoPassAdapter; re-stub to capture the factory.
+    import tests.bot.proactive_plugin_test  # noqa: F401 — same module
+
+    proactive.TwoPassAdapter = factory_with_images
+    try:
+        async def activate_generating_image(context):
+            deps = captured_factory["deps_factory"](
+                env=None, actions=None, instruction_store=None,
+                skim_transcript=None, budget=None,
+            )
+            deps.pending_images.append(
+                GeneratedImage(data=b"png", mime_type="image/png",
+                               filename="art.png")
+            )
+            return persistence_setup.adapter.result
+
+        persistence_setup.adapter.activate = activate_generating_image
+        await proactive.run_wake(state)
+    finally:
+        proactive.TwoPassAdapter = original_factory
+
+    calls = persistence_setup.bot.rest.create_message.await_args_list
+    # First the text reply, then the image message with attachments.
+    assert len(calls) == 2
+    image_kwargs = calls[1].kwargs
+    assert len(image_kwargs["attachments"]) == 1
+    assert image_kwargs["reply"] == 555
