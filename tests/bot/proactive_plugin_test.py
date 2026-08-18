@@ -237,6 +237,83 @@ async def test_empty_non_passive_wake_is_a_noop(wake_setup):
     assert wake_setup.adapter.contexts == []
 
 
+# --- passive/active scheduling ----------------------------------------------
+
+
+def test_engagement_detection_on_mention_and_reply_to_bot():
+    assert proactive.event_engages_bot(
+        _hikari_message(user_mentions_ids=(999,)), "999"
+    )
+    assert proactive.event_engages_bot(
+        _hikari_message(
+            referenced_message=SimpleNamespace(
+                id=1, author=SimpleNamespace(id=999)
+            )
+        ),
+        "999",
+    )
+    assert not proactive.event_engages_bot(_hikari_message(), "999")
+
+
+@pytest.fixture
+def listener_setup(wake_setup, monkeypatch):
+    scheduled = []
+    monkeypatch.setattr(
+        proactive, "_schedule_wake", lambda state: scheduled.append(state)
+    )
+    wake_setup.scheduled = scheduled
+    return wake_setup
+
+
+def _event(message):
+    return SimpleNamespace(
+        author=message.author,
+        guild_id=2,
+        channel_id=1,
+        message=message,
+    )
+
+
+async def test_passive_message_buffers_without_arming_the_debounce(listener_setup):
+    await proactive.on_guild_message(_event(_hikari_message()))
+    state = listener_setup.runtime.states[1]
+    assert len(state.buffer) == 1
+    assert listener_setup.scheduled == []  # waits for the 15-min sweep
+
+
+async def test_engagement_flips_to_active_and_arms_the_debounce(listener_setup):
+    await proactive.on_guild_message(
+        _event(_hikari_message(user_mentions_ids=(999,)))
+    )
+    state = listener_setup.runtime.states[1]
+    assert state.active_until > proactive.time.monotonic()
+    assert listener_setup.scheduled == [state]
+
+    # Ordinary chatter during the active window also ingests fast.
+    await proactive.on_guild_message(_event(_hikari_message(id=556)))
+    assert listener_setup.scheduled == [state, state]
+
+
+async def test_passive_sweep_drains_buffered_channels(listener_setup):
+    await proactive.on_guild_message(_event(_hikari_message()))
+    state = listener_setup.runtime.states[1]
+    assert state.buffer
+
+    woken = []
+
+    async def fake_run_wake(target_state, passive=False):
+        woken.append((target_state, passive))
+        target_state.buffer.clear()
+
+    original = proactive.run_wake
+    proactive.run_wake = fake_run_wake
+    try:
+        await proactive._passive_sweep(listener_setup.runtime)
+    finally:
+        proactive.run_wake = original
+    assert woken == [(state, False)]
+
+
 class _FakeRedis:
     def __init__(self):
         self.data: dict[str, bytes] = {}
