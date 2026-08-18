@@ -224,6 +224,39 @@ async def _channel_auto_responds(bot: Any, event: hikari.MessageCreateEvent) -> 
     return bool(override and override.auto_respond)
 
 
+def _proactive_service(bot: Any) -> Any | None:
+    """The bot's ProactiveSettingsService (set on ``bot.d``), or None."""
+    data = getattr(bot, "d", None)
+    if not isinstance(data, dict):
+        return None
+    return data.get("proactive_settings_service")
+
+
+async def _proactive_channel(bot: Any, event: hikari.MessageCreateEvent) -> bool:
+    """True when the channel runs the proactive agent INSTEAD of this bot.
+
+    A proactive-enabled channel belongs entirely to the proactive plugin: no
+    mention, reply, auto-respond or observe path here may run. Fail-soft the
+    other way from auto-respond: a lookup failure means "not proactive", so
+    an API blip never silences the classic chat bot.
+    """
+    service = _proactive_service(bot)
+    if service is None:
+        return False
+    try:
+        settings = await service.get_settings(
+            str(event.guild_id), str(event.channel_id)
+        )
+    except Exception:
+        logger.warning(
+            "Failed to read proactive settings for channel %s — classic chat stays on",
+            event.channel_id,
+            exc_info=True,
+        )
+        return False
+    return bool(settings.enabled)
+
+
 def _bot_was_engaged(event: hikari.MessageCreateEvent, bot_user_id: int) -> bool:
     """True if the message @mentions the bot or replies to one of its messages."""
     if event.message.user_mentions_ids and bot_user_id in event.message.user_mentions_ids:
@@ -304,6 +337,11 @@ async def on_message_create(event: hikari.GuildMessageCreateEvent) -> None:
 
     bot_user = plugin.bot.get_me()
     if not bot_user:
+        return
+
+    # A proactive-enabled channel is the proactive agent's territory: the
+    # classic chat bot must not react to anything there, mentions included.
+    if await _proactive_channel(plugin.bot, event):
         return
 
     registry = get_chat_engine_registry()
