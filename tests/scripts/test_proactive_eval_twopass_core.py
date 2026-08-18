@@ -341,9 +341,10 @@ async def test_adapter_wakes_deterministically_on_bot_mention():
 def test_watcher_prompt_names_the_bot_user_id():
     prompt = watcher.build_watcher_prompt(
         instructions="i", context_transcript="c", new_transcript="n",
-        bot_user_id="B1",
+        bot_user_id="B1", bot_display_name="smarter dev",
     )
     assert "<@B1>" in prompt
+    assert 'addressing "smarter dev" by name' in prompt
 
 
 async def test_adapter_stays_silent_when_watcher_declines():

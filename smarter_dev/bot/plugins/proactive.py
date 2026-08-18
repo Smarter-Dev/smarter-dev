@@ -384,6 +384,7 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
             instruction_store=instruction_store,
             watcher_model_id=run.watcher_model_id,
             agent_model_id=run.agent_model_id,
+            bot_display_name=me.username if me else "the bot",
             deps_factory=deps_factory,
             brief_preamble=brief_preamble,
         )
