@@ -231,6 +231,7 @@ def _build_twopass_adapter(
         instruction_store=InstructionStore(seed=OPERATING_POLICY_BRIEF),
         watcher_model_id=watcher_model_id,
         agent_model_id=agent_model_id,
+        bot_display_name=bot_display_name,
         deps_factory=replay_deps_factory,
     )
     return adapter, agent_model_id

@@ -44,11 +44,14 @@ def build_watcher_prompt(
     context_transcript: str,
     new_transcript: str,
     bot_user_id: str,
+    bot_display_name: str = "the bot",
 ) -> str:
     return f"""\
-The bot's Discord user id is {bot_user_id}: `<@{bot_user_id}>` inside a \
-message is a mention of the bot, and transcript lines marked [BOT] are the \
-bot's own messages.
+The bot goes by the name "{bot_display_name}" and its Discord user id is \
+{bot_user_id}: `<@{bot_user_id}>` inside a message is a mention of the bot, \
+a message addressing "{bot_display_name}" by name (with or without an @) is \
+directed at the bot, and transcript lines marked [BOT] are the bot's own \
+messages.
 
 WAKE CRITERIA:
 {instructions}
@@ -97,6 +100,7 @@ class WatcherRunner:
         context_transcript: str,
         new_transcript: str,
         bot_user_id: str,
+        bot_display_name: str = "the bot",
     ) -> tuple[WatcherDecision, dict]:
         result = await self._agent.run(
             build_watcher_prompt(
@@ -104,6 +108,7 @@ class WatcherRunner:
                 context_transcript=context_transcript,
                 new_transcript=new_transcript,
                 bot_user_id=bot_user_id,
+                bot_display_name=bot_display_name,
             )
         )
         return result.output, usage_dict(result.usage())

@@ -85,6 +85,9 @@ class TwoPassAdapter:
     watcher_model_id: str
     agent_model_id: str
     context_size: int = WATCHER_CONTEXT_SIZE
+    # Shown to the watcher so name-mentions ("hey smarter dev…") register as
+    # directed at the bot even without an @.
+    bot_display_name: str = "the bot"
     # Builds the deps object handed to the agent's tools. The default is the
     # eval's AgentDeps; the production plugin injects a factory that returns
     # ProactiveDeps carrying the live bot/channel for the parity tools.
@@ -124,6 +127,7 @@ class TwoPassAdapter:
                 ),
                 new_transcript=env.render(context.new_messages),
                 bot_user_id=context.bot_user_id,
+                bot_display_name=self.bot_display_name,
             )
             _merge_usage(usage_by_model, self.watcher_model_id, watcher_usage)
             details = {"watcher": decision.model_dump()}
