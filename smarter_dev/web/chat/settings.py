@@ -36,6 +36,13 @@ DEFAULT_FALLBACK_MODEL = "gemini-3-5-flash-lite"
 # V4 Flash is the closest replacement the catalog still carries: $0.14/$0.28 per
 # M against Laguna's $0.10/$0.20, and the cheapest remaining tool-capable model.
 DEFAULT_SUMMARIZER = "deepseek-v4"
+# The idle evaluator in a Quick chat. Cheap is the whole specification: it reads
+# a few hundred tokens and answers one bit, and it must not cost a noticeable
+# fraction of the turn it is protecting. Always the catalog KEY — OpenCode Zen's
+# wire id for this model is "deepseek-v4-flash" and Digital Ocean's retired one
+# was "deepseek-4-flash", and both are still priced.
+DEFAULT_THREAD_EVALUATOR = "deepseek-v4"
+DEFAULT_THREAD_IDLE_MINUTES = 15
 COST_TIERS = frozenset({"low", "medium", "high", "ultra"})
 
 
@@ -48,6 +55,9 @@ class SettingsInput:
     summarizer_fallback_model_key: str | None
     compaction_model_key: str
     compaction_fallback_model_key: str | None
+    thread_evaluator_model_key: str
+    thread_evaluator_fallback_model_key: str | None
+    thread_idle_minutes: int
     catalog: dict[str, tuple[bool, str]]
     limits: dict[str, tuple[Decimal, Decimal, Decimal]]
 
@@ -59,9 +69,15 @@ def validate_settings_input(data: SettingsInput) -> SettingsInput:
         data.compaction_model_key,
         data.summarizer_fallback_model_key,
         data.compaction_fallback_model_key,
+        data.thread_evaluator_model_key,
+        data.thread_evaluator_fallback_model_key,
     } - {None, ""}
     if not data.summarizer_model_key or not data.compaction_model_key:
         raise ValueError("Summarizer and compaction models are required")
+    if not data.thread_evaluator_model_key:
+        raise ValueError("Thread evaluator model is required")
+    if int(data.thread_idle_minutes) < 1:
+        raise ValueError("Thread idle threshold must be at least 1 minute")
     unknown = sorted(key for key in keys if get_model(str(key)) is None)
     if unknown:
         raise ValueError(f"Unknown model key(s): {', '.join(unknown)}")
@@ -76,6 +92,8 @@ def validate_settings_input(data: SettingsInput) -> SettingsInput:
         data.summarizer_fallback_model_key,
         data.compaction_model_key,
         data.compaction_fallback_model_key,
+        data.thread_evaluator_model_key,
+        data.thread_evaluator_fallback_model_key,
     ]
     for key in (value for value in auxiliary_keys if value):
         model = get_model(key)
@@ -127,6 +145,9 @@ async def ensure_settings(session: AsyncSession) -> ChatSettings:
             summarizer_fallback_model_key=DEFAULT_FALLBACK_MODEL,
             compaction_model_key=DEFAULT_MODEL,
             compaction_fallback_model_key=DEFAULT_FALLBACK_MODEL,
+            thread_evaluator_model_key=DEFAULT_THREAD_EVALUATOR,
+            thread_evaluator_fallback_model_key=None,
+            thread_idle_minutes=DEFAULT_THREAD_IDLE_MINUTES,
         )
         session.add(settings)
     existing = set(
@@ -165,6 +186,14 @@ async def ensure_settings(session: AsyncSession) -> ChatSettings:
     await session.commit()
     await session.refresh(settings)
     return settings
+
+
+def integer_field(value: object, name: str) -> int:
+    """A whole number out of a form field, or a raised ValueError naming it."""
+    try:
+        return int(str(value).strip())
+    except (ValueError, AttributeError) as exc:
+        raise ValueError(f"{name} must be a whole number") from exc
 
 
 def decimal_field(value: object, name: str) -> Decimal:

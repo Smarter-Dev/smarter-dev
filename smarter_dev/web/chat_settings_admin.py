@@ -31,6 +31,7 @@ from smarter_dev.web.chat.policy import IntelligenceMode
 from smarter_dev.web.chat.settings import SettingsInput
 from smarter_dev.web.chat.settings import decimal_field
 from smarter_dev.web.chat.settings import ensure_settings
+from smarter_dev.web.chat.settings import integer_field
 from smarter_dev.web.chat.settings import validate_settings_input
 from smarter_dev.web.llm_pricing import price_rates_for_model
 from smarter_dev.web.models import ChatCatalogModel
@@ -141,6 +142,16 @@ class ChatSettingsAdminController(Controller):
                         form.get("compaction_fallback_model_key") or ""
                     )
                     or None,
+                    thread_evaluator_model_key=str(
+                        form.get("thread_evaluator_model_key") or ""
+                    ),
+                    thread_evaluator_fallback_model_key=str(
+                        form.get("thread_evaluator_fallback_model_key") or ""
+                    )
+                    or None,
+                    thread_idle_minutes=integer_field(
+                        form.get("thread_idle_minutes"), "Thread idle threshold"
+                    ),
                     catalog=catalog,
                     limits=limits,
                 )
@@ -158,6 +169,11 @@ class ChatSettingsAdminController(Controller):
         settings.summarizer_fallback_model_key = parsed.summarizer_fallback_model_key
         settings.compaction_model_key = parsed.compaction_model_key
         settings.compaction_fallback_model_key = parsed.compaction_fallback_model_key
+        settings.thread_evaluator_model_key = parsed.thread_evaluator_model_key
+        settings.thread_evaluator_fallback_model_key = (
+            parsed.thread_evaluator_fallback_model_key
+        )
+        settings.thread_idle_minutes = parsed.thread_idle_minutes
         settings.revision += 1
         raw_actor = request.session.get(SESSION_USER_ID)
         settings.updated_by_user_id = UUID(str(raw_actor)) if raw_actor else None

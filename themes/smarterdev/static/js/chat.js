@@ -1634,6 +1634,37 @@
     });
   }
 
+  // A Quick chat's thread boundaries, keyed by the message sequence each one is
+  // drawn above. Every stored boundary gets a divider — the opening thread has
+  // no row at all — which is the same rule the page template applies. A
+  // boundary dropped here is swept out of the stream by the reconcile below,
+  // live divider included.
+  function threadBreaks(snapshot) {
+    var breaks = {};
+    (snapshot.threads || []).forEach(function (boundary) {
+      breaks[boundary.start_sequence] = boundary;
+    });
+    return breaks;
+  }
+
+  function threadBreakElement(boundary, existing) {
+    var divider = existing;
+    if (!divider) {
+      divider = document.createElement('div');
+      divider.className = 'chat-thread-break';
+      divider.dataset.threadBreak = '';
+      divider.setAttribute('role', 'separator');
+      var label = document.createElement('span');
+      label.className = 'chat-thread-break-label';
+      divider.appendChild(label);
+    }
+    divider.dataset.threadId = boundary.id;
+    divider.dataset.startSequence = boundary.start_sequence;
+    divider.querySelector('.chat-thread-break-label').textContent =
+      boundary.title || 'New thread';
+    return divider;
+  }
+
   // Rebuild the thread from the durable snapshot: active versions only, rendered
   // markdown, regenerate/version controls, and no stale placeholders. This is the
   // client-side equivalent of the server-rendered page after a reload.
@@ -1651,10 +1682,21 @@
     var empty = thread.querySelector('.chat-empty');
     if (empty && messages.length) empty.remove();
     var kept = [];
+    var keptBreaks = [];
     var adopted = [];
+    var breaks = threadBreaks(snapshot);
     messages.filter(function (message) {
       return message.role !== 'assistant' || message.is_active;
     }).forEach(function (message) {
+      var boundary = breaks[message.sequence];
+      if (boundary) {
+        var divider = threadBreakElement(
+          boundary,
+          thread.querySelector('[data-thread-break][data-thread-id="' + boundary.id + '"]')
+        );
+        thread.insertBefore(divider, statusEl || null);
+        keptBreaks.push(divider);
+      }
       var article = thread.querySelector('[data-message-id="' + message.id + '"]') || adoptArticle(message, adopted);
       if (article && !article.dataset.messageId) adopted.push(article);
       article = messageArticle(message, article);
@@ -1673,6 +1715,43 @@
     Array.prototype.forEach.call(thread.querySelectorAll('.chat-message'), function (article) {
       if (kept.indexOf(article) === -1) article.remove();
     });
+    // Dividers need their own sweep: a `.chat-thread-break` is not a
+    // `.chat-message`, so the sweep above would leave a boundary that has moved
+    // or been withdrawn sitting in the stream for the rest of the session.
+    Array.prototype.forEach.call(thread.querySelectorAll('[data-thread-break]'), function (divider) {
+      if (keptBreaks.indexOf(divider) === -1) divider.remove();
+    });
+  }
+
+  // Which user article the live divider goes above. The turn is the precise
+  // answer, but two common cases have no user article carrying it: the sender's
+  // own optimistic bubble is only named once the POST returns, and a regenerate
+  // runs under a turn id the user message never had. The line always belongs in
+  // front of the newest message in the stream, so fall back to that rather than
+  // dropping the divider until the turn finishes.
+  function liveThreadBreakAnchor(turnId) {
+    var named = turnId
+      ? thread.querySelector('.chat-message-user[data-turn-id="' + turnId + '"]')
+      : null;
+    if (named) return named;
+    var userArticles = thread.querySelectorAll('.chat-message-user');
+    return userArticles.length ? userArticles[userArticles.length - 1] : null;
+  }
+
+  // The agent drew a line mid-turn. Put the divider above the message being
+  // answered right away instead of waiting for the turn to finish, and build it
+  // with the reconcile's own builder so the element the browser shows now is the
+  // element the reconcile adopts later — matched on data-thread-id.
+  function insertLiveThreadBreak(data) {
+    if (mode !== 'chat' || !thread || !data.thread_id) return;
+    if (thread.querySelector('[data-thread-break][data-thread-id="' + data.thread_id + '"]')) return;
+    var anchor = liveThreadBreakAnchor(data.turn_id);
+    if (!anchor) return;
+    thread.insertBefore(threadBreakElement({
+      id: data.thread_id,
+      start_sequence: data.start_sequence,
+      title: data.title
+    }, null), anchor);
   }
 
   function createActivity(startedAt, label) {
@@ -2167,6 +2246,9 @@
       if (mode === 'resources') resourceRunning = true;
       assistant.dataset.pendingTurn = activeTurn || '';
       assistant.dataset.turnId = activeTurn || '';
+      // Name the reader's own bubble too. It went in before the turn existed, and
+      // a mid-turn divider anchors on the turn it belongs to.
+      if (activeTurn) user.dataset.turnId = activeTurn;
       flushPendingDocuments();
       updateRootActivity({
         turn_id: activeTurn,
@@ -2329,6 +2411,7 @@
       stick(wasAtBottom);
     }
     if (type === 'chat_title_changed' && data.title) applyTitle(data.conversation_id, data.title);
+    if (type === 'chat_thread_started') insertLiveThreadBreak(data);
     if (type === 'chat_usage_updated') refreshUsage();
     if (type === 'agent_run_complete' && mode === 'resources') {
       window.location.reload();

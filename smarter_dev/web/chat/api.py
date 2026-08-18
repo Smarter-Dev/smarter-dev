@@ -62,6 +62,8 @@ from smarter_dev.web.chat.policy import IntelligenceMode
 from smarter_dev.web.chat.policy import parse_intelligence_mode
 from smarter_dev.web.chat.settings import ensure_settings
 from smarter_dev.web.chat.spend import as_utc
+from smarter_dev.web.chat.threads import QUICK_CHAT_MODE
+from smarter_dev.web.chat.threads import thread_snapshots
 from smarter_dev.web.chat.usage import usage_metrics
 from smarter_dev.web.llm_pricing import model_change_warning
 from smarter_dev.web.models import ChatCatalogModel
@@ -137,6 +139,47 @@ async def require_entitled(
             status_code=403, detail="Ultra Intelligence requires Ultra Chat."
         )
     return permissions
+
+
+async def resolved_conversation_settings(
+    session: AsyncSession,
+    *,
+    permissions,
+    intelligence_mode: str | None = None,
+    model_key: str | None = None,
+    reasoning_level: str | None = None,
+) -> tuple[str, str, str | None]:
+    """What a new conversation starts on, from the request and the defaults.
+
+    Every way of opening a conversation goes through here — the API's create
+    endpoint and the Quick chat's get-or-create — so the two cannot drift on the
+    Ultra downgrade, the enabled-model check or the reasoning resolution.
+
+    Asking for Ultra without Ultra Chat is refused; *defaulting* into it is
+    quietly downgraded instead, because a settings default nobody chose should
+    not lock a person out of starting a chat.
+    """
+    settings = await ensure_settings(session)
+    requested_mode = intelligence_mode or settings.default_intelligence_mode
+    if (
+        intelligence_mode is None
+        and requested_mode == IntelligenceMode.ULTRA_INTELLIGENCE.value
+        and not has_ultra_chat(permissions)
+    ):
+        requested_mode = IntelligenceMode.MAXIMIZE_INTELLIGENCE.value
+    mode = parse_intelligence_mode(requested_mode)
+    if mode is IntelligenceMode.ULTRA_INTELLIGENCE and not has_ultra_chat(permissions):
+        raise HTTPException(
+            status_code=403, detail="Ultra Intelligence requires Ultra Chat."
+        )
+    chosen_key = model_key or settings.default_model_key
+    enabled = await session.get(ChatCatalogModel, chosen_key)
+    model = get_model(chosen_key)
+    if model is None or enabled is None or not enabled.enabled:
+        raise HTTPException(status_code=422, detail="Select an available Chat model.")
+    requested = parse_reasoning_level(reasoning_level or settings.default_reasoning)
+    effective = resolve_reasoning_level(model, requested)
+    return mode.value, model.key, effective.value if effective else None
 
 
 async def require_between_turns(session: AsyncSession, conversation_id: UUID) -> None:
@@ -349,38 +392,21 @@ class ChatApiController(Controller):
     ) -> dict:
         require_api_csrf(request)
         user_id = require_user_id(request)
-        settings = await ensure_settings(db_session)
-        requested_mode = data.intelligence_mode or settings.default_intelligence_mode
         permissions = await require_entitled(db_session, user_id)
-        if (
-            data.intelligence_mode is None
-            and requested_mode == IntelligenceMode.ULTRA_INTELLIGENCE.value
-            and not has_ultra_chat(permissions)
-        ):
-            requested_mode = IntelligenceMode.MAXIMIZE_INTELLIGENCE.value
-        mode = parse_intelligence_mode(requested_mode)
-        if mode is IntelligenceMode.ULTRA_INTELLIGENCE and not has_ultra_chat(
-            permissions
-        ):
-            raise HTTPException(
-                status_code=403, detail="Ultra Intelligence requires Ultra Chat."
+        intelligence_mode, model_key, reasoning_level = (
+            await resolved_conversation_settings(
+                db_session,
+                permissions=permissions,
+                intelligence_mode=data.intelligence_mode,
+                model_key=data.model_key,
+                reasoning_level=data.reasoning_level,
             )
-        model_key = data.model_key or settings.default_model_key
-        enabled = await db_session.get(ChatCatalogModel, model_key)
-        model = get_model(model_key)
-        if model is None or enabled is None or not enabled.enabled:
-            raise HTTPException(
-                status_code=422, detail="Select an available Chat model."
-            )
-        requested = parse_reasoning_level(
-            data.reasoning_level or settings.default_reasoning
         )
-        effective = resolve_reasoning_level(model, requested)
         conversation = WebChatConversation(
             owner_user_id=user_id,
-            intelligence_mode=mode.value,
-            selected_model_key=model.key,
-            reasoning_level=effective.value if effective else None,
+            intelligence_mode=intelligence_mode,
+            selected_model_key=model_key,
+            reasoning_level=reasoning_level,
             title="New Chat",
             status="idle",
             next_sequence=1,
@@ -565,6 +591,11 @@ class ChatApiController(Controller):
             # that produced them; `artifacts` is the panel's shelf, where a file
             # the agent wrote and a file the user uploaded sit side by side.
             "documents": [document_dict(document) for document in documents],
+            # Thread dividers, from the same helper the page template renders
+            # from. Empty for every standard conversation.
+            "threads": await thread_snapshots(
+                db_session, conversation_id=conversation_id
+            ),
             "artifacts": [
                 artifact.as_dict()
                 for artifact in await conversation_artifacts(
@@ -653,6 +684,13 @@ class ChatApiController(Controller):
                 raise HTTPException(status_code=422, detail=str(exc)) from None
             conversation.title_is_custom = True
         if data.archived is not None:
+            # A Quick chat is a fixed surface, not a filed document. Archiving
+            # it would free the one-live-Quick-chat slot and silently strand the
+            # person's history behind a new empty chat at the same URL.
+            if conversation.chat_mode == QUICK_CHAT_MODE:
+                raise HTTPException(
+                    status_code=409, detail="A Quick chat cannot be archived."
+                )
             conversation.archived_at = datetime.now(UTC) if data.archived else None
         await db_session.commit()
         return {
@@ -683,6 +721,13 @@ class ChatApiController(Controller):
         conversation = await owned_conversation(
             db_session, conversation_id, user_id, lock=True
         )
+        # Same reasoning as archiving: the Quick chat is reached at a fixed URL
+        # and has no rail menu, so destroying it from the API would leave the
+        # person looking at a surface that quietly rebuilt itself empty.
+        if conversation.chat_mode == QUICK_CHAT_MODE:
+            raise HTTPException(
+                status_code=409, detail="A Quick chat cannot be deleted."
+            )
         active = await db_session.scalar(
             select(WebChatTurn.id).where(
                 WebChatTurn.conversation_id == conversation.id,
