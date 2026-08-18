@@ -9,13 +9,19 @@ proactive agent's history is day-scale context, already bounded by the
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 
 import pydantic
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 
 HISTORY_TTL_SECONDS = int(timedelta(hours=24).total_seconds())
+CURSOR_TTL_SECONDS = int(timedelta(days=7).total_seconds())
 KEY_PREFIX = "proactive"
+
+
+def _decode(value) -> str:
+    return value.decode() if isinstance(value, bytes) else value
 
 
 class ProactiveHistoryStore:
@@ -47,3 +53,38 @@ class ProactiveHistoryStore:
 
     async def clear(self, channel_id: int) -> None:
         await self._redis.delete(self._history_key(channel_id))
+
+    # -- last-processed cursor (restart recovery) --
+
+    @staticmethod
+    def _cursor_key(channel_id: int) -> str:
+        return f"{KEY_PREFIX}:{channel_id}:cursor"
+
+    async def read_cursor(self, channel_id: int) -> dict | None:
+        raw = await self._redis.get(self._cursor_key(channel_id))
+        if not raw:
+            return None
+        try:
+            return json.loads(_decode(raw))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return None
+
+    async def write_cursor(
+        self, channel_id: int, *, guild_id: str, last_message_id: str
+    ) -> None:
+        await self._redis.set(
+            self._cursor_key(channel_id),
+            json.dumps({"guild_id": guild_id, "last_message_id": last_message_id}),
+            ex=CURSOR_TTL_SECONDS,
+        )
+
+    async def cursor_channel_ids(self) -> list[int]:
+        """Channels with a stored cursor — the restart-recovery scan set."""
+        channel_ids = []
+        async for key in self._redis.scan_iter(
+            match=f"{KEY_PREFIX}:*:cursor"
+        ):
+            middle = _decode(key).split(":")[1]
+            if middle.isdigit():
+                channel_ids.append(int(middle))
+        return sorted(channel_ids)

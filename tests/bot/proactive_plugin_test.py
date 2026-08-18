@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -382,6 +382,84 @@ class _FakeRedis:
 
     async def delete(self, key):
         self.data.pop(key, None)
+
+    async def scan_iter(self, match=None):
+        import fnmatch
+
+        for key in list(self.data):
+            if match is None or fnmatch.fnmatch(key, match):
+                yield key
+
+
+async def test_cursor_round_trips_with_guild_id():
+    from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
+
+    store = ProactiveHistoryStore(_FakeRedis())
+    assert await store.read_cursor(1) is None
+    await store.write_cursor(1, guild_id="2", last_message_id="555")
+    cursor = await store.read_cursor(1)
+    assert cursor == {"guild_id": "2", "last_message_id": "555"}
+    assert await store.cursor_channel_ids() == [1]
+
+
+async def test_wake_advances_the_cursor_to_newest_new_message(persistence_setup):
+    state = persistence_setup.runtime.state_for(2, 1)
+    state.buffer.append(
+        proactive.channel_message_from_hikari(_hikari_message(id=555))
+    )
+    state.buffer.append(
+        proactive.channel_message_from_hikari(_hikari_message(id=556))
+    )
+    await proactive.run_wake(state)
+    cursor = await persistence_setup.store.read_cursor(1)
+    assert cursor == {"guild_id": "2", "last_message_id": "556"}
+
+
+async def test_recovery_wakes_enabled_channels_on_missed_messages(
+    persistence_setup, monkeypatch
+):
+    store = persistence_setup.store
+    await store.write_cursor(1, guild_id="2", last_message_id="500")
+
+    fresh = datetime.now(UTC)
+    missed = [
+        _hikari_message(id=501, created_at=fresh),
+        _hikari_message(id=502, created_at=fresh, author=SimpleNamespace(
+            id=999, username="smarter-bot", global_name=None, is_bot=True
+        )),  # bot-authored: excluded from catch-up
+        _hikari_message(
+            id=499, created_at=fresh - timedelta(hours=2)
+        ),  # older than the catch-up age cap: excluded
+    ]
+    persistence_setup.bot.rest.fetch_messages = (
+        lambda channel_id, after=None: _FakeIterator(missed)
+    )
+    woken = []
+
+    async def fake_run_wake(state, passive=False):
+        woken.append([m.id for m in state.buffer])
+        state.buffer.clear()
+
+    monkeypatch.setattr(proactive, "run_wake", fake_run_wake)
+    await proactive._recover_channels(persistence_setup.runtime)
+    assert woken == [["501"]]
+
+
+async def test_recovery_skips_disabled_channels(persistence_setup, monkeypatch):
+    await persistence_setup.store.write_cursor(
+        1, guild_id="2", last_message_id="500"
+    )
+    persistence_setup.service.settings = ProactiveChannelSettings(
+        guild_id="2", channel_id="1", enabled=False, watch_addendum="",
+    )
+    woken = []
+
+    async def fake_run_wake(state, passive=False):
+        woken.append(state)
+
+    monkeypatch.setattr(proactive, "run_wake", fake_run_wake)
+    await proactive._recover_channels(persistence_setup.runtime)
+    assert woken == []
 
 
 async def test_history_store_round_trips_and_survives_garbage():

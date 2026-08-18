@@ -25,7 +25,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import hikari
 import lightbulb
@@ -68,6 +68,10 @@ ACTIVE_WINDOW_SECONDS = 600
 # How often the guild/channel memory bundle is re-read and injected into the
 # agent's brief; the refresh runs lazily on the next wake after expiry.
 MEMORY_REFRESH_SECONDS = 3600
+# Restart recovery: how far back a startup catch-up wake may reach, and how
+# many missed messages it will at most replay.
+CATCHUP_MAX_AGE_SECONDS = 3600
+CATCHUP_MAX_MESSAGES = 50
 AGENT_MODEL_ENV_VAR = "PROACTIVE_AGENT_MODEL"
 WATCHER_MODEL_ENV_VAR = "PROACTIVE_WATCHER_MODEL"
 DEFAULT_AGENT_MODEL = "gemini-3.7-flash"
@@ -222,6 +226,7 @@ class ProactiveRuntime:
         self._agent_model_id: str | None = None
         self._history_store: ProactiveHistoryStore | None = None
         self.passive_task: asyncio.Task | None = None
+        self.recovery_task: asyncio.Task | None = None
 
     # -- lazy model construction (env keys are only needed on first wake) --
 
@@ -449,6 +454,19 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
                 await history_store.write(int(state.channel_id), runner.history)
             except Exception:  # noqa: BLE001 — persistence is best-effort
                 logger.exception("failed to persist proactive history")
+        if (
+            history_store is not None
+            and new_messages
+            and new_messages[-1].id.isdigit()
+        ):
+            try:
+                await history_store.write_cursor(
+                    int(state.channel_id),
+                    guild_id=state.guild_id,
+                    last_message_id=new_messages[-1].id,
+                )
+            except Exception:  # noqa: BLE001 — the cursor is best-effort
+                logger.exception("failed to persist proactive cursor")
         if instruction_store.updates:
             try:
                 await service.set_watch_addendum(
@@ -539,11 +557,64 @@ async def _passive_ticker() -> None:
         await _passive_sweep(run)
 
 
+async def _fetch_missed(
+    bot, channel_id: int, last_message_id: str
+) -> list[ChannelMessage]:
+    """Human messages sent after the cursor, capped by age and count."""
+    fetched = []
+    try:
+        async for message in bot.rest.fetch_messages(
+            int(channel_id), after=int(last_message_id)
+        ).limit(CATCHUP_MAX_MESSAGES):
+            fetched.append(message)
+    except Exception:  # noqa: BLE001 — catch-up is best-effort
+        logger.exception("proactive catch-up fetch failed channel=%s", channel_id)
+        return []
+    fetched.sort(key=lambda message: int(message.id))
+    cutoff = datetime.now(UTC) - timedelta(seconds=CATCHUP_MAX_AGE_SECONDS)
+    converted = [channel_message_from_hikari(m) for m in fetched]
+    return [m for m in converted if not m.is_bot and m.timestamp >= cutoff]
+
+
+async def _recover_channels(run: ProactiveRuntime) -> None:
+    """Replay what enabled channels received while the bot was down."""
+    store = run.history_store()
+    service = run.settings_service()
+    if store is None or service is None:
+        return
+    for channel_id in await store.cursor_channel_ids():
+        try:
+            cursor = await store.read_cursor(channel_id)
+            if not cursor:
+                continue
+            settings = await service.get_settings(
+                cursor["guild_id"], str(channel_id)
+            )
+            if not settings.enabled:
+                continue
+            missed = await _fetch_missed(
+                run.bot, channel_id, cursor["last_message_id"]
+            )
+            if not missed:
+                continue
+            state = run.state_for(int(cursor["guild_id"]), channel_id)
+            state.buffer.extend(missed)
+            state.first_at = state.last_at = time.monotonic()
+            logger.info(
+                "proactive recovery: %d missed messages in channel %s",
+                len(missed), channel_id,
+            )
+            await run_wake(state)
+        except Exception:  # noqa: BLE001 — one channel must not kill recovery
+            logger.exception("proactive recovery failed channel=%s", channel_id)
+
+
 @plugin.listener(hikari.StartedEvent)
 async def on_started(event: hikari.StartedEvent) -> None:
     run = runtime
     if run is not None and run.passive_task is None:
         run.passive_task = asyncio.create_task(_passive_ticker())
+        run.recovery_task = asyncio.create_task(_recover_channels(run))
 
 
 @plugin.command
