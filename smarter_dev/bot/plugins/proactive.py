@@ -52,6 +52,7 @@ from smarter_dev.bot.proactive.windows import (
     PASSIVE_SECONDS,
     QUIET_SECONDS,
 )
+from smarter_dev.bot.services.chat_memory import get_chat_memory
 from smarter_dev.bot.services.proactive_settings_service import (
     ProactiveSettingsService,
 )
@@ -64,6 +65,9 @@ ADMIN_DENIAL_MESSAGE = "The /proactive command is limited to server admins."
 # How long a channel stays in active ingest (fast 15s/60s debounce) after a
 # member engages the bot; outside it, messages wait for the 15-min sweep.
 ACTIVE_WINDOW_SECONDS = 600
+# How often the guild/channel memory bundle is re-read and injected into the
+# agent's brief; the refresh runs lazily on the next wake after expiry.
+MEMORY_REFRESH_SECONDS = 3600
 AGENT_MODEL_ENV_VAR = "PROACTIVE_AGENT_MODEL"
 WATCHER_MODEL_ENV_VAR = "PROACTIVE_WATCHER_MODEL"
 DEFAULT_AGENT_MODEL = "gemini-3.7-flash"
@@ -92,6 +96,65 @@ def event_engages_bot(message, bot_user_id: str) -> bool:
     referenced = getattr(message, "referenced_message", None)
     author = getattr(referenced, "author", None) if referenced else None
     return author is not None and str(author.id) == bot_user_id
+
+
+def render_memory_block(
+    *, long_term_memory, long_term_updated_at, notes, topic, channel_notes
+) -> str:
+    """The memory bundle as one brief-ready block; empty when nothing is known."""
+    sections = []
+    if long_term_memory:
+        stamp = (
+            f" (dreamed {long_term_updated_at:%Y-%m-%d})"
+            if long_term_updated_at
+            else ""
+        )
+        sections.append(f"GUILD MEMORY{stamp}:\n{long_term_memory}")
+    if notes:
+        note_lines = "\n".join(
+            f"- [{note.channel_name or note.channel_id or 'somewhere'}] {note.text}"
+            for note in notes
+        )
+        sections.append(f"NOTES YOU KEPT TODAY:\n{note_lines}")
+    if topic:
+        sections.append(f"CHANNEL TOPIC (your earlier summary): {topic}")
+    if channel_notes:
+        sections.append(f"CHANNEL NOTES: {channel_notes}")
+    if not sections:
+        return ""
+    return "YOUR MEMORY (refreshed at most hourly):\n" + "\n\n".join(sections)
+
+
+async def load_memory_block(run: "ProactiveRuntime", state: "ChannelWatchState") -> str:
+    """Read the same memory the chat bot injects; empty string on any failure."""
+    long_term = None
+    long_term_at = None
+    kept_notes = ()
+    guild_service = run.bot.d.get("guild_chat_memory_service")
+    if guild_service is not None:
+        try:
+            snapshot = await guild_service.load_snapshot(state.guild_id)
+            long_term = snapshot.long_term_memory
+            long_term_at = snapshot.updated_at
+            kept_notes = snapshot.notes
+        except Exception:  # noqa: BLE001 — memory is best-effort context
+            logger.warning("proactive guild memory read failed", exc_info=True)
+    topic = None
+    channel_notes = None
+    try:
+        chat_memory = get_chat_memory()
+        topic_value = await chat_memory.topic_for_activation(int(state.channel_id))
+        topic = topic_value.text if hasattr(topic_value, "text") else topic_value
+        channel_notes = await chat_memory.get_notes(int(state.channel_id))
+    except Exception:  # noqa: BLE001 — memory is best-effort context
+        logger.warning("proactive channel memory read failed", exc_info=True)
+    return render_memory_block(
+        long_term_memory=long_term,
+        long_term_updated_at=long_term_at,
+        notes=kept_notes,
+        topic=topic,
+        channel_notes=channel_notes,
+    )
 
 
 def channel_message_from_hikari(message) -> ChannelMessage:
@@ -145,6 +208,7 @@ class ChannelWatchState:
     history_loaded: bool = False
     # Monotonic deadline of the active-ingest window; 0 means passive.
     active_until: float = 0.0
+    memory_refreshed_at: float = 0.0
 
 
 class ProactiveRuntime:
@@ -294,6 +358,12 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
                 logger.exception("failed to load proactive history")
             state.history_loaded = True
 
+        brief_preamble = ""
+        now = time.monotonic()
+        if now - state.memory_refreshed_at >= MEMORY_REFRESH_SECONDS:
+            brief_preamble = await load_memory_block(run, state)
+            state.memory_refreshed_at = now
+
         wake_deps: list[ProactiveDeps] = []
 
         def deps_factory(**kwargs):
@@ -315,6 +385,7 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
             watcher_model_id=run.watcher_model_id,
             agent_model_id=run.agent_model_id,
             deps_factory=deps_factory,
+            brief_preamble=brief_preamble,
         )
         context = ActivationContext(
             channel_name=str(state.channel_id),

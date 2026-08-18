@@ -89,6 +89,10 @@ class TwoPassAdapter:
     # eval's AgentDeps; the production plugin injects a factory that returns
     # ProactiveDeps carrying the live bot/channel for the parity tools.
     deps_factory: object = None
+    # Prepended to the wake brief when non-empty. The plugin uses it for the
+    # hourly memory refresh: since the agent's history persists across wakes,
+    # the block only needs to ride one brief per refresh.
+    brief_preamble: str = ""
 
     async def activate(self, context: ActivationContext) -> ActivationResult:
         usage_by_model: dict[str, dict] = {}
@@ -140,9 +144,10 @@ class TwoPassAdapter:
                 skim_transcript=skim_transcript,
                 budget=ToolBudget(),
             )
-            note, agent_usage = await self.agent_runner.wake(
-                build_wake_brief(decision, env), deps
-            )
+            brief = build_wake_brief(decision, env)
+            if self.brief_preamble:
+                brief = f"{self.brief_preamble}\n\n{brief}"
+            note, agent_usage = await self.agent_runner.wake(brief, deps)
             _merge_usage(usage_by_model, self.agent_model_id, agent_usage)
             details["agent"] = {
                 "tool_calls": deps.budget.used,
