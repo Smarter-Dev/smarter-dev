@@ -314,6 +314,62 @@ async def test_passive_sweep_drains_buffered_channels(listener_setup):
     assert woken == [(state, False)]
 
 
+# --- memory injection --------------------------------------------------------
+
+
+def test_render_memory_block_composes_known_sections():
+    note = SimpleNamespace(channel_name="#general", channel_id="1",
+                            text="alice is benchmarking her parser")
+    block = proactive.render_memory_block(
+        long_term_memory="This guild loves rust.",
+        long_term_updated_at=datetime(2026, 8, 17, tzinfo=UTC),
+        notes=[note],
+        topic="parser performance chat",
+        channel_notes="carol prefers concise answers",
+    )
+    assert "GUILD MEMORY (dreamed 2026-08-17)" in block
+    assert "alice is benchmarking" in block
+    assert "parser performance chat" in block
+    assert "carol prefers concise" in block
+
+
+def test_render_memory_block_empty_when_nothing_known():
+    assert proactive.render_memory_block(
+        long_term_memory=None, long_term_updated_at=None, notes=(),
+        topic=None, channel_notes=None,
+    ) == ""
+
+
+async def test_wake_injects_memory_hourly_not_per_wake(wake_setup, monkeypatch):
+    captured_kwargs = []
+    adapter = wake_setup.adapter
+
+    def capturing_factory(**kwargs):
+        captured_kwargs.append(kwargs)
+        return adapter
+
+    monkeypatch.setattr(proactive, "TwoPassAdapter", capturing_factory)
+
+    async def fake_memory(run, state):
+        return "YOUR MEMORY: the guild loves rust"
+
+    monkeypatch.setattr(proactive, "load_memory_block", fake_memory)
+
+    state = wake_setup.runtime.state_for(2, 1)
+    state.buffer.append(
+        proactive.channel_message_from_hikari(_hikari_message(id=555))
+    )
+    await proactive.run_wake(state)
+    assert captured_kwargs[-1]["brief_preamble"].startswith("YOUR MEMORY")
+
+    # A second wake inside the hour carries no memory block.
+    state.buffer.append(
+        proactive.channel_message_from_hikari(_hikari_message(id=556))
+    )
+    await proactive.run_wake(state)
+    assert captured_kwargs[-1]["brief_preamble"] == ""
+
+
 class _FakeRedis:
     def __init__(self):
         self.data: dict[str, bytes] = {}
