@@ -5,7 +5,7 @@ the agent-written watch_addendum that extends the watcher's wake criteria
 across restarts.
 
 Revision ID: d1f5a8c3e7b2
-Revises: c9e4b7d2f6a3
+Revises: d2f7a4c9e1b6
 Create Date: 2026-08-17 23:30:00.000000
 
 """
@@ -16,7 +16,7 @@ import sqlalchemy as sa
 
 
 revision: str = "d1f5a8c3e7b2"
-down_revision: Union[str, None] = "c9e4b7d2f6a3"
+down_revision: Union[str, None] = "d2f7a4c9e1b6"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
