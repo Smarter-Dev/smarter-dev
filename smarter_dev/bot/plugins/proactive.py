@@ -1,13 +1,21 @@
-"""Proactive chat bot plugin: burst watcher loop + admin /proactive toggle.
+"""Proactive chat bot plugin: passive watch, active ingest, /proactive toggle.
 
-Runs the two-pass system (smarter_dev/bot/proactive/) live: enabled
-channels buffer human messages, a wake fires 15s after the burst goes
-quiet (capped 60s after its first message), the DeepSeek watcher gates —
-bot mentions/replies wake deterministically — and the agent (Gemini 3.7
-Flash by default, full chat-tool parity) acts or deliberately stays
-silent. A 15-minute passive tick re-runs the watcher on idle channels the
-plugin has seen traffic in. The agent's watch-instruction updates persist
-per channel via the proactive-settings API.
+Two scheduling modes per enabled channel:
+
+- PASSIVE (the default, all messages at all times): messages buffer and the
+  15-minute sweep reviews each batch through the DeepSeek watcher — cold
+  entries happen here, at sweep latency and minimal cost.
+- ACTIVE ingest: when a member engages the bot (@mention or reply to a bot
+  message) the channel switches to the fast 15s-quiet/60s-cap debounce for
+  ACTIVE_WINDOW_SECONDS, so the conversation feels responsive; every
+  further engagement extends the window, and it decays back to passive by
+  absence.
+
+Engagement messages wake the agent deterministically; everything else goes
+through the watcher gate. The agent (Gemini 3.7 Flash by default, full
+chat-tool parity) acts or deliberately stays silent; its watch-instruction
+updates persist per channel via the proactive-settings API, and its history
+persists in Redis.
 """
 
 from __future__ import annotations
@@ -53,6 +61,9 @@ logger = logging.getLogger(__name__)
 plugin = lightbulb.Plugin("proactive")
 
 ADMIN_DENIAL_MESSAGE = "The /proactive command is limited to server admins."
+# How long a channel stays in active ingest (fast 15s/60s debounce) after a
+# member engages the bot; outside it, messages wait for the 15-min sweep.
+ACTIVE_WINDOW_SECONDS = 600
 AGENT_MODEL_ENV_VAR = "PROACTIVE_AGENT_MODEL"
 WATCHER_MODEL_ENV_VAR = "PROACTIVE_WATCHER_MODEL"
 DEFAULT_AGENT_MODEL = "gemini-3.7-flash"
@@ -71,6 +82,16 @@ def compute_fire_delay(
     """Seconds until the current burst should fire, measured from ``now``."""
     fire_at = min(last_at + quiet_seconds, first_at + max_wait_seconds)
     return max(0.0, fire_at - now)
+
+
+def event_engages_bot(message, bot_user_id: str) -> bool:
+    """True when the message @mentions the bot or replies to a bot message."""
+    mention_ids = getattr(message, "user_mentions_ids", None) or ()
+    if bot_user_id in {str(mention_id) for mention_id in mention_ids}:
+        return True
+    referenced = getattr(message, "referenced_message", None)
+    author = getattr(referenced, "author", None) if referenced else None
+    return author is not None and str(author.id) == bot_user_id
 
 
 def channel_message_from_hikari(message) -> ChannelMessage:
@@ -122,6 +143,8 @@ class ChannelWatchState:
     agent_runner: KimiAgentRunner | None = None
     last_wake_at: float = 0.0
     history_loaded: bool = False
+    # Monotonic deadline of the active-ingest window; 0 means passive.
+    active_until: float = 0.0
 
 
 class ProactiveRuntime:
@@ -409,7 +432,30 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
         state.first_at = now
     state.last_at = now
     state.buffer.append(channel_message_from_hikari(event.message))
-    _schedule_wake(state)
+
+    me = run.bot.get_me()
+    bot_user_id = str(me.id) if me else ""
+    if event_engages_bot(event.message, bot_user_id):
+        # A member engaged the bot: active ingest for a while, so the
+        # conversation feels responsive.
+        state.active_until = now + ACTIVE_WINDOW_SECONDS
+    if now < state.active_until:
+        _schedule_wake(state)
+    # Passive channels leave the buffer for the 15-minute sweep.
+
+
+async def _passive_sweep(run: ProactiveRuntime) -> None:
+    """One 15-minute pass: drain passive buffers, revisit long-idle channels."""
+    for state in list(run.states.values()):
+        try:
+            if state.buffer:
+                await run_wake(state)
+                continue
+            idle_for = time.monotonic() - max(state.last_wake_at, state.last_at)
+            if idle_for >= PASSIVE_SECONDS:
+                await run_wake(state, passive=True)
+        except Exception:  # noqa: BLE001 — one channel must not kill the ticker
+            logger.exception("passive sweep failed channel=%s", state.channel_id)
 
 
 async def _passive_ticker() -> None:
@@ -418,14 +464,7 @@ async def _passive_ticker() -> None:
         run = runtime
         if run is None:
             return
-        for state in list(run.states.values()):
-            idle_for = time.monotonic() - max(state.last_wake_at, state.last_at)
-            if state.buffer or idle_for < PASSIVE_SECONDS:
-                continue
-            try:
-                await run_wake(state, passive=True)
-            except Exception:  # noqa: BLE001 — one channel must not kill the ticker
-                logger.exception("passive wake failed channel=%s", state.channel_id)
+        await _passive_sweep(run)
 
 
 @plugin.listener(hikari.StartedEvent)
