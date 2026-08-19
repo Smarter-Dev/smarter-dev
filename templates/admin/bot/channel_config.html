@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block page_title %}Configure the chat bot{% endblock %}
+
+{% block content %}
+<article class="sk-channel-config">
+  <hgroup>
+    <h1>Chat bot configuration</h1>
+    <p>Channel <code>#{{ channel_id }}</code> · this link expires 15 minutes after it was issued.</p>
+  </hgroup>
+
+  {% if flash_messages %}
+  <div class="sk-flash-list">
+    {% for msg in flash_messages %}
+    <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <form method="post" action="/admin/bot/configure/{{ token }}">
+    <fieldset>
+      <legend><strong>Which bot serves this channel</strong></legend>
+      <label>
+        <input type="radio" name="bot_kind" value="legacy"
+               {% if not (proactive and proactive.enabled) %}checked{% endif %}>
+        <strong>Legacy chat bot</strong> — replies when mentioned, or to any
+        message if auto-respond is on below.
+      </label>
+      <label>
+        <input type="radio" name="bot_kind" value="proactive"
+               {% if proactive and proactive.enabled %}checked{% endif %}>
+        <strong>Proactive bot</strong> — watches the channel and decides for
+        itself when to join in. Turning this on switches the legacy bot off
+        in this channel entirely.
+      </label>
+    </fieldset>
+
+    <fieldset>
+      <legend><strong>Model</strong></legend>
+      <label>
+        Chat model
+        <select name="model_key">
+          <option value="">Server default</option>
+          {% for model in models %}
+          <option value="{{ model.key }}"
+                  {% if override and override.model_key == model.key %}selected{% endif %}>
+            {{ model.label }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label>
+        Reasoning level
+        <select name="reasoning_level">
+          <option value="">Model default</option>
+          {% for level in reasoning_levels %}
+          <option value="{{ level }}"
+                  {% if override and override.reasoning_level == level %}selected{% endif %}>
+            {{ level }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label>
+        Fallback model <small>used when the primary is unavailable</small>
+        <select name="fallback_model_key">
+          <option value="">None</option>
+          {% for model in models %}
+          <option value="{{ model.key }}"
+                  {% if override and override.fallback_model_key == model.key %}selected{% endif %}>
+            {{ model.label }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label>
+        Drafter model <small>set this to run the cheap two-stage drafter+writer mode</small>
+        <select name="drafter_model">
+          <option value="">Off (single agent)</option>
+          {% for model in models %}
+          <option value="{{ model.key }}"
+                  {% if override and override.drafter_model == model.key %}selected{% endif %}>
+            {{ model.label }}
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+    </fieldset>
+
+    <fieldset>
+      <legend><strong>Budgets</strong> <small>0 means unlimited</small></legend>
+      <label>
+        Daily token budget
+        <input type="number" name="daily_token_budget" min="0" step="1"
+               value="{{ override.daily_token_budget if override else 0 }}">
+      </label>
+      <label>
+        Hourly token budget
+        <input type="number" name="hourly_token_budget" min="0" step="1"
+               value="{{ override.hourly_token_budget if override else 0 }}">
+      </label>
+    </fieldset>
+
+    <fieldset>
+      <legend><strong>Legacy bot behaviour</strong> <small>ignored while the proactive bot serves this channel</small></legend>
+      <label>
+        <input type="checkbox" name="auto_respond"
+               {% if override and override.auto_respond %}checked{% endif %}>
+        Auto-respond — reply to every message, not just mentions
+      </label>
+      <label>
+        Response filter
+        <textarea name="response_filter" rows="3"
+                  placeholder="Free-text instructions for which messages deserve a reply">{{ override.response_filter if override and override.response_filter else "" }}</textarea>
+      </label>
+    </fieldset>
+
+    <button type="submit">Save configuration</button>
+  </form>
+</article>
+{% endblock %}

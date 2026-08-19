@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block page_title %}Configuration link expired{% endblock %}
+
+{% block content %}
+<article>
+  <hgroup>
+    <h1>This configuration link is no longer valid</h1>
+    <p>Links expire 15 minutes after they are issued, and each one only works
+       for the channel it was created for.</p>
+  </hgroup>
+  <p>Run <code>/configure bot</code> in the channel again to get a fresh link.</p>
+</article>
+{% endblock %}
