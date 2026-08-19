@@ -74,15 +74,39 @@ def engagement_notifications(
     return produced
 
 
+def render_active_instructions(store: InstructionStore) -> str:
+    """The agent's own standing watch instructions, shown every wake.
+
+    Seeing the mechanism in its live state each wake is what makes the agent
+    actually use it — a tool mentioned only in the system prompt stays
+    theoretical.
+    """
+    if not store.entries:
+        return "YOUR WATCH INSTRUCTIONS: none set."
+    lines = "\n".join(
+        f"- {e.instruction_id} (expires {e.expires_at:%H:%M} UTC): {e.text}"
+        for e in store.entries
+    )
+    return f"YOUR WATCH INSTRUCTIONS (active):\n{lines}"
+
+
 def build_wake_brief(
-    notifications: list[Notification], dropped: int
+    notifications: list[Notification], dropped: int, store: InstructionStore
 ) -> str:
     return f"""\
 {render_notifications(notifications, dropped)}
 
+{render_active_instructions(store)}
+
 A notification is a lead, not the full story — pull context with your tools
-when it isn't enough. Act per your policy (or deliberately don't), and
-finish with a one-sentence note on what you did and why."""
+when it isn't enough. Act per your policy (or deliberately don't).
+
+Before you finish: the watcher will not wake you again except for direct
+engagement or activity it independently judges interesting. If anything here
+deserves a follow-up you would otherwise never hear about — someone said
+they'd report back, a thread you want to see resolved, a topic worth
+catching — call set_watch_instruction now with a TTL. Then finish with a
+one-sentence note on what you did and why."""
 
 
 def _merge_usage(usage_by_model: dict, model_id: str, usage: dict) -> None:
@@ -186,7 +210,9 @@ class TwoPassAdapter:
                 if self.notification_queue is not None
                 else ([], 0)
             )
-            brief = build_wake_brief(pending + wake_notifications, dropped)
+            brief = build_wake_brief(
+                pending + wake_notifications, dropped, self.instruction_store
+            )
             if self.brief_preamble:
                 brief = f"{self.brief_preamble}\n\n{brief}"
             note, agent_usage = await self.agent_runner.wake(brief, deps)
