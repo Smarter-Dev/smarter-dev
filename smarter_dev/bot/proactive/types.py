@@ -32,6 +32,9 @@ class ChannelMessage:
     message_type: int
     reaction_counts: dict[str, int] = field(default_factory=dict)
     injected_bot_response: bool = False
+    # Guild role names of the author, when the runtime knows them (live
+    # gateway messages); fixtures and injected messages leave this empty.
+    roles: tuple[str, ...] = ()
 
     @classmethod
     def from_record(cls, record: dict) -> ChannelMessage:
@@ -50,6 +53,7 @@ class ChannelMessage:
             sticker_count=record["sticker_count"],
             message_type=record["message_type"],
             reaction_counts=dict(record["reaction_counts"]),
+            roles=tuple(record.get("roles", ())),
         )
 
     def to_record(self) -> dict:
@@ -69,6 +73,7 @@ class ChannelMessage:
             "sticker_count": self.sticker_count,
             "reaction_counts": dict(self.reaction_counts),
             "message_type": self.message_type,
+            "roles": list(self.roles),
         }
 
 

@@ -172,6 +172,13 @@ def channel_message_from_hikari(message) -> ChannelMessage:
     author = message.author
     member = getattr(message, "member", None)
     nickname = getattr(member, "nickname", None) if member else None
+    role_names: tuple[str, ...] = ()
+    get_roles = getattr(member, "get_roles", None) if member else None
+    if callable(get_roles):
+        try:
+            role_names = tuple(role.name for role in get_roles())
+        except Exception:  # noqa: BLE001 — roles are metadata, never load-bearing
+            role_names = ()
     display = (
         nickname or getattr(author, "global_name", None) or author.username
     )
@@ -199,6 +206,7 @@ def channel_message_from_hikari(message) -> ChannelMessage:
         attachment_count=len(getattr(message, "attachments", ()) or ()),
         sticker_count=len(getattr(message, "stickers", ()) or ()),
         message_type=message_type,
+        roles=role_names,
     )
 
 

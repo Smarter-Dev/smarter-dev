@@ -26,6 +26,7 @@ def _message(message_id: str = "555", *, mention: bool = False,
         attachment_count=0,
         sticker_count=0,
         message_type=19 if reply_to else 0,
+        roles=("Regular", "Helper"),
     )
 
 
@@ -34,7 +35,8 @@ def test_mention_notification_carries_verbatim_id_and_user_metadata():
     assert notification.kind == "mention"
     assert notification.wakes is True
     assert notification.message_ids == ("555",)
-    for expected in ("555", "ally", "alice", "901", "what's a coroutine?"):
+    for expected in ("555", "ally", "alice", "901", "what's a coroutine?",
+                     "Regular, Helper"):
         assert expected in notification.body
 
 

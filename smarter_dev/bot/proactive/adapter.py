@@ -153,18 +153,17 @@ class TwoPassAdapter:
             )
             _merge_usage(usage_by_model, self.watcher_model_id, watcher_usage)
             details = {"watcher": decision.model_dump()}
-            summary = watcher_summary_notification(
-                summary=decision.summary or decision.reason,
-                message_ids=list(decision.relevant_message_ids),
-                wake=decision.wake,
-                created_at=context.activated_at,
-            )
             if decision.wake:
-                wake_notifications.append(summary)
-            elif self.notification_queue is not None:
-                # Non-waking summaries queue: the agent hears what it slept
-                # through on its next wake.
-                self.notification_queue.push(summary)
+                # Non-waking watcher summaries are deliberately discarded —
+                # only waking activity reaches the agent.
+                wake_notifications.append(
+                    watcher_summary_notification(
+                        summary=decision.summary or decision.reason,
+                        message_ids=list(decision.relevant_message_ids),
+                        wake=True,
+                        created_at=context.activated_at,
+                    )
+                )
 
         actions = WakeActions()
         if decision.wake:

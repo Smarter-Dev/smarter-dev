@@ -391,7 +391,7 @@ async def test_adapter_wakes_agent_and_merges_usage():
     assert "follow-up from alice" in two_pass.instruction_store.current()
 
 
-async def test_non_wake_watcher_summaries_queue_and_drain_into_next_wake():
+async def test_non_wake_summaries_discard_but_queued_items_drain():
     from smarter_dev.bot.proactive.notifications import NotificationQueue
 
     queue = NotificationQueue()
@@ -413,9 +413,22 @@ async def test_non_wake_watcher_summaries_queue_and_drain_into_next_wake():
     )
     silent = await two_pass.activate(_context())
     assert silent.responses == []
-    assert len(queue.items) == 1  # the quiet summary queued
+    assert queue.items == []  # non-wake watcher summaries are discarded
 
-    # Next wake is deterministic (a mention): the queued summary rides along.
+    # Queue a mode-change (the kind that DOES queue) to prove drainage.
+    from datetime import UTC as _UTC
+    from datetime import datetime as _datetime
+
+    from smarter_dev.bot.proactive.notifications import (
+        mode_change_notification,
+    )
+
+    queue.push(mode_change_notification(
+        mode="active", cause="keyboard chatter escalated",
+        until=None, created_at=_datetime(2026, 7, 20, 10, 0, tzinfo=_UTC),
+    ))
+
+    # Next wake is deterministic (a mention): the queued item rides along.
     two_pass.watcher = _StubWatcher(
         watcher.WatcherDecision(wake=True, reason="unused")
     )
@@ -431,7 +444,7 @@ async def test_non_wake_watcher_summaries_queue_and_drain_into_next_wake():
         )
     )
     brief = runner.briefs[-1]
-    assert "keyboard chatter" in brief   # drained queue content
-    assert "mention" in brief            # plus the waking notification
-    assert queue.items == []             # drained
+    assert "keyboard chatter escalated" in brief  # drained queue content
+    assert "mention" in brief                     # plus the waking notification
+    assert queue.items == []                      # drained
     assert woken.details["watcher"]["deterministic"] is True

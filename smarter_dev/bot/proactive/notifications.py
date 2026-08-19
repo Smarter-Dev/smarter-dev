@@ -4,8 +4,9 @@ Everything the agent learns about arrives as a typed notification: watcher
 summaries (with the relevant message ids and user metadata), @mentions and
 replies to the bot (verbatim), monitoring-mode changes, watch-instruction
 expiries, and restart recoveries. Deterministic engagement (mention/reply)
-and wake-worthy watcher summaries wake the agent; everything else queues and
-rides along with the next wake's brief.
+and wake-worthy watcher summaries wake the agent; mode changes, expiries and
+recoveries queue and ride along with the next wake's brief. Watcher
+summaries that don't wake are deliberately discarded.
 """
 
 from __future__ import annotations
@@ -31,9 +32,12 @@ class Notification:
 
 def _user_metadata(message: ChannelMessage) -> str:
     bot_marker = ", bot" if message.is_bot else ""
+    roles = (
+        f", roles: {', '.join(message.roles)}" if message.roles else ""
+    )
     return (
         f"{message.author_display} (username {message.author_name}, "
-        f"id {message.author_id}{bot_marker})"
+        f"id {message.author_id}{bot_marker}{roles})"
     )
 
 
