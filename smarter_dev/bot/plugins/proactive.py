@@ -30,6 +30,11 @@ from datetime import UTC, datetime, timedelta
 import hikari
 import lightbulb
 
+from smarter_dev.bot.agents.response_fitting import (
+    SUMMARIZE_THRESHOLD,
+    fit_writer_message,
+    split_for_discord,
+)
 from smarter_dev.bot.plugins.admin_gate import deny_if_not_admin
 from smarter_dev.bot.proactive.adapter import TwoPassAdapter
 from smarter_dev.bot.proactive.agent import (
@@ -106,6 +111,42 @@ def event_engages_bot(message, bot_user_id: str) -> bool:
     referenced = getattr(message, "referenced_message", None)
     author = getattr(referenced, "author", None) if referenced else None
     return author is not None and str(author.id) == bot_user_id
+
+
+async def dispatch_response(
+    bot, *, channel_id: int, content: str, reply_to_id: str | None
+) -> int:
+    """Send one agent response, honoring Discord's length cap.
+
+    Mirrors the chat engine: up to SUMMARIZE_THRESHOLD the text goes out as
+    at most two messages split at a newline; beyond that (the send tools
+    normally refuse first) the shared summarizer condenses it rather than
+    letting the tail be dropped. The reply anchor rides the first message
+    only. Returns how many messages were actually sent.
+    """
+    if len(content) > SUMMARIZE_THRESHOLD:
+        fit = await fit_writer_message(content)
+        logger.info(
+            "proactive overlong reply (%d chars) fitted via %s to %d chars",
+            len(content), fit.method, len(fit.text),
+        )
+        content = fit.text
+    parts = split_for_discord(content)
+    reply_target = (
+        int(reply_to_id) if reply_to_id and reply_to_id.isdigit() else None
+    )
+    sent = 0
+    for index, part in enumerate(parts):
+        kwargs = {}
+        if index == 0 and reply_target is not None:
+            kwargs["reply"] = reply_target
+        try:
+            await bot.rest.create_message(channel_id, part, **kwargs)
+        except Exception:  # noqa: BLE001 — one failed part must not kill the wake
+            logger.exception("proactive send failed")
+            break
+        sent += 1
+    return sent
 
 
 def render_memory_block(
@@ -369,6 +410,7 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
         instruction_store = InstructionStore.from_stored(
             OPERATING_POLICY_BRIEF, settings.watch_addendum
         )
+        persisted_updates = instruction_store.updates
         for expired in instruction_store.prune_expired():
             state.queue.push(
                 instruction_expired_notification(
@@ -377,7 +419,6 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
                     created_at=datetime.now(UTC),
                 )
             )
-        persisted_updates = instruction_store.updates
 
         runner = run.agent_runner_for(state)
         history_store = run.history_store()
@@ -452,15 +493,12 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
         result = await adapter.activate(context)
 
         for response in result.responses:
-            kwargs = {}
-            if response.reply_to_id and response.reply_to_id.isdigit():
-                kwargs["reply"] = int(response.reply_to_id)
-            try:
-                await run.bot.rest.create_message(
-                    int(state.channel_id), response.content[:2000], **kwargs
-                )
-            except Exception:  # noqa: BLE001 — one failed send must not kill the wake
-                logger.exception("proactive send failed")
+            await dispatch_response(
+                run.bot,
+                channel_id=int(state.channel_id),
+                content=response.content,
+                reply_to_id=response.reply_to_id,
+            )
         for reaction in result.reactions:
             if not reaction.message_id.isdigit():
                 continue
@@ -733,10 +771,26 @@ async def proactive_status(ctx: lightbulb.Context) -> None:
         )
         return
     settings = await service.get_settings(str(ctx.guild_id), str(ctx.channel_id))
-    addendum = settings.watch_addendum or "(none)"
+    store = InstructionStore.from_stored(
+        OPERATING_POLICY_BRIEF, settings.watch_addendum
+    )
+    if store.entries:
+        instructions = "\n".join(
+            f"• `{e.instruction_id}` (expires {e.expires_at:%H:%M} UTC): {e.text}"
+            for e in store.entries
+        )
+    else:
+        instructions = "(none set)"
+    state = _runtime().states.get(ctx.channel_id)
+    mode = (
+        "active"
+        if state is not None and time.monotonic() < state.active_until
+        else "passive"
+    )
     await ctx.respond(
-        f"Proactive bot: **{'on' if settings.enabled else 'off'}**\n"
-        f"Watch addendum: {addendum[:1500]}",
+        f"Proactive bot: **{'on' if settings.enabled else 'off'}** "
+        f"(monitoring: {mode})\n"
+        f"Watch instructions:\n{instructions[:1500]}",
         flags=hikari.MessageFlag.EPHEMERAL,
     )
 

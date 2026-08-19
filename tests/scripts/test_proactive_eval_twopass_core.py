@@ -448,3 +448,15 @@ async def test_non_wake_summaries_discard_but_queued_items_drain():
     assert "mention" in brief                     # plus the waking notification
     assert queue.items == []                      # drained
     assert woken.details["watcher"]["deterministic"] is True
+
+
+def test_wake_brief_shows_active_instructions_and_nudges():
+    store = environment.InstructionStore(seed="SEED")
+    empty_brief = adapter.build_wake_brief([], 0, store)
+    assert "YOUR WATCH INSTRUCTIONS: none set." in empty_brief
+    assert "set_watch_instruction" in empty_brief
+
+    store.set_instruction("watch for zoe's benchmarks", ttl_seconds=3600)
+    brief = adapter.build_wake_brief([], 0, store)
+    assert "w1" in brief
+    assert "watch for zoe's benchmarks" in brief

@@ -23,6 +23,7 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models import Model
 
+from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
 from smarter_dev.bot.proactive.environment import (
     ChannelEnvironment,
     InstructionStore,
@@ -41,6 +42,15 @@ HISTORY_TOKEN_LIMIT = 100_000
 COMPACTION_KEEP_MESSAGES = 8
 
 BUDGET_EXHAUSTED = "Tool budget exhausted — wrap up with your final note now."
+# Discord caps messages at 2000 chars; dispatch splits anything up to
+# SUMMARIZE_THRESHOLD into two messages. Above that the send tools refuse so
+# the agent rewrites with its own context still in hand — the in-loop
+# equivalent of the chat bot's shorten re-run, at no extra model call.
+TOO_LONG_TEMPLATE = (
+    "That message is too long to send: {length} characters, and anything over "
+    "{limit} can't be delivered. Rewrite it under 1500 characters — keep the "
+    "essential answer and any load-bearing code or links — then send again."
+)
 
 # Stated in the system prompt so the agent can reason about its own cadence;
 # keep in sync with windows.PASSIVE_SECONDS and the plugin's active window.
@@ -127,7 +137,11 @@ the channel ingests fast (wakes within ~15-60s), extended by further
 engagement. set_monitoring_mode switches modes yourself; @mentions and
 replies always reach you in any mode.
 - The watcher is STATELESS between calls; watch instructions are its only
-memory. Your memory bundle refreshes at most hourly.
+memory. Set one whenever you would want to know something you won't
+otherwise be told: someone promises to report back ("I'll post results
+tonight"), you answer with a caveat worth checking on, a discussion is
+unresolved and may need you, or you deliberately went quiet and want to
+resume later. Your memory bundle refreshes at most hourly.
 
 RESPONSE POLICY:
 {response_policy}"""
@@ -213,6 +227,10 @@ def build_kimi_agent(
             return BUDGET_EXHAUSTED
         if len(ctx.deps.actions.sent) >= MAX_SENDS_PER_WAKE:
             return f"Send limit of {MAX_SENDS_PER_WAKE} per wake reached."
+        if len(content) > SUMMARIZE_THRESHOLD:
+            return TOO_LONG_TEMPLATE.format(
+                length=len(content), limit=SUMMARIZE_THRESHOLD
+            )
         ctx.deps.actions.sent.append(
             ProposedResponse(reply_to_id=None, content=content)
         )
@@ -229,6 +247,10 @@ def build_kimi_agent(
             return f"Send limit of {MAX_SENDS_PER_WAKE} per wake reached."
         if ctx.deps.env.lookup(message_id) is None:
             return f"No message with id {message_id} is visible."
+        if len(content) > SUMMARIZE_THRESHOLD:
+            return TOO_LONG_TEMPLATE.format(
+                length=len(content), limit=SUMMARIZE_THRESHOLD
+            )
         ctx.deps.actions.sent.append(
             ProposedResponse(reply_to_id=message_id, content=content)
         )
