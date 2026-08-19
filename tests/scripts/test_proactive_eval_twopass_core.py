@@ -336,7 +336,10 @@ async def test_adapter_wakes_deterministically_on_bot_mention():
     )
     assert result.details["watcher"]["deterministic"] is True
     assert result.details["watcher"]["relevant_message_ids"] == ["2"]
-    assert "[id=2]" in runner.briefs[0]
+    # The wake brief is a mention notification carrying the verbatim message.
+    assert "mention" in runner.briefs[0]
+    assert "id=2" in runner.briefs[0]
+    assert "message 2" in runner.briefs[0]
     assert len(result.responses) == 1  # the stub agent replied
     # No watcher model usage — only the agent spent tokens.
     assert set(result.usage_by_model) == {"agent-model"}
@@ -380,8 +383,55 @@ async def test_adapter_wakes_agent_and_merges_usage():
     assert result.usage_by_model["agent-model"]["output_tokens"] == 50
     assert result.details["agent"]["note"].startswith("replied")
     assert result.details["watch_instruction_updates"] == 1
-    # The brief carried the verbatim snippet for the relevant id.
-    assert "[id=2]" in runner.briefs[0]
+    # The brief is the watcher-summary notification with the relevant ids.
     assert "alice asked the room" in runner.briefs[0]
+    assert "2" in runner.briefs[0]
+    assert "NOTIFICATIONS" in runner.briefs[0]
     # The instruction update persists for the next wake's watcher call.
     assert "follow-up from alice" in two_pass.instruction_store.current()
+
+
+async def test_non_wake_watcher_summaries_queue_and_drain_into_next_wake():
+    from smarter_dev.bot.proactive.notifications import NotificationQueue
+
+    queue = NotificationQueue()
+    runner = _StubAgentRunner()
+    quiet_watcher = _StubWatcher(
+        watcher.WatcherDecision(
+            wake=False, reason="two people chatting",
+            summary="keyboard chatter between carol and dave",
+        )
+    )
+    two_pass = adapter.TwoPassAdapter(
+        watcher=quiet_watcher,
+        agent_runner=runner,
+        skim=None,
+        instruction_store=environment.InstructionStore(seed="SEED"),
+        watcher_model_id="watcher-model",
+        agent_model_id="agent-model",
+        notification_queue=queue,
+    )
+    silent = await two_pass.activate(_context())
+    assert silent.responses == []
+    assert len(queue.items) == 1  # the quiet summary queued
+
+    # Next wake is deterministic (a mention): the queued summary rides along.
+    two_pass.watcher = _StubWatcher(
+        watcher.WatcherDecision(wake=True, reason="unused")
+    )
+    messages = [_message(str(n), n) for n in range(3)]
+    mention = FixtureMessage(
+        **{**_message("9", 9).__dict__, "mention_user_ids": ("B1",)}
+    )
+    woken = await two_pass.activate(
+        ActivationContext(
+            channel_name="c", guild_name="g", bot_user_id="B1",
+            activated_at=T + timedelta(seconds=20),
+            history=messages, new_messages=[mention],
+        )
+    )
+    brief = runner.briefs[-1]
+    assert "keyboard chatter" in brief   # drained queue content
+    assert "mention" in brief            # plus the waking notification
+    assert queue.items == []             # drained
+    assert woken.details["watcher"]["deterministic"] is True
