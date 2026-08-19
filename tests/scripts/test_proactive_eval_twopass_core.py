@@ -118,11 +118,12 @@ def _kimi(call_tools: list[str]) -> agent.Agent:
 
 async def test_send_and_instruction_tools_record_actions():
     deps = _deps()
-    kimi = _kimi(["send_channel_message", "update_watch_instructions"])
+    kimi = _kimi(["send_channel_message", "set_watch_instruction"])
     await kimi.run("go", deps=deps)
     assert len(deps.actions.sent) == 1
     assert deps.actions.sent[0].reply_to_id is None
     assert deps.instruction_store.updates == 1
+    assert len(deps.instruction_store.entries) == 1
     assert deps.budget.used == 2
 
 
@@ -163,9 +164,10 @@ def test_default_system_prompt_is_brief_but_complete():
         channel_name="💬general",
         guild_name="Smarter Dev",
     )
-    assert len(prompt) < 3500  # brief: the full policy doc is ~5k chars
+    assert len(prompt) < 5000  # still far under prompt-bloat territory
     for load_bearing in (
-        "smarter-bot", "B1", "stateless", "update_watch_instructions",
+        "smarter-bot", "B1", "STATELESS", "set_watch_instruction",
+        "set_monitoring_mode", "PASSIVE", "ACTIVE", "NOTIFICATIONS",
         "one-off", "higher", "Silence", "Backing off",
     ):
         assert load_bearing in prompt, load_bearing
@@ -252,7 +254,9 @@ class _StubAgentRunner:
         deps.actions.sent.append(
             ProposedResponse(reply_to_id="2", content="happy to help")
         )
-        deps.instruction_store.update("watch for follow-up from alice")
+        deps.instruction_store.set_instruction(
+            "watch for follow-up from alice", ttl_seconds=3600
+        )
         return "replied to the open question", {
             "input_tokens": 500, "output_tokens": 50, "cache_read_tokens": 0,
         }

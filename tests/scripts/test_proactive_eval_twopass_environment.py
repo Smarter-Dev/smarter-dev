@@ -6,6 +6,8 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
@@ -80,16 +82,70 @@ def test_render_uses_stable_tags_and_ids():
     assert "[id=3] A·zoe" in rendered
 
 
-def test_instruction_store_updates_addendum_and_counts():
+def test_instruction_store_sets_ttl_entries_and_counts():
+    now = datetime(2026, 8, 19, 12, 0, tzinfo=UTC)
     store = environment.InstructionStore(seed="SEED RULES")
-    assert "SEED RULES" in store.current()
+    assert "SEED RULES" in store.current(now=now)
     assert store.updates == 0
 
-    store.update("wake me if zoe posts benchmark results")
+    entry = store.set_instruction(
+        "wake me if zoe posts benchmark results", ttl_seconds=3600, now=now
+    )
     assert store.updates == 1
-    assert "SEED RULES" in store.current()
-    assert "zoe posts benchmark results" in store.current()
+    assert entry.instruction_id == "w1"
+    rendered = store.current(now=now)
+    assert "zoe posts benchmark results" in rendered
+    assert "w1" in rendered
 
-    store.update("different addendum")
-    assert "different addendum" in store.current()
-    assert "zoe posts benchmark" not in store.current()  # replaced, not appended
+    assert store.clear_instruction("w1") is True
+    assert store.clear_instruction("w1") is False
+    assert "zoe posts benchmark" not in store.current(now=now)
+    assert store.updates == 2
+
+
+def test_instruction_store_prunes_expired_entries():
+    now = datetime(2026, 8, 19, 12, 0, tzinfo=UTC)
+    store = environment.InstructionStore(seed="SEED")
+    store.set_instruction("short lived", ttl_seconds=60, now=now)
+    store.set_instruction("long lived", ttl_seconds=7200, now=now)
+
+    later = now + timedelta(minutes=30)
+    expired = store.prune_expired(now=later)
+    assert [e.text for e in expired] == ["short lived"]
+    assert "short lived" not in store.current(now=later)
+    assert "long lived" in store.current(now=later)
+
+
+def test_instruction_store_caps_entries_and_ttl():
+    now = datetime(2026, 8, 19, 12, 0, tzinfo=UTC)
+    store = environment.InstructionStore(seed="SEED")
+    for n in range(environment.MAX_WATCH_INSTRUCTIONS):
+        store.set_instruction(f"entry {n}", ttl_seconds=600, now=now)
+    with pytest.raises(ValueError, match="at most"):
+        store.set_instruction("one too many", ttl_seconds=600, now=now)
+
+    capped = environment.InstructionStore(seed="SEED").set_instruction(
+        "very long", ttl_seconds=10**9, now=now
+    )
+    assert capped.expires_at <= now + timedelta(
+        seconds=environment.MAX_WATCH_INSTRUCTION_TTL_SECONDS
+    )
+
+
+def test_instruction_store_round_trips_storage_and_reads_legacy_text():
+    now = datetime(2026, 8, 19, 12, 0, tzinfo=UTC)
+    store = environment.InstructionStore(seed="SEED")
+    store.set_instruction("watch for tech news questions", ttl_seconds=3600, now=now)
+    stored = store.to_stored()
+
+    loaded = environment.InstructionStore.from_stored("SEED", stored, now=now)
+    assert "watch for tech news questions" in loaded.current(now=now)
+    # New ids continue after the loaded ones.
+    assert loaded.set_instruction("x", ttl_seconds=60, now=now).instruction_id == "w2"
+
+    legacy = environment.InstructionStore.from_stored(
+        "SEED", "plain legacy addendum text", now=now
+    )
+    assert "plain legacy addendum text" in legacy.current(now=now)
+
+    assert environment.InstructionStore.from_stored("SEED", "", now=now).entries == []

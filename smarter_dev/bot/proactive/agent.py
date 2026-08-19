@@ -1,9 +1,10 @@
 """Pass 2: the Kimi K3 chat agent — tools, budget, persistent history.
 
 The agent keeps its conversation history across wakes (compacted around
-100k tokens); the watcher is stateless, so the `update_watch_instructions`
+100k tokens); the watcher is stateless, so the TTL'd set_watch_instruction
 tool is the agent's only way to make sure a relevant follow-up wakes it
-again.
+again. set_monitoring_mode lets it flip its own channel between fast active
+ingest and the 15-minute passive sweep.
 """
 
 from __future__ import annotations
@@ -41,6 +42,12 @@ COMPACTION_KEEP_MESSAGES = 8
 
 BUDGET_EXHAUSTED = "Tool budget exhausted — wrap up with your final note now."
 
+# Stated in the system prompt so the agent can reason about its own cadence;
+# keep in sync with windows.PASSIVE_SECONDS and the plugin's active window.
+PASSIVE_SWEEP_MINUTES = 15
+ACTIVE_WINDOW_MINUTES = 10
+MONITORING_MODES = ("active", "passive")
+
 
 @dataclass
 class ToolBudget:
@@ -61,6 +68,9 @@ class AgentDeps:
     instruction_store: InstructionStore
     skim_transcript: Callable[[str], Awaitable[str]]
     budget: ToolBudget
+    # Live runtimes inject a callable(mode, minutes) -> confirmation string;
+    # None means mode control is unavailable (replay evals).
+    request_mode: Callable[[str, int], str] | None = None
 
 
 # Condensed operating rules — the full rationale lives in
@@ -99,10 +109,26 @@ Choosing not to respond is a first-class outcome: when nothing clears the
 bar, do nothing and say so in your final note. At most {max_sends} messages
 per wake.
 
-The watcher that decides when to wake you is stateless — it forgets
-everything between calls. If a follow-up matters ("wake me if X posts their
-benchmark results"), you MUST write it into the watch instructions with the
-update_watch_instructions tool, or the follow-up will be missed.
+HOW YOUR MONITORING WORKS:
+- Everything reaches you as NOTIFICATIONS: @mentions and replies to you
+(verbatim, with message ids and user metadata), watcher summaries with the
+relevant message ids, monitoring-mode changes, watch-instruction expiries,
+and restart recoveries. A notification is a lead, not the full story — pull
+context with your tools when it isn't enough.
+- PASSIVE mode (the default): channel messages batch up and the watcher
+reviews them every {passive_minutes} minutes; you wake only when the
+watcher decides something needs you.
+- ACTIVE mode: after someone engages you, the channel ingests fast (you can
+be woken within ~15-60 seconds) for about {active_minutes} minutes,
+extended by each further engagement. Use set_monitoring_mode to switch
+modes yourself — go active when a conversation you're part of deserves fast
+responses, go passive to back off. @mentions and replies to you always
+reach you regardless of mode.
+- The watcher that decides when to wake you is STATELESS — it forgets
+everything between calls. If a follow-up matters, set_watch_instruction
+with a TTL (e.g. "watch for zoe's benchmark results", 60 minutes) or it
+will be missed; clear instructions when done or let them expire. Your
+memory bundle refreshes at most hourly.
 
 RESPONSE POLICY:
 {response_policy}"""
@@ -122,6 +148,8 @@ def build_agent_system_prompt(
         channel_name=channel_name,
         guild_name=guild_name,
         max_sends=MAX_SENDS_PER_WAKE,
+        passive_minutes=PASSIVE_SWEEP_MINUTES,
+        active_minutes=ACTIVE_WINDOW_MINUTES,
         response_policy=response_policy or OPERATING_POLICY_BRIEF,
     )
 
@@ -222,15 +250,62 @@ def build_kimi_agent(
         return "Reaction added."
 
     @agent.tool
-    async def update_watch_instructions(
-        ctx: RunContext[AgentDeps], addendum: str
+    async def set_watch_instruction(
+        ctx: RunContext[AgentDeps], instruction: str, ttl_minutes: int = 60
     ) -> str:
-        """Replace the addendum of the watcher's wake criteria. The watcher
-        is stateless: this is the only way a follow-up gets watched for."""
+        """Add a TTL'd wake criterion for the stateless watcher (e.g. "watch
+        for tech news questions", 60 minutes). The only way a follow-up gets
+        watched for."""
         if not ctx.deps.budget.try_spend():
             return BUDGET_EXHAUSTED
-        ctx.deps.instruction_store.update(addendum)
-        return "Watch instructions updated."
+        try:
+            entry = ctx.deps.instruction_store.set_instruction(
+                instruction, ttl_seconds=max(1, ttl_minutes) * 60
+            )
+        except ValueError as error:
+            return str(error)
+        return (
+            f"Watch instruction {entry.instruction_id} set, expires "
+            f"{entry.expires_at:%H:%M} UTC."
+        )
+
+    @agent.tool
+    async def clear_watch_instruction(
+        ctx: RunContext[AgentDeps], instruction_id: str
+    ) -> str:
+        """Remove one of your watch instructions by its id (e.g. "w1")."""
+        if not ctx.deps.budget.try_spend():
+            return BUDGET_EXHAUSTED
+        if ctx.deps.instruction_store.clear_instruction(instruction_id):
+            return f"Watch instruction {instruction_id} cleared."
+        return f"No watch instruction with id {instruction_id}."
+
+    @agent.tool
+    async def list_watch_instructions(ctx: RunContext[AgentDeps]) -> str:
+        """List your active watch instructions with their ids and expiries."""
+        if not ctx.deps.budget.try_spend():
+            return BUDGET_EXHAUSTED
+        entries = ctx.deps.instruction_store.entries
+        if not entries:
+            return "No active watch instructions."
+        return "\n".join(
+            f"{e.instruction_id}: {e.text} (expires {e.expires_at:%H:%M} UTC)"
+            for e in entries
+        )
+
+    @agent.tool
+    async def set_monitoring_mode(
+        ctx: RunContext[AgentDeps], mode: str, minutes: int = 10
+    ) -> str:
+        """Switch this channel between active (fast ingest) and passive
+        (15-minute batch review) monitoring for the given duration."""
+        if not ctx.deps.budget.try_spend():
+            return BUDGET_EXHAUSTED
+        if mode not in MONITORING_MODES:
+            return f"Unknown mode {mode!r}; use one of {MONITORING_MODES}."
+        if ctx.deps.request_mode is None:
+            return "Mode control is unavailable in this environment."
+        return ctx.deps.request_mode(mode, minutes)
 
     # Parity tools (web search, code run, …) register here; in replay evals
     # the Discord/API-bound ones are stubbed by the caller.

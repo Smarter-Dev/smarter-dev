@@ -38,6 +38,7 @@ class ProactiveDeps(ChatDeps):
     instruction_store: InstructionStore
     skim_transcript: Callable[[str], Awaitable[str]]
     budget: ToolBudget
+    request_mode: Callable[[str, int], str] | None = None
 
 
 def parity_tool_functions() -> list:

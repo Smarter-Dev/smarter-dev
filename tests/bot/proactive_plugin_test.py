@@ -191,8 +191,11 @@ async def test_wake_drains_buffer_dispatches_and_seeds_addendum(wake_setup):
     assert [m.id for m in context.new_messages] == ["555"]
     assert all(m.id != "555" for m in context.history)
     assert context.bot_user_id == "999"
-    # Stored addendum seeded the instruction store.
-    assert wake_setup.captured_stores[0].addendum == "stored addendum"
+    # Stored (legacy plain-text) addendum seeded the instruction store.
+    assert any(
+        entry.text == "stored addendum"
+        for entry in wake_setup.captured_stores[0].entries
+    )
     # Dispatch: reply + reaction hit the rest API.
     wake_setup.bot.rest.create_message.assert_awaited_once()
     args, kwargs = wake_setup.bot.rest.create_message.await_args
@@ -210,12 +213,15 @@ async def test_wake_persists_updated_addendum(wake_setup):
     )
 
     async def activate_and_update(context):
-        wake_setup.captured_stores[0].update("watch for benchmarks")
+        wake_setup.captured_stores[0].set_instruction(
+            "watch for benchmarks", ttl_seconds=3600
+        )
         return wake_setup.adapter.result
 
     wake_setup.adapter.activate = activate_and_update
     await proactive.run_wake(state)
-    assert wake_setup.service.saved_addenda == ["watch for benchmarks"]
+    assert len(wake_setup.service.saved_addenda) == 1
+    assert "watch for benchmarks" in wake_setup.service.saved_addenda[0]
 
 
 async def test_wake_skips_when_channel_disabled(wake_setup):

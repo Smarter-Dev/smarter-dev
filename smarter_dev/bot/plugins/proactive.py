@@ -351,8 +351,11 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
             int(state.channel_id),
             exclude_ids={m.id for m in new_messages},
         )
-        instruction_store = InstructionStore(seed=OPERATING_POLICY_BRIEF)
-        instruction_store.addendum = settings.watch_addendum
+        instruction_store = InstructionStore.from_stored(
+            OPERATING_POLICY_BRIEF, settings.watch_addendum
+        )
+        instruction_store.prune_expired()
+        persisted_updates = instruction_store.updates
 
         runner = run.agent_runner_for(state)
         history_store = run.history_store()
@@ -371,12 +374,20 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
 
         wake_deps: list[ProactiveDeps] = []
 
+        def request_mode(mode: str, minutes: int) -> str:
+            if mode == "active":
+                state.active_until = time.monotonic() + max(1, minutes) * 60
+                return f"Monitoring mode set to active for {minutes} minutes."
+            state.active_until = 0.0
+            return "Monitoring mode set to passive."
+
         def deps_factory(**kwargs):
             deps = ProactiveDeps(
                 bot=run.bot,
                 channel_id=int(state.channel_id),
                 guild_id=int(state.guild_id),
                 channel_name=str(state.channel_id),
+                request_mode=request_mode,
                 **kwargs,
             )
             wake_deps.append(deps)
@@ -467,13 +478,14 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
                 )
             except Exception:  # noqa: BLE001 — the cursor is best-effort
                 logger.exception("failed to persist proactive cursor")
-        if instruction_store.updates:
+        if instruction_store.updates != persisted_updates:
             try:
                 await service.set_watch_addendum(
-                    state.guild_id, state.channel_id, instruction_store.addendum
+                    state.guild_id, state.channel_id,
+                    instruction_store.to_stored(),
                 )
             except Exception:  # noqa: BLE001 — persistence is best-effort
-                logger.exception("failed to persist watch addendum")
+                logger.exception("failed to persist watch instructions")
         logger.info(
             "proactive wake channel=%s new=%d responses=%d reactions=%d "
             "passive=%s details=%s",
