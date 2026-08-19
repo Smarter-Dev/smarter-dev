@@ -49,9 +49,9 @@ def bot_directed_message_ids(
             continue
         if message.reply_to_id is not None:
             target = env.lookup(message.reply_to_id)
-            if target is not None and (
-                target.is_bot or target.author_id == bot_user_id
-            ):
+            # Our own id only: a reply to some other bot in the channel is
+            # not someone engaging us.
+            if target is not None and target.author_id == bot_user_id:
                 directed.append(message.id)
     return directed
 
@@ -67,9 +67,9 @@ def engagement_notifications(
             continue
         if message.reply_to_id is not None:
             target = env.lookup(message.reply_to_id)
-            if target is not None and (
-                target.is_bot or target.author_id == bot_user_id
-            ):
+            # Our own id only: a reply to some other bot in the channel is
+            # not someone engaging us.
+            if target is not None and target.author_id == bot_user_id:
                 produced.append(reply_notification(message, target))
     return produced
 

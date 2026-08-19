@@ -460,3 +460,32 @@ def test_wake_brief_shows_active_instructions_and_nudges():
     brief = adapter.build_wake_brief([], 0, store)
     assert "w1" in brief
     assert "watch for zoe's benchmarks" in brief
+
+
+def test_engagement_ignores_replies_to_other_bots():
+    """A reply to MEE6 is not a reply to us — it must not wake the agent."""
+    ours = FixtureMessage(
+        **{**_message("5", 5).__dict__, "is_bot": True, "author_id": "B1"}
+    )
+    other_bot = FixtureMessage(
+        **{**_message("6", 6).__dict__, "is_bot": True, "author_id": "OTHERBOT"}
+    )
+    reply_to_ours = FixtureMessage(
+        **{**_message("7", 7).__dict__, "reply_to_id": "5"}
+    )
+    reply_to_other = FixtureMessage(
+        **{**_message("8", 8).__dict__, "reply_to_id": "6"}
+    )
+    env = environment.ChannelEnvironment(
+        visible=[ours, other_bot, reply_to_ours, reply_to_other],
+        bot_user_id="B1",
+    )
+
+    produced = adapter.engagement_notifications(
+        [reply_to_ours, reply_to_other], env, "B1"
+    )
+    assert [n.message_ids[0] for n in produced] == ["7"]
+
+    assert adapter.bot_directed_message_ids(
+        [reply_to_ours, reply_to_other], env, "B1"
+    ) == ["7"]
