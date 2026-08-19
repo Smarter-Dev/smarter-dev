@@ -111,24 +111,23 @@ per wake.
 
 HOW YOUR MONITORING WORKS:
 - Everything reaches you as NOTIFICATIONS: @mentions and replies to you
-(verbatim, with message ids and user metadata), watcher summaries with the
-relevant message ids, monitoring-mode changes, watch-instruction expiries,
-and restart recoveries. A notification is a lead, not the full story — pull
-context with your tools when it isn't enough.
-- PASSIVE mode (the default): channel messages batch up and the watcher
-reviews them every {passive_minutes} minutes; you wake only when the
-watcher decides something needs you.
-- ACTIVE mode: after someone engages you, the channel ingests fast (you can
-be woken within ~15-60 seconds) for about {active_minutes} minutes,
-extended by each further engagement. Use set_monitoring_mode to switch
-modes yourself — go active when a conversation you're part of deserves fast
-responses, go passive to back off. @mentions and replies to you always
-reach you regardless of mode.
-- The watcher that decides when to wake you is STATELESS — it forgets
-everything between calls. If a follow-up matters, set_watch_instruction
-with a TTL (e.g. "watch for zoe's benchmark results", 60 minutes) or it
-will be missed; clear instructions when done or let them expire. Your
-memory bundle refreshes at most hourly.
+(verbatim, with ids, user metadata and roles), waking watcher summaries
+with relevant message ids, mode changes, instruction expiries, restart
+recoveries. A notification is a lead — pull context with your tools when
+it isn't enough.
+- PASSIVE mode (default): the watcher reviews the channel every
+{passive_minutes} minutes and wakes you ONLY for a tight set of
+interesting activity — direct engagement with you and clear open bids it
+judges worth your time. Anything else it sees, it drops without telling
+you. If you want to be woken for something specific (a follow-up, a topic,
+someone's next message), set_watch_instruction with a TTL — that is the
+only way you will hear about it.
+- ACTIVE mode: for ~{active_minutes} minutes after someone engages you,
+the channel ingests fast (wakes within ~15-60s), extended by further
+engagement. set_monitoring_mode switches modes yourself; @mentions and
+replies always reach you in any mode.
+- The watcher is STATELESS between calls; watch instructions are its only
+memory. Your memory bundle refreshes at most hourly.
 
 RESPONSE POLICY:
 {response_policy}"""

@@ -46,7 +46,10 @@ def _hikari_message(**overrides):
         "author": SimpleNamespace(
             id=901, username="alice", global_name="Alice", is_bot=False
         ),
-        "member": SimpleNamespace(nickname="ally"),
+        "member": SimpleNamespace(
+            nickname="ally",
+            get_roles=lambda: [SimpleNamespace(name="Regular")],
+        ),
         "content": "hey there",
         "type": 0,
         "referenced_message": None,
@@ -67,6 +70,7 @@ def test_channel_message_conversion_prefers_nickname_and_stringifies_ids():
     assert converted.attachment_count == 1
     assert converted.reply_to_id is None
     assert converted.is_bot is False
+    assert converted.roles == ("Regular",)
 
 
 def test_channel_message_conversion_reads_reply_reference():
