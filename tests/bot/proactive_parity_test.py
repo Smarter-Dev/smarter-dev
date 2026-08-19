@@ -78,7 +78,8 @@ def test_proactive_agent_registers_native_plus_parity_tools():
     native = {
         "lookup_message", "channel_history", "skim_messages",
         "send_channel_message", "reply_to_message", "react_to_message",
-        "update_watch_instructions",
+        "set_watch_instruction", "clear_watch_instruction",
+        "list_watch_instructions", "set_monitoring_mode",
     }
     assert native <= registered
     assert PARITY_TOOL_NAMES <= registered

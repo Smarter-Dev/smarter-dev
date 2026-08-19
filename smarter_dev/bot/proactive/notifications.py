@@ -1,0 +1,156 @@
+"""The proactive bot's notification model.
+
+Everything the agent learns about arrives as a typed notification: watcher
+summaries (with the relevant message ids and user metadata), @mentions and
+replies to the bot (verbatim), monitoring-mode changes, watch-instruction
+expiries, and restart recoveries. Deterministic engagement (mention/reply)
+and wake-worthy watcher summaries wake the agent; everything else queues and
+rides along with the next wake's brief.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+
+from smarter_dev.bot.proactive.types import ChannelMessage
+
+NOTIFICATION_QUEUE_LIMIT = 20
+
+
+@dataclass(frozen=True)
+class Notification:
+    kind: str
+    created_at: datetime
+    body: str
+    message_ids: tuple[str, ...] = ()
+    # Whether this notification wakes the agent by itself; non-waking ones
+    # queue until something else wakes it.
+    wakes: bool = False
+
+
+def _user_metadata(message: ChannelMessage) -> str:
+    bot_marker = ", bot" if message.is_bot else ""
+    return (
+        f"{message.author_display} (username {message.author_name}, "
+        f"id {message.author_id}{bot_marker})"
+    )
+
+
+def mention_notification(message: ChannelMessage) -> Notification:
+    return Notification(
+        kind="mention",
+        created_at=message.timestamp,
+        body=(
+            f"You were @mentioned by {_user_metadata(message)} in message "
+            f"id={message.id}:\n> {message.content}"
+        ),
+        message_ids=(message.id,),
+        wakes=True,
+    )
+
+
+def reply_notification(
+    message: ChannelMessage, replied_to: ChannelMessage | None
+) -> Notification:
+    replied_line = (
+        f'your message id={replied_to.id} ("{replied_to.content[:120]}")'
+        if replied_to is not None
+        else "one of your messages"
+    )
+    return Notification(
+        kind="reply_to_bot",
+        created_at=message.timestamp,
+        body=(
+            f"{_user_metadata(message)} replied to {replied_line} with "
+            f"message id={message.id}:\n> {message.content}"
+        ),
+        message_ids=(message.id,),
+        wakes=True,
+    )
+
+
+def watcher_summary_notification(
+    *,
+    summary: str,
+    message_ids: list[str],
+    wake: bool,
+    created_at: datetime,
+) -> Notification:
+    id_list = ", ".join(message_ids) if message_ids else "none flagged"
+    return Notification(
+        kind="watcher_summary",
+        created_at=created_at,
+        body=f"Watcher summary: {summary} (relevant message ids: {id_list})",
+        message_ids=tuple(message_ids),
+        wakes=wake,
+    )
+
+
+def mode_change_notification(
+    *,
+    mode: str,
+    cause: str,
+    until: datetime | None,
+    created_at: datetime,
+) -> Notification:
+    until_text = f" until {until:%H:%M} UTC" if until else ""
+    return Notification(
+        kind="mode_change",
+        created_at=created_at,
+        body=f"Monitoring mode changed to {mode}{until_text} — {cause}.",
+    )
+
+
+def instruction_expired_notification(
+    *, instruction_id: str, text: str, created_at: datetime
+) -> Notification:
+    return Notification(
+        kind="instruction_expired",
+        created_at=created_at,
+        body=f'Watch instruction {instruction_id} expired: "{text}"',
+    )
+
+
+def recovery_notification(
+    *, missed_count: int, created_at: datetime
+) -> Notification:
+    return Notification(
+        kind="recovery",
+        created_at=created_at,
+        body=(
+            f"The bot restarted; {missed_count} messages arrived while it "
+            f"was down and are included in this wake."
+        ),
+    )
+
+
+@dataclass
+class NotificationQueue:
+    """Per-channel pending notifications, newest kept when over the limit."""
+
+    limit: int = NOTIFICATION_QUEUE_LIMIT
+    items: list[Notification] = field(default_factory=list)
+    dropped: int = 0
+
+    def push(self, notification: Notification) -> None:
+        self.items.append(notification)
+        if len(self.items) > self.limit:
+            overflow = len(self.items) - self.limit
+            self.items = self.items[overflow:]
+            self.dropped += overflow
+
+    def drain(self) -> tuple[list[Notification], int]:
+        items, dropped = self.items, self.dropped
+        self.items, self.dropped = [], 0
+        return items, dropped
+
+
+def render_notifications(items: list[Notification], dropped: int = 0) -> str:
+    lines = ["NOTIFICATIONS since your last wake (oldest first):"]
+    if dropped:
+        lines.append(f"({dropped} older notifications were dropped)")
+    for notification in items:
+        stamp = notification.created_at.astimezone(UTC).strftime("%H:%M")
+        lines.append(f"[{stamp} UTC, {notification.kind}] {notification.body}")
+    return "\n".join(lines)
