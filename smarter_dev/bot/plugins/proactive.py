@@ -35,7 +35,7 @@ from smarter_dev.bot.agents.response_fitting import (
     fit_writer_message,
     split_for_discord,
 )
-from smarter_dev.bot.plugins.admin_gate import deny_if_not_admin
+from smarter_dev.bot.plugins.admin_gate import is_admin
 from smarter_dev.bot.proactive.adapter import TwoPassAdapter
 from smarter_dev.bot.proactive.agent import (
     OPERATING_POLICY_BRIEF,
@@ -72,7 +72,10 @@ logger = logging.getLogger(__name__)
 
 plugin = lightbulb.Plugin("proactive")
 
-ADMIN_DENIAL_MESSAGE = "The /proactive command is limited to server admins."
+MODERATOR_DENIAL_MESSAGE = (
+    "The /proactive command is limited to moderators — it needs the Manage "
+    "Messages permission."
+)
 # How long a channel stays in active ingest (fast 15s/60s debounce) after a
 # member engages the bot; outside it, messages wait for the 15-min sweep.
 ACTIVE_WINDOW_SECONDS = 600
@@ -101,6 +104,34 @@ def compute_fire_delay(
     """Seconds until the current burst should fire, measured from ``now``."""
     fire_at = min(last_at + quiet_seconds, first_at + max_wait_seconds)
     return max(0.0, fire_at - now)
+
+
+def has_moderator_permissions(permissions: hikari.Permissions) -> bool:
+    """True for Manage Messages (or Administrator, which implies it).
+
+    Deliberately looser than the Administrator gate the other admin commands
+    use: a moderator who can police a channel must be able to switch the
+    proactive bot off there without holding full admin.
+    """
+    return bool(permissions & hikari.Permissions.MANAGE_MESSAGES) or is_admin(
+        permissions
+    )
+
+
+async def deny_without_moderator_permissions(
+    ctx, denial_message: str
+) -> bool:
+    """Gate a command on moderator permissions; respond ephemerally on deny."""
+    if not isinstance(ctx.member, hikari.InteractionMember):
+        await ctx.respond(
+            "This command only works in a server.",
+            flags=hikari.MessageFlag.EPHEMERAL,
+        )
+        return True
+    if not has_moderator_permissions(lightbulb.utils.permissions_for(ctx.member)):
+        await ctx.respond(denial_message, flags=hikari.MessageFlag.EPHEMERAL)
+        return True
+    return False
 
 
 def event_engages_bot(message, bot_user_id: str) -> bool:
@@ -720,14 +751,16 @@ async def on_started(event: hikari.StartedEvent) -> None:
 
 
 @plugin.command
-@lightbulb.command("proactive", "Proactive chat bot for this channel (admin only)")
+@lightbulb.command(
+    "proactive", "Proactive chat bot for this channel (moderators only)"
+)
 @lightbulb.implements(lightbulb.SlashCommandGroup)
 async def proactive_group(ctx: lightbulb.Context) -> None:
     pass
 
 
 async def _set_enabled(ctx: lightbulb.Context, enabled: bool) -> None:
-    if await deny_if_not_admin(ctx, ADMIN_DENIAL_MESSAGE):
+    if await deny_without_moderator_permissions(ctx, MODERATOR_DENIAL_MESSAGE):
         return
     service = _runtime().settings_service()
     if service is None:
@@ -761,7 +794,7 @@ async def proactive_off(ctx: lightbulb.Context) -> None:
 @lightbulb.command("status", "Show the proactive bot's status for this channel")
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def proactive_status(ctx: lightbulb.Context) -> None:
-    if await deny_if_not_admin(ctx, ADMIN_DENIAL_MESSAGE):
+    if await deny_without_moderator_permissions(ctx, MODERATOR_DENIAL_MESSAGE):
         return
     service = _runtime().settings_service()
     if service is None:
