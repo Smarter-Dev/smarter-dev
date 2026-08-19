@@ -1350,6 +1350,10 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
         bot.load_extensions("smarter_dev.bot.plugins.proactive")
         logger.info("✓ Loaded proactive plugin")
 
+        logger.info("Loading configure plugin...")
+        bot.load_extensions("smarter_dev.bot.plugins.configure")
+        logger.info("✓ Loaded configure plugin")
+
         logger.info("Loading bot usage plugin...")
         bot.load_extensions("smarter_dev.bot.plugins.bot_usage")
         logger.info("✓ Loaded bot usage plugin")
