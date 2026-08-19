@@ -14,6 +14,14 @@ from smarter_dev.bot.proactive.environment import (
     InstructionStore,
     WakeActions,
 )
+from smarter_dev.bot.proactive.notifications import (
+    Notification,
+    NotificationQueue,
+    mention_notification,
+    render_notifications,
+    reply_notification,
+    watcher_summary_notification,
+)
 from smarter_dev.bot.proactive.types import (
     ActivationContext,
     ActivationResult,
@@ -48,24 +56,33 @@ def bot_directed_message_ids(
     return directed
 
 
-def build_wake_brief(decision: WatcherDecision, env: ChannelEnvironment) -> str:
-    snippet_messages = [
-        message
-        for message_id in decision.relevant_message_ids
-        if (message := env.lookup(message_id)) is not None
-    ]
-    snippets = env.render(snippet_messages) if snippet_messages else "(none)"
+def engagement_notifications(
+    new_messages: list, env: ChannelEnvironment, bot_user_id: str
+) -> list[Notification]:
+    """Waking notifications for messages that engage the bot directly."""
+    produced = []
+    for message in new_messages:
+        if bot_user_id in message.mention_user_ids:
+            produced.append(mention_notification(message))
+            continue
+        if message.reply_to_id is not None:
+            target = env.lookup(message.reply_to_id)
+            if target is not None and (
+                target.is_bot or target.author_id == bot_user_id
+            ):
+                produced.append(reply_notification(message, target))
+    return produced
+
+
+def build_wake_brief(
+    notifications: list[Notification], dropped: int
+) -> str:
     return f"""\
-The watcher woke you.
+{render_notifications(notifications, dropped)}
 
-WATCHER SUMMARY: {decision.summary or decision.reason}
-
-RELEVANT MESSAGES (verbatim, with message ids):
-{snippets}
-
-Use your tools to investigate further if needed, act per your policy (or
-deliberately don't), and finish with a one-sentence note on what you did
-and why."""
+A notification is a lead, not the full story — pull context with your tools
+when it isn't enough. Act per your policy (or deliberately don't), and
+finish with a one-sentence note on what you did and why."""
 
 
 def _merge_usage(usage_by_model: dict, model_id: str, usage: dict) -> None:
@@ -96,6 +113,10 @@ class TwoPassAdapter:
     # hourly memory refresh: since the agent's history persists across wakes,
     # the block only needs to ride one brief per refresh.
     brief_preamble: str = ""
+    # Queue-only notifications (mode changes, expiries, non-wake watcher
+    # summaries) accumulate here and drain into the next wake's brief. None
+    # means no queue (bare eval runs).
+    notification_queue: NotificationQueue | None = None
 
     async def activate(self, context: ActivationContext) -> ActivationResult:
         usage_by_model: dict[str, dict] = {}
@@ -103,10 +124,11 @@ class TwoPassAdapter:
             visible=[*context.history, *context.new_messages],
             bot_user_id=context.bot_user_id,
         )
-        forced_ids = bot_directed_message_ids(
+        wake_notifications = engagement_notifications(
             context.new_messages, env, context.bot_user_id
         )
-        if forced_ids:
+        if wake_notifications:
+            forced_ids = [n.message_ids[0] for n in wake_notifications]
             decision = WatcherDecision(
                 wake=True,
                 reason="bot mentioned or replied to (deterministic wake)",
@@ -131,6 +153,18 @@ class TwoPassAdapter:
             )
             _merge_usage(usage_by_model, self.watcher_model_id, watcher_usage)
             details = {"watcher": decision.model_dump()}
+            summary = watcher_summary_notification(
+                summary=decision.summary or decision.reason,
+                message_ids=list(decision.relevant_message_ids),
+                wake=decision.wake,
+                created_at=context.activated_at,
+            )
+            if decision.wake:
+                wake_notifications.append(summary)
+            elif self.notification_queue is not None:
+                # Non-waking summaries queue: the agent hears what it slept
+                # through on its next wake.
+                self.notification_queue.push(summary)
 
         actions = WakeActions()
         if decision.wake:
@@ -148,7 +182,12 @@ class TwoPassAdapter:
                 skim_transcript=skim_transcript,
                 budget=ToolBudget(),
             )
-            brief = build_wake_brief(decision, env)
+            pending, dropped = (
+                self.notification_queue.drain()
+                if self.notification_queue is not None
+                else ([], 0)
+            )
+            brief = build_wake_brief(pending + wake_notifications, dropped)
             if self.brief_preamble:
                 brief = f"{self.brief_preamble}\n\n{brief}"
             note, agent_usage = await self.agent_runner.wake(brief, deps)

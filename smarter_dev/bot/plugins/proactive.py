@@ -39,6 +39,12 @@ from smarter_dev.bot.proactive.agent import (
 )
 from smarter_dev.bot.proactive.environment import InstructionStore
 from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
+from smarter_dev.bot.proactive.notifications import (
+    NotificationQueue,
+    instruction_expired_notification,
+    mode_change_notification,
+    recovery_notification,
+)
 from smarter_dev.bot.proactive.models import (
     build_twopass_model,
     ensure_openrouter_key_alias,
@@ -213,6 +219,7 @@ class ChannelWatchState:
     # Monotonic deadline of the active-ingest window; 0 means passive.
     active_until: float = 0.0
     memory_refreshed_at: float = 0.0
+    queue: NotificationQueue = field(default_factory=NotificationQueue)
 
 
 class ProactiveRuntime:
@@ -354,7 +361,14 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
         instruction_store = InstructionStore.from_stored(
             OPERATING_POLICY_BRIEF, settings.watch_addendum
         )
-        instruction_store.prune_expired()
+        for expired in instruction_store.prune_expired():
+            state.queue.push(
+                instruction_expired_notification(
+                    instruction_id=expired.instruction_id,
+                    text=expired.text,
+                    created_at=datetime.now(UTC),
+                )
+            )
         persisted_updates = instruction_store.updates
 
         runner = run.agent_runner_for(state)
@@ -377,9 +391,23 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
         def request_mode(mode: str, minutes: int) -> str:
             if mode == "active":
                 state.active_until = time.monotonic() + max(1, minutes) * 60
-                return f"Monitoring mode set to active for {minutes} minutes."
-            state.active_until = 0.0
-            return "Monitoring mode set to passive."
+                until = datetime.now(UTC) + timedelta(minutes=max(1, minutes))
+                confirmation = (
+                    f"Monitoring mode set to active for {minutes} minutes."
+                )
+            else:
+                state.active_until = 0.0
+                until = None
+                confirmation = "Monitoring mode set to passive."
+            state.queue.push(
+                mode_change_notification(
+                    mode=mode,
+                    cause="you requested it",
+                    until=until,
+                    created_at=datetime.now(UTC),
+                )
+            )
+            return confirmation
 
         def deps_factory(**kwargs):
             deps = ProactiveDeps(
@@ -403,6 +431,7 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
             bot_display_name=me.username if me else "the bot",
             deps_factory=deps_factory,
             brief_preamble=brief_preamble,
+            notification_queue=state.queue,
         )
         context = ActivationContext(
             channel_name=str(state.channel_id),
@@ -540,6 +569,16 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
     if event_engages_bot(event.message, bot_user_id):
         # A member engaged the bot: active ingest for a while, so the
         # conversation feels responsive.
+        if now >= state.active_until:
+            state.queue.push(
+                mode_change_notification(
+                    mode="active",
+                    cause=f"{event.author.username} engaged the bot",
+                    until=datetime.now(UTC)
+                    + timedelta(seconds=ACTIVE_WINDOW_SECONDS),
+                    created_at=datetime.now(UTC),
+                )
+            )
         state.active_until = now + ACTIVE_WINDOW_SECONDS
     if now < state.active_until:
         _schedule_wake(state)
@@ -612,6 +651,11 @@ async def _recover_channels(run: ProactiveRuntime) -> None:
             state = run.state_for(int(cursor["guild_id"]), channel_id)
             state.buffer.extend(missed)
             state.first_at = state.last_at = time.monotonic()
+            state.queue.push(
+                recovery_notification(
+                    missed_count=len(missed), created_at=datetime.now(UTC)
+                )
+            )
             logger.info(
                 "proactive recovery: %d missed messages in channel %s",
                 len(missed), channel_id,
