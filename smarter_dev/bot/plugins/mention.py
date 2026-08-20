@@ -203,15 +203,20 @@ def _model_override_service(bot: Any) -> Any | None:
 async def _channel_auto_responds(bot: Any, event: hikari.MessageCreateEvent) -> bool:
     """True when the channel's override opts into replying to plain messages.
 
-    Read fail-soft to match the chat runtime's override contract: a missing
-    service or any lookup error degrades to "no auto-respond" (logged at warning)
-    so a bad read never makes the bot answer — or stay silent — unexpectedly.
+    Reads through the service's last-known fallback, so an unreachable API
+    reuses the channel's previous setting rather than muting it: this gate is
+    the only thing standing between an auto-respond channel and silence, and a
+    database outage once left one unanswered for forty minutes.
+
+    Only a cold cache (nothing ever read for the channel) still degrades to
+    "no auto-respond", along with a missing service — logged at warning, and
+    silence stays the safe direction when we genuinely have no setting to go on.
     """
     service = _model_override_service(bot)
     if service is None:
         return False
     try:
-        override = await service.get_override(
+        override = await service.get_override_or_last_known(
             str(event.guild_id), str(event.channel_id)
         )
     except Exception:

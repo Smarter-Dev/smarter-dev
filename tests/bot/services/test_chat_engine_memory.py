@@ -185,7 +185,7 @@ def _make_engine(event_redis, memory_service, *, override=None):
     bot.rest = MagicMock()
     bot.rest.create_message = AsyncMock()
     override_service = MagicMock()
-    override_service.get_override = AsyncMock(return_value=override or _override())
+    override_service.get_override_or_last_known = AsyncMock(return_value=override or _override())
     bot.d = {
         "model_override_service": override_service,
         "guild_chat_memory_service": memory_service,
