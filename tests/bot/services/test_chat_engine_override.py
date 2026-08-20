@@ -138,7 +138,7 @@ def _make_engine(override, fake_redis):
     bot.rest = MagicMock()
     bot.rest.create_message = AsyncMock()
     service = MagicMock()
-    service.get_override = AsyncMock(return_value=override)
+    service.get_override_or_last_known = AsyncMock(return_value=override)
     bot.d = {
         "model_override_service": service,
         "chat_memory_redis": fake_redis,

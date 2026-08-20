@@ -1447,14 +1447,20 @@ class ChannelEngine:
     async def _get_channel_override(self) -> Any | None:
         """Read this channel's admin model override (fail-soft).
 
-        A bad or unreachable override read must never break chat, so any error
-        degrades to "no override" (default model, no budget) with a warning.
+        A bad or unreachable override read must never break chat. Prefer the
+        channel's last known settings over "no override": once the mention gate
+        lets a turn through during an outage, degrading here would answer with
+        the default model and — worse — no response filter, so a filtered
+        channel would reply to things it is configured to ignore.
+
+        Only with nothing cached does it fall back to "no override" (default
+        model, no budget), with a warning.
         """
         service = self._override_service()
         if service is None:
             return None
         try:
-            return await service.get_override(
+            return await service.get_override_or_last_known(
                 str(self.guild_id), str(self.channel_id)
             )
         except APIError:

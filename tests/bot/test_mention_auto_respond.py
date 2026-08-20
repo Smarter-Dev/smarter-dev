@@ -19,6 +19,8 @@ from unittest.mock import patch
 import pytest
 
 from smarter_dev.bot.plugins import mention
+from smarter_dev.bot.services.exceptions import APIError
+from smarter_dev.bot.services.model_override_service import ModelOverrideService
 from smarter_dev.bot.services.models import ChannelModelOverride
 
 BOT_USER_ID = 999
@@ -34,6 +36,20 @@ def _override(auto_respond: bool) -> ChannelModelOverride:
         daily_token_budget=0,
         hourly_token_budget=0,
         auto_respond=auto_respond,
+    )
+
+
+def _api_response(auto_respond: bool = True) -> SimpleNamespace:
+    """A model-override API response for an auto-respond channel."""
+    return SimpleNamespace(
+        json=lambda: {
+            "guild_id": str(GUILD_ID),
+            "channel_id": str(CHANNEL_ID),
+            "model_key": "test-model",
+            "daily_token_budget": 0,
+            "hourly_token_budget": 0,
+            "auto_respond": auto_respond,
+        }
     )
 
 
@@ -63,12 +79,16 @@ class _FakeRegistry:
 
 
 def _override_service(auto_respond: bool | None) -> SimpleNamespace | None:
-    """A service whose ``get_override`` returns an override, ``None`` or raises.
+    """A service whose read returns an override, ``None`` or raises.
 
-    ``auto_respond=None`` means "no override configured" (get returns ``None``).
+    ``auto_respond=None`` means "no override configured" (the read returns
+    ``None``). The gate reads through ``get_override_or_last_known``, so the
+    stub only exposes that: a revert to the plain ``get_override`` fails here.
     """
     override = None if auto_respond is None else _override(auto_respond)
-    return SimpleNamespace(get_override=AsyncMock(return_value=override))
+    return SimpleNamespace(
+        get_override_or_last_known=AsyncMock(return_value=override)
+    )
 
 
 def _bot(override_service: SimpleNamespace | None) -> SimpleNamespace:
@@ -234,12 +254,15 @@ async def test_auto_respond_drops_over_limit_user():
 
 @pytest.mark.asyncio
 async def test_override_lookup_failure_degrades_to_no_activation():
+    """Nothing cached to fall back on — silence is the safe direction."""
     engine = _fake_engine()
     registry = _FakeRegistry(active=False, engine=engine)
     memory = _memory()
     event = _plain_message_event()
     service = SimpleNamespace(
-        get_override=AsyncMock(side_effect=RuntimeError("override backend down"))
+        get_override_or_last_known=AsyncMock(
+            side_effect=RuntimeError("override backend down")
+        )
     )
     bot = _bot(service)
 
@@ -247,4 +270,50 @@ async def test_override_lookup_failure_degrades_to_no_activation():
 
     registry.ensure_engine.assert_not_awaited()
     engine.trigger_initial.assert_not_called()
+    memory.increment_idle_counter.assert_awaited_once_with(CHANNEL_ID)
+
+
+@pytest.mark.asyncio
+async def test_auto_respond_survives_an_api_outage():
+    """A real service + a dead API still activates on the channel's last setting.
+
+    Regression guard for the 2026-08-20 database outage: the gate degraded to
+    "no auto-respond" and an auto-respond channel went unanswered for forty
+    minutes. Uses the real ModelOverrideService so the wiring is covered, not a
+    stub that would pass whatever the gate asked for.
+    """
+    api_client = SimpleNamespace(get=AsyncMock(return_value=_api_response()))
+    service = ModelOverrideService(api_client)
+    # One good read while the API is up, then the outage.
+    await service.get_override_or_last_known(str(GUILD_ID), str(CHANNEL_ID))
+    service._invalidate_override(str(GUILD_ID), str(CHANNEL_ID))
+    api_client.get.side_effect = APIError("Request timeout after 10.0s")
+
+    engine = _fake_engine()
+    registry = _FakeRegistry(active=False, engine=engine)
+    memory = _memory()
+    event = _plain_message_event()
+
+    await _dispatch(event, _bot(service), registry, memory=memory)
+
+    registry.ensure_engine.assert_awaited_once()
+    engine.trigger_initial.assert_called_once_with(event.message)
+
+
+@pytest.mark.asyncio
+async def test_outage_before_any_read_still_degrades_to_silence():
+    """Nothing was ever read for this channel, so there is no setting to reuse."""
+    api_client = SimpleNamespace(
+        get=AsyncMock(side_effect=APIError("Request timeout after 10.0s"))
+    )
+    service = ModelOverrideService(api_client)
+
+    engine = _fake_engine()
+    registry = _FakeRegistry(active=False, engine=engine)
+    memory = _memory()
+    event = _plain_message_event()
+
+    await _dispatch(event, _bot(service), registry, memory=memory)
+
+    registry.ensure_engine.assert_not_awaited()
     memory.increment_idle_counter.assert_awaited_once_with(CHANNEL_ID)
