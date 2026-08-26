@@ -7,7 +7,7 @@ endpoints, providing proper validation, serialization, and documentation.
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, Field, ConfigDict, field_validator, field_serializer
@@ -1012,3 +1012,39 @@ class ProactiveChannelSettingsRead(BaseAPIModel):
     )
     created_at: datetime = Field(description="Row creation time")
     updated_at: datetime = Field(description="Row last-update time")
+
+
+class ProactiveUsageEntry(BaseAPIModel):
+    """One model's token usage inside a single proactive wake."""
+
+    model_id: str = Field(
+        max_length=200, description="Wire model id as the bot ran it"
+    )
+    operation: Literal["watcher", "agent"] = Field(
+        description="Which pass of the two-pass bot spent these tokens"
+    )
+    input_tokens: int = Field(0, ge=0)
+    output_tokens: int = Field(0, ge=0)
+    cache_read_tokens: int = Field(0, ge=0)
+
+
+class ProactiveWakeUsageWrite(BaseAPIModel):
+    """Request body recording one proactive wake's spend in the usage ledger."""
+
+    wake_id: str = Field(
+        min_length=1,
+        max_length=64,
+        description="Bot-generated unique id for the wake; replays are no-ops",
+    )
+    metered_at: datetime = Field(description="When the wake ran")
+    passive: bool = Field(description="Whether this was a passive sweep")
+    responses: int = Field(ge=0, description="Channel messages the wake sent")
+    entries: list[ProactiveUsageEntry] = Field(
+        max_length=8, description="Per-model token usage for the wake"
+    )
+
+
+class ProactiveWakeUsageRead(BaseAPIModel):
+    """How many ledger rows a proactive usage report created."""
+
+    recorded: int = Field(description="Rows written; 0 for a replayed wake")

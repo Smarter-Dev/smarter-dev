@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from litestar.testing import TestClient
 
@@ -88,3 +90,111 @@ class TestPutProactiveSettings:
             _url(), json={"enabled": True, "watch_addendum": "x" * 4001}
         )
         assert response.status_code in (400, 422)
+
+
+def _usage_payload(**overrides) -> dict:
+    payload = {
+        "wake_id": "abc123",
+        "metered_at": "2026-08-26T01:00:00Z",
+        "passive": False,
+        "responses": 1,
+        "entries": [
+            {
+                "model_id": "deepseek/deepseek-v4-flash",
+                "operation": "watcher",
+                "input_tokens": 1_000_000,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+            },
+            {
+                "model_id": "gemini-3.7-flash",
+                "operation": "agent",
+                "input_tokens": 0,
+                "output_tokens": 1_000_000,
+                "cache_read_tokens": 0,
+            },
+        ],
+    }
+    payload.update(overrides)
+    return payload
+
+
+class TestPostProactiveWakeUsage:
+    def test_records_priced_rows_per_model(
+        self, proactive_settings_client: TestClient, session_mock: AsyncMock
+    ):
+        session_mock.scalar.return_value = None
+
+        response = proactive_settings_client.post(
+            _url() + "/usage", json=_usage_payload()
+        )
+
+        assert response.status_code == 200
+        assert response.json()["recorded"] == 2
+        rows = [call.args[0] for call in session_mock.add.call_args_list]
+        by_operation = {row.operation_type: row for row in rows}
+
+        watcher = by_operation["proactive-watcher"]
+        assert watcher.operation_key == (
+            "proactive:abc123:watcher:deepseek/deepseek-v4-flash"
+        )
+        assert watcher.product_mode == "discord"
+        assert watcher.provider_key == "openrouter"
+        assert watcher.catalog_model_key == "deepseek-v4"
+        assert watcher.model_id == "deepseek/deepseek-v4-flash"
+        assert watcher.input_tokens == 1_000_000
+        # 1M input tokens at OpenRouter's DeepSeek V4 Flash rate.
+        assert watcher.cost_usd == Decimal("0.0867")
+        assert watcher.details == {
+            "guild_id": _GUILD,
+            "channel_id": _CHANNEL,
+            "passive": False,
+            "responses": 1,
+        }
+        assert watcher.metered_at == datetime(
+            2026, 8, 26, 1, 0, tzinfo=timezone.utc
+        )
+
+        agent = by_operation["proactive-agent"]
+        assert agent.provider_key == "google"
+        assert agent.catalog_model_key == "gemini-3-7-flash"
+        assert agent.output_tokens == 1_000_000
+        # 1M output tokens at Gemini 3.7 Flash's rate.
+        assert agent.cost_usd == Decimal("3.75")
+
+        session_mock.commit.assert_awaited_once()
+
+    def test_replayed_wake_records_nothing(
+        self, proactive_settings_client: TestClient, session_mock: AsyncMock
+    ):
+        session_mock.scalar.return_value = SimpleNamespace()
+
+        response = proactive_settings_client.post(
+            _url() + "/usage", json=_usage_payload()
+        )
+
+        assert response.status_code == 200
+        assert response.json()["recorded"] == 0
+        session_mock.add.assert_not_called()
+
+    def test_unknown_operation_is_rejected(
+        self, proactive_settings_client: TestClient, session_mock: AsyncMock
+    ):
+        payload = _usage_payload()
+        payload["entries"][0]["operation"] = "skim"
+
+        response = proactive_settings_client.post(_url() + "/usage", json=payload)
+
+        assert response.status_code in (400, 422)
+        session_mock.add.assert_not_called()
+
+    def test_negative_tokens_are_rejected(
+        self, proactive_settings_client: TestClient, session_mock: AsyncMock
+    ):
+        payload = _usage_payload()
+        payload["entries"][0]["input_tokens"] = -5
+
+        response = proactive_settings_client.post(_url() + "/usage", json=payload)
+
+        assert response.status_code in (400, 422)
+        session_mock.add.assert_not_called()
