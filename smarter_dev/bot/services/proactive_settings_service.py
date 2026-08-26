@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from datetime import datetime
 
 from smarter_dev.bot.services.base import BaseService
 from smarter_dev.bot.services.api_client import APIClient
@@ -107,6 +108,29 @@ class ProactiveSettingsService(BaseService):
         return await self._put(
             guild_id, channel_id, enabled=current.enabled,
             watch_addendum=watch_addendum,
+        )
+
+    async def record_wake_usage(
+        self,
+        guild_id: str,
+        channel_id: str,
+        *,
+        wake_id: str,
+        metered_at: datetime,
+        passive: bool,
+        responses: int,
+        entries: list[dict],
+    ) -> None:
+        """Report one wake's per-model token spend to the usage ledger."""
+        await self._api_client.post(
+            f"{self._path(guild_id, channel_id)}/usage",
+            json_data={
+                "wake_id": wake_id,
+                "metered_at": metered_at.isoformat(),
+                "passive": passive,
+                "responses": responses,
+                "entries": entries,
+            },
         )
 
     async def _put(

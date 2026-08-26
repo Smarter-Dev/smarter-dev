@@ -103,6 +103,8 @@ class _StubSettingsService:
             watch_addendum=addendum,
         )
         self.saved_addenda: list[str] = []
+        self.recorded_usage: list[dict] = []
+        self.usage_error: Exception | None = None
 
     async def get_settings(self, guild_id, channel_id):
         return self.settings
@@ -110,6 +112,22 @@ class _StubSettingsService:
     async def set_watch_addendum(self, guild_id, channel_id, addendum):
         self.saved_addenda.append(addendum)
         return self.settings
+
+    async def record_wake_usage(
+        self, guild_id, channel_id, *, wake_id, metered_at, passive,
+        responses, entries,
+    ):
+        if self.usage_error is not None:
+            raise self.usage_error
+        self.recorded_usage.append({
+            "guild_id": guild_id,
+            "channel_id": channel_id,
+            "wake_id": wake_id,
+            "metered_at": metered_at,
+            "passive": passive,
+            "responses": responses,
+            "entries": entries,
+        })
 
 
 class _FakeIterator:
@@ -245,6 +263,79 @@ async def test_empty_non_passive_wake_is_a_noop(wake_setup):
     state = wake_setup.runtime.state_for(2, 1)
     await proactive.run_wake(state)
     assert wake_setup.adapter.contexts == []
+
+
+def _usage_result(**overrides) -> ActivationResult:
+    fields = dict(
+        responses=[ProposedResponse(reply_to_id="555", content="happy to help")],
+        input_tokens=1200, output_tokens=40, cache_read_tokens=100,
+        model_id="gemini-3.7-flash",
+        usage_by_model={
+            "deepseek/deepseek-v4-flash": {
+                "input_tokens": 1000, "output_tokens": 30,
+                "cache_read_tokens": 100,
+            },
+            "gemini-3.7-flash": {
+                "input_tokens": 200, "output_tokens": 10,
+                "cache_read_tokens": 0,
+            },
+        },
+    )
+    fields.update(overrides)
+    return ActivationResult(**fields)
+
+
+async def test_wake_persists_usage_per_model(wake_setup):
+    wake_setup.adapter.result = _usage_result()
+    state = wake_setup.runtime.state_for(2, 1)
+    state.buffer.append(
+        proactive.channel_message_from_hikari(_hikari_message(id=555))
+    )
+
+    await proactive.run_wake(state)
+
+    assert len(wake_setup.service.recorded_usage) == 1
+    recorded = wake_setup.service.recorded_usage[0]
+    assert recorded["guild_id"] == "2"
+    assert recorded["channel_id"] == "1"
+    assert recorded["wake_id"]
+    assert recorded["metered_at"] == wake_setup.adapter.contexts[0].activated_at
+    assert recorded["passive"] is False
+    assert recorded["responses"] == 1
+    by_model = {entry["model_id"]: entry for entry in recorded["entries"]}
+    watcher = by_model["deepseek/deepseek-v4-flash"]
+    assert watcher["operation"] == "watcher"
+    assert watcher["input_tokens"] == 1000
+    assert watcher["output_tokens"] == 30
+    assert watcher["cache_read_tokens"] == 100
+    agent = by_model["gemini-3.7-flash"]
+    assert agent["operation"] == "agent"
+    assert agent["input_tokens"] == 200
+
+
+async def test_wake_without_usage_records_nothing(wake_setup):
+    state = wake_setup.runtime.state_for(2, 1)
+    state.buffer.append(
+        proactive.channel_message_from_hikari(_hikari_message(id=555))
+    )
+
+    await proactive.run_wake(state)
+
+    assert wake_setup.service.recorded_usage == []
+
+
+async def test_wake_survives_usage_persistence_failure(wake_setup):
+    wake_setup.adapter.result = _usage_result()
+    wake_setup.service.usage_error = RuntimeError("api down")
+    state = wake_setup.runtime.state_for(2, 1)
+    state.buffer.append(
+        proactive.channel_message_from_hikari(_hikari_message(id=555))
+    )
+
+    await proactive.run_wake(state)
+
+    # The response still went out even though usage persistence failed.
+    wake_setup.bot.rest.create_message.assert_awaited_once()
 
 
 # --- passive/active scheduling ----------------------------------------------

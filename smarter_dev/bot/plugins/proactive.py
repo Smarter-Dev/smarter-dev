@@ -26,6 +26,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import hikari
 import lightbulb
@@ -592,12 +593,37 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
                 )
             except Exception:  # noqa: BLE001 — persistence is best-effort
                 logger.exception("failed to persist watch instructions")
+        usage_entries = [
+            {
+                "model_id": model_id,
+                "operation": (
+                    "watcher" if model_id == run.watcher_model_id else "agent"
+                ),
+                "input_tokens": usage.get("input_tokens", 0),
+                "output_tokens": usage.get("output_tokens", 0),
+                "cache_read_tokens": usage.get("cache_read_tokens", 0),
+            }
+            for model_id, usage in (result.usage_by_model or {}).items()
+        ]
+        if usage_entries:
+            try:
+                await service.record_wake_usage(
+                    state.guild_id, state.channel_id,
+                    wake_id=uuid4().hex,
+                    metered_at=context.activated_at,
+                    passive=passive,
+                    responses=len(result.responses),
+                    entries=usage_entries,
+                )
+            except Exception:  # noqa: BLE001 — the ledger must not kill a wake
+                logger.exception("failed to persist proactive usage")
         logger.info(
             "proactive wake channel=%s new=%d responses=%d reactions=%d "
-            "passive=%s details=%s",
+            "passive=%s details=%s tokens_in=%d tokens_out=%d",
             state.channel_id, len(new_messages), len(result.responses),
             len(result.reactions), passive,
             (result.details or {}).get("watcher", {}).get("wake"),
+            result.input_tokens, result.output_tokens,
         )
 
 
