@@ -375,23 +375,48 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         reasoning_levels=_OPEN_EFFORT,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
-    # GLM left Zen on 2026-08-13. Z.AI serves its own model at fp8, so fp8 is
-    # the reference build, not a downgrade — and Zen charges exactly Z.AI's
-    # $1.40/$4.40 while a dozen fp8 endpoints sell the same precision for half.
-    # The floor admits fp8 and bf16 only, so routing can never quietly drop to
-    # one of the fp4 endpoints sharing this id.
+    # GLM-5.2 retired 2026-08-27, superseded in this same slot by 5.3-Flash —
+    # cheaper and stronger per Z.ai's own benchmarks, so nothing is lost. Its
+    # pricing and provider mapping are deliberately retained (llm_pricing,
+    # usage_invoice) for historical rows.
+    #
+    # GLM-5.3-Flash is natively multimodal (text+image+video) and 1M-context.
+    # Live-checked against GET /api/v1/models/z-ai/glm-5.3-flash/endpoints
+    # (2026-08-27) from inside the cluster: 13 endpoints, all fp8 or unknown
+    # quant, no bf16/fp4 split to worry about. Two are excluded by name on
+    # evidence, not precision — both are China-linked, which the requesting
+    # party ruled out:
+    #   - z-ai: the model's own author (Zhipu AI, Beijing).
+    #   - novita: prices byte-for-byte identical to z-ai's, including z-ai's
+    #     50% launch discount ($0.075/$0.25 against every other endpoint's
+    #     flat $0.15/$0.50) — a strong tell it is reselling/passing through
+    #     z-ai's own China-hosted inference rather than running an
+    #     independent build.
+    # together and wafer declare no quantization at all and aren't otherwise
+    # vouched for, so they're excluded on the same "unknown build" grounds as
+    # every other model's precision floor here — cloudflare is the one
+    # undeclared-quant endpoint kept, as an explicit exception (known
+    # operator, in-pool pricing, decent uptime). venice also declares no
+    # quantization and additionally sampled 61-88% uptime live, so it stays
+    # out on both counts.
+    # Every surviving endpoint (parasail, reka, deepinfra, baseten, gmicloud,
+    # modal, io-net, cloudflare) bills the same flat $0.15/$0.50/$0.03 — the
+    # ceiling matches that rate exactly, so routing can never drift onto a
+    # pricier fallback.
     CatalogModel(
-        key="glm-5-2",
-        label="GLM-5.2 (Zhipu)",
+        key="glm-5-3-flash",
+        label="GLM-5.3 Flash (Zhipu)",
         family="GLM",
         provider=ModelProvider.OPENROUTER,
-        model_id="z-ai/glm-5.2",
+        model_id="z-ai/glm-5.3-flash",
+        context_window=1_048_576,
+        supports_vision=True,
         reasoning_levels=_OPEN_EFFORT,
         default_reasoning=ReasoningLevel.MEDIUM,
         openrouter_routing=OpenRouterRouting(
-            quantizations=("fp8", "bf16"),
-            max_price_input_mtok=0.80,
-            max_price_output_mtok=3.20,
+            ignore=("z-ai", "novita", "together", "wafer", "venice"),
+            max_price_input_mtok=0.15,
+            max_price_output_mtok=0.50,
         ),
     ),
     # DeepSeek V4 Pro, added 2026-08-13 into the slot 3.1 Flash Lite vacated.

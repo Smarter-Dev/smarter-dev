@@ -29,7 +29,7 @@ def _record(**overrides) -> SimpleNamespace:
     fields = {
         "guild_id": _GUILD,
         "channel_id": _CHANNEL,
-        "model_key": "glm-5-2",
+        "model_key": "glm-5-3-flash",
         "reasoning_level": None,
         "daily_token_budget": 5000,
         "hourly_token_budget": 500,
@@ -54,7 +54,7 @@ class TestGetModelOverride:
         body = response.json()
         assert body["guild_id"] == _GUILD
         assert body["channel_id"] == _CHANNEL
-        assert body["model_key"] == "glm-5-2"
+        assert body["model_key"] == "glm-5-3-flash"
         assert body["reasoning_level"] is None
         assert body["daily_token_budget"] == 5000
         assert body["hourly_token_budget"] == 500
@@ -152,7 +152,7 @@ class TestPutModelOverride:
         response = model_override_client.put(
             _url(),
             json={
-                "model_key": "glm-5-2",
+                "model_key": "glm-5-3-flash",
                 "auto_respond": True,
                 "fallback_model_key": "gemma-4-31b",
                 "response_filter": "Only coding questions.",
@@ -176,7 +176,7 @@ class TestPutModelOverride:
 
         response = model_override_client.put(
             _url(),
-            json={"model_key": "glm-5-2", "drafter_model": "gemma-4-31b"},
+            json={"model_key": "glm-5-3-flash", "drafter_model": "gemma-4-31b"},
         )
 
         assert response.status_code == 200
@@ -187,21 +187,21 @@ class TestPutModelOverride:
     def test_unknown_drafter_model_is_422(self, model_override_client: TestClient):
         response = model_override_client.put(
             _url(),
-            json={"model_key": "glm-5-2", "drafter_model": "not-a-real-model"},
+            json={"model_key": "glm-5-3-flash", "drafter_model": "not-a-real-model"},
         )
         assert response.status_code == 422
 
     def test_unknown_fallback_model_key_is_422(self, model_override_client: TestClient):
         response = model_override_client.put(
             _url(),
-            json={"model_key": "glm-5-2", "fallback_model_key": "not-a-real-model"},
+            json={"model_key": "glm-5-3-flash", "fallback_model_key": "not-a-real-model"},
         )
         assert response.status_code == 422
 
     def test_over_length_response_filter_is_422(self, model_override_client: TestClient):
         response = model_override_client.put(
             _url(),
-            json={"model_key": "glm-5-2", "response_filter": "x" * 4001},
+            json={"model_key": "glm-5-3-flash", "response_filter": "x" * 4001},
         )
         assert response.status_code == 422
 
@@ -211,7 +211,7 @@ class TestPutModelOverride:
         model_override_crud_mock.upsert.return_value = _record(reasoning_level="high")
 
         response = model_override_client.put(
-            _url(), json={"model_key": "glm-5-2", "reasoning_level": "high"}
+            _url(), json={"model_key": "glm-5-3-flash", "reasoning_level": "high"}
         )
 
         assert response.status_code == 200
@@ -225,7 +225,7 @@ class TestPutModelOverride:
 
     def test_unknown_reasoning_level_is_422(self, model_override_client: TestClient):
         response = model_override_client.put(
-            _url(), json={"model_key": "glm-5-2", "reasoning_level": "ludicrous"}
+            _url(), json={"model_key": "glm-5-3-flash", "reasoning_level": "ludicrous"}
         )
         assert response.status_code == 422
 

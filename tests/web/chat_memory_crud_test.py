@@ -76,14 +76,14 @@ async def test_upsert_inserts_the_first_revision(db_session):
         guild_id=_GUILD,
         content="## Who's here\nkai (id 7) is deep in embedded rust.",
         notes_consumed=4,
-        model_name="glm-5-2",
+        model_name="glm-5-3-flash",
         dreamed_at=_MIDNIGHT,
     )
     await db_session.commit()
 
     assert record.revision == 1
     assert record.notes_consumed == 4
-    assert record.model_name == "glm-5-2"
+    assert record.model_name == "glm-5-3-flash"
     assert record.memory_enabled is True
     stored = await get_guild_memory_blob(db_session, _GUILD)
     assert stored.content.startswith("## Who's here")
@@ -97,7 +97,7 @@ async def test_upsert_bumps_the_revision_in_the_statement(db_session):
         guild_id=_GUILD,
         content="night one",
         notes_consumed=1,
-        model_name="glm-5-2",
+        model_name="glm-5-3-flash",
         dreamed_at=_MIDNIGHT,
     )
     await db_session.commit()
@@ -317,7 +317,7 @@ async def test_record_memory_revision_stores_the_nights_output(db_session):
         content="last night's blob",
         revision=3,
         notes_consumed=12,
-        model_name="glm-5-2",
+        model_name="glm-5-3-flash",
     )
     await db_session.commit()
 

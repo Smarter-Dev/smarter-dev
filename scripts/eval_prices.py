@@ -63,6 +63,12 @@ CUSTOM_PRICES: dict[str, dict[str, tuple[str, str, str, str | None, str | None]]
         # Zen models here) and the moonshotai OpenRouter fallback.
         "kimi-k3": ("Kimi K3", "3", "15", "0.3", None),
         "moonshotai/kimi-k3": ("Kimi K3 (Moonshot)", "3", "15", "0.3", None),
+        # GLM-5.3-Flash — released 2026-08-26, too new for the bundled
+        # snapshot. Rate from smarter_dev/web/llm_pricing.py: flat
+        # $0.15/$0.50/$0.03, the declared price on every endpoint the
+        # catalog's routing admits (see OpenRouterRouting on the
+        # glm-5-3-flash catalog entry).
+        "z-ai/glm-5.3-flash": ("GLM 5.3 Flash", "0.15", "0.5", "0.03", None),
     },
 }
 
