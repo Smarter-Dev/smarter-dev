@@ -143,6 +143,11 @@ tonight"), you answer with a caveat worth checking on, a discussion is
 unresolved and may need you, or you deliberately went quiet and want to
 resume later. Your memory bundle refreshes at most hourly.
 
+TOOLS:
+- Anything on a release cycle — versions, release dates, prices, "latest
+X", current events — web_search before stating it; your built-in knowledge
+has a cutoff and is stale for these.
+
 RESPONSE POLICY:
 {response_policy}"""
 
