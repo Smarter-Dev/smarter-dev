@@ -191,14 +191,14 @@ def test_openrouter_routing_constraints_ride_on_every_request():
     quietly gets the most quantized endpoint. That makes the block a
     correctness concern, not a tuning knob.
     """
-    glm = get_model("glm-5-2")
+    glm = get_model("glm-5-3-flash")
     settings = model_settings_for(glm)
     provider = settings["extra_body"]["provider"]
-    # Z.AI serves its own model at fp8, so fp8 is the floor, not a downgrade.
-    assert provider["quantizations"] == ["fp8", "bf16"]
+    # China-linked/unvetted endpoints are excluded by name, not precision.
+    assert provider["ignore"] == ["z-ai", "novita", "together", "wafer", "venice"]
     # A ceiling means a fallback can never silently cost more than the rate
     # llm_pricing records for this model.
-    assert provider["max_price"] == {"prompt": 0.80, "completion": 3.20}
+    assert provider["max_price"] == {"prompt": 0.15, "completion": 0.50}
     # Reasoning still rides along on the same settings object.
     assert settings["openai_reasoning_effort"] == "medium"
 

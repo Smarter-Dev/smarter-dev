@@ -271,7 +271,7 @@ def _usage_result(**overrides) -> ActivationResult:
         input_tokens=1200, output_tokens=40, cache_read_tokens=100,
         model_id="gemini-3.7-flash",
         usage_by_model={
-            "deepseek/deepseek-v4-flash": {
+            "z-ai/glm-5.3-flash": {
                 "input_tokens": 1000, "output_tokens": 30,
                 "cache_read_tokens": 100,
             },
@@ -303,7 +303,7 @@ async def test_wake_persists_usage_per_model(wake_setup):
     assert recorded["passive"] is False
     assert recorded["responses"] == 1
     by_model = {entry["model_id"]: entry for entry in recorded["entries"]}
-    watcher = by_model["deepseek/deepseek-v4-flash"]
+    watcher = by_model["z-ai/glm-5.3-flash"]
     assert watcher["operation"] == "watcher"
     assert watcher["input_tokens"] == 1000
     assert watcher["output_tokens"] == 30

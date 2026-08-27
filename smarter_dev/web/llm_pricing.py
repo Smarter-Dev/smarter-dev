@@ -435,10 +435,21 @@ _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
     # GLM-5.2: fp8 pool. Sampling never reached sail-research's $0.50/$3.15 —
     # gmicloud and novita split every request at ~$0.742/$2.332, so that is what
     # this bills at. Against Z.AI's own $1.40/$4.40 for the same fp8 build.
+    # Retired from the catalog 2026-08-27 in favour of GLM-5.3-Flash; kept
+    # because rows written while it was selectable still carry this id.
     "z-ai/glm-5.2": types.ModelPrice(
         input_mtok=Decimal("0.742"),
         output_mtok=Decimal("2.332"),
         cache_read_mtok=Decimal("0.1378"),
+    ),
+    # GLM-5.3-Flash: unlike 5.2's pool, every endpoint the catalog's routing
+    # admits (parasail, reka, deepinfra, baseten, gmicloud, modal, io-net,
+    # cloudflare) quotes the identical flat rate — no sampling needed, this is
+    # the declared price on every one of them (2026-08-27).
+    "z-ai/glm-5.3-flash": types.ModelPrice(
+        input_mtok=Decimal("0.15"),
+        output_mtok=Decimal("0.50"),
+        cache_read_mtok=Decimal("0.03"),
     ),
     # DeepSeek V4 Pro: baidu/fp8 served 5 of 6, streamlake/fp8 the other one,
     # never the authors' endpoint. Priced at baidu's rate. Against Zen's

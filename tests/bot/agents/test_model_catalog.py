@@ -61,7 +61,7 @@ def test_parse_reasoning_level_round_trips_and_degrades():
 
 
 def test_resolve_reasoning_level_falls_back_to_default():
-    glm = get_model("glm-5-2")
+    glm = get_model("glm-5-3-flash")
     assert resolve_reasoning_level(glm, None) is glm.default_reasoning
 
 
@@ -73,7 +73,7 @@ def test_resolve_reasoning_level_keeps_supported_choice():
 def test_resolve_reasoning_level_clamps_unsupported_to_nearest():
     gemini = get_model("gemini-3-7-flash")  # caps at HIGH
     assert resolve_reasoning_level(gemini, ReasoningLevel.MAX) is ReasoningLevel.HIGH
-    glm = get_model("glm-5-2")  # LOW/MEDIUM/HIGH only
+    glm = get_model("glm-5-3-flash")  # LOW/MEDIUM/HIGH only
     assert resolve_reasoning_level(glm, ReasoningLevel.NONE) is ReasoningLevel.LOW
 
 
@@ -233,7 +233,7 @@ def test_prompted_output_follows_the_model_not_the_endpoint():
     OpenRouter, while Grok and Luna — which share that provider and DO handle
     native tool output — must not be forced onto it.
     """
-    for key in ("gemma-4-31b", "glm-5-2", "deepseek-v4", "qwen3-6-plus"):
+    for key in ("gemma-4-31b", "glm-5-3-flash", "deepseek-v4", "qwen3-6-plus"):
         model = get_model(key)
         assert model.provider is ModelProvider.OPENROUTER, key
         assert model.needs_prompted_output is True, key
