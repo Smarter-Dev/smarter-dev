@@ -9,24 +9,22 @@ wrapped so it spends the same per-wake budget as the native tools.
 from __future__ import annotations
 
 import functools
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
 
-from smarter_dev.bot.agents.chat_tools import ChatDeps, chat_tool_functions
+from smarter_dev.bot.agents.chat_tools import ChatDeps
+from smarter_dev.bot.agents.chat_tools import chat_tool_functions
 from smarter_dev.bot.agents.handler_tools import handler_tool_functions
-from smarter_dev.bot.proactive.agent import (
-    BUDGET_EXHAUSTED,
-    ToolBudget,
-    build_kimi_agent,
-)
-from smarter_dev.bot.proactive.environment import (
-    ChannelEnvironment,
-    InstructionStore,
-    WakeActions,
-)
+from smarter_dev.bot.proactive.agent import BUDGET_EXHAUSTED
+from smarter_dev.bot.proactive.agent import ToolBudget
+from smarter_dev.bot.proactive.agent import build_kimi_agent
+from smarter_dev.bot.proactive.environment import ChannelEnvironment
+from smarter_dev.bot.proactive.environment import InstructionStore
+from smarter_dev.bot.proactive.environment import WakeActions
 
 
 @dataclass(kw_only=True)
@@ -39,6 +37,7 @@ class ProactiveDeps(ChatDeps):
     skim_transcript: Callable[[str], Awaitable[str]]
     budget: ToolBudget
     request_mode: Callable[[str, int], str] | None = None
+    drain_notifications: Callable[[], str] | None = None
 
 
 def parity_tool_functions() -> list:

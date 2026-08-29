@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC
+from datetime import datetime
 
 from smarter_dev.bot.proactive import notifications
 from smarter_dev.bot.proactive.types import ChannelMessage
@@ -69,6 +70,19 @@ def test_watcher_summary_notification_wakes_only_on_wake_decision():
     assert quiet.kind == "watcher_summary"
     assert "keyboards" in quiet.body
     assert quiet.message_ids == ("3",)
+
+
+def test_new_messages_notification_groups_ids_and_summary():
+    notification = notifications.new_messages_notification(
+        summary="alice and bob are comparing parser benchmarks",
+        message_ids=["601", "602", "603"],
+        created_at=NOW,
+    )
+    assert notification.kind == "new_messages"
+    assert notification.wakes is False
+    assert notification.message_ids == ("601", "602", "603")
+    assert "3 new messages" in notification.body
+    assert "parser benchmarks" in notification.body
 
 
 def test_mode_change_and_expiry_notifications_never_wake():

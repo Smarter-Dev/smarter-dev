@@ -2,22 +2,20 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+import asyncio
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
 
 from smarter_dev.bot.plugins import proactive
-from smarter_dev.bot.proactive.types import (
-    ActivationResult,
-    ProposedReaction,
-    ProposedResponse,
-)
-from smarter_dev.bot.services.proactive_settings_service import (
-    ProactiveChannelSettings,
-)
-
+from smarter_dev.bot.proactive.types import ActivationResult
+from smarter_dev.bot.proactive.types import ProposedReaction
+from smarter_dev.bot.proactive.types import ProposedResponse
+from smarter_dev.bot.services.proactive_settings_service import ProactiveChannelSettings
 
 # --- debounce math -----------------------------------------------------------
 
@@ -187,15 +185,17 @@ def wake_setup(monkeypatch):
     )
     adapter = _StubAdapter(result)
     captured_stores = []
+    captured_kwargs = []
 
     def fake_adapter_factory(**kwargs):
         captured_stores.append(kwargs["instruction_store"])
+        captured_kwargs.append(kwargs)
         return adapter
 
     monkeypatch.setattr(proactive, "TwoPassAdapter", fake_adapter_factory)
     return SimpleNamespace(
         service=service, bot=bot, runtime=runtime, adapter=adapter,
-        captured_stores=captured_stores,
+        captured_stores=captured_stores, captured_kwargs=captured_kwargs,
     )
 
 
@@ -415,6 +415,289 @@ async def test_passive_sweep_drains_buffered_channels(listener_setup):
     assert woken == [(state, False)]
 
 
+# --- in-flight wakes: queue instead of cancel --------------------------------
+
+
+async def _blocked_wake_task(release: asyncio.Event) -> None:
+    await release.wait()
+
+
+async def test_mention_during_wake_queues_verbatim_and_never_cancels(
+    listener_setup,
+):
+    state = listener_setup.runtime.state_for(2, 1)
+    release = asyncio.Event()
+    state.wake_task = asyncio.create_task(_blocked_wake_task(release))
+
+    await proactive.on_guild_message(
+        _event(_hikari_message(user_mentions_ids=(999,)))
+    )
+
+    assert not state.wake_task.cancelled()
+    assert listener_setup.scheduled == []  # no new debounce armed mid-run
+    kinds = [n.kind for n in state.queue.items]
+    assert "mention" in kinds
+    mention = next(n for n in state.queue.items if n.kind == "mention")
+    assert "hey there" in mention.body  # verbatim, not summarized
+    assert state.engaged_ids == {"555"}
+    release.set()
+    await state.wake_task
+
+
+async def test_plain_message_during_wake_buffers_without_notifying(
+    listener_setup,
+):
+    state = listener_setup.runtime.state_for(2, 1)
+    state.active_until = proactive.time.monotonic() + 600
+    release = asyncio.Event()
+    state.wake_task = asyncio.create_task(_blocked_wake_task(release))
+
+    await proactive.on_guild_message(_event(_hikari_message()))
+
+    assert [n.kind for n in state.queue.items] == []  # ticker handles it
+    assert [m.id for m in state.buffer] == ["555"]
+    assert listener_setup.scheduled == []
+    release.set()
+    await state.wake_task
+
+
+async def test_scheduled_wake_survives_messages_arriving_mid_run(wake_setup):
+    state = wake_setup.runtime.state_for(2, 1)
+    state.buffer.append(
+        proactive.channel_message_from_hikari(_hikari_message(id=555))
+    )
+    state.first_at = state.last_at = proactive.time.monotonic() - 120
+
+    release = asyncio.Event()
+    original_activate = wake_setup.adapter.activate
+
+    async def blocking_activate(context):
+        await release.wait()
+        return await original_activate(context)
+
+    wake_setup.adapter.activate = blocking_activate
+
+    proactive._schedule_wake(state)
+    for _ in range(10):  # let the timer fire and the wake start
+        await asyncio.sleep(0)
+    assert state.wake_task is not None and not state.wake_task.done()
+
+    await proactive.on_guild_message(_event(_hikari_message(id=556)))
+    assert not state.wake_task.cancelled()
+
+    release.set()
+    await state.wake_task
+    # The wake completed exactly once; the mid-run message waits its turn.
+    assert len(wake_setup.adapter.contexts) == 1
+    assert [m.id for m in state.buffer] == ["556"]
+
+
+# --- consumed messages -------------------------------------------------------
+
+
+async def test_wake_excludes_consumed_messages_from_new_set(wake_setup):
+    state = wake_setup.runtime.state_for(2, 1)
+    for message_id in (555, 556):
+        state.buffer.append(
+            proactive.channel_message_from_hikari(
+                _hikari_message(id=message_id)
+            )
+        )
+    state.consumed_ids.add("555")
+    state.engaged_ids.add("555")
+
+    await proactive.run_wake(state)
+
+    context = wake_setup.adapter.contexts[0]
+    assert [m.id for m in context.new_messages] == ["556"]
+    assert state.consumed_ids == set()
+    assert state.engaged_ids == set()
+
+
+async def test_wake_of_only_consumed_messages_is_a_noop(wake_setup):
+    state = wake_setup.runtime.state_for(2, 1)
+    state.buffer.append(
+        proactive.channel_message_from_hikari(_hikari_message(id=555))
+    )
+    state.consumed_ids.add("555")
+
+    await proactive.run_wake(state)
+
+    assert wake_setup.adapter.contexts == []
+    assert state.buffer == []
+
+
+async def test_drain_notifications_renders_and_marks_consumed(wake_setup):
+    state = wake_setup.runtime.state_for(2, 1)
+    state.buffer.append(
+        proactive.channel_message_from_hikari(_hikari_message(id=555))
+    )
+    drained: list[str] = []
+    original_activate = wake_setup.adapter.activate
+
+    async def activate_reading_notifications(context):
+        arrived = proactive.channel_message_from_hikari(
+            _hikari_message(id=777, content="did you see this?")
+        )
+        state.buffer.append(arrived)
+        state.queue.push(proactive.mention_notification(arrived))
+        deps = wake_setup.captured_kwargs[-1]["deps_factory"](
+            env=None, actions=None, instruction_store=None,
+            skim_transcript=None, budget=None,
+        )
+        drained.append(deps.drain_notifications())
+        drained.append(deps.drain_notifications())
+        return await original_activate(context)
+
+    wake_setup.adapter.activate = activate_reading_notifications
+    await proactive.run_wake(state)
+
+    assert "did you see this?" in drained[0]
+    assert drained[1] == "No new notifications."
+    # Read via the tool: the follow-up wake must not treat it as new.
+    assert "777" in state.consumed_ids
+
+
+# --- follow-up scheduling after a wake ---------------------------------------
+
+
+async def test_followup_wake_fires_immediately_for_unconsumed_mention(
+    wake_setup,
+):
+    state = wake_setup.runtime.state_for(2, 1)
+    state.buffer.append(
+        proactive.channel_message_from_hikari(_hikari_message(id=555))
+    )
+    original_activate = wake_setup.adapter.activate
+
+    async def activate_with_midrun_mention(context):
+        if len(wake_setup.adapter.contexts) == 0:
+            arrived = proactive.channel_message_from_hikari(
+                _hikari_message(id=777, user_mentions_ids=(999,))
+            )
+            state.buffer.append(arrived)
+            state.engaged_ids.add(arrived.id)
+        return await original_activate(context)
+
+    wake_setup.adapter.activate = activate_with_midrun_mention
+    await proactive._run_wake_guarded(state)
+    assert state.wake_task is not None
+    await state.wake_task
+
+    assert len(wake_setup.adapter.contexts) == 2
+    assert [m.id for m in wake_setup.adapter.contexts[1].new_messages] == [
+        "777"
+    ]
+
+
+async def test_followup_wake_debounces_plain_messages(
+    wake_setup, monkeypatch
+):
+    state = wake_setup.runtime.state_for(2, 1)
+    state.active_until = proactive.time.monotonic() + 600
+    state.buffer.append(
+        proactive.channel_message_from_hikari(_hikari_message(id=555))
+    )
+    scheduled = []
+    monkeypatch.setattr(
+        proactive, "_schedule_wake", lambda s: scheduled.append(s)
+    )
+    original_activate = wake_setup.adapter.activate
+
+    async def activate_with_midrun_chatter(context):
+        if len(wake_setup.adapter.contexts) == 0:
+            state.buffer.append(
+                proactive.channel_message_from_hikari(
+                    _hikari_message(id=778)
+                )
+            )
+        return await original_activate(context)
+
+    wake_setup.adapter.activate = activate_with_midrun_chatter
+    await proactive._run_wake_guarded(state)
+
+    assert len(wake_setup.adapter.contexts) == 1
+    assert scheduled == [state]
+
+
+async def test_followup_leaves_passive_channels_to_the_sweep(
+    wake_setup, monkeypatch
+):
+    state = wake_setup.runtime.state_for(2, 1)
+    state.buffer.append(
+        proactive.channel_message_from_hikari(_hikari_message(id=555))
+    )
+    scheduled = []
+    monkeypatch.setattr(
+        proactive, "_schedule_wake", lambda s: scheduled.append(s)
+    )
+    original_activate = wake_setup.adapter.activate
+
+    async def activate_with_midrun_chatter(context):
+        if len(wake_setup.adapter.contexts) == 0:
+            state.buffer.append(
+                proactive.channel_message_from_hikari(
+                    _hikari_message(id=778)
+                )
+            )
+        return await original_activate(context)
+
+    wake_setup.adapter.activate = activate_with_midrun_chatter
+    await proactive._run_wake_guarded(state)
+
+    assert len(wake_setup.adapter.contexts) == 1
+    assert scheduled == []
+    assert [m.id for m in state.buffer] == ["778"]
+
+
+# --- mid-run ticker summaries ------------------------------------------------
+
+
+class _StubSkim:
+    def __init__(self):
+        self.transcripts: list[str] = []
+
+    async def skim(self, transcript):
+        self.transcripts.append(transcript)
+        return "grouped summary", {
+            "input_tokens": 40, "output_tokens": 8, "cache_read_tokens": 0,
+        }
+
+
+async def test_midrun_summary_groups_unseen_messages(wake_setup, monkeypatch):
+    skim = _StubSkim()
+    monkeypatch.setattr(wake_setup.runtime, "skim", lambda: skim)
+    state = wake_setup.runtime.state_for(2, 1)
+    for message_id, content in (
+        (601, "plain chatter"),
+        (602, "engaged separately"),
+        (603, "already consumed"),
+    ):
+        state.buffer.append(
+            proactive.channel_message_from_hikari(
+                _hikari_message(id=message_id, content=content)
+            )
+        )
+    state.engaged_ids.add("602")
+    state.consumed_ids.add("603")
+
+    await proactive._push_midrun_summary(state)
+
+    notification = state.queue.items[-1]
+    assert notification.kind == "new_messages"
+    assert notification.message_ids == ("601",)
+    assert "grouped summary" in notification.body
+    assert state.notified_ids == {"601"}
+    assert state.midrun_usage[wake_setup.runtime.watcher_model_id] == {
+        "input_tokens": 40, "output_tokens": 8, "cache_read_tokens": 0,
+    }
+
+    # Nothing new since the last tick: no second notification, no skim call.
+    await proactive._push_midrun_summary(state)
+    assert len([n for n in state.queue.items if n.kind == "new_messages"]) == 1
+    assert len(skim.transcripts) == 1
+
+
 # --- memory injection --------------------------------------------------------
 
 
@@ -564,7 +847,8 @@ async def test_recovery_skips_disabled_channels(persistence_setup, monkeypatch):
 
 
 async def test_history_store_round_trips_and_survives_garbage():
-    from pydantic_ai.messages import ModelRequest, UserPromptPart
+    from pydantic_ai.messages import ModelRequest
+    from pydantic_ai.messages import UserPromptPart
 
     from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
 
@@ -598,7 +882,8 @@ def persistence_setup(wake_setup, monkeypatch):
 
 
 async def test_wake_loads_and_persists_agent_history(persistence_setup):
-    from pydantic_ai.messages import ModelRequest, UserPromptPart
+    from pydantic_ai.messages import ModelRequest
+    from pydantic_ai.messages import UserPromptPart
 
     stored = [ModelRequest(parts=[UserPromptPart("earlier wake")])]
     await persistence_setup.store.write(1, stored)

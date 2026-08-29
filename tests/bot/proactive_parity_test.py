@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC
+from datetime import datetime
 
 from pydantic_ai.models.test import TestModel
 
-from smarter_dev.bot.proactive.agent import BUDGET_EXHAUSTED, ToolBudget
-from smarter_dev.bot.proactive.environment import (
-    ChannelEnvironment,
-    InstructionStore,
-    WakeActions,
-)
-from smarter_dev.bot.proactive.parity import (
-    ProactiveDeps,
-    build_proactive_agent,
-    parity_tool_functions,
-)
+from smarter_dev.bot.proactive.agent import BUDGET_EXHAUSTED
+from smarter_dev.bot.proactive.agent import ToolBudget
+from smarter_dev.bot.proactive.environment import ChannelEnvironment
+from smarter_dev.bot.proactive.environment import InstructionStore
+from smarter_dev.bot.proactive.environment import WakeActions
+from smarter_dev.bot.proactive.parity import ProactiveDeps
+from smarter_dev.bot.proactive.parity import build_proactive_agent
+from smarter_dev.bot.proactive.parity import parity_tool_functions
 from smarter_dev.bot.proactive.types import ChannelMessage
 
 PARITY_TOOL_NAMES = {
@@ -80,9 +78,34 @@ def test_proactive_agent_registers_native_plus_parity_tools():
         "send_channel_message", "reply_to_message", "react_to_message",
         "set_watch_instruction", "clear_watch_instruction",
         "list_watch_instructions", "set_monitoring_mode",
+        "read_notifications",
     }
     assert native <= registered
     assert PARITY_TOOL_NAMES <= registered
+
+
+async def test_read_notifications_is_free_and_drains_the_queue():
+    deps = _deps(budget_limit=0)  # exhausted: a budgeted tool would refuse
+    deps.drain_notifications = lambda: "NOTIFICATIONS: alice mentioned you"
+    agent = build_proactive_agent(
+        TestModel(call_tools=["read_notifications"], custom_output_text="done"),
+        system_prompt="s",
+    )
+    result = await agent.run("go", deps=deps)
+    messages = str(result.all_messages())
+    assert "alice mentioned you" in messages
+    assert BUDGET_EXHAUSTED not in messages
+    assert deps.budget.used == 0
+
+
+async def test_read_notifications_without_wiring_reports_none():
+    deps = _deps()
+    agent = build_proactive_agent(
+        TestModel(call_tools=["read_notifications"], custom_output_text="done"),
+        system_prompt="s",
+    )
+    result = await agent.run("go", deps=deps)
+    assert "No new notifications" in str(result.all_messages())
 
 
 def test_replay_tool_surface_matches_production():

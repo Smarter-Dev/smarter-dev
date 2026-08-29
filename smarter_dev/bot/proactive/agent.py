@@ -9,30 +9,27 @@ ingest and the 15-minute passive sweep.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from collections.abc import Awaitable
+from collections.abc import Callable
+from dataclasses import dataclass
+from dataclasses import field
 
-from pydantic_ai import Agent, RunContext
-from pydantic_ai.messages import (
-    ModelMessage,
-    ModelMessagesTypeAdapter,
-    ModelRequest,
-    ModelResponse,
-    TextPart,
-    UserPromptPart,
-)
+from pydantic_ai import Agent
+from pydantic_ai import RunContext
+from pydantic_ai.messages import ModelMessage
+from pydantic_ai.messages import ModelMessagesTypeAdapter
+from pydantic_ai.messages import ModelRequest
+from pydantic_ai.messages import ModelResponse
+from pydantic_ai.messages import TextPart
+from pydantic_ai.messages import UserPromptPart
 from pydantic_ai.models import Model
 
 from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
-from smarter_dev.bot.proactive.environment import (
-    ChannelEnvironment,
-    InstructionStore,
-    WakeActions,
-)
-from smarter_dev.bot.proactive.types import (
-    ProposedReaction,
-    ProposedResponse,
-)
+from smarter_dev.bot.proactive.environment import ChannelEnvironment
+from smarter_dev.bot.proactive.environment import InstructionStore
+from smarter_dev.bot.proactive.environment import WakeActions
+from smarter_dev.bot.proactive.types import ProposedReaction
+from smarter_dev.bot.proactive.types import ProposedResponse
 from smarter_dev.bot.proactive.watcher import usage_dict
 
 TOOL_CALL_LIMIT = 8
@@ -81,6 +78,9 @@ class AgentDeps:
     # Live runtimes inject a callable(mode, minutes) -> confirmation string;
     # None means mode control is unavailable (replay evals).
     request_mode: Callable[[str, int], str] | None = None
+    # Drains the channel's notification queue mid-run (rendered text, marks
+    # the covered messages consumed); None means nothing queues mid-run.
+    drain_notifications: Callable[[], str] | None = None
 
 
 # Condensed operating rules — the full rationale lives in
@@ -136,6 +136,11 @@ only way you will hear about it.
 the channel ingests fast (wakes within ~15-60s), extended by further
 engagement. set_monitoring_mode switches modes yourself; @mentions and
 replies always reach you in any mode.
+- While you are working, new channel activity never interrupts you — it
+queues as notifications instead: mentions and replies to you individually
+and verbatim, everything else as grouped watcher summaries. Call
+read_notifications (free, costs no tool budget) to check; always check
+once before your final send so you don't answer a stale channel.
 - The watcher is STATELESS between calls; watch instructions are its only
 memory. Set one whenever you would want to know something you won't
 otherwise be told: someone promises to report back ("I'll post results
@@ -318,6 +323,15 @@ def build_kimi_agent(
             f"{e.instruction_id}: {e.text} (expires {e.expires_at:%H:%M} UTC)"
             for e in entries
         )
+
+    @agent.tool
+    async def read_notifications(ctx: RunContext[AgentDeps]) -> str:
+        """Read notifications that queued while you've been working: new
+        mentions verbatim, other new messages as grouped summaries. Free —
+        never spends your tool budget. Check before you finish a wake."""
+        if ctx.deps.drain_notifications is None:
+            return "No new notifications."
+        return ctx.deps.drain_notifications()
 
     @agent.tool
     async def set_monitoring_mode(

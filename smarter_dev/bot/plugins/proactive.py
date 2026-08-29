@@ -24,50 +24,50 @@ import asyncio
 import logging
 import os
 import time
-from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
+from dataclasses import field
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
 from uuid import uuid4
 
 import hikari
 import lightbulb
 
-from smarter_dev.bot.agents.response_fitting import (
-    SUMMARIZE_THRESHOLD,
-    fit_writer_message,
-    split_for_discord,
-)
+from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
+from smarter_dev.bot.agents.response_fitting import fit_writer_message
+from smarter_dev.bot.agents.response_fitting import split_for_discord
 from smarter_dev.bot.plugins.admin_gate import is_admin
 from smarter_dev.bot.proactive.adapter import TwoPassAdapter
-from smarter_dev.bot.proactive.agent import (
-    OPERATING_POLICY_BRIEF,
-    KimiAgentRunner,
-    build_agent_system_prompt,
-)
+from smarter_dev.bot.proactive.adapter import _merge_usage
+from smarter_dev.bot.proactive.agent import OPERATING_POLICY_BRIEF
+from smarter_dev.bot.proactive.agent import KimiAgentRunner
+from smarter_dev.bot.proactive.agent import build_agent_system_prompt
+from smarter_dev.bot.proactive.environment import ChannelEnvironment
 from smarter_dev.bot.proactive.environment import InstructionStore
 from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
-from smarter_dev.bot.proactive.notifications import (
-    NotificationQueue,
-    instruction_expired_notification,
-    mode_change_notification,
-    recovery_notification,
-)
-from smarter_dev.bot.proactive.models import (
-    build_twopass_model,
-    ensure_openrouter_key_alias,
-    resolve_agent_model_id,
-)
-from smarter_dev.bot.proactive.parity import ProactiveDeps, build_proactive_agent
-from smarter_dev.bot.proactive.types import ActivationContext, ChannelMessage
-from smarter_dev.bot.proactive.watcher import SkimRunner, WatcherRunner
-from smarter_dev.bot.proactive.windows import (
-    MAX_WAIT_SECONDS,
-    PASSIVE_SECONDS,
-    QUIET_SECONDS,
-)
+from smarter_dev.bot.proactive.models import build_twopass_model
+from smarter_dev.bot.proactive.models import ensure_openrouter_key_alias
+from smarter_dev.bot.proactive.models import resolve_agent_model_id
+from smarter_dev.bot.proactive.notifications import NotificationQueue
+from smarter_dev.bot.proactive.notifications import instruction_expired_notification
+from smarter_dev.bot.proactive.notifications import mention_notification
+from smarter_dev.bot.proactive.notifications import mode_change_notification
+from smarter_dev.bot.proactive.notifications import new_messages_notification
+from smarter_dev.bot.proactive.notifications import recovery_notification
+from smarter_dev.bot.proactive.notifications import render_notifications
+from smarter_dev.bot.proactive.notifications import reply_notification
+from smarter_dev.bot.proactive.parity import ProactiveDeps
+from smarter_dev.bot.proactive.parity import build_proactive_agent
+from smarter_dev.bot.proactive.types import ActivationContext
+from smarter_dev.bot.proactive.types import ChannelMessage
+from smarter_dev.bot.proactive.watcher import SkimRunner
+from smarter_dev.bot.proactive.watcher import WatcherRunner
+from smarter_dev.bot.proactive.windows import MAX_WAIT_SECONDS
+from smarter_dev.bot.proactive.windows import PASSIVE_SECONDS
+from smarter_dev.bot.proactive.windows import QUIET_SECONDS
 from smarter_dev.bot.services.chat_memory import get_chat_memory
-from smarter_dev.bot.services.proactive_settings_service import (
-    ProactiveSettingsService,
-)
+from smarter_dev.bot.services.proactive_settings_service import ProactiveSettingsService
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +92,9 @@ WATCHER_MODEL_ENV_VAR = "PROACTIVE_WATCHER_MODEL"
 DEFAULT_AGENT_MODEL = "gemini-3.7-flash"
 DEFAULT_WATCHER_MODEL = "z-ai/glm-5.3-flash"
 HISTORY_FETCH_LIMIT = 60
+# While a wake is running, arriving messages queue instead of cancelling it;
+# every tick the watcher summarizes the batch into one notification.
+MIDRUN_TICK_SECONDS = 15
 
 
 def compute_fire_delay(
@@ -208,7 +211,7 @@ def render_memory_block(
     return "YOUR MEMORY (refreshed at most hourly):\n" + "\n\n".join(sections)
 
 
-async def load_memory_block(run: "ProactiveRuntime", state: "ChannelWatchState") -> str:
+async def load_memory_block(run: ProactiveRuntime, state: ChannelWatchState) -> str:
     """Read the same memory the chat bot injects; empty string on any failure."""
     long_term = None
     long_term_at = None
@@ -292,7 +295,22 @@ class ChannelWatchState:
     buffer: list[ChannelMessage] = field(default_factory=list)
     first_at: float = 0.0
     last_at: float = 0.0
+    # The debounce timer only sleeps and then starts the wake; the wake
+    # itself runs in wake_task so a rescheduled timer can never kill it.
     timer: asyncio.Task | None = None
+    wake_task: asyncio.Task | None = None
+    midrun_ticker: asyncio.Task | None = None
+    # Message ids the agent already saw mid-run via read_notifications: the
+    # next wake must not treat them as new (prevents double replies).
+    consumed_ids: set[str] = field(default_factory=set)
+    # Message ids already covered by a mid-run summary notification.
+    notified_ids: set[str] = field(default_factory=set)
+    # Message ids that engaged the bot (mention/reply); an unconsumed one
+    # left in the buffer makes the follow-up wake fire immediately.
+    engaged_ids: set[str] = field(default_factory=set)
+    # Watcher usage from mid-run summaries, merged into the wake's ledger
+    # entries on completion. Keyed by model id like usage_by_model.
+    midrun_usage: dict[str, dict] = field(default_factory=dict)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     agent_runner: KimiAgentRunner | None = None
     last_wake_at: float = 0.0
@@ -423,8 +441,13 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
     if service is None:
         return
     async with state.lock:
-        new_messages = list(state.buffer)
+        new_messages = [
+            m for m in state.buffer if m.id not in state.consumed_ids
+        ]
         state.buffer.clear()
+        state.consumed_ids.clear()
+        state.notified_ids.clear()
+        state.engaged_ids.clear()
         state.last_wake_at = time.monotonic()
         if not new_messages and not passive:
             return
@@ -490,6 +513,14 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
             )
             return confirmation
 
+        def drain_notifications() -> str:
+            items, dropped = state.queue.drain()
+            if not items:
+                return "No new notifications."
+            for notification in items:
+                state.consumed_ids.update(notification.message_ids)
+            return render_notifications(items, dropped)
+
         def deps_factory(**kwargs):
             deps = ProactiveDeps(
                 bot=run.bot,
@@ -497,6 +528,7 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
                 guild_id=int(state.guild_id),
                 channel_name=str(state.channel_id),
                 request_mode=request_mode,
+                drain_notifications=drain_notifications,
                 **kwargs,
             )
             wake_deps.append(deps)
@@ -593,6 +625,13 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
                 )
             except Exception:  # noqa: BLE001 — persistence is best-effort
                 logger.exception("failed to persist watch instructions")
+        usage_by_model = {
+            model_id: dict(usage)
+            for model_id, usage in (result.usage_by_model or {}).items()
+        }
+        for model_id, usage in state.midrun_usage.items():
+            _merge_usage(usage_by_model, model_id, usage)
+        state.midrun_usage.clear()
         usage_entries = [
             {
                 "model_id": model_id,
@@ -603,7 +642,7 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
                 "output_tokens": usage.get("output_tokens", 0),
                 "cache_read_tokens": usage.get("cache_read_tokens", 0),
             }
-            for model_id, usage in (result.usage_by_model or {}).items()
+            for model_id, usage in usage_by_model.items()
         ]
         if usage_entries:
             try:
@@ -627,6 +666,101 @@ async def run_wake(state: ChannelWatchState, *, passive: bool = False) -> None:
         )
 
 
+def wake_in_flight(state: ChannelWatchState) -> bool:
+    return state.wake_task is not None and not state.wake_task.done()
+
+
+def _begin_wake(state: ChannelWatchState) -> None:
+    if wake_in_flight(state):
+        return
+    state.wake_task = asyncio.create_task(_run_wake_guarded(state))
+
+
+async def _run_wake_guarded(state: ChannelWatchState) -> None:
+    """Run one wake with the mid-run ticker, then schedule any follow-up."""
+    state.midrun_ticker = asyncio.create_task(_midrun_ticker(state))
+    try:
+        await run_wake(state)
+    except Exception:  # noqa: BLE001 — a failed wake must not kill scheduling
+        logger.exception("proactive wake failed channel=%s", state.channel_id)
+    finally:
+        state.midrun_ticker.cancel()
+        state.midrun_ticker = None
+        state.wake_task = None
+        _schedule_followup(state)
+
+
+def _schedule_followup(state: ChannelWatchState) -> None:
+    """Deal with messages that arrived mid-run: an unconsumed engagement
+    wakes again immediately; plain active-window chatter debounces; passive
+    channels wait for the sweep."""
+    pending = [m for m in state.buffer if m.id not in state.consumed_ids]
+    if not pending:
+        return
+    if any(m.id in state.engaged_ids for m in pending):
+        _begin_wake(state)
+    elif time.monotonic() < state.active_until:
+        _schedule_wake(state)
+
+
+async def _midrun_ticker(state: ChannelWatchState) -> None:
+    while True:
+        await asyncio.sleep(MIDRUN_TICK_SECONDS)
+        try:
+            await _push_midrun_summary(state)
+        except Exception:  # noqa: BLE001 — one failed tick must not stop the next
+            logger.exception(
+                "proactive mid-run summary failed channel=%s", state.channel_id
+            )
+
+
+async def _push_midrun_summary(state: ChannelWatchState) -> None:
+    """Group the messages the running agent hasn't heard about and queue one
+    watcher-summarized notification for them."""
+    run = _runtime()
+    pending = [
+        m
+        for m in state.buffer
+        if m.id not in state.consumed_ids
+        and m.id not in state.notified_ids
+        and m.id not in state.engaged_ids
+    ]
+    if not pending:
+        return
+    me = run.bot.get_me()
+    env = ChannelEnvironment(
+        visible=pending, bot_user_id=str(me.id) if me else ""
+    )
+    summary, usage = await run.skim().skim(env.render(pending))
+    _merge_usage(state.midrun_usage, run.watcher_model_id, usage)
+    state.notified_ids.update(m.id for m in pending)
+    state.queue.push(
+        new_messages_notification(
+            summary=summary,
+            message_ids=[m.id for m in pending],
+            created_at=datetime.now(UTC),
+        )
+    )
+
+
+def _push_engagement_notification(
+    state: ChannelWatchState, message, converted: ChannelMessage,
+    bot_user_id: str,
+) -> None:
+    """Queue a mention/reply for the running agent, verbatim."""
+    mention_ids = getattr(message, "user_mentions_ids", None) or ()
+    if bot_user_id in {str(mention_id) for mention_id in mention_ids}:
+        state.queue.push(mention_notification(converted))
+        return
+    referenced = getattr(message, "referenced_message", None)
+    replied_to = (
+        channel_message_from_hikari(referenced)
+        if referenced is not None
+        else None
+    )
+    state.queue.push(reply_notification(converted, replied_to))
+
+
 def _schedule_wake(state: ChannelWatchState) -> None:
     if state.timer is not None and not state.timer.done():
         state.timer.cancel()
@@ -636,7 +770,7 @@ def _schedule_wake(state: ChannelWatchState) -> None:
             state.first_at, state.last_at, time.monotonic()
         )
         await asyncio.sleep(delay)
-        await run_wake(state)
+        _begin_wake(state)
 
     state.timer = asyncio.create_task(fire_after_delay())
 
@@ -665,13 +799,16 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
     if not state.buffer:
         state.first_at = now
     state.last_at = now
-    state.buffer.append(channel_message_from_hikari(event.message))
+    converted = channel_message_from_hikari(event.message)
+    state.buffer.append(converted)
 
     me = run.bot.get_me()
     bot_user_id = str(me.id) if me else ""
-    if event_engages_bot(event.message, bot_user_id):
+    engaged = event_engages_bot(event.message, bot_user_id)
+    if engaged:
         # A member engaged the bot: active ingest for a while, so the
         # conversation feels responsive.
+        state.engaged_ids.add(converted.id)
         if now >= state.active_until:
             state.queue.push(
                 mode_change_notification(
@@ -683,7 +820,14 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
                 )
             )
         state.active_until = now + ACTIVE_WINDOW_SECONDS
-    if now < state.active_until:
+    if wake_in_flight(state):
+        # Never interrupt a running wake: engagements queue verbatim right
+        # away, everything else waits for the mid-run ticker's summary.
+        if engaged:
+            _push_engagement_notification(
+                state, event.message, converted, bot_user_id
+            )
+    elif now < state.active_until:
         _schedule_wake(state)
     # Passive channels leave the buffer for the 15-minute sweep.
 
