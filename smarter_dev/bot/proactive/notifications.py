@@ -11,8 +11,10 @@ summaries that don't wake are deliberately discarded.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from dataclasses import field
+from datetime import UTC
+from datetime import datetime
 
 from smarter_dev.bot.proactive.types import ChannelMessage
 
@@ -88,6 +90,26 @@ def watcher_summary_notification(
         body=f"Watcher summary: {summary} (relevant message ids: {id_list})",
         message_ids=tuple(message_ids),
         wakes=wake,
+    )
+
+
+def new_messages_notification(
+    *,
+    summary: str,
+    message_ids: list[str],
+    created_at: datetime,
+) -> Notification:
+    """Mid-run batch: messages that arrived while the agent was working,
+    grouped and summarized by the watcher model. Mentions never take this
+    path — they queue individually and verbatim."""
+    return Notification(
+        kind="new_messages",
+        created_at=created_at,
+        body=(
+            f"{len(message_ids)} new messages arrived while you were "
+            f"working: {summary}"
+        ),
+        message_ids=tuple(message_ids),
     )
 
 
