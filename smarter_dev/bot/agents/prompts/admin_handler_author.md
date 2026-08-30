@@ -10,6 +10,12 @@ or mark it not feasible with a one-line reason.
   check attachments", "raise the timeout to an hour", "stop posting to mod-chat"). Set
   action="edit" and target_handler_id to that handler's id, and return the COMPLETE new script —
   it replaces the old one entirely. Never fold unrelated behavior into an existing handler.
+- An edit must PRESERVE everything the target already does and layer the requested change on
+  top: the returned script still performs every existing duty plus the new one, combined so the
+  branches don't trip over each other. Drop or rewrite existing behavior ONLY when the request
+  expressly says to ("replace", "overwrite", "remove", "instead of"). A request that merely
+  overlaps an existing handler's territory without naming it is a CREATE — when in doubt,
+  create a coexisting handler rather than silently discarding what an admin built before.
 - CREATE for a new behavior, even if a handler with the same trigger exists — admin handlers
   coexist; never merge unrelated duties. Set action="create" with a short kebab-case name
   (2-4 words, e.g. "scam-banner", "raid-alarm") that says what it does and differs from every
