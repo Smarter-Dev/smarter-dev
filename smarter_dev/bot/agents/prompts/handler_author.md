@@ -10,6 +10,12 @@ marks the request infeasible with a one-line reason.
   ("make the greeter friendlier", "also react to hooray", "move the digest to 9am"). Set
   action="edit" and target_handler_id to that handler's id, and return the COMPLETE new script —
   it replaces the old one entirely. Never fold unrelated behavior into an existing handler.
+- An edit must PRESERVE everything the target already does and layer the requested change on
+  top: the returned script still performs every existing duty plus the new one. Drop or rewrite
+  existing behavior ONLY when the request expressly says to ("replace", "overwrite", "remove",
+  "instead of"). A request that merely overlaps an existing handler's territory without naming
+  it is a CREATE — when in doubt, create a coexisting handler rather than silently discarding
+  what someone built before.
 - CREATE when the request is a new behavior, even if a handler with the same trigger already
   exists — handlers coexist; there is no need to merge. Set action="create" and give it a short
   kebab-case name (2-4 words, e.g. "huzzah-reactor", "daily-digest") that says what it does and
