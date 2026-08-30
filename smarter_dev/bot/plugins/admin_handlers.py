@@ -134,27 +134,47 @@ async def install_admin_result(api: Any, guild_id: str, admin_id: str, result: A
 )
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def create_admin_handler(ctx: lightbulb.Context, request: str) -> None:
+    await _run_create_admin_handler(ctx, request)
+
+
+async def _run_create_admin_handler(ctx: lightbulb.Context, request: str) -> None:
     if await deny_if_not_admin(ctx, ADMIN_DENIAL_MESSAGE):
         return
     await ctx.respond(
         hikari.ResponseType.DEFERRED_MESSAGE_CREATE, flags=hikari.MessageFlag.EPHEMERAL
     )
 
-    from smarter_dev.bot.agents.handler_authoring import run_admin_creation_pipeline
+    from smarter_dev.bot.agents import handler_authoring
 
-    api = _api_client()
-    existing_handlers = await _guild_admin_handlers_with_scripts(api, str(ctx.guild_id))
-    result = await run_admin_creation_pipeline(
-        request=request,
-        existing_handlers=existing_handlers,
-        channel_lister=lambda: _list_guild_channels(ctx),
-    )
-    if not result.ok:
-        await ctx.edit_last_response(f"Couldn't do it — {result.error}")
-        return
+    async def _relay_progress(text: str) -> None:
+        await ctx.edit_last_response(text)
 
-    line = await install_admin_result(api, str(ctx.guild_id), str(ctx.author.id), result)
-    await ctx.edit_last_response(line)
+    try:
+        api = _api_client()
+        existing_handlers = await _guild_admin_handlers_with_scripts(
+            api, str(ctx.guild_id)
+        )
+        result = await handler_authoring.run_admin_creation_pipeline(
+            request=request,
+            existing_handlers=existing_handlers,
+            channel_lister=lambda: _list_guild_channels(ctx),
+            progress=_relay_progress,
+        )
+        if not result.ok:
+            await ctx.edit_last_response(f"Couldn't do it — {result.error}")
+            return
+
+        line = await install_admin_result(
+            api, str(ctx.guild_id), str(ctx.author.id), result
+        )
+        await ctx.edit_last_response(line)
+    except Exception:
+        # The deferred ephemeral response otherwise spins forever with nothing.
+        await ctx.edit_last_response(
+            "Something broke while building the handler — the error is logged. "
+            "Try again in a minute."
+        )
+        raise
 
 
 @adminhandler_group.child
