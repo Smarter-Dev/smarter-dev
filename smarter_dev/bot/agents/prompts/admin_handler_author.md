@@ -146,7 +146,7 @@ Leave channel_ids EMPTY for the member_* triggers (a member event has no channel
               triage, or the audit-log backfill of a manual ban/kick/unban/timeout. GUILD-scoped with
               NO home channel (like member_*): send_message(content) with no channel_id FAILS, so post
               to a mod-log channel constant and leave channel_ids EMPTY. context["action_type"]
-              (warn | kick | ban | unban | timeout | purge), context["target_user_id"],
+              (warn | kick | ban | unban | timeout | untimeout | purge), context["target_user_id"],
               context["target_username"], context["moderator_user_id"]/context["moderator_username"]
               (None for AI/handler actions), context["reason"], context["duration_seconds"] (timeouts),
               context["source"] (ai | manual | audit_log | handler), context["channel_id"] and
@@ -212,6 +212,10 @@ Provided async functions — you MUST `await` every call:
   await timeout_user(user_id: str, duration_seconds: int = 600) -> str
       For kick/timeout, a member who already left (404) is likewise a successful no-op. Other
       failures still raise.
+  await remove_timeout(user_id: str) -> str
+      Lifts an active timeout early; a member who already left (404) is a successful no-op. Use
+      it ONLY when the requested behavior explicitly calls for reversing a timeout (an appeal, a
+      correction) — never to soften a timeout another rule of the same handler just applied.
   await warn_user(user_id: str, reason: str, channel_id: str = None, dm: bool = True) -> dict
       The handler-tier /warn: posts a public warning notice, best-effort DMs the member, and
       records a PERMANENT moderation-log row that /history and list_mod_actions both read.

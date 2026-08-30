@@ -365,6 +365,7 @@ class HandlerExecution:
                     "ban_user": self._guard(self._ban_user),
                     "kick_user": self._guard(self._kick_user),
                     "timeout_user": self._guard(self._timeout_user),
+                    "remove_timeout": self._guard(self._remove_timeout),
                     "warn_user": self._guard(self._warn_user),
                     "add_role": self._guard(self._add_role),
                     "remove_role": self._guard(self._remove_role),
@@ -676,6 +677,15 @@ class HandlerExecution:
         """Timeout a member; a 404 is an already-left successful no-op."""
         self.budget.spend_mod_action()
         return await self.actor.timeout_user(str(user_id), int(duration_seconds))
+
+    async def _remove_timeout(self, user_id: str) -> str:
+        """Lift a member's timeout; a 404 is an already-left successful no-op.
+
+        Spends the mod_action budget like the timeout it reverses: a
+        mod_action-triggered fire must not be able to undo a timeout either.
+        """
+        self.budget.spend_mod_action()
+        return await self.actor.remove_timeout(str(user_id))
 
     async def _warn_user(
         self,
