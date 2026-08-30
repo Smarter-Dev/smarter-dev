@@ -657,6 +657,218 @@ async def test_standard_pipeline_rejects_admin_only_trigger():
     assert "invalid trigger" in result.error
 
 
+# -- admin fix round -----------------------------------------------------------
+
+CLEAN_ADMIN_SCRIPT = (
+    'if context["message_content"].startswith("!raid"):\n'
+    '    await send_message("raid reported", "MODCHAT")\n'
+)
+
+LINT_BLOB_SCRIPT = 'x = "{}"\n'.format("QUJDREVG" * 30)
+
+
+def _admin_author_drafting(*plans):
+    """An author returning each plan in turn; a call past the last one fails."""
+    requests = []
+
+    async def author(*, request, existing_handlers, channel_lister):
+        requests.append(request)
+        return plans[len(requests) - 1]
+
+    return author, requests
+
+
+def _judge_returning(*verdicts):
+    """A judge returning each verdict in turn, recording its trigger contexts."""
+    contexts = []
+
+    async def judge(script, trigger_context):
+        contexts.append(trigger_context)
+        return verdicts[len(contexts) - 1]
+
+    return judge, contexts
+
+
+def _progress_recorder():
+    messages = []
+
+    async def progress(text):
+        messages.append(text)
+
+    return progress, messages
+
+
+async def test_admin_rejected_draft_goes_back_to_the_author_once():
+    first = _admin_plan(script=ADMIN_SCRIPT)
+    second = _admin_plan(script=CLEAN_ADMIN_SCRIPT)
+    author, requests = _admin_author_drafting(first, second)
+    judge, _ = _judge_returning(
+        _verdict(approved=False, reason="bans every author with no condition"),
+        _verdict(reason="guarded and within caps"),
+    )
+    progress, messages = _progress_recorder()
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=judge,
+        progress=progress,
+    )
+    assert result.ok
+    assert result.script == CLEAN_ADMIN_SCRIPT
+    assert len(requests) == 2
+    # The revision carries the first draft's script and the rejection detail.
+    assert "ban_user" in requests[1]
+    assert "no condition" in requests[1]
+    assert "alert mods about raids" in requests[1]
+    assert any("no condition" in m for m in messages)
+
+
+async def test_admin_fix_round_relays_the_lint_reason():
+    author, requests = _admin_author_drafting(
+        _admin_plan(script=LINT_BLOB_SCRIPT),
+        _admin_plan(script=CLEAN_ADMIN_SCRIPT),
+    )
+    progress, messages = _progress_recorder()
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=_judge_approving(),
+        progress=progress,
+    )
+    assert result.ok
+    assert len(requests) == 2
+    assert "opaque" in requests[1]
+    assert any("opaque" in m for m in messages)
+
+
+async def test_admin_fix_round_relays_a_resolution_error():
+    author, requests = _admin_author_drafting(
+        _admin_plan(name="scam-banner"),
+        _admin_plan(name="raid-alarm", script=CLEAN_ADMIN_SCRIPT),
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=_judge_approving(),
+    )
+    assert result.ok
+    assert result.name == "raid-alarm"
+    assert len(requests) == 2
+    assert "already exists" in requests[1]
+
+
+async def test_admin_fix_round_relays_a_schedule_error():
+    author, requests = _admin_author_drafting(
+        _admin_plan(
+            trigger_type="schedule",
+            name="hourly-audit",
+            settings={"interval_seconds": 30},
+            script='await send_message("audit", "MODCHAT")\n',
+        ),
+        _admin_plan(
+            trigger_type="schedule",
+            name="hourly-audit",
+            settings={"interval_seconds": 3600},
+            script='await send_message("audit", "MODCHAT")\n',
+        ),
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="post an audit every so often",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=_judge_approving(),
+    )
+    assert result.ok
+    assert result.settings == {"interval_seconds": 3600}
+    assert len(requests) == 2
+    assert "interval_seconds must be at least 60" in requests[1]
+
+
+async def test_admin_second_rejection_fails_with_the_second_verdict():
+    author, requests = _admin_author_drafting(
+        _admin_plan(), _admin_plan(script=CLEAN_ADMIN_SCRIPT)
+    )
+    judge, _ = _judge_returning(
+        _verdict(approved=False, reason="bans every author with no condition"),
+        _verdict(approved=False, reason="still reports on every single message"),
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=judge,
+    )
+    assert not result.ok
+    assert "still reports on every single message" in result.error
+    assert "after a round of fixes" in result.error
+    assert len(requests) == 2
+
+
+async def test_admin_infeasible_first_draft_skips_the_fix_round():
+    author, requests = _admin_author_drafting(
+        AdminHandlerPlan(feasible=False, error="needs 100 bans/sec, over the cap")
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="impossible",
+        existing_handlers=[],
+        author=author,
+        judge=_judge_approving(),
+    )
+    assert not result.ok
+    assert "over the cap" in result.error
+    assert len(requests) == 1
+
+
+async def test_admin_infeasible_revision_is_terminal():
+    author, requests = _admin_author_drafting(
+        _admin_plan(),
+        AdminHandlerPlan(feasible=False, error="can't guard this without a user id"),
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=_judge_rejecting("bans every author with no condition"),
+    )
+    assert not result.ok
+    assert "can't guard this without a user id" in result.error
+    assert "after a round of fixes" in result.error
+    assert len(requests) == 2
+
+
+async def test_admin_judge_reviews_against_the_original_request_on_both_rounds():
+    author, requests = _admin_author_drafting(
+        _admin_plan(), _admin_plan(script=CLEAN_ADMIN_SCRIPT)
+    )
+    judge, contexts = _judge_returning(
+        _verdict(approved=False, reason="bans every author with no condition"),
+        _verdict(reason="guarded and within caps"),
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=judge,
+    )
+    assert result.ok
+    assert len(contexts) == 2
+    for context in contexts:
+        assert "alert mods about raids" in context
+        assert "REVISION" not in context
+        assert "no condition" not in context
+
+
 # -- checklist verdict + dual-judge merge --------------------------------------
 
 

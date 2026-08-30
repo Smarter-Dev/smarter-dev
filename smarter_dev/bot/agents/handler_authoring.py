@@ -899,36 +899,22 @@ async def _empty_channel_lister() -> list[dict]:
     return []
 
 
-async def run_admin_creation_pipeline(
+async def _draft_admin_plan(
     *,
+    author: AdminAuthor | None,
     request: str,
     existing_handlers: list[dict],
-    channel_lister: ChannelLister | None = None,
-    author: AdminAuthor | None = None,
-    judge: Judge | None = None,
-    progress: Progress | None = None,
-    now_utc: datetime | None = None,
-) -> AdminCreationResult:
-    """Admin author (plans edit-vs-create + trigger/scope/script) -> lint -> judge.
-
-    The author sees the guild's existing named admin handlers and either edits
-    one (by handler_id) or creates a new, named one.
-    """
-    judge = judge or _default_admin_judge
-    channel_lister = channel_lister or _empty_channel_lister
-    author_time_utc = _current_utc(now_utc)
-
-    logger.info(
-        "admin creation pipeline: request=%r existing=%d",
-        request,
-        len(existing_handlers),
-    )
+    channel_lister: ChannelLister,
+    current_time_utc: datetime,
+    draft_label: str,
+) -> AdminHandlerPlan:
+    """Run the admin author once (the injected one when given) and log its plan."""
     if author is None:
         plan = await _default_admin_author(
             request=request,
             existing_handlers=existing_handlers,
             channel_lister=channel_lister,
-            current_time_utc=author_time_utc,
+            current_time_utc=current_time_utc,
         )
     else:
         plan = await author(
@@ -937,8 +923,9 @@ async def run_admin_creation_pipeline(
             channel_lister=channel_lister,
         )
     logger.info(
-        "admin author plan: feasible=%s action=%s target=%s name=%s trigger=%s "
+        "admin author plan (%s): feasible=%s action=%s target=%s name=%s trigger=%s "
         "channels=%s settings=%s\n%s",
+        draft_label,
         plan.feasible,
         plan.action,
         plan.target_handler_id,
@@ -948,13 +935,51 @@ async def run_admin_creation_pipeline(
         plan.settings,
         plan.script,
     )
+    return plan
 
-    if not plan.feasible:
-        return AdminCreationResult(
-            ok=False,
-            error=f"the author couldn't build this: {plan.error or 'not feasible'}",
-        )
 
+def _build_admin_revision_request(
+    *, request: str, plan: AdminHandlerPlan, feedback: str
+) -> str:
+    """The fix-round request: the rejected draft plus what the review said.
+
+    Passed to the author as its ``request`` — the author only ever sees one
+    prompt string. The judge keeps reviewing against the ORIGINAL request.
+    """
+    return "\n\n".join(
+        [
+            "This is a REVISION of your own previous draft. It was rejected by the "
+            "review below. Fix exactly what the review reports and keep the "
+            "original intent — return a complete plan and script, not a diff.",
+            f"Original request:\n{request}",
+            "Your rejected draft:\n"
+            f"- action: {plan.action}\n"
+            f"- target_handler_id: {plan.target_handler_id}\n"
+            f"- name: {plan.name}\n"
+            f"- trigger: {plan.trigger_type}\n"
+            f"- channel_ids: {json.dumps(plan.channel_ids)}\n"
+            f"- settings: {json.dumps(plan.settings, sort_keys=True)}\n"
+            "- script:\n---\n" + plan.script + "\n---",
+            f"Why it was rejected:\n{feedback}",
+        ]
+    )
+
+
+async def _validate_admin_draft(
+    *,
+    plan: AdminHandlerPlan,
+    request: str,
+    existing_handlers: list[dict],
+    judge: Judge,
+    progress: Progress | None,
+    now_utc: datetime | None,
+) -> tuple[str, None] | tuple[None, AdminCreationResult]:
+    """Take one admin draft through resolve -> lint -> schedule -> judge.
+
+    Returns ``(feedback, None)`` when a stage rejects the draft — the same
+    sentence the admin is shown and the author is sent back to fix — or
+    ``(None, result)`` for an approved draft.
+    """
     error, resolved = _resolve_plan_target(
         action=plan.action,
         target_handler_id=plan.target_handler_id,
@@ -966,15 +991,13 @@ async def run_admin_creation_pipeline(
     )
     if error is not None:
         logger.info("admin plan rejected: %s", error)
-        return AdminCreationResult(ok=False, error=error)
+        return error, None
 
     script = _strip_code_fences(plan.script)
     reason = lint_script(script)
     if reason is not None:
         logger.info("admin lint rejected script: %s", reason)
-        return AdminCreationResult(
-            ok=False, error=f"the safety lint rejected it: {reason}"
-        )
+        return f"the safety lint rejected it: {reason}", None
 
     if resolved.trigger_type in ("schedule", "timer"):
         try:
@@ -984,9 +1007,7 @@ async def run_admin_creation_pipeline(
                 uses_agent=script_uses_agent(script),
             )
         except ScheduleError as exc:
-            return AdminCreationResult(
-                ok=False, error=f"invalid schedule settings: {exc}"
-            )
+            return f"invalid schedule settings: {exc}", None
 
     if progress is not None:
         await progress("Reviewing the admin handler before installing…")
@@ -1006,11 +1027,9 @@ async def run_admin_creation_pipeline(
         verdict.reason,
     )
     if verdict_rejects(verdict):
-        return AdminCreationResult(
-            ok=False, error=f"the reviewer rejected it: {rejection_detail(verdict)}"
-        )
+        return f"the reviewer rejected it: {rejection_detail(verdict)}", None
 
-    return AdminCreationResult(
+    return None, AdminCreationResult(
         ok=True,
         action=resolved.action,
         target_handler_id=resolved.target_handler_id,
@@ -1022,4 +1041,97 @@ async def run_admin_creation_pipeline(
             plan.description, resolved, existing_handlers, request
         ),
         script=script,
+    )
+
+
+async def run_admin_creation_pipeline(
+    *,
+    request: str,
+    existing_handlers: list[dict],
+    channel_lister: ChannelLister | None = None,
+    author: AdminAuthor | None = None,
+    judge: Judge | None = None,
+    progress: Progress | None = None,
+    now_utc: datetime | None = None,
+) -> AdminCreationResult:
+    """Admin author (plans edit-vs-create + trigger/scope/script) -> lint -> judge.
+
+    The author sees the guild's existing named admin handlers and either edits
+    one (by handler_id) or creates a new, named one. A draft rejected by any
+    stage goes back to the author ONCE with the rejection text; a second
+    rejection is final. An infeasible plan is final either round — there is no
+    draft to fix.
+    """
+    judge = judge or _default_admin_judge
+    channel_lister = channel_lister or _empty_channel_lister
+    author_time_utc = _current_utc(now_utc)
+
+    logger.info(
+        "admin creation pipeline: request=%r existing=%d",
+        request,
+        len(existing_handlers),
+    )
+    plan = await _draft_admin_plan(
+        author=author,
+        request=request,
+        existing_handlers=existing_handlers,
+        channel_lister=channel_lister,
+        current_time_utc=author_time_utc,
+        draft_label="first draft",
+    )
+    if not plan.feasible:
+        return AdminCreationResult(
+            ok=False,
+            error=f"the author couldn't build this: {plan.error or 'not feasible'}",
+        )
+
+    feedback, result = await _validate_admin_draft(
+        plan=plan,
+        request=request,
+        existing_handlers=existing_handlers,
+        judge=judge,
+        progress=progress,
+        now_utc=now_utc,
+    )
+    if result is not None:
+        return result
+
+    logger.info("admin first draft sent back for fixes: %s", feedback)
+    if progress is not None:
+        await progress(
+            f"First draft needs work — {feedback} "
+            "Sending it back for one round of fixes…"
+        )
+
+    revision = await _draft_admin_plan(
+        author=author,
+        request=_build_admin_revision_request(
+            request=request, plan=plan, feedback=feedback
+        ),
+        existing_handlers=existing_handlers,
+        channel_lister=channel_lister,
+        current_time_utc=author_time_utc,
+        draft_label="revision",
+    )
+    if not revision.feasible:
+        return AdminCreationResult(
+            ok=False,
+            error="even after a round of fixes, the author couldn't build this: "
+            f"{revision.error or 'not feasible'}",
+        )
+
+    feedback, result = await _validate_admin_draft(
+        plan=revision,
+        request=request,
+        existing_handlers=existing_handlers,
+        judge=judge,
+        progress=progress,
+        now_utc=now_utc,
+    )
+    if result is not None:
+        return result
+
+    logger.info("admin revision rejected: %s", feedback)
+    return AdminCreationResult(
+        ok=False, error=f"even after a round of fixes, {feedback}"
     )
