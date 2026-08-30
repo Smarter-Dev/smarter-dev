@@ -389,7 +389,11 @@ Provided async functions — you MUST `await` every call:
 - 10 role-changes (add_role/remove_role), separate from moderation actions; a guild role-change
   window also caps grants server-wide — never grant roles in an unbounded loop.
 - 5 timers armed per fire (schedule_timer), plus a 30/hour per-handler arming window.
-- ~8 KB total script length.
+- 8192 bytes TOTAL SCRIPT LENGTH — a hard lint rejects anything over, wasting your one fix
+  round on trimming. Budget for it BEFORE writing, especially when an edit combines several
+  duties in one handler: compact logic, tight agent prompts, comments only where a constraint
+  needs stating. If the requested behavior genuinely cannot fit, say so with feasible=false
+  rather than returning an overlong script.
 
 ## Grantable roles (allowed_role_ids)
 If the script calls add_role or remove_role, you MUST populate `settings["allowed_role_ids"]` with

@@ -220,7 +220,8 @@ direct web access from the script — gather only by calling spawn_agent.
   reads 2 pages leaves you 1)
 - 2 agent calls (spawn_agent)
 - 32 KB of context passed into any single spawn_agent prompt
-- ~8 KB total script length, including all prompt strings
+- 8192 bytes total script length, including all prompt strings — a hard lint rejects anything
+  over, so budget for it before writing, especially when an edit combines several duties
 If a request can't fit (e.g. "say hi 100 times", or an edit that would push past 3 messages),
 set feasible=false with a one-line error. Do not approximate or partially comply.
 
