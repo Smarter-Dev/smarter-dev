@@ -5,12 +5,14 @@ in the live user-interaction context — so a *triggered* execution, which runs 
 the worker, structurally has no path to this code. That is the "triggered
 executions can't author" invariant, enforced by where the code lives.
 
-Pipeline: Author (Gemini 3 Flash) sees the existing named handlers and returns
-a structured plan — edit one of them or create a new, named one — or marks the
-request infeasible; the host-side :mod:`~smarter_dev.web.handler_lint` rejects
-opaque blobs / dynamic execution; Judge (Gemini 3 Flash) reviews the script as
-inert data and APPROVEs or REJECTs. The author and judge callables are
-injectable so the orchestration is unit-testable without any model calls.
+Pipeline: the Author (member tier Gemini 3 Flash; admin tier GPT-5.6 Terra at
+high reasoning) sees the existing named handlers and returns a structured plan
+— edit one of them or create a new, named one — or marks the request
+infeasible; the host-side :mod:`~smarter_dev.web.handler_lint` rejects opaque
+blobs / dynamic execution; the Judge (member tier Gemini 3 Flash; admin tier a
+Gemini 3.7 Flash + Terra panel, any-reject-wins) reviews the script as inert
+data and APPROVEs or REJECTs. The author and judge callables are injectable so
+the orchestration is unit-testable without any model calls.
 """
 
 from __future__ import annotations
@@ -543,13 +545,13 @@ def _build_google_model(model_id: str) -> GoogleModel:
     return GoogleModel(model_id, provider=GoogleProvider(api_key=api_key))
 
 
-def _build_judge_model(model_id: str) -> Model:
-    """Build the model behind a judge, honoring the catalog's provider routing.
+def _build_configured_model(model_id: str) -> Model:
+    """Build a configured author/judge model, honoring the catalog's routing.
 
-    Judge models are configured by wire id. A catalog id routes through the
-    shared model router (Luna, the admin second judge's default, is served via
-    OpenRouter); anything else is assumed to be a Gemini id, matching the
-    author/primary-judge defaults.
+    These models are configured by wire id. A catalog id routes through the
+    shared model router (Terra, the admin author and second judge default, is
+    served via OpenAI); anything else is assumed to be a Gemini id, matching the
+    member-tier author/judge defaults.
     """
     catalog_model = next(
         (model for model in MODEL_CATALOG if model.model_id == model_id), None
@@ -559,20 +561,24 @@ def _build_judge_model(model_id: str) -> Model:
     return _build_google_model(model_id)
 
 
-def _judge_model_settings(model_id: str) -> ModelSettings:
-    """Reasoning settings for a judge: MEDIUM effort in each provider's dialect."""
+def _handler_model_settings(
+    model_id: str, reasoning_level: ReasoningLevel
+) -> ModelSettings:
+    """Reasoning settings at ``reasoning_level`` in the model's own dialect."""
     catalog_model = next(
         (model for model in MODEL_CATALOG if model.model_id == model_id), None
     )
     if catalog_model is not None:
-        settings = model_settings_for(catalog_model, ReasoningLevel.MEDIUM)
+        settings = model_settings_for(catalog_model, reasoning_level)
         if settings is not None:
             return settings
     return _HANDLER_THINKING
 
 
-# Author and judge both think at MEDIUM: writing a sandbox-correct script and
-# catching subtle violations (e.g. a disallowed import) is worth the deliberation.
+# Member-tier author and judge both think at MEDIUM: writing a sandbox-correct
+# script and catching subtle violations (e.g. a disallowed import) is worth the
+# deliberation. This is also the fallback for a model outside the catalog, which
+# has no per-provider reasoning mapping. The admin author thinks at HIGH.
 _HANDLER_THINKING = GoogleModelSettings(
     google_thinking_config={"thinking_level": "MEDIUM"}
 )
@@ -814,13 +820,16 @@ _admin_judge_agents: dict[str, Agent[None, JudgeVerdict]] = {}
 def _get_admin_author_agent() -> Agent[_AdminAuthorDeps, AdminHandlerPlan]:
     global _admin_author_agent
     if _admin_author_agent is None:
+        admin_author_model = get_settings().handler_admin_author_model
         _admin_author_agent = Agent(
-            _build_google_model(get_settings().handler_author_model),
+            _build_configured_model(admin_author_model),
             deps_type=_AdminAuthorDeps,
             output_type=AdminHandlerPlan,
             system_prompt=ADMIN_AUTHOR_PROMPT,
             tools=[_list_channels],
-            model_settings=_HANDLER_THINKING,
+            model_settings=_handler_model_settings(
+                admin_author_model, ReasoningLevel.HIGH
+            ),
         )
     return _admin_author_agent
 
@@ -828,10 +837,10 @@ def _get_admin_author_agent() -> Agent[_AdminAuthorDeps, AdminHandlerPlan]:
 def _get_admin_judge_agent(model_id: str) -> Agent[None, JudgeVerdict]:
     if model_id not in _admin_judge_agents:
         _admin_judge_agents[model_id] = Agent(
-            _build_judge_model(model_id),
+            _build_configured_model(model_id),
             output_type=JudgeVerdict,
             system_prompt=ADMIN_JUDGE_PROMPT,
-            model_settings=_judge_model_settings(model_id),
+            model_settings=_handler_model_settings(model_id, ReasoningLevel.MEDIUM),
         )
     return _admin_judge_agents[model_id]
 
@@ -839,7 +848,10 @@ def _get_admin_judge_agent(model_id: str) -> Agent[None, JudgeVerdict]:
 def _admin_judge_models() -> list[str]:
     """The admin judge panel: primary + second judge, deduplicated."""
     settings = get_settings()
-    models = [settings.handler_judge_model, settings.handler_admin_second_judge_model]
+    models = [
+        settings.handler_admin_judge_model,
+        settings.handler_admin_second_judge_model,
+    ]
     return list(dict.fromkeys(m for m in models if m))
 
 

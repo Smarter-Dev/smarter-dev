@@ -7,16 +7,23 @@ from __future__ import annotations
 
 from datetime import UTC
 from datetime import datetime
+from types import SimpleNamespace
 
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIResponsesModel
 
+from smarter_dev.bot.agents import handler_authoring
 from smarter_dev.bot.agents.handler_authoring import AdminHandlerPlan
 from smarter_dev.bot.agents.handler_authoring import HandlerPlan
 from smarter_dev.bot.agents.handler_authoring import JudgeVerdict
+from smarter_dev.bot.agents.handler_authoring import _HANDLER_THINKING
+from smarter_dev.bot.agents.handler_authoring import _admin_judge_models
 from smarter_dev.bot.agents.handler_authoring import _build_admin_author_prompt
-from smarter_dev.bot.agents.handler_authoring import _build_judge_model
+from smarter_dev.bot.agents.handler_authoring import _build_configured_model
+from smarter_dev.bot.agents.handler_authoring import _handler_model_settings
 from smarter_dev.shared.config import Settings
+from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.bot.agents.handler_authoring import _build_author_prompt
 from smarter_dev.bot.agents.handler_authoring import checklist_failures
 from smarter_dev.bot.agents.handler_authoring import describe_trigger
@@ -1044,23 +1051,120 @@ async def test_pipeline_accepts_conditional_literal_role_grant():
 
 
 # ---------------------------------------------------------------------------
-# Admin judge model routing
+# Admin author / judge model routing
 # ---------------------------------------------------------------------------
 
 
-def test_judge_model_builder_routes_catalog_ids_through_model_router(monkeypatch):
-    # The admin second judge defaults to Luna, which the catalog serves via
-    # OpenRouter — building it as a Google model would send a GPT id to the
-    # Gemini API. Catalog wire ids must route through the shared router;
+def _settings_with(**overrides):
+    """A stand-in for the global settings, defaulting every handler model field."""
+    handler_model_fields = {
+        name: field.default
+        for name, field in Settings.model_fields.items()
+        if name.startswith("handler_")
+    }
+    return SimpleNamespace(**{**handler_model_fields, **overrides})
+
+
+def test_configured_model_builder_routes_catalog_ids_through_model_router(monkeypatch):
+    # The admin author and second judge both default to Terra, which the catalog
+    # serves via OpenAI — building it as a Google model would send a GPT id to
+    # the Gemini API. Catalog wire ids must route through the shared router;
     # anything else is assumed to be a Gemini id.
     monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
-    luna = _build_judge_model("openai/gpt-5.6-luna")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    terra = _build_configured_model("gpt-5.6-terra")
+    assert isinstance(terra, OpenAIResponsesModel)
+
+    luna = _build_configured_model("openai/gpt-5.6-luna")
     assert isinstance(luna, OpenAIChatModel)
 
-    gemini = _build_judge_model("gemini-3-flash-preview")
+    gemini = _build_configured_model("gemini-3-flash-preview")
     assert isinstance(gemini, GoogleModel)
 
 
-def test_admin_second_judge_default_is_catalog_luna():
-    default = Settings.model_fields["handler_admin_second_judge_model"].default
-    assert default == "openai/gpt-5.6-luna"
+def test_admin_model_defaults_are_the_stronger_pair():
+    assert Settings.model_fields["handler_admin_author_model"].default == "gpt-5.6-terra"
+    assert (
+        Settings.model_fields["handler_admin_judge_model"].default == "gemini-3.7-flash"
+    )
+    assert (
+        Settings.model_fields["handler_admin_second_judge_model"].default
+        == "gpt-5.6-terra"
+    )
+
+
+def test_standard_tier_model_defaults_are_unchanged():
+    assert (
+        Settings.model_fields["handler_author_model"].default
+        == "gemini-3-flash-preview"
+    )
+    assert (
+        Settings.model_fields["handler_judge_model"].default == "gemini-3-flash-preview"
+    )
+
+
+def test_admin_judge_panel_defaults_to_gemini_then_terra(monkeypatch):
+    monkeypatch.setattr(handler_authoring, "get_settings", _settings_with)
+    assert _admin_judge_models() == ["gemini-3.7-flash", "gpt-5.6-terra"]
+
+
+def test_admin_judge_panel_ignores_the_standard_tier_judge(monkeypatch):
+    monkeypatch.setattr(
+        handler_authoring,
+        "get_settings",
+        lambda: _settings_with(handler_judge_model="gemini-3-flash-preview"),
+    )
+    assert "gemini-3-flash-preview" not in _admin_judge_models()
+
+
+def test_empty_second_judge_leaves_a_single_judge_panel(monkeypatch):
+    monkeypatch.setattr(
+        handler_authoring,
+        "get_settings",
+        lambda: _settings_with(handler_admin_second_judge_model=""),
+    )
+    assert _admin_judge_models() == ["gemini-3.7-flash"]
+
+
+def test_duplicate_admin_judge_models_are_deduplicated(monkeypatch):
+    monkeypatch.setattr(
+        handler_authoring,
+        "get_settings",
+        lambda: _settings_with(
+            handler_admin_judge_model="gpt-5.6-terra",
+            handler_admin_second_judge_model="gpt-5.6-terra",
+        ),
+    )
+    assert _admin_judge_models() == ["gpt-5.6-terra"]
+
+
+def test_admin_author_agent_uses_the_admin_author_model(monkeypatch):
+    # The cached agent is module-level; clear it so this test builds its own and
+    # leaves no cache behind for the next one.
+    monkeypatch.setattr(handler_authoring, "_admin_author_agent", None)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setattr(
+        handler_authoring,
+        "get_settings",
+        lambda: _settings_with(handler_admin_author_model="gpt-5.6-terra"),
+    )
+    agent = handler_authoring._get_admin_author_agent()
+    assert agent.model.model_name == "gpt-5.6-terra"
+
+
+def test_handler_model_settings_uses_the_requested_reasoning_level():
+    terra_high = _handler_model_settings("gpt-5.6-terra", ReasoningLevel.HIGH)
+    assert terra_high["openai_reasoning_effort"] == "high"
+
+    gemini_high = _handler_model_settings("gemini-3.7-flash", ReasoningLevel.HIGH)
+    assert gemini_high["google_thinking_config"] == {"thinking_level": "HIGH"}
+
+    terra_medium = _handler_model_settings("gpt-5.6-terra", ReasoningLevel.MEDIUM)
+    assert terra_medium["openai_reasoning_effort"] == "medium"
+
+
+def test_handler_model_settings_falls_back_for_non_catalog_ids():
+    assert (
+        _handler_model_settings("gemini-3-flash-preview", ReasoningLevel.HIGH)
+        is _HANDLER_THINKING
+    )
