@@ -673,6 +673,8 @@ CLEAN_ADMIN_SCRIPT = (
 
 LINT_BLOB_SCRIPT = 'x = "{}"\n'.format("QUJDREVG" * 30)
 
+OVERLONG_ADMIN_SCRIPT = CLEAN_ADMIN_SCRIPT + "# padding past the byte cap\n" * 400
+
 
 def _admin_author_drafting(*plans):
     """An author returning each plan in turn; a call past the last one fails."""
@@ -849,6 +851,148 @@ async def test_admin_infeasible_revision_is_terminal():
     )
     assert not result.ok
     assert "can't guard this without a user id" in result.error
+    assert "after a round of fixes" in result.error
+    assert len(requests) == 2
+
+
+async def test_admin_lint_failure_and_judge_rejection_get_separate_rounds():
+    # The over-length draft spends the mechanical retry; the judge rejection on
+    # the revision still has the untouched semantic round to spend.
+    author, requests = _admin_author_drafting(
+        _admin_plan(script=OVERLONG_ADMIN_SCRIPT),
+        _admin_plan(script=ADMIN_SCRIPT),
+        _admin_plan(script=CLEAN_ADMIN_SCRIPT),
+    )
+    judge, _ = _judge_returning(
+        _verdict(approved=False, reason="bans every author with no condition"),
+        _verdict(reason="guarded and within caps"),
+    )
+    progress, messages = _progress_recorder()
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=judge,
+        progress=progress,
+    )
+    assert result.ok
+    assert result.script == CLEAN_ADMIN_SCRIPT
+    assert len(requests) == 3
+    assert any("8192-byte limit" in text for text in messages)
+    assert any("no condition" in text for text in messages)
+
+
+async def test_admin_judge_rejection_then_lint_failure_get_separate_rounds():
+    author, requests = _admin_author_drafting(
+        _admin_plan(script=ADMIN_SCRIPT),
+        _admin_plan(script=OVERLONG_ADMIN_SCRIPT),
+        _admin_plan(script=CLEAN_ADMIN_SCRIPT),
+    )
+    judge, _ = _judge_returning(
+        _verdict(approved=False, reason="bans every author with no condition"),
+        _verdict(reason="guarded and within caps"),
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=judge,
+    )
+    assert result.ok
+    assert result.script == CLEAN_ADMIN_SCRIPT
+    assert len(requests) == 3
+
+
+async def test_admin_second_lint_failure_is_final():
+    author, requests = _admin_author_drafting(
+        _admin_plan(script=LINT_BLOB_SCRIPT),
+        _admin_plan(script=OVERLONG_ADMIN_SCRIPT),
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=_judge_approving(),
+    )
+    assert not result.ok
+    assert "8192-byte limit" in result.error
+    assert "after a round of fixes" in result.error
+    assert len(requests) == 2
+
+
+async def test_admin_pipeline_ends_once_both_budgets_are_spent():
+    author, requests = _admin_author_drafting(
+        _admin_plan(script=LINT_BLOB_SCRIPT),
+        _admin_plan(script=ADMIN_SCRIPT),
+        _admin_plan(script=OVERLONG_ADMIN_SCRIPT),
+    )
+    judge, _ = _judge_returning(
+        _verdict(approved=False, reason="bans every author with no condition")
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=judge,
+    )
+    assert not result.ok
+    assert "8192-byte limit" in result.error
+    assert "after a round of fixes" in result.error
+    assert len(requests) == 3
+
+
+async def test_admin_resolution_error_spends_the_semantic_budget():
+    author, requests = _admin_author_drafting(
+        _admin_plan(name="scam-banner"),
+        _admin_plan(script=ADMIN_SCRIPT),
+    )
+    judge, _ = _judge_returning(
+        _verdict(approved=False, reason="bans every author with no condition")
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=judge,
+    )
+    assert not result.ok
+    assert "no condition" in result.error
+    assert "after a round of fixes" in result.error
+    assert len(requests) == 2
+
+
+async def test_admin_schedule_error_spends_the_semantic_budget():
+    author, requests = _admin_author_drafting(
+        _admin_plan(
+            trigger_type="schedule",
+            name="hourly-audit",
+            settings={"interval_seconds": 30},
+            script='await send_message("audit", "MODCHAT")\n',
+        ),
+        _admin_plan(
+            trigger_type="schedule",
+            name="hourly-audit",
+            settings={"interval_seconds": 3600},
+            script='await send_message("audit", "MODCHAT")\n',
+        ),
+    )
+    judge, _ = _judge_returning(
+        _verdict(approved=False, reason="posts an audit nobody reads")
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="post an audit every so often",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=judge,
+    )
+    assert not result.ok
+    assert "posts an audit nobody reads" in result.error
     assert "after a round of fixes" in result.error
     assert len(requests) == 2
 

@@ -977,6 +977,21 @@ def _build_admin_revision_request(
     )
 
 
+@dataclass
+class _DraftRejection:
+    """Why a draft was rejected, and which retry budget the fix comes out of.
+
+    A lint rejection (over-length, banned construct, compile error) is
+    mechanical: the author has to trim or rewrite mechanics, not rethink the
+    behavior. A resolve error, schedule error or judge rejection is semantic.
+    The two get separate budgets so a trimming round can't consume the round a
+    real review rejection needs.
+    """
+
+    is_mechanical: bool
+    feedback: str
+
+
 async def _validate_admin_draft(
     *,
     plan: AdminHandlerPlan,
@@ -985,12 +1000,12 @@ async def _validate_admin_draft(
     judge: Judge,
     progress: Progress | None,
     now_utc: datetime | None,
-) -> tuple[str, None] | tuple[None, AdminCreationResult]:
+) -> tuple[_DraftRejection, None] | tuple[None, AdminCreationResult]:
     """Take one admin draft through resolve -> lint -> schedule -> judge.
 
-    Returns ``(feedback, None)`` when a stage rejects the draft — the same
-    sentence the admin is shown and the author is sent back to fix — or
-    ``(None, result)`` for an approved draft.
+    Returns ``(rejection, None)`` when a stage rejects the draft — carrying the
+    sentence the admin is shown and the author is sent back to fix, plus which
+    budget it spends — or ``(None, result)`` for an approved draft.
     """
     error, resolved = _resolve_plan_target(
         action=plan.action,
@@ -1003,13 +1018,18 @@ async def _validate_admin_draft(
     )
     if error is not None:
         logger.info("admin plan rejected: %s", error)
-        return error, None
+        return _DraftRejection(is_mechanical=False, feedback=error), None
 
     script = _strip_code_fences(plan.script)
     reason = lint_script(script)
     if reason is not None:
         logger.info("admin lint rejected script: %s", reason)
-        return f"the safety lint rejected it: {reason}", None
+        return (
+            _DraftRejection(
+                is_mechanical=True, feedback=f"the safety lint rejected it: {reason}"
+            ),
+            None,
+        )
 
     if resolved.trigger_type in ("schedule", "timer"):
         try:
@@ -1019,7 +1039,12 @@ async def _validate_admin_draft(
                 uses_agent=script_uses_agent(script),
             )
         except ScheduleError as exc:
-            return f"invalid schedule settings: {exc}", None
+            return (
+                _DraftRejection(
+                    is_mechanical=False, feedback=f"invalid schedule settings: {exc}"
+                ),
+                None,
+            )
 
     if progress is not None:
         await progress("Reviewing the admin handler before installing…")
@@ -1039,7 +1064,13 @@ async def _validate_admin_draft(
         verdict.reason,
     )
     if verdict_rejects(verdict):
-        return f"the reviewer rejected it: {rejection_detail(verdict)}", None
+        return (
+            _DraftRejection(
+                is_mechanical=False,
+                feedback=f"the reviewer rejected it: {rejection_detail(verdict)}",
+            ),
+            None,
+        )
 
     return None, AdminCreationResult(
         ok=True,
@@ -1056,6 +1087,21 @@ async def _validate_admin_draft(
     )
 
 
+def _fix_round_progress_message(
+    *, rejection: _DraftRejection, is_first_draft: bool
+) -> str:
+    """The status line shown while a rejected draft goes back to the author."""
+    opening = (
+        "First draft needs work" if is_first_draft else "That draft still needs work"
+    )
+    closing = (
+        "Sending it back for a quick mechanical fix…"
+        if rejection.is_mechanical
+        else "Sending it back for one round of fixes…"
+    )
+    return f"{opening} — {rejection.feedback} {closing}"
+
+
 async def run_admin_creation_pipeline(
     *,
     request: str,
@@ -1069,10 +1115,14 @@ async def run_admin_creation_pipeline(
     """Admin author (plans edit-vs-create + trigger/scope/script) -> lint -> judge.
 
     The author sees the guild's existing named admin handlers and either edits
-    one (by handler_id) or creates a new, named one. A draft rejected by any
-    stage goes back to the author ONCE with the rejection text; a second
-    rejection is final. An infeasible plan is final either round — there is no
-    draft to fix.
+    one (by handler_id) or creates a new, named one. A rejected draft goes back
+    to the author with the rejection text, against two independent retry
+    budgets of one round each: MECHANICAL for a lint rejection (over-length,
+    banned construct, compile error) and SEMANTIC for a resolve error, schedule
+    error or judge rejection. A rejection whose own budget is already spent is
+    final, so the author runs at most three times — first draft plus one round
+    per budget, in whatever order the failures happen. An infeasible plan is
+    final in every round: there is no draft to fix.
     """
     judge = judge or _default_admin_judge
     channel_lister = channel_lister or _empty_channel_lister
@@ -1091,59 +1141,68 @@ async def run_admin_creation_pipeline(
         current_time_utc=author_time_utc,
         draft_label="first draft",
     )
-    if not plan.feasible:
-        return AdminCreationResult(
-            ok=False,
-            error=f"the author couldn't build this: {plan.error or 'not feasible'}",
+
+    mechanical_rounds_left = 1
+    semantic_rounds_left = 1
+    revisions_made = 0
+
+    while True:
+        if not plan.feasible:
+            unbuildable = (
+                f"the author couldn't build this: {plan.error or 'not feasible'}"
+            )
+            if revisions_made:
+                return AdminCreationResult(
+                    ok=False, error=f"even after a round of fixes, {unbuildable}"
+                )
+            return AdminCreationResult(ok=False, error=unbuildable)
+
+        rejection, result = await _validate_admin_draft(
+            plan=plan,
+            request=request,
+            existing_handlers=existing_handlers,
+            judge=judge,
+            progress=progress,
+            now_utc=now_utc,
         )
+        if result is not None:
+            return result
 
-    feedback, result = await _validate_admin_draft(
-        plan=plan,
-        request=request,
-        existing_handlers=existing_handlers,
-        judge=judge,
-        progress=progress,
-        now_utc=now_utc,
-    )
-    if result is not None:
-        return result
-
-    logger.info("admin first draft sent back for fixes: %s", feedback)
-    if progress is not None:
-        await progress(
-            f"First draft needs work — {feedback} "
-            "Sending it back for one round of fixes…"
+        rounds_left = (
+            mechanical_rounds_left if rejection.is_mechanical else semantic_rounds_left
         )
+        if rounds_left == 0:
+            logger.info(
+                "admin draft rejected with no rounds left: %s", rejection.feedback
+            )
+            return AdminCreationResult(
+                ok=False, error=f"even after a round of fixes, {rejection.feedback}"
+            )
 
-    revision = await _draft_admin_plan(
-        author=author,
-        request=_build_admin_revision_request(
-            request=request, plan=plan, feedback=feedback
-        ),
-        existing_handlers=existing_handlers,
-        channel_lister=channel_lister,
-        current_time_utc=author_time_utc,
-        draft_label="revision",
-    )
-    if not revision.feasible:
-        return AdminCreationResult(
-            ok=False,
-            error="even after a round of fixes, the author couldn't build this: "
-            f"{revision.error or 'not feasible'}",
+        if rejection.is_mechanical:
+            mechanical_rounds_left -= 1
+        else:
+            semantic_rounds_left -= 1
+        logger.info(
+            "admin draft sent back for %s fixes: %s",
+            "mechanical" if rejection.is_mechanical else "semantic",
+            rejection.feedback,
         )
+        if progress is not None:
+            await progress(
+                _fix_round_progress_message(
+                    rejection=rejection, is_first_draft=revisions_made == 0
+                )
+            )
 
-    feedback, result = await _validate_admin_draft(
-        plan=revision,
-        request=request,
-        existing_handlers=existing_handlers,
-        judge=judge,
-        progress=progress,
-        now_utc=now_utc,
-    )
-    if result is not None:
-        return result
-
-    logger.info("admin revision rejected: %s", feedback)
-    return AdminCreationResult(
-        ok=False, error=f"even after a round of fixes, {feedback}"
-    )
+        revisions_made += 1
+        plan = await _draft_admin_plan(
+            author=author,
+            request=_build_admin_revision_request(
+                request=request, plan=plan, feedback=rejection.feedback
+            ),
+            existing_handlers=existing_handlers,
+            channel_lister=channel_lister,
+            current_time_utc=author_time_utc,
+            draft_label=f"revision {revisions_made}",
+        )
