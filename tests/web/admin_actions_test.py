@@ -83,6 +83,15 @@ async def test_timeout_user():
     assert "communication_disabled_until" in json.loads(request.content)
 
 
+async def test_remove_timeout():
+    requests: list[httpx.Request] = []
+    await _actor(requests).remove_timeout("U1")
+    request = requests[0]
+    assert request.method == "PATCH"
+    assert request.url.path.endswith("/guilds/G1/members/U1")
+    assert json.loads(request.content) == {"communication_disabled_until": None}
+
+
 async def test_delete_message():
     requests: list[httpx.Request] = []
     await _actor(requests).delete_message("C1", "M1")
@@ -97,6 +106,10 @@ async def test_delete_message():
         (lambda actor: actor.ban_user("U1"), "ban target U1 already absent"),
         (lambda actor: actor.kick_user("U1"), "kick target U1 already absent"),
         (lambda actor: actor.timeout_user("U1"), "timeout target U1 already absent"),
+        (
+            lambda actor: actor.remove_timeout("U1"),
+            "untimeout target U1 already absent",
+        ),
         (
             lambda actor: actor.delete_message("C1", "M1"),
             "message M1 already deleted",
@@ -116,6 +129,7 @@ async def test_absent_moderation_target_is_successful_noop(invoke, expected):
         lambda actor: actor.ban_user("U1"),
         lambda actor: actor.kick_user("U1"),
         lambda actor: actor.timeout_user("U1"),
+        lambda actor: actor.remove_timeout("U1"),
         lambda actor: actor.delete_message("C1", "M1"),
     ],
 )
@@ -582,6 +596,13 @@ async def test_timeout_records_its_duration(recorded_events):
     assert recorded_events[0].duration_seconds == 900
 
 
+async def test_remove_timeout_records_an_untimeout(recorded_events):
+    await _actor([]).remove_timeout("U1")
+
+    assert recorded_events[0].action == "untimeout"
+    assert recorded_events[0].target_username == "U1"
+
+
 async def test_kick_and_delete_are_written_to_the_event_log(recorded_events):
     await _actor([]).kick_user("U1")
     await _actor([]).delete_message("C1", "M1")
@@ -594,6 +615,7 @@ async def test_a_no_op_against_a_departed_member_is_never_remembered(recorded_ev
     """Nothing happened, so the bot has nothing to remember doing."""
     assert "already absent" in await _actor([], status_code=404).ban_user("U1")
     assert "already absent" in await _actor([], status_code=404).kick_user("U1")
+    assert "already absent" in await _actor([], status_code=404).remove_timeout("U1")
     assert "already deleted" in await _actor([], status_code=404).delete_message(
         "C1", "M1"
     )

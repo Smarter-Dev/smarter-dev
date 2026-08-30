@@ -182,6 +182,21 @@ class AdminActor(DiscordBotClient):
         )
         return f"timed out {user_id} for {int(duration_seconds)}s"
 
+    async def remove_timeout(self, user_id: str) -> str:
+        """Lift a member's timeout; a member who already left is a no-op."""
+        try:
+            await self._request(
+                "PATCH",
+                f"/guilds/{self.guild_id}/members/{user_id}",
+                json={"communication_disabled_until": None},
+            )
+        except AdminActionError as error:
+            if error.status_code == 404:
+                return f"untimeout target {user_id} already absent"
+            raise
+        await self._remember_action("untimeout", user_id)
+        return f"removed timeout for {user_id}"
+
     async def delete_message(self, channel_id: str, message_id: str) -> str:
         """Delete a message; an already-deleted target is a successful no-op."""
         try:
