@@ -12,6 +12,9 @@ from unittest.mock import AsyncMock
 import pytest
 
 from smarter_dev.bot.plugins import proactive
+from smarter_dev.bot.proactive.adapter import AgentConsumer
+from smarter_dev.bot.proactive.adapter import WatcherProducer
+from smarter_dev.bot.proactive.notifications import watcher_summary_notification
 from smarter_dev.bot.proactive.types import ActivationResult
 from smarter_dev.bot.proactive.types import ProposedReaction
 from smarter_dev.bot.proactive.types import ProposedResponse
@@ -73,9 +76,7 @@ def test_channel_message_conversion_prefers_nickname_and_stringifies_ids():
 
 def test_channel_message_conversion_reads_reply_reference():
     converted = proactive.channel_message_from_hikari(
-        _hikari_message(
-            referenced_message=SimpleNamespace(id=444), member=None
-        )
+        _hikari_message(referenced_message=SimpleNamespace(id=444), member=None)
     )
     assert converted.reply_to_id == "444"
     assert converted.author_display == "Alice"  # global_name fallback
@@ -84,20 +85,45 @@ def test_channel_message_conversion_reads_reply_reference():
 # --- wake flow ---------------------------------------------------------------
 
 
-class _StubAdapter:
+class _StubProducer:
+    def __init__(self, queue):
+        self.queue = queue
+        self.contexts = []
+        self.details = {"watcher": {"wake": True}}
+        self.wake_produced = True
+        self.usage_by_model = {}
+
+    async def produce(self, context):
+        self.contexts.append(context)
+        self.queue.push(
+            watcher_summary_notification(
+                summary="interesting activity",
+                message_ids=[message.id for message in context.new_messages],
+                wake=True,
+                created_at=context.activated_at,
+            )
+        )
+        return self.usage_by_model
+
+
+class _StubConsumer:
     def __init__(self, result: ActivationResult):
         self.result = result
         self.contexts = []
+        self.queue = None
 
-    async def activate(self, context):
+    async def consume(self, context):
         self.contexts.append(context)
+        self.queue.drain()
         return self.result
 
 
 class _StubSettingsService:
     def __init__(self, enabled: bool = True, addendum: str = ""):
         self.settings = ProactiveChannelSettings(
-            guild_id="2", channel_id="1", enabled=enabled,
+            guild_id="2",
+            channel_id="1",
+            enabled=enabled,
             watch_addendum=addendum,
         )
         self.saved_addenda: list[str] = []
@@ -112,20 +138,29 @@ class _StubSettingsService:
         return self.settings
 
     async def record_wake_usage(
-        self, guild_id, channel_id, *, wake_id, metered_at, passive,
-        responses, entries,
+        self,
+        guild_id,
+        channel_id,
+        *,
+        wake_id,
+        metered_at,
+        passive,
+        responses,
+        entries,
     ):
         if self.usage_error is not None:
             raise self.usage_error
-        self.recorded_usage.append({
-            "guild_id": guild_id,
-            "channel_id": channel_id,
-            "wake_id": wake_id,
-            "metered_at": metered_at,
-            "passive": passive,
-            "responses": responses,
-            "entries": entries,
-        })
+        self.recorded_usage.append(
+            {
+                "guild_id": guild_id,
+                "channel_id": channel_id,
+                "wake_id": wake_id,
+                "metered_at": metered_at,
+                "passive": passive,
+                "responses": responses,
+                "entries": entries,
+            }
+        )
 
 
 class _FakeIterator:
@@ -143,7 +178,7 @@ class _FakeIterator:
         try:
             return next(self._iter)
         except StopIteration:
-            raise StopAsyncIteration
+            raise StopAsyncIteration from None
 
 
 def _fake_bot(history_messages, service):
@@ -168,48 +203,72 @@ def wake_setup(monkeypatch):
     service = _StubSettingsService(addendum="stored addendum")
     history = [_hikari_message(id=100 + n) for n in range(3)]
     bot = _fake_bot(history, service)
-    runtime = proactive.ProactiveRuntime(bot)
+    runtime = proactive.ProactiveRuntime(bot, start_consumers=False)
     monkeypatch.setattr(proactive, "runtime", runtime)
-    # The adapter is stubbed below, but its constructor arguments are still
-    # evaluated — keep the real model builders out of the test path.
+    # The split factories still evaluate their model dependencies.
     monkeypatch.setattr(runtime, "watcher", lambda: None)
     monkeypatch.setattr(runtime, "skim", lambda: None)
     monkeypatch.setattr(runtime, "agent_runner_for", lambda state: None)
 
     result = ActivationResult(
         responses=[ProposedResponse(reply_to_id="555", content="happy to help")],
-        input_tokens=10, output_tokens=1, cache_read_tokens=0,
+        input_tokens=10,
+        output_tokens=1,
+        cache_read_tokens=0,
         model_id="stub",
         reactions=(ProposedReaction(message_id="555", emoji="👍"),),
         details={"watcher": {"wake": True}},
     )
-    adapter = _StubAdapter(result)
+    consumer = _StubConsumer(result)
+    producers = []
+    producer_usage = {}
+    producer_stores = []
     captured_stores = []
     captured_kwargs = []
 
-    def fake_adapter_factory(**kwargs):
+    def fake_producer_factory(**kwargs):
+        producer = _StubProducer(kwargs["notification_queue"])
+        producer.usage_by_model = dict(producer_usage)
+        producers.append(producer)
+        producer_stores.append(kwargs["instruction_store"])
+        return producer
+
+    def fake_consumer_factory(**kwargs):
         captured_stores.append(kwargs["instruction_store"])
         captured_kwargs.append(kwargs)
-        return adapter
+        consumer.queue = kwargs["notification_queue"]
+        return consumer
 
-    monkeypatch.setattr(proactive, "TwoPassAdapter", fake_adapter_factory)
+    monkeypatch.setattr(proactive, "WatcherProducer", fake_producer_factory)
+    monkeypatch.setattr(proactive, "AgentConsumer", fake_consumer_factory)
     return SimpleNamespace(
-        service=service, bot=bot, runtime=runtime, adapter=adapter,
-        captured_stores=captured_stores, captured_kwargs=captured_kwargs,
+        service=service,
+        bot=bot,
+        runtime=runtime,
+        consumer=consumer,
+        producers=producers,
+        producer_usage=producer_usage,
+        producer_stores=producer_stores,
+        captured_stores=captured_stores,
+        captured_kwargs=captured_kwargs,
     )
+
+
+async def _produce_and_consume(state):
+    await proactive._run_producer(state)
+    if state.queue.items:
+        await proactive._consume_channel_once(state)
 
 
 async def test_wake_drains_buffer_dispatches_and_seeds_addendum(wake_setup):
     state = wake_setup.runtime.state_for(2, 1)
-    state.buffer.append(
-        proactive.channel_message_from_hikari(_hikari_message(id=555))
-    )
+    state.buffer.append(proactive.channel_message_from_hikari(_hikari_message(id=555)))
 
-    await proactive.run_wake(state)
+    await _produce_and_consume(state)
 
     assert state.buffer == []
     # Adapter saw the buffered message as new, fetched history excludes it.
-    context = wake_setup.adapter.contexts[0]
+    context = wake_setup.producers[0].contexts[0]
     assert [m.id for m in context.new_messages] == ["555"]
     assert all(m.id != "555" for m in context.history)
     assert context.bot_user_id == "999"
@@ -230,109 +289,147 @@ async def test_wake_drains_buffer_dispatches_and_seeds_addendum(wake_setup):
 
 async def test_wake_persists_updated_addendum(wake_setup):
     state = wake_setup.runtime.state_for(2, 1)
-    state.buffer.append(
-        proactive.channel_message_from_hikari(_hikari_message(id=555))
-    )
+    state.buffer.append(proactive.channel_message_from_hikari(_hikari_message(id=555)))
 
     async def activate_and_update(context):
         wake_setup.captured_stores[0].set_instruction(
             "watch for benchmarks", ttl_seconds=3600
         )
-        return wake_setup.adapter.result
+        return wake_setup.consumer.result
 
-    wake_setup.adapter.activate = activate_and_update
-    await proactive.run_wake(state)
+    wake_setup.consumer.consume = activate_and_update
+    await _produce_and_consume(state)
     assert len(wake_setup.service.saved_addenda) == 1
     assert "watch for benchmarks" in wake_setup.service.saved_addenda[0]
 
 
+async def test_producer_and_consumer_read_fresh_instruction_settings(wake_setup):
+    state = wake_setup.runtime.state_for(2, 1)
+    state.buffer.append(proactive.channel_message_from_hikari(_hikari_message(id=555)))
+
+    await proactive._run_producer(state)
+    wake_setup.service.settings = ProactiveChannelSettings(
+        guild_id="2",
+        channel_id="1",
+        enabled=True,
+        watch_addendum="consumer-only addendum",
+    )
+    await proactive._consume_channel_once(state)
+
+    assert any(
+        entry.text == "stored addendum"
+        for entry in wake_setup.producer_stores[0].entries
+    )
+    assert all(
+        entry.text != "consumer-only addendum"
+        for entry in wake_setup.producer_stores[0].entries
+    )
+    assert any(
+        entry.text == "consumer-only addendum"
+        for entry in wake_setup.captured_stores[0].entries
+    )
+
+
 async def test_wake_skips_when_channel_disabled(wake_setup):
     wake_setup.service.settings = ProactiveChannelSettings(
-        guild_id="2", channel_id="1", enabled=False, watch_addendum="",
+        guild_id="2",
+        channel_id="1",
+        enabled=False,
+        watch_addendum="",
     )
     state = wake_setup.runtime.state_for(2, 1)
-    state.buffer.append(
-        proactive.channel_message_from_hikari(_hikari_message(id=555))
-    )
-    await proactive.run_wake(state)
-    assert wake_setup.adapter.contexts == []
+    state.buffer.append(proactive.channel_message_from_hikari(_hikari_message(id=555)))
+    await proactive._run_producer(state)
+    assert wake_setup.producers == []
+    assert wake_setup.consumer.contexts == []
     wake_setup.bot.rest.create_message.assert_not_awaited()
 
 
 async def test_empty_non_passive_wake_is_a_noop(wake_setup):
     state = wake_setup.runtime.state_for(2, 1)
-    await proactive.run_wake(state)
-    assert wake_setup.adapter.contexts == []
+    await proactive._run_producer(state)
+    assert wake_setup.producers == []
+    assert wake_setup.consumer.contexts == []
 
 
 def _usage_result(**overrides) -> ActivationResult:
-    fields = dict(
-        responses=[ProposedResponse(reply_to_id="555", content="happy to help")],
-        input_tokens=1200, output_tokens=40, cache_read_tokens=100,
-        model_id="gemini-3.7-flash",
-        usage_by_model={
+    fields = {
+        "responses": [ProposedResponse(reply_to_id="555", content="happy to help")],
+        "input_tokens": 1200,
+        "output_tokens": 40,
+        "cache_read_tokens": 100,
+        "model_id": "gemini-3.7-flash",
+        "usage_by_model": {
             "z-ai/glm-5.3-flash": {
-                "input_tokens": 1000, "output_tokens": 30,
+                "input_tokens": 1000,
+                "output_tokens": 30,
                 "cache_read_tokens": 100,
             },
             "gemini-3.7-flash": {
-                "input_tokens": 200, "output_tokens": 10,
+                "input_tokens": 200,
+                "output_tokens": 10,
                 "cache_read_tokens": 0,
             },
         },
-    )
+    }
     fields.update(overrides)
     return ActivationResult(**fields)
 
 
 async def test_wake_persists_usage_per_model(wake_setup):
-    wake_setup.adapter.result = _usage_result()
-    state = wake_setup.runtime.state_for(2, 1)
-    state.buffer.append(
-        proactive.channel_message_from_hikari(_hikari_message(id=555))
+    wake_setup.producer_usage["z-ai/glm-5.3-flash"] = {
+        "input_tokens": 1000,
+        "output_tokens": 30,
+        "cache_read_tokens": 100,
+    }
+    wake_setup.consumer.result = _usage_result(
+        usage_by_model={
+            "gemini-3.7-flash": {
+                "input_tokens": 200,
+                "output_tokens": 10,
+                "cache_read_tokens": 0,
+            }
+        }
     )
+    state = wake_setup.runtime.state_for(2, 1)
+    state.buffer.append(proactive.channel_message_from_hikari(_hikari_message(id=555)))
 
-    await proactive.run_wake(state)
+    await _produce_and_consume(state)
 
-    assert len(wake_setup.service.recorded_usage) == 1
-    recorded = wake_setup.service.recorded_usage[0]
-    assert recorded["guild_id"] == "2"
-    assert recorded["channel_id"] == "1"
-    assert recorded["wake_id"]
-    assert recorded["metered_at"] == wake_setup.adapter.contexts[0].activated_at
-    assert recorded["passive"] is False
-    assert recorded["responses"] == 1
-    by_model = {entry["model_id"]: entry for entry in recorded["entries"]}
-    watcher = by_model["z-ai/glm-5.3-flash"]
+    assert len(wake_setup.service.recorded_usage) == 2
+    watcher_record, agent_record = wake_setup.service.recorded_usage
+    assert watcher_record["guild_id"] == "2"
+    assert watcher_record["channel_id"] == "1"
+    assert watcher_record["wake_id"] != agent_record["wake_id"]
+    assert watcher_record["passive"] is False
+    assert watcher_record["responses"] == 0
+    watcher = watcher_record["entries"][0]
     assert watcher["operation"] == "watcher"
     assert watcher["input_tokens"] == 1000
     assert watcher["output_tokens"] == 30
     assert watcher["cache_read_tokens"] == 100
-    agent = by_model["gemini-3.7-flash"]
+    assert agent_record["responses"] == 1
+    agent = agent_record["entries"][0]
     assert agent["operation"] == "agent"
     assert agent["input_tokens"] == 200
 
 
 async def test_wake_without_usage_records_nothing(wake_setup):
     state = wake_setup.runtime.state_for(2, 1)
-    state.buffer.append(
-        proactive.channel_message_from_hikari(_hikari_message(id=555))
-    )
+    state.buffer.append(proactive.channel_message_from_hikari(_hikari_message(id=555)))
 
-    await proactive.run_wake(state)
+    await _produce_and_consume(state)
 
     assert wake_setup.service.recorded_usage == []
 
 
 async def test_wake_survives_usage_persistence_failure(wake_setup):
-    wake_setup.adapter.result = _usage_result()
+    wake_setup.consumer.result = _usage_result()
     wake_setup.service.usage_error = RuntimeError("api down")
     state = wake_setup.runtime.state_for(2, 1)
-    state.buffer.append(
-        proactive.channel_message_from_hikari(_hikari_message(id=555))
-    )
+    state.buffer.append(proactive.channel_message_from_hikari(_hikari_message(id=555)))
 
-    await proactive.run_wake(state)
+    await _produce_and_consume(state)
 
     # The response still went out even though usage persistence failed.
     wake_setup.bot.rest.create_message.assert_awaited_once()
@@ -342,14 +439,10 @@ async def test_wake_survives_usage_persistence_failure(wake_setup):
 
 
 def test_engagement_detection_on_mention_and_reply_to_bot():
-    assert proactive.event_engages_bot(
-        _hikari_message(user_mentions_ids=(999,)), "999"
-    )
+    assert proactive.event_engages_bot(_hikari_message(user_mentions_ids=(999,)), "999")
     assert proactive.event_engages_bot(
         _hikari_message(
-            referenced_message=SimpleNamespace(
-                id=1, author=SimpleNamespace(id=999)
-            )
+            referenced_message=SimpleNamespace(id=1, author=SimpleNamespace(id=999))
         ),
         "999",
     )
@@ -360,7 +453,7 @@ def test_engagement_detection_on_mention_and_reply_to_bot():
 def listener_setup(wake_setup, monkeypatch):
     scheduled = []
     monkeypatch.setattr(
-        proactive, "_schedule_wake", lambda state: scheduled.append(state)
+        proactive, "_schedule_producer", lambda state: scheduled.append(state)
     )
     wake_setup.scheduled = scheduled
     return wake_setup
@@ -383,9 +476,7 @@ async def test_passive_message_buffers_without_arming_the_debounce(listener_setu
 
 
 async def test_engagement_flips_to_active_and_arms_the_debounce(listener_setup):
-    await proactive.on_guild_message(
-        _event(_hikari_message(user_mentions_ids=(999,)))
-    )
+    await proactive.on_guild_message(_event(_hikari_message(user_mentions_ids=(999,))))
     state = listener_setup.runtime.states[1]
     assert state.active_until > proactive.time.monotonic()
     assert listener_setup.scheduled == [state]
@@ -400,310 +491,141 @@ async def test_passive_sweep_drains_buffered_channels(listener_setup):
     state = listener_setup.runtime.states[1]
     assert state.buffer
 
-    woken = []
+    produced = []
 
-    async def fake_run_wake(target_state, passive=False):
-        woken.append((target_state, passive))
+    async def fake_run_producer(target_state, passive=False):
+        produced.append((target_state, passive))
         target_state.buffer.clear()
 
-    original = proactive.run_wake
-    proactive.run_wake = fake_run_wake
+    original = proactive._run_producer
+    proactive._run_producer = fake_run_producer
     try:
         await proactive._passive_sweep(listener_setup.runtime)
     finally:
-        proactive.run_wake = original
-    assert woken == [(state, False)]
+        proactive._run_producer = original
+    assert produced == [(state, True)]
 
 
-# --- in-flight wakes: queue instead of cancel --------------------------------
+# --- independent producer and consumer state ---------------------------------
 
 
-async def _blocked_wake_task(release: asyncio.Event) -> None:
-    await release.wait()
-
-
-async def test_mention_during_wake_queues_verbatim_and_never_cancels(
-    listener_setup,
-):
+async def test_mention_queues_verbatim_while_consumer_is_busy(listener_setup):
     state = listener_setup.runtime.state_for(2, 1)
-    release = asyncio.Event()
-    state.wake_task = asyncio.create_task(_blocked_wake_task(release))
 
-    await proactive.on_guild_message(
-        _event(_hikari_message(user_mentions_ids=(999,)))
-    )
+    await proactive.on_guild_message(_event(_hikari_message(user_mentions_ids=(999,))))
 
-    assert not state.wake_task.cancelled()
-    assert listener_setup.scheduled == []  # no new debounce armed mid-run
-    kinds = [n.kind for n in state.queue.items]
-    assert "mention" in kinds
+    assert listener_setup.scheduled == [state]
     mention = next(n for n in state.queue.items if n.kind == "mention")
-    assert "hey there" in mention.body  # verbatim, not summarized
-    assert state.engaged_ids == {"555"}
-    release.set()
-    await state.wake_task
+    assert "hey there" in mention.body
+    assert mention.wakes is True
 
 
-async def test_plain_message_during_wake_buffers_without_notifying(
-    listener_setup,
-):
+async def test_plain_active_message_buffers_for_the_producer(listener_setup):
     state = listener_setup.runtime.state_for(2, 1)
     state.active_until = proactive.time.monotonic() + 600
-    release = asyncio.Event()
-    state.wake_task = asyncio.create_task(_blocked_wake_task(release))
 
     await proactive.on_guild_message(_event(_hikari_message()))
 
-    assert [n.kind for n in state.queue.items] == []  # ticker handles it
-    assert [m.id for m in state.buffer] == ["555"]
-    assert listener_setup.scheduled == []
-    release.set()
-    await state.wake_task
+    assert state.queue.items == []
+    assert [message.id for message in state.buffer] == ["555"]
+    assert listener_setup.scheduled == [state]
 
 
-async def test_scheduled_wake_survives_messages_arriving_mid_run(wake_setup):
+async def test_producer_runs_while_agent_consumer_is_mid_wake(wake_setup):
     state = wake_setup.runtime.state_for(2, 1)
-    state.buffer.append(
-        proactive.channel_message_from_hikari(_hikari_message(id=555))
-    )
-    state.first_at = state.last_at = proactive.time.monotonic() - 120
-
-    release = asyncio.Event()
-    original_activate = wake_setup.adapter.activate
-
-    async def blocking_activate(context):
-        await release.wait()
-        return await original_activate(context)
-
-    wake_setup.adapter.activate = blocking_activate
-
-    proactive._schedule_wake(state)
-    for _ in range(10):  # let the timer fire and the wake start
-        await asyncio.sleep(0)
-    assert state.wake_task is not None and not state.wake_task.done()
-
-    await proactive.on_guild_message(_event(_hikari_message(id=556)))
-    assert not state.wake_task.cancelled()
-
-    release.set()
-    await state.wake_task
-    # The wake completed exactly once; the mid-run message waits its turn.
-    assert len(wake_setup.adapter.contexts) == 1
-    assert [m.id for m in state.buffer] == ["556"]
-
-
-# --- consumed messages -------------------------------------------------------
-
-
-async def test_wake_excludes_consumed_messages_from_new_set(wake_setup):
-    state = wake_setup.runtime.state_for(2, 1)
-    for message_id in (555, 556):
-        state.buffer.append(
-            proactive.channel_message_from_hikari(
-                _hikari_message(id=message_id)
-            )
+    state.buffer.append(proactive.channel_message_from_hikari(_hikari_message(id=555)))
+    state.queue.push(
+        proactive.mention_notification(
+            proactive.channel_message_from_hikari(_hikari_message(id=554))
         )
-    state.consumed_ids.add("555")
-    state.engaged_ids.add("555")
-
-    await proactive.run_wake(state)
-
-    context = wake_setup.adapter.contexts[0]
-    assert [m.id for m in context.new_messages] == ["556"]
-    assert state.consumed_ids == set()
-    assert state.engaged_ids == set()
-
-
-async def test_wake_of_only_consumed_messages_is_a_noop(wake_setup):
-    state = wake_setup.runtime.state_for(2, 1)
-    state.buffer.append(
-        proactive.channel_message_from_hikari(_hikari_message(id=555))
     )
-    state.consumed_ids.add("555")
+    first_started = asyncio.Event()
+    release = asyncio.Event()
+    original_consume = wake_setup.consumer.consume
 
-    await proactive.run_wake(state)
+    async def blocking_consume(context):
+        first_started.set()
+        await release.wait()
+        return await original_consume(context)
 
-    assert wake_setup.adapter.contexts == []
+    wake_setup.consumer.consume = blocking_consume
+    consumer_task = asyncio.create_task(proactive._consume_channel_once(state))
+    await first_started.wait()
+
+    await proactive._run_producer(state)
+
+    reviewed = wake_setup.producers[0].contexts[0].new_messages
+    assert [message.id for message in reviewed] == ["555"]
+    release.set()
+    await consumer_task
+
+
+async def test_producer_excludes_messages_at_or_before_review_cursor(wake_setup):
+    state = wake_setup.runtime.state_for(2, 1)
+    state.last_reviewed_message_id = "555"
+    for message_id in (554, 555, 556):
+        state.buffer.append(
+            proactive.channel_message_from_hikari(_hikari_message(id=message_id))
+        )
+
+    await proactive._run_producer(state)
+
+    context = wake_setup.producers[0].contexts[0]
+    assert [message.id for message in context.new_messages] == ["556"]
+    assert state.last_reviewed_message_id == "556"
+
+
+async def test_producer_of_only_reviewed_messages_is_a_noop(wake_setup):
+    state = wake_setup.runtime.state_for(2, 1)
+    state.last_reviewed_message_id = "555"
+    state.buffer.append(proactive.channel_message_from_hikari(_hikari_message(id=555)))
+
+    await proactive._run_producer(state)
+
+    assert wake_setup.producers == []
     assert state.buffer == []
 
 
-async def test_drain_notifications_renders_and_marks_consumed(wake_setup):
+async def test_drain_notifications_renders_new_arrivals_mid_wake(wake_setup):
     state = wake_setup.runtime.state_for(2, 1)
-    state.buffer.append(
-        proactive.channel_message_from_hikari(_hikari_message(id=555))
+    state.queue.push(
+        proactive.mention_notification(
+            proactive.channel_message_from_hikari(_hikari_message(id=555))
+        )
     )
     drained: list[str] = []
-    original_activate = wake_setup.adapter.activate
+    original_consume = wake_setup.consumer.consume
 
-    async def activate_reading_notifications(context):
+    async def consume_reading_notifications(context):
         arrived = proactive.channel_message_from_hikari(
             _hikari_message(id=777, content="did you see this?")
         )
-        state.buffer.append(arrived)
         state.queue.push(proactive.mention_notification(arrived))
         deps = wake_setup.captured_kwargs[-1]["deps_factory"](
-            env=None, actions=None, instruction_store=None,
-            skim_transcript=None, budget=None,
+            env=None,
+            actions=None,
+            instruction_store=None,
+            skim_transcript=None,
+            budget=None,
         )
         drained.append(deps.drain_notifications())
         drained.append(deps.drain_notifications())
-        return await original_activate(context)
+        return await original_consume(context)
 
-    wake_setup.adapter.activate = activate_reading_notifications
-    await proactive.run_wake(state)
+    wake_setup.consumer.consume = consume_reading_notifications
+    await proactive._consume_channel_once(state)
 
     assert "did you see this?" in drained[0]
     assert drained[1] == "No new notifications."
-    # Read via the tool: the follow-up wake must not treat it as new.
-    assert "777" in state.consumed_ids
-
-
-# --- follow-up scheduling after a wake ---------------------------------------
-
-
-async def test_followup_wake_fires_immediately_for_unconsumed_mention(
-    wake_setup,
-):
-    state = wake_setup.runtime.state_for(2, 1)
-    state.buffer.append(
-        proactive.channel_message_from_hikari(_hikari_message(id=555))
-    )
-    original_activate = wake_setup.adapter.activate
-
-    async def activate_with_midrun_mention(context):
-        if len(wake_setup.adapter.contexts) == 0:
-            arrived = proactive.channel_message_from_hikari(
-                _hikari_message(id=777, user_mentions_ids=(999,))
-            )
-            state.buffer.append(arrived)
-            state.engaged_ids.add(arrived.id)
-        return await original_activate(context)
-
-    wake_setup.adapter.activate = activate_with_midrun_mention
-    await proactive._run_wake_guarded(state)
-    assert state.wake_task is not None
-    await state.wake_task
-
-    assert len(wake_setup.adapter.contexts) == 2
-    assert [m.id for m in wake_setup.adapter.contexts[1].new_messages] == [
-        "777"
-    ]
-
-
-async def test_followup_wake_debounces_plain_messages(
-    wake_setup, monkeypatch
-):
-    state = wake_setup.runtime.state_for(2, 1)
-    state.active_until = proactive.time.monotonic() + 600
-    state.buffer.append(
-        proactive.channel_message_from_hikari(_hikari_message(id=555))
-    )
-    scheduled = []
-    monkeypatch.setattr(
-        proactive, "_schedule_wake", lambda s: scheduled.append(s)
-    )
-    original_activate = wake_setup.adapter.activate
-
-    async def activate_with_midrun_chatter(context):
-        if len(wake_setup.adapter.contexts) == 0:
-            state.buffer.append(
-                proactive.channel_message_from_hikari(
-                    _hikari_message(id=778)
-                )
-            )
-        return await original_activate(context)
-
-    wake_setup.adapter.activate = activate_with_midrun_chatter
-    await proactive._run_wake_guarded(state)
-
-    assert len(wake_setup.adapter.contexts) == 1
-    assert scheduled == [state]
-
-
-async def test_followup_leaves_passive_channels_to_the_sweep(
-    wake_setup, monkeypatch
-):
-    state = wake_setup.runtime.state_for(2, 1)
-    state.buffer.append(
-        proactive.channel_message_from_hikari(_hikari_message(id=555))
-    )
-    scheduled = []
-    monkeypatch.setattr(
-        proactive, "_schedule_wake", lambda s: scheduled.append(s)
-    )
-    original_activate = wake_setup.adapter.activate
-
-    async def activate_with_midrun_chatter(context):
-        if len(wake_setup.adapter.contexts) == 0:
-            state.buffer.append(
-                proactive.channel_message_from_hikari(
-                    _hikari_message(id=778)
-                )
-            )
-        return await original_activate(context)
-
-    wake_setup.adapter.activate = activate_with_midrun_chatter
-    await proactive._run_wake_guarded(state)
-
-    assert len(wake_setup.adapter.contexts) == 1
-    assert scheduled == []
-    assert [m.id for m in state.buffer] == ["778"]
-
-
-# --- mid-run ticker summaries ------------------------------------------------
-
-
-class _StubSkim:
-    def __init__(self):
-        self.transcripts: list[str] = []
-
-    async def skim(self, transcript):
-        self.transcripts.append(transcript)
-        return "grouped summary", {
-            "input_tokens": 40, "output_tokens": 8, "cache_read_tokens": 0,
-        }
-
-
-async def test_midrun_summary_groups_unseen_messages(wake_setup, monkeypatch):
-    skim = _StubSkim()
-    monkeypatch.setattr(wake_setup.runtime, "skim", lambda: skim)
-    state = wake_setup.runtime.state_for(2, 1)
-    for message_id, content in (
-        (601, "plain chatter"),
-        (602, "engaged separately"),
-        (603, "already consumed"),
-    ):
-        state.buffer.append(
-            proactive.channel_message_from_hikari(
-                _hikari_message(id=message_id, content=content)
-            )
-        )
-    state.engaged_ids.add("602")
-    state.consumed_ids.add("603")
-
-    await proactive._push_midrun_summary(state)
-
-    notification = state.queue.items[-1]
-    assert notification.kind == "new_messages"
-    assert notification.message_ids == ("601",)
-    assert "grouped summary" in notification.body
-    assert state.notified_ids == {"601"}
-    assert state.midrun_usage[wake_setup.runtime.watcher_model_id] == {
-        "input_tokens": 40, "output_tokens": 8, "cache_read_tokens": 0,
-    }
-
-    # Nothing new since the last tick: no second notification, no skim call.
-    await proactive._push_midrun_summary(state)
-    assert len([n for n in state.queue.items if n.kind == "new_messages"]) == 1
-    assert len(skim.transcripts) == 1
 
 
 # --- memory injection --------------------------------------------------------
 
 
 def test_render_memory_block_composes_known_sections():
-    note = SimpleNamespace(channel_name="#general", channel_id="1",
-                            text="alice is benchmarking her parser")
+    note = SimpleNamespace(
+        channel_name="#general", channel_id="1", text="alice is benchmarking her parser"
+    )
     block = proactive.render_memory_block(
         long_term_memory="This guild loves rust.",
         long_term_updated_at=datetime(2026, 8, 17, tzinfo=UTC),
@@ -718,21 +640,28 @@ def test_render_memory_block_composes_known_sections():
 
 
 def test_render_memory_block_empty_when_nothing_known():
-    assert proactive.render_memory_block(
-        long_term_memory=None, long_term_updated_at=None, notes=(),
-        topic=None, channel_notes=None,
-    ) == ""
+    assert (
+        proactive.render_memory_block(
+            long_term_memory=None,
+            long_term_updated_at=None,
+            notes=(),
+            topic=None,
+            channel_notes=None,
+        )
+        == ""
+    )
 
 
 async def test_wake_injects_memory_hourly_not_per_wake(wake_setup, monkeypatch):
     captured_kwargs = []
-    adapter = wake_setup.adapter
+    consumer = wake_setup.consumer
 
     def capturing_factory(**kwargs):
         captured_kwargs.append(kwargs)
-        return adapter
+        consumer.queue = kwargs["notification_queue"]
+        return consumer
 
-    monkeypatch.setattr(proactive, "TwoPassAdapter", capturing_factory)
+    monkeypatch.setattr(proactive, "AgentConsumer", capturing_factory)
 
     async def fake_memory(run, state):
         return "YOUR MEMORY: the guild loves rust"
@@ -740,17 +669,13 @@ async def test_wake_injects_memory_hourly_not_per_wake(wake_setup, monkeypatch):
     monkeypatch.setattr(proactive, "load_memory_block", fake_memory)
 
     state = wake_setup.runtime.state_for(2, 1)
-    state.buffer.append(
-        proactive.channel_message_from_hikari(_hikari_message(id=555))
-    )
-    await proactive.run_wake(state)
+    state.buffer.append(proactive.channel_message_from_hikari(_hikari_message(id=555)))
+    await _produce_and_consume(state)
     assert captured_kwargs[-1]["brief_preamble"].startswith("YOUR MEMORY")
 
     # A second wake inside the hour carries no memory block.
-    state.buffer.append(
-        proactive.channel_message_from_hikari(_hikari_message(id=556))
-    )
-    await proactive.run_wake(state)
+    state.buffer.append(proactive.channel_message_from_hikari(_hikari_message(id=556)))
+    await _produce_and_consume(state)
     assert captured_kwargs[-1]["brief_preamble"] == ""
 
 
@@ -788,13 +713,9 @@ async def test_cursor_round_trips_with_guild_id():
 
 async def test_wake_advances_the_cursor_to_newest_new_message(persistence_setup):
     state = persistence_setup.runtime.state_for(2, 1)
-    state.buffer.append(
-        proactive.channel_message_from_hikari(_hikari_message(id=555))
-    )
-    state.buffer.append(
-        proactive.channel_message_from_hikari(_hikari_message(id=556))
-    )
-    await proactive.run_wake(state)
+    state.buffer.append(proactive.channel_message_from_hikari(_hikari_message(id=555)))
+    state.buffer.append(proactive.channel_message_from_hikari(_hikari_message(id=556)))
+    await _produce_and_consume(state)
     cursor = await persistence_setup.store.read_cursor(1)
     assert cursor == {"guild_id": "2", "last_message_id": "556"}
 
@@ -808,9 +729,13 @@ async def test_recovery_wakes_enabled_channels_on_missed_messages(
     fresh = datetime.now(UTC)
     missed = [
         _hikari_message(id=501, created_at=fresh),
-        _hikari_message(id=502, created_at=fresh, author=SimpleNamespace(
-            id=999, username="smarter-bot", global_name=None, is_bot=True
-        )),  # bot-authored: excluded from catch-up
+        _hikari_message(
+            id=502,
+            created_at=fresh,
+            author=SimpleNamespace(
+                id=999, username="smarter-bot", global_name=None, is_bot=True
+            ),
+        ),  # bot-authored: excluded from catch-up
         _hikari_message(
             id=499, created_at=fresh - timedelta(hours=2)
         ),  # older than the catch-up age cap: excluded
@@ -818,32 +743,83 @@ async def test_recovery_wakes_enabled_channels_on_missed_messages(
     persistence_setup.bot.rest.fetch_messages = (
         lambda channel_id, after=None: _FakeIterator(missed)
     )
-    woken = []
+    produced = []
 
-    async def fake_run_wake(state, passive=False):
-        woken.append([m.id for m in state.buffer])
+    async def fake_run_producer(state, passive=False):
+        produced.append(
+            (
+                [m.id for m in state.buffer],
+                [notification.kind for notification in state.queue.items],
+                passive,
+            )
+        )
         state.buffer.clear()
 
-    monkeypatch.setattr(proactive, "run_wake", fake_run_wake)
+    monkeypatch.setattr(proactive, "_run_producer", fake_run_producer)
     await proactive._recover_channels(persistence_setup.runtime)
-    assert woken == [["501"]]
+    assert produced == [(["501"], ["recovery"], True)]
+
+
+async def test_recovery_queues_and_consumes_missed_mention(
+    persistence_setup, monkeypatch
+):
+    await persistence_setup.store.write_cursor(1, guild_id="2", last_message_id="500")
+    missed_mention = _hikari_message(
+        id=501,
+        created_at=datetime.now(UTC),
+        user_mentions_ids=(999,),
+        content="@smarter-bot can you help?",
+    )
+    persistence_setup.bot.rest.fetch_messages = (
+        lambda channel_id, after=None: _FakeIterator([missed_mention])
+    )
+    persistence_setup.runtime._agent_model_id = "stub"
+    persistence_setup.runner.history = []
+    persistence_setup.runner.wake = AsyncMock(
+        return_value=(
+            "handled missed mention",
+            {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0},
+        )
+    )
+    monkeypatch.setattr(proactive, "WatcherProducer", WatcherProducer)
+    monkeypatch.setattr(proactive, "AgentConsumer", AgentConsumer)
+    monkeypatch.setattr(proactive, "load_memory_block", AsyncMock(return_value=""))
+
+    await proactive._recover_channels(persistence_setup.runtime)
+
+    state = persistence_setup.runtime.states[1]
+    engagement = next(
+        notification
+        for notification in state.queue.items
+        if notification.kind == "mention"
+    )
+    assert engagement.message_ids == ("501",)
+
+    await proactive._consumer_loop_iteration(state)
+
+    persistence_setup.runner.wake.assert_awaited_once()
+    brief = persistence_setup.runner.wake.await_args.args[0]
+    assert "You were @mentioned" in brief
+    assert "@smarter-bot can you help?" in brief
+    assert state.queue.items == []
 
 
 async def test_recovery_skips_disabled_channels(persistence_setup, monkeypatch):
-    await persistence_setup.store.write_cursor(
-        1, guild_id="2", last_message_id="500"
-    )
+    await persistence_setup.store.write_cursor(1, guild_id="2", last_message_id="500")
     persistence_setup.service.settings = ProactiveChannelSettings(
-        guild_id="2", channel_id="1", enabled=False, watch_addendum="",
+        guild_id="2",
+        channel_id="1",
+        enabled=False,
+        watch_addendum="",
     )
-    woken = []
+    produced = []
 
-    async def fake_run_wake(state, passive=False):
-        woken.append(state)
+    async def fake_run_producer(state, passive=False):
+        produced.append(state)
 
-    monkeypatch.setattr(proactive, "run_wake", fake_run_wake)
+    monkeypatch.setattr(proactive, "_run_producer", fake_run_producer)
     await proactive._recover_channels(persistence_setup.runtime)
-    assert woken == []
+    assert produced == []
 
 
 async def test_history_store_round_trips_and_survives_garbage():
@@ -869,13 +845,9 @@ def persistence_setup(wake_setup, monkeypatch):
     from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
 
     store = ProactiveHistoryStore(_FakeRedis())
-    monkeypatch.setattr(
-        wake_setup.runtime, "history_store", lambda: store
-    )
+    monkeypatch.setattr(wake_setup.runtime, "history_store", lambda: store)
     runner = SimpleNamespace(history=["fresh"])
-    monkeypatch.setattr(
-        wake_setup.runtime, "agent_runner_for", lambda state: runner
-    )
+    monkeypatch.setattr(wake_setup.runtime, "agent_runner_for", lambda state: runner)
     wake_setup.store = store
     wake_setup.runner = runner
     return wake_setup
@@ -889,20 +861,17 @@ async def test_wake_loads_and_persists_agent_history(persistence_setup):
     await persistence_setup.store.write(1, stored)
 
     state = persistence_setup.runtime.state_for(2, 1)
-    state.buffer.append(
-        proactive.channel_message_from_hikari(_hikari_message(id=555))
-    )
+    state.buffer.append(proactive.channel_message_from_hikari(_hikari_message(id=555)))
 
     async def activate_leaving_history(context):
         # The runner would normally append the turn; simulate that.
-        persistence_setup.runner.history = list(
-            persistence_setup.runner.history
-        ) + [ModelRequest(parts=[UserPromptPart("this wake")])]
-        return persistence_setup.adapter.result
+        persistence_setup.runner.history = list(persistence_setup.runner.history) + [
+            ModelRequest(parts=[UserPromptPart("this wake")])
+        ]
+        return persistence_setup.consumer.result
 
-    persistence_setup.adapter.activate = activate_leaving_history
-    # The stubbed adapter factory must still expose activate.
-    await proactive.run_wake(state)
+    persistence_setup.consumer.consume = activate_leaving_history
+    await _produce_and_consume(state)
 
     # Stored history was loaded into the runner before the wake…
     assert "earlier wake" in str(persistence_setup.runner.history[0])
@@ -916,37 +885,36 @@ async def test_wake_posts_generated_images(persistence_setup):
     from smarter_dev.bot.agents.chat_tools import GeneratedImage
 
     state = persistence_setup.runtime.state_for(2, 1)
-    state.buffer.append(
-        proactive.channel_message_from_hikari(_hikari_message(id=555))
-    )
+    state.buffer.append(proactive.channel_message_from_hikari(_hikari_message(id=555)))
     captured_factory = {}
 
-    original_factory = proactive.TwoPassAdapter
+    original_factory = proactive.AgentConsumer
 
     def factory_with_images(**kwargs):
         captured_factory["deps_factory"] = kwargs["deps_factory"]
-        return persistence_setup.adapter
+        persistence_setup.consumer.queue = kwargs["notification_queue"]
+        return persistence_setup.consumer
 
-    # wake_setup already stubbed TwoPassAdapter; re-stub to capture the factory.
-    import tests.bot.proactive_plugin_test  # noqa: F401 — same module
-
-    proactive.TwoPassAdapter = factory_with_images
+    proactive.AgentConsumer = factory_with_images
     try:
+
         async def activate_generating_image(context):
             deps = captured_factory["deps_factory"](
-                env=None, actions=None, instruction_store=None,
-                skim_transcript=None, budget=None,
+                env=None,
+                actions=None,
+                instruction_store=None,
+                skim_transcript=None,
+                budget=None,
             )
             deps.pending_images.append(
-                GeneratedImage(data=b"png", mime_type="image/png",
-                               filename="art.png")
+                GeneratedImage(data=b"png", mime_type="image/png", filename="art.png")
             )
-            return persistence_setup.adapter.result
+            return persistence_setup.consumer.result
 
-        persistence_setup.adapter.activate = activate_generating_image
-        await proactive.run_wake(state)
+        persistence_setup.consumer.consume = activate_generating_image
+        await _produce_and_consume(state)
     finally:
-        proactive.TwoPassAdapter = original_factory
+        proactive.AgentConsumer = original_factory
 
     calls = persistence_setup.bot.rest.create_message.await_args_list
     # First the text reply, then the image message with attachments.
@@ -954,3 +922,100 @@ async def test_wake_posts_generated_images(persistence_setup):
     image_kwargs = calls[1].kwargs
     assert len(image_kwargs["attachments"]) == 1
     assert image_kwargs["reply"] == 555
+
+
+# --- notification consumer loop --------------------------------------------
+
+
+async def test_consumer_iteration_runs_when_waking_notification_arrives(
+    monkeypatch,
+):
+    state = proactive.ChannelWatchState(guild_id="2", channel_id="1")
+    consumed = []
+
+    async def fake_consume(target_state):
+        consumed.append(target_state)
+
+    monkeypatch.setattr(proactive, "_consume_channel_once", fake_consume)
+    state.queue.push(
+        proactive.mention_notification(
+            proactive.channel_message_from_hikari(
+                _hikari_message(user_mentions_ids=(999,))
+            )
+        )
+    )
+
+    await proactive._consumer_loop_iteration(state)
+
+    assert consumed == [state]
+
+
+async def test_waking_notification_mid_wake_causes_immediate_followup(
+    monkeypatch,
+):
+    state = proactive.ChannelWatchState(guild_id="2", channel_id="1")
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    second_finished = asyncio.Event()
+    calls = 0
+
+    async def fake_consume(target_state):
+        nonlocal calls
+        calls += 1
+        target_state.queue.drain()
+        if calls == 1:
+            first_started.set()
+            await release_first.wait()
+        else:
+            second_finished.set()
+
+    monkeypatch.setattr(proactive, "_consume_channel_once", fake_consume)
+    consumer = asyncio.create_task(proactive._consumer_loop(state))
+    state.queue.push(
+        proactive.mention_notification(
+            proactive.channel_message_from_hikari(
+                _hikari_message(id=555, user_mentions_ids=(999,))
+            )
+        )
+    )
+    await first_started.wait()
+    state.queue.push(
+        proactive.mention_notification(
+            proactive.channel_message_from_hikari(
+                _hikari_message(id=556, user_mentions_ids=(999,))
+            )
+        )
+    )
+    release_first.set()
+    await asyncio.wait_for(second_finished.wait(), timeout=1)
+    consumer.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await consumer
+
+    assert calls == 2
+
+
+async def test_passive_non_waking_producer_result_never_runs_agent(monkeypatch):
+    state = proactive.ChannelWatchState(guild_id="2", channel_id="1")
+    consumed = []
+
+    async def fake_consume(target_state):
+        consumed.append(target_state)
+
+    monkeypatch.setattr(proactive, "_consume_channel_once", fake_consume)
+    state.queue.push(
+        watcher_summary_notification(
+            summary="ordinary chatter",
+            message_ids=["555"],
+            wake=False,
+            created_at=datetime.now(UTC),
+        )
+    )
+    iteration = asyncio.create_task(proactive._consumer_loop_iteration(state))
+    await asyncio.sleep(0)
+
+    assert not iteration.done()
+    assert consumed == []
+    iteration.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await iteration

@@ -11,6 +11,7 @@ summaries that don't wake are deliberately discarded.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import UTC
@@ -158,17 +159,29 @@ class NotificationQueue:
     limit: int = NOTIFICATION_QUEUE_LIMIT
     items: list[Notification] = field(default_factory=list)
     dropped: int = 0
+    _wake_event: asyncio.Event = field(
+        default_factory=asyncio.Event,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def push(self, notification: Notification) -> None:
         self.items.append(notification)
+        if notification.wakes:
+            self._wake_event.set()
         if len(self.items) > self.limit:
             overflow = len(self.items) - self.limit
             self.items = self.items[overflow:]
             self.dropped += overflow
 
+    async def wait_for_wake(self) -> None:
+        await self._wake_event.wait()
+
     def drain(self) -> tuple[list[Notification], int]:
         items, dropped = self.items, self.dropped
         self.items, self.dropped = [], 0
+        self._wake_event.clear()
         return items, dropped
 
 

@@ -3,34 +3,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field
 
-from smarter_dev.bot.proactive.agent import (
-    AgentDeps,
-    KimiAgentRunner,
-    ToolBudget,
-)
-from smarter_dev.bot.proactive.environment import (
-    ChannelEnvironment,
-    InstructionStore,
-    WakeActions,
-)
-from smarter_dev.bot.proactive.notifications import (
-    Notification,
-    NotificationQueue,
-    mention_notification,
-    render_notifications,
-    reply_notification,
-    watcher_summary_notification,
-)
-from smarter_dev.bot.proactive.types import (
-    ActivationContext,
-    ActivationResult,
-)
-from smarter_dev.bot.proactive.watcher import (
-    SkimRunner,
-    WatcherDecision,
-    WatcherRunner,
-)
+from smarter_dev.bot.proactive.agent import AgentDeps
+from smarter_dev.bot.proactive.agent import KimiAgentRunner
+from smarter_dev.bot.proactive.agent import ToolBudget
+from smarter_dev.bot.proactive.environment import ChannelEnvironment
+from smarter_dev.bot.proactive.environment import InstructionStore
+from smarter_dev.bot.proactive.environment import WakeActions
+from smarter_dev.bot.proactive.notifications import Notification
+from smarter_dev.bot.proactive.notifications import NotificationQueue
+from smarter_dev.bot.proactive.notifications import mention_notification
+from smarter_dev.bot.proactive.notifications import render_notifications
+from smarter_dev.bot.proactive.notifications import reply_notification
+from smarter_dev.bot.proactive.notifications import watcher_summary_notification
+from smarter_dev.bot.proactive.types import ActivationContext
+from smarter_dev.bot.proactive.types import ActivationResult
+from smarter_dev.bot.proactive.watcher import SkimRunner
+from smarter_dev.bot.proactive.watcher import WatcherDecision
+from smarter_dev.bot.proactive.watcher import WatcherRunner
 
 WATCHER_CONTEXT_SIZE = 30
 
@@ -118,32 +109,19 @@ def _merge_usage(usage_by_model: dict, model_id: str, usage: dict) -> None:
 
 
 @dataclass
-class TwoPassAdapter:
+class WatcherProducer:
     watcher: WatcherRunner
-    agent_runner: KimiAgentRunner
-    skim: SkimRunner
     instruction_store: InstructionStore
     watcher_model_id: str
-    agent_model_id: str
+    notification_queue: NotificationQueue
     context_size: int = WATCHER_CONTEXT_SIZE
-    # Shown to the watcher so name-mentions ("hey smarter dev…") register as
-    # directed at the bot even without an @.
     bot_display_name: str = "the bot"
-    # Builds the deps object handed to the agent's tools. The default is the
-    # eval's AgentDeps; the production plugin injects a factory that returns
-    # ProactiveDeps carrying the live bot/channel for the parity tools.
-    deps_factory: object = None
-    # Prepended to the wake brief when non-empty. The plugin uses it for the
-    # hourly memory refresh: since the agent's history persists across wakes,
-    # the block only needs to ride one brief per refresh.
-    brief_preamble: str = ""
-    # Queue-only notifications (mode changes, expiries, non-wake watcher
-    # summaries) accumulate here and drain into the next wake's brief. None
-    # means no queue (bare eval runs).
-    notification_queue: NotificationQueue | None = None
+    details: dict = field(default_factory=dict, init=False)
+    wake_produced: bool = field(default=False, init=False)
 
-    async def activate(self, context: ActivationContext) -> ActivationResult:
+    async def produce(self, context: ActivationContext) -> dict[str, dict]:
         usage_by_model: dict[str, dict] = {}
+        self.wake_produced = False
         env = ChannelEnvironment(
             visible=[*context.history, *context.new_messages],
             bot_user_id=context.bot_user_id,
@@ -158,19 +136,19 @@ class TwoPassAdapter:
                 reason="bot mentioned or replied to (deterministic wake)",
                 relevant_message_ids=forced_ids,
                 summary=(
-                    "A new message mentions the bot or replies to one of its "
-                    "messages."
+                    "A new message mentions the bot or replies to one of its messages."
                 ),
             )
             details: dict = {
                 "watcher": {**decision.model_dump(), "deterministic": True}
             }
+            for notification in wake_notifications:
+                self.notification_queue.push(notification)
+            self.wake_produced = True
         else:
             decision, watcher_usage = await self.watcher.decide(
                 instructions=self.instruction_store.current(),
-                context_transcript=env.render(
-                    context.history[-self.context_size :]
-                ),
+                context_transcript=env.render(context.history[-self.context_size :]),
                 new_transcript=env.render(context.new_messages),
                 bot_user_id=context.bot_user_id,
                 bot_display_name=self.bot_display_name,
@@ -180,7 +158,7 @@ class TwoPassAdapter:
             if decision.wake:
                 # Non-waking watcher summaries are deliberately discarded —
                 # only waking activity reaches the agent.
-                wake_notifications.append(
+                self.notification_queue.push(
                     watcher_summary_notification(
                         summary=decision.summary or decision.reason,
                         message_ids=list(decision.relevant_message_ids),
@@ -188,40 +166,71 @@ class TwoPassAdapter:
                         created_at=context.activated_at,
                     )
                 )
+                self.wake_produced = True
+
+        self.details = details
+        return usage_by_model
+
+    async def activate(self, context: ActivationContext) -> dict[str, dict]:
+        return await self.produce(context)
+
+
+@dataclass
+class AgentConsumer:
+    agent_runner: KimiAgentRunner
+    skim: SkimRunner
+    instruction_store: InstructionStore
+    agent_model_id: str
+    notification_queue: NotificationQueue
+    watcher_model_id: str | None = None
+    # Builds the deps object handed to the agent's tools. The default is the
+    # eval's AgentDeps; the production plugin injects a factory that returns
+    # ProactiveDeps carrying the live bot/channel for the parity tools.
+    deps_factory: object | None = None
+    # Prepended to the wake brief when non-empty. The plugin uses it for the
+    # hourly memory refresh: since the agent's history persists across wakes,
+    # the block only needs to ride one brief per refresh.
+    brief_preamble: str = ""
+
+    async def consume(self, context: ActivationContext) -> ActivationResult:
+        usage_by_model: dict[str, dict] = {}
+        env = ChannelEnvironment(
+            visible=[*context.history, *context.new_messages],
+            bot_user_id=context.bot_user_id,
+        )
 
         actions = WakeActions()
-        if decision.wake:
 
-            async def skim_transcript(transcript: str) -> str:
-                text, skim_usage = await self.skim.skim(transcript)
-                _merge_usage(usage_by_model, self.watcher_model_id, skim_usage)
-                return text
+        async def skim_transcript(transcript: str) -> str:
+            text, skim_usage = await self.skim.skim(transcript)
+            if self.watcher_model_id is None:
+                raise ValueError(
+                    "watcher_model_id is required to attribute skim usage"
+                )
+            _merge_usage(usage_by_model, self.watcher_model_id, skim_usage)
+            return text
 
-            build_deps = self.deps_factory or AgentDeps
-            deps = build_deps(
-                env=env,
-                actions=actions,
-                instruction_store=self.instruction_store,
-                skim_transcript=skim_transcript,
-                budget=ToolBudget(),
-            )
-            pending, dropped = (
-                self.notification_queue.drain()
-                if self.notification_queue is not None
-                else ([], 0)
-            )
-            brief = build_wake_brief(
-                pending + wake_notifications, dropped, self.instruction_store
-            )
-            if self.brief_preamble:
-                brief = f"{self.brief_preamble}\n\n{brief}"
-            note, agent_usage = await self.agent_runner.wake(brief, deps)
-            _merge_usage(usage_by_model, self.agent_model_id, agent_usage)
-            details["agent"] = {
+        build_deps = self.deps_factory or AgentDeps
+        deps = build_deps(
+            env=env,
+            actions=actions,
+            instruction_store=self.instruction_store,
+            skim_transcript=skim_transcript,
+            budget=ToolBudget(),
+        )
+        pending, dropped = self.notification_queue.drain()
+        brief = build_wake_brief(pending, dropped, self.instruction_store)
+        if self.brief_preamble:
+            brief = f"{self.brief_preamble}\n\n{brief}"
+        note, agent_usage = await self.agent_runner.wake(brief, deps)
+        _merge_usage(usage_by_model, self.agent_model_id, agent_usage)
+        details = {
+            "agent": {
                 "tool_calls": deps.budget.used,
                 "note": str(note)[:300],
-            }
-            details["watch_instruction_updates"] = self.instruction_store.updates
+            },
+            "watch_instruction_updates": self.instruction_store.updates,
+        }
 
         totals = {
             key: sum(entry[key] for entry in usage_by_model.values())
@@ -236,4 +245,89 @@ class TwoPassAdapter:
             reactions=tuple(actions.reactions),
             usage_by_model=usage_by_model,
             details=details,
+        )
+
+    async def activate(self, context: ActivationContext) -> ActivationResult:
+        return await self.consume(context)
+
+
+@dataclass
+class TwoPassAdapter:
+    watcher: WatcherRunner
+    agent_runner: KimiAgentRunner
+    skim: SkimRunner
+    instruction_store: InstructionStore
+    watcher_model_id: str
+    agent_model_id: str
+    context_size: int = WATCHER_CONTEXT_SIZE
+    # Shown to the watcher so name-mentions ("hey smarter dev…") register as
+    # directed at the bot even without an @.
+    bot_display_name: str = "the bot"
+    deps_factory: object | None = None
+    brief_preamble: str = ""
+    # Queue-only notifications (mode changes, expiries, non-wake watcher
+    # summaries) accumulate here and drain into the next wake's brief. None
+    # gives bare eval runs an isolated queue for each activation.
+    notification_queue: NotificationQueue | None = None
+
+    async def activate(self, context: ActivationContext) -> ActivationResult:
+        notification_queue = self.notification_queue or NotificationQueue()
+        producer = WatcherProducer(
+            watcher=self.watcher,
+            instruction_store=self.instruction_store,
+            watcher_model_id=self.watcher_model_id,
+            notification_queue=notification_queue,
+            context_size=self.context_size,
+            bot_display_name=self.bot_display_name,
+        )
+        usage_by_model = await producer.produce(context)
+        if not producer.wake_produced:
+            totals = {
+                key: sum(entry[key] for entry in usage_by_model.values())
+                for key in (
+                    "input_tokens",
+                    "output_tokens",
+                    "cache_read_tokens",
+                )
+            }
+            return ActivationResult(
+                responses=[],
+                input_tokens=totals["input_tokens"],
+                output_tokens=totals["output_tokens"],
+                cache_read_tokens=totals["cache_read_tokens"],
+                model_id=self.agent_model_id,
+                usage_by_model=usage_by_model,
+                details=producer.details,
+            )
+
+        consumer = AgentConsumer(
+            agent_runner=self.agent_runner,
+            skim=self.skim,
+            instruction_store=self.instruction_store,
+            agent_model_id=self.agent_model_id,
+            notification_queue=notification_queue,
+            watcher_model_id=self.watcher_model_id,
+            deps_factory=self.deps_factory,
+            brief_preamble=self.brief_preamble,
+        )
+        agent_result = await consumer.consume(context)
+        for model_id, usage in (agent_result.usage_by_model or {}).items():
+            _merge_usage(usage_by_model, model_id, usage)
+        totals = {
+            key: sum(entry[key] for entry in usage_by_model.values())
+            for key in (
+                "input_tokens",
+                "output_tokens",
+                "cache_read_tokens",
+            )
+        }
+        return ActivationResult(
+            responses=agent_result.responses,
+            input_tokens=totals["input_tokens"],
+            output_tokens=totals["output_tokens"],
+            cache_read_tokens=totals["cache_read_tokens"],
+            model_id=self.agent_model_id,
+            reactions=agent_result.reactions,
+            usage_by_model=usage_by_model,
+            details={**producer.details, **(agent_result.details or {})},
         )

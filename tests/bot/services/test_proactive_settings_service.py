@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from datetime import UTC
+from datetime import datetime
+
 import pytest
 
 from smarter_dev.bot.services.exceptions import APIError
@@ -101,3 +104,39 @@ async def test_set_watch_addendum_preserves_switch(service, mock_api_client):
         PATH, json_data={"enabled": True, "watch_addendum": "new criteria"}
     )
     assert settings.watch_addendum == "new criteria"
+
+
+async def test_record_wake_usage_posts_split_ledger_payload(
+    service, mock_api_client
+):
+    metered_at = datetime(2026, 8, 30, 12, 30, tzinfo=UTC)
+    entries = [
+        {
+            "model_id": "z-ai/glm-5.3-flash",
+            "operation": "watcher",
+            "input_tokens": 100,
+            "output_tokens": 5,
+            "cache_read_tokens": 20,
+        }
+    ]
+
+    await service.record_wake_usage(
+        GUILD,
+        CHANNEL,
+        wake_id="watcher-run-id",
+        metered_at=metered_at,
+        passive=True,
+        responses=0,
+        entries=entries,
+    )
+
+    mock_api_client.post.assert_awaited_once_with(
+        f"{PATH}/usage",
+        json_data={
+            "wake_id": "watcher-run-id",
+            "metered_at": metered_at.isoformat(),
+            "passive": True,
+            "responses": 0,
+            "entries": entries,
+        },
+    )
