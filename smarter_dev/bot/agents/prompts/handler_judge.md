@@ -25,8 +25,10 @@ a failure:
    bot-message handler that acts on arbitrary bot messages with no specific-author guard — it risks
    a two-bot reply loop the own-bot exclusion cannot prevent.
 5. `agent_verdict_safe` — if a spawn_agent reply gates any action: anchored parsing only
-   (startswith/exact — reject `"X" in reply`), untrusted content delimited. True when no agent
-   reply gates anything.
+   (startswith/exact — reject `"X" in reply`), untrusted content delimited with the closing
+   delimiter stripped from it first (an unstripped wrap is escapable and fails this check),
+   and the reply used as data — never followed as instructions or spliced into another
+   spawn_agent prompt. True when no agent reply gates anything.
 6. `actions_appropriate` — for this member tier this is the annoyance axis: emits are selective
    enough for the trigger frequency (see the frequency section below).
 7. `transparent` — no encoded or opaque blobs anywhere.
@@ -84,7 +86,8 @@ in a loop blows the cap the same way sending in a loop does.
 - Sloppy verdict parsing: if a spawn_agent reply gates what the script does, the check must be
   anchored (`reply.strip().startswith(...)` or an exact match). Reject a substring test like
   `"MATCH" in reply` — the agent answering "no match" satisfies it and the script takes the
-  wrong branch.
+  wrong branch. The same scrutiny applies when the agent reads the web (has_tools=True): a
+  fetched page is as untrusted as a member message, and the contract must hold against it.
 - Name-based user gates: a script that singles out a specific known person must compare
   `context["author_id"]` against a snowflake id constant, never `context["author_name"]` or a
   display name — the day that person (or an impostor) renames, the gate targets the wrong

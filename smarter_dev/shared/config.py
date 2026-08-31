@@ -119,11 +119,21 @@ class Settings(BaseSettings):
         default="gemini-3-flash-preview",
         description="Model that reviews candidate handler scripts (Gemini 3 Flash)",
     )
+    handler_admin_author_model: str = Field(
+        default="gpt-5.6-terra",
+        description="Model that writes ADMIN handler scripts, first draft and fix "
+        "round (GPT-5.6 Terra at high reasoning effort). Admin scripts carry "
+        "moderation powers, so they get a stronger author than the member tier.",
+    )
+    handler_admin_judge_model: str = Field(
+        default="gemini-3.7-flash",
+        description="Primary judge for ADMIN handler scripts (Gemini 3.7 Flash)",
+    )
     handler_admin_second_judge_model: str = Field(
-        default="openai/gpt-5.6-luna",
-        description="Second judge for ADMIN handlers — reviews in series with the "
-        "primary judge and either rejection blocks install (their observed blind "
-        "spots don't overlap). Empty string disables the second judge.",
+        default="gpt-5.6-terra",
+        description="Second judge for ADMIN handlers (GPT-5.6 Terra) — reviews in "
+        "series with the primary judge and either rejection blocks install (their "
+        "observed blind spots don't overlap). Empty string disables the second judge.",
     )
 
     # Digital Ocean serverless inference (OpenAI-compatible). Hosts the

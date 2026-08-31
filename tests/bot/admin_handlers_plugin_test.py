@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
+
+from smarter_dev.bot.agents import handler_authoring
 from smarter_dev.bot.agents.handler_authoring import AdminCreationResult
+from smarter_dev.bot.plugins import admin_handlers
+from smarter_dev.bot.plugins.admin_handlers import _run_create_admin_handler
 from smarter_dev.bot.plugins.admin_handlers import install_admin_result
 
 
@@ -131,3 +136,80 @@ async def test_install_relays_api_failure():
     api.post_response = _Resp(409, text="name taken")
     line = await install_admin_result(api, "G1", "A1", _result())
     assert "Failed" in line and "name taken" in line
+
+
+# -- the /adminhandler create flow ---------------------------------------------
+
+
+class _FakeAuthor:
+    id = "A1"
+
+
+class _FakeCtx:
+    guild_id = "G1"
+    author = _FakeAuthor()
+
+    def __init__(self):
+        self.deferred = 0
+        self.edits = []
+
+    async def respond(self, *args, **kwargs):
+        self.deferred += 1
+
+    async def edit_last_response(self, text):
+        self.edits.append(text)
+
+
+def _wire_create_flow(monkeypatch, pipeline):
+    async def allow_admin(ctx, message):
+        return False
+
+    async def no_handlers(api, guild_id):
+        return []
+
+    monkeypatch.setattr(admin_handlers, "deny_if_not_admin", allow_admin)
+    monkeypatch.setattr(admin_handlers, "_api_client", lambda: _FakeAPI())
+    monkeypatch.setattr(
+        admin_handlers, "_guild_admin_handlers_with_scripts", no_handlers
+    )
+    monkeypatch.setattr(handler_authoring, "run_admin_creation_pipeline", pipeline)
+
+
+async def test_create_relays_pipeline_progress_to_the_admin(monkeypatch):
+    async def pipeline(*, progress, **kwargs):
+        await progress("First draft needs work — the reviewer rejected it.")
+        return _result()
+
+    _wire_create_flow(monkeypatch, pipeline)
+    ctx = _FakeCtx()
+
+    await _run_create_admin_handler(ctx, "alert mods about raids")
+
+    assert any("First draft needs work" in text for text in ctx.edits)
+    assert "Created" in ctx.edits[-1]
+
+
+async def test_create_reports_a_rejected_result(monkeypatch):
+    async def pipeline(**kwargs):
+        return AdminCreationResult(ok=False, error="the reviewer rejected it: nope")
+
+    _wire_create_flow(monkeypatch, pipeline)
+    ctx = _FakeCtx()
+
+    await _run_create_admin_handler(ctx, "alert mods about raids")
+
+    assert ctx.edits[-1] == "Couldn't do it — the reviewer rejected it: nope"
+
+
+async def test_create_reports_a_pipeline_crash_instead_of_hanging(monkeypatch):
+    async def pipeline(**kwargs):
+        raise RuntimeError("provider exploded")
+
+    _wire_create_flow(monkeypatch, pipeline)
+    ctx = _FakeCtx()
+
+    with pytest.raises(RuntimeError):
+        await _run_create_admin_handler(ctx, "alert mods about raids")
+
+    assert ctx.deferred == 1
+    assert any("Something broke" in text for text in ctx.edits)
