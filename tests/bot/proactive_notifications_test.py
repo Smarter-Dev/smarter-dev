@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC
 from datetime import datetime
 
@@ -110,6 +111,48 @@ def test_queue_caps_and_reports_drops():
     assert "cause 4" in items[-1].body  # newest kept, oldest dropped
     # Drained means empty.
     assert queue.drain() == ([], 0)
+
+
+async def test_waking_push_sets_queue_wake_event():
+    queue = notifications.NotificationQueue()
+
+    queue.push(notifications.mention_notification(_message(mention=True)))
+
+    assert queue._wake_event.is_set()
+    await asyncio.wait_for(queue.wait_for_wake(), timeout=0.1)
+
+
+def test_non_waking_push_does_not_set_queue_wake_event():
+    queue = notifications.NotificationQueue()
+
+    queue.push(notifications.mode_change_notification(
+        mode="passive", cause="quiet update", until=None, created_at=NOW,
+    ))
+
+    assert not queue._wake_event.is_set()
+
+
+def test_queue_drain_clears_wake_event():
+    queue = notifications.NotificationQueue()
+    queue.push(notifications.mention_notification(_message(mention=True)))
+
+    queue.drain()
+
+    assert not queue._wake_event.is_set()
+
+
+async def test_waking_push_during_in_flight_consumer_signals_next_loop():
+    queue = notifications.NotificationQueue()
+    queue.push(notifications.mention_notification(_message(mention=True)))
+    await queue.wait_for_wake()
+    queue.drain()
+
+    queue.push(notifications.mention_notification(
+        _message(message_id="556", mention=True)
+    ))
+
+    await asyncio.wait_for(queue.wait_for_wake(), timeout=0.1)
+    assert queue._wake_event.is_set()
 
 
 def test_render_notifications_is_ordered_and_notes_drops():
