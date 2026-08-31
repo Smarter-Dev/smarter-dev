@@ -5,12 +5,14 @@ in the live user-interaction context — so a *triggered* execution, which runs 
 the worker, structurally has no path to this code. That is the "triggered
 executions can't author" invariant, enforced by where the code lives.
 
-Pipeline: Author (Gemini 3 Flash) sees the existing named handlers and returns
-a structured plan — edit one of them or create a new, named one — or marks the
-request infeasible; the host-side :mod:`~smarter_dev.web.handler_lint` rejects
-opaque blobs / dynamic execution; Judge (Gemini 3 Flash) reviews the script as
-inert data and APPROVEs or REJECTs. The author and judge callables are
-injectable so the orchestration is unit-testable without any model calls.
+Pipeline: the Author (member tier Gemini 3 Flash; admin tier GPT-5.6 Terra at
+high reasoning) sees the existing named handlers and returns a structured plan
+— edit one of them or create a new, named one — or marks the request
+infeasible; the host-side :mod:`~smarter_dev.web.handler_lint` rejects opaque
+blobs / dynamic execution; the Judge (member tier Gemini 3 Flash; admin tier a
+Gemini 3.7 Flash + Terra panel, any-reject-wins) reviews the script as inert
+data and APPROVEs or REJECTs. The author and judge callables are injectable so
+the orchestration is unit-testable without any model calls.
 """
 
 from __future__ import annotations
@@ -543,13 +545,13 @@ def _build_google_model(model_id: str) -> GoogleModel:
     return GoogleModel(model_id, provider=GoogleProvider(api_key=api_key))
 
 
-def _build_judge_model(model_id: str) -> Model:
-    """Build the model behind a judge, honoring the catalog's provider routing.
+def _build_configured_model(model_id: str) -> Model:
+    """Build a configured author/judge model, honoring the catalog's routing.
 
-    Judge models are configured by wire id. A catalog id routes through the
-    shared model router (Luna, the admin second judge's default, is served via
-    OpenRouter); anything else is assumed to be a Gemini id, matching the
-    author/primary-judge defaults.
+    These models are configured by wire id. A catalog id routes through the
+    shared model router (Terra, the admin author and second judge default, is
+    served via OpenAI); anything else is assumed to be a Gemini id, matching the
+    member-tier author/judge defaults.
     """
     catalog_model = next(
         (model for model in MODEL_CATALOG if model.model_id == model_id), None
@@ -559,20 +561,24 @@ def _build_judge_model(model_id: str) -> Model:
     return _build_google_model(model_id)
 
 
-def _judge_model_settings(model_id: str) -> ModelSettings:
-    """Reasoning settings for a judge: MEDIUM effort in each provider's dialect."""
+def _handler_model_settings(
+    model_id: str, reasoning_level: ReasoningLevel
+) -> ModelSettings:
+    """Reasoning settings at ``reasoning_level`` in the model's own dialect."""
     catalog_model = next(
         (model for model in MODEL_CATALOG if model.model_id == model_id), None
     )
     if catalog_model is not None:
-        settings = model_settings_for(catalog_model, ReasoningLevel.MEDIUM)
+        settings = model_settings_for(catalog_model, reasoning_level)
         if settings is not None:
             return settings
     return _HANDLER_THINKING
 
 
-# Author and judge both think at MEDIUM: writing a sandbox-correct script and
-# catching subtle violations (e.g. a disallowed import) is worth the deliberation.
+# Member-tier author and judge both think at MEDIUM: writing a sandbox-correct
+# script and catching subtle violations (e.g. a disallowed import) is worth the
+# deliberation. This is also the fallback for a model outside the catalog, which
+# has no per-provider reasoning mapping. The admin author thinks at HIGH.
 _HANDLER_THINKING = GoogleModelSettings(
     google_thinking_config={"thinking_level": "MEDIUM"}
 )
@@ -814,13 +820,16 @@ _admin_judge_agents: dict[str, Agent[None, JudgeVerdict]] = {}
 def _get_admin_author_agent() -> Agent[_AdminAuthorDeps, AdminHandlerPlan]:
     global _admin_author_agent
     if _admin_author_agent is None:
+        admin_author_model = get_settings().handler_admin_author_model
         _admin_author_agent = Agent(
-            _build_google_model(get_settings().handler_author_model),
+            _build_configured_model(admin_author_model),
             deps_type=_AdminAuthorDeps,
             output_type=AdminHandlerPlan,
             system_prompt=ADMIN_AUTHOR_PROMPT,
             tools=[_list_channels],
-            model_settings=_HANDLER_THINKING,
+            model_settings=_handler_model_settings(
+                admin_author_model, ReasoningLevel.HIGH
+            ),
         )
     return _admin_author_agent
 
@@ -828,10 +837,10 @@ def _get_admin_author_agent() -> Agent[_AdminAuthorDeps, AdminHandlerPlan]:
 def _get_admin_judge_agent(model_id: str) -> Agent[None, JudgeVerdict]:
     if model_id not in _admin_judge_agents:
         _admin_judge_agents[model_id] = Agent(
-            _build_judge_model(model_id),
+            _build_configured_model(model_id),
             output_type=JudgeVerdict,
             system_prompt=ADMIN_JUDGE_PROMPT,
-            model_settings=_judge_model_settings(model_id),
+            model_settings=_handler_model_settings(model_id, ReasoningLevel.MEDIUM),
         )
     return _admin_judge_agents[model_id]
 
@@ -839,7 +848,10 @@ def _get_admin_judge_agent(model_id: str) -> Agent[None, JudgeVerdict]:
 def _admin_judge_models() -> list[str]:
     """The admin judge panel: primary + second judge, deduplicated."""
     settings = get_settings()
-    models = [settings.handler_judge_model, settings.handler_admin_second_judge_model]
+    models = [
+        settings.handler_admin_judge_model,
+        settings.handler_admin_second_judge_model,
+    ]
     return list(dict.fromkeys(m for m in models if m))
 
 
@@ -899,36 +911,22 @@ async def _empty_channel_lister() -> list[dict]:
     return []
 
 
-async def run_admin_creation_pipeline(
+async def _draft_admin_plan(
     *,
+    author: AdminAuthor | None,
     request: str,
     existing_handlers: list[dict],
-    channel_lister: ChannelLister | None = None,
-    author: AdminAuthor | None = None,
-    judge: Judge | None = None,
-    progress: Progress | None = None,
-    now_utc: datetime | None = None,
-) -> AdminCreationResult:
-    """Admin author (plans edit-vs-create + trigger/scope/script) -> lint -> judge.
-
-    The author sees the guild's existing named admin handlers and either edits
-    one (by handler_id) or creates a new, named one.
-    """
-    judge = judge or _default_admin_judge
-    channel_lister = channel_lister or _empty_channel_lister
-    author_time_utc = _current_utc(now_utc)
-
-    logger.info(
-        "admin creation pipeline: request=%r existing=%d",
-        request,
-        len(existing_handlers),
-    )
+    channel_lister: ChannelLister,
+    current_time_utc: datetime,
+    draft_label: str,
+) -> AdminHandlerPlan:
+    """Run the admin author once (the injected one when given) and log its plan."""
     if author is None:
         plan = await _default_admin_author(
             request=request,
             existing_handlers=existing_handlers,
             channel_lister=channel_lister,
-            current_time_utc=author_time_utc,
+            current_time_utc=current_time_utc,
         )
     else:
         plan = await author(
@@ -937,8 +935,9 @@ async def run_admin_creation_pipeline(
             channel_lister=channel_lister,
         )
     logger.info(
-        "admin author plan: feasible=%s action=%s target=%s name=%s trigger=%s "
+        "admin author plan (%s): feasible=%s action=%s target=%s name=%s trigger=%s "
         "channels=%s settings=%s\n%s",
+        draft_label,
         plan.feasible,
         plan.action,
         plan.target_handler_id,
@@ -948,13 +947,66 @@ async def run_admin_creation_pipeline(
         plan.settings,
         plan.script,
     )
+    return plan
 
-    if not plan.feasible:
-        return AdminCreationResult(
-            ok=False,
-            error=f"the author couldn't build this: {plan.error or 'not feasible'}",
-        )
 
+def _build_admin_revision_request(
+    *, request: str, plan: AdminHandlerPlan, feedback: str
+) -> str:
+    """The fix-round request: the rejected draft plus what the review said.
+
+    Passed to the author as its ``request`` — the author only ever sees one
+    prompt string. The judge keeps reviewing against the ORIGINAL request.
+    """
+    return "\n\n".join(
+        [
+            "This is a REVISION of your own previous draft. It was rejected by the "
+            "review below. Fix exactly what the review reports and keep the "
+            "original intent — return a complete plan and script, not a diff.",
+            f"Original request:\n{request}",
+            "Your rejected draft:\n"
+            f"- action: {plan.action}\n"
+            f"- target_handler_id: {plan.target_handler_id}\n"
+            f"- name: {plan.name}\n"
+            f"- trigger: {plan.trigger_type}\n"
+            f"- channel_ids: {json.dumps(plan.channel_ids)}\n"
+            f"- settings: {json.dumps(plan.settings, sort_keys=True)}\n"
+            "- script:\n---\n" + plan.script + "\n---",
+            f"Why it was rejected:\n{feedback}",
+        ]
+    )
+
+
+@dataclass
+class _DraftRejection:
+    """Why a draft was rejected, and which retry budget the fix comes out of.
+
+    A lint rejection (over-length, banned construct, compile error) is
+    mechanical: the author has to trim or rewrite mechanics, not rethink the
+    behavior. A resolve error, schedule error or judge rejection is semantic.
+    The two get separate budgets so a trimming round can't consume the round a
+    real review rejection needs.
+    """
+
+    is_mechanical: bool
+    feedback: str
+
+
+async def _validate_admin_draft(
+    *,
+    plan: AdminHandlerPlan,
+    request: str,
+    existing_handlers: list[dict],
+    judge: Judge,
+    progress: Progress | None,
+    now_utc: datetime | None,
+) -> tuple[_DraftRejection, None] | tuple[None, AdminCreationResult]:
+    """Take one admin draft through resolve -> lint -> schedule -> judge.
+
+    Returns ``(rejection, None)`` when a stage rejects the draft — carrying the
+    sentence the admin is shown and the author is sent back to fix, plus which
+    budget it spends — or ``(None, result)`` for an approved draft.
+    """
     error, resolved = _resolve_plan_target(
         action=plan.action,
         target_handler_id=plan.target_handler_id,
@@ -966,14 +1018,17 @@ async def run_admin_creation_pipeline(
     )
     if error is not None:
         logger.info("admin plan rejected: %s", error)
-        return AdminCreationResult(ok=False, error=error)
+        return _DraftRejection(is_mechanical=False, feedback=error), None
 
     script = _strip_code_fences(plan.script)
     reason = lint_script(script)
     if reason is not None:
         logger.info("admin lint rejected script: %s", reason)
-        return AdminCreationResult(
-            ok=False, error=f"the safety lint rejected it: {reason}"
+        return (
+            _DraftRejection(
+                is_mechanical=True, feedback=f"the safety lint rejected it: {reason}"
+            ),
+            None,
         )
 
     if resolved.trigger_type in ("schedule", "timer"):
@@ -984,8 +1039,11 @@ async def run_admin_creation_pipeline(
                 uses_agent=script_uses_agent(script),
             )
         except ScheduleError as exc:
-            return AdminCreationResult(
-                ok=False, error=f"invalid schedule settings: {exc}"
+            return (
+                _DraftRejection(
+                    is_mechanical=False, feedback=f"invalid schedule settings: {exc}"
+                ),
+                None,
             )
 
     if progress is not None:
@@ -1006,11 +1064,15 @@ async def run_admin_creation_pipeline(
         verdict.reason,
     )
     if verdict_rejects(verdict):
-        return AdminCreationResult(
-            ok=False, error=f"the reviewer rejected it: {rejection_detail(verdict)}"
+        return (
+            _DraftRejection(
+                is_mechanical=False,
+                feedback=f"the reviewer rejected it: {rejection_detail(verdict)}",
+            ),
+            None,
         )
 
-    return AdminCreationResult(
+    return None, AdminCreationResult(
         ok=True,
         action=resolved.action,
         target_handler_id=resolved.target_handler_id,
@@ -1023,3 +1085,124 @@ async def run_admin_creation_pipeline(
         ),
         script=script,
     )
+
+
+def _fix_round_progress_message(
+    *, rejection: _DraftRejection, is_first_draft: bool
+) -> str:
+    """The status line shown while a rejected draft goes back to the author."""
+    opening = (
+        "First draft needs work" if is_first_draft else "That draft still needs work"
+    )
+    closing = (
+        "Sending it back for a quick mechanical fix…"
+        if rejection.is_mechanical
+        else "Sending it back for one round of fixes…"
+    )
+    return f"{opening} — {rejection.feedback} {closing}"
+
+
+async def run_admin_creation_pipeline(
+    *,
+    request: str,
+    existing_handlers: list[dict],
+    channel_lister: ChannelLister | None = None,
+    author: AdminAuthor | None = None,
+    judge: Judge | None = None,
+    progress: Progress | None = None,
+    now_utc: datetime | None = None,
+) -> AdminCreationResult:
+    """Admin author (plans edit-vs-create + trigger/scope/script) -> lint -> judge.
+
+    The author sees the guild's existing named admin handlers and either edits
+    one (by handler_id) or creates a new, named one. A rejected draft goes back
+    to the author with the rejection text, against two independent retry
+    budgets of one round each: MECHANICAL for a lint rejection (over-length,
+    banned construct, compile error) and SEMANTIC for a resolve error, schedule
+    error or judge rejection. A rejection whose own budget is already spent is
+    final, so the author runs at most three times — first draft plus one round
+    per budget, in whatever order the failures happen. An infeasible plan is
+    final in every round: there is no draft to fix.
+    """
+    judge = judge or _default_admin_judge
+    channel_lister = channel_lister or _empty_channel_lister
+    author_time_utc = _current_utc(now_utc)
+
+    logger.info(
+        "admin creation pipeline: request=%r existing=%d",
+        request,
+        len(existing_handlers),
+    )
+    plan = await _draft_admin_plan(
+        author=author,
+        request=request,
+        existing_handlers=existing_handlers,
+        channel_lister=channel_lister,
+        current_time_utc=author_time_utc,
+        draft_label="first draft",
+    )
+
+    mechanical_rounds_left = 1
+    semantic_rounds_left = 1
+    revisions_made = 0
+
+    while True:
+        if not plan.feasible:
+            unbuildable = (
+                f"the author couldn't build this: {plan.error or 'not feasible'}"
+            )
+            if revisions_made:
+                return AdminCreationResult(
+                    ok=False, error=f"even after a round of fixes, {unbuildable}"
+                )
+            return AdminCreationResult(ok=False, error=unbuildable)
+
+        rejection, result = await _validate_admin_draft(
+            plan=plan,
+            request=request,
+            existing_handlers=existing_handlers,
+            judge=judge,
+            progress=progress,
+            now_utc=now_utc,
+        )
+        if result is not None:
+            return result
+
+        rounds_left = (
+            mechanical_rounds_left if rejection.is_mechanical else semantic_rounds_left
+        )
+        if rounds_left == 0:
+            logger.info(
+                "admin draft rejected with no rounds left: %s", rejection.feedback
+            )
+            return AdminCreationResult(
+                ok=False, error=f"even after a round of fixes, {rejection.feedback}"
+            )
+
+        if rejection.is_mechanical:
+            mechanical_rounds_left -= 1
+        else:
+            semantic_rounds_left -= 1
+        logger.info(
+            "admin draft sent back for %s fixes: %s",
+            "mechanical" if rejection.is_mechanical else "semantic",
+            rejection.feedback,
+        )
+        if progress is not None:
+            await progress(
+                _fix_round_progress_message(
+                    rejection=rejection, is_first_draft=revisions_made == 0
+                )
+            )
+
+        revisions_made += 1
+        plan = await _draft_admin_plan(
+            author=author,
+            request=_build_admin_revision_request(
+                request=request, plan=plan, feedback=rejection.feedback
+            ),
+            existing_handlers=existing_handlers,
+            channel_lister=channel_lister,
+            current_time_utc=author_time_utc,
+            draft_label=f"revision {revisions_made}",
+        )

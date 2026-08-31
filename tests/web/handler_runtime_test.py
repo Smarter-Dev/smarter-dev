@@ -132,6 +132,9 @@ class _FakeActor:
     async def timeout_user(self, user_id, duration_seconds=600):
         self.calls.append(("timeout", user_id, duration_seconds)); return "ok"
 
+    async def remove_timeout(self, user_id):
+        self.calls.append(("remove_timeout", user_id)); return "ok"
+
     async def delete_message(self, channel_id, message_id):
         self.calls.append(("delete", channel_id, message_id)); return "ok"
 
@@ -433,6 +436,36 @@ async def test_admin_mod_action_cap():
     assert result.outcome == "cap_exceeded"
     assert result.cap == "mod_actions"
     assert len(actor.calls) == 3
+
+
+async def test_standard_handler_has_no_remove_timeout():
+    # Admin-only, like the timeout it reverses: no actor -> NameError -> error.
+    result, _, _ = await _run('await remove_timeout("U1")\n')
+    assert result.outcome == "error"
+
+
+async def test_admin_remove_timeout_spends_mod_action():
+    actor = _FakeActor()
+    result, _, _ = await _run(
+        'await remove_timeout("U1")\n', budget=admin_budget(), actor=actor
+    )
+    assert result.outcome == "ok", result.error
+    assert actor.calls == [("remove_timeout", "U1")]
+    assert result.usage["mod_actions"] == 1
+
+
+async def test_remove_timeout_budget_is_spent_before_the_actor_call():
+    # A mod_action-triggered fire runs with max_mod_actions=0, so lifting a
+    # timeout must breach BEFORE the REST call — the same rail as timeout_user.
+    actor = _FakeActor()
+    result, _, _ = await _run(
+        'await remove_timeout("U1")\n',
+        budget=HandlerBudget(max_mod_actions=0, max_messages=5),
+        actor=actor,
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "mod_actions"
+    assert actor.calls == []
 
 
 async def test_random_globals_available_without_import():

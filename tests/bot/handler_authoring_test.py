@@ -7,16 +7,23 @@ from __future__ import annotations
 
 from datetime import UTC
 from datetime import datetime
+from types import SimpleNamespace
 
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.openai import OpenAIResponsesModel
 
+from smarter_dev.bot.agents import handler_authoring
 from smarter_dev.bot.agents.handler_authoring import AdminHandlerPlan
 from smarter_dev.bot.agents.handler_authoring import HandlerPlan
 from smarter_dev.bot.agents.handler_authoring import JudgeVerdict
+from smarter_dev.bot.agents.handler_authoring import _HANDLER_THINKING
+from smarter_dev.bot.agents.handler_authoring import _admin_judge_models
 from smarter_dev.bot.agents.handler_authoring import _build_admin_author_prompt
-from smarter_dev.bot.agents.handler_authoring import _build_judge_model
+from smarter_dev.bot.agents.handler_authoring import _build_configured_model
+from smarter_dev.bot.agents.handler_authoring import _handler_model_settings
 from smarter_dev.shared.config import Settings
+from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.bot.agents.handler_authoring import _build_author_prompt
 from smarter_dev.bot.agents.handler_authoring import checklist_failures
 from smarter_dev.bot.agents.handler_authoring import describe_trigger
@@ -657,6 +664,362 @@ async def test_standard_pipeline_rejects_admin_only_trigger():
     assert "invalid trigger" in result.error
 
 
+# -- admin fix round -----------------------------------------------------------
+
+CLEAN_ADMIN_SCRIPT = (
+    'if context["message_content"].startswith("!raid"):\n'
+    '    await send_message("raid reported", "MODCHAT")\n'
+)
+
+LINT_BLOB_SCRIPT = 'x = "{}"\n'.format("QUJDREVG" * 30)
+
+OVERLONG_ADMIN_SCRIPT = CLEAN_ADMIN_SCRIPT + "# padding past the byte cap\n" * 400
+
+
+def _admin_author_drafting(*plans):
+    """An author returning each plan in turn; a call past the last one fails."""
+    requests = []
+
+    async def author(*, request, existing_handlers, channel_lister):
+        requests.append(request)
+        return plans[len(requests) - 1]
+
+    return author, requests
+
+
+def _judge_returning(*verdicts):
+    """A judge returning each verdict in turn, recording its trigger contexts."""
+    contexts = []
+
+    async def judge(script, trigger_context):
+        contexts.append(trigger_context)
+        return verdicts[len(contexts) - 1]
+
+    return judge, contexts
+
+
+def _progress_recorder():
+    messages = []
+
+    async def progress(text):
+        messages.append(text)
+
+    return progress, messages
+
+
+async def test_admin_rejected_draft_goes_back_to_the_author_once():
+    first = _admin_plan(script=ADMIN_SCRIPT)
+    second = _admin_plan(script=CLEAN_ADMIN_SCRIPT)
+    author, requests = _admin_author_drafting(first, second)
+    judge, _ = _judge_returning(
+        _verdict(approved=False, reason="bans every author with no condition"),
+        _verdict(reason="guarded and within caps"),
+    )
+    progress, messages = _progress_recorder()
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=judge,
+        progress=progress,
+    )
+    assert result.ok
+    assert result.script == CLEAN_ADMIN_SCRIPT
+    assert len(requests) == 2
+    # The revision carries the first draft's script and the rejection detail.
+    assert "ban_user" in requests[1]
+    assert "no condition" in requests[1]
+    assert "alert mods about raids" in requests[1]
+    assert any("no condition" in m for m in messages)
+
+
+async def test_admin_fix_round_relays_the_lint_reason():
+    author, requests = _admin_author_drafting(
+        _admin_plan(script=LINT_BLOB_SCRIPT),
+        _admin_plan(script=CLEAN_ADMIN_SCRIPT),
+    )
+    progress, messages = _progress_recorder()
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=_judge_approving(),
+        progress=progress,
+    )
+    assert result.ok
+    assert len(requests) == 2
+    assert "opaque" in requests[1]
+    assert any("opaque" in m for m in messages)
+
+
+async def test_admin_fix_round_relays_a_resolution_error():
+    author, requests = _admin_author_drafting(
+        _admin_plan(name="scam-banner"),
+        _admin_plan(name="raid-alarm", script=CLEAN_ADMIN_SCRIPT),
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=_judge_approving(),
+    )
+    assert result.ok
+    assert result.name == "raid-alarm"
+    assert len(requests) == 2
+    assert "already exists" in requests[1]
+
+
+async def test_admin_fix_round_relays_a_schedule_error():
+    author, requests = _admin_author_drafting(
+        _admin_plan(
+            trigger_type="schedule",
+            name="hourly-audit",
+            settings={"interval_seconds": 30},
+            script='await send_message("audit", "MODCHAT")\n',
+        ),
+        _admin_plan(
+            trigger_type="schedule",
+            name="hourly-audit",
+            settings={"interval_seconds": 3600},
+            script='await send_message("audit", "MODCHAT")\n',
+        ),
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="post an audit every so often",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=_judge_approving(),
+    )
+    assert result.ok
+    assert result.settings == {"interval_seconds": 3600}
+    assert len(requests) == 2
+    assert "interval_seconds must be at least 60" in requests[1]
+
+
+async def test_admin_second_rejection_fails_with_the_second_verdict():
+    author, requests = _admin_author_drafting(
+        _admin_plan(), _admin_plan(script=CLEAN_ADMIN_SCRIPT)
+    )
+    judge, _ = _judge_returning(
+        _verdict(approved=False, reason="bans every author with no condition"),
+        _verdict(approved=False, reason="still reports on every single message"),
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=judge,
+    )
+    assert not result.ok
+    assert "still reports on every single message" in result.error
+    assert "after a round of fixes" in result.error
+    assert len(requests) == 2
+
+
+async def test_admin_infeasible_first_draft_skips_the_fix_round():
+    author, requests = _admin_author_drafting(
+        AdminHandlerPlan(feasible=False, error="needs 100 bans/sec, over the cap")
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="impossible",
+        existing_handlers=[],
+        author=author,
+        judge=_judge_approving(),
+    )
+    assert not result.ok
+    assert "over the cap" in result.error
+    assert len(requests) == 1
+
+
+async def test_admin_infeasible_revision_is_terminal():
+    author, requests = _admin_author_drafting(
+        _admin_plan(),
+        AdminHandlerPlan(feasible=False, error="can't guard this without a user id"),
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=_judge_rejecting("bans every author with no condition"),
+    )
+    assert not result.ok
+    assert "can't guard this without a user id" in result.error
+    assert "after a round of fixes" in result.error
+    assert len(requests) == 2
+
+
+async def test_admin_lint_failure_and_judge_rejection_get_separate_rounds():
+    # The over-length draft spends the mechanical retry; the judge rejection on
+    # the revision still has the untouched semantic round to spend.
+    author, requests = _admin_author_drafting(
+        _admin_plan(script=OVERLONG_ADMIN_SCRIPT),
+        _admin_plan(script=ADMIN_SCRIPT),
+        _admin_plan(script=CLEAN_ADMIN_SCRIPT),
+    )
+    judge, _ = _judge_returning(
+        _verdict(approved=False, reason="bans every author with no condition"),
+        _verdict(reason="guarded and within caps"),
+    )
+    progress, messages = _progress_recorder()
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=judge,
+        progress=progress,
+    )
+    assert result.ok
+    assert result.script == CLEAN_ADMIN_SCRIPT
+    assert len(requests) == 3
+    assert any("8192-byte limit" in text for text in messages)
+    assert any("no condition" in text for text in messages)
+
+
+async def test_admin_judge_rejection_then_lint_failure_get_separate_rounds():
+    author, requests = _admin_author_drafting(
+        _admin_plan(script=ADMIN_SCRIPT),
+        _admin_plan(script=OVERLONG_ADMIN_SCRIPT),
+        _admin_plan(script=CLEAN_ADMIN_SCRIPT),
+    )
+    judge, _ = _judge_returning(
+        _verdict(approved=False, reason="bans every author with no condition"),
+        _verdict(reason="guarded and within caps"),
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=judge,
+    )
+    assert result.ok
+    assert result.script == CLEAN_ADMIN_SCRIPT
+    assert len(requests) == 3
+
+
+async def test_admin_second_lint_failure_is_final():
+    author, requests = _admin_author_drafting(
+        _admin_plan(script=LINT_BLOB_SCRIPT),
+        _admin_plan(script=OVERLONG_ADMIN_SCRIPT),
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=_judge_approving(),
+    )
+    assert not result.ok
+    assert "8192-byte limit" in result.error
+    assert "after a round of fixes" in result.error
+    assert len(requests) == 2
+
+
+async def test_admin_pipeline_ends_once_both_budgets_are_spent():
+    author, requests = _admin_author_drafting(
+        _admin_plan(script=LINT_BLOB_SCRIPT),
+        _admin_plan(script=ADMIN_SCRIPT),
+        _admin_plan(script=OVERLONG_ADMIN_SCRIPT),
+    )
+    judge, _ = _judge_returning(
+        _verdict(approved=False, reason="bans every author with no condition")
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=judge,
+    )
+    assert not result.ok
+    assert "8192-byte limit" in result.error
+    assert "after a round of fixes" in result.error
+    assert len(requests) == 3
+
+
+async def test_admin_resolution_error_spends_the_semantic_budget():
+    author, requests = _admin_author_drafting(
+        _admin_plan(name="scam-banner"),
+        _admin_plan(script=ADMIN_SCRIPT),
+    )
+    judge, _ = _judge_returning(
+        _verdict(approved=False, reason="bans every author with no condition")
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=judge,
+    )
+    assert not result.ok
+    assert "no condition" in result.error
+    assert "after a round of fixes" in result.error
+    assert len(requests) == 2
+
+
+async def test_admin_schedule_error_spends_the_semantic_budget():
+    author, requests = _admin_author_drafting(
+        _admin_plan(
+            trigger_type="schedule",
+            name="hourly-audit",
+            settings={"interval_seconds": 30},
+            script='await send_message("audit", "MODCHAT")\n',
+        ),
+        _admin_plan(
+            trigger_type="schedule",
+            name="hourly-audit",
+            settings={"interval_seconds": 3600},
+            script='await send_message("audit", "MODCHAT")\n',
+        ),
+    )
+    judge, _ = _judge_returning(
+        _verdict(approved=False, reason="posts an audit nobody reads")
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="post an audit every so often",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=judge,
+    )
+    assert not result.ok
+    assert "posts an audit nobody reads" in result.error
+    assert "after a round of fixes" in result.error
+    assert len(requests) == 2
+
+
+async def test_admin_judge_reviews_against_the_original_request_on_both_rounds():
+    author, requests = _admin_author_drafting(
+        _admin_plan(), _admin_plan(script=CLEAN_ADMIN_SCRIPT)
+    )
+    judge, contexts = _judge_returning(
+        _verdict(approved=False, reason="bans every author with no condition"),
+        _verdict(reason="guarded and within caps"),
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods about raids",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=judge,
+    )
+    assert result.ok
+    assert len(contexts) == 2
+    for context in contexts:
+        assert "alert mods about raids" in context
+        assert "REVISION" not in context
+        assert "no condition" not in context
+
+
 # -- checklist verdict + dual-judge merge --------------------------------------
 
 
@@ -832,23 +1195,120 @@ async def test_pipeline_accepts_conditional_literal_role_grant():
 
 
 # ---------------------------------------------------------------------------
-# Admin judge model routing
+# Admin author / judge model routing
 # ---------------------------------------------------------------------------
 
 
-def test_judge_model_builder_routes_catalog_ids_through_model_router(monkeypatch):
-    # The admin second judge defaults to Luna, which the catalog serves via
-    # OpenRouter — building it as a Google model would send a GPT id to the
-    # Gemini API. Catalog wire ids must route through the shared router;
+def _settings_with(**overrides):
+    """A stand-in for the global settings, defaulting every handler model field."""
+    handler_model_fields = {
+        name: field.default
+        for name, field in Settings.model_fields.items()
+        if name.startswith("handler_")
+    }
+    return SimpleNamespace(**{**handler_model_fields, **overrides})
+
+
+def test_configured_model_builder_routes_catalog_ids_through_model_router(monkeypatch):
+    # The admin author and second judge both default to Terra, which the catalog
+    # serves via OpenAI — building it as a Google model would send a GPT id to
+    # the Gemini API. Catalog wire ids must route through the shared router;
     # anything else is assumed to be a Gemini id.
     monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
-    luna = _build_judge_model("openai/gpt-5.6-luna")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    terra = _build_configured_model("gpt-5.6-terra")
+    assert isinstance(terra, OpenAIResponsesModel)
+
+    luna = _build_configured_model("openai/gpt-5.6-luna")
     assert isinstance(luna, OpenAIChatModel)
 
-    gemini = _build_judge_model("gemini-3-flash-preview")
+    gemini = _build_configured_model("gemini-3-flash-preview")
     assert isinstance(gemini, GoogleModel)
 
 
-def test_admin_second_judge_default_is_catalog_luna():
-    default = Settings.model_fields["handler_admin_second_judge_model"].default
-    assert default == "openai/gpt-5.6-luna"
+def test_admin_model_defaults_are_the_stronger_pair():
+    assert Settings.model_fields["handler_admin_author_model"].default == "gpt-5.6-terra"
+    assert (
+        Settings.model_fields["handler_admin_judge_model"].default == "gemini-3.7-flash"
+    )
+    assert (
+        Settings.model_fields["handler_admin_second_judge_model"].default
+        == "gpt-5.6-terra"
+    )
+
+
+def test_standard_tier_model_defaults_are_unchanged():
+    assert (
+        Settings.model_fields["handler_author_model"].default
+        == "gemini-3-flash-preview"
+    )
+    assert (
+        Settings.model_fields["handler_judge_model"].default == "gemini-3-flash-preview"
+    )
+
+
+def test_admin_judge_panel_defaults_to_gemini_then_terra(monkeypatch):
+    monkeypatch.setattr(handler_authoring, "get_settings", _settings_with)
+    assert _admin_judge_models() == ["gemini-3.7-flash", "gpt-5.6-terra"]
+
+
+def test_admin_judge_panel_ignores_the_standard_tier_judge(monkeypatch):
+    monkeypatch.setattr(
+        handler_authoring,
+        "get_settings",
+        lambda: _settings_with(handler_judge_model="gemini-3-flash-preview"),
+    )
+    assert "gemini-3-flash-preview" not in _admin_judge_models()
+
+
+def test_empty_second_judge_leaves_a_single_judge_panel(monkeypatch):
+    monkeypatch.setattr(
+        handler_authoring,
+        "get_settings",
+        lambda: _settings_with(handler_admin_second_judge_model=""),
+    )
+    assert _admin_judge_models() == ["gemini-3.7-flash"]
+
+
+def test_duplicate_admin_judge_models_are_deduplicated(monkeypatch):
+    monkeypatch.setattr(
+        handler_authoring,
+        "get_settings",
+        lambda: _settings_with(
+            handler_admin_judge_model="gpt-5.6-terra",
+            handler_admin_second_judge_model="gpt-5.6-terra",
+        ),
+    )
+    assert _admin_judge_models() == ["gpt-5.6-terra"]
+
+
+def test_admin_author_agent_uses_the_admin_author_model(monkeypatch):
+    # The cached agent is module-level; clear it so this test builds its own and
+    # leaves no cache behind for the next one.
+    monkeypatch.setattr(handler_authoring, "_admin_author_agent", None)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setattr(
+        handler_authoring,
+        "get_settings",
+        lambda: _settings_with(handler_admin_author_model="gpt-5.6-terra"),
+    )
+    agent = handler_authoring._get_admin_author_agent()
+    assert agent.model.model_name == "gpt-5.6-terra"
+
+
+def test_handler_model_settings_uses_the_requested_reasoning_level():
+    terra_high = _handler_model_settings("gpt-5.6-terra", ReasoningLevel.HIGH)
+    assert terra_high["openai_reasoning_effort"] == "high"
+
+    gemini_high = _handler_model_settings("gemini-3.7-flash", ReasoningLevel.HIGH)
+    assert gemini_high["google_thinking_config"] == {"thinking_level": "HIGH"}
+
+    terra_medium = _handler_model_settings("gpt-5.6-terra", ReasoningLevel.MEDIUM)
+    assert terra_medium["openai_reasoning_effort"] == "medium"
+
+
+def test_handler_model_settings_falls_back_for_non_catalog_ids():
+    assert (
+        _handler_model_settings("gemini-3-flash-preview", ReasoningLevel.HIGH)
+        is _HANDLER_THINKING
+    )
