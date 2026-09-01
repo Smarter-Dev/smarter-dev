@@ -57,6 +57,7 @@ from smarter_dev.bot.proactive.notifications import channel_enabled_notification
 from smarter_dev.bot.proactive.notifications import instruction_expired_notification
 from smarter_dev.bot.proactive.notifications import mention_notification
 from smarter_dev.bot.proactive.notifications import mode_change_notification
+from smarter_dev.bot.proactive.notifications import reaction_notification
 from smarter_dev.bot.proactive.notifications import recovery_notification
 from smarter_dev.bot.proactive.notifications import render_notifications
 from smarter_dev.bot.proactive.notifications import reply_notification
@@ -1033,6 +1034,61 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
     if now < state.active_until:
         _schedule_producer(state)
     # Passive channels leave the buffer for the 15-minute sweep.
+
+
+@plugin.listener(hikari.GuildReactionAddEvent)
+async def on_guild_reaction(event: hikari.GuildReactionAddEvent) -> None:
+    """Queue reactions to the bot's own messages as weak engagement signals."""
+    run = runtime
+    if run is None or not event.guild_id:
+        return
+    me = run.bot.get_me()
+    if me is None or str(event.user_id) == str(me.id):
+        return
+    service = run.settings_service()
+    if service is None:
+        return
+    try:
+        settings = await service.get_settings(
+            str(event.guild_id), str(event.channel_id)
+        )
+    except Exception:  # noqa: BLE001 — settings failure means "off", not a crash
+        logger.warning("proactive settings lookup failed", exc_info=True)
+        return
+    if not settings.enabled:
+        return
+    message = run.bot.cache.get_message(event.message_id)
+    if message is None:
+        try:
+            message = await run.bot.rest.fetch_message(
+                event.channel_id, event.message_id
+            )
+        except Exception:  # noqa: BLE001 — a lost lookup only drops one signal
+            logger.warning(
+                "proactive reaction message fetch failed", exc_info=True
+            )
+            return
+    author = getattr(message, "author", None)
+    if author is None or str(author.id) != str(me.id):
+        return
+    reactor = getattr(event, "member", None)
+    reactor_name = (
+        getattr(reactor, "display_name", None)
+        or getattr(reactor, "username", None)
+        or str(event.user_id)
+    )
+    run.guild_state_for(event.guild_id).queue.push(
+        reaction_notification(
+            reactor_name=reactor_name,
+            reactor_id=str(event.user_id),
+            emoji=getattr(event, "emoji_name", None) or "a custom emoji",
+            message_id=str(event.message_id),
+            message_preview=getattr(message, "content", "") or "",
+            created_at=datetime.now(UTC),
+            channel_id=str(event.channel_id),
+            channel_name=_channel_name_for_id(run.bot, str(event.channel_id)),
+        )
+    )
 
 
 async def _passive_sweep(run: ProactiveRuntime) -> None:
