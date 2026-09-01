@@ -17,6 +17,10 @@ def _url(guild_id: str = _GUILD, channel_id: str = _CHANNEL) -> str:
     return f"/api/guilds/{guild_id}/channels/{channel_id}/proactive-settings"
 
 
+def _list_url(guild_id: str = _GUILD) -> str:
+    return f"/api/guilds/{guild_id}/proactive-settings"
+
+
 def _record(**overrides) -> SimpleNamespace:
     fields = {
         "guild_id": _GUILD,
@@ -55,6 +59,46 @@ class TestGetProactiveSettings:
         assert response.json()["detail"]["detail"].startswith(
             "Proactive settings"
         )
+
+
+class TestListEnabledProactiveSettings:
+    def test_returns_enabled_channel_summaries(
+        self, proactive_settings_client: TestClient, proactive_settings_crud_mock
+    ):
+        proactive_settings_crud_mock.list_enabled.return_value = [
+            _record(),
+            _record(
+                channel_id="666000111222333444",
+                watch_addendum="wake me for deployment failures",
+            ),
+        ]
+
+        response = proactive_settings_client.get(_list_url())
+
+        assert response.status_code == 200
+        assert response.json() == [
+            {
+                "channel_id": _CHANNEL,
+                "watch_addendum": "wake me when alice posts benchmarks",
+            },
+            {
+                "channel_id": "666000111222333444",
+                "watch_addendum": "wake me for deployment failures",
+            },
+        ]
+        proactive_settings_crud_mock.list_enabled.assert_awaited_once()
+        args = proactive_settings_crud_mock.list_enabled.await_args.args
+        assert args[1] == _GUILD
+
+    def test_returns_empty_list_when_no_channels_are_enabled(
+        self, proactive_settings_client: TestClient, proactive_settings_crud_mock
+    ):
+        proactive_settings_crud_mock.list_enabled.return_value = []
+
+        response = proactive_settings_client.get(_list_url())
+
+        assert response.status_code == 200
+        assert response.json() == []
 
 
 class TestPutProactiveSettings:

@@ -85,18 +85,21 @@ class ActivationContext:
     activated_at: datetime
     history: list[ChannelMessage]
     new_messages: list[ChannelMessage]
+    channel_id: str = ""
 
 
 @dataclass(frozen=True)
 class ProposedResponse:
     reply_to_id: str | None
     content: str
+    channel_id: str = ""
 
 
 @dataclass(frozen=True)
 class ProposedReaction:
     message_id: str
     emoji: str
+    channel_id: str = ""
 
 
 @dataclass(frozen=True)

@@ -17,6 +17,7 @@ from tests.bot.services.conftest import create_mock_response
 GUILD = "111"
 CHANNEL = "222"
 PATH = f"/guilds/{GUILD}/channels/{CHANNEL}/proactive-settings"
+LIST_PATH = f"/guilds/{GUILD}/proactive-settings"
 
 
 def _payload(enabled: bool = True, watch_addendum: str = "") -> dict:
@@ -66,6 +67,39 @@ async def test_get_settings_caches_the_default(service, mock_api_client):
     await service.get_settings(GUILD, CHANNEL)
     await service.get_settings(GUILD, CHANNEL)
     assert mock_api_client.get.await_count == 1
+
+
+async def test_list_enabled_channels_hits_guild_path(service, mock_api_client):
+    mock_api_client.get.return_value = create_mock_response(
+        200,
+        [
+            {"channel_id": CHANNEL, "watch_addendum": "watch for benchmarks"},
+            {"channel_id": "333", "watch_addendum": "watch deployments"},
+        ],
+    )
+
+    channels = await service.list_enabled_channels(GUILD)
+
+    mock_api_client.get.assert_awaited_once_with(LIST_PATH)
+    assert [(channel.channel_id, channel.watch_addendum) for channel in channels] == [
+        (CHANNEL, "watch for benchmarks"),
+        ("333", "watch deployments"),
+    ]
+
+
+async def test_list_enabled_channels_returns_empty_list(service, mock_api_client):
+    mock_api_client.get.return_value = create_mock_response(200, [])
+
+    channels = await service.list_enabled_channels(GUILD)
+
+    assert channels == []
+
+
+async def test_list_enabled_channels_propagates_api_errors(service, mock_api_client):
+    mock_api_client.get.side_effect = APIError("boom", status_code=500)
+
+    with pytest.raises(APIError):
+        await service.list_enabled_channels(GUILD)
 
 
 async def test_set_enabled_preserves_addendum_and_caches_result(

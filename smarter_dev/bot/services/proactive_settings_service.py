@@ -45,6 +45,21 @@ class ProactiveChannelSettings:
         )
 
 
+@dataclass(frozen=True)
+class EnabledProactiveChannel:
+    """Bot-side view of an enabled proactive channel."""
+
+    channel_id: str
+    watch_addendum: str
+
+    @classmethod
+    def from_api_response(cls, payload: dict) -> EnabledProactiveChannel:
+        return cls(
+            channel_id=payload["channel_id"],
+            watch_addendum=payload["watch_addendum"],
+        )
+
+
 class ProactiveSettingsService(BaseService):
     """Per-channel proactive settings over the bot API."""
 
@@ -64,6 +79,18 @@ class ProactiveSettingsService(BaseService):
 
     def _invalidate(self, guild_id: str, channel_id: str) -> None:
         self._settings_cache.pop((guild_id, channel_id), None)
+
+    async def list_enabled_channels(
+        self, guild_id: str
+    ) -> list[EnabledProactiveChannel]:
+        """Return the guild's enabled proactive channels."""
+        response = await self._api_client.get(
+            f"/guilds/{guild_id}/proactive-settings"
+        )
+        return [
+            EnabledProactiveChannel.from_api_response(payload)
+            for payload in response.json()
+        ]
 
     async def get_settings(
         self, guild_id: str, channel_id: str

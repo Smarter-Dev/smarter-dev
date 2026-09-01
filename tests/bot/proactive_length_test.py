@@ -8,24 +8,20 @@ summarizer rather than silently truncated.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-import pytest
 from pydantic_ai.models.test import TestModel
 
-from smarter_dev.bot.agents.response_fitting import (
-    DISCORD_MESSAGE_LIMIT,
-    SUMMARIZE_THRESHOLD,
-)
+from smarter_dev.bot.agents.response_fitting import DISCORD_MESSAGE_LIMIT
+from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
 from smarter_dev.bot.plugins import proactive
 from smarter_dev.bot.proactive import agent as proactive_agent
-from smarter_dev.bot.proactive.environment import (
-    ChannelEnvironment,
-    InstructionStore,
-    WakeActions,
-)
+from smarter_dev.bot.proactive.environment import ChannelEnvironment
+from smarter_dev.bot.proactive.environment import InstructionStore
+from smarter_dev.bot.proactive.environment import WakeActions
 from smarter_dev.bot.proactive.types import ChannelMessage
 
 
@@ -53,6 +49,7 @@ async def _noop_skim(transcript: str) -> str:
 
 def _deps() -> proactive_agent.AgentDeps:
     return proactive_agent.AgentDeps(
+        enabled_channels={"test": "test"},
         env=ChannelEnvironment(visible=[_message()], bot_user_id="B1"),
         actions=WakeActions(),
         instruction_store=InstructionStore(seed="SEED"),
@@ -71,7 +68,9 @@ async def test_send_tool_refuses_overlong_content_with_rewrite_guidance():
     )
     tool = kimi._function_toolset.tools["send_channel_message"]
     answer = await tool.function(
-        SimpleNamespace(deps=deps), content="x" * (SUMMARIZE_THRESHOLD + 1)
+        SimpleNamespace(deps=deps),
+        channel_id="test",
+        content="x" * (SUMMARIZE_THRESHOLD + 1),
     )
     assert "too long" in answer.lower()
     assert str(SUMMARIZE_THRESHOLD) in answer
@@ -86,6 +85,7 @@ async def test_reply_tool_accepts_content_within_the_fitting_range():
     tool = kimi._function_toolset.tools["reply_to_message"]
     answer = await tool.function(
         SimpleNamespace(deps=deps),
+        channel_id="test",
         message_id="555",
         content="y" * (DISCORD_MESSAGE_LIMIT + 200),
     )

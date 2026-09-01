@@ -48,20 +48,37 @@ def bot_directed_message_ids(
 
 
 def engagement_notifications(
-    new_messages: list, env: ChannelEnvironment, bot_user_id: str
+    new_messages: list,
+    env: ChannelEnvironment,
+    bot_user_id: str,
+    channel_id: str = "",
+    channel_name: str = "",
 ) -> list[Notification]:
     """Waking notifications for messages that engage the bot directly."""
     produced = []
     for message in new_messages:
         if bot_user_id in message.mention_user_ids:
-            produced.append(mention_notification(message))
+            produced.append(
+                mention_notification(
+                    message,
+                    channel_id=channel_id,
+                    channel_name=channel_name,
+                )
+            )
             continue
         if message.reply_to_id is not None:
             target = env.lookup(message.reply_to_id)
             # Our own id only: a reply to some other bot in the channel is
             # not someone engaging us.
             if target is not None and target.author_id == bot_user_id:
-                produced.append(reply_notification(message, target))
+                produced.append(
+                    reply_notification(
+                        message,
+                        target,
+                        channel_id=channel_id,
+                        channel_name=channel_name,
+                    )
+                )
     return produced
 
 
@@ -81,13 +98,51 @@ def render_active_instructions(store: InstructionStore) -> str:
     return f"YOUR WATCH INSTRUCTIONS (active):\n{lines}"
 
 
-def build_wake_brief(
-    notifications: list[Notification], dropped: int, store: InstructionStore
+def render_channel_instructions(
+    instruction_stores: dict[str, InstructionStore],
+    enabled_channels: dict[str, str],
 ) -> str:
+    sections = ["YOUR WATCH INSTRUCTIONS BY CHANNEL:"]
+    for channel_id, channel_name in enabled_channels.items():
+        label = channel_name or channel_id
+        store = instruction_stores.get(channel_id)
+        sections.append(
+            f"WATCH INSTRUCTIONS FOR #{label} (channel_id={channel_id}):"
+        )
+        if store is None or not store.entries:
+            sections.append("- none set")
+            continue
+        sections.extend(
+            f"- {entry.instruction_id} "
+            f"(expires {entry.expires_at:%H:%M} UTC): {entry.text}"
+            for entry in store.entries
+        )
+    return "\n".join(sections)
+
+
+def build_wake_brief(
+    notifications: list[Notification],
+    dropped: int,
+    store: InstructionStore | None = None,
+    instruction_stores: dict[str, InstructionStore] | None = None,
+    enabled_channels: dict[str, str] | None = None,
+) -> str:
+    if instruction_stores is None:
+        if store is None:
+            raise ValueError("an instruction store is required")
+        rendered_instructions = render_active_instructions(store)
+    else:
+        if not enabled_channels:
+            raise ValueError(
+                "enabled_channels is required with instruction_stores"
+            )
+        rendered_instructions = render_channel_instructions(
+            instruction_stores, enabled_channels
+        )
     return f"""\
 {render_notifications(notifications, dropped)}
 
-{render_active_instructions(store)}
+{rendered_instructions}
 
 A notification is a lead, not the full story — pull context with your tools
 when it isn't enough. Act per your policy (or deliberately don't).
@@ -127,7 +182,11 @@ class WatcherProducer:
             bot_user_id=context.bot_user_id,
         )
         wake_notifications = engagement_notifications(
-            context.new_messages, env, context.bot_user_id
+            context.new_messages,
+            env,
+            context.bot_user_id,
+            channel_id=context.channel_id,
+            channel_name=context.channel_name,
         )
         if wake_notifications:
             forced_ids = [n.message_ids[0] for n in wake_notifications]
@@ -164,6 +223,8 @@ class WatcherProducer:
                         message_ids=list(decision.relevant_message_ids),
                         wake=True,
                         created_at=context.activated_at,
+                        channel_id=context.channel_id,
+                        channel_name=context.channel_name,
                     )
                 )
                 self.wake_produced = True
@@ -179,7 +240,6 @@ class WatcherProducer:
 class AgentConsumer:
     agent_runner: KimiAgentRunner
     skim: SkimRunner
-    instruction_store: InstructionStore
     agent_model_id: str
     notification_queue: NotificationQueue
     watcher_model_id: str | None = None
@@ -191,13 +251,31 @@ class AgentConsumer:
     # hourly memory refresh: since the agent's history persists across wakes,
     # the block only needs to ride one brief per refresh.
     brief_preamble: str = ""
+    instruction_stores: dict[str, InstructionStore] = field(
+        default_factory=dict
+    )
+    enabled_channels: dict[str, str] = field(default_factory=dict)
+    channel_envs: object | dict[str, ChannelEnvironment] | None = None
+    # Compatibility for the current per-channel plugin and eval adapter.
+    instruction_store: InstructionStore | None = None
 
     async def consume(self, context: ActivationContext) -> ActivationResult:
         usage_by_model: dict[str, dict] = {}
-        env = ChannelEnvironment(
-            visible=[*context.history, *context.new_messages],
-            bot_user_id=context.bot_user_id,
-        )
+        channel_key = context.channel_id or context.channel_name
+        enabled_channels = dict(self.enabled_channels)
+        if not enabled_channels:
+            enabled_channels = {channel_key: context.channel_name}
+        instruction_stores = dict(self.instruction_stores)
+        if not instruction_stores and self.instruction_store is not None:
+            instruction_stores = {channel_key: self.instruction_store}
+        channel_envs = self.channel_envs
+        if channel_envs is None:
+            channel_envs = {
+                channel_key: ChannelEnvironment(
+                    visible=[*context.history, *context.new_messages],
+                    bot_user_id=context.bot_user_id,
+                )
+            }
 
         actions = WakeActions()
 
@@ -212,14 +290,20 @@ class AgentConsumer:
 
         build_deps = self.deps_factory or AgentDeps
         deps = build_deps(
-            env=env,
+            enabled_channels=enabled_channels,
+            channel_envs=channel_envs,
             actions=actions,
-            instruction_store=self.instruction_store,
+            instruction_stores=instruction_stores,
             skim_transcript=skim_transcript,
             budget=ToolBudget(),
         )
         pending, dropped = self.notification_queue.drain()
-        brief = build_wake_brief(pending, dropped, self.instruction_store)
+        brief = build_wake_brief(
+            pending,
+            dropped,
+            instruction_stores=instruction_stores,
+            enabled_channels=enabled_channels,
+        )
         if self.brief_preamble:
             brief = f"{self.brief_preamble}\n\n{brief}"
         note, agent_usage = await self.agent_runner.wake(brief, deps)
@@ -229,7 +313,9 @@ class AgentConsumer:
                 "tool_calls": deps.budget.used,
                 "note": str(note)[:300],
             },
-            "watch_instruction_updates": self.instruction_store.updates,
+            "watch_instruction_updates": sum(
+                store.updates for store in instruction_stores.values()
+            ),
         }
 
         totals = {
@@ -303,12 +389,23 @@ class TwoPassAdapter:
         consumer = AgentConsumer(
             agent_runner=self.agent_runner,
             skim=self.skim,
-            instruction_store=self.instruction_store,
             agent_model_id=self.agent_model_id,
             notification_queue=notification_queue,
             watcher_model_id=self.watcher_model_id,
             deps_factory=self.deps_factory,
             brief_preamble=self.brief_preamble,
+            instruction_stores={
+                context.channel_id or context.channel_name: self.instruction_store
+            },
+            enabled_channels={
+                context.channel_id or context.channel_name: context.channel_name
+            },
+            channel_envs={
+                context.channel_id or context.channel_name: ChannelEnvironment(
+                    visible=[*context.history, *context.new_messages],
+                    bot_user_id=context.bot_user_id,
+                )
+            },
         )
         agent_result = await consumer.consume(context)
         for model_id, usage in (agent_result.usage_by_model or {}).items():

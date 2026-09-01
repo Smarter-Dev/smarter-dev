@@ -28,6 +28,7 @@ from smarter_dev.web.api_native import image_quota as image_quota_module
 from smarter_dev.web.api_native import messages as messages_module
 from smarter_dev.web.api_native import model_overrides as model_overrides_module
 from smarter_dev.web.api_native import quests as quests_module
+from smarter_dev.web.api_native import proactive_settings as proactive_settings_module
 from smarter_dev.web.api_native import squads as squads_module
 from smarter_dev.web.api_native.image_quota import ImageQuotaController
 from smarter_dev.web.api_native.model_overrides import ChannelModelOverrideController
@@ -683,16 +684,14 @@ def model_override_crud_mock() -> Iterator[Mock]:
 @pytest.fixture
 def proactive_settings_client(session_mock: AsyncMock) -> Iterator[TestClient]:
     """Client serving the proactive-settings controller with guards bypassed."""
-    from smarter_dev.web.api_native import proactive_settings as proactive_module
-    from smarter_dev.web.api_native.proactive_settings import (
-        ProactiveChannelSettingsController,
-    )
-
-    original_guards = list(proactive_module.BOT_API_GUARDS)
-    proactive_module.BOT_API_GUARDS.clear()
+    original_guards = list(proactive_settings_module.BOT_API_GUARDS)
+    proactive_settings_module.BOT_API_GUARDS.clear()
     try:
         with create_test_client(
-            route_handlers=[ProactiveChannelSettingsController],
+            route_handlers=[
+                proactive_settings_module.ProactiveChannelSettingsController,
+                proactive_settings_module.ProactiveGuildSettingsController,
+            ],
             plugins=[PydanticPlugin()],
             dependencies={
                 "db_session": Provide(lambda: session_mock, sync_to_thread=False)
@@ -700,12 +699,12 @@ def proactive_settings_client(session_mock: AsyncMock) -> Iterator[TestClient]:
         ) as client:
             yield client
     finally:
-        proactive_module.BOT_API_GUARDS[:] = original_guards
+        proactive_settings_module.BOT_API_GUARDS[:] = original_guards
 
 
 @pytest.fixture
 def proactive_settings_crud_mock() -> Iterator[Mock]:
-    """Patch the two crud functions the proactive-settings controller calls."""
+    """Patch the crud functions the proactive-settings controllers call."""
     with (
         patch(
             "smarter_dev.web.api_native.proactive_settings.get_proactive_channel_settings",
@@ -715,10 +714,15 @@ def proactive_settings_crud_mock() -> Iterator[Mock]:
             "smarter_dev.web.api_native.proactive_settings.upsert_proactive_channel_settings",
             new=AsyncMock(),
         ) as upsert_mock,
+        patch(
+            "smarter_dev.web.api_native.proactive_settings.list_enabled_proactive_channel_settings",
+            new=AsyncMock(),
+        ) as list_enabled_mock,
     ):
         namespace = Mock()
         namespace.get = get_mock
         namespace.upsert = upsert_mock
+        namespace.list_enabled = list_enabled_mock
         yield namespace
 
 
