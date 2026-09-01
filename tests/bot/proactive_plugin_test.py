@@ -1603,7 +1603,7 @@ def _cached_message(author_id):
     )
 
 
-async def test_reaction_on_bot_message_queues_a_weak_waking_signal(wake_setup):
+async def test_reaction_on_bot_message_queues_without_waking(wake_setup):
     wake_setup.bot.cache.get_message = lambda _mid: _cached_message(999)
 
     await proactive.on_guild_reaction(_reaction_event())
@@ -1611,10 +1611,13 @@ async def test_reaction_on_bot_message_queues_a_weak_waking_signal(wake_setup):
     queue = wake_setup.runtime.guild_state_for(2).queue
     assert [n.kind for n in queue.items] == ["reaction"]
     reaction = queue.items[0]
-    assert reaction.wakes is True
+    # Low signal by design: it rides along with the next wake, never
+    # waking the agent by itself.
+    assert reaction.wakes is False
+    assert not queue._wake_event.is_set()
     assert reaction.channel_id == "1"
     assert reaction.message_ids == ("900",)
-    assert "WEAKER signal" in reaction.body
+    assert "LOW signal" in reaction.body
     assert "Dale" in reaction.body and "👍" in reaction.body
 
 

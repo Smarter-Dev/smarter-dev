@@ -203,8 +203,8 @@ def reaction_notification(
 ) -> Notification:
     """A member reacted to one of the bot's messages.
 
-    Wakes the agent like an engagement, but the body frames it as the
-    weaker signal it is — usually acknowledgment, rarely an invitation.
+    Low signal by design: it queues like a plain message and rides along
+    with whatever wakes the agent next, never waking it by itself.
     """
     preview = message_preview[:80]
     return Notification(
@@ -212,13 +212,11 @@ def reaction_notification(
         created_at=created_at,
         body=(
             f"{reactor_name} (id {reactor_id}) reacted {emoji} to your "
-            f'message {message_id} ("{preview}"). A reaction is a WEAKER '
-            "signal than a message — usually simple acknowledgment. Engage "
-            "only if it clearly invites a response (a question or pointed "
-            "emoji, or it continues an active exchange); otherwise let it "
-            "stand."
+            f'message {message_id} ("{preview}"). A reaction is a LOW '
+            "signal — usually simple acknowledgment. Engage only if it "
+            "clearly invites a response (a question or pointed emoji, or it "
+            "continues an active exchange); otherwise let it stand."
         ),
-        wakes=True,
         message_ids=(message_id,),
         channel_id=channel_id,
         channel_name=channel_name,
