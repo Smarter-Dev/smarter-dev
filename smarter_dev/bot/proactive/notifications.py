@@ -190,6 +190,41 @@ def recovery_notification(
     )
 
 
+def reaction_notification(
+    *,
+    reactor_name: str,
+    reactor_id: str,
+    emoji: str,
+    message_id: str,
+    message_preview: str,
+    created_at: datetime,
+    channel_id: str = "",
+    channel_name: str = "",
+) -> Notification:
+    """A member reacted to one of the bot's messages.
+
+    Wakes the agent like an engagement, but the body frames it as the
+    weaker signal it is — usually acknowledgment, rarely an invitation.
+    """
+    preview = message_preview[:80]
+    return Notification(
+        kind="reaction",
+        created_at=created_at,
+        body=(
+            f"{reactor_name} (id {reactor_id}) reacted {emoji} to your "
+            f'message {message_id} ("{preview}"). A reaction is a WEAKER '
+            "signal than a message — usually simple acknowledgment. Engage "
+            "only if it clearly invites a response (a question or pointed "
+            "emoji, or it continues an active exchange); otherwise let it "
+            "stand."
+        ),
+        wakes=True,
+        message_ids=(message_id,),
+        channel_id=channel_id,
+        channel_name=channel_name,
+    )
+
+
 def channel_enabled_notification(
     *,
     created_at: datetime,

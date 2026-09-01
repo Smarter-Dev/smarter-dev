@@ -1581,3 +1581,65 @@ async def test_passive_non_waking_producer_result_never_runs_agent(monkeypatch):
     iteration.cancel()
     with pytest.raises(asyncio.CancelledError):
         await iteration
+
+
+# --- reactions to bot messages ----------------------------------------------
+
+
+def _reaction_event(*, user_id=42, message_id=900, emoji="👍"):
+    return SimpleNamespace(
+        guild_id=2,
+        channel_id=1,
+        message_id=message_id,
+        user_id=user_id,
+        emoji_name=emoji,
+        member=SimpleNamespace(display_name="Dale", username="eviloony"),
+    )
+
+
+def _cached_message(author_id):
+    return SimpleNamespace(
+        author=SimpleNamespace(id=author_id), content="the bot said a thing"
+    )
+
+
+async def test_reaction_on_bot_message_queues_a_weak_waking_signal(wake_setup):
+    wake_setup.bot.cache.get_message = lambda _mid: _cached_message(999)
+
+    await proactive.on_guild_reaction(_reaction_event())
+
+    queue = wake_setup.runtime.guild_state_for(2).queue
+    assert [n.kind for n in queue.items] == ["reaction"]
+    reaction = queue.items[0]
+    assert reaction.wakes is True
+    assert reaction.channel_id == "1"
+    assert reaction.message_ids == ("900",)
+    assert "WEAKER signal" in reaction.body
+    assert "Dale" in reaction.body and "👍" in reaction.body
+
+
+async def test_reaction_on_someone_elses_message_is_ignored(wake_setup):
+    wake_setup.bot.cache.get_message = lambda _mid: _cached_message(42)
+
+    await proactive.on_guild_reaction(_reaction_event())
+
+    assert wake_setup.runtime.guild_state_for(2).queue.items == []
+
+
+async def test_bots_own_reaction_is_ignored(wake_setup):
+    wake_setup.bot.cache.get_message = lambda _mid: _cached_message(999)
+
+    await proactive.on_guild_reaction(_reaction_event(user_id=999))
+
+    assert wake_setup.runtime.guild_state_for(2).queue.items == []
+
+
+async def test_reaction_in_disabled_channel_is_ignored(wake_setup):
+    wake_setup.service.settings = ProactiveChannelSettings(
+        guild_id="2", channel_id="1", enabled=False, watch_addendum="",
+    )
+    wake_setup.bot.cache.get_message = lambda _mid: _cached_message(999)
+
+    await proactive.on_guild_reaction(_reaction_event())
+
+    assert wake_setup.runtime.guild_state_for(2).queue.items == []
