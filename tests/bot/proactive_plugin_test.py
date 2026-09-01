@@ -1621,6 +1621,37 @@ async def test_reaction_on_bot_message_queues_without_waking(wake_setup):
     assert "Dale" in reaction.body and "👍" in reaction.body
 
 
+async def test_reaction_buffers_for_the_watcher_like_a_message(wake_setup):
+    wake_setup.bot.cache.get_message = lambda _mid: _cached_message(999)
+
+    await proactive.on_guild_reaction(_reaction_event())
+
+    state = wake_setup.runtime.channel_states[1]
+    assert len(state.buffer) == 1
+    buffered = state.buffer[0]
+    assert "reacted 👍" in buffered.content and "900" in buffered.content
+    assert buffered.author_display == "Dale"
+    assert buffered.id.isdigit()  # synthetic snowflake passes the cursor
+
+
+async def test_reaction_arms_the_debounce_only_in_an_active_window(
+    wake_setup, monkeypatch
+):
+    wake_setup.bot.cache.get_message = lambda _mid: _cached_message(999)
+    scheduled = []
+    monkeypatch.setattr(
+        proactive, "_schedule_producer", lambda state: scheduled.append(state)
+    )
+
+    await proactive.on_guild_reaction(_reaction_event())
+    assert scheduled == []  # passive channel: waits for the sweep
+
+    state = wake_setup.runtime.channel_states[1]
+    state.active_until = proactive.time.monotonic() + 600
+    await proactive.on_guild_reaction(_reaction_event(message_id=901))
+    assert scheduled == [state]
+
+
 async def test_reaction_on_someone_elses_message_is_ignored(wake_setup):
     wake_setup.bot.cache.get_message = lambda _mid: _cached_message(42)
 
