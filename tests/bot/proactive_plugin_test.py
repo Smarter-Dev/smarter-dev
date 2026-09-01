@@ -1261,10 +1261,7 @@ async def test_guild_history_store_uses_a_distinct_key_and_survives_garbage():
     assert "guild wake" in str((await store.read_guild(2))[0])
 
 
-async def test_compaction_summarize_times_out_and_falls_back(monkeypatch):
-    # A hung summarize call blocks the guild consumer loop; the closure must
-    # bound the watcher-model call, retry on the agent model, and finally
-    # compact by truncation instead of hanging.
+def _compaction_runtime(monkeypatch) -> proactive.ProactiveRuntime:
     runtime = proactive.ProactiveRuntime(
         SimpleNamespace(
             cache=SimpleNamespace(get_guild=lambda _gid: None),
@@ -1273,12 +1270,6 @@ async def test_compaction_summarize_times_out_and_falls_back(monkeypatch):
         start_consumers=False,
     )
     runtime._agent_model_id = "agent-model"
-
-    class _HangingSkim:
-        async def skim(self, text):
-            await asyncio.sleep(3600)
-
-    monkeypatch.setattr(runtime, "skim", lambda: _HangingSkim())
     monkeypatch.setattr(proactive, "COMPACTION_TIMEOUT_SECONDS", 0.01)
     monkeypatch.setattr(proactive, "build_twopass_model", lambda model_id: model_id)
     monkeypatch.setattr(
@@ -1286,24 +1277,59 @@ async def test_compaction_summarize_times_out_and_falls_back(monkeypatch):
         "build_proactive_agent",
         lambda model, system_prompt: SimpleNamespace(),
     )
+    return runtime
+
+
+_COMPACTION_MESSAGES = [ModelRequest(parts=[UserPromptPart("old wake")])]
+
+
+async def test_compaction_is_written_by_the_agents_own_model(monkeypatch):
+    runtime = _compaction_runtime(monkeypatch)
+    seen = {}
+
+    async def fake_self_summary(model, messages):
+        seen["model"] = model
+        seen["messages"] = messages
+        return "my own memory note", {"input_tokens": 1, "output_tokens": 1}
+
+    monkeypatch.setattr(proactive, "self_compaction_summary", fake_self_summary)
+    runner = runtime.agent_runner_for(proactive.GuildAgentState(guild_id="2"))
+
+    assert await runner.summarize(_COMPACTION_MESSAGES) == "my own memory note"
+    assert seen["model"] == "agent-model"
+    assert seen["messages"] is _COMPACTION_MESSAGES
+
+
+async def test_compaction_times_out_and_falls_back_to_skim(monkeypatch):
+    # A hung summarize once blocked the guild consumer loop; the closure
+    # must bound the self-summary, fall back to a watcher-model skim, and
+    # finally compact by truncation instead of hanging.
+    runtime = _compaction_runtime(monkeypatch)
+
+    async def hanging_self_summary(model, messages):
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(
+        proactive, "self_compaction_summary", hanging_self_summary
+    )
 
     class _FallbackSkim:
-        def __init__(self, model):
-            self.model = model
-
         async def skim(self, text):
-            return "agent-model summary", {"input_tokens": 1, "output_tokens": 1}
+            return "skim summary", {"input_tokens": 1, "output_tokens": 1}
 
-    monkeypatch.setattr(proactive, "SkimRunner", _FallbackSkim)
-    state = proactive.GuildAgentState(guild_id="2")
-    runner = runtime.agent_runner_for(state)
-    assert await runner.summarize("long transcript") == "agent-model summary"
+    monkeypatch.setattr(runtime, "skim", lambda: _FallbackSkim())
+    runner = runtime.agent_runner_for(proactive.GuildAgentState(guild_id="2"))
+    assert await runner.summarize(_COMPACTION_MESSAGES) == "skim summary"
 
-    # Both models failing must still return a truncation placeholder.
-    monkeypatch.setattr(proactive, "SkimRunner", lambda model: _HangingSkim())
-    state_both_fail = proactive.GuildAgentState(guild_id="3")
-    runner = runtime.agent_runner_for(state_both_fail)
-    assert "could not be summarized" in await runner.summarize("long transcript")
+    class _HangingSkim:
+        async def skim(self, text):
+            await asyncio.sleep(3600)
+
+    monkeypatch.setattr(runtime, "skim", lambda: _HangingSkim())
+    runner = runtime.agent_runner_for(proactive.GuildAgentState(guild_id="3"))
+    assert "could not be summarized" in await runner.summarize(
+        _COMPACTION_MESSAGES
+    )
 
 
 async def test_history_writes_never_expire():

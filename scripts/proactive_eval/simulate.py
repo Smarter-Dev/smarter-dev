@@ -26,6 +26,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from genai_prices import Usage, calc_price
+from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
@@ -191,10 +192,13 @@ def _build_twopass_adapter(
         bot_display_name = _bot_display_name(messages, meta["bot_user_id"])
     skim = SkimRunner(build_twopass_model(watcher_model_id))
 
-    async def compaction_summarize(text: str) -> str:
+    async def compaction_summarize(messages) -> str:
         # Compaction is rare (~100k tokens of agent history); its skim cost
-        # is logged but not attributed to an activation.
-        summary, usage = await skim.skim(text)
+        # is logged but not attributed to an activation. Production
+        # self-compacts on the agent model; the replay keeps the cheaper
+        # skim.
+        dumped = ModelMessagesTypeAdapter.dump_json(messages).decode()
+        summary, usage = await skim.skim(dumped)
         print(f"history compaction: {usage}", file=sys.stderr, flush=True)
         return summary
 
