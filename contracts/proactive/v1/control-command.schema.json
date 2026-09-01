@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://smarter.dev/contracts/proactive/v1/control-command.schema.json",
+  "title": "Proactive agent control command",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "command_id",
+    "guild_id",
+    "channel_id",
+    "mode",
+    "minutes",
+    "created_at",
+    "trace_id"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "command_id": {"type": "string", "format": "uuid"},
+    "guild_id": {"type": "string", "pattern": "^[0-9]{1,20}$"},
+    "channel_id": {"type": "string", "pattern": "^[0-9]{1,20}$"},
+    "mode": {"enum": ["active", "passive"]},
+    "minutes": {"type": "integer", "minimum": 0, "maximum": 1440},
+    "created_at": {"type": "string", "format": "date-time"},
+    "trace_id": {"type": "string", "format": "uuid"}
+  }
+}

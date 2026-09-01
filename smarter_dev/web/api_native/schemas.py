@@ -1057,3 +1057,26 @@ class ProactiveWakeUsageRead(BaseAPIModel):
     """How many ledger rows a proactive usage report created."""
 
     recorded: int = Field(description="Rows written; 0 for a replayed wake")
+
+
+class ProactiveAgentHistoryWrite(BaseAPIModel):
+    """A versioned durable snapshot of one guild agent's model history."""
+
+    schema_version: int = Field(1, ge=1, le=1)
+    revision: int = Field(ge=1)
+    checksum: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[0-9a-f]{64}$",
+        description="Lowercase SHA-256 of the canonical serialized history",
+    )
+    history: list[dict] = Field(
+        description="Pydantic-AI model messages serialized as JSON objects"
+    )
+
+
+class ProactiveAgentHistoryRead(ProactiveAgentHistoryWrite):
+    """Stored proactive-agent history plus its server update time."""
+
+    guild_id: str = Field(description="Discord guild ID")
+    updated_at: datetime = Field(description="When this revision was persisted")

@@ -17,31 +17,32 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from litestar import Controller, get, post, put
+from litestar import Controller
+from litestar import get
+from litestar import post
+from litestar import put
 from litestar.status_codes import HTTP_200_OK
+from skrift.auth.guards import APIKeyOnly
+from skrift.auth.guards import Permission
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from skrift.auth.guards import APIKeyOnly, Permission
-
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.chat_conversations import _normalized_model_identity
-from smarter_dev.web.api_native.errors import (
-    BOT_API_EXCEPTION_HANDLERS,
-    nested_not_found_error,
-)
-from smarter_dev.web.api_native.schemas import (
-    EnabledProactiveChannelRead,
-    ProactiveChannelSettingsRead,
-    ProactiveChannelSettingsWrite,
-    ProactiveWakeUsageRead,
-    ProactiveWakeUsageWrite,
-)
-from smarter_dev.web.crud import (
-    get_proactive_channel_settings,
-    list_enabled_proactive_channel_settings,
-    upsert_proactive_channel_settings,
-)
+from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
+from smarter_dev.web.api_native.errors import nested_not_found_error
+from smarter_dev.web.api_native.schemas import EnabledProactiveChannelRead
+from smarter_dev.web.api_native.schemas import ProactiveAgentHistoryRead
+from smarter_dev.web.api_native.schemas import ProactiveAgentHistoryWrite
+from smarter_dev.web.api_native.schemas import ProactiveChannelSettingsRead
+from smarter_dev.web.api_native.schemas import ProactiveChannelSettingsWrite
+from smarter_dev.web.api_native.schemas import ProactiveWakeUsageRead
+from smarter_dev.web.api_native.schemas import ProactiveWakeUsageWrite
+from smarter_dev.web.crud import get_proactive_agent_history
+from smarter_dev.web.crud import get_proactive_channel_settings
+from smarter_dev.web.crud import list_enabled_proactive_channel_settings
+from smarter_dev.web.crud import upsert_proactive_agent_history
+from smarter_dev.web.crud import upsert_proactive_channel_settings
 from smarter_dev.web.llm_pricing import calc_cost
 from smarter_dev.web.models import UsageCostRow
 
@@ -72,6 +73,45 @@ class ProactiveGuildSettingsController(Controller):
             EnabledProactiveChannelRead.model_validate(record)
             for record in records
         ]
+
+
+class ProactiveAgentHistoryController(Controller):
+    """Durable recovery history for one guild-scoped proactive agent."""
+
+    path = "/api/guilds/{guild_id:str}/proactive-agent/history"
+    exception_handlers = BOT_API_EXCEPTION_HANDLERS
+
+    @get(status_code=HTTP_200_OK, guards=BOT_API_GUARDS)
+    async def get_history(
+        self,
+        db_session: AsyncSession,
+        guild_id: str,
+    ) -> ProactiveAgentHistoryRead:
+        record = await get_proactive_agent_history(db_session, guild_id)
+        if record is None:
+            raise nested_not_found_error(
+                f"Proactive agent history for guild '{guild_id}' not found"
+            )
+        return ProactiveAgentHistoryRead.model_validate(record)
+
+    @put(status_code=HTTP_200_OK, guards=BOT_API_GUARDS)
+    async def put_history(
+        self,
+        db_session: AsyncSession,
+        guild_id: str,
+        data: ProactiveAgentHistoryWrite,
+    ) -> ProactiveAgentHistoryRead:
+        record = await upsert_proactive_agent_history(
+            db_session,
+            guild_id=guild_id,
+            schema_version=data.schema_version,
+            revision=data.revision,
+            checksum=data.checksum,
+            history=data.history,
+        )
+        response = ProactiveAgentHistoryRead.model_validate(record)
+        await db_session.commit()
+        return response
 
 
 class ProactiveChannelSettingsController(Controller):
