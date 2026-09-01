@@ -6,15 +6,20 @@ import os
 import sys
 
 from pydantic_ai.models import Model
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.profiles.openai import OpenAIModelProfile
+from pydantic_ai.providers.openai import OpenAIProvider
 
 from smarter_dev.bot.agents.chat_agent import build_agent_model
 from smarter_dev.bot.agents.model_router import build_model_for
-from smarter_dev.shared.model_catalog import (
-    CatalogModel,
-    ModelProvider,
-)
+from smarter_dev.shared.model_catalog import CatalogModel
+from smarter_dev.shared.model_catalog import ModelProvider
 
 KIMI_OPENROUTER_MODEL_ID = "moonshotai/kimi-k3"
+_LITELLM_MODEL_ALIASES = {
+    "z-ai/glm-5.3-flash": "glm-5.3-flash",
+    "gemini-3.7-flash": "gemini/gemini-3.7-flash",
+}
 
 
 def ensure_openrouter_key_alias() -> None:
@@ -50,6 +55,22 @@ def resolve_agent_model_id(requested: str) -> str:
 
 
 def build_twopass_model(model_id: str) -> Model:
+    litellm_endpoint = os.getenv("LITELLM_ENDPOINT", "").rstrip("/")
+    litellm_api_key = os.getenv("LITELLM_API_KEY", "")
+    if litellm_endpoint and litellm_api_key:
+        if not litellm_endpoint.endswith("/v1"):
+            litellm_endpoint += "/v1"
+        return OpenAIChatModel(
+            _LITELLM_MODEL_ALIASES.get(model_id, model_id),
+            provider=OpenAIProvider(
+                base_url=litellm_endpoint,
+                api_key=litellm_api_key,
+            ),
+            profile=OpenAIModelProfile(
+                openai_supports_tool_choice_required=False,
+                openai_chat_supports_multiple_system_messages=False,
+            ),
+        )
     if model_id == KIMI_OPENROUTER_MODEL_ID:
         return build_model_for(
             CatalogModel(

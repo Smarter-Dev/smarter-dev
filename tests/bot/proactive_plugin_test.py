@@ -8,6 +8,7 @@ from datetime import datetime
 from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from pydantic_ai.messages import ModelRequest
@@ -17,6 +18,7 @@ from smarter_dev.bot.agents.chat_tools import GeneratedImage
 from smarter_dev.bot.plugins import proactive
 from smarter_dev.bot.proactive.adapter import AgentConsumer
 from smarter_dev.bot.proactive.adapter import WatcherProducer
+from smarter_dev.bot.proactive.contracts import ControlCommand
 from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
 from smarter_dev.bot.proactive.notifications import watcher_summary_notification
 from smarter_dev.bot.proactive.types import ActivationResult
@@ -41,6 +43,59 @@ def test_fire_delay_caps_at_max_wait_from_first():
 
 def test_fire_delay_never_negative():
     assert proactive.compute_fire_delay(0.0, 0.0, 500.0) == 0.0
+
+
+def test_execution_destination_can_be_selected_per_guild(monkeypatch):
+    monkeypatch.setenv(proactive.EXTERNAL_GUILDS_ENV_VAR, "2, 3")
+    monkeypatch.setenv(proactive.SHADOW_GUILDS_ENV_VAR, "4")
+    run = proactive.ProactiveRuntime(
+        SimpleNamespace(d={}), start_consumers=False
+    )
+
+    assert run.execution_mode_for("1") == proactive.EMBEDDED_EXECUTION_MODE
+    assert run.execution_mode_for("2") == proactive.EXTERNAL_EXECUTION_MODE
+    assert run.execution_mode_for("4") == proactive.SHADOW_EXECUTION_MODE
+
+
+def test_embedded_override_supports_single_guild_rollback(monkeypatch):
+    monkeypatch.setenv(proactive.EMBEDDED_GUILDS_ENV_VAR, "2")
+    run = proactive.ProactiveRuntime(
+        SimpleNamespace(d={}),
+        start_consumers=False,
+        execution_mode=proactive.EXTERNAL_EXECUTION_MODE,
+    )
+
+    assert run.execution_mode_for("1") == proactive.EXTERNAL_EXECUTION_MODE
+    assert run.execution_mode_for("2") == proactive.EMBEDDED_EXECUTION_MODE
+
+
+async def test_worker_control_command_changes_bot_owned_active_window():
+    bot = SimpleNamespace(
+        d={},
+        cache=SimpleNamespace(
+            get_guild_channel=lambda _channel_id: SimpleNamespace(name="general")
+        ),
+    )
+    run = proactive.ProactiveRuntime(bot, start_consumers=False)
+    store = SimpleNamespace(write_active_until=AsyncMock())
+    run.history_store = lambda: store
+    run.enqueue_notification = AsyncMock()
+    command = ControlCommand(
+        command_id=uuid4(),
+        guild_id="2",
+        channel_id="1",
+        mode="active",
+        minutes=7,
+        created_at=datetime.now(UTC),
+        trace_id=uuid4(),
+    )
+
+    await proactive._apply_control_command(run, command)
+
+    assert run.state_for(2, 1).active_until > proactive.time.monotonic()
+    assert store.write_active_until.await_args.kwargs["ttl_seconds"] == 420
+    queued = run.enqueue_notification.await_args.args[1]
+    assert queued.kind == "mode_change"
 
 
 # --- hikari message conversion -----------------------------------------------

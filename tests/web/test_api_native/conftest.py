@@ -691,6 +691,7 @@ def proactive_settings_client(session_mock: AsyncMock) -> Iterator[TestClient]:
             route_handlers=[
                 proactive_settings_module.ProactiveChannelSettingsController,
                 proactive_settings_module.ProactiveGuildSettingsController,
+                proactive_settings_module.ProactiveAgentHistoryController,
             ],
             plugins=[PydanticPlugin()],
             dependencies={
@@ -718,11 +719,21 @@ def proactive_settings_crud_mock() -> Iterator[Mock]:
             "smarter_dev.web.api_native.proactive_settings.list_enabled_proactive_channel_settings",
             new=AsyncMock(),
         ) as list_enabled_mock,
+        patch(
+            "smarter_dev.web.api_native.proactive_settings.get_proactive_agent_history",
+            new=AsyncMock(),
+        ) as get_history_mock,
+        patch(
+            "smarter_dev.web.api_native.proactive_settings.upsert_proactive_agent_history",
+            new=AsyncMock(),
+        ) as upsert_history_mock,
     ):
         namespace = Mock()
         namespace.get = get_mock
         namespace.upsert = upsert_mock
         namespace.list_enabled = list_enabled_mock
+        namespace.get_history = get_history_mock
+        namespace.upsert_history = upsert_history_mock
         yield namespace
 
 

@@ -10,10 +10,12 @@ message/user ids.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
 
 from pydantic import BaseModel
-from pydantic_ai import Agent, PromptedOutput
+from pydantic_ai import Agent
+from pydantic_ai import PromptedOutput
 from pydantic_ai.models import Model
 
 
@@ -66,6 +68,8 @@ Decide: wake the agent or not."""
 
 
 def usage_dict(usage) -> dict:
+    if callable(usage):
+        usage = usage()
     return {
         "input_tokens": usage.input_tokens or 0,
         "output_tokens": usage.output_tokens or 0,
@@ -111,7 +115,7 @@ class WatcherRunner:
                 bot_display_name=bot_display_name,
             )
         )
-        return result.output, usage_dict(result.usage())
+        return result.output, usage_dict(result.usage)
 
 
 SKIM_SYSTEM_PROMPT = """\
@@ -133,4 +137,4 @@ class SkimRunner:
 
     async def skim(self, transcript: str) -> tuple[str, dict]:
         result = await self._agent.run(transcript)
-        return result.output, usage_dict(result.usage())
+        return result.output, usage_dict(result.usage)

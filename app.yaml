@@ -81,6 +81,8 @@ controllers:
   - smarter_dev.web.api_native.model_overrides:ChannelModelOverrideController
   - smarter_dev.web.api_native.proactive_settings:ProactiveGuildSettingsController
   - smarter_dev.web.api_native.proactive_settings:ProactiveChannelSettingsController
+  - smarter_dev.web.api_native.proactive_settings:ProactiveAgentHistoryController
+  - smarter_dev.web.api_native.search_previews:SearchPreviewPersistenceController
   # Signed-link per-channel bot config (no auth_guard: the link is the
   # authorization — see smarter_dev/shared/config_links.py).
   - smarter_dev.web.bot_admin.channel_config:ChannelConfigController
