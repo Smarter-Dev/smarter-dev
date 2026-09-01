@@ -13,6 +13,7 @@ from pydantic_ai.models.test import TestModel
 
 from smarter_dev.bot.agents.chat_tools import GeneratedImage
 from smarter_dev.bot.proactive import adapter
+from smarter_dev.bot.proactive import agent as agent_module
 from smarter_dev.bot.proactive import parity
 from smarter_dev.bot.proactive.agent import OPERATING_POLICY_BRIEF
 from smarter_dev.bot.proactive.agent import AgentDeps
@@ -546,3 +547,38 @@ async def test_agent_consumer_passes_multi_channel_deps_and_brief():
     assert "#alpha" in runner.brief
     assert "#beta" in runner.brief
     assert runner.deps.enabled_channels == {"A": "alpha", "B": "beta"}
+
+
+# --- tool error containment and channel listing ------------------------------
+
+
+async def test_tool_errors_return_to_the_agent_instead_of_raising():
+    async def exploding_tool(ctx, channel_id: str) -> str:
+        raise RuntimeError("discord fell over")
+
+    guarded = agent_module.tool_errors_returned(exploding_tool)
+
+    result = await guarded(None, channel_id="1")
+
+    assert "exploding_tool failed" in result
+    assert "RuntimeError" in result
+    assert "discord fell over" in result
+
+
+async def test_tool_success_passes_through_the_error_guard():
+    async def fine_tool(ctx, value: str) -> str:
+        return f"ok:{value}"
+
+    guarded = agent_module.tool_errors_returned(fine_tool)
+
+    assert await guarded(None, value="x") == "ok:x"
+
+
+def test_render_channel_list_names_every_enabled_channel():
+    rendered = agent_module.render_channel_list(
+        {"111": "general", "222": "technical-talk"}
+    )
+    assert "111 — #general" in rendered
+    assert "222 — #technical-talk" in rendered
+
+    assert "not enabled in any" in agent_module.render_channel_list({})

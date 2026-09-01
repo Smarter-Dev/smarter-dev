@@ -9,6 +9,9 @@ active ingest and the 15-minute passive sweep.
 
 from __future__ import annotations
 
+import functools
+import logging
+
 from collections.abc import Awaitable
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -35,6 +38,8 @@ from smarter_dev.bot.proactive.watcher import usage_dict
 
 TOOL_CALL_LIMIT = 8
 MAX_SENDS_PER_WAKE = 2
+logger = logging.getLogger(__name__)
+
 HISTORY_TOKEN_LIMIT = 100_000
 # After compaction, keep roughly this many trailing messages verbatim.
 COMPACTION_KEEP_MESSAGES = 8
@@ -240,6 +245,39 @@ RESPONSE POLICY:
 {response_policy}"""
 
 
+def tool_errors_returned(tool_function):
+    """Turn a tool crash into feedback the agent can act on.
+
+    An uncaught tool exception would abort the whole wake; the agent can
+    usually correct course (wrong id, transient API failure) if it is told
+    what went wrong instead.
+    """
+
+    @functools.wraps(tool_function)
+    async def guarded_tool(ctx, *args, **kwargs):
+        try:
+            return await tool_function(ctx, *args, **kwargs)
+        except Exception as error:  # noqa: BLE001 — surfaced to the agent
+            logger.exception("proactive tool %s failed", tool_function.__name__)
+            return (
+                f"Tool {tool_function.__name__} failed: "
+                f"{type(error).__name__}: {error}. Adjust your approach or "
+                "try another tool."
+            )
+
+    return guarded_tool
+
+
+def render_channel_list(enabled_channels: dict[str, str]) -> str:
+    if not enabled_channels:
+        return "You are not enabled in any channels."
+    lines = "\n".join(
+        f"- {channel_id} — #{channel_name}"
+        for channel_id, channel_name in enabled_channels.items()
+    )
+    return f"Channels you are enabled in (channel_id — name):\n{lines}"
+
+
 def build_agent_system_prompt(
     *,
     bot_display_name: str,
@@ -271,7 +309,7 @@ channels and earlier wakes.
 Every tool that reads from or acts in a channel requires a `channel_id`. Your
 wake brief's WATCH INSTRUCTIONS BY CHANNEL section lists every enabled
 channel with its channel_id — that is the complete set of channels you may
-inspect or act in. Never guess another id or attempt to access a channel
+inspect or act in; the budget-free list_channels tool lists it on demand. Never guess another id or attempt to access a channel
 outside that set. Notifications and watch instructions are labeled by channel;
 keep each conversation and watch instruction routed to its named channel.
 
@@ -322,6 +360,7 @@ def build_kimi_agent(
     )
 
     @agent.tool
+    @tool_errors_returned
     async def lookup_message(
         ctx: RunContext[AgentDeps], channel_id: str, message_id: str
     ) -> str:
@@ -337,6 +376,7 @@ def build_kimi_agent(
         return env.render([message])
 
     @agent.tool
+    @tool_errors_returned
     async def channel_history(
         ctx: RunContext[AgentDeps],
         channel_id: str,
@@ -353,6 +393,7 @@ def build_kimi_agent(
         return env.render(env.history(limit, before_id=before_message_id))
 
     @agent.tool
+    @tool_errors_returned
     async def skim_messages(
         ctx: RunContext[AgentDeps],
         channel_id: str,
@@ -372,6 +413,7 @@ def build_kimi_agent(
         return await ctx.deps.skim_transcript(env.render(messages))
 
     @agent.tool
+    @tool_errors_returned
     async def send_channel_message(
         ctx: RunContext[AgentDeps], channel_id: str, content: str
     ) -> str:
@@ -394,6 +436,7 @@ def build_kimi_agent(
         return "Message sent."
 
     @agent.tool
+    @tool_errors_returned
     async def reply_to_message(
         ctx: RunContext[AgentDeps],
         channel_id: str,
@@ -423,6 +466,7 @@ def build_kimi_agent(
         return "Reply sent."
 
     @agent.tool
+    @tool_errors_returned
     async def react_to_message(
         ctx: RunContext[AgentDeps],
         channel_id: str,
@@ -444,6 +488,7 @@ def build_kimi_agent(
         return "Reaction added."
 
     @agent.tool
+    @tool_errors_returned
     async def set_watch_instruction(
         ctx: RunContext[AgentDeps],
         channel_id: str,
@@ -469,6 +514,7 @@ def build_kimi_agent(
         )
 
     @agent.tool
+    @tool_errors_returned
     async def clear_watch_instruction(
         ctx: RunContext[AgentDeps], channel_id: str, instruction_id: str
     ) -> str:
@@ -483,6 +529,7 @@ def build_kimi_agent(
         return f"No watch instruction with id {instruction_id}."
 
     @agent.tool
+    @tool_errors_returned
     async def list_watch_instructions(
         ctx: RunContext[AgentDeps], channel_id: str
     ) -> str:
@@ -500,6 +547,7 @@ def build_kimi_agent(
         )
 
     @agent.tool
+    @tool_errors_returned
     async def read_notifications(ctx: RunContext[AgentDeps]) -> str:
         """Read notifications that queued while you've been working: new
         mentions verbatim, other new messages as grouped summaries. Free —
@@ -509,6 +557,7 @@ def build_kimi_agent(
         return ctx.deps.drain_notifications()
 
     @agent.tool
+    @tool_errors_returned
     async def set_monitoring_mode(
         ctx: RunContext[AgentDeps],
         channel_id: str,
@@ -527,10 +576,17 @@ def build_kimi_agent(
             return "Mode control is unavailable in this environment."
         return ctx.deps.request_mode(channel_id, mode, minutes)
 
+    @agent.tool
+    @tool_errors_returned
+    async def list_channels(ctx: RunContext[AgentDeps]) -> str:
+        """List every channel you are enabled in, with its channel_id. Free —
+        never spends your tool budget."""
+        return render_channel_list(ctx.deps.enabled_channels)
+
     # Parity tools (web search, code run, …) register here; in replay evals
     # the Discord/API-bound ones are stubbed by the caller.
     for tool_function in extra_tools:
-        agent.tool(tool_function)
+        agent.tool(tool_errors_returned(tool_function))
 
     return agent
 
