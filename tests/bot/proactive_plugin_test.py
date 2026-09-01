@@ -1261,6 +1261,51 @@ async def test_guild_history_store_uses_a_distinct_key_and_survives_garbage():
     assert "guild wake" in str((await store.read_guild(2))[0])
 
 
+async def test_compaction_summarize_times_out_and_falls_back(monkeypatch):
+    # A hung summarize call blocks the guild consumer loop; the closure must
+    # bound the watcher-model call, retry on the agent model, and finally
+    # compact by truncation instead of hanging.
+    runtime = proactive.ProactiveRuntime(
+        SimpleNamespace(
+            cache=SimpleNamespace(get_guild=lambda _gid: None),
+            get_me=lambda: None,
+        ),
+        start_consumers=False,
+    )
+    runtime._agent_model_id = "agent-model"
+
+    class _HangingSkim:
+        async def skim(self, text):
+            await asyncio.sleep(3600)
+
+    monkeypatch.setattr(runtime, "skim", lambda: _HangingSkim())
+    monkeypatch.setattr(proactive, "COMPACTION_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(proactive, "build_twopass_model", lambda model_id: model_id)
+    monkeypatch.setattr(
+        proactive,
+        "build_proactive_agent",
+        lambda model, system_prompt: SimpleNamespace(),
+    )
+
+    class _FallbackSkim:
+        def __init__(self, model):
+            self.model = model
+
+        async def skim(self, text):
+            return "agent-model summary", {"input_tokens": 1, "output_tokens": 1}
+
+    monkeypatch.setattr(proactive, "SkimRunner", _FallbackSkim)
+    state = proactive.GuildAgentState(guild_id="2")
+    runner = runtime.agent_runner_for(state)
+    assert await runner.summarize("long transcript") == "agent-model summary"
+
+    # Both models failing must still return a truncation placeholder.
+    monkeypatch.setattr(proactive, "SkimRunner", lambda model: _HangingSkim())
+    state_both_fail = proactive.GuildAgentState(guild_id="3")
+    runner = runtime.agent_runner_for(state_both_fail)
+    assert "could not be summarized" in await runner.summarize("long transcript")
+
+
 async def test_history_writes_never_expire():
     # The rolling context is the agent's extended memory: history keys must
     # persist indefinitely, unlike the TTL'd recovery cursors.
