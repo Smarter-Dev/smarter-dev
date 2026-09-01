@@ -285,6 +285,8 @@ class ChannelProducerState:
     last_wake_at: float = 0.0
     # Monotonic deadline of the active-ingest window; 0 means passive.
     active_until: float = 0.0
+    # Whether the stored active window was already restored after a restart.
+    active_window_restored: bool = False
     last_reviewed_message_id: str | None = None
     pending_directed_ids: set[str] = field(default_factory=set)
 
@@ -927,6 +929,50 @@ async def _run_producer_guarded(state: ChannelProducerState) -> None:
         logger.exception("proactive producer failed channel=%s", state.channel_id)
 
 
+async def _persist_active_window(
+    run: ProactiveRuntime, state: ChannelProducerState
+) -> None:
+    """Store the wall-clock window deadline so restarts keep conversations
+    responsive; a Redis blip only costs the persistence, never the wake."""
+    store = run.history_store()
+    if store is None:
+        return
+    try:
+        await store.write_active_until(
+            int(state.channel_id),
+            until_epoch=time.time() + ACTIVE_WINDOW_SECONDS,
+            ttl_seconds=ACTIVE_WINDOW_SECONDS,
+        )
+    except Exception:  # noqa: BLE001 — persistence is best-effort
+        logger.exception(
+            "failed to persist active window channel=%s", state.channel_id
+        )
+
+
+async def _restore_active_window(
+    run: ProactiveRuntime, state: ChannelProducerState
+) -> None:
+    """Rehydrate a live active window once per channel after a restart."""
+    if state.active_window_restored:
+        return
+    state.active_window_restored = True
+    store = run.history_store()
+    if store is None:
+        return
+    try:
+        stored_until = await store.read_active_until(int(state.channel_id))
+    except Exception:  # noqa: BLE001 — restoration is best-effort
+        logger.exception(
+            "failed to read active window channel=%s", state.channel_id
+        )
+        return
+    remaining = (stored_until or 0) - time.time()
+    if remaining > 0:
+        state.active_until = max(
+            state.active_until, time.monotonic() + remaining
+        )
+
+
 @plugin.listener(hikari.GuildMessageCreateEvent)
 async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
     if not event.author or event.author.is_bot or not event.guild_id:
@@ -948,6 +994,7 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
         return
     state = run.state_for(event.guild_id, event.channel_id)
     guild_state = run.guild_state_for(event.guild_id)
+    await _restore_active_window(run, state)
     now = time.monotonic()
     if not state.buffer:
         state.first_at = now
@@ -973,6 +1020,7 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
                 )
             )
         state.active_until = now + ACTIVE_WINDOW_SECONDS
+        await _persist_active_window(run, state)
         _push_engagement_notification(
             run.bot,
             state,

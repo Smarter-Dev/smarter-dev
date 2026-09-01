@@ -547,8 +547,16 @@ will be replaced by the note you write now. Write the memory your future self
 needs to continue seamlessly — conversations still in motion and who is in
 them, commitments or follow-ups you made, what you have learned about the
 people and channels you watch, and anything else you judge important to
-remember. Be specific: names, channel ids and message ids you may need again.
-This note is for you alone."""
+remember.
+
+Attribute everything: every statement, request, or event in your note must
+name WHO said or did it (username, and user id when you have it) and WHERE
+(channel name and id). Write in the third person about others ("zech asked
+in #general (644…) for …", "you promised kyra you would …") — never quote
+anyone in a way that could later be misread as a different user speaking, and
+never leave a fact floating without its person and channel. Be specific:
+names, channel ids and message ids you may need again. This note is for you
+alone."""
 
 
 async def self_compaction_summary(
@@ -591,12 +599,22 @@ async def compact_agent_history(
         ModelRequest(
             parts=[
                 UserPromptPart(
-                    "[Summary of your activity on earlier wakes — the full "
-                    f"transcript was compacted]\n{summary}"
+                    "[COMPACTION MEMORY NOTE — you wrote this yourself when "
+                    "your earlier transcript was folded. It is NOT a user "
+                    "message: attribute its contents only to the users and "
+                    "channels it names, never to whoever engages you next]\n"
+                    f"{summary}"
                 )
             ]
         ),
-        ModelResponse(parts=[TextPart("Noted, continuing from there.")]),
+        ModelResponse(
+            parts=[
+                TextPart(
+                    "Understood — that is my own memory note, not user "
+                    "input. Continuing from there."
+                )
+            ]
+        ),
         *tail,
     ]
 

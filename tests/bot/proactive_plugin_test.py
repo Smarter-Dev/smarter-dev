@@ -1332,6 +1332,49 @@ async def test_compaction_times_out_and_falls_back_to_skim(monkeypatch):
     )
 
 
+async def test_active_window_round_trips_with_ttl():
+    redis = _FakeRedis()
+    store = ProactiveHistoryStore(redis)
+    assert await store.read_active_until(1) is None
+
+    await store.write_active_until(1, until_epoch=1234.5, ttl_seconds=600)
+
+    assert await store.read_active_until(1) == 1234.5
+    assert redis.expiries[ProactiveHistoryStore._active_until_key(1)] == 600
+
+
+async def test_engagement_persists_and_restart_restores_the_active_window(
+    listener_setup, monkeypatch
+):
+    store = ProactiveHistoryStore(_FakeRedis())
+    monkeypatch.setattr(
+        listener_setup.runtime, "history_store", lambda: store
+    )
+    await proactive.on_guild_message(
+        _event(_hikari_message(user_mentions_ids=(999,)))
+    )
+    stored = await store.read_active_until(1)
+    assert stored is not None and stored > proactive.time.time()
+
+    # A fresh runtime (restart) sharing the store: a PLAIN message must find
+    # the window still active and arm the fast debounce.
+    restarted = proactive.ProactiveRuntime(
+        listener_setup.runtime.bot, start_consumers=False
+    )
+    monkeypatch.setattr(restarted, "history_store", lambda: store)
+    monkeypatch.setattr(proactive, "runtime", restarted)
+    scheduled = []
+    monkeypatch.setattr(
+        proactive, "_schedule_producer", lambda state: scheduled.append(state)
+    )
+
+    await proactive.on_guild_message(_event(_hikari_message(id=777)))
+
+    state = restarted.channel_states[1]
+    assert state.active_until > proactive.time.monotonic()
+    assert scheduled == [state]
+
+
 async def test_history_writes_never_expire():
     # The rolling context is the agent's extended memory: history keys must
     # persist indefinitely, unlike the TTL'd recovery cursors.

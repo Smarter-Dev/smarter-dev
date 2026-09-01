@@ -218,6 +218,9 @@ async def test_history_compacts_over_limit_and_keeps_tail():
     assert len(summaries) == 1
     assert "wake 19" in str(compacted[-2])  # tail survives verbatim
     assert "compact summary" in str(compacted[0])
+    # The injected note is framed as the agent's own memory so its contents
+    # are never misread as whatever the next engaging user said.
+    assert "NOT a user message" in str(compacted[0])
     assert isinstance(compacted[0], ModelRequest)
     assert len(compacted) < len(history)
 
