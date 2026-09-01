@@ -41,7 +41,9 @@ def _message(
     )
 
 
-def _context(*new_messages: ChannelMessage) -> ActivationContext:
+def _context(
+    *new_messages: ChannelMessage, channel_id: str = ""
+) -> ActivationContext:
     return ActivationContext(
         channel_name="general",
         guild_name="Smarter Dev",
@@ -49,6 +51,7 @@ def _context(*new_messages: ChannelMessage) -> ActivationContext:
         activated_at=T + timedelta(minutes=1),
         history=[_message("history", 0)],
         new_messages=list(new_messages) or [_message("new", 1)],
+        channel_id=channel_id,
     )
 
 
@@ -83,12 +86,17 @@ async def test_watcher_producer_pushes_engagement_without_watcher_call():
     producer = _producer(_ExplodingWatcher(), queue)
 
     usage = await producer.activate(
-        _context(_message("mention", 2, mentions=("bot-1",)))
+        _context(
+            _message("mention", 2, mentions=("bot-1",)),
+            channel_id="123",
+        )
     )
 
     assert usage == {}
     assert len(queue.items) == 1
     assert queue.items[0].kind == "mention"
+    assert queue.items[0].channel_id == "123"
+    assert queue.items[0].channel_name == "general"
     assert queue.items[0].message_ids == ("mention",)
     assert queue.items[0].wakes is True
 
@@ -107,10 +115,12 @@ async def test_watcher_producer_pushes_waking_watcher_summary():
         queue,
     )
 
-    await producer.activate(_context())
+    await producer.activate(_context(channel_id="123"))
 
     assert len(queue.items) == 1
     assert queue.items[0].kind == "watcher_summary"
+    assert queue.items[0].channel_id == "123"
+    assert queue.items[0].channel_name == "general"
     assert queue.items[0].message_ids == ("new",)
     assert queue.items[0].wakes is True
 
@@ -195,20 +205,27 @@ async def test_agent_consumer_drains_exact_notifications_and_returns_agent_usage
 ):
     queue = NotificationQueue()
     first = mode_change_notification(
-        mode="active", cause="requested", until=None, created_at=T
+        mode="active", cause="requested", until=None, created_at=T,
+        channel_id="1", channel_name="general",
     )
     second = mode_change_notification(
         mode="passive",
         cause="quiet",
         until=None,
         created_at=T + timedelta(seconds=1),
+        channel_id="1",
+        channel_name="general",
     )
     queue.push(first)
     queue.push(second)
     built_with = []
 
-    def recording_build_wake_brief(notifications, dropped, store):
-        built_with.append((notifications, dropped, store))
+    def recording_build_wake_brief(
+        notifications, dropped, instruction_stores, enabled_channels
+    ):
+        built_with.append(
+            (notifications, dropped, instruction_stores, enabled_channels)
+        )
         return "rendered brief"
 
     monkeypatch.setattr(adapter, "build_wake_brief", recording_build_wake_brief)
@@ -218,7 +235,8 @@ async def test_agent_consumer_drains_exact_notifications_and_returns_agent_usage
     consumer = adapter.AgentConsumer(
         agent_runner=runner,
         skim=None,
-        instruction_store=store,
+        instruction_stores={"general": store},
+        enabled_channels={"general": "general"},
         agent_model_id="agent-model",
         notification_queue=queue,
         deps_factory=deps_factory,
@@ -227,7 +245,9 @@ async def test_agent_consumer_drains_exact_notifications_and_returns_agent_usage
 
     result = await consumer.activate(_context())
 
-    assert built_with == [([first, second], 0, store)]
+    assert built_with == [
+        ([first, second], 0, {"general": store}, {"general": "general"})
+    ]
     assert runner.briefs == ["MEMORY REFRESH\n\nrendered brief"]
     assert len(deps_factory.kwargs) == 1
     assert runner.deps == [adapter.AgentDeps(**deps_factory.kwargs[0])]
@@ -246,7 +266,8 @@ async def test_agent_consumer_returns_skim_usage_attributed_to_watcher_model():
     consumer = adapter.AgentConsumer(
         agent_runner=_SkimmingAgentRunner(),
         skim=_StubSkimRunner(),
-        instruction_store=InstructionStore(seed="SEED"),
+        instruction_stores={"general": InstructionStore(seed="SEED")},
+        enabled_channels={"general": "general"},
         agent_model_id="agent-model",
         notification_queue=NotificationQueue(),
         watcher_model_id="watcher-model",
@@ -275,7 +296,8 @@ async def test_agent_consumer_rejects_skim_usage_without_watcher_model_id():
     consumer = adapter.AgentConsumer(
         agent_runner=_SkimmingAgentRunner(),
         skim=_StubSkimRunner(),
-        instruction_store=InstructionStore(seed="SEED"),
+        instruction_stores={"general": InstructionStore(seed="SEED")},
+        enabled_channels={"general": "general"},
         agent_model_id="agent-model",
         notification_queue=NotificationQueue(),
     )

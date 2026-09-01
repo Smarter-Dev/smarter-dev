@@ -101,6 +101,7 @@ class GeneratedImage:
     data: bytes
     mime_type: str
     filename: str
+    channel_id: str = ""
 
 
 @dataclass
@@ -558,7 +559,12 @@ async def generate_image(ctx: RunContext[ChatDeps], prompt: str) -> str:
 
     filename = f"diagram{_MIME_EXT.get(mime_type, '.png')}"
     ctx.deps.pending_images.append(
-        GeneratedImage(data=data, mime_type=mime_type, filename=filename)
+        GeneratedImage(
+            data=data,
+            mime_type=mime_type,
+            filename=filename,
+            channel_id=str(ctx.deps.channel_id),
+        )
     )
     logger.info(
         "generate_image: attached %d bytes (%s) channel=%s remaining=%s",

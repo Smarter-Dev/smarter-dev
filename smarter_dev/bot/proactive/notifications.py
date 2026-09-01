@@ -27,6 +27,8 @@ class Notification:
     kind: str
     created_at: datetime
     body: str
+    channel_id: str = ""
+    channel_name: str = ""
     message_ids: tuple[str, ...] = ()
     # Whether this notification wakes the agent by itself; non-waking ones
     # queue until something else wakes it.
@@ -44,7 +46,11 @@ def _user_metadata(message: ChannelMessage) -> str:
     )
 
 
-def mention_notification(message: ChannelMessage) -> Notification:
+def mention_notification(
+    message: ChannelMessage,
+    channel_id: str = "",
+    channel_name: str = "",
+) -> Notification:
     return Notification(
         kind="mention",
         created_at=message.timestamp,
@@ -52,13 +58,18 @@ def mention_notification(message: ChannelMessage) -> Notification:
             f"You were @mentioned by {_user_metadata(message)} in message "
             f"id={message.id}:\n> {message.content}"
         ),
+        channel_id=channel_id,
+        channel_name=channel_name,
         message_ids=(message.id,),
         wakes=True,
     )
 
 
 def reply_notification(
-    message: ChannelMessage, replied_to: ChannelMessage | None
+    message: ChannelMessage,
+    replied_to: ChannelMessage | None,
+    channel_id: str = "",
+    channel_name: str = "",
 ) -> Notification:
     replied_line = (
         f'your message id={replied_to.id} ("{replied_to.content[:120]}")'
@@ -72,6 +83,8 @@ def reply_notification(
             f"{_user_metadata(message)} replied to {replied_line} with "
             f"message id={message.id}:\n> {message.content}"
         ),
+        channel_id=channel_id,
+        channel_name=channel_name,
         message_ids=(message.id,),
         wakes=True,
     )
@@ -83,12 +96,16 @@ def watcher_summary_notification(
     message_ids: list[str],
     wake: bool,
     created_at: datetime,
+    channel_id: str = "",
+    channel_name: str = "",
 ) -> Notification:
     id_list = ", ".join(message_ids) if message_ids else "none flagged"
     return Notification(
         kind="watcher_summary",
         created_at=created_at,
         body=f"Watcher summary: {summary} (relevant message ids: {id_list})",
+        channel_id=channel_id,
+        channel_name=channel_name,
         message_ids=tuple(message_ids),
         wakes=wake,
     )
@@ -99,6 +116,8 @@ def new_messages_notification(
     summary: str,
     message_ids: list[str],
     created_at: datetime,
+    channel_id: str = "",
+    channel_name: str = "",
 ) -> Notification:
     """Mid-run batch: messages that arrived while the agent was working,
     grouped and summarized by the watcher model. Mentions never take this
@@ -110,6 +129,8 @@ def new_messages_notification(
             f"{len(message_ids)} new messages arrived while you were "
             f"working: {summary}"
         ),
+        channel_id=channel_id,
+        channel_name=channel_name,
         message_ids=tuple(message_ids),
     )
 
@@ -120,27 +141,42 @@ def mode_change_notification(
     cause: str,
     until: datetime | None,
     created_at: datetime,
+    channel_id: str = "",
+    channel_name: str = "",
 ) -> Notification:
     until_text = f" until {until:%H:%M} UTC" if until else ""
     return Notification(
         kind="mode_change",
         created_at=created_at,
         body=f"Monitoring mode changed to {mode}{until_text} — {cause}.",
+        channel_id=channel_id,
+        channel_name=channel_name,
     )
 
 
 def instruction_expired_notification(
-    *, instruction_id: str, text: str, created_at: datetime
+    *,
+    instruction_id: str,
+    text: str,
+    created_at: datetime,
+    channel_id: str = "",
+    channel_name: str = "",
 ) -> Notification:
     return Notification(
         kind="instruction_expired",
         created_at=created_at,
         body=f'Watch instruction {instruction_id} expired: "{text}"',
+        channel_id=channel_id,
+        channel_name=channel_name,
     )
 
 
 def recovery_notification(
-    *, missed_count: int, created_at: datetime
+    *,
+    missed_count: int,
+    created_at: datetime,
+    channel_id: str = "",
+    channel_name: str = "",
 ) -> Notification:
     return Notification(
         kind="recovery",
@@ -149,6 +185,8 @@ def recovery_notification(
             f"The bot restarted; {missed_count} messages arrived while it "
             f"was down and are included in this wake."
         ),
+        channel_id=channel_id,
+        channel_name=channel_name,
     )
 
 
@@ -191,5 +229,10 @@ def render_notifications(items: list[Notification], dropped: int = 0) -> str:
         lines.append(f"({dropped} older notifications were dropped)")
     for notification in items:
         stamp = notification.created_at.astimezone(UTC).strftime("%H:%M")
-        lines.append(f"[{stamp} UTC, {notification.kind}] {notification.body}")
+        channel = notification.channel_name or notification.channel_id
+        channel_prefix = f"[#{channel}] " if channel else ""
+        lines.append(
+            f"{channel_prefix}[{stamp} UTC, {notification.kind}] "
+            f"{notification.body}"
+        )
     return "\n".join(lines)

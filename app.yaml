@@ -79,6 +79,7 @@ controllers:
   - smarter_dev.web.api_native.image_quota:ImageQuotaController
   - smarter_dev.web.api_native.activity:ActivityController
   - smarter_dev.web.api_native.model_overrides:ChannelModelOverrideController
+  - smarter_dev.web.api_native.proactive_settings:ProactiveGuildSettingsController
   - smarter_dev.web.api_native.proactive_settings:ProactiveChannelSettingsController
   # Signed-link per-channel bot config (no auth_guard: the link is the
   # authorization — see smarter_dev/shared/config_links.py).

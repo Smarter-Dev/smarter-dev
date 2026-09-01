@@ -62,10 +62,13 @@ async def _noop_skim(transcript: str) -> str:
 
 
 def _deps(env=None, budget_limit: int = 8) -> agent.AgentDeps:
+    channel_env = env or _env()
+    instruction_store = environment.InstructionStore(seed="SEED")
     return agent.AgentDeps(
-        env=env or _env(),
+        enabled_channels={"a": "test-channel"},
+        channel_envs={"a": channel_env},
         actions=environment.WakeActions(),
-        instruction_store=environment.InstructionStore(seed="SEED"),
+        instruction_stores={"a": instruction_store},
         skim_transcript=_noop_skim,
         budget=agent.ToolBudget(limit=budget_limit),
     )
@@ -426,6 +429,7 @@ async def test_non_wake_summaries_discard_but_queued_items_drain():
     queue.push(mode_change_notification(
         mode="active", cause="keyboard chatter escalated",
         until=None, created_at=_datetime(2026, 7, 20, 10, 0, tzinfo=_UTC),
+        channel_id="c", channel_name="c",
     ))
 
     # Next wake is deterministic (a mention): the queued item rides along.

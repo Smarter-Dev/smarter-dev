@@ -43,7 +43,7 @@ from smarter_dev.bot.proactive.adapter import WatcherProducer
 from smarter_dev.bot.proactive.adapter import bot_directed_message_ids
 from smarter_dev.bot.proactive.agent import OPERATING_POLICY_BRIEF
 from smarter_dev.bot.proactive.agent import KimiAgentRunner
-from smarter_dev.bot.proactive.agent import build_agent_system_prompt
+from smarter_dev.bot.proactive.agent import build_guild_agent_system_prompt
 from smarter_dev.bot.proactive.environment import ChannelEnvironment
 from smarter_dev.bot.proactive.environment import InstructionStore
 from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
@@ -66,7 +66,7 @@ from smarter_dev.bot.proactive.watcher import WatcherRunner
 from smarter_dev.bot.proactive.windows import MAX_WAIT_SECONDS
 from smarter_dev.bot.proactive.windows import PASSIVE_SECONDS
 from smarter_dev.bot.proactive.windows import QUIET_SECONDS
-from smarter_dev.bot.services.chat_memory import get_chat_memory
+from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.proactive_settings_service import ProactiveSettingsService
 
 logger = logging.getLogger(__name__)
@@ -92,6 +92,7 @@ WATCHER_MODEL_ENV_VAR = "PROACTIVE_WATCHER_MODEL"
 DEFAULT_AGENT_MODEL = "gemini-3.7-flash"
 DEFAULT_WATCHER_MODEL = "z-ai/glm-5.3-flash"
 HISTORY_FETCH_LIMIT = 60
+SETTINGS_RETRY_BACKOFF_SECONDS = 5
 
 
 def compute_fire_delay(
@@ -179,9 +180,7 @@ async def dispatch_response(
     return sent
 
 
-def render_memory_block(
-    *, long_term_memory, long_term_updated_at, notes, topic, channel_notes
-) -> str:
+def render_memory_block(*, long_term_memory, long_term_updated_at, notes) -> str:
     """The memory bundle as one brief-ready block; empty when nothing is known."""
     sections = []
     if long_term_memory:
@@ -197,44 +196,29 @@ def render_memory_block(
             for note in notes
         )
         sections.append(f"NOTES YOU KEPT TODAY:\n{note_lines}")
-    if topic:
-        sections.append(f"CHANNEL TOPIC (your earlier summary): {topic}")
-    if channel_notes:
-        sections.append(f"CHANNEL NOTES: {channel_notes}")
     if not sections:
         return ""
     return "YOUR MEMORY (refreshed at most hourly):\n" + "\n\n".join(sections)
 
 
-async def load_memory_block(run: ProactiveRuntime, state: ChannelWatchState) -> str:
-    """Read the same memory the chat bot injects; empty string on any failure."""
+async def load_memory_block(run: ProactiveRuntime, guild_id: str) -> str:
+    """Read guild memory only; per-channel reads do not scale with a guild."""
     long_term = None
     long_term_at = None
     kept_notes = ()
     guild_service = run.bot.d.get("guild_chat_memory_service")
     if guild_service is not None:
         try:
-            snapshot = await guild_service.load_snapshot(state.guild_id)
+            snapshot = await guild_service.load_snapshot(guild_id)
             long_term = snapshot.long_term_memory
             long_term_at = snapshot.updated_at
             kept_notes = snapshot.notes
         except Exception:  # noqa: BLE001 — memory is best-effort context
             logger.warning("proactive guild memory read failed", exc_info=True)
-    topic = None
-    channel_notes = None
-    try:
-        chat_memory = get_chat_memory()
-        topic_value = await chat_memory.topic_for_activation(int(state.channel_id))
-        topic = topic_value.text if hasattr(topic_value, "text") else topic_value
-        channel_notes = await chat_memory.get_notes(int(state.channel_id))
-    except Exception:  # noqa: BLE001 — memory is best-effort context
-        logger.warning("proactive channel memory read failed", exc_info=True)
     return render_memory_block(
         long_term_memory=long_term,
         long_term_updated_at=long_term_at,
         notes=kept_notes,
-        topic=topic,
-        channel_notes=channel_notes,
     )
 
 
@@ -280,8 +264,8 @@ def channel_message_from_hikari(message) -> ChannelMessage:
 
 
 @dataclass
-class ChannelWatchState:
-    """Per-channel producer buffer, notification consumer and persistent agent."""
+class ChannelProducerState:
+    """Per-channel watcher buffer and review cursor."""
 
     guild_id: str
     channel_id: str
@@ -290,26 +274,43 @@ class ChannelWatchState:
     last_at: float = 0.0
     timer: asyncio.Task | None = None
     producer_tasks: set[asyncio.Task] = field(default_factory=set)
-    consumer_task: asyncio.Task | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    agent_runner: KimiAgentRunner | None = None
     last_wake_at: float = 0.0
-    history_loaded: bool = False
     # Monotonic deadline of the active-ingest window; 0 means passive.
     active_until: float = 0.0
-    memory_refreshed_at: float = 0.0
-    queue: NotificationQueue = field(default_factory=NotificationQueue)
     last_reviewed_message_id: str | None = None
-    pending_passive_wake: bool = False
     pending_directed_ids: set[str] = field(default_factory=set)
 
 
+@dataclass
+class GuildAgentState:
+    """One notification consumer and persistent agent per guild."""
+
+    guild_id: str
+    queue: NotificationQueue = field(default_factory=NotificationQueue)
+    consumer_task: asyncio.Task | None = None
+    agent_runner: KimiAgentRunner | None = None
+    history_loaded: bool = False
+    memory_refreshed_at: float = 0.0
+    pending_passive_wake: bool = False
+
+
+def _channel_name_for_id(bot, channel_id: str) -> str:
+    channel = bot.cache.get_guild_channel(int(channel_id))
+    return getattr(channel, "name", None) or channel_id
+
+
+def _channel_name(bot, state: ChannelProducerState) -> str:
+    return _channel_name_for_id(bot, state.channel_id)
+
+
 class ProactiveRuntime:
-    """All live state: shared watcher/skim, per-channel agents and buffers."""
+    """Shared models, per-channel producers, and per-guild agents."""
 
     def __init__(self, bot: lightbulb.BotApp, *, start_consumers: bool = True):
         self.bot = bot
-        self.states: dict[int, ChannelWatchState] = {}
+        self.channel_states: dict[int, ChannelProducerState] = {}
+        self.guild_states: dict[int, GuildAgentState] = {}
         self._watcher: WatcherRunner | None = None
         self._skim: SkimRunner | None = None
         self._agent_model_id: str | None = None
@@ -354,20 +355,26 @@ class ProactiveRuntime:
             self._history_store = ProactiveHistoryStore(redis_client)
         return self._history_store
 
-    def state_for(self, guild_id: int, channel_id: int) -> ChannelWatchState:
-        state = self.states.get(channel_id)
+    def state_for(self, guild_id: int, channel_id: int) -> ChannelProducerState:
+        state = self.channel_states.get(channel_id)
         if state is None:
-            state = ChannelWatchState(
+            state = ChannelProducerState(
                 guild_id=str(guild_id), channel_id=str(channel_id)
             )
-            self.states[channel_id] = state
+            self.channel_states[channel_id] = state
+        return state
+
+    def guild_state_for(self, guild_id: int) -> GuildAgentState:
+        state = self.guild_states.get(guild_id)
+        if state is None:
+            state = GuildAgentState(guild_id=str(guild_id))
+            self.guild_states[guild_id] = state
             if self.start_consumers:
                 state.consumer_task = asyncio.create_task(_consumer_loop(state))
         return state
 
-    def agent_runner_for(self, state: ChannelWatchState) -> KimiAgentRunner:
+    def agent_runner_for(self, state: GuildAgentState) -> KimiAgentRunner:
         if state.agent_runner is None:
-            channel = self.bot.cache.get_guild_channel(int(state.channel_id))
             guild = self.bot.cache.get_guild(int(state.guild_id))
             me = self.bot.get_me()
 
@@ -379,12 +386,9 @@ class ProactiveRuntime:
             state.agent_runner = KimiAgentRunner(
                 agent=build_proactive_agent(
                     build_twopass_model(self.agent_model_id),
-                    system_prompt=build_agent_system_prompt(
+                    system_prompt=build_guild_agent_system_prompt(
                         bot_display_name=me.username if me else "smarter-bot",
                         bot_user_id=str(me.id) if me else "",
-                        channel_name=(
-                            getattr(channel, "name", None) or state.channel_id
-                        ),
                         guild_name=(getattr(guild, "name", None) or state.guild_id),
                     ),
                 ),
@@ -424,8 +428,9 @@ def _message_is_after_cursor(message: ChannelMessage, cursor: str | None) -> boo
 
 async def _record_usage(
     service,
-    state: ChannelWatchState,
     *,
+    guild_id: str,
+    channel_id: str,
     metered_at: datetime,
     passive: bool,
     responses: int,
@@ -446,8 +451,8 @@ async def _record_usage(
         return
     try:
         await service.record_wake_usage(
-            state.guild_id,
-            state.channel_id,
+            guild_id,
+            channel_id,
             wake_id=uuid4().hex,
             metered_at=metered_at,
             passive=passive,
@@ -458,7 +463,7 @@ async def _record_usage(
         logger.exception("failed to persist proactive usage")
 
 
-async def _run_producer(state: ChannelWatchState, *, passive: bool = False) -> None:
+async def _run_producer(state: ChannelProducerState, *, passive: bool = False) -> None:
     """Review the next buffered batch and enqueue any watcher wake."""
     run = _runtime()
     service = run.settings_service()
@@ -502,6 +507,7 @@ async def _run_producer(state: ChannelWatchState, *, passive: bool = False) -> N
     instruction_store = InstructionStore.from_stored(
         OPERATING_POLICY_BRIEF, settings.watch_addendum
     )
+    guild_state = run.guild_state_for(int(state.guild_id))
     usage_by_model: dict[str, dict] = {}
     details: dict = {}
     if watcher_messages or passive:
@@ -509,24 +515,26 @@ async def _run_producer(state: ChannelWatchState, *, passive: bool = False) -> N
             watcher=run.watcher(),
             instruction_store=instruction_store,
             watcher_model_id=run.watcher_model_id,
-            notification_queue=state.queue,
+            notification_queue=guild_state.queue,
             bot_display_name=me.username if me else "the bot",
         )
         context = ActivationContext(
-            channel_name=str(state.channel_id),
+            channel_name=_channel_name(run.bot, state),
             guild_name=str(state.guild_id),
             bot_user_id=bot_user_id,
             activated_at=activated_at,
             history=history,
             new_messages=watcher_messages,
+            channel_id=state.channel_id,
         )
         usage_by_model = await producer.produce(context)
         details = producer.details
         if producer.wake_produced:
-            state.pending_passive_wake = passive
+            guild_state.pending_passive_wake = passive
         await _record_usage(
             service,
-            state,
+            guild_id=state.guild_id,
+            channel_id=state.channel_id,
             metered_at=activated_at,
             passive=passive,
             responses=0,
@@ -545,60 +553,92 @@ async def _run_producer(state: ChannelWatchState, *, passive: bool = False) -> N
     )
 
 
-async def _consume_channel_once(state: ChannelWatchState) -> None:
-    """Drain one wake-worthy queue batch and run the channel agent."""
+async def _consume_guild_once(state: GuildAgentState) -> None:
+    """Drain one guild wake and route every action to its named channel."""
     run = _runtime()
     service = run.settings_service()
     if service is None:
         state.queue.drain()
         return
-    settings = await service.get_settings(state.guild_id, state.channel_id)
-    if not settings.enabled:
+    try:
+        enabled_rows = await service.list_enabled_channels(state.guild_id)
+    except APIError:
+        logger.warning(
+            "proactive enabled-channel lookup failed guild=%s",
+            state.guild_id,
+            exc_info=True,
+        )
+        await asyncio.sleep(SETTINGS_RETRY_BACKOFF_SECONDS)
+        return
+    if not enabled_rows:
         state.queue.drain()
         return
 
     me = run.bot.get_me()
     bot_user_id = str(me.id) if me else ""
     activated_at = datetime.now(UTC)
-    history = await _fetch_history(run.bot, int(state.channel_id), exclude_ids=set())
-    instruction_store = InstructionStore.from_stored(
-        OPERATING_POLICY_BRIEF, settings.watch_addendum
-    )
-    persisted_updates = instruction_store.updates
-    for expired in instruction_store.prune_expired():
-        state.queue.push(
-            instruction_expired_notification(
-                instruction_id=expired.instruction_id,
-                text=expired.text,
-                created_at=activated_at,
-            )
+    enabled_channels = {}
+    instruction_stores = {}
+    persisted_updates = {}
+    for row in enabled_rows:
+        channel_id = str(row.channel_id)
+        channel_name = _channel_name_for_id(run.bot, channel_id)
+        enabled_channels[channel_id] = channel_name
+        instruction_store = InstructionStore.from_stored(
+            OPERATING_POLICY_BRIEF, row.watch_addendum
         )
+        persisted_updates[channel_id] = instruction_store.updates
+        for expired in instruction_store.prune_expired(now=activated_at):
+            state.queue.push(
+                instruction_expired_notification(
+                    instruction_id=expired.instruction_id,
+                    text=expired.text,
+                    created_at=activated_at,
+                    channel_id=channel_id,
+                    channel_name=channel_name,
+                )
+            )
+        instruction_stores[channel_id] = instruction_store
 
     runner = run.agent_runner_for(state)
     history_store = run.history_store()
     if history_store is not None and not state.history_loaded:
         try:
-            runner.history = await history_store.read(int(state.channel_id))
+            runner.history = await history_store.read_guild(int(state.guild_id))
         except Exception:  # noqa: BLE001 — stored history is a cache
-            logger.exception("failed to load proactive history")
+            logger.exception("failed to load proactive guild history")
         state.history_loaded = True
 
     brief_preamble = ""
     now = time.monotonic()
     if now - state.memory_refreshed_at >= MEMORY_REFRESH_SECONDS:
-        brief_preamble = await load_memory_block(run, state)
+        brief_preamble = await load_memory_block(run, state.guild_id)
         state.memory_refreshed_at = now
+
+    async def channel_envs(channel_id: str) -> ChannelEnvironment:
+        try:
+            history = await _fetch_history(run.bot, int(channel_id), exclude_ids=set())
+        except hikari.HikariError:
+            # An unreachable channel must not discard every channel's wake.
+            logger.warning(
+                "proactive channel history unavailable channel=%s",
+                channel_id,
+                exc_info=True,
+            )
+            history = []
+        return ChannelEnvironment(visible=history, bot_user_id=bot_user_id)
 
     wake_deps: list[ProactiveDeps] = []
 
-    def request_mode(mode: str, minutes: int) -> str:
+    def request_mode(channel_id: str, mode: str, minutes: int) -> str:
+        channel_state = run.state_for(int(state.guild_id), int(channel_id))
         if mode == "active":
             duration = max(1, minutes)
-            state.active_until = time.monotonic() + duration * 60
+            channel_state.active_until = time.monotonic() + duration * 60
             until = datetime.now(UTC) + timedelta(minutes=duration)
             confirmation = f"Monitoring mode set to active for {minutes} minutes."
         else:
-            state.active_until = 0.0
+            channel_state.active_until = 0.0
             until = None
             confirmation = "Monitoring mode set to passive."
         state.queue.push(
@@ -607,6 +647,8 @@ async def _consume_channel_once(state: ChannelWatchState) -> None:
                 cause="you requested it",
                 until=until,
                 created_at=datetime.now(UTC),
+                channel_id=channel_id,
+                channel_name=enabled_channels[channel_id],
             )
         )
         return confirmation
@@ -620,9 +662,9 @@ async def _consume_channel_once(state: ChannelWatchState) -> None:
     def deps_factory(**kwargs):
         deps = ProactiveDeps(
             bot=run.bot,
-            channel_id=int(state.channel_id),
+            channel_id=0,
             guild_id=int(state.guild_id),
-            channel_name=str(state.channel_id),
+            channel_name=None,
             request_mode=request_mode,
             drain_notifications=drain_notifications,
             **kwargs,
@@ -633,48 +675,77 @@ async def _consume_channel_once(state: ChannelWatchState) -> None:
     consumer = AgentConsumer(
         agent_runner=runner,
         skim=run.skim(),
-        instruction_store=instruction_store,
         agent_model_id=run.agent_model_id,
         notification_queue=state.queue,
         watcher_model_id=run.watcher_model_id,
         deps_factory=deps_factory,
         brief_preamble=brief_preamble,
+        instruction_stores=instruction_stores,
+        enabled_channels=enabled_channels,
+        channel_envs=channel_envs,
     )
+    guild = run.bot.cache.get_guild(int(state.guild_id))
     context = ActivationContext(
-        channel_name=str(state.channel_id),
-        guild_name=str(state.guild_id),
+        channel_name="",
+        guild_name=getattr(guild, "name", None) or state.guild_id,
         bot_user_id=bot_user_id,
         activated_at=activated_at,
-        history=history,
+        history=[],
         new_messages=[],
+        channel_id="",
     )
     passive = state.pending_passive_wake
     state.pending_passive_wake = False
     result = await consumer.consume(context)
 
+    dispatched_responses = 0
+    sent_message_parts = 0
     for response in result.responses:
-        await dispatch_response(
+        if response.channel_id not in enabled_channels:
+            logger.warning(
+                "proactive response rejected for disabled channel=%s",
+                response.channel_id,
+            )
+            continue
+        response_message_parts = await dispatch_response(
             run.bot,
-            channel_id=int(state.channel_id),
+            channel_id=int(response.channel_id),
             content=response.content,
             reply_to_id=response.reply_to_id,
         )
+        sent_message_parts += response_message_parts
+        if response_message_parts:
+            dispatched_responses += 1
     for reaction in result.reactions:
-        if not reaction.message_id.isdigit():
+        if (
+            reaction.channel_id not in enabled_channels
+            or not reaction.message_id.isdigit()
+        ):
             continue
         try:
             await run.bot.rest.add_reaction(
-                int(state.channel_id), int(reaction.message_id), reaction.emoji
+                int(reaction.channel_id),
+                int(reaction.message_id),
+                reaction.emoji,
             )
         except Exception:  # noqa: BLE001
             logger.exception("proactive reaction failed")
-    pending_images = [image for deps in wake_deps for image in deps.pending_images]
-    if pending_images:
+
+    images_by_channel: dict[str, list] = {}
+    for deps in wake_deps:
+        for pending_image in deps.pending_images:
+            if pending_image.channel_id in enabled_channels:
+                images_by_channel.setdefault(pending_image.channel_id, []).append(
+                    pending_image
+                )
+    for channel_id, pending_images in images_by_channel.items():
         reply_target = next(
             (
                 int(response.reply_to_id)
                 for response in result.responses
-                if response.reply_to_id and response.reply_to_id.isdigit()
+                if response.channel_id == channel_id
+                and response.reply_to_id
+                and response.reply_to_id.isdigit()
             ),
             None,
         )
@@ -687,88 +758,111 @@ async def _consume_channel_once(state: ChannelWatchState) -> None:
         if reply_target is not None:
             image_kwargs["reply"] = reply_target
         try:
-            await run.bot.rest.create_message(int(state.channel_id), **image_kwargs)
+            await run.bot.rest.create_message(int(channel_id), **image_kwargs)
         except Exception:  # noqa: BLE001 — images are best-effort extras
             logger.exception("proactive image post failed")
+
     if history_store is not None:
         try:
-            await history_store.write(int(state.channel_id), runner.history)
+            await history_store.write_guild(int(state.guild_id), runner.history)
         except Exception:  # noqa: BLE001 — persistence is best-effort
-            logger.exception("failed to persist proactive history")
-    if (
-        history_store is not None
-        and state.last_reviewed_message_id is not None
-        and state.last_reviewed_message_id.isdigit()
-    ):
-        try:
-            await history_store.write_cursor(
-                int(state.channel_id),
-                guild_id=state.guild_id,
-                last_message_id=state.last_reviewed_message_id,
-            )
-        except Exception:  # noqa: BLE001 — the cursor is best-effort
-            logger.exception("failed to persist proactive cursor")
-    if instruction_store.updates != persisted_updates:
+            logger.exception("failed to persist proactive guild history")
+        for producer_state in run.channel_states.values():
+            if (
+                producer_state.guild_id != state.guild_id
+                or producer_state.last_reviewed_message_id is None
+                or not producer_state.last_reviewed_message_id.isdigit()
+            ):
+                continue
+            try:
+                await history_store.write_cursor(
+                    int(producer_state.channel_id),
+                    guild_id=producer_state.guild_id,
+                    last_message_id=producer_state.last_reviewed_message_id,
+                )
+            except Exception:  # noqa: BLE001 — persistence is best-effort
+                logger.exception("failed to persist proactive cursor")
+    for channel_id, instruction_store in instruction_stores.items():
+        if instruction_store.updates == persisted_updates[channel_id]:
+            continue
         try:
             await service.set_watch_addendum(
-                state.guild_id, state.channel_id, instruction_store.to_stored()
+                state.guild_id, channel_id, instruction_store.to_stored()
             )
         except Exception:  # noqa: BLE001 — persistence is best-effort
             logger.exception("failed to persist watch instructions")
     await _record_usage(
         service,
-        state,
+        guild_id=state.guild_id,
+        channel_id="guild-wide",
         metered_at=activated_at,
         passive=passive,
-        responses=len(result.responses),
+        responses=dispatched_responses,
         operation="agent",
         usage_by_model=result.usage_by_model,
     )
     logger.info(
-        "proactive agent channel=%s responses=%d reactions=%d tokens_in=%d "
-        "tokens_out=%d",
-        state.channel_id,
-        len(result.responses),
+        "proactive guild agent guild=%s responses=%d message_parts=%d reactions=%d "
+        "tokens_in=%d tokens_out=%d",
+        state.guild_id,
+        dispatched_responses,
+        sent_message_parts,
         len(result.reactions),
         result.input_tokens,
         result.output_tokens,
     )
 
 
-async def _consumer_loop_iteration(state: ChannelWatchState) -> None:
+async def _consumer_loop_iteration(state: GuildAgentState) -> None:
     await state.queue.wait_for_wake()
-    await _consume_channel_once(state)
+    await _consume_guild_once(state)
 
 
-async def _consumer_loop(state: ChannelWatchState) -> None:
+async def _consumer_loop(state: GuildAgentState) -> None:
     while True:
         try:
             await _consumer_loop_iteration(state)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 — a failed wake must not kill the loop
-            logger.exception("proactive agent wake failed channel=%s", state.channel_id)
+            logger.exception("proactive agent wake failed guild=%s", state.guild_id)
 
 
 def _push_engagement_notification(
-    state: ChannelWatchState,
+    bot,
+    state: ChannelProducerState,
+    queue: NotificationQueue,
     message,
     converted: ChannelMessage,
     bot_user_id: str,
 ) -> None:
     """Queue a mention/reply for the running agent, verbatim."""
+    channel_name = _channel_name(bot, state)
     mention_ids = getattr(message, "user_mentions_ids", None) or ()
     if bot_user_id in {str(mention_id) for mention_id in mention_ids}:
-        state.queue.push(mention_notification(converted))
+        queue.push(
+            mention_notification(
+                converted,
+                channel_id=state.channel_id,
+                channel_name=channel_name,
+            )
+        )
         return
     referenced = getattr(message, "referenced_message", None)
     replied_to = (
         channel_message_from_hikari(referenced) if referenced is not None else None
     )
-    state.queue.push(reply_notification(converted, replied_to))
+    queue.push(
+        reply_notification(
+            converted,
+            replied_to,
+            channel_id=state.channel_id,
+            channel_name=channel_name,
+        )
+    )
 
 
-def _schedule_producer(state: ChannelWatchState) -> None:
+def _schedule_producer(state: ChannelProducerState) -> None:
     if state.timer is not None and not state.timer.done():
         state.timer.cancel()
 
@@ -782,7 +876,7 @@ def _schedule_producer(state: ChannelWatchState) -> None:
     state.timer = asyncio.create_task(fire_after_delay())
 
 
-async def _run_producer_guarded(state: ChannelWatchState) -> None:
+async def _run_producer_guarded(state: ChannelProducerState) -> None:
     try:
         await _run_producer(state)
     except Exception:  # noqa: BLE001 — a failed run must not kill scheduling
@@ -809,6 +903,7 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
     if not settings.enabled:
         return
     state = run.state_for(event.guild_id, event.channel_id)
+    guild_state = run.guild_state_for(event.guild_id)
     now = time.monotonic()
     if not state.buffer:
         state.first_at = now
@@ -823,16 +918,25 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
         # A member engaged the bot: active ingest for a while, so the
         # conversation feels responsive.
         if now >= state.active_until:
-            state.queue.push(
+            guild_state.queue.push(
                 mode_change_notification(
                     mode="active",
                     cause=f"{event.author.username} engaged the bot",
                     until=datetime.now(UTC) + timedelta(seconds=ACTIVE_WINDOW_SECONDS),
                     created_at=datetime.now(UTC),
+                    channel_id=state.channel_id,
+                    channel_name=_channel_name(run.bot, state),
                 )
             )
         state.active_until = now + ACTIVE_WINDOW_SECONDS
-        _push_engagement_notification(state, event.message, converted, bot_user_id)
+        _push_engagement_notification(
+            run.bot,
+            state,
+            guild_state.queue,
+            event.message,
+            converted,
+            bot_user_id,
+        )
         state.pending_directed_ids.add(converted.id)
     if now < state.active_until:
         _schedule_producer(state)
@@ -841,7 +945,7 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
 
 async def _passive_sweep(run: ProactiveRuntime) -> None:
     """One 15-minute pass: review passive buffers and long-idle channels."""
-    for state in list(run.states.values()):
+    for state in list(run.channel_states.values()):
         try:
             if state.buffer:
                 await _run_producer(state, passive=True)
@@ -881,29 +985,52 @@ async def _fetch_missed(
     return [m for m in converted if not m.is_bot and m.timestamp >= cutoff]
 
 
+async def _recovery_channel_settings(
+    run: ProactiveRuntime, guild_id: str, channel_id: int
+):
+    """Wait out a transient settings outage without abandoning the cursor."""
+    while True:
+        service = run.settings_service()
+        if service is not None:
+            try:
+                return await service.get_settings(guild_id, str(channel_id))
+            except APIError:
+                logger.warning(
+                    "proactive recovery settings unavailable channel=%s",
+                    channel_id,
+                    exc_info=True,
+                )
+        await asyncio.sleep(SETTINGS_RETRY_BACKOFF_SECONDS)
+
+
 async def _recover_channels(run: ProactiveRuntime) -> None:
     """Replay what enabled channels received while the bot was down."""
     store = run.history_store()
-    service = run.settings_service()
-    if store is None or service is None:
+    if store is None:
         return
     for channel_id in await store.cursor_channel_ids():
         try:
             cursor = await store.read_cursor(channel_id)
             if not cursor:
                 continue
-            settings = await service.get_settings(cursor["guild_id"], str(channel_id))
+            settings = await _recovery_channel_settings(
+                run, cursor["guild_id"], channel_id
+            )
             if not settings.enabled:
                 continue
             missed = await _fetch_missed(run.bot, channel_id, cursor["last_message_id"])
             if not missed:
                 continue
             state = run.state_for(int(cursor["guild_id"]), channel_id)
+            guild_state = run.guild_state_for(int(cursor["guild_id"]))
             state.buffer.extend(missed)
             state.first_at = state.last_at = time.monotonic()
-            state.queue.push(
+            guild_state.queue.push(
                 recovery_notification(
-                    missed_count=len(missed), created_at=datetime.now(UTC)
+                    missed_count=len(missed),
+                    created_at=datetime.now(UTC),
+                    channel_id=state.channel_id,
+                    channel_name=_channel_name(run.bot, state),
                 )
             )
             logger.info(
@@ -986,10 +1113,12 @@ async def proactive_status(ctx: lightbulb.Context) -> None:
         )
     else:
         instructions = "(none set)"
-    state = _runtime().states.get(ctx.channel_id)
+    state = _runtime().channel_states.get(ctx.channel_id)
     mode = (
         "active"
-        if state is not None and time.monotonic() < state.active_until
+        if settings.enabled
+        and state is not None
+        and time.monotonic() < state.active_until
         else "passive"
     )
     await ctx.respond(
@@ -1013,12 +1142,13 @@ def unload(bot: lightbulb.BotApp) -> None:
             runtime.passive_task.cancel()
         if runtime.recovery_task is not None:
             runtime.recovery_task.cancel()
-        for state in runtime.states.values():
+        for state in runtime.channel_states.values():
             if state.timer is not None:
                 state.timer.cancel()
-            if state.consumer_task is not None:
-                state.consumer_task.cancel()
             for producer_task in state.producer_tasks:
                 producer_task.cancel()
+        for state in runtime.guild_states.values():
+            if state.consumer_task is not None:
+                state.consumer_task.cancel()
     runtime = None
     bot.remove_plugin(plugin)

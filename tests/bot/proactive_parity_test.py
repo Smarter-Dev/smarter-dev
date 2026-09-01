@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC
 from datetime import datetime
+from types import SimpleNamespace
 
 from pydantic_ai.models.test import TestModel
 
@@ -56,9 +57,12 @@ def _deps(budget_limit: int = 8) -> ProactiveDeps:
         bot=None,
         channel_id=1,
         guild_id=2,
-        env=ChannelEnvironment(visible=[message], bot_user_id="B1"),
+        enabled_channels={"1": "general"},
+        channel_envs={
+            "1": ChannelEnvironment(visible=[message], bot_user_id="B1")
+        },
         actions=WakeActions(),
-        instruction_store=InstructionStore(seed="SEED"),
+        instruction_stores={"1": InstructionStore(seed="SEED")},
         skim_transcript=_noop_skim,
         budget=ToolBudget(limit=budget_limit),
     )
@@ -136,15 +140,33 @@ async def test_replay_stub_answers_honestly_and_spends_budget():
     assert deps.budget.used == 1
 
 
-async def test_parity_tools_spend_the_wake_budget():
-    deps = _deps(budget_limit=0)  # exhausted from the start
+async def test_channel_parity_tool_is_callable_through_the_model():
+    deps = _deps(budget_limit=0)  # exhausted: any spend attempt would refuse
     agent = build_proactive_agent(
         TestModel(call_tools=["list_handlers"], custom_output_text="done"),
         system_prompt="s",
     )
     result = await agent.run("go", deps=deps)
+    messages = str(result.all_messages())
+    # The model synthesizes channel_id; whichever branch it hits, the wrapper
+    # bound through the real tool machinery and refused before doing work.
+    assert (
+        "is not enabled for the proactive bot" in messages
+        or BUDGET_EXHAUSTED in messages
+    )
+    assert deps.budget.used == 0
+
+
+async def test_parity_tools_spend_the_wake_budget():
+    deps = _deps(budget_limit=0)  # exhausted from the start
+    agent = build_proactive_agent(
+        TestModel(custom_output_text="done"),
+        system_prompt="s",
+    )
+    result = await agent._function_toolset.tools["list_handlers"].function(
+        SimpleNamespace(deps=deps), channel_id="1"
+    )
     # The parity tool was refused by the budget wrapper, never executed
     # (executing list_handlers would need an API client and raise).
-    messages = str(result.all_messages())
-    assert BUDGET_EXHAUSTED in messages
+    assert result == BUDGET_EXHAUSTED
     assert deps.budget.used == 0

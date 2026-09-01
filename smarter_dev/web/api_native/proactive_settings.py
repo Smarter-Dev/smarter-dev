@@ -4,6 +4,7 @@ Mirrors the model-override controller's shape (one row per channel, PUT
 upserts) for the two-pass proactive bot:
 
 - ``GET    /api/guilds/{guild_id}/channels/{channel_id}/proactive-settings`` → row or 404.
+- ``GET    /api/guilds/{guild_id}/proactive-settings`` → enabled channel summaries.
 - ``PUT    /api/guilds/{guild_id}/channels/{channel_id}/proactive-settings`` → upsert, 200.
 - ``POST   /api/guilds/{guild_id}/channels/{channel_id}/proactive-settings/usage``
   → append one wake's per-model spend to the usage ledger, 200.
@@ -30,6 +31,7 @@ from smarter_dev.web.api_native.errors import (
     nested_not_found_error,
 )
 from smarter_dev.web.api_native.schemas import (
+    EnabledProactiveChannelRead,
     ProactiveChannelSettingsRead,
     ProactiveChannelSettingsWrite,
     ProactiveWakeUsageRead,
@@ -37,6 +39,7 @@ from smarter_dev.web.api_native.schemas import (
 )
 from smarter_dev.web.crud import (
     get_proactive_channel_settings,
+    list_enabled_proactive_channel_settings,
     upsert_proactive_channel_settings,
 )
 from smarter_dev.web.llm_pricing import calc_cost
@@ -47,6 +50,28 @@ BOT_API_PERMISSION = "bot-api"
 # Guards are declared PER ROUTE — Skrift's auth_guard inspects
 # route_handler.guards for the APIKeyOnly marker (see model_overrides.py).
 BOT_API_GUARDS = [bot_api_auth_guard, APIKeyOnly(), Permission(BOT_API_PERMISSION)]
+
+
+class ProactiveGuildSettingsController(Controller):
+    """Guild-level proactive settings endpoints."""
+
+    path = "/api/guilds/{guild_id:str}/proactive-settings"
+    exception_handlers = BOT_API_EXCEPTION_HANDLERS
+
+    @get(status_code=HTTP_200_OK, guards=BOT_API_GUARDS)
+    async def list_enabled_channels(
+        self,
+        db_session: AsyncSession,
+        guild_id: str,
+    ) -> list[EnabledProactiveChannelRead]:
+        """Return every channel where proactive watching is enabled."""
+        records = await list_enabled_proactive_channel_settings(
+            db_session, guild_id
+        )
+        return [
+            EnabledProactiveChannelRead.model_validate(record)
+            for record in records
+        ]
 
 
 class ProactiveChannelSettingsController(Controller):

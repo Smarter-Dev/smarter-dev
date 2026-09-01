@@ -1014,6 +1014,15 @@ class ProactiveChannelSettingsRead(BaseAPIModel):
     updated_at: datetime = Field(description="Row last-update time")
 
 
+class EnabledProactiveChannelRead(BaseAPIModel):
+    """An enabled channel and its channel-specific watch instructions."""
+
+    channel_id: str = Field(description="Discord channel ID")
+    watch_addendum: str = Field(
+        description="Agent-written extension of the watcher wake criteria"
+    )
+
+
 class ProactiveUsageEntry(BaseAPIModel):
     """One model's token usage inside a single proactive wake."""
 

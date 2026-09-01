@@ -3,8 +3,8 @@
 The agent keeps its conversation history across wakes (compacted around
 100k tokens); the watcher is stateless, so the TTL'd set_watch_instruction
 tool is the agent's only way to make sure a relevant follow-up wakes it
-again. set_monitoring_mode lets it flip its own channel between fast active
-ingest and the 15-minute passive sweep.
+again. set_monitoring_mode lets it flip an enabled channel between fast
+active ingest and the 15-minute passive sweep.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from collections.abc import Awaitable
 from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field
+from inspect import isawaitable
 
 from pydantic_ai import Agent
 from pydantic_ai import RunContext
@@ -68,19 +69,101 @@ class ToolBudget:
         return True
 
 
-@dataclass
+@dataclass(kw_only=True)
 class AgentDeps:
-    env: ChannelEnvironment
     actions: WakeActions
-    instruction_store: InstructionStore
     skim_transcript: Callable[[str], Awaitable[str]]
     budget: ToolBudget
-    # Live runtimes inject a callable(mode, minutes) -> confirmation string;
-    # None means mode control is unavailable (replay evals).
-    request_mode: Callable[[str, int], str] | None = None
+    enabled_channels: dict[str, str] = field(default_factory=dict)
+    channel_envs: (
+        Callable[[str], ChannelEnvironment | Awaitable[ChannelEnvironment]]
+        | dict[str, ChannelEnvironment]
+        | None
+    ) = None
+    instruction_stores: dict[str, InstructionStore] = field(
+        default_factory=dict
+    )
+    # Transitional aliases keep the still-single-channel plugin and replay
+    # harness constructible until the guild runtime lands.
+    env: ChannelEnvironment | None = None
+    instruction_store: InstructionStore | None = None
+    # Live runtimes inject a callable(channel_id, mode, minutes) ->
+    # confirmation string; None means mode control is unavailable (replay
+    # evals).
+    request_mode: Callable[[str, str, int], str] | None = None
     # Drains the channel's notification queue mid-run (rendered text, marks
     # the covered messages consumed); None means nothing queues mid-run.
     drain_notifications: Callable[[], str] | None = None
+    # Environments already resolved from a callable provider this wake; in
+    # production the provider hits Discord REST, so each channel is fetched
+    # at most once no matter how many tools read it.
+    resolved_channel_envs: dict[str, ChannelEnvironment] = field(
+        default_factory=dict, init=False, repr=False
+    )
+
+    def __post_init__(self) -> None:
+        if (
+            self.env is not None or self.instruction_store is not None
+        ) and not self.enabled_channels:
+            raise ValueError(
+                "enabled_channels is required with legacy env or "
+                "instruction_store"
+            )
+        if (
+            self.env is not None or self.instruction_store is not None
+        ) and len(self.enabled_channels) != 1:
+            raise ValueError(
+                "legacy env or instruction_store requires exactly one "
+                "enabled channel"
+            )
+        legacy_channel_id = next(iter(self.enabled_channels), "")
+        if self.env is not None and self.channel_envs is None:
+            self.channel_envs = {legacy_channel_id: self.env}
+        if self.instruction_store is not None and not self.instruction_stores:
+            self.instruction_stores = {
+                legacy_channel_id: self.instruction_store
+            }
+        if self.env is None and isinstance(self.channel_envs, dict):
+            self.env = next(iter(self.channel_envs.values()), None)
+        if self.instruction_store is None:
+            self.instruction_store = next(
+                iter(self.instruction_stores.values()), None
+            )
+
+    async def channel_env(self, channel_id: str) -> ChannelEnvironment:
+        return await fetch_channel_env(
+            self.channel_envs, channel_id, self.resolved_channel_envs
+        )
+
+    def channel_instruction_store(self, channel_id: str) -> InstructionStore:
+        return self.instruction_stores[channel_id]
+
+
+async def fetch_channel_env(
+    channel_envs: (
+        Callable[[str], ChannelEnvironment | Awaitable[ChannelEnvironment]]
+        | dict[str, ChannelEnvironment]
+        | None
+    ),
+    channel_id: str,
+    resolved_channel_envs: dict[str, ChannelEnvironment],
+) -> ChannelEnvironment:
+    if not callable(channel_envs):
+        if channel_envs is None:
+            raise KeyError(channel_id)
+        return channel_envs[channel_id]
+    if channel_id not in resolved_channel_envs:
+        fetched = channel_envs(channel_id)
+        if isawaitable(fetched):
+            fetched = await fetched
+        resolved_channel_envs[channel_id] = fetched
+    return resolved_channel_envs[channel_id]
+
+
+def disabled_channel_error(deps: AgentDeps, channel_id: str) -> str | None:
+    if channel_id not in deps.enabled_channels:
+        return f"Channel {channel_id} is not enabled for the proactive bot."
+    return None
 
 
 # Condensed operating rules — the full rationale lives in
@@ -177,6 +260,53 @@ def build_agent_system_prompt(
     )
 
 
+GUILD_AGENT_SYSTEM_PROMPT = """\
+You are {bot_display_name}, a member of the {guild_name} Discord server. Your
+Discord user id is {bot_user_id} — `<@{bot_user_id}>` inside a message means
+someone is addressing YOU, and transcript lines marked [BOT] are your own past
+messages. One guild-wide watcher system wakes you for activity across the
+channels where the proactive feature is enabled. Your history persists across
+channels and earlier wakes.
+
+Every tool that reads from or acts in a channel requires a `channel_id`. Your
+wake brief's WATCH INSTRUCTIONS BY CHANNEL section lists every enabled
+channel with its channel_id — that is the complete set of channels you may
+inspect or act in. Never guess another id or attempt to access a channel
+outside that set. Notifications and watch instructions are labeled by channel;
+keep each conversation and watch instruction routed to its named channel.
+
+Choosing not to respond is a first-class outcome: when nothing clears the bar,
+do nothing and say so in your final note. At most {max_sends} messages per
+wake across the guild.
+
+HOW YOUR MONITORING WORKS:
+- Everything reaches you as channel-labeled NOTIFICATIONS. A notification is a
+lead — pull context with channel tools when it is not enough.
+- The watcher is STATELESS between calls. Per-channel watch instructions are
+its only memory; set one in the relevant channel when you need a follow-up.
+- Call read_notifications before your final send to catch activity queued
+while you worked. It drains the guild-wide queue and costs no tool budget.
+
+TOOLS:
+- Anything on a release cycle — versions, release dates, prices, latest
+events — web_search before stating it.
+
+RESPONSE POLICY:
+{response_policy}"""
+
+
+def build_guild_agent_system_prompt(
+    *, bot_display_name: str, bot_user_id: str, guild_name: str
+) -> str:
+    return GUILD_AGENT_SYSTEM_PROMPT.format(
+        bot_display_name=bot_display_name,
+        bot_user_id=bot_user_id,
+        guild_name=guild_name,
+        max_sends=MAX_SENDS_PER_WAKE,
+        response_policy=OPERATING_POLICY_BRIEF,
+    )
+
+
 def build_kimi_agent(
     model: Model | str,
     *,
@@ -192,47 +322,62 @@ def build_kimi_agent(
     )
 
     @agent.tool
-    async def lookup_message(ctx: RunContext[AgentDeps], message_id: str) -> str:
+    async def lookup_message(
+        ctx: RunContext[AgentDeps], channel_id: str, message_id: str
+    ) -> str:
         """Fetch one channel message verbatim by its message id."""
+        if error := disabled_channel_error(ctx.deps, channel_id):
+            return error
         if not ctx.deps.budget.try_spend():
             return BUDGET_EXHAUSTED
-        message = ctx.deps.env.lookup(message_id)
+        env = await ctx.deps.channel_env(channel_id)
+        message = env.lookup(message_id)
         if message is None:
             return f"No message with id {message_id} is visible."
-        return ctx.deps.env.render([message])
+        return env.render([message])
 
     @agent.tool
     async def channel_history(
         ctx: RunContext[AgentDeps],
+        channel_id: str,
         limit: int = 20,
         before_message_id: str | None = None,
     ) -> str:
         """Pull the last `limit` channel messages, optionally before a given
         message id."""
+        if error := disabled_channel_error(ctx.deps, channel_id):
+            return error
         if not ctx.deps.budget.try_spend():
             return BUDGET_EXHAUSTED
-        return ctx.deps.env.render(
-            ctx.deps.env.history(limit, before_id=before_message_id)
-        )
+        env = await ctx.deps.channel_env(channel_id)
+        return env.render(env.history(limit, before_id=before_message_id))
 
     @agent.tool
     async def skim_messages(
-        ctx: RunContext[AgentDeps], around_message_id: str, radius: int = 40
+        ctx: RunContext[AgentDeps],
+        channel_id: str,
+        around_message_id: str,
+        radius: int = 40,
     ) -> str:
         """Have the fast watcher model skim the messages around an id,
         returning a summary with verbatim snippets and message/user ids."""
+        if error := disabled_channel_error(ctx.deps, channel_id):
+            return error
         if not ctx.deps.budget.try_spend():
             return BUDGET_EXHAUSTED
-        messages = ctx.deps.env.slice_around(around_message_id, radius=radius)
+        env = await ctx.deps.channel_env(channel_id)
+        messages = env.slice_around(around_message_id, radius=radius)
         if not messages:
             return f"No message with id {around_message_id} is visible."
-        return await ctx.deps.skim_transcript(ctx.deps.env.render(messages))
+        return await ctx.deps.skim_transcript(env.render(messages))
 
     @agent.tool
     async def send_channel_message(
-        ctx: RunContext[AgentDeps], content: str
+        ctx: RunContext[AgentDeps], channel_id: str, content: str
     ) -> str:
         """Send a standalone message to the channel."""
+        if error := disabled_channel_error(ctx.deps, channel_id):
+            return error
         if not ctx.deps.budget.try_spend():
             return BUDGET_EXHAUSTED
         if len(ctx.deps.actions.sent) >= MAX_SENDS_PER_WAKE:
@@ -242,55 +387,78 @@ def build_kimi_agent(
                 length=len(content), limit=SUMMARIZE_THRESHOLD
             )
         ctx.deps.actions.sent.append(
-            ProposedResponse(reply_to_id=None, content=content)
+            ProposedResponse(
+                reply_to_id=None, content=content, channel_id=channel_id
+            )
         )
         return "Message sent."
 
     @agent.tool
     async def reply_to_message(
-        ctx: RunContext[AgentDeps], message_id: str, content: str
+        ctx: RunContext[AgentDeps],
+        channel_id: str,
+        message_id: str,
+        content: str,
     ) -> str:
         """Reply to a specific channel message by id."""
+        if error := disabled_channel_error(ctx.deps, channel_id):
+            return error
         if not ctx.deps.budget.try_spend():
             return BUDGET_EXHAUSTED
         if len(ctx.deps.actions.sent) >= MAX_SENDS_PER_WAKE:
             return f"Send limit of {MAX_SENDS_PER_WAKE} per wake reached."
-        if ctx.deps.env.lookup(message_id) is None:
+        if (await ctx.deps.channel_env(channel_id)).lookup(message_id) is None:
             return f"No message with id {message_id} is visible."
         if len(content) > SUMMARIZE_THRESHOLD:
             return TOO_LONG_TEMPLATE.format(
                 length=len(content), limit=SUMMARIZE_THRESHOLD
             )
         ctx.deps.actions.sent.append(
-            ProposedResponse(reply_to_id=message_id, content=content)
+            ProposedResponse(
+                reply_to_id=message_id,
+                content=content,
+                channel_id=channel_id,
+            )
         )
         return "Reply sent."
 
     @agent.tool
     async def react_to_message(
-        ctx: RunContext[AgentDeps], message_id: str, emoji: str
+        ctx: RunContext[AgentDeps],
+        channel_id: str,
+        message_id: str,
+        emoji: str,
     ) -> str:
         """Add an emoji reaction to a channel message."""
+        if error := disabled_channel_error(ctx.deps, channel_id):
+            return error
         if not ctx.deps.budget.try_spend():
             return BUDGET_EXHAUSTED
-        if ctx.deps.env.lookup(message_id) is None:
+        if (await ctx.deps.channel_env(channel_id)).lookup(message_id) is None:
             return f"No message with id {message_id} is visible."
         ctx.deps.actions.reactions.append(
-            ProposedReaction(message_id=message_id, emoji=emoji)
+            ProposedReaction(
+                message_id=message_id, emoji=emoji, channel_id=channel_id
+            )
         )
         return "Reaction added."
 
     @agent.tool
     async def set_watch_instruction(
-        ctx: RunContext[AgentDeps], instruction: str, ttl_minutes: int = 60
+        ctx: RunContext[AgentDeps],
+        channel_id: str,
+        instruction: str,
+        ttl_minutes: int = 60,
     ) -> str:
         """Add a TTL'd wake criterion for the stateless watcher (e.g. "watch
         for tech news questions", 60 minutes). The only way a follow-up gets
         watched for."""
+        if error := disabled_channel_error(ctx.deps, channel_id):
+            return error
         if not ctx.deps.budget.try_spend():
             return BUDGET_EXHAUSTED
         try:
-            entry = ctx.deps.instruction_store.set_instruction(
+            entry = ctx.deps.channel_instruction_store(channel_id).set_instruction(
                 instruction, ttl_seconds=max(1, ttl_minutes) * 60
             )
         except ValueError as error:
@@ -302,21 +470,28 @@ def build_kimi_agent(
 
     @agent.tool
     async def clear_watch_instruction(
-        ctx: RunContext[AgentDeps], instruction_id: str
+        ctx: RunContext[AgentDeps], channel_id: str, instruction_id: str
     ) -> str:
         """Remove one of your watch instructions by its id (e.g. "w1")."""
+        if error := disabled_channel_error(ctx.deps, channel_id):
+            return error
         if not ctx.deps.budget.try_spend():
             return BUDGET_EXHAUSTED
-        if ctx.deps.instruction_store.clear_instruction(instruction_id):
+        store = ctx.deps.channel_instruction_store(channel_id)
+        if store.clear_instruction(instruction_id):
             return f"Watch instruction {instruction_id} cleared."
         return f"No watch instruction with id {instruction_id}."
 
     @agent.tool
-    async def list_watch_instructions(ctx: RunContext[AgentDeps]) -> str:
+    async def list_watch_instructions(
+        ctx: RunContext[AgentDeps], channel_id: str
+    ) -> str:
         """List your active watch instructions with their ids and expiries."""
+        if error := disabled_channel_error(ctx.deps, channel_id):
+            return error
         if not ctx.deps.budget.try_spend():
             return BUDGET_EXHAUSTED
-        entries = ctx.deps.instruction_store.entries
+        entries = ctx.deps.channel_instruction_store(channel_id).entries
         if not entries:
             return "No active watch instructions."
         return "\n".join(
@@ -335,17 +510,22 @@ def build_kimi_agent(
 
     @agent.tool
     async def set_monitoring_mode(
-        ctx: RunContext[AgentDeps], mode: str, minutes: int = 10
+        ctx: RunContext[AgentDeps],
+        channel_id: str,
+        mode: str,
+        minutes: int = 10,
     ) -> str:
-        """Switch this channel between active (fast ingest) and passive
-        (15-minute batch review) monitoring for the given duration."""
+        """Switch one enabled channel between active (fast ingest) and
+        passive (15-minute batch review) monitoring for the given duration."""
+        if error := disabled_channel_error(ctx.deps, channel_id):
+            return error
         if not ctx.deps.budget.try_spend():
             return BUDGET_EXHAUSTED
         if mode not in MONITORING_MODES:
             return f"Unknown mode {mode!r}; use one of {MONITORING_MODES}."
         if ctx.deps.request_mode is None:
             return "Mode control is unavailable in this environment."
-        return ctx.deps.request_mode(mode, minutes)
+        return ctx.deps.request_mode(channel_id, mode, minutes)
 
     # Parity tools (web search, code run, …) register here; in replay evals
     # the Discord/API-bound ones are stubbed by the caller.

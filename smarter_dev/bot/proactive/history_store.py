@@ -25,7 +25,7 @@ def _decode(value) -> str:
 
 
 class ProactiveHistoryStore:
-    """Per-channel agent history on the shared chat-memory Redis."""
+    """Agent history and recovery cursors on the shared chat-memory Redis."""
 
     def __init__(self, redis_client):
         self._redis = redis_client
@@ -33,6 +33,10 @@ class ProactiveHistoryStore:
     @staticmethod
     def _history_key(channel_id: int) -> str:
         return f"{KEY_PREFIX}:{channel_id}:history"
+
+    @staticmethod
+    def _guild_history_key(guild_id: int) -> str:
+        return f"{KEY_PREFIX}:guild-history:{guild_id}"
 
     async def read(self, channel_id: int) -> list[ModelMessage]:
         raw = await self._redis.get(self._history_key(channel_id))
@@ -49,6 +53,25 @@ class ProactiveHistoryStore:
         payload = ModelMessagesTypeAdapter.dump_json(messages)
         await self._redis.set(
             self._history_key(channel_id), payload, ex=HISTORY_TTL_SECONDS
+        )
+
+    async def read_guild(self, guild_id: int) -> list[ModelMessage]:
+        raw = await self._redis.get(self._guild_history_key(guild_id))
+        if not raw:
+            return []
+        try:
+            return list(ModelMessagesTypeAdapter.validate_json(raw))
+        except pydantic.ValidationError:
+            return []
+
+    async def write_guild(
+        self, guild_id: int, messages: list[ModelMessage]
+    ) -> None:
+        payload = ModelMessagesTypeAdapter.dump_json(messages)
+        await self._redis.set(
+            self._guild_history_key(guild_id),
+            payload,
+            ex=HISTORY_TTL_SECONDS,
         )
 
     async def clear(self, channel_id: int) -> None:
