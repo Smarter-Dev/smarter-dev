@@ -92,6 +92,10 @@ WATCHER_MODEL_ENV_VAR = "PROACTIVE_WATCHER_MODEL"
 DEFAULT_AGENT_MODEL = "gemini-3.7-flash"
 DEFAULT_WATCHER_MODEL = "z-ai/glm-5.3-flash"
 HISTORY_FETCH_LIMIT = 60
+# Cap on one compaction-summarize LLM call; past it the wake falls back to
+# the agent model, then to truncation. A hung summarize blocks the guild's
+# whole consumer loop, so this must be finite.
+COMPACTION_TIMEOUT_SECONDS = 120
 SETTINGS_RETRY_BACKOFF_SECONDS = 5
 
 
@@ -379,9 +383,44 @@ class ProactiveRuntime:
             me = self.bot.get_me()
 
             async def compaction_summarize(text: str) -> str:
-                summary, usage = await self.skim().skim(text)
-                logger.info("proactive history compaction: %s", usage)
-                return summary
+                # A ~100k-token summarize can hang the whole consumer loop
+                # (observed 2026-09-01: an unbounded watcher-model call
+                # stalled the first post-inheritance compaction for 10+
+                # minutes). Bound it, fall back to the agent model, and as
+                # a last resort compact by truncation so a wake never
+                # blocks on summarization.
+                try:
+                    summary, usage = await asyncio.wait_for(
+                        self.skim().skim(text), timeout=COMPACTION_TIMEOUT_SECONDS
+                    )
+                    logger.info("proactive history compaction: %s", usage)
+                    return summary
+                except Exception:  # noqa: BLE001 — fall back, never hang a wake
+                    logger.exception(
+                        "watcher-model compaction failed; retrying on the "
+                        "agent model"
+                    )
+                try:
+                    summary, usage = await asyncio.wait_for(
+                        SkimRunner(build_twopass_model(self.agent_model_id)).skim(
+                            text
+                        ),
+                        timeout=COMPACTION_TIMEOUT_SECONDS,
+                    )
+                    logger.info(
+                        "proactive history compaction (agent-model fallback): %s",
+                        usage,
+                    )
+                    return summary
+                except Exception:  # noqa: BLE001 — truncation beats a hung agent
+                    logger.exception(
+                        "compaction summarize failed on both models; "
+                        "compacting by truncation"
+                    )
+                    return (
+                        "[Earlier history could not be summarized this wake "
+                        "and was dropped; only recent messages follow.]"
+                    )
 
             state.agent_runner = KimiAgentRunner(
                 agent=build_proactive_agent(
