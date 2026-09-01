@@ -31,6 +31,7 @@ from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
+from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS_DIR = REPO_ROOT / "scripts"
@@ -165,8 +166,9 @@ async def run_guildwide(args: argparse.Namespace) -> None:
     instruction_stores = {c.channel_id: c.instruction_store for c in channels}
     by_channel_id = {c.channel_id: c for c in channels}
 
-    async def compaction_summarize(text: str) -> str:
-        summary, usage = await skim.skim(text)
+    async def compaction_summarize(messages) -> str:
+        dumped = ModelMessagesTypeAdapter.dump_json(messages).decode()
+        summary, usage = await skim.skim(dumped)
         print(f"history compaction: {usage}", file=sys.stderr, flush=True)
         return summary
 

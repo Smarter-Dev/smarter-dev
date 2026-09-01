@@ -190,6 +190,28 @@ def recovery_notification(
     )
 
 
+def channel_enabled_notification(
+    *,
+    created_at: datetime,
+    channel_id: str = "",
+    channel_name: str = "",
+) -> Notification:
+    """Wakes the agent when a moderator switches a new channel on."""
+    return Notification(
+        kind="channel_enabled",
+        created_at=created_at,
+        body=(
+            "You were just enabled in this channel. Get oriented: pull its "
+            "recent history and see what the space is about. If a brief, "
+            "natural introduction or contribution fits the room, send one — "
+            "otherwise just take note of what you learned."
+        ),
+        wakes=True,
+        channel_id=channel_id,
+        channel_name=channel_name,
+    )
+
+
 @dataclass
 class NotificationQueue:
     """Per-channel pending notifications, newest kept when over the limit."""

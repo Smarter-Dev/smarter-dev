@@ -33,6 +33,7 @@ from uuid import uuid4
 
 import hikari
 import lightbulb
+from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
 from smarter_dev.bot.agents.response_fitting import fit_writer_message
@@ -44,6 +45,7 @@ from smarter_dev.bot.proactive.adapter import bot_directed_message_ids
 from smarter_dev.bot.proactive.agent import OPERATING_POLICY_BRIEF
 from smarter_dev.bot.proactive.agent import KimiAgentRunner
 from smarter_dev.bot.proactive.agent import build_guild_agent_system_prompt
+from smarter_dev.bot.proactive.agent import self_compaction_summary
 from smarter_dev.bot.proactive.environment import ChannelEnvironment
 from smarter_dev.bot.proactive.environment import InstructionStore
 from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
@@ -51,6 +53,7 @@ from smarter_dev.bot.proactive.models import build_twopass_model
 from smarter_dev.bot.proactive.models import ensure_openrouter_key_alias
 from smarter_dev.bot.proactive.models import resolve_agent_model_id
 from smarter_dev.bot.proactive.notifications import NotificationQueue
+from smarter_dev.bot.proactive.notifications import channel_enabled_notification
 from smarter_dev.bot.proactive.notifications import instruction_expired_notification
 from smarter_dev.bot.proactive.notifications import mention_notification
 from smarter_dev.bot.proactive.notifications import mode_change_notification
@@ -382,34 +385,36 @@ class ProactiveRuntime:
             guild = self.bot.cache.get_guild(int(state.guild_id))
             me = self.bot.get_me()
 
-            async def compaction_summarize(text: str) -> str:
-                # A ~100k-token summarize can hang the whole consumer loop
-                # (observed 2026-09-01: an unbounded watcher-model call
-                # stalled the first post-inheritance compaction for 10+
-                # minutes). Bound it, fall back to the agent model, and as
-                # a last resort compact by truncation so a wake never
-                # blocks on summarization.
+            async def compaction_summarize(messages) -> str:
+                # The agent writes its own carry-forward memory: the folded
+                # transcript rides as message history and the agent's own
+                # model decides what its future self needs to keep. Every
+                # attempt is bounded — an unbounded ~100k-token summarize
+                # once stalled the whole consumer loop (2026-09-01) — and
+                # failure degrades to a watcher-model skim, then truncation,
+                # so a wake can never block on summarization.
                 try:
                     summary, usage = await asyncio.wait_for(
-                        self.skim().skim(text), timeout=COMPACTION_TIMEOUT_SECONDS
-                    )
-                    logger.info("proactive history compaction: %s", usage)
-                    return summary
-                except Exception:  # noqa: BLE001 — fall back, never hang a wake
-                    logger.exception(
-                        "watcher-model compaction failed; retrying on the "
-                        "agent model"
-                    )
-                try:
-                    summary, usage = await asyncio.wait_for(
-                        SkimRunner(build_twopass_model(self.agent_model_id)).skim(
-                            text
+                        self_compaction_summary(
+                            build_twopass_model(self.agent_model_id), messages
                         ),
                         timeout=COMPACTION_TIMEOUT_SECONDS,
                     )
+                    logger.info("proactive self-compaction: %s", usage)
+                    return summary
+                except Exception:  # noqa: BLE001 — fall back, never hang a wake
+                    logger.exception(
+                        "self-compaction failed; falling back to a "
+                        "watcher-model skim"
+                    )
+                try:
+                    dumped = ModelMessagesTypeAdapter.dump_json(messages).decode()
+                    summary, usage = await asyncio.wait_for(
+                        self.skim().skim(dumped),
+                        timeout=COMPACTION_TIMEOUT_SECONDS,
+                    )
                     logger.info(
-                        "proactive history compaction (agent-model fallback): %s",
-                        usage,
+                        "proactive history compaction (skim fallback): %s", usage
                     )
                     return summary
                 except Exception:  # noqa: BLE001 — truncation beats a hung agent
@@ -1107,7 +1112,21 @@ async def _set_enabled(ctx: lightbulb.Context, enabled: bool) -> None:
             flags=hikari.MessageFlag.EPHEMERAL,
         )
         return
+    was_enabled = (
+        await service.get_settings(str(ctx.guild_id), str(ctx.channel_id))
+    ).enabled
     await service.set_enabled(str(ctx.guild_id), str(ctx.channel_id), enabled)
+    if enabled and not was_enabled:
+        # Wake the guild agent to get oriented in its new channel.
+        run = _runtime()
+        state = run.guild_state_for(int(ctx.guild_id))
+        state.queue.push(
+            channel_enabled_notification(
+                created_at=datetime.now(UTC),
+                channel_id=str(ctx.channel_id),
+                channel_name=_channel_name_for_id(run.bot, str(ctx.channel_id)),
+            )
+        )
     await ctx.respond(
         f"Proactive bot is now **{'on' if enabled else 'off'}** in this channel.",
         flags=hikari.MessageFlag.EPHEMERAL,

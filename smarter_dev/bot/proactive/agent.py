@@ -541,11 +541,36 @@ def estimated_history_tokens(history: list[ModelMessage]) -> int:
     return len(ModelMessagesTypeAdapter.dump_json(history)) // 4
 
 
+COMPACTION_PROMPT = """\
+Your rolling context is about to be compacted: everything above this message
+will be replaced by the note you write now. Write the memory your future self
+needs to continue seamlessly — conversations still in motion and who is in
+them, commitments or follow-ups you made, what you have learned about the
+people and channels you watch, and anything else you judge important to
+remember. Be specific: names, channel ids and message ids you may need again.
+This note is for you alone."""
+
+
+async def self_compaction_summary(
+    model: Model | str, messages: list[ModelMessage]
+) -> tuple[str, dict]:
+    """The agent's own carry-forward memory, written by its own model.
+
+    The transcript being folded rides as message history, so the model
+    decides what its future self most needs to keep.
+    """
+    compaction_agent = Agent(model, output_type=str)
+    result = await compaction_agent.run(
+        COMPACTION_PROMPT, message_history=messages
+    )
+    return result.output, usage_dict(result.usage())
+
+
 async def compact_agent_history(
     history: list[ModelMessage],
     *,
     token_limit: int,
-    summarize: Callable[[str], Awaitable[str]],
+    summarize: Callable[[list[ModelMessage]], Awaitable[str]],
     keep_messages: int = COMPACTION_KEEP_MESSAGES,
 ) -> list[ModelMessage]:
     """Fold old wakes into a summary once the history outgrows the limit.
@@ -561,9 +586,7 @@ async def compact_agent_history(
     old, tail = history[:cut], history[cut:]
     if not old:
         return history
-    summary = await summarize(
-        ModelMessagesTypeAdapter.dump_json(old).decode()
-    )
+    summary = await summarize(old)
     return [
         ModelRequest(
             parts=[
@@ -583,7 +606,7 @@ class KimiAgentRunner:
     """Runs the agent, carrying history across wakes with compaction."""
 
     agent: Agent
-    summarize: Callable[[str], Awaitable[str]]
+    summarize: Callable[[list[ModelMessage]], Awaitable[str]]
     token_limit: int = HISTORY_TOKEN_LIMIT
     history: list[ModelMessage] = field(default_factory=list)
 

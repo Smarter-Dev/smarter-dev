@@ -208,8 +208,8 @@ async def test_history_compacts_over_limit_and_keeps_tail():
     history = [message for index in range(20) for message in _turn(index)]
     summaries = []
 
-    async def summarize(text: str) -> str:
-        summaries.append(text)
+    async def summarize(messages) -> str:
+        summaries.append(messages)
         return "compact summary"
 
     compacted = await agent.compact_agent_history(
@@ -225,7 +225,7 @@ async def test_history_compacts_over_limit_and_keeps_tail():
 async def test_history_untouched_under_limit():
     history = _turn(0)
 
-    async def summarize(text: str) -> str:  # pragma: no cover - must not run
+    async def summarize(messages) -> str:  # pragma: no cover - must not run
         raise AssertionError("should not summarize")
 
     assert (
