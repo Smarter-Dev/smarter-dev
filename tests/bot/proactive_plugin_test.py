@@ -1043,12 +1043,14 @@ async def test_wake_injects_memory_hourly_not_per_wake(wake_setup, monkeypatch):
 class _FakeRedis:
     def __init__(self):
         self.data: dict[str, bytes] = {}
+        self.expiries: dict[str, int | None] = {}
 
     async def get(self, key):
         return self.data.get(key)
 
     async def set(self, key, value, ex=None):
         self.data[key] = value
+        self.expiries[key] = ex
 
     async def delete(self, key):
         self.data.pop(key, None)
@@ -1257,6 +1259,22 @@ async def test_guild_history_store_uses_a_distinct_key_and_survives_garbage():
     await store.write_guild(2, history)
 
     assert "guild wake" in str((await store.read_guild(2))[0])
+
+
+async def test_history_writes_never_expire():
+    # The rolling context is the agent's extended memory: history keys must
+    # persist indefinitely, unlike the TTL'd recovery cursors.
+    redis = _FakeRedis()
+    store = ProactiveHistoryStore(redis)
+    history = [ModelRequest(parts=[UserPromptPart("remember me")])]
+
+    await store.write(1, history)
+    await store.write_guild(2, history)
+    await store.write_cursor(1, guild_id="2", last_message_id="5")
+
+    assert redis.expiries[ProactiveHistoryStore._history_key(1)] is None
+    assert redis.expiries[ProactiveHistoryStore._guild_history_key(2)] is None
+    assert redis.expiries[ProactiveHistoryStore._cursor_key(1)] is not None
     assert ProactiveHistoryStore._guild_history_key(2) in redis.data
     assert ProactiveHistoryStore._history_key(2) not in redis.data
 
