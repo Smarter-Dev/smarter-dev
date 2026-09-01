@@ -70,6 +70,31 @@ class ProactiveHistoryStore:
     async def clear(self, channel_id: int) -> None:
         await self._redis.delete(self._history_key(channel_id))
 
+    # -- active-ingest window (survives restarts) --
+
+    @staticmethod
+    def _active_until_key(channel_id: int) -> str:
+        return f"{KEY_PREFIX}:{channel_id}:active-until"
+
+    async def read_active_until(self, channel_id: int) -> float | None:
+        """Wall-clock epoch when the channel's active window ends."""
+        raw = await self._redis.get(self._active_until_key(channel_id))
+        if not raw:
+            return None
+        try:
+            return float(_decode(raw))
+        except ValueError:
+            return None
+
+    async def write_active_until(
+        self, channel_id: int, *, until_epoch: float, ttl_seconds: int
+    ) -> None:
+        await self._redis.set(
+            self._active_until_key(channel_id),
+            str(until_epoch),
+            ex=ttl_seconds,
+        )
+
     # -- last-processed cursor (restart recovery) --
 
     @staticmethod
