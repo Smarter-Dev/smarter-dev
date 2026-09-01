@@ -1036,9 +1036,42 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
     # Passive channels leave the buffer for the 15-minute sweep.
 
 
+DISCORD_EPOCH_MS = 1420070400000
+
+
+def _synthetic_message_id() -> str:
+    """A now-timestamped snowflake so synthetic entries pass the review
+    cursor exactly once, like a real message would."""
+    return str((int(time.time() * 1000) - DISCORD_EPOCH_MS) << 22)
+
+
+def _reaction_channel_message(
+    *, reactor_name: str, reactor_id: str, emoji: str, message_id: str
+) -> ChannelMessage:
+    """A reaction as a buffer entry, so the watcher reviews it at the same
+    cadence as plain messages (sweep in passive, debounce in active)."""
+    return ChannelMessage(
+        id=_synthetic_message_id(),
+        timestamp=datetime.now(UTC),
+        author_id=reactor_id,
+        author_name=reactor_name,
+        author_display=reactor_name,
+        is_bot=False,
+        content=f"[reacted {emoji} to the bot's message {message_id}]",
+        reply_to_id=None,
+        mention_user_ids=(),
+        mention_everyone=False,
+        attachment_count=0,
+        sticker_count=0,
+        message_type=0,
+    )
+
+
 @plugin.listener(hikari.GuildReactionAddEvent)
 async def on_guild_reaction(event: hikari.GuildReactionAddEvent) -> None:
-    """Queue reactions to the bot's own messages as weak engagement signals."""
+    """Reactions to the bot's messages flow like plain messages: they join
+    the channel's producer buffer for watcher review at normal cadence, and
+    a low-signal notification carries the detail into the next wake."""
     run = runtime
     if run is None or not event.guild_id:
         return
@@ -1077,11 +1110,12 @@ async def on_guild_reaction(event: hikari.GuildReactionAddEvent) -> None:
         or getattr(reactor, "username", None)
         or str(event.user_id)
     )
+    emoji = getattr(event, "emoji_name", None) or "a custom emoji"
     run.guild_state_for(event.guild_id).queue.push(
         reaction_notification(
             reactor_name=reactor_name,
             reactor_id=str(event.user_id),
-            emoji=getattr(event, "emoji_name", None) or "a custom emoji",
+            emoji=emoji,
             message_id=str(event.message_id),
             message_preview=getattr(message, "content", "") or "",
             created_at=datetime.now(UTC),
@@ -1089,6 +1123,25 @@ async def on_guild_reaction(event: hikari.GuildReactionAddEvent) -> None:
             channel_name=_channel_name_for_id(run.bot, str(event.channel_id)),
         )
     )
+    # Same review cadence as a plain message: buffer for the watcher, and
+    # arm the fast debounce only if the channel is already in its active
+    # window (a reaction is low signal — it never opens one).
+    state = run.state_for(event.guild_id, event.channel_id)
+    await _restore_active_window(run, state)
+    now = time.monotonic()
+    if not state.buffer:
+        state.first_at = now
+    state.last_at = now
+    state.buffer.append(
+        _reaction_channel_message(
+            reactor_name=reactor_name,
+            reactor_id=str(event.user_id),
+            emoji=emoji,
+            message_id=str(event.message_id),
+        )
+    )
+    if now < state.active_until:
+        _schedule_producer(state)
 
 
 async def _passive_sweep(run: ProactiveRuntime) -> None:
