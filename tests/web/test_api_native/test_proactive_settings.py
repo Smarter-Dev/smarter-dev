@@ -21,6 +21,10 @@ def _list_url(guild_id: str = _GUILD) -> str:
     return f"/api/guilds/{guild_id}/proactive-settings"
 
 
+def _history_url(guild_id: str = _GUILD) -> str:
+    return f"/api/guilds/{guild_id}/proactive-agent/history"
+
+
 def _record(**overrides) -> SimpleNamespace:
     fields = {
         "guild_id": _GUILD,
@@ -242,3 +246,99 @@ class TestPostProactiveWakeUsage:
 
         assert response.status_code in (400, 422)
         session_mock.add.assert_not_called()
+
+
+def _history_record(**overrides) -> SimpleNamespace:
+    fields = {
+        "guild_id": _GUILD,
+        "schema_version": 1,
+        "revision": 7,
+        "checksum": "a" * 64,
+        "history": [{"kind": "request", "parts": []}],
+        "updated_at": datetime(2026, 9, 1, 16, 0, tzinfo=timezone.utc),
+    }
+    fields.update(overrides)
+    return SimpleNamespace(**fields)
+
+
+def _history_payload(**overrides) -> dict:
+    payload = {
+        "schema_version": 1,
+        "revision": 7,
+        "checksum": "a" * 64,
+        "history": [{"kind": "request", "parts": []}],
+    }
+    payload.update(overrides)
+    return payload
+
+
+class TestProactiveAgentHistory:
+    def test_get_returns_durable_guild_history(
+        self, proactive_settings_client: TestClient, proactive_settings_crud_mock
+    ):
+        proactive_settings_crud_mock.get_history.return_value = _history_record()
+
+        response = proactive_settings_client.get(_history_url())
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "schema_version": 1,
+            "revision": 7,
+            "checksum": "a" * 64,
+            "history": [{"kind": "request", "parts": []}],
+            "guild_id": _GUILD,
+            "updated_at": "2026-09-01T16:00:00Z",
+        }
+
+    def test_get_returns_404_when_no_durable_history_exists(
+        self, proactive_settings_client: TestClient, proactive_settings_crud_mock
+    ):
+        proactive_settings_crud_mock.get_history.return_value = None
+
+        response = proactive_settings_client.get(_history_url())
+
+        assert response.status_code == 404
+        assert "Proactive agent history" in response.json()["detail"]["detail"]
+
+    def test_put_persists_a_versioned_snapshot(
+        self,
+        proactive_settings_client: TestClient,
+        proactive_settings_crud_mock,
+        session_mock: AsyncMock,
+    ):
+        proactive_settings_crud_mock.upsert_history.return_value = _history_record()
+
+        response = proactive_settings_client.put(
+            _history_url(), json=_history_payload()
+        )
+
+        assert response.status_code == 200
+        kwargs = proactive_settings_crud_mock.upsert_history.await_args.kwargs
+        assert kwargs == {
+            "guild_id": _GUILD,
+            "schema_version": 1,
+            "revision": 7,
+            "checksum": "a" * 64,
+            "history": [{"kind": "request", "parts": []}],
+        }
+        session_mock.commit.assert_awaited_once()
+
+    def test_put_rejects_invalid_checksum(
+        self, proactive_settings_client: TestClient, proactive_settings_crud_mock
+    ):
+        response = proactive_settings_client.put(
+            _history_url(), json=_history_payload(checksum="not-a-sha")
+        )
+
+        assert response.status_code in (400, 422)
+        proactive_settings_crud_mock.upsert_history.assert_not_awaited()
+
+    def test_put_rejects_zero_revision(
+        self, proactive_settings_client: TestClient, proactive_settings_crud_mock
+    ):
+        response = proactive_settings_client.put(
+            _history_url(), json=_history_payload(revision=0)
+        )
+
+        assert response.status_code in (400, 422)
+        proactive_settings_crud_mock.upsert_history.assert_not_awaited()

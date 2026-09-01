@@ -27,6 +27,17 @@ data:
   # Bot API configuration
   API_BASE_URL: "http://smarter-dev-website:8000/api"
 
+  # Proactive-agent extraction rollout. Keep global ownership embedded until a
+  # shadow guild has been validated, then move guild IDs through shadow and
+  # external before changing the global default.
+  PROACTIVE_AGENT_EXECUTION_MODE: "embedded"
+  PROACTIVE_AGENT_SHADOW_GUILD_IDS: ""
+  PROACTIVE_AGENT_EXTERNAL_GUILD_IDS: "733364234141827073"
+  PROACTIVE_AGENT_EMBEDDED_GUILD_IDS: ""
+  PROACTIVE_AGENT_MODEL: "gemini-3.7-flash"
+  PROACTIVE_WATCHER_MODEL: "z-ai/glm-5.3-flash"
+  PROACTIVE_SKIM_MODEL: "z-ai/glm-5.3-flash"
+
   # Site base URL
   SITE_BASE_URL: "https://smarter.dev"
 

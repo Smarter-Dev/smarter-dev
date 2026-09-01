@@ -6162,3 +6162,26 @@ class ProactiveChannelSettings(Base):
     watch_addendum: Mapped[str] = mapped_column(
         Text, nullable=False, default="", server_default=""
     )
+
+
+class ProactiveAgentHistory(Base):
+    """Durable recovery copy of one guild's proactive-agent model history.
+
+    Redis remains the hot read/write path for the extracted worker.  This row
+    is written through the bot API after a short debounce and is used only when
+    the Redis copy is absent or invalid.  ``revision`` is monotonically
+    increasing so a stale worker cannot overwrite history produced by the
+    current guild owner.
+    """
+
+    __tablename__ = "proactive_agent_histories"
+
+    guild_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    schema_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    revision: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
+    history: Mapped[list] = mapped_column(JSON, nullable=False)
+    checksum: Mapped[str] = mapped_column(String(64), nullable=False)

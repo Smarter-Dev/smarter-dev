@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import functools
 import logging
-
 from collections.abc import Awaitable
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -631,7 +630,7 @@ async def self_compaction_summary(
     result = await compaction_agent.run(
         COMPACTION_PROMPT, message_history=messages
     )
-    return result.output, usage_dict(result.usage())
+    return result.output, usage_dict(result.usage)
 
 
 async def compact_agent_history(
@@ -696,4 +695,4 @@ class KimiAgentRunner:
             brief, deps=deps, message_history=self.history or None
         )
         self.history = result.all_messages()
-        return result.output, usage_dict(result.usage())
+        return result.output, usage_dict(result.usage)
