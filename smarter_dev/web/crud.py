@@ -50,6 +50,7 @@ from smarter_dev.web.models import (
     ModerationConfig,
     ModerationAction,
     ChannelModelOverride,
+    ProactiveAgentHistory,
     ProactiveChannelSettings,
     ChatAgentGuildMemory,
     ChatAgentMemoryNote,
@@ -6246,3 +6247,74 @@ async def upsert_proactive_channel_settings(
     await session.flush()
     await session.refresh(record)
     return record
+
+
+async def get_proactive_agent_history(
+    session: AsyncSession, guild_id: str
+) -> ProactiveAgentHistory | None:
+    """Return the durable proactive-agent history for ``guild_id``."""
+    result = await session.execute(
+        select(ProactiveAgentHistory).where(
+            ProactiveAgentHistory.guild_id == guild_id
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def upsert_proactive_agent_history(
+    session: AsyncSession,
+    *,
+    guild_id: str,
+    schema_version: int,
+    revision: int,
+    checksum: str,
+    history: list[dict],
+) -> ProactiveAgentHistory:
+    """Write a newer guild-history revision, idempotently.
+
+    The conditional PostgreSQL upsert makes the revision check atomic across
+    worker hand-off.  Replaying the same revision/checksum returns the existing
+    row; an older or conflicting revision raises ``ConflictError``.
+    """
+    from sqlalchemy.dialects.postgresql import insert as postgres_insert
+
+    statement = (
+        postgres_insert(ProactiveAgentHistory)
+        .values(
+            guild_id=guild_id,
+            schema_version=schema_version,
+            revision=revision,
+            checksum=checksum,
+            history=history,
+        )
+        .on_conflict_do_update(
+            index_elements=[ProactiveAgentHistory.guild_id],
+            set_={
+                "schema_version": schema_version,
+                "revision": revision,
+                "checksum": checksum,
+                "history": history,
+                "updated_at": func.now(),
+            },
+            where=ProactiveAgentHistory.revision < revision,
+        )
+        .returning(ProactiveAgentHistory)
+    )
+    result = await session.execute(statement)
+    record = result.scalar_one_or_none()
+    if record is not None:
+        return record
+
+    existing = await get_proactive_agent_history(session, guild_id)
+    if (
+        existing is not None
+        and existing.revision == revision
+        and existing.schema_version == schema_version
+        and existing.checksum == checksum
+    ):
+        return existing
+    stored_revision = existing.revision if existing is not None else "unknown"
+    raise ConflictError(
+        "Proactive agent history revision conflict: "
+        f"stored={stored_revision}, received={revision}"
+    )

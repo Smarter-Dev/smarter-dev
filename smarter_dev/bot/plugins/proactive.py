@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import socket
 import time
 from dataclasses import dataclass
 from dataclasses import field
@@ -46,12 +47,15 @@ from smarter_dev.bot.proactive.agent import OPERATING_POLICY_BRIEF
 from smarter_dev.bot.proactive.agent import KimiAgentRunner
 from smarter_dev.bot.proactive.agent import build_guild_agent_system_prompt
 from smarter_dev.bot.proactive.agent import self_compaction_summary
+from smarter_dev.bot.proactive.contracts import ControlCommand
+from smarter_dev.bot.proactive.contracts import NotificationEnvelope
 from smarter_dev.bot.proactive.environment import ChannelEnvironment
 from smarter_dev.bot.proactive.environment import InstructionStore
 from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
 from smarter_dev.bot.proactive.models import build_twopass_model
 from smarter_dev.bot.proactive.models import ensure_openrouter_key_alias
 from smarter_dev.bot.proactive.models import resolve_agent_model_id
+from smarter_dev.bot.proactive.notifications import Notification
 from smarter_dev.bot.proactive.notifications import NotificationQueue
 from smarter_dev.bot.proactive.notifications import channel_enabled_notification
 from smarter_dev.bot.proactive.notifications import instruction_expired_notification
@@ -63,6 +67,7 @@ from smarter_dev.bot.proactive.notifications import render_notifications
 from smarter_dev.bot.proactive.notifications import reply_notification
 from smarter_dev.bot.proactive.parity import ProactiveDeps
 from smarter_dev.bot.proactive.parity import build_proactive_agent
+from smarter_dev.bot.proactive.redis_queue import RedisNotificationQueue
 from smarter_dev.bot.proactive.types import ActivationContext
 from smarter_dev.bot.proactive.types import ChannelMessage
 from smarter_dev.bot.proactive.watcher import SkimRunner
@@ -101,6 +106,25 @@ HISTORY_FETCH_LIMIT = 60
 # whole consumer loop, so this must be finite.
 COMPACTION_TIMEOUT_SECONDS = 120
 SETTINGS_RETRY_BACKOFF_SECONDS = 5
+EXECUTION_MODE_ENV_VAR = "PROACTIVE_AGENT_EXECUTION_MODE"
+EXTERNAL_GUILDS_ENV_VAR = "PROACTIVE_AGENT_EXTERNAL_GUILD_IDS"
+SHADOW_GUILDS_ENV_VAR = "PROACTIVE_AGENT_SHADOW_GUILD_IDS"
+EMBEDDED_GUILDS_ENV_VAR = "PROACTIVE_AGENT_EMBEDDED_GUILD_IDS"
+EMBEDDED_EXECUTION_MODE = "embedded"
+SHADOW_EXECUTION_MODE = "shadow"
+EXTERNAL_EXECUTION_MODE = "external"
+EXECUTION_MODES = {
+    EMBEDDED_EXECUTION_MODE,
+    SHADOW_EXECUTION_MODE,
+    EXTERNAL_EXECUTION_MODE,
+}
+CONTROL_STREAM_KEY = "proactive:v1:control"
+CONTROL_GROUP = "proactive-bot-v1"
+CONTROL_PROCESSED_PREFIX = "proactive:v1:control-processed"
+
+
+def _guild_id_set(raw: str) -> set[str]:
+    return {value.strip() for value in raw.split(",") if value.strip()}
 
 
 def compute_fire_delay(
@@ -317,17 +341,57 @@ def _channel_name(bot, state: ChannelProducerState) -> str:
 class ProactiveRuntime:
     """Shared models, per-channel producers, and per-guild agents."""
 
-    def __init__(self, bot: lightbulb.BotApp, *, start_consumers: bool = True):
+    def __init__(
+        self,
+        bot: lightbulb.BotApp,
+        *,
+        start_consumers: bool = True,
+        execution_mode: str | None = None,
+    ):
         self.bot = bot
+        self.execution_mode = execution_mode or os.getenv(
+            EXECUTION_MODE_ENV_VAR, EMBEDDED_EXECUTION_MODE
+        )
+        if self.execution_mode not in EXECUTION_MODES:
+            raise ValueError(
+                f"{EXECUTION_MODE_ENV_VAR} must be one of "
+                f"{', '.join(sorted(EXECUTION_MODES))}"
+            )
         self.channel_states: dict[int, ChannelProducerState] = {}
         self.guild_states: dict[int, GuildAgentState] = {}
         self._watcher: WatcherRunner | None = None
         self._skim: SkimRunner | None = None
         self._agent_model_id: str | None = None
         self._history_store: ProactiveHistoryStore | None = None
+        self._redis_notification_queue: RedisNotificationQueue | None = None
         self.passive_task: asyncio.Task | None = None
         self.recovery_task: asyncio.Task | None = None
+        self.control_task: asyncio.Task | None = None
+        self.external_guild_ids = _guild_id_set(os.getenv(EXTERNAL_GUILDS_ENV_VAR, ""))
+        self.shadow_guild_ids = _guild_id_set(os.getenv(SHADOW_GUILDS_ENV_VAR, ""))
+        self.embedded_guild_ids = _guild_id_set(os.getenv(EMBEDDED_GUILDS_ENV_VAR, ""))
+        selections = (
+            self.external_guild_ids,
+            self.shadow_guild_ids,
+            self.embedded_guild_ids,
+        )
+        if any(
+            left & right
+            for i, left in enumerate(selections)
+            for right in selections[i + 1 :]
+        ):
+            raise ValueError("proactive per-guild execution lists must not overlap")
         self.start_consumers = start_consumers
+
+    def execution_mode_for(self, guild_id: str) -> str:
+        """Resolve ownership per guild so rollout can be canaried safely."""
+        if guild_id in self.embedded_guild_ids:
+            return EMBEDDED_EXECUTION_MODE
+        if guild_id in self.external_guild_ids:
+            return EXTERNAL_EXECUTION_MODE
+        if guild_id in self.shadow_guild_ids:
+            return SHADOW_EXECUTION_MODE
+        return self.execution_mode
 
     # -- lazy model construction (env keys are only needed on first wake) --
 
@@ -365,6 +429,79 @@ class ProactiveRuntime:
             self._history_store = ProactiveHistoryStore(redis_client)
         return self._history_store
 
+    def redis_notification_queue(self) -> RedisNotificationQueue | None:
+        if self._redis_notification_queue is None:
+            redis_client = self.bot.d.get("chat_memory_redis")
+            if redis_client is None:
+                return None
+            self._redis_notification_queue = RedisNotificationQueue(redis_client)
+        return self._redis_notification_queue
+
+    async def sync_execution_ownership(self) -> None:
+        """Publish the authoritative owner for every connected/canary guild."""
+        redis_queue = self.redis_notification_queue()
+        guild_ids = {
+            *(str(guild_id) for guild_id in self.bot.cache.get_guilds_view()),
+            *self.external_guild_ids,
+            *self.shadow_guild_ids,
+            *self.embedded_guild_ids,
+        }
+        if redis_queue is None:
+            external = [
+                guild_id
+                for guild_id in guild_ids
+                if self.execution_mode_for(guild_id) == EXTERNAL_EXECUTION_MODE
+            ]
+            if external:
+                raise RuntimeError(
+                    "proactive external notification queue is unavailable"
+                )
+            return
+        for guild_id in guild_ids:
+            await redis_queue.set_execution_owner(
+                guild_id, self.execution_mode_for(guild_id)
+            )
+
+    async def enqueue_notification(
+        self,
+        guild_id: str,
+        notification: Notification,
+        *,
+        passive: bool = False,
+        watcher_usage: dict[str, dict] | None = None,
+    ) -> None:
+        """Route one notification to the embedded and/or extracted consumer.
+
+        ``shadow`` deliberately publishes both copies while only the embedded
+        consumer owns side effects. ``external`` publishes only Redis and never
+        starts an in-process guild consumer.
+        """
+        destination = self.execution_mode_for(guild_id)
+        redis_queue = self.redis_notification_queue()
+        if redis_queue is not None:
+            await redis_queue.set_execution_owner(guild_id, destination)
+        if destination != EXTERNAL_EXECUTION_MODE:
+            self.guild_state_for(int(guild_id)).queue.push(notification)
+        if destination == EMBEDDED_EXECUTION_MODE:
+            return
+
+        if redis_queue is None:
+            message = "proactive external notification queue is unavailable"
+            if destination == EXTERNAL_EXECUTION_MODE:
+                raise RuntimeError(message)
+            logger.warning(message)
+            return
+        envelope = NotificationEnvelope.from_notification(
+            notification,
+            guild_id=guild_id,
+            passive=passive,
+            watcher_usage=watcher_usage,
+        )
+        if destination == SHADOW_EXECUTION_MODE:
+            await redis_queue.publish_shadow(envelope)
+            return
+        await redis_queue.publish(envelope)
+
     def state_for(self, guild_id: int, channel_id: int) -> ChannelProducerState:
         state = self.channel_states.get(channel_id)
         if state is None:
@@ -379,7 +516,10 @@ class ProactiveRuntime:
         if state is None:
             state = GuildAgentState(guild_id=str(guild_id))
             self.guild_states[guild_id] = state
-            if self.start_consumers:
+            if (
+                self.start_consumers
+                and self.execution_mode_for(str(guild_id)) != EXTERNAL_EXECUTION_MODE
+            ):
                 state.consumer_task = asyncio.create_task(_consumer_loop(state))
         return state
 
@@ -407,8 +547,7 @@ class ProactiveRuntime:
                     return summary
                 except Exception:  # noqa: BLE001 — fall back, never hang a wake
                     logger.exception(
-                        "self-compaction failed; falling back to a "
-                        "watcher-model skim"
+                        "self-compaction failed; falling back to a watcher-model skim"
                     )
                 try:
                     dumped = ModelMessagesTypeAdapter.dump_json(messages).decode()
@@ -554,7 +693,7 @@ async def _run_producer(state: ChannelProducerState, *, passive: bool = False) -
     instruction_store = InstructionStore.from_stored(
         OPERATING_POLICY_BRIEF, settings.watch_addendum
     )
-    guild_state = run.guild_state_for(int(state.guild_id))
+    produced_queue = NotificationQueue()
     usage_by_model: dict[str, dict] = {}
     details: dict = {}
     if watcher_messages or passive:
@@ -562,7 +701,7 @@ async def _run_producer(state: ChannelProducerState, *, passive: bool = False) -
             watcher=run.watcher(),
             instruction_store=instruction_store,
             watcher_model_id=run.watcher_model_id,
-            notification_queue=guild_state.queue,
+            notification_queue=produced_queue,
             bot_display_name=me.username if me else "the bot",
         )
         context = ActivationContext(
@@ -576,8 +715,18 @@ async def _run_producer(state: ChannelProducerState, *, passive: bool = False) -
         )
         usage_by_model = await producer.produce(context)
         details = producer.details
-        if producer.wake_produced:
-            guild_state.pending_passive_wake = passive
+        if (
+            producer.wake_produced
+            and run.execution_mode_for(state.guild_id) != EXTERNAL_EXECUTION_MODE
+        ):
+            run.guild_state_for(int(state.guild_id)).pending_passive_wake = passive
+        for notification in produced_queue.items:
+            await run.enqueue_notification(
+                state.guild_id,
+                notification,
+                passive=passive,
+                watcher_usage=usage_by_model,
+            )
         await _record_usage(
             service,
             guild_id=state.guild_id,
@@ -875,37 +1024,31 @@ async def _consumer_loop(state: GuildAgentState) -> None:
             logger.exception("proactive agent wake failed guild=%s", state.guild_id)
 
 
-def _push_engagement_notification(
+def _engagement_notification(
     bot,
     state: ChannelProducerState,
-    queue: NotificationQueue,
     message,
     converted: ChannelMessage,
     bot_user_id: str,
-) -> None:
-    """Queue a mention/reply for the running agent, verbatim."""
+) -> Notification:
+    """Build a mention/reply notification for the guild agent, verbatim."""
     channel_name = _channel_name(bot, state)
     mention_ids = getattr(message, "user_mentions_ids", None) or ()
     if bot_user_id in {str(mention_id) for mention_id in mention_ids}:
-        queue.push(
-            mention_notification(
-                converted,
-                channel_id=state.channel_id,
-                channel_name=channel_name,
-            )
+        return mention_notification(
+            converted,
+            channel_id=state.channel_id,
+            channel_name=channel_name,
         )
-        return
     referenced = getattr(message, "referenced_message", None)
     replied_to = (
         channel_message_from_hikari(referenced) if referenced is not None else None
     )
-    queue.push(
-        reply_notification(
-            converted,
-            replied_to,
-            channel_id=state.channel_id,
-            channel_name=channel_name,
-        )
+    return reply_notification(
+        converted,
+        replied_to,
+        channel_id=state.channel_id,
+        channel_name=channel_name,
     )
 
 
@@ -945,9 +1088,7 @@ async def _persist_active_window(
             ttl_seconds=ACTIVE_WINDOW_SECONDS,
         )
     except Exception:  # noqa: BLE001 — persistence is best-effort
-        logger.exception(
-            "failed to persist active window channel=%s", state.channel_id
-        )
+        logger.exception("failed to persist active window channel=%s", state.channel_id)
 
 
 async def _restore_active_window(
@@ -963,15 +1104,11 @@ async def _restore_active_window(
     try:
         stored_until = await store.read_active_until(int(state.channel_id))
     except Exception:  # noqa: BLE001 — restoration is best-effort
-        logger.exception(
-            "failed to read active window channel=%s", state.channel_id
-        )
+        logger.exception("failed to read active window channel=%s", state.channel_id)
         return
     remaining = (stored_until or 0) - time.time()
     if remaining > 0:
-        state.active_until = max(
-            state.active_until, time.monotonic() + remaining
-        )
+        state.active_until = max(state.active_until, time.monotonic() + remaining)
 
 
 @plugin.listener(hikari.GuildMessageCreateEvent)
@@ -994,7 +1131,6 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
     if not settings.enabled:
         return
     state = run.state_for(event.guild_id, event.channel_id)
-    guild_state = run.guild_state_for(event.guild_id)
     await _restore_active_window(run, state)
     now = time.monotonic()
     if not state.buffer:
@@ -1010,7 +1146,8 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
         # A member engaged the bot: active ingest for a while, so the
         # conversation feels responsive.
         if now >= state.active_until:
-            guild_state.queue.push(
+            await run.enqueue_notification(
+                str(event.guild_id),
                 mode_change_notification(
                     mode="active",
                     cause=f"{event.author.username} engaged the bot",
@@ -1018,17 +1155,19 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
                     created_at=datetime.now(UTC),
                     channel_id=state.channel_id,
                     channel_name=_channel_name(run.bot, state),
-                )
+                ),
             )
         state.active_until = now + ACTIVE_WINDOW_SECONDS
         await _persist_active_window(run, state)
-        _push_engagement_notification(
-            run.bot,
-            state,
-            guild_state.queue,
-            event.message,
-            converted,
-            bot_user_id,
+        await run.enqueue_notification(
+            str(event.guild_id),
+            _engagement_notification(
+                run.bot,
+                state,
+                event.message,
+                converted,
+                bot_user_id,
+            ),
         )
         state.pending_directed_ids.add(converted.id)
     if now < state.active_until:
@@ -1097,9 +1236,7 @@ async def on_guild_reaction(event: hikari.GuildReactionAddEvent) -> None:
                 event.channel_id, event.message_id
             )
         except Exception:  # noqa: BLE001 — a lost lookup only drops one signal
-            logger.warning(
-                "proactive reaction message fetch failed", exc_info=True
-            )
+            logger.warning("proactive reaction message fetch failed", exc_info=True)
             return
     author = getattr(message, "author", None)
     if author is None or str(author.id) != str(me.id):
@@ -1111,7 +1248,8 @@ async def on_guild_reaction(event: hikari.GuildReactionAddEvent) -> None:
         or str(event.user_id)
     )
     emoji = getattr(event, "emoji_name", None) or "a custom emoji"
-    run.guild_state_for(event.guild_id).queue.push(
+    await run.enqueue_notification(
+        str(event.guild_id),
         reaction_notification(
             reactor_name=reactor_name,
             reactor_id=str(event.user_id),
@@ -1121,7 +1259,7 @@ async def on_guild_reaction(event: hikari.GuildReactionAddEvent) -> None:
             created_at=datetime.now(UTC),
             channel_id=str(event.channel_id),
             channel_name=_channel_name_for_id(run.bot, str(event.channel_id)),
-        )
+        ),
     )
     # Same review cadence as a plain message: buffer for the watcher, and
     # arm the fast debounce only if the channel is already in its active
@@ -1223,16 +1361,16 @@ async def _recover_channels(run: ProactiveRuntime) -> None:
             if not missed:
                 continue
             state = run.state_for(int(cursor["guild_id"]), channel_id)
-            guild_state = run.guild_state_for(int(cursor["guild_id"]))
             state.buffer.extend(missed)
             state.first_at = state.last_at = time.monotonic()
-            guild_state.queue.push(
+            await run.enqueue_notification(
+                cursor["guild_id"],
                 recovery_notification(
                     missed_count=len(missed),
                     created_at=datetime.now(UTC),
                     channel_id=state.channel_id,
                     channel_name=_channel_name(run.bot, state),
-                )
+                ),
             )
             logger.info(
                 "proactive recovery: %d missed messages in channel %s",
@@ -1244,12 +1382,111 @@ async def _recover_channels(run: ProactiveRuntime) -> None:
             logger.exception("proactive recovery failed channel=%s", channel_id)
 
 
+def _redis_text(value) -> str:
+    return value.decode() if isinstance(value, bytes) else str(value)
+
+
+async def _apply_control_command(
+    run: ProactiveRuntime, command: ControlCommand
+) -> None:
+    """Apply one worker request to the bot-owned watcher schedule."""
+    state = run.state_for(int(command.guild_id), int(command.channel_id))
+    now = datetime.now(UTC)
+    if command.mode == "active":
+        duration = max(1, command.minutes)
+        state.active_until = time.monotonic() + duration * 60
+        until = now + timedelta(minutes=duration)
+        store = run.history_store()
+        if store is not None:
+            await store.write_active_until(
+                int(command.channel_id),
+                until_epoch=until.timestamp(),
+                ttl_seconds=duration * 60,
+            )
+    else:
+        state.active_until = 0.0
+        until = None
+        store = run.history_store()
+        if store is not None:
+            await store.write_active_until(
+                int(command.channel_id), until_epoch=0, ttl_seconds=1
+            )
+    await run.enqueue_notification(
+        command.guild_id,
+        mode_change_notification(
+            mode=command.mode,
+            cause="you requested it",
+            until=until,
+            created_at=now,
+            channel_id=command.channel_id,
+            channel_name=_channel_name_for_id(run.bot, command.channel_id),
+        ),
+    )
+
+
+async def _control_loop(run: ProactiveRuntime) -> None:
+    """Consume idempotent watcher-control commands emitted by workers."""
+    redis_client = run.bot.d.get("chat_memory_redis")
+    if redis_client is None:
+        return
+    try:
+        await redis_client.xgroup_create(
+            CONTROL_STREAM_KEY, CONTROL_GROUP, id="0", mkstream=True
+        )
+    except Exception as error:  # redis-py has sync/async ResponseError variants
+        if "BUSYGROUP" not in str(error):
+            raise
+    consumer = f"{socket.gethostname()}-{id(run)}"
+    while True:
+        reclaimed = await redis_client.xautoclaim(
+            CONTROL_STREAM_KEY,
+            CONTROL_GROUP,
+            consumer,
+            60_000,
+            "0-0",
+            count=20,
+        )
+        records = (
+            [(CONTROL_STREAM_KEY, reclaimed[1])]
+            if reclaimed and reclaimed[1]
+            else await redis_client.xreadgroup(
+                CONTROL_GROUP,
+                consumer,
+                {CONTROL_STREAM_KEY: ">"},
+                count=20,
+                block=30_000,
+            )
+        )
+        for _stream, entries in records or ():
+            for stream_id, fields in entries:
+                try:
+                    payload = fields.get(b"payload", fields.get("payload"))
+                    command = ControlCommand.model_validate_json(_redis_text(payload))
+                    processed_key = f"{CONTROL_PROCESSED_PREFIX}:{command.command_id}"
+                    if not await redis_client.exists(processed_key):
+                        await _apply_control_command(run, command)
+                        await redis_client.set(processed_key, "1", ex=7 * 24 * 60 * 60)
+                    await redis_client.xack(
+                        CONTROL_STREAM_KEY, CONTROL_GROUP, stream_id
+                    )
+                    await redis_client.xdel(CONTROL_STREAM_KEY, stream_id)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception(
+                        "failed proactive control command stream_id=%s",
+                        _redis_text(stream_id),
+                    )
+
+
 @plugin.listener(hikari.StartedEvent)
 async def on_started(event: hikari.StartedEvent) -> None:
     run = runtime
     if run is not None and run.passive_task is None:
+        await run.sync_execution_ownership()
         run.passive_task = asyncio.create_task(_passive_ticker())
         run.recovery_task = asyncio.create_task(_recover_channels(run))
+        run.control_task = asyncio.create_task(_control_loop(run))
 
 
 @plugin.command
@@ -1276,13 +1513,13 @@ async def _set_enabled(ctx: lightbulb.Context, enabled: bool) -> None:
     if enabled and not was_enabled:
         # Wake the guild agent to get oriented in its new channel.
         run = _runtime()
-        state = run.guild_state_for(int(ctx.guild_id))
-        state.queue.push(
+        await run.enqueue_notification(
+            str(ctx.guild_id),
             channel_enabled_notification(
                 created_at=datetime.now(UTC),
                 channel_id=str(ctx.channel_id),
                 channel_name=_channel_name_for_id(run.bot, str(ctx.channel_id)),
-            )
+            ),
         )
     await ctx.respond(
         f"Proactive bot is now **{'on' if enabled else 'off'}** in this channel.",
@@ -1357,6 +1594,8 @@ def unload(bot: lightbulb.BotApp) -> None:
             runtime.passive_task.cancel()
         if runtime.recovery_task is not None:
             runtime.recovery_task.cancel()
+        if runtime.control_task is not None:
+            runtime.control_task.cancel()
         for state in runtime.channel_states.values():
             if state.timer is not None:
                 state.timer.cancel()
