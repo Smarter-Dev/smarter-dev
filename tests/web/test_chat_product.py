@@ -80,13 +80,13 @@ def test_priced_catalog_choices_remain_enabled_during_admin_save():
         {
             "gpt-5-6-luna": (True, "low"),
             "gpt-5-6-sol": (True, "medium"),
-            "claude-opus-5": (True, "high"),
+            "gpt-5-6-terra": (True, "high"),
         }
     )
     assert filtered == {
         "gpt-5-6-luna": (True, "low"),
         "gpt-5-6-sol": (True, "medium"),
-        "claude-opus-5": (True, "high"),
+        "gpt-5-6-terra": (True, "high"),
     }
     assert skipped == []
 
