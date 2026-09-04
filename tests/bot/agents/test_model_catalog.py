@@ -109,6 +109,30 @@ def test_gemini_lineup_reflects_current_releases():
     # Verified against the Gemini models API rather than assumed.
     assert flash_3_7.context_window == 1_048_576
     assert flash_3_7.max_output_tokens == 65_536
+    # 3.8 Flash joined on 2026-09-03 as the proactive agent's model, ALONGSIDE
+    # 3.7 rather than replacing it — the handler admin judge still pins 3.7.
+    # Its slot came from the retired Claude family, not from another Gemini.
+    flash_3_8 = get_model("gemini-3-8-flash")
+    assert flash_3_8 is not None
+    assert flash_3_8.model_id == "gemini-3.8-flash"
+    assert flash_3_8.provider is ModelProvider.GOOGLE
+    assert flash_3_8.supports_vision is True
+    assert flash_3_8.context_window == 1_048_576
+    assert flash_3_8.max_output_tokens == 65_536
+
+
+def test_proactive_agent_model_resolves_through_the_catalog():
+    """The reason 3.8 Flash is in the catalog at all.
+
+    ``_normalized_model_identity`` walks MODEL_CATALOG to attribute a wire id to
+    a provider when writing usage rows. Without an entry the proactive agent's
+    whole spend files under provider "unknown" in the invoice breakdown.
+    """
+    from smarter_dev.bot.plugins.proactive import DEFAULT_AGENT_MODEL
+
+    matches = [m for m in MODEL_CATALOG if m.model_id == DEFAULT_AGENT_MODEL]
+    assert len(matches) == 1
+    assert matches[0].provider is ModelProvider.GOOGLE
 
 
 def test_gpt_5_6_lineup_is_selectable():
@@ -147,16 +171,15 @@ def test_luna_routes_through_openrouter():
     assert luna.default_reasoning is ReasoningLevel.MEDIUM
 
 
-def test_claude_opus_5_is_selectable():
-    opus = get_model("claude-opus-5")
-    assert opus is not None
-    assert opus.label == "Claude Opus 5"
-    assert opus.family == "Claude"
-    assert opus.provider is ModelProvider.ANTHROPIC
-    assert opus.model_id == "claude-opus-5"
-    # Flagship Claude exposes the full low→max effort ladder, like Sonnet 5.
-    assert opus.supports_reasoning is True
-    assert opus.default_reasoning in opus.reasoning_levels
+def test_claude_left_the_catalog():
+    # The whole Claude family was retired on 2026-09-03 for lack of traffic,
+    # freeing three select slots. Its pricing stays in llm_pricing and its
+    # provider mapping in usage_invoice, both for settled usage rows.
+    assert get_model("claude-opus-5") is None
+    assert get_model("claude-sonnet-5") is None
+    assert get_model("claude-haiku-4-5") is None
+    assert "Claude" not in MODEL_FAMILIES
+    assert all(m.provider is not ModelProvider.ANTHROPIC for m in MODEL_CATALOG)
 
 
 def test_poolside_left_the_catalog():
@@ -244,7 +267,7 @@ def test_prompted_output_follows_the_model_not_the_endpoint():
 
     # Proprietary models keep native structured output, including the two that
     # share OpenRouter with the open weights.
-    for key in ("grok-4-6", "gpt-5-6-luna", "gemini-3-5-flash-lite", "claude-opus-5"):
+    for key in ("grok-4-6", "gpt-5-6-luna", "gemini-3-5-flash-lite", "gemini-3-8-flash"):
         assert get_model(key).needs_prompted_output is False, key
 
 
@@ -291,8 +314,6 @@ def test_provider_routing_by_family():
                 ModelProvider.OPENAI,
                 ModelProvider.OPENROUTER,
             )
-        elif model.family == "Claude":
-            assert model.provider is ModelProvider.ANTHROPIC
         elif model.family == "Grok":
             assert model.provider is ModelProvider.OPENROUTER
         elif model.family in _OPEN_WEIGHTS_FAMILIES:

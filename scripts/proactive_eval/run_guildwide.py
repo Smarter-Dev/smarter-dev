@@ -16,7 +16,7 @@ Usage:
     uv run python -m scripts.proactive_eval.run_guildwide \
         scripts/proactive_eval/data/<fixture-a>.jsonl \
         scripts/proactive_eval/data/<fixture-b>.jsonl \
-        [--model gemini-3.7-flash] [--watcher-model z-ai/glm-5.3-flash] \
+        [--model gemini-3.8-flash] [--watcher-model z-ai/glm-5.3-flash] \
         [--history-size 60] [--run-name guildwide]
 """
 
@@ -77,7 +77,7 @@ eval_prices.install()
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 RUNS_DIR = DATA_DIR / "runs"
-DEFAULT_AGENT_MODEL = "gemini-3.7-flash"
+DEFAULT_AGENT_MODEL = "gemini-3.8-flash"
 DEFAULT_WATCHER_MODEL = "z-ai/glm-5.3-flash"
 
 

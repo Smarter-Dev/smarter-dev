@@ -12,7 +12,7 @@ Two scheduling modes per enabled channel:
   absence.
 
 Engagement messages wake the agent deterministically; everything else goes
-through the watcher gate. The agent (Gemini 3.7 Flash by default, full
+through the watcher gate. The agent (Gemini 3.8 Flash by default, full
 chat-tool parity) acts or deliberately stays silent; its watch-instruction
 updates persist per channel via the proactive-settings API, and its history
 persists in Redis.
@@ -98,7 +98,7 @@ CATCHUP_MAX_AGE_SECONDS = 3600
 CATCHUP_MAX_MESSAGES = 50
 AGENT_MODEL_ENV_VAR = "PROACTIVE_AGENT_MODEL"
 WATCHER_MODEL_ENV_VAR = "PROACTIVE_WATCHER_MODEL"
-DEFAULT_AGENT_MODEL = "gemini-3.7-flash"
+DEFAULT_AGENT_MODEL = "gemini-3.8-flash"
 DEFAULT_WATCHER_MODEL = "z-ai/glm-5.3-flash"
 HISTORY_FETCH_LIMIT = 60
 # Cap on one compaction-summarize LLM call; past it the wake falls back to

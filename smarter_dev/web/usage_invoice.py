@@ -90,6 +90,13 @@ _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gemini-3-flash-preview", "google")
 # Laguna S briefly ran on Zen's free tier before its rate limiting sent it
 # back to OpenRouter; rows from that window carry the free id.
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("laguna-s-2.1-free", "opencode_zen")
+# The whole Claude family left the catalog on 2026-09-03 for lack of traffic.
+# Settled usage rows still carry these wire ids and still price against the
+# Claude patches in llm_pricing, so without these they would drop out of the
+# per-provider invoice breakdown into "unknown".
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("claude-opus-5", "anthropic")
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("claude-sonnet-5", "anthropic")
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("claude-haiku-4-5", "anthropic")
 
 # Provider key -> human display label.
 PROVIDER_LABELS: dict[str, str] = {

@@ -28,11 +28,22 @@ class TestDigitalOceanPricing:
         assert calc_cost(1_000_000, 1_000_000, "gemma-4-31B-it") == Decimal("0.68")
 
     def test_gemini_flash_promotional_rates(self):
-        # 3.6 and 3.7 Flash share $0.75/$3.75 through 2026-12-31, reverting to
-        # $1.50/$7.50 on 2027-01-01. The $1.50/$7.50 recorded before today was
-        # Google's actual rate until they announced this 50% cut on 2026-08-13.
+        # 3.6, 3.7 and 3.8 Flash share $0.75/$3.75 through 2026-12-31, reverting
+        # to $1.50/$7.50 on 2027-01-01. The $1.50/$7.50 recorded before that
+        # cut was Google's actual rate until they announced the 50% cut on
+        # 2026-08-13; 3.8 Flash shipped into the same promotional tier.
         assert calc_cost(1_000_000, 1_000_000, "gemini-3.6-flash") == Decimal("4.50")
         assert calc_cost(1_000_000, 1_000_000, "gemini-3.7-flash") == Decimal("4.50")
+        assert calc_cost(1_000_000, 1_000_000, "gemini-3.8-flash") == Decimal("4.50")
+
+    def test_gemini_3_8_flash_cache_reads_price_at_the_flash_rate(self):
+        # The proactive agent runs a long, heavily cached context, so the
+        # cache-read leg is the one that dominates its bill. Cache-read tokens
+        # are a subset of the input total, so a fully cached 1M-token prompt
+        # bills the $0.075 cached rate and nothing at the $0.75 input rate.
+        assert calc_cost(1_000_000, 0, "gemini-3.8-flash", 1_000_000) == Decimal(
+            "0.075"
+        )
 
     def test_gemini_3_flash_preview_still_prices_after_leaving_the_catalog(self):
         # The resources agent and blogging scout/research agents still pin this
