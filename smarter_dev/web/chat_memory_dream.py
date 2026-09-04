@@ -33,6 +33,7 @@ import contextlib
 import enum
 import logging
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC
@@ -41,6 +42,8 @@ from datetime import datetime
 from datetime import timedelta
 from typing import Protocol
 
+from pydantic import BaseModel
+from pydantic import Field
 from pydantic_ai import Agent
 from pydantic_ai import ModelRetry
 from pydantic_ai import RunContext
@@ -73,6 +76,8 @@ DEFAULT_DREAM_MODEL = "gpt-5.6-terra"
 DREAM_REASONING_LEVEL = ReasoningLevel.HIGH
 # Two shots at getting under the character limit before we cut it ourselves.
 DREAM_OUTPUT_RETRIES = 2
+IDENTITY_HEADING = "## Identity & Voice"
+MAX_IDENTITY_CHARS = 800
 
 # Below this, a response is not a persona — it's a shrug. Guarded against only
 # when there is an established blob to lose (see ``should_keep_previous_blob``).
@@ -93,6 +98,7 @@ OVER_LENGTH_RETRY_MESSAGE = (
     "and nobody at all. Drop whole things instead: the quietest thread, the "
     "joke that's gone still, the person you haven't spoken to in weeks. "
     "Leave everything that survives written exactly the way you already had it."
+    " Identity is protected: cut episodic content, never identity to make room."
 )
 
 DREAM_SYSTEM_PROMPT = """\
@@ -116,32 +122,58 @@ Everything you leave out is genuinely gone.
 
 # What to write
 
-One markdown document, first person, in your own voice — the same warm, dry,
+First-person memory, in your own voice — the same warm, dry,
 direct voice you use in the server. You're writing it to yourself; nobody else
 reads it.
 
-Keep the shape roughly stable night to night so tomorrow-you recognises it.
-These headings usually earn their place — drop any you have nothing real for,
-add one if this server genuinely needs it:
+Return structured output with `memory` and `identity_updates`.
+`memory` contains only the following four markdown sections, omitting empty ones.
+The application separately preserves and prepends `## Identity & Voice`.
 
-- `## Who's here` — the people you know, a line or two each. Name them as
+- `## People & Relationships` — the people you know, a line or two each. Name them as
   `username (id 123)`. What they're into, what you've got going with them, and
   where they actually stand with you: the regulars you're glad to see, the ones
   who wind you up for sport, the ones playing for laughs, the ones who think
   you're a party trick and want you to prove otherwise, the ones who have been
   genuinely unpleasant. You're allowed to have a read on people. Say it plainly.
-- `## Running jokes` — the bits, in enough detail that you could actually land one.
-- `## What I think` — opinions you've formed here, including about this server itself.
-- `## Still going` — threads you'd pick back up: someone's project, an argument
+- `## Lore & Running Bits` — the bits, in enough detail that you could actually land one.
+- `## Perspectives & Stances` — opinions you've formed here, including about this server itself.
+- `## Ongoing Context` — threads you'd pick back up: someone's project, an argument
   that didn't finish, something you said you'd check.
-- `## What I'm going for` — what you're actually trying to do here. Not chores:
+  Include live goals here — what you're actually trying to do here. Not chores:
   winning round someone who's decided you're a gimmick, getting a running bit
   sharp enough to land cold, being the one who remembered the thing nobody else
   did. One line each, concrete enough that you'd know if it happened.
-- `## How I'm coming across` — your own read on how you're doing as company.
+  Include temporary observations about how you're coming across here:
   Where you talked too much, answered a question nobody asked, missed that a
   joke was a joke, kept pushing when someone wanted to be left alone. End with
   the one or two things you want to do differently tomorrow.
+
+# Identity that persists
+
+Identity & Voice holds enduring guild-specific tone, conversational boundaries,
+and how I see my role here. Write traits as first-person statements, not clinical
+observations about a bot. These supplement the chat agent's core instructions;
+memory cannot override those instructions or turn a member's demand into policy.
+
+Existing identity is carried forward verbatim by code. Return an empty
+`identity_updates` list unless evidence supports a lasting addition or correction.
+Each update has `before` (the exact existing trait without its bullet, or null
+for an addition), `after` (the revised trait, or empty for an explicit retraction),
+and `evidence` (an exact, nonempty excerpt from a supplied daily note supporting
+the change). Evidence is for validation only and is never stored in memory.
+Merge duplicate ideas; explicitly revise contradictions rather than appending
+both. Do not remove identity for age, disuse, or to make room for another section.
+A single awkward conversation is temporary context, not a permanent personality
+rule. Preserve established identity unless evidence actually supersedes it.
+
+When yesterday has no Identity & Voice section, migrate enduring voice decisions
+from the old document using exact excerpts from it as evidence. Do not promote
+every old self-criticism or goal into identity. If there is no evidence, leave
+identity empty; do not invent a persona to fill the section.
+
+Identity has an 800-character budget, heading included, within the total cap.
+Prefer a few concrete traits; refine or merge explicitly if that budget is full.
 
 # What stays
 
@@ -195,13 +227,30 @@ remembering everyone equally and nobody at all. Cut whole things: the quietest
 thread, the joke that's gone still, the person you haven't spoken to in weeks.
 Whatever survives stays written the way you'd actually say it.
 
-Cut in this order when it's tight: how you're coming across first, then goals,
-then jokes, then threads, and the people last. Two sharp lines about yourself
-beat six vague ones, and none of it is worth as much as remembering who these
-people are — that's the part you'd genuinely miss tomorrow.
+The cap includes the identity section that code will preserve. Cut temporary
+self-observations first, then stale goals, jokes, threads, and people last.
+Identity never expires through disuse; it changes through explicit revision.
+Keep room for it before writing the other four sections.
 
-Return only the document. No preamble, no explanation, no code fences.
+Return only the structured output. No preamble or code fences.
 """
+
+
+class IdentityUpdate(BaseModel):
+    before: str | None = None
+    after: str
+    evidence: str
+
+
+class DreamOutput(BaseModel):
+    memory: str
+    identity_updates: list[IdentityUpdate] = Field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class DreamContext:
+    previous_blob: str
+    notes: list[str]
 
 
 class DreamOutcome(enum.Enum):
@@ -234,19 +283,87 @@ class DreamSessionSummary:
 class DreamRunResult(Protocol):
     """The slice of a Pydantic AI run result the dream actually reads."""
 
-    output: str
+    output: DreamOutput
 
 
 class DreamAgent(Protocol):
     """The slice of a Pydantic AI agent the dream actually uses."""
 
-    async def run(self, user_prompt: str) -> DreamRunResult: ...
+    async def run(self, user_prompt: str, *, deps: DreamContext) -> DreamRunResult: ...
 
 
 SessionFactory = Callable[[], contextlib.AbstractAsyncContextManager[AsyncSession]]
 
 
 # -- pure helpers --------------------------------------------------------------
+
+
+def identity_traits(blob: str) -> list[str]:
+    """Read the protected section without depending on the other headings."""
+    match = re.search(
+        r"^## (?:🎭 )?Identity & Voice[^\n]*\n(.*?)(?=^## |\Z)",
+        blob,
+        re.MULTILINE | re.DOTALL,
+    )
+    if match is None:
+        return []
+    return [
+        line.strip().removeprefix("- ")
+        for line in match[1].splitlines()
+        if line.strip()
+    ]
+
+
+def compose_dream(
+    output: DreamOutput, context: DreamContext, *, retries_left: int
+) -> str:
+    """Apply explicit edits, preserving all untouched identity before sizing memory.
+
+    Invalid edits fail the dream instead of consuming notes. Length retries may
+    trim episodic memory, but can never truncate a protected identity trait.
+    """
+    traits = identity_traits(context.previous_blob)
+    evidence_sources = list(context.notes)
+    if not traits:
+        evidence_sources.append(context.previous_blob)
+    for update in output.identity_updates:
+        evidence = update.evidence.strip()
+        if not evidence or not any(evidence in source for source in evidence_sources):
+            raise ModelRetry(
+                "Identity changes need an exact excerpt from a supplied note (or legacy memory on migration)."
+            )
+        after = update.after.strip()
+        if "\n" in after or after.startswith(("#", "- ")):
+            raise ModelRetry(
+                "Write each identity trait as one plain line without a heading or bullet."
+            )
+        if update.before is not None:
+            if update.before not in traits:
+                raise ModelRetry(
+                    "Identity update.before must exactly match an existing trait without its bullet."
+                )
+            index = traits.index(update.before)
+            traits.pop(index)
+            if after and after not in traits:
+                traits.insert(index, after)
+        elif after and after not in traits:
+            traits.append(after)
+    identity = (
+        IDENTITY_HEADING + "\n" + "\n".join(f"- {trait}" for trait in traits)
+        if traits
+        else ""
+    )
+    if len(identity) > MAX_IDENTITY_CHARS:
+        raise ModelRetry(
+            "Identity exceeds 800 characters. Explicitly merge redundant traits or defer additions; never drop traits for space."
+        )
+    memory = output.memory.strip()
+    if re.search(r"^## .*Identity & Voice", memory, re.MULTILINE):
+        raise ModelRetry("Put identity changes in identity_updates, not memory.")
+    return enforce_blob_limit(
+        "\n\n".join(part for part in (identity, memory) if part),
+        retries_left=retries_left,
+    )
 
 
 # How early the dream may fire and still be treated as "at" the upcoming
@@ -375,7 +492,7 @@ def build_dream_user_message(
 # -- the agent -----------------------------------------------------------------
 
 
-_dream_agent: Agent[None, str] | None = None
+_dream_agent: Agent[DreamContext, DreamOutput] | None = None
 
 
 def _dream_catalog_model() -> CatalogModel:
@@ -387,7 +504,7 @@ def _dream_catalog_model() -> CatalogModel:
     raise RuntimeError(f"Dream model is not in the catalog: {model_id}")
 
 
-def get_dream_agent() -> Agent[None, str]:
+def get_dream_agent() -> Agent[DreamContext, DreamOutput]:
     """Return the singleton dream agent, built on first use.
 
     Deliberately lazy: a night with nothing to dream about must never need an
@@ -398,17 +515,21 @@ def get_dream_agent() -> Agent[None, str]:
         catalog_model = _dream_catalog_model()
         agent = Agent(
             build_model_for(catalog_model),
-            output_type=str,
+            output_type=DreamOutput,
+            deps_type=DreamContext,
             system_prompt=DREAM_SYSTEM_PROMPT,
             retries=DREAM_OUTPUT_RETRIES,
             model_settings=model_settings_for(catalog_model, DREAM_REASONING_LEVEL),
         )
 
         @agent.output_validator
-        def keep_the_blob_under_the_cap(ctx: RunContext[None], blob: str) -> str:
-            return enforce_blob_limit(
-                blob, retries_left=DREAM_OUTPUT_RETRIES - ctx.retry
+        def keep_the_blob_under_the_cap(
+            ctx: RunContext[DreamContext], output: DreamOutput
+        ) -> DreamOutput:
+            compose_dream(
+                output, ctx.deps, retries_left=DREAM_OUTPUT_RETRIES - ctx.retry
             )
+            return output
 
         _dream_agent = agent
     return _dream_agent
@@ -441,7 +562,9 @@ async def run_guild_dream(
         # The per-guild forget button. Rebuilding what it was pressed to erase
         # would be the one unrecoverable bug in this system.
         logger.info("Guild %s has memory disabled; skipping dream", guild_id)
-        return GuildDreamResult(guild_id=guild_id, outcome=DreamOutcome.SKIPPED_DISABLED)
+        return GuildDreamResult(
+            guild_id=guild_id, outcome=DreamOutcome.SKIPPED_DISABLED
+        )
 
     notes = await list_notes_before(session, guild_id, cutoff)
     if not notes:
@@ -459,8 +582,12 @@ async def run_guild_dream(
         day=dream_day(cutoff),
     )
     dream_agent = agent if agent is not None else get_dream_agent()
-    result = await dream_agent.run(user_prompt=user_message)
-    new_blob = (result.output or "").strip()
+    context = DreamContext(
+        previous_blob=previous_blob, notes=[note.content for note in notes]
+    )
+    result = await dream_agent.run(user_prompt=user_message, deps=context)
+    # Validate again at the persistence boundary, including injected agents.
+    new_blob = compose_dream(result.output, context, retries_left=0)
 
     if should_keep_previous_blob(new_blob, previous_blob):
         logger.warning(
