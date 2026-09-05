@@ -168,5 +168,5 @@ async def test_parity_tools_spend_the_wake_budget():
     )
     # The parity tool was refused by the budget wrapper, never executed
     # (executing list_handlers would need an API client and raise).
-    assert result == BUDGET_EXHAUSTED
+    assert result.split("\n", 1)[1] == BUDGET_EXHAUSTED
     assert deps.budget.used == 0

@@ -79,7 +79,7 @@ async def test_disabled_channel_is_rejected_before_native_tool_budget_spend():
         SimpleNamespace(deps=deps), channel_id="not-enabled"
     )
 
-    assert answer == (
+    assert answer.split("\n", 1)[1] == (
         "Channel not-enabled is not enabled for the proactive bot."
     )
     assert deps.budget.used == 0
@@ -138,7 +138,7 @@ async def test_set_monitoring_mode_rejects_disabled_channel_without_budget_spend
         SimpleNamespace(deps=deps), channel_id="not-enabled", mode="active"
     )
 
-    assert answer == (
+    assert answer.split("\n", 1)[1] == (
         "Channel not-enabled is not enabled for the proactive bot."
     )
     assert deps.budget.used == 0
@@ -161,7 +161,7 @@ async def test_set_monitoring_mode_routes_the_named_channel():
         SimpleNamespace(deps=deps), channel_id="B", mode="active", minutes=5
     )
 
-    assert answer == "Monitoring mode set."
+    assert answer.split("\n", 1)[1] == "Monitoring mode set."
     assert mode_requests == [("B", "active", 5)]
 
 
@@ -295,7 +295,7 @@ async def test_disabled_generate_image_rejected_without_budget_or_work(
         SimpleNamespace(deps=deps), channel_id="B", prompt="a diagram"
     )
 
-    assert answer == "Channel B is not enabled for the proactive bot."
+    assert answer.split("\n", 1)[1] == "Channel B is not enabled for the proactive bot."
     assert deps.budget.used == 0
     assert called is False
 
@@ -341,7 +341,7 @@ async def test_disabled_channel_rejects_channel_parity_tools_without_budget(
         SimpleNamespace(deps=deps), channel_id="B", **arguments
     )
 
-    assert answer == "Channel B is not enabled for the proactive bot."
+    assert answer.split("\n", 1)[1] == "Channel B is not enabled for the proactive bot."
     assert deps.budget.used == 0
 
 
@@ -395,7 +395,7 @@ async def test_generate_image_routes_with_a_per_call_context_without_mutation(
         SimpleNamespace(deps=deps), channel_id="B", prompt="a diagram"
     )
 
-    assert answer == "generated"
+    assert answer.split("\n", 1)[1] == "generated"
     assert observed_channel_ids == ["B"]
     assert deps.channel_id == 1
     assert deps.pending_images[0].channel_id == "B"
@@ -571,7 +571,7 @@ async def test_tool_success_passes_through_the_error_guard():
 
     guarded = agent_module.tool_errors_returned(fine_tool)
 
-    assert await guarded(None, value="x") == "ok:x"
+    assert (await guarded(None, value="x")).split("\n", 1)[1] == "ok:x"
 
 
 def test_render_channel_list_names_every_enabled_channel():

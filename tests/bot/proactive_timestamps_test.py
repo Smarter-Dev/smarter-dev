@@ -1,9 +1,12 @@
 """Agent-visible timestamps preserve dates, UTC offsets, and precision."""
 
+from datetime import UTC
 from datetime import datetime
+from types import SimpleNamespace
 
 import pytest
 
+from smarter_dev.bot.proactive import agent as agent_module
 from smarter_dev.bot.proactive.notifications import Notification
 from smarter_dev.bot.proactive.notifications import render_notifications
 from smarter_dev.bot.proactive.timestamps import utc_timestamp
@@ -37,3 +40,25 @@ def test_notifications_use_latest_event_even_when_delivered_out_of_order():
     assert "Most recent notification: 2026-09-01T19:30:00Z" in rendered
     assert "[2026-09-01T19:30:00Z, reaction]" in rendered
     assert "[2026-09-01T19:00:00Z, reaction]" in rendered
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["text", "structured", "error"])
+async def test_tool_results_are_timestamped_after_completion(monkeypatch, outcome):
+    finished = datetime(2026, 9, 4, 18, 42, 3, 123456, tzinfo=UTC)
+    payload = [{"message_id": "123", "content": "hello"}]
+
+    async def tool(ctx):
+        # Advance the clock inside the tool to catch timestamps taken too early.
+        monkeypatch.setattr(agent_module, "datetime", SimpleNamespace(now=lambda tz: finished))
+        if outcome == "error":
+            raise RuntimeError("unavailable")
+        return payload if outcome == "structured" else "hello"
+
+    result = await agent_module.tool_errors_returned(tool)(None)
+    stamp = "2026-09-04T18:42:03.123456Z"
+    if outcome == "structured":
+        assert result == {"tool_completed_at": stamp, "result": payload}
+    else:
+        assert result.startswith(f"[tool_completed_at={stamp}]\n")
+        assert ("RuntimeError: unavailable" if outcome == "error" else "hello") in result

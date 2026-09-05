@@ -15,6 +15,8 @@ from collections.abc import Awaitable
 from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import field
+from datetime import UTC
+from datetime import datetime
 from inspect import isawaitable
 
 from pydantic_ai import Agent
@@ -31,6 +33,7 @@ from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
 from smarter_dev.bot.proactive.environment import ChannelEnvironment
 from smarter_dev.bot.proactive.environment import InstructionStore
 from smarter_dev.bot.proactive.environment import WakeActions
+from smarter_dev.bot.proactive.timestamps import utc_timestamp
 from smarter_dev.bot.proactive.types import ProposedReaction
 from smarter_dev.bot.proactive.types import ProposedResponse
 from smarter_dev.bot.proactive.watcher import usage_dict
@@ -245,7 +248,7 @@ RESPONSE POLICY:
 
 
 def tool_errors_returned(tool_function):
-    """Turn a tool crash into feedback the agent can act on.
+    """Timestamp every tool result and turn crashes into actionable feedback.
 
     An uncaught tool exception would abort the whole wake; the agent can
     usually correct course (wrong id, transient API failure) if it is told
@@ -255,14 +258,18 @@ def tool_errors_returned(tool_function):
     @functools.wraps(tool_function)
     async def guarded_tool(ctx, *args, **kwargs):
         try:
-            return await tool_function(ctx, *args, **kwargs)
+            result = await tool_function(ctx, *args, **kwargs)
         except Exception as error:  # noqa: BLE001 — surfaced to the agent
             logger.exception("proactive tool %s failed", tool_function.__name__)
-            return (
+            result = (
                 f"Tool {tool_function.__name__} failed: "
                 f"{type(error).__name__}: {error}. Adjust your approach or "
                 "try another tool."
             )
+        completed_at = utc_timestamp(datetime.now(UTC))
+        if isinstance(result, str):
+            return f"[tool_completed_at={completed_at}]\n{result}"
+        return {"tool_completed_at": completed_at, "result": result}
 
     return guarded_tool
 
