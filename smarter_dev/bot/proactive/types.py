@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
 
+from smarter_dev.bot.proactive.timestamps import utc_timestamp
+
 
 @dataclass(frozen=True)
 class ChannelMessage:
@@ -60,7 +62,7 @@ class ChannelMessage:
         """Dict shaped like a fixture JSONL line (for transcript rendering)."""
         return {
             "id": self.id,
-            "timestamp": self.timestamp.isoformat(),
+            "timestamp": utc_timestamp(self.timestamp),
             "author_id": self.author_id,
             "author_name": self.author_name,
             "author_display": self.author_display,

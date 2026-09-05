@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from datetime import UTC
 from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID
@@ -113,6 +115,35 @@ def test_wire_models_match_canonical_json_schemas():
 
     jsonschema.validate(envelope.model_dump(mode="json"), notification_schema)
     jsonschema.validate(command.model_dump(mode="json"), control_schema)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", ["wake", "pending", "shadow"])
+async def test_redis_notification_timestamp_is_iso_utc(redis_client, route):
+    notification = Notification(
+        kind="mention",
+        created_at=datetime(2026, 9, 2, 1, 2, 3, 456789,
+                            tzinfo=timezone(timedelta(hours=5, minutes=30))),
+        body="hello",
+        channel_id="222",
+        wakes=route == "wake",
+    )
+    envelope = NotificationEnvelope.from_notification(notification, guild_id="111")
+    queue = RedisNotificationQueue(redis_client)
+    if route == "shadow":
+        await queue.publish_shadow(envelope)
+        entries = await redis_client.xrange(SHADOW_STREAM_KEY)
+        raw = entries[0][1][b"payload"]
+    else:
+        await queue.publish(envelope)
+        if route == "wake":
+            entries = await redis_client.xrange(wake_stream_key("111"))
+            raw = entries[0][1][b"payload"]
+        else:
+            raw = await redis_client.lindex(pending_key("111"), 0)
+    assert json.loads(raw)["created_at"] == "2026-09-01T19:32:03.456789Z"
+    restored = NotificationEnvelope.model_validate_json(raw).to_notification()
+    assert restored.created_at == notification.created_at
 
 
 @pytest.mark.asyncio

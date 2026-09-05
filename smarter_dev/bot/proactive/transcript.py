@@ -6,6 +6,10 @@ reply markers and a [BOT] prefix for bot-authored lines.
 
 from __future__ import annotations
 
+from datetime import datetime
+
+from smarter_dev.bot.proactive.timestamps import utc_timestamp
+
 
 def speaker_tags(records: list[dict]) -> dict[str, str]:
     """Stable per-author letter tags (A, B, … AA, AB) by first appearance."""
@@ -32,7 +36,8 @@ def render_transcript_line(record: dict, tags: dict[str, str]) -> str:
         f" (reply to id={record['reply_to_id']})" if record["reply_to_id"] else ""
     )
     tag = tags[record["author_id"]]
+    stamp = utc_timestamp(datetime.fromisoformat(record["timestamp"]))
     return (
-        f"[id={record['id']}] {bot_marker}{tag}·{record['author_display']}"
+        f"[{stamp}] [id={record['id']}] {bot_marker}{tag}·{record['author_display']}"
         f"{reply_marker}: {record['content']}"
     )
