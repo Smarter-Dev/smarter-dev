@@ -741,6 +741,15 @@ async def _run_producer(state: ChannelProducerState, *, passive: bool = False) -
         )
     if new_messages:
         state.last_reviewed_message_id = new_messages[-1].id
+        # External wakes are durable in Redis by this point; their consumer
+        # never executes the embedded consumer's cursor persistence below.
+        if run.execution_mode_for(state.guild_id) == EXTERNAL_EXECUTION_MODE:
+            store = run.history_store()
+            if store is not None:
+                await store.write_cursor(
+                    int(state.channel_id), guild_id=state.guild_id,
+                    last_message_id=state.last_reviewed_message_id,
+                )
     state.last_wake_at = time.monotonic()
     logger.info(
         "proactive producer channel=%s reviewed=%d passive=%s wake=%s",
@@ -1351,20 +1360,45 @@ async def _recover_channels(run: ProactiveRuntime) -> None:
     store = run.history_store()
     if store is None:
         return
+    cursors = {}
     for channel_id in await store.cursor_channel_ids():
+        cursor = await store.read_cursor(channel_id)
+        if cursor:
+            cursors[channel_id] = cursor
+    guild_ids = {
+        *(str(guild_id) for guild_id in run.bot.cache.get_guilds_view()),
+        *(cursor["guild_id"] for cursor in cursors.values()),
+    }
+    # A channel may never have had an embedded consumer (and hence a cursor).
+    # Discover it from settings and use the existing bounded catch-up window.
+    fallback_id = str(hikari.Snowflake.from_datetime(
+        datetime.now(UTC) - timedelta(seconds=CATCHUP_MAX_AGE_SECONDS)
+    ))
+    for guild_id in guild_ids:
+        while True:
+            service = run.settings_service()
+            if service is not None:
+                try:
+                    enabled = await service.list_enabled_channels(guild_id)
+                    break
+                except APIError:
+                    logger.warning("proactive recovery channel discovery unavailable guild=%s", guild_id)
+            await asyncio.sleep(SETTINGS_RETRY_BACKOFF_SECONDS)
+        for row in enabled:
+            cursors.setdefault(int(row.channel_id), {
+                "guild_id": guild_id, "last_message_id": fallback_id,
+            })
+    for channel_id, cursor in cursors.items():
         try:
-            cursor = await store.read_cursor(channel_id)
-            if not cursor:
-                continue
             settings = await _recovery_channel_settings(
                 run, cursor["guild_id"], channel_id
             )
             if not settings.enabled:
                 continue
+            state = run.state_for(int(cursor["guild_id"]), channel_id)
             missed = await _fetch_missed(run.bot, channel_id, cursor["last_message_id"])
             if not missed:
                 continue
-            state = run.state_for(int(cursor["guild_id"]), channel_id)
             state.buffer.extend(missed)
             state.first_at = state.last_at = time.monotonic()
             await run.enqueue_notification(
