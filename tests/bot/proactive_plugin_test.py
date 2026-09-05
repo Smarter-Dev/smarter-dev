@@ -917,6 +917,41 @@ async def test_passive_sweep_drains_buffered_channels(listener_setup):
 # --- independent producer and consumer state ---------------------------------
 
 
+async def test_passive_ticker_sweeps_after_two_minutes_then_every_fifteen(monkeypatch):
+    run = SimpleNamespace()
+    delays = []
+    sweep = AsyncMock()
+
+    async def fake_sleep(delay):
+        delays.append(delay)
+        if len(delays) == 3:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(proactive, "runtime", run)
+    monkeypatch.setattr(proactive.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(proactive, "_passive_sweep", sweep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await proactive._passive_ticker()
+
+    assert delays == [120, 900, 900]
+    assert sweep.await_count == 2
+    sweep.assert_awaited_with(run)
+
+
+async def test_passive_ticker_stops_if_runtime_removed_during_initial_wait(monkeypatch):
+    sleep = AsyncMock()
+    sweep = AsyncMock()
+    monkeypatch.setattr(proactive, "runtime", None)
+    monkeypatch.setattr(proactive.asyncio, "sleep", sleep)
+    monkeypatch.setattr(proactive, "_passive_sweep", sweep)
+
+    await proactive._passive_ticker()
+
+    sleep.assert_awaited_once_with(120)
+    sweep.assert_not_awaited()
+
+
 async def test_mention_queues_verbatim_while_consumer_is_busy(listener_setup):
     state = listener_setup.runtime.state_for(2, 1)
 
