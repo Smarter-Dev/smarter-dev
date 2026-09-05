@@ -89,6 +89,8 @@ MODERATOR_DENIAL_MESSAGE = (
 # How long a channel stays in active ingest (fast 15s/60s debounce) after a
 # member engages the bot; outside it, messages wait for the 15-min sweep.
 ACTIVE_WINDOW_SECONDS = 600
+# Review messages buffered during startup promptly, then use the normal cadence.
+FIRST_PASSIVE_SWEEP_SECONDS = 120
 # How often the guild/channel memory bundle is re-read and injected into the
 # agent's brief; the refresh runs lazily on the next wake after expiry.
 MEMORY_REFRESH_SECONDS = 3600
@@ -1297,12 +1299,14 @@ async def _passive_sweep(run: ProactiveRuntime) -> None:
 
 
 async def _passive_ticker() -> None:
+    delay = FIRST_PASSIVE_SWEEP_SECONDS
     while True:
-        await asyncio.sleep(PASSIVE_SECONDS)
+        await asyncio.sleep(delay)
         run = runtime
         if run is None:
             return
         await _passive_sweep(run)
+        delay = PASSIVE_SECONDS
 
 
 async def _fetch_missed(
