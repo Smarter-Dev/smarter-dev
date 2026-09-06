@@ -35,6 +35,7 @@ from uuid import uuid4
 import hikari
 import lightbulb
 from pydantic_ai.messages import ModelMessagesTypeAdapter
+from redis.exceptions import RedisError
 
 from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
 from smarter_dev.bot.agents.response_fitting import fit_writer_message
@@ -1301,10 +1302,15 @@ async def _sweep_expired_envelopes(run: ProactiveRuntime) -> None:
     queue = run.redis_notification_queue()
     if queue is None:
         return
+    connected_guild_ids = [
+        str(guild_id) for guild_id in run.bot.cache.get_guilds_view()
+    ]
     try:
-        await queue.trim_expired_envelopes()
-    except Exception:  # noqa: BLE001 — retention must not kill the ticker
+        dropped = await queue.trim_expired_envelopes(connected_guild_ids)
+    except RedisError:
         logger.exception("proactive envelope retention trim failed")
+        return
+    logger.info("proactive envelope retention trim dropped=%d", dropped)
 
 
 async def _passive_ticker() -> None:

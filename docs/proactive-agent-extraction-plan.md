@@ -187,6 +187,25 @@ proactive:v1:guilds-with-wakes
 The exact prefix may change during implementation, but the guild hash tag and
 schema version are required.
 
+### Retention
+
+Envelopes carry verbatim Discord message text, so nothing that holds them may
+outlive the 48-hour content retention window (`CONTENT_RETENTION_WINDOW` in
+`smarter_dev/shared/message_content.py`):
+
+- `wake` and `proactive:v1:shadow` are trimmed exactly at the cutoff
+  (`XTRIM MINID`, not approximate: approximate trimming only drops whole
+  macro nodes and would never touch a quiet stream) on every publish, and
+  again on the bot's 15-minute passive tick for every guild the bot sees plus
+  every guild `guilds-with-wakes` still names. The worker may remove guilds
+  from that index; retention does not depend on it.
+- `batch:<wake_id>` and its `:dropped` counter expire 48 hours after the claim
+  that created them, so a wake that is never acknowledged cannot keep its
+  batch forever.
+- `pending` is capped by count only and is drained by the next wake.
+- `ready` and `guilds-with-wakes` carry guild ids only and are never trimmed
+  by age.
+
 ### Notification envelope
 
 Both repositories validate the same JSON Schema:
