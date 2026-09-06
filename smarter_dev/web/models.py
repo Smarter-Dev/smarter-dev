@@ -28,13 +28,12 @@ from sqlalchemy.sql import func
 from smarter_dev.shared.database import Base
 
 # How long Discord-sourced message text may live in our database before the
-# retention sweep scrubs it. Every table that captures message content passively
-# — i.e. text a user typed in Discord rather than typed into one of our modals —
-# carries a ``content_purged_at`` marker and is swept on this window. The row
-# itself survives (timestamps, token counts, cost, decisions) so operators keep
-# usage and abuse history; only the human text goes.
-# See :mod:`smarter_dev.web.retention`.
-CONTENT_RETENTION_WINDOW = timedelta(hours=48)
+# retention sweep scrubs it. Owned by
+# :mod:`smarter_dev.shared.message_content` because the bot tier bounds its
+# Redis streams on the same window and must not import web models; re-exported
+# here because the schema's expiry defaults and the sweep are written against
+# ``smarter_dev.web.models``.
+from smarter_dev.shared.message_content import CONTENT_RETENTION_WINDOW
 
 # The chat agent's three-layer per-guild memory. These caps are the schema's
 # contract with the prompts that talk about them, so they live next to the
