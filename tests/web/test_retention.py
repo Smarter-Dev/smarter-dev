@@ -25,11 +25,8 @@ from smarter_dev.web.models import (
     ModerationAction,
     ChannelHandler,
 )
-from smarter_dev.web.retention import (
-    SCRUBBERS,
-    run_retention_sweep,
-    strip_trigger_content,
-)
+from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
+from smarter_dev.web.retention import SCRUBBERS, run_retention_sweep
 
 NOW = datetime(2026, 7, 26, 12, 0, tzinfo=UTC)
 STALE = NOW - CONTENT_RETENTION_WINDOW - timedelta(minutes=1)
@@ -349,69 +346,6 @@ class TestModerationActions:
         assert action.reason == "timed out for repeatedly posting scam links"
 
 
-class TestStripTriggerContent:
-    def test_drops_message_text(self):
-        stripped = strip_trigger_content(
-            {
-                "trigger_type": "message",
-                "message_content": "what someone said",
-                "message_id": "444",
-                "author_id": "333",
-                "author_is_bot": False,
-            }
-        )
-        assert stripped == {
-            "trigger_type": "message",
-            "message_id": "444",
-            "author_id": "333",
-            "author_is_bot": False,
-        }
-
-    def test_drops_edit_before_and_after(self):
-        stripped = strip_trigger_content(
-            {
-                "trigger_type": "message_edit",
-                "message_content": "after",
-                "old_content": "before",
-                "author_id": "333",
-            }
-        )
-        assert stripped == {"trigger_type": "message_edit", "author_id": "333"}
-
-    def test_drops_dm_content_attachments_and_thread_titles(self):
-        stripped = strip_trigger_content(
-            {
-                "trigger_type": "dm_message",
-                "content": "a DM",
-                "attachment_urls": [{"url": "https://cdn", "filename": "x.png"}],
-                "attachments": [{"filename": "y.png"}],
-                "embeds": [{"title": "quoted thing"}],
-                "thread_name": "a title someone typed",
-                "starter_message_content": "the opening post",
-                "dm_channel_id": "555",
-            }
-        )
-        assert stripped == {"trigger_type": "dm_message", "dm_channel_id": "555"}
-
-    def test_drops_unknown_keys_following_the_content_convention(self):
-        # A trigger type added later gets covered without touching this module.
-        stripped = strip_trigger_content(
-            {"trigger_type": "future", "poll_answer_content": "text", "poll_id": "1"}
-        )
-        assert stripped == {"trigger_type": "future", "poll_id": "1"}
-
-    def test_keeps_ids_flags_and_role_lists(self):
-        context = {
-            "trigger_type": "member_join",
-            "member_id": "333",
-            "guild_id": "111",
-            "role_ids": ["1", "2"],
-            "has_custom_avatar": True,
-            "guild_member_count": 42,
-        }
-        assert strip_trigger_content(context) == context
-
-
 class TestHandlerRuns:
     async def _run(self, session, fired_at: datetime, context: dict) -> HandlerRun:
         handler = ChannelHandler(
@@ -438,7 +372,7 @@ class TestHandlerRuns:
         await session.flush()
         return run
 
-    async def test_strips_content_from_trigger_context(self, db_session):
+    async def test_redacts_content_in_trigger_context(self, db_session):
         await self._run(
             db_session,
             STALE,
@@ -454,6 +388,7 @@ class TestHandlerRuns:
         run = (await db_session.execute(select(HandlerRun))).scalar_one()
         assert run.trigger_context == {
             "trigger_type": "message",
+            "message_content": MESSAGE_CONTENT_PLACEHOLDER,
             "author_id": "333",
         }
         assert purged_at(run.content_purged_at) == NOW

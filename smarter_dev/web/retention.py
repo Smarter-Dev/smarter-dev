@@ -53,6 +53,7 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.shared.message_content import redact_trigger_context
 from smarter_dev.web.models import (
     CONTENT_RETENTION_WINDOW,
     ChatAgentCompactionEvent,
@@ -265,45 +266,15 @@ async def scrub_moderation_actions(
     )
 
 
-# Keys inside handler_runs.trigger_context that carry message text. Anything
-# ending in ``_content`` is dropped as well, so a new trigger type that follows
-# the existing naming convention is covered the day it ships rather than the
-# day someone remembers to update this list.
-_HANDLER_CONTENT_KEYS = frozenset(
-    {
-        "content",
-        "message_content",
-        "old_content",
-        "starter_message_content",
-        "attachments",
-        "attachment_urls",
-        "embeds",
-        "thread_name",
-    }
-)
-
-
-def strip_trigger_content(context: dict) -> dict:
-    """Return ``context`` without the keys that carry Discord message text.
-
-    Ids, flags, counts, role lists and timestamps stay: a handler run's audit
-    row still shows which trigger fired, in which channel, for whom.
-    """
-    return {
-        key: value
-        for key, value in context.items()
-        if key not in _HANDLER_CONTENT_KEYS and not key.endswith("_content")
-    }
-
-
 async def scrub_handler_runs(
     session: AsyncSession, cutoff: datetime, now: datetime
 ) -> int:
-    """Strip message text out of every due handler run's trigger context.
+    """Redact message text out of every due handler run's trigger context.
 
     Streams in batches: ``trigger_context`` is a JSON blob whose content keys
-    have to be removed key-by-key, so this is a read-modify-write rather than a
-    single UPDATE.
+    have to be rewritten key-by-key, so this is a read-modify-write rather than
+    a single UPDATE. Rows written since the write-time redaction landed already
+    hold placeholders; re-redacting them is a no-op.
     """
     scrubbed = 0
     while True:
@@ -324,7 +295,7 @@ async def scrub_handler_runs(
                 update(HandlerRun)
                 .where(HandlerRun.id == run_id)
                 .values(
-                    trigger_context=strip_trigger_content(context or {}),
+                    trigger_context=redact_trigger_context(context or {}),
                     content_purged_at=now,
                 )
             )
