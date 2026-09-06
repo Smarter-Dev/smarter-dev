@@ -214,11 +214,11 @@ def redact_forum_post(post: dict) -> dict:
     """The member-authored columns of a forum-agent response row.
 
     A forum post's title is as much a member's own words as its body, and its
-    attachment urls are message content, so all three are redacted and only
-    what the agent decided about the post is stored verbatim. Text that is
-    absent or null becomes the empty string those not-null columns expect
-    rather than an invented placeholder, so a starter post carrying only an
-    image still leaves an audit row.
+    attachment filenames are member-supplied text, so all three are redacted
+    and only what the agent decided about the post is stored verbatim. Text
+    that is absent or null becomes the empty string those not-null columns
+    expect rather than an invented placeholder, so a starter post carrying
+    only an image still leaves an audit row.
 
     Returns exactly the columns it redacts, so the route it feeds cannot
     smuggle a sender-chosen key into the row.

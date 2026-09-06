@@ -60,6 +60,14 @@ the confidence, the decision reason and its own reply — is stored as written.
 The sweep still blanks those columns, which is what clears rows written before
 write-time redaction and the agent's own derived text.
 
+`help_conversations` follows the same rule. Every context message — the channel
+scrape the bot read before answering — is stored as the placeholder at write
+time, whatever the interaction type. `user_question` is stored as typed only
+when the member submitted it as a slash-command argument; a mention or a streak
+reply is the member's own Discord message and is stored as the placeholder. The
+sweep's remaining job on that table is the bot's own answer plus rows written
+before this change.
+
 `handler_runs` keeps the non-content parts of its trigger context — which
 trigger fired, in which channel, for whom — and replaces every key that carries
 message text with the placeholder, including any future key following the

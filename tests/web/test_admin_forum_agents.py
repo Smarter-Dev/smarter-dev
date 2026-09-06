@@ -277,6 +277,7 @@ def test_format_response_details_shapes_payload():
     now = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
     response = SimpleNamespace(
         id=uuid4(),
+        thread_id="333",
         post_title="Title",
         post_content="Body",
         author_display_name="Author",
@@ -294,6 +295,7 @@ def test_format_response_details_shapes_payload():
     payload = format_response_details(response, agent)
     assert payload["agent_name"] == "Helper"
     assert payload["post_title"] == "Title"
+    assert payload["thread_id"] == "333"
     assert payload["decision_reasoning"] == "reason"
     assert payload["created_at"] == now.isoformat()
 
@@ -638,6 +640,26 @@ async def test_analytics_aggregates_responses(db_session):
     assert len(response.context["recent_responses"]) == 2
 
 
+async def test_analytics_recent_responses_carry_thread_id(db_session):
+    # The post title and body are stored as the placeholder, so the thread id
+    # is the only thing left that tells one evaluated post from another.
+    agent = await _seed_agent(db_session, name="Analyzed")
+    await _seed_response(db_session, agent, responded=True, confidence=0.8, tokens=100)
+    with patch(
+        f"{_MODULE}.get_admin_context", new=AsyncMock(return_value={})
+    ), patch(f"{_MODULE}.get_admin_discord_client", return_value=_admin_client()):
+        response = await ForumAgentsAdminController.forum_agent_analytics.fn(
+            None,
+            request=object(),
+            db_session=db_session,
+            guild_id=_GUILD,
+            agent_id=agent.id,
+        )
+
+    recent = response.context["recent_responses"]
+    assert [row.thread_id for row in recent] == ["333"]
+
+
 async def test_analytics_missing_agent_returns_404(db_session):
     with patch(
         f"{_MODULE}.get_admin_context", new=AsyncMock(return_value={})
@@ -669,6 +691,18 @@ async def test_response_details_returns_json(db_session):
     assert response.content["agent_name"] == "Detailed"
     assert response.content["tokens_used"] == 42
     assert response.content["responded"] is True
+
+
+async def test_response_details_carry_thread_id(db_session):
+    agent = await _seed_agent(db_session, name="Detailed")
+    resp = await _seed_response(
+        db_session, agent, responded=True, confidence=0.9, tokens=42
+    )
+    response = await ForumAgentsAdminController.forum_response_details.fn(
+        None, db_session=db_session, response_id=resp.id
+    )
+
+    assert response.content["thread_id"] == "333"
 
 
 async def test_response_details_missing_returns_404(db_session):
