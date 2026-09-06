@@ -29,6 +29,7 @@ from smarter_dev.shared.message_content import (
     MESSAGE_CONTENT_PLACEHOLDER,
     oldest_retained_stream_id,
     redact_chat_agent_messages,
+    redact_forum_post,
     redact_help_context_messages,
     redact_help_question,
     redact_model_message_parts,
@@ -578,6 +579,86 @@ class TestRedactTriggerContext:
         redacted = redact_trigger_context(context)
         context["author_role_ids"].append("what the script quoted back")
         assert redacted["author_role_ids"] == ["R1"]
+
+
+def forum_post_request(**overrides) -> dict:
+    """A forum-agent response request, the shape ``record_agent_response`` reads."""
+    request = {
+        "channel_id": "222222222222222222",
+        "thread_id": "333333333333333333",
+        "post_title": "Bot crashes on startup",
+        "post_content": "here is my whole main.py and the traceback",
+        "author_display_name": "Alice",
+        "post_tags": ["python", "help"],
+        "attachments": ["https://cdn.discordapp.com/attachments/1/2/traceback.txt"],
+        "decision_reason": "question matches the agent's topic",
+        "response_content": "check your event loop setup",
+    }
+    request.update(overrides)
+    return request
+
+
+class TestRedactForumPost:
+    def test_replaces_the_title_a_member_typed(self):
+        assert (
+            redact_forum_post(forum_post_request())["post_title"]
+            == MESSAGE_CONTENT_PLACEHOLDER
+        )
+
+    def test_replaces_the_body_a_member_typed(self):
+        assert (
+            redact_forum_post(forum_post_request())["post_content"]
+            == MESSAGE_CONTENT_PLACEHOLDER
+        )
+
+    def test_drops_the_attachment_urls(self):
+        assert redact_forum_post(forum_post_request())["attachments"] == []
+
+    def test_returns_only_the_member_authored_columns(self):
+        # The route spreads this into the row, so a request key that reached
+        # the result would be stored under whatever name the sender chose.
+        assert set(redact_forum_post(forum_post_request())) == {
+            "post_title",
+            "post_content",
+            "attachments",
+        }
+
+    @pytest.mark.parametrize("field", ["post_title", "post_content"])
+    def test_empty_text_stays_empty(self, field):
+        redacted = redact_forum_post(forum_post_request(**{field: ""}))
+        assert redacted[field] == ""
+
+    @pytest.mark.parametrize("field", ["post_title", "post_content"])
+    def test_null_text_becomes_the_empty_string_the_row_requires(self, field):
+        # An image-only starter post sends null; both columns are not-null.
+        redacted = redact_forum_post(forum_post_request(**{field: None}))
+        assert redacted[field] == ""
+
+    @pytest.mark.parametrize("field", ["post_title", "post_content"])
+    def test_absent_text_becomes_the_empty_string_the_row_requires(self, field):
+        request = forum_post_request()
+        del request[field]
+        assert redact_forum_post(request)[field] == ""
+
+    def test_an_absent_attachment_list_is_still_empty(self):
+        request = forum_post_request()
+        del request["attachments"]
+        assert redact_forum_post(request)["attachments"] == []
+
+    def test_does_not_mutate_its_argument(self):
+        request = forum_post_request()
+        redact_forum_post(request)
+        assert request["post_title"] == "Bot crashes on startup"
+        assert request["post_content"] == (
+            "here is my whole main.py and the traceback"
+        )
+        assert request["attachments"] == [
+            "https://cdn.discordapp.com/attachments/1/2/traceback.txt"
+        ]
+
+    def test_is_idempotent(self):
+        once = redact_forum_post(forum_post_request())
+        assert redact_forum_post(once) == once
 
 
 class TestOldestRetainedStreamId:

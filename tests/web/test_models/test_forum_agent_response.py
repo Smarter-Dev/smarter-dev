@@ -5,10 +5,12 @@ from __future__ import annotations
 import pytest
 from uuid import UUID
 from datetime import datetime, timezone
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.exc import IntegrityError
 
 from smarter_dev.shared.database import Base
+from smarter_dev.shared.message_content import redact_forum_post
+from smarter_dev.web.models import ForumAgent, ForumAgentResponse
 
 
 class TestForumAgentResponse:
@@ -417,3 +419,42 @@ class TestForumAgentResponse:
             assert response_yes.responded is True
             assert response_yes.responded_at is not None
             assert isinstance(response_yes.responded_at, datetime)
+
+    async def test_a_redacted_textless_post_satisfies_the_not_null_columns(
+        self, test_engine
+    ):
+        """A starter post with no text still stores, so the audit row survives."""
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
+        async with session_maker() as session:
+            agent = ForumAgent(
+                guild_id="forum_guild_123",
+                name="Test Agent",
+                system_prompt="Test prompt",
+                created_by="test_admin",
+            )
+            session.add(agent)
+            await session.commit()
+            await session.refresh(agent)
+
+            response = ForumAgentResponse(
+                agent_id=agent.id,
+                guild_id="forum_guild_123",
+                channel_id="123456789",
+                thread_id="987654321",
+                author_display_name="TestUser",
+                decision_reason="Test decision",
+                confidence_score=0.5,
+                tokens_used=100,
+                response_time_ms=1000,
+                **redact_forum_post({"post_title": None, "post_content": None}),
+            )
+            session.add(response)
+            await session.commit()
+            await session.refresh(response)
+
+            assert response.post_title == ""
+            assert response.post_content == ""
+            assert response.attachments == []

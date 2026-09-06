@@ -615,3 +615,24 @@ def test_record_agent_response_absent_post_text_stays_empty(
     assert row.post_title == ""
     assert row.post_content == ""
     assert row.attachments == []
+
+
+def test_record_agent_response_null_post_text_stores_the_empty_string(
+    forum_client: TestClient,
+    forum_agent_ops_mock: Mock,
+    session_mock: AsyncMock,
+    guild_id: str,
+):
+    # An image-only or embed-only starter post has no text, and the bot sends
+    # that through as null; both columns are not-null, so a null reaching the
+    # insert would lose the audit row to a 500.
+    row = _recorded_response_row(
+        forum_client,
+        forum_agent_ops_mock,
+        session_mock,
+        guild_id,
+        post_title=None,
+        post_content=None,
+    )
+    assert row.post_title == ""
+    assert row.post_content == ""
