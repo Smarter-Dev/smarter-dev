@@ -46,6 +46,7 @@ from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
 from decimal import Decimal
+from typing import NamedTuple
 from uuid import UUID
 
 from litestar import Controller
@@ -71,6 +72,7 @@ from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.api_native.errors import plain_error
+from smarter_dev.web.api_native.schemas import ChatAgentCompactionEventCreate
 from smarter_dev.web.api_native.schemas import ChatAgentEngagementEnd
 from smarter_dev.web.api_native.schemas import ChatAgentEngagementStart
 from smarter_dev.web.api_native.schemas import ChatAgentEngagementStartResponse
@@ -202,6 +204,162 @@ async def guild_total_tokens(
     if since is not None:
         stmt = stmt.where(ChatAgentTurn.started_at >= since)
     return int(await db.scalar(stmt) or 0)
+
+
+class _CompactionTotals(NamedTuple):
+    """What a turn's compaction events add to the engagement's running totals."""
+
+    cost_usd: Decimal
+    tokens_input: int
+    tokens_output: int
+
+
+def _usage_cost_row(
+    *,
+    operation_key: str,
+    operation_type: str,
+    engagement: ChatAgentEngagement,
+    turn_id: UUID,
+    model_name: str,
+    reasoning_level: str | None,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_tokens: int,
+    cache_write_tokens: int,
+    cost_usd: Decimal,
+    details: dict,
+) -> UsageCostRow:
+    """One metering row for a model that billed for this turn."""
+    provider, catalog_key, wire_id = _normalized_model_identity(model_name)
+    return UsageCostRow(
+        operation_key=operation_key,
+        product_mode="discord",
+        operation_type=operation_type,
+        discord_user_id=engagement.activation_user_id,
+        conversation_id=engagement.id,
+        root_turn_id=turn_id,
+        provider_key=provider,
+        catalog_model_key=catalog_key,
+        model_id=wire_id,
+        reasoning_level=reasoning_level,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
+        cost_usd=cost_usd,
+        details=details,
+    )
+
+
+def _summarizer_cost(event: ChatAgentCompactionEventCreate) -> Decimal:
+    """What the summarizer charged for this compaction; zero on unknown models."""
+    if not event.summarizer_model_name:
+        return Decimal("0")
+    return calc_cost(
+        event.summarizer_tokens_input,
+        event.summarizer_tokens_output,
+        event.summarizer_model_name,
+        cache_read_tokens=event.summarizer_cache_read_tokens or 0,
+        cache_write_tokens=event.summarizer_cache_write_tokens or 0,
+    )
+
+
+def _compaction_event_row(
+    turn_id: UUID, event: ChatAgentCompactionEventCreate
+) -> ChatAgentCompactionEvent:
+    """One stored compaction event: its metrics kept, its content redacted."""
+    return ChatAgentCompactionEvent(
+        turn_id=turn_id,
+        event_kind=event.event_kind,
+        tool_name=event.tool_name,
+        original_content=redact_text(event.original_content),
+        summary=event.summary,
+        original_chars=event.original_chars,
+        summary_chars=event.summary_chars,
+        chars_saved=event.original_chars - event.summary_chars,
+        summarizer_tokens_input=event.summarizer_tokens_input,
+        summarizer_tokens_output=event.summarizer_tokens_output,
+        summarizer_model_name=event.summarizer_model_name,
+        summarizer_reasoning_level=event.summarizer_reasoning_level,
+        summarizer_cache_read_tokens=event.summarizer_cache_read_tokens,
+        summarizer_cache_write_tokens=event.summarizer_cache_write_tokens,
+        summarizer_cost_usd=_summarizer_cost(event),
+    )
+
+
+async def _persist_compaction_events(
+    db_session: AsyncSession,
+    *,
+    turn_id: UUID,
+    engagement: ChatAgentEngagement,
+    events: list[ChatAgentCompactionEventCreate],
+) -> _CompactionTotals:
+    """Store each compaction event plus its metering row, and total the spend."""
+    stored_events = []
+    for event in events:
+        stored_event = _compaction_event_row(turn_id, event)
+        db_session.add(stored_event)
+        await db_session.flush()  # populate stored_event.id for the metering key
+        stored_events.append(stored_event)
+        if event.summarizer_model_name:
+            db_session.add(
+                _usage_cost_row(
+                    operation_key=(
+                        f"discord:turn:{turn_id}:compaction:{stored_event.id}"
+                    ),
+                    operation_type="compaction",
+                    engagement=engagement,
+                    turn_id=turn_id,
+                    model_name=event.summarizer_model_name,
+                    reasoning_level=event.summarizer_reasoning_level,
+                    input_tokens=event.summarizer_tokens_input,
+                    output_tokens=event.summarizer_tokens_output,
+                    cache_read_tokens=event.summarizer_cache_read_tokens or 0,
+                    cache_write_tokens=event.summarizer_cache_write_tokens or 0,
+                    cost_usd=stored_event.summarizer_cost_usd,
+                    details={"event_kind": event.event_kind},
+                )
+            )
+    return _CompactionTotals(
+        cost_usd=sum(
+            (stored.summarizer_cost_usd for stored in stored_events), Decimal("0")
+        ),
+        tokens_input=sum(event.summarizer_tokens_input for event in events),
+        tokens_output=sum(event.summarizer_tokens_output for event in events),
+    )
+
+
+def _candidate_blog_topics(
+    engagement_id: UUID, turn_id: UUID, agent_output: dict
+) -> list[CandidateBlogTopic]:
+    """The blogging-agent topics this turn surfaced, minus the unusable ones.
+
+    Same neutral {headline, observation, scope, evidence, category} shape Scout
+    produces — Brainstorm forms hypotheses from these claims downstream. A
+    candidate without both a headline and an observation claims nothing, and
+    evidence that did not arrive as a list is dropped rather than guessed at.
+    """
+    topics = []
+    for candidate in agent_output.get("blog_topic_candidates") or []:
+        headline = (candidate.get("headline") or "").strip()
+        observation = (candidate.get("observation") or "").strip()
+        if not headline or not observation:
+            continue
+        evidence = candidate.get("evidence")
+        topics.append(
+            CandidateBlogTopic(
+                engagement_id=engagement_id,
+                turn_id=turn_id,
+                headline=headline[:255],
+                observation=observation,
+                scope=(candidate.get("scope") or "").strip(),
+                evidence=[str(item) for item in evidence if item]
+                if isinstance(evidence, list)
+                else [],
+                category=candidate.get("category"),
+            )
+        )
+    return topics
 
 
 class ChatConversationController(Controller):
@@ -351,10 +509,6 @@ class ChatConversationController(Controller):
             if data.voice_model_name
             else Decimal("0")
         )
-        summarizer_cost_total = Decimal("0")
-        summarizer_in_total = 0
-        summarizer_out_total = 0
-
         turn = ChatAgentTurn(
             engagement_id=data.engagement_id,
             request_id=data.request_id,
@@ -362,9 +516,7 @@ class ChatConversationController(Controller):
             output_kind=data.output_kind,
             triggering_messages=redact_chat_agent_messages(data.triggering_messages),
             agent_output=data.agent_output,
-            model_messages_delta=redact_model_message_parts(
-                data.model_messages_delta
-            ),
+            model_messages_delta=redact_model_message_parts(data.model_messages_delta),
             duration_ms=data.duration_ms,
             chat_tokens_input=data.chat_tokens_input,
             chat_tokens_output=data.chat_tokens_output,
@@ -384,22 +536,13 @@ class ChatConversationController(Controller):
         await db_session.flush()  # populate turn.id for compaction-event FKs
 
         if data.chat_model_name:
-            provider, catalog_key, wire_id = _normalized_model_identity(
-                data.chat_model_name
-            )
             db_session.add(
-                UsageCostRow(
+                _usage_cost_row(
                     operation_key=f"discord:turn:{turn.id}:primary",
-                    product_mode="discord",
                     operation_type="primary",
-                    discord_user_id=engagement.activation_user_id
-                    if engagement
-                    else None,
-                    conversation_id=data.engagement_id,
-                    root_turn_id=turn.id,
-                    provider_key=provider,
-                    catalog_model_key=catalog_key,
-                    model_id=wire_id,
+                    engagement=engagement,
+                    turn_id=turn.id,
+                    model_name=data.chat_model_name,
                     reasoning_level=data.chat_reasoning_level,
                     input_tokens=data.chat_tokens_input,
                     output_tokens=data.chat_tokens_output,
@@ -410,128 +553,38 @@ class ChatConversationController(Controller):
                 )
             )
         if data.voice_model_name:
-            provider, catalog_key, wire_id = _normalized_model_identity(
-                data.voice_model_name
-            )
             db_session.add(
-                UsageCostRow(
+                _usage_cost_row(
                     operation_key=f"discord:turn:{turn.id}:voice",
-                    product_mode="discord",
                     operation_type="voice",
-                    discord_user_id=engagement.activation_user_id
-                    if engagement
-                    else None,
-                    conversation_id=data.engagement_id,
-                    root_turn_id=turn.id,
-                    provider_key=provider,
-                    catalog_model_key=catalog_key,
-                    model_id=wire_id,
+                    engagement=engagement,
+                    turn_id=turn.id,
+                    model_name=data.voice_model_name,
+                    reasoning_level=None,
                     input_tokens=data.voice_tokens_input,
                     output_tokens=data.voice_tokens_output,
+                    cache_read_tokens=0,
+                    cache_write_tokens=0,
                     cost_usd=voice_cost,
                     details={"request_id": str(data.request_id)},
                 )
             )
 
-        for ev in data.compaction_events:
-            ev_cost = (
-                calc_cost(
-                    ev.summarizer_tokens_input,
-                    ev.summarizer_tokens_output,
-                    ev.summarizer_model_name,
-                    cache_read_tokens=ev.summarizer_cache_read_tokens or 0,
-                    cache_write_tokens=ev.summarizer_cache_write_tokens or 0,
-                )
-                if ev.summarizer_model_name
-                else Decimal("0")
-            )
-            summarizer_cost_total += ev_cost
-            summarizer_in_total += ev.summarizer_tokens_input
-            summarizer_out_total += ev.summarizer_tokens_output
-            compaction_event = ChatAgentCompactionEvent(
-                turn_id=turn.id,
-                event_kind=ev.event_kind,
-                tool_name=ev.tool_name,
-                original_content=redact_text(ev.original_content),
-                summary=ev.summary,
-                original_chars=ev.original_chars,
-                summary_chars=ev.summary_chars,
-                chars_saved=ev.original_chars - ev.summary_chars,
-                summarizer_tokens_input=ev.summarizer_tokens_input,
-                summarizer_tokens_output=ev.summarizer_tokens_output,
-                summarizer_model_name=ev.summarizer_model_name,
-                summarizer_reasoning_level=ev.summarizer_reasoning_level,
-                summarizer_cache_read_tokens=ev.summarizer_cache_read_tokens,
-                summarizer_cache_write_tokens=ev.summarizer_cache_write_tokens,
-                summarizer_cost_usd=ev_cost,
-            )
-            db_session.add(compaction_event)
-            await db_session.flush()
-            if ev.summarizer_model_name:
-                provider, catalog_key, wire_id = _normalized_model_identity(
-                    ev.summarizer_model_name
-                )
-                db_session.add(
-                    UsageCostRow(
-                        operation_key=f"discord:turn:{turn.id}:compaction:{compaction_event.id}",
-                        product_mode="discord",
-                        operation_type="compaction",
-                        discord_user_id=engagement.activation_user_id
-                        if engagement
-                        else None,
-                        conversation_id=data.engagement_id,
-                        root_turn_id=turn.id,
-                        provider_key=provider,
-                        catalog_model_key=catalog_key,
-                        model_id=wire_id,
-                        reasoning_level=ev.summarizer_reasoning_level,
-                        input_tokens=ev.summarizer_tokens_input,
-                        output_tokens=ev.summarizer_tokens_output,
-                        cache_read_tokens=ev.summarizer_cache_read_tokens or 0,
-                        cache_write_tokens=ev.summarizer_cache_write_tokens or 0,
-                        cost_usd=ev_cost,
-                        details={"event_kind": ev.event_kind},
-                    )
-                )
-
-        # Blogging-agent capture: file any candidate blog topics the agent
-        # surfaced this turn. Same neutral {headline, observation, scope,
-        # evidence, category} shape Scout produces — Brainstorm forms
-        # hypotheses from these claims downstream.
-        if isinstance(data.agent_output, dict):
-            for cand in data.agent_output.get("blog_topic_candidates") or []:
-                headline = (cand.get("headline") or "").strip()
-                observation = (cand.get("observation") or "").strip()
-                if not headline or not observation:
-                    continue
-                scope = (cand.get("scope") or "").strip()
-                evidence = cand.get("evidence") or []
-                if not isinstance(evidence, list):
-                    evidence = []
-                db_session.add(
-                    CandidateBlogTopic(
-                        engagement_id=data.engagement_id,
-                        turn_id=turn.id,
-                        headline=headline[:255],
-                        observation=observation,
-                        scope=scope,
-                        evidence=[str(e) for e in evidence if e],
-                        category=cand.get("category"),
-                    )
-                )
-
-        # Bump engagement aggregates + latest topic/notes denormalisation.
-        last_topic = (
-            data.agent_output.get("topic")
-            if isinstance(data.agent_output, dict)
-            else None
+        compaction = await _persist_compaction_events(
+            db_session,
+            turn_id=turn.id,
+            engagement=engagement,
+            events=data.compaction_events,
         )
-        last_notes = (
-            data.agent_output.get("notes")
-            if isinstance(data.agent_output, dict)
-            else None
-        )
-        total_cost_delta = chat_cost + voice_cost + summarizer_cost_total
+
+        for topic in _candidate_blog_topics(
+            data.engagement_id, turn.id, data.agent_output
+        ):
+            db_session.add(topic)
+
+        last_topic = data.agent_output.get("topic")
+        last_notes = data.agent_output.get("notes")
+        total_cost_delta = chat_cost + voice_cost + compaction.cost_usd
 
         update_values: dict = {
             "total_chat_tokens_input": ChatAgentEngagement.total_chat_tokens_input
@@ -543,14 +596,14 @@ class ChatConversationController(Controller):
             "total_voice_tokens_output": ChatAgentEngagement.total_voice_tokens_output
             + data.voice_tokens_output,
             "total_compaction_tokens_input": ChatAgentEngagement.total_compaction_tokens_input
-            + summarizer_in_total,
+            + compaction.tokens_input,
             "total_compaction_tokens_output": ChatAgentEngagement.total_compaction_tokens_output
-            + summarizer_out_total,
+            + compaction.tokens_output,
             "total_chat_cost_usd": ChatAgentEngagement.total_chat_cost_usd + chat_cost,
             "total_voice_cost_usd": ChatAgentEngagement.total_voice_cost_usd
             + voice_cost,
             "total_compaction_cost_usd": ChatAgentEngagement.total_compaction_cost_usd
-            + summarizer_cost_total,
+            + compaction.cost_usd,
             "total_cost_usd": ChatAgentEngagement.total_cost_usd + total_cost_delta,
         }
         if last_topic is not None:
@@ -572,7 +625,7 @@ class ChatConversationController(Controller):
             started_at=turn.started_at,
             chat_cost_usd=str(chat_cost),
             voice_cost_usd=str(voice_cost),
-            summarizer_cost_usd_total=str(summarizer_cost_total),
+            summarizer_cost_usd_total=str(compaction.cost_usd),
         )
 
     @get("/usage-leaderboard", status_code=HTTP_200_OK, guards=BOT_API_GUARDS)
