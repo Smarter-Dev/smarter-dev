@@ -1,12 +1,23 @@
-"""Redis producer primitives for guild-scoped proactive notifications."""
+"""Redis producer primitives for guild-scoped proactive notifications.
+
+Envelopes carry verbatim Discord message text, so every key that holds them is
+bounded to ``CONTENT_RETENTION_WINDOW``: the wake and shadow streams are
+trimmed exactly at the cutoff (approximate trimming skips a quiet stream whose
+entries all sit in the open macro node) on every publish and again by
+``trim_expired_envelopes`` on the bot's passive tick, and a claimed batch
+expires at claim time. The pending list is the one exception; see
+``publish``.
+"""
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
 
 from smarter_dev.bot.proactive.contracts import NotificationEnvelope
+from smarter_dev.shared.message_content import CONTENT_RETENTION_WINDOW
 from smarter_dev.shared.message_content import oldest_retained_stream_id
 
 KEY_PREFIX = "proactive:v1"
@@ -15,6 +26,7 @@ READY_STREAM_KEY = f"{KEY_PREFIX}:ready"
 SHADOW_STREAM_KEY = f"{KEY_PREFIX}:shadow"
 PENDING_LIMIT = 20
 SHADOW_STREAM_MAX_ENTRIES = 10_000
+RETENTION_WINDOW_MILLISECONDS = int(CONTENT_RETENTION_WINDOW.total_seconds() * 1000)
 WAKE_PAYLOAD_FIELD = "payload"
 
 _PUSH_PENDING_LUA = """
@@ -32,10 +44,11 @@ _CLAIM_PENDING_LUA = """
 if redis.call('EXISTS', KEYS[2]) == 0 then
   if redis.call('EXISTS', KEYS[1]) == 1 then
     redis.call('RENAME', KEYS[1], KEYS[2])
+    redis.call('PEXPIRE', KEYS[2], ARGV[1])
   end
   local dropped = redis.call('GET', KEYS[3])
   if dropped then
-    redis.call('SET', KEYS[4], dropped)
+    redis.call('SET', KEYS[4], dropped, 'PX', ARGV[1])
     redis.call('DEL', KEYS[3])
   end
 end
@@ -97,6 +110,12 @@ class RedisNotificationQueue:
         await self._redis.set(ownership_key(guild_id), owner)
 
     async def publish(self, envelope: NotificationEnvelope) -> str | None:
+        """Queue a non-waking envelope, or wake the guild with a bounded stream.
+
+        The pending list a non-waking envelope enters is capped by count, not
+        age: it is drained by the next wake, and a guild that never wakes
+        again keeps up to ``pending_limit`` envelopes until it does.
+        """
         payload = envelope.model_dump_json()
         if not envelope.wakes:
             await self._redis.eval(
@@ -139,22 +158,30 @@ class RedisNotificationQueue:
             stream_id, _ = await pipeline.execute()
         return _decode(stream_id)
 
-    async def trim_expired_envelopes(self) -> int:
+    async def trim_expired_envelopes(self, guild_ids: Iterable[str]) -> int:
         """Drop past-window envelopes from every stream no publish still reaches.
 
         A publish only bounds the stream it writes, so a guild whose last wake
         was its final one, and the shadow stream after canary mode ends, keep
-        their envelopes until this runs.
+        their envelopes until this runs. Visits the wake stream of every guild
+        in ``guild_ids`` (the guilds the caller can see) and of every guild the
+        ready index still names, so retention does not depend on the worker
+        leaving that index untouched. Returns the number of envelopes dropped.
         """
         age_bound = _exact_retention_age_bound()
-        guild_ids = await self._redis.smembers(READY_GUILDS_KEY)
+        indexed_guild_ids = await self._redis.smembers(READY_GUILDS_KEY)
+        stream_guild_ids = sorted(
+            {*guild_ids, *(_decode(guild_id) for guild_id in indexed_guild_ids)}
+        )
         async with self._redis.pipeline(transaction=False) as pipeline:
-            for guild_id in guild_ids:
-                pipeline.xtrim(wake_stream_key(_decode(guild_id)), **age_bound)
+            for guild_id in stream_guild_ids:
+                pipeline.xtrim(wake_stream_key(guild_id), **age_bound)
             pipeline.xtrim(SHADOW_STREAM_KEY, **age_bound)
             return sum(await pipeline.execute())
 
     async def claim_pending(self, guild_id: str, wake_id: str) -> ClaimedPending:
+        """Move the pending list into a batch that a retry of ``wake_id`` reads
+        again and that expires with the retention window if never acknowledged."""
         raw = await self._redis.eval(
             _CLAIM_PENDING_LUA,
             4,
@@ -162,6 +189,7 @@ class RedisNotificationQueue:
             batch_key(guild_id, wake_id),
             pending_dropped_key(guild_id),
             batch_dropped_key(guild_id, wake_id),
+            RETENTION_WINDOW_MILLISECONDS,
         )
         dropped = int(_decode(raw[0]))
         notifications = tuple(
