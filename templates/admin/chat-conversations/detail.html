@@ -197,6 +197,11 @@
 
 <a href="/admin/chat-conversations" class="cc-back">&larr; back to list</a>
 
+<div class="cc-meta" style="padding: .5rem 0;">
+    🔒 Discord message text is never stored &mdash; every message body, prompt and tool
+    return below is a placeholder. The metrics are permanent.
+</div>
+
 <div class="cc-timeline">
     {% for turn in turns %}
     <div class="cc-turn-divider">
@@ -208,8 +213,8 @@
 
     {% if turn.content_purged_at %}
     <div class="cc-meta" style="padding: .5rem 0;">
-        🧹 Message content purged {{ turn.content_purged_at.strftime('%Y-%m-%d %H:%M') }} UTC
-        &mdash; Discord text is kept for 48 hours; the metrics above are permanent.
+        🧹 Derived text purged {{ turn.content_purged_at.strftime('%Y-%m-%d %H:%M') }} UTC
+        &mdash; the agent's own output and summaries were blanked; the metrics above are permanent.
     </div>
     {% endif %}
 
