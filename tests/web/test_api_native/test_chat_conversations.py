@@ -19,28 +19,50 @@ separately by ``test_auth.py``.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from datetime import datetime, timedelta, timezone
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
+from datetime import timezone
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from httpx import ASGITransport, AsyncClient
+from httpx import ASGITransport
+from httpx import AsyncClient
+from jinja2 import ChoiceLoader
+from jinja2 import DictLoader
+from jinja2 import Environment
+from jinja2 import FileSystemLoader
 from litestar import Litestar
 from litestar.di import Provide
 from litestar.plugins.pydantic import PydanticPlugin
+from pydantic_ai.messages import ModelMessagesTypeAdapter
+from pydantic_ai.messages import ModelRequest
+from pydantic_ai.messages import ModelResponse
+from pydantic_ai.messages import SystemPromptPart
+from pydantic_ai.messages import TextPart
+from pydantic_ai.messages import ToolCallPart
+from pydantic_ai.messages import ToolReturnPart
+from pydantic_ai.messages import UserPromptPart
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.orm import selectinload
 from sqlalchemy.pool import StaticPool
 
+from smarter_dev.bot.agents.chat_models import Message as ChatMessage
+from smarter_dev.bot.agents.chat_models import MessageAttachment
 from smarter_dev.shared.database import Base
+from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 from smarter_dev.web.api_native import chat_conversations as chat_module
 from smarter_dev.web.api_native.chat_conversations import ChatConversationController
-from smarter_dev.web.models import (
-    CandidateBlogTopic,
-    ChatAgentCompactionEvent,
-    ChatAgentEngagement,
-    ChatAgentError,
-    ChatAgentTurn,
-)
+from smarter_dev.web.models import CandidateBlogTopic
+from smarter_dev.web.models import ChatAgentCompactionEvent
+from smarter_dev.web.models import ChatAgentEngagement
+from smarter_dev.web.models import ChatAgentError
+from smarter_dev.web.models import ChatAgentTurn
+
+_TEMPLATES_ROOT = str(Path(__file__).resolve().parents[3] / "templates")
 
 _GUILD = "123456789012345678"
 _CHANNEL = "555000111222333444"
@@ -510,3 +532,295 @@ class TestUsageLeaderboard:
     async def test_missing_guild_id_is_422(self, client: AsyncClient):
         response = await client.get("/api/chat-conversations/usage-leaderboard")
         assert response.status_code == 422
+
+
+def _serialised_triggering_message(**overrides) -> dict:
+    """A triggering message exactly as ``chat_engine`` serialises it."""
+    message = ChatMessage(
+        message_id="444",
+        author_id="333",
+        body="what someone actually said",
+        reactions=["👍"],
+        attachments=[MessageAttachment(url="https://cdn/x.png", filename="x.png")],
+        sent_at=datetime(2026, 7, 26, 12, 0, tzinfo=UTC),
+        mentions_bot=True,
+        reply_to_message_id="443",
+        reply_to_author_id="222",
+        reply_to_is_self=True,
+    )
+    return message.model_dump(mode="json") | overrides
+
+
+def _serialised_model_messages() -> list[dict]:
+    """A pydantic-ai message delta carrying every part kind the agent emits."""
+    return ModelMessagesTypeAdapter.dump_python(
+        [
+            ModelRequest(
+                parts=[
+                    SystemPromptPart(content="you are a bot"),
+                    UserPromptPart(content="what someone actually said"),
+                ]
+            ),
+            ModelResponse(
+                parts=[
+                    TextPart(content="the agent reply"),
+                    ToolCallPart(
+                        tool_name="search",
+                        args={"query": "a phrase"},
+                        tool_call_id="c1",
+                    ),
+                ]
+            ),
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        tool_name="search",
+                        content={"messages": ["what someone actually said"]},
+                        tool_call_id="c1",
+                    )
+                ]
+            ),
+        ],
+        mode="json",
+    )
+
+
+async def _post_turn(client: AsyncClient, engagement, **overrides) -> dict:
+    payload = {
+        "engagement_id": str(engagement.id),
+        "request_id": "req-redact",
+        "turn_kind": "initial",
+        "output_kind": "send_response",
+        "triggering_messages": [_serialised_triggering_message()],
+        "agent_output": {"topic": "greetings", "notes": "friendly"},
+        "model_messages_delta": _serialised_model_messages(),
+    }
+    payload.update(overrides)
+    response = await client.post("/api/chat-conversations/turns", json=payload)
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+async def _stored_turn(session) -> ChatAgentTurn:
+    turns = (await session.execute(select(ChatAgentTurn))).scalars().all()
+    assert len(turns) == 1
+    return turns[0]
+
+
+class TestTurnStoresPlaceholdersForMessageText:
+    async def test_triggering_message_body_is_a_placeholder(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+
+        await _post_turn(client, engagement)
+
+        turn = await _stored_turn(session)
+        stored_message = turn.triggering_messages[0]
+        assert stored_message["body"] == MESSAGE_CONTENT_PLACEHOLDER
+        assert stored_message["attachments"] == []
+
+    async def test_triggering_message_metadata_survives(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+
+        await _post_turn(client, engagement)
+
+        stored_message = (await _stored_turn(session)).triggering_messages[0]
+        assert stored_message["message_id"] == "444"
+        assert stored_message["author_id"] == "333"
+        assert stored_message["reply_to_message_id"] == "443"
+        assert stored_message["reply_to_author_id"] == "222"
+        assert stored_message["reply_to_is_self"] is True
+        assert stored_message["mentions_bot"] is True
+        assert stored_message["reactions"] == ["👍"]
+        assert stored_message["sent_at"].startswith("2026-07-26T12:00:00")
+
+    async def test_empty_body_stays_empty(self, client: AsyncClient, session):
+        engagement = await _seed_engagement(session)
+
+        await _post_turn(
+            client,
+            engagement,
+            triggering_messages=[_serialised_triggering_message(body="")],
+        )
+
+        assert (await _stored_turn(session)).triggering_messages[0]["body"] == ""
+
+    async def test_no_triggering_messages_stores_empty_list(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+
+        await _post_turn(client, engagement, triggering_messages=[])
+
+        assert (await _stored_turn(session)).triggering_messages == []
+
+    async def test_agent_output_survives_verbatim(self, client: AsyncClient, session):
+        engagement = await _seed_engagement(session)
+        agent_output = {
+            "topic": "greetings",
+            "notes": "friendly",
+            "response": {"message": "hello there", "target_message_id": "444"},
+        }
+
+        await _post_turn(client, engagement, agent_output=agent_output)
+
+        assert (await _stored_turn(session)).agent_output == agent_output
+
+
+class TestTurnDeltaRedaction:
+    async def test_user_prompt_and_tool_return_content_are_placeholders(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+
+        await _post_turn(client, engagement)
+
+        parts = [
+            part
+            for message in (await _stored_turn(session)).model_messages_delta
+            for part in message["parts"]
+        ]
+        by_kind = {part["part_kind"]: part for part in parts}
+        assert by_kind["user-prompt"]["content"] == MESSAGE_CONTENT_PLACEHOLDER
+        assert by_kind["tool-return"]["content"] == {}
+
+    async def test_text_tool_call_and_system_parts_survive(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+
+        await _post_turn(client, engagement)
+
+        parts = [
+            part
+            for message in (await _stored_turn(session)).model_messages_delta
+            for part in message["parts"]
+        ]
+        by_kind = {part["part_kind"]: part for part in parts}
+        assert by_kind["text"]["content"] == "the agent reply"
+        assert by_kind["tool-call"]["tool_name"] == "search"
+        assert by_kind["tool-call"]["args"] == {"query": "a phrase"}
+        assert by_kind["system-prompt"]["content"] == "you are a bot"
+        assert by_kind["tool-return"]["tool_name"] == "search"
+
+    async def test_absent_delta_stays_null(self, client: AsyncClient, session):
+        engagement = await _seed_engagement(session)
+
+        await _post_turn(client, engagement, model_messages_delta=None)
+
+        assert (await _stored_turn(session)).model_messages_delta is None
+
+
+class TestCompactionEventRedaction:
+    async def test_original_content_is_a_placeholder_and_metrics_survive(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+
+        await _post_turn(
+            client,
+            engagement,
+            compaction_events=[
+                {
+                    "event_kind": "tool_summary",
+                    "tool_name": "search",
+                    "original_content": "everything the channel said",
+                    "summary": "they said hello",
+                    "original_chars": 27,
+                    "summary_chars": 15,
+                }
+            ],
+        )
+
+        events = (
+            (await session.execute(select(ChatAgentCompactionEvent))).scalars().all()
+        )
+        assert len(events) == 1
+        assert events[0].original_content == MESSAGE_CONTENT_PLACEHOLDER
+        assert events[0].summary == "they said hello"
+        assert events[0].original_chars == 27
+        assert events[0].summary_chars == 15
+        assert events[0].chars_saved == 12
+        assert events[0].tool_name == "search"
+
+    async def test_empty_original_content_stays_empty(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+
+        await _post_turn(
+            client,
+            engagement,
+            compaction_events=[
+                {
+                    "event_kind": "tool_summary",
+                    "tool_name": "search",
+                    "original_content": "",
+                    "summary": "nothing to say",
+                    "original_chars": 0,
+                    "summary_chars": 14,
+                }
+            ],
+        )
+
+        events = (
+            (await session.execute(select(ChatAgentCompactionEvent))).scalars().all()
+        )
+        assert events[0].original_content == ""
+
+
+class TestDetailTemplateRendersRedactedRows:
+    async def test_renders_placeholders_alongside_surviving_detail(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+        await _post_turn(
+            client,
+            engagement,
+            compaction_events=[
+                {
+                    "event_kind": "tool_summary",
+                    "tool_name": "search",
+                    "original_content": "everything the channel said",
+                    "summary": "they said hello",
+                    "original_chars": 27,
+                    "summary_chars": 15,
+                }
+            ],
+        )
+        turn = (
+            await session.execute(
+                select(ChatAgentTurn).options(
+                    selectinload(ChatAgentTurn.compaction_events)
+                )
+            )
+        ).scalar_one()
+
+        html = _render_detail_template(engagement=engagement, turns=[turn])
+
+        assert MESSAGE_CONTENT_PLACEHOLDER in html
+        assert "what someone actually said" not in html
+        assert "everything the channel said" not in html
+        assert "they said hello" in html
+        assert "search" in html
+        assert "returned 2 chars" in html
+
+
+def _render_detail_template(**context) -> str:
+    """Render the real admin detail template with its layout stubbed out."""
+    environment = Environment(  # nosemgrep: python.flask.security.xss.audit.direct-use-of-jinja2.direct-use-of-jinja2
+        loader=ChoiceLoader(
+            [
+                DictLoader({"admin/base.html": "{% block admin_content %}{% endblock %}"}),
+                FileSystemLoader(_TEMPLATES_ROOT),
+            ]
+        ),
+        autoescape=True,
+    )
+    environment.globals.update(site_name=lambda: "Smarter Dev", csp_nonce=lambda: "n")
+    return environment.get_template("admin/chat-conversations/detail.html").render(
+        **context
+    )
