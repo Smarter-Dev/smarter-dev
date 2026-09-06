@@ -1296,6 +1296,17 @@ async def _passive_sweep(run: ProactiveRuntime) -> None:
             logger.exception("passive sweep failed channel=%s", state.channel_id)
 
 
+async def _sweep_expired_envelopes(run: ProactiveRuntime) -> None:
+    """Bound the envelope streams of guilds no recent publish has trimmed."""
+    queue = run.redis_notification_queue()
+    if queue is None:
+        return
+    try:
+        await queue.trim_expired_envelopes()
+    except Exception:  # noqa: BLE001 — retention must not kill the ticker
+        logger.exception("proactive envelope retention trim failed")
+
+
 async def _passive_ticker() -> None:
     while True:
         await asyncio.sleep(PASSIVE_SECONDS)
@@ -1303,6 +1314,7 @@ async def _passive_ticker() -> None:
         if run is None:
             return
         await _passive_sweep(run)
+        await _sweep_expired_envelopes(run)
 
 
 async def _fetch_missed(
