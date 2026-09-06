@@ -39,7 +39,7 @@ from smarter_dev.extensions.rendering import (
     validate_config_values,
 )
 from smarter_dev.extensions.schema import ExtensionManifest
-from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
+from smarter_dev.web.handler_fire_payloads import AdminHandlerFirePayload
 from smarter_dev.web.handler_caps import MAX_ADMIN_HANDLERS_PER_GUILD
 from smarter_dev.web.handler_schedule import ScheduleError, first_fire_at
 from smarter_dev.web.models import AdminHandler, ExtensionInstall

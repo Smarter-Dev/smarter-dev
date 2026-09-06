@@ -26,7 +26,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.redis_client import get_redis_client
-from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
 from smarter_dev.web.handler_caps import ADMIN_FIRES_PER_MIN
 from smarter_dev.web.handler_caps import DM_FIRES_PER_AUTHOR_PER_MIN
 from smarter_dev.web.handler_caps import GUILD_MEMBER_EVENTS_PER_MIN
@@ -36,7 +35,8 @@ from smarter_dev.web.handler_caps import dm_trigger_author_key
 from smarter_dev.web.handler_caps import fires_per_min_for_trigger
 from smarter_dev.web.handler_caps import guild_member_events_key
 from smarter_dev.web.handler_caps import handler_fire_key
-from smarter_dev.web.handlers_jobs import HandlerFirePayload
+from smarter_dev.web.handler_fire_payloads import AdminHandlerFirePayload
+from smarter_dev.web.handler_fire_payloads import HandlerFirePayload
 from smarter_dev.web.member_activity import activity_facts
 from smarter_dev.web.member_activity import get_activity
 from smarter_dev.web.member_activity import record_activity
@@ -152,7 +152,7 @@ async def dispatch_handler_event(
 
     # Recursion rail, checked BEFORE either tier's worker_submit so one check
     # covers standard and admin handlers alike. Sits behind — never instead of —
-    # the mod_action fire's max_mod_actions=0 rail (admin_handlers_jobs): that
+    # the mod_action fire's max_mod_actions=0 rail (handler_budget.admin_budget): that
     # rail permits ZERO generations of a handler-caused ban wave, this one would
     # still permit three. Defense in depth, in that order.
     if chain_depth_exceeded(chain_depth):

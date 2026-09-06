@@ -5,25 +5,23 @@ allowed to read the message it is reacting to — while every row that outlives
 the fire keeps the redacted copy. This module takes the context a caller has
 and redacts it itself, so no call site can store what a member actually said.
 
-Both fire jobs share it: the member one in ``handlers_jobs`` and the admin one
-in ``admin_handlers_jobs`` differ only in which tier they name and which
-counters their budget lets them spend.
-
-Two rows, two transactions, for one reason each. A completed fire writes into
-the caller's session so the run, the handler's memory and the commit land
-together. A skipped retry has no such neighbours, so it owns its session.
+Three rows, one owner: a completed fire with its outcome and spend, a retry
+that declined to re-run an already-started script, and a sweep that re-armed a
+chain whose fire never came. Every function joins the caller's session and
+commits nothing, so the row lands in the same transaction as whatever the
+caller persists beside it.
 """
 
 from __future__ import annotations
 
 from datetime import UTC
 from datetime import datetime
+from datetime import timedelta
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.message_content import redact_trigger_context
 from smarter_dev.web.models import HandlerRun
 
@@ -35,8 +33,10 @@ _SKIPPED_RETRY_ERROR = (
     "avoid duplicate side effects"
 )
 
+_SWEEP_TRIGGER_CONTEXT = {"trigger_type": "sweep"}
 
-async def record_completed_run(
+
+def record_completed_run(
     session: AsyncSession,
     *,
     handler_id: UUID,
@@ -45,10 +45,6 @@ async def record_completed_run(
     result: HandlerResult,
 ) -> None:
     """Audit a fire that reached its script, whatever the script did.
-
-    Added to the caller's session and left uncommitted: the caller persists the
-    handler's memory in the same transaction, so a run row never claims a memory
-    write that was rolled back.
 
     The admin-only counters (moderation actions, mod-audit lookups) read zero
     for a standard fire, whose budget forbids them outright.
@@ -78,19 +74,53 @@ async def record_completed_run(
     )
 
 
-async def record_skipped_run(
-    handler_id: UUID, handler_kind: str, trigger_context: dict
+def record_skipped_run(
+    session: AsyncSession,
+    *,
+    handler_id: UUID,
+    handler_kind: str,
+    trigger_context: dict,
 ) -> None:
     """Audit a retry that declined to re-run an already-started script."""
-    async with get_db_session_context() as session:
-        session.add(
-            HandlerRun(
-                handler_id=handler_id,
-                handler_kind=handler_kind,
-                trigger_context=redact_trigger_context(trigger_context),
-                outcome="skipped",
-                error=_SKIPPED_RETRY_ERROR,
-                finished_at=datetime.now(UTC),
-            )
+    session.add(
+        HandlerRun(
+            handler_id=handler_id,
+            handler_kind=handler_kind,
+            trigger_context=redact_trigger_context(trigger_context),
+            outcome="skipped",
+            error=_SKIPPED_RETRY_ERROR,
+            finished_at=datetime.now(UTC),
         )
-        await session.commit()
+    )
+
+
+def record_rearmed_run(
+    session: AsyncSession,
+    *,
+    handler_id: UUID,
+    handler_kind: str,
+    last_fired_at: datetime | None,
+    overdue_by: timedelta,
+    next_occurrence: datetime,
+    now: datetime,
+) -> None:
+    """Audit the sweep reviving a recurring chain that had stopped firing.
+
+    Its explanation is host-authored and names no member, which is why the
+    retention sweep leaves a ``rearmed`` row's ``error`` in place.
+    """
+    last_fire = last_fired_at.isoformat() if last_fired_at else "never"
+    session.add(
+        HandlerRun(
+            handler_id=handler_id,
+            handler_kind=handler_kind,
+            trigger_context=dict(_SWEEP_TRIGGER_CONTEXT),
+            outcome="rearmed",
+            error=(
+                f"schedule chain had stopped firing (last fire {last_fire}, "
+                f"overdue by {overdue_by}); re-armed for {next_occurrence.isoformat()}"
+            ),
+            fired_at=now,
+            finished_at=now,
+        )
+    )

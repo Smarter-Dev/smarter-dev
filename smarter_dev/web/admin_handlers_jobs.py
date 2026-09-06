@@ -3,7 +3,7 @@
 Mirrors ``handlers_jobs`` but runs an admin handler with moderation powers: the
 runtime gets an :class:`AdminActor` (enabling ban/kick/timeout/delete and
 cross-channel send), the looser :func:`admin_budget`, and the host services in
-``admin_script_services``. Audited in ``handler_runs`` with
+``handler_script_services``. Audited in ``handler_runs`` with
 ``handler_kind="admin"``.
 
 Import-clean of pydantic-ai/Monty (lazy inside the job) so the web tier can
@@ -15,14 +15,12 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from pydantic import BaseModel
 from skrift.workers import RetryPolicy, WorkerContext, handler
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.message_content import redact_trigger_context
 from smarter_dev.shared.redis_client import get_redis_client
-from smarter_dev.web.admin_script_services import AdminScriptServices
 from smarter_dev.web.handler_budget import admin_budget
 from smarter_dev.web.handler_caps import (
     DM_USER_WINDOW_SECONDS,
@@ -32,42 +30,28 @@ from smarter_dev.web.handler_caps import (
     claim_fire_attempt,
 )
 from smarter_dev.web.handler_emitter import DiscordEmitter
+from smarter_dev.web.handler_fire_payloads import AdminHandlerFirePayload
 from smarter_dev.web.handler_guild_memory import (
     load_guild_memory,
     persist_guild_memory,
 )
 from smarter_dev.web.handler_memory import persist_handler_memory
 from smarter_dev.web.handler_notify import notify_handler_error
+from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
 from smarter_dev.web.handler_run_audit import record_completed_run, record_skipped_run
-from smarter_dev.web.handler_schedule import RecurringFireChain
+from smarter_dev.web.handler_script_services import (
+    AdminScriptServices,
+    HandlerTimerScheduler,
+)
 from smarter_dev.web.models import AdminHandler
+
+__all__ = ["AdminHandlerFirePayload", "run_admin_handler_fire"]
 
 logger = logging.getLogger(__name__)
 
-# Which tier of handler this job fires, as it is named in the audit row.
 HANDLER_KIND = "admin"
 
-
-class AdminHandlerFirePayload(BaseModel):
-    """Job payload for one admin-handler firing."""
-
-    admin_handler_id: str
-    channel_id: str = ""
-    trigger_context: dict = {}
-    # How many handler fires deep this fire is (0 = caused by a gateway event).
-    # An explicit FIELD, never a trigger_context key: context goes to the Monty
-    # sandbox verbatim, so a depth in there would be script-readable and
-    # script-forgeable. Defaulted so an omitted field means "chain root", not a
-    # crash — schedule re-arms are roots, and so is any already-enqueued job.
-    chain_depth: int = 0
-
-
-_recurring_chain = RecurringFireChain(
-    handler_model=AdminHandler,
-    build_fire_payload=lambda handler_id: AdminHandlerFirePayload(
-        admin_handler_id=handler_id, trigger_context={"trigger_type": "schedule"}
-    ),
-)
+_recurring_chain = RECURRING_CHAINS[HANDLER_KIND]
 
 
 @handler(
@@ -89,8 +73,6 @@ async def run_admin_handler_fire(
         return {"status": "disabled"}
 
     handler_id = UUID(payload.admin_handler_id)
-    # Snapshotted BEFORE the script runs: the sandbox is handed the live context
-    # dict, so a copy taken afterwards could carry text the script wrote into it.
     audit_trigger_context = redact_trigger_context(payload.trigger_context)
     async with get_db_session_context() as session:
         record = await session.get(AdminHandler, handler_id)
@@ -131,7 +113,15 @@ async def run_admin_handler_fire(
         channel_id=channel_id,
         chain_depth=payload.chain_depth,
         actor=actor,
-        fire_payload_class=AdminHandlerFirePayload,
+    )
+    timer_scheduler = HandlerTimerScheduler(
+        chain_depth=payload.chain_depth,
+        build_refire_payload=lambda refire_context, chain_depth: AdminHandlerFirePayload(
+            admin_handler_id=str(handler_id),
+            channel_id=channel_id,
+            trigger_context=refire_context,
+            chain_depth=chain_depth,
+        ),
     )
     # The timer limiter is a separate 3600s window (self.limiter is fixed at
     # 60s), and send_dm's per-recipient cap is a third window — same
@@ -151,7 +141,14 @@ async def run_admin_handler_fire(
             "entered the script; skipping execution so actions aren't duplicated",
             context.job.id,
         )
-        await record_skipped_run(handler_id, HANDLER_KIND, audit_trigger_context)
+        async with get_db_session_context() as session:
+            record_skipped_run(
+                session,
+                handler_id=handler_id,
+                handler_kind=HANDLER_KIND,
+                trigger_context=audit_trigger_context,
+            )
+            await session.commit()
         await _recurring_chain.rearm_after_fire(
             handler_id=handler_id,
             trigger_type=trigger_type,
@@ -174,7 +171,7 @@ async def run_admin_handler_fire(
         mod_action_recorder=services.record_warn,
         rules_reader=services.read_rules,
         handler_id=str(handler_id),
-        timer_scheduler=services.schedule_timer,
+        timer_scheduler=timer_scheduler.schedule_timer,
         timer_limiter=timer_limiter,
         dm_user_limiter=dm_user_limiter,
         budget=budget,
@@ -184,7 +181,7 @@ async def run_admin_handler_fire(
     )
 
     async with get_db_session_context() as session:
-        await record_completed_run(
+        record_completed_run(
             session,
             handler_id=handler_id,
             handler_kind=HANDLER_KIND,

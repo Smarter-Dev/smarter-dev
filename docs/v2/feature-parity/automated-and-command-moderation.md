@@ -169,7 +169,7 @@ Seven extensions, ordered by how many capabilities they unblock. All new trigger
 }
 ```
 
-**Loop rail (hard):** a `mod_action`-triggered fire runs with `max_mod_actions=0` in its budget (a `mod_action` handler formats and posts; it never bans). `admin_handlers_jobs.run_admin_handler_fire` sets this when `trigger_type == "mod_action"`. This makes handler-action → audit-row → handler-action loops structurally impossible.
+**Loop rail (hard):** a `mod_action`-triggered fire runs with `max_mod_actions=0` in its budget (a `mod_action` handler formats and posts; it never bans). `handler_budget.admin_budget(trigger_type)` forces the pool to zero for `"mod_action"`; the trigger type is a required argument so no fire can reach the full pool by omitting it. This makes handler-action → audit-row → handler-action loops structurally impossible.
 
 **Consumed by:** mod-action-log channel posting — one authored handler formats *all* actions (manual slash commands, AI triage, auto-mod handler) into the mod-log channel, replacing per-command hardcoded embeds. `mod_monitor`'s existing `response_channel_id` reporting stays as-is; unification is optional later.
 

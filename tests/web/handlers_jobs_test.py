@@ -15,11 +15,12 @@ from uuid import UUID, uuid4
 import pytest
 
 import smarter_dev.web.admin_handlers_jobs as admin_handlers_jobs
-import smarter_dev.web.admin_script_services as admin_script_services
 import smarter_dev.web.handler_agent as handler_agent
-import smarter_dev.web.handler_schedule as handler_schedule
+import smarter_dev.web.handler_recurrence as handler_recurrence
+import smarter_dev.web.handler_script_services as handler_script_services
 import smarter_dev.web.handlers_jobs as handlers_jobs
 import smarter_dev.web.handler_runtime as handler_runtime
+from smarter_dev.web.admin_actions import AdminActionError
 from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
 from smarter_dev.web.handler_runtime import HandlerResult
 from smarter_dev.web.handlers_jobs import HandlerFirePayload
@@ -279,8 +280,8 @@ def _patch_admin_job(monkeypatch, engine, fake_result, captured=None):
         "get_db_session_context",
         _RealSessionCtx(engine),
         admin_handlers_jobs,
-        admin_script_services,
-        handler_schedule,
+        handler_script_services,
+        handler_recurrence,
     )
     monkeypatch.setattr(admin_handlers_jobs, "get_redis_client", lambda: object())
     monkeypatch.setattr(
@@ -537,7 +538,9 @@ def _patch_std_job(monkeypatch, record, *, fake_run, submits, limiter_kwargs):
     monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
     monkeypatch.setattr(handler_agent, "run_gathering_agent", fake_agent)
     monkeypatch.setattr(handlers_jobs, "notify_handler_error", fake_notify)
-    _patch_seam(monkeypatch, "worker_submit", fake_submit, handlers_jobs, handler_schedule)
+    _patch_seam(
+        monkeypatch, "worker_submit", fake_submit, handler_script_services, handler_recurrence
+    )
     monkeypatch.setattr(
         handlers_jobs,
         "get_settings",
@@ -548,7 +551,7 @@ def _patch_std_job(monkeypatch, record, *, fake_run, submits, limiter_kwargs):
         "get_db_session_context",
         lambda: _FakeSessionCtx(record),
         handlers_jobs,
-        handler_schedule,
+        handler_recurrence,
     )
     monkeypatch.setattr(handlers_jobs, "get_redis_client", lambda: object())
     monkeypatch.setattr(handlers_jobs, "WindowedLimiter", fake_limiter)
@@ -620,7 +623,7 @@ async def test_admin_fire_arms_timer_submits_admin_payload(monkeypatch):
     monkeypatch.setattr(handler_agent, "run_gathering_agent", fake_agent)
     monkeypatch.setattr(admin_handlers_jobs, "notify_handler_error", fake_notify)
     _patch_seam(
-        monkeypatch, "worker_submit", fake_submit, admin_script_services, handler_schedule
+        monkeypatch, "worker_submit", fake_submit, handler_script_services, handler_recurrence
     )
     monkeypatch.setattr(
         admin_handlers_jobs,
@@ -639,8 +642,8 @@ async def test_admin_fire_arms_timer_submits_admin_payload(monkeypatch):
         "get_db_session_context",
         lambda: _FakeSessionCtx(record),
         admin_handlers_jobs,
-        admin_script_services,
-        handler_schedule,
+        handler_script_services,
+        handler_recurrence,
     )
     monkeypatch.setattr(admin_handlers_jobs, "get_redis_client", lambda: object())
     monkeypatch.setattr(admin_handlers_jobs, "WindowedLimiter", fake_limiter)
@@ -790,7 +793,7 @@ def _patch_admin_reschedule_job(monkeypatch, record, submits):
     monkeypatch.setattr(handler_agent, "run_gathering_agent", fake_agent)
     monkeypatch.setattr(admin_handlers_jobs, "notify_handler_error", fake_notify)
     _patch_seam(
-        monkeypatch, "worker_submit", fake_submit, admin_script_services, handler_schedule
+        monkeypatch, "worker_submit", fake_submit, handler_script_services, handler_recurrence
     )
     monkeypatch.setattr(
         admin_handlers_jobs, "load_guild_memory", fake_load_guild_memory
@@ -805,8 +808,8 @@ def _patch_admin_reschedule_job(monkeypatch, record, submits):
         "get_db_session_context",
         lambda: _FakeSessionCtx(record),
         admin_handlers_jobs,
-        admin_script_services,
-        handler_schedule,
+        handler_script_services,
+        handler_recurrence,
     )
     monkeypatch.setattr(admin_handlers_jobs, "get_redis_client", lambda: object())
     monkeypatch.setattr(
@@ -1162,7 +1165,8 @@ from smarter_dev.web.models import GuildRulesConfig
 class _NamedActor:
     """AdminActor stand-in whose get_member_info answers the username lookup.
 
-    ``fail`` models a REST failure so the degrade-to-raw-id path is exercisable.
+    ``fail`` models a Discord REST failure so the degrade-to-raw-id path is
+    exercisable; only that failure degrades, anything else propagates.
     """
 
     fail = False
@@ -1172,7 +1176,7 @@ class _NamedActor:
 
     async def get_member_info(self, user_id):
         if _NamedActor.fail:
-            raise RuntimeError("discord is down")
+            raise AdminActionError("discord is down")
         return {"user_id": user_id, "username": f"name-{user_id}"}
 
 
@@ -1449,7 +1453,7 @@ async def test_admin_timer_refire_descends_one_generation(monkeypatch, test_engi
     async def fake_submit(payload, scheduled_for=None, job_id=None):
         submits.append(payload)
 
-    monkeypatch.setattr(admin_script_services, "worker_submit", fake_submit)
+    monkeypatch.setattr(handler_script_services, "worker_submit", fake_submit)
 
     await _admin_fire(
         AdminHandlerFirePayload(

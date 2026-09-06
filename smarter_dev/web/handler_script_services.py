@@ -1,31 +1,39 @@
-"""The host services one admin fire lends to its sandboxed script.
+"""The host services one fire lends to its sandboxed script.
 
-A script never reaches Discord or the database itself: it calls external
-functions the fire injects, and each of those is bound host-side to THIS fire's
-guild, handler and channel. That binding is the security property — a script
-supplies a target user and a reason, never the guild whose history it reads or
-the moderator name that lands in a permanent audit row.
+A script never reaches Discord, the worker queue or the database itself: it
+calls external functions the fire injects, and each of those is bound host-side
+to THIS fire's guild, handler and channel. That binding is the security
+property — a script supplies a target user and a reason, never the guild whose
+history it reads or the moderator name that lands in a permanent audit row.
 
-Gathering them into one object is what keeps the fire job readable: the job
-builds this once from the facts it just loaded and hands its methods to the
-runtime, instead of carrying four closures over the same five variables.
+:class:`HandlerTimerScheduler` is the one service both tiers share: a
+script-armed timer re-fires the same handler one generation deeper, and only
+the payload differs per tier. :class:`AdminScriptServices` is what the admin
+fire adds on top. Gathering them into objects is what keeps the fire jobs
+readable: a job builds these once from the facts it just loaded and hands the
+methods to the runtime, instead of carrying closures over the same variables.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 from uuid import uuid4
 
+from pydantic import BaseModel
 from skrift.workers import submit as worker_submit
 
 from smarter_dev.shared.database import get_db_session_context
+from smarter_dev.web.admin_actions import AdminActionError
 from smarter_dev.web.crud import GuildRulesConfigOperations
 from smarter_dev.web.crud import ModerationActionOperations
 from smarter_dev.web.guild_rules import parse_guild_rules
+from smarter_dev.web.handler_dispatch import build_mod_action_context
+from smarter_dev.web.handler_dispatch import dispatch_handler_event
 from smarter_dev.web.models import ModerationAction
 
 if TYPE_CHECKING:
@@ -35,6 +43,33 @@ logger = logging.getLogger(__name__)
 
 _mod_action_ops = ModerationActionOperations()
 _guild_rules_ops = GuildRulesConfigOperations()
+
+
+@dataclass(frozen=True)
+class HandlerTimerScheduler:
+    """Arms durable one-shot re-fires of the handler that is currently firing.
+
+    ``build_refire_payload`` is the tier's own: given the re-fire context and
+    the depth the re-fire runs at, it returns that tier's fire payload.
+    """
+
+    chain_depth: int
+    build_refire_payload: Callable[[dict, int], BaseModel]
+
+    async def schedule_timer(self, fire_at: datetime, refire_context: dict) -> None:
+        """Arm a durable one-shot re-fire of this handler.
+
+        The re-fire is caused BY this fire, so it descends one generation. It is
+        still enqueued (depth is enforced at the dispatch choke point, and the
+        arming window bounds a self-deferring handler); carrying the depth is
+        what makes anything that re-fire DISPATCHES get refused past
+        MAX_CHAIN_DEPTH.
+        """
+        await worker_submit(
+            self.build_refire_payload(refire_context, self.chain_depth + 1),
+            scheduled_for=fire_at,
+            job_id=uuid4().hex,
+        )
 
 
 def _mod_action_row(action: ModerationAction) -> dict:
@@ -56,12 +91,7 @@ def _mod_action_row(action: ModerationAction) -> dict:
 
 @dataclass(frozen=True)
 class AdminScriptServices:
-    """Everything one admin fire's script may reach, bound to that fire.
-
-    ``fire_payload_class`` is the job's own payload type: a script-armed timer
-    re-fires this same handler, and the class lives in the job module, so it is
-    passed in rather than imported (which would be a cycle).
-    """
+    """Everything one admin fire's script may reach, bound to that fire."""
 
     handler_id: UUID
     handler_name: str
@@ -69,27 +99,6 @@ class AdminScriptServices:
     channel_id: str
     chain_depth: int
     actor: AdminActor
-    fire_payload_class: type
-
-    async def schedule_timer(self, fire_at: datetime, refire_context: dict) -> None:
-        """Arm a durable one-shot re-fire of this handler.
-
-        The re-fire is caused BY this fire, so it descends one generation. It is
-        still enqueued (depth is enforced at the dispatch choke point, and the
-        arming window bounds a self-deferring handler); carrying the depth is
-        what makes anything that re-fire DISPATCHES get refused past
-        MAX_CHAIN_DEPTH.
-        """
-        await worker_submit(
-            self.fire_payload_class(
-                admin_handler_id=str(self.handler_id),
-                channel_id=self.channel_id,
-                trigger_context=refire_context,
-                chain_depth=self.chain_depth + 1,
-            ),
-            scheduled_for=fire_at,
-            job_id=uuid4().hex,
-        )
 
     async def read_mod_actions(self, target_user_id: str, limit: int) -> list[dict]:
         """This guild's recent moderation history for one member."""
@@ -150,12 +159,12 @@ class AdminScriptServices:
 
         Never trusted from the script (a script-supplied name could impersonate
         anyone in the log). One UNMETERED fetch — it is a host rail, not a
-        script-visible read — and a failure degrades to the raw id rather than
-        failing a warn whose notice has already posted.
+        script-visible read — and a Discord failure degrades to the raw id
+        rather than failing a warn whose notice has already posted.
         """
         try:
             info = await self.actor.get_member_info(target_user_id)
-        except Exception:  # noqa: BLE001 — a name lookup must never fail the warn
+        except AdminActionError:
             logger.debug(
                 "warn_user could not resolve username for %s",
                 target_user_id,
@@ -170,26 +179,20 @@ class AdminScriptServices:
         A handler-issued warn must reach them exactly like ``/warn`` does. Best
         effort, mirroring mod_action_dispatch: a dispatch failure is logged,
         NEVER propagated into the warn, whose notice and audit row have both
-        already landed. Imported inside because ``handler_dispatch`` imports the
-        fire job that imports this module.
+        already landed.
         """
+        # warn -> mod-log handler -> whatever THAT warns is a real chain, so it
+        # descends one generation and the choke point cuts it past
+        # MAX_CHAIN_DEPTH. Sits behind the mod_action trigger's zero-action
+        # budget, which already forbids a mod_action fire from warning at all.
+        trigger_context = build_mod_action_context(action)
         try:
-            from smarter_dev.web.handler_dispatch import (
-                build_mod_action_context,
-                dispatch_handler_event,
-            )
-
             await dispatch_handler_event(
                 session,
                 guild_id=self.guild_id,
                 channel_id="",
                 trigger_type="mod_action",
-                trigger_context=build_mod_action_context(action),
-                # warn -> mod-log handler -> whatever THAT warns is a real
-                # chain, so it descends one generation and the choke point cuts
-                # it past MAX_CHAIN_DEPTH. Sits behind the mod_action trigger's
-                # zero-action budget, which already forbids a mod_action fire
-                # from warning at all.
+                trigger_context=trigger_context,
                 chain_depth=self.chain_depth + 1,
             )
         except Exception:  # noqa: BLE001 — dispatch never breaks the warn

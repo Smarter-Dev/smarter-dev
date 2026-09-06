@@ -49,7 +49,7 @@ from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
+from smarter_dev.web.handler_fire_payloads import AdminHandlerFirePayload
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.api_native.errors import parse_uuid_path

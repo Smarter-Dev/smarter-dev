@@ -215,10 +215,10 @@ def redact_trigger_context(context: dict) -> dict:
     is emptied whole: a script chose what to carry across the wait, and it may
     have carried the message it was reacting to.
 
-    The result shares no mutable value with ``context``. A fire takes this copy
-    and then hands the same dict to a sandboxed script that keeps running, so a
-    kept list or dict that aliased the original would still be changing — and
-    whatever the script appended to it would land in the durable row.
+    The result shares no mutable value with ``context``: it is a deep copy, so
+    a caller that goes on to hand the original to something else can be sure
+    the audit copy is fixed at the moment it was taken. The copy is defensive;
+    it is not a claim that anything downstream mutates the original.
     """
     return _redact_mapping(copy.deepcopy(context), _is_redacted_handler_key)
 

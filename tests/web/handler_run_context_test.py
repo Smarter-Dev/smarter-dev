@@ -21,7 +21,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import smarter_dev.web.admin_handlers_jobs as admin_handlers_jobs
 import smarter_dev.web.handler_agent as handler_agent
-import smarter_dev.web.handler_run_audit as handler_run_audit
 import smarter_dev.web.handler_runtime as handler_runtime
 import smarter_dev.web.handlers_jobs as handlers_jobs
 from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
@@ -124,9 +123,6 @@ def _patch_job(
         lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
     )
     monkeypatch.setattr(module, "get_db_session_context", _SessionCtx(engine))
-    monkeypatch.setattr(
-        handler_run_audit, "get_db_session_context", _SessionCtx(engine)
-    )
     monkeypatch.setattr(module, "get_redis_client", lambda: object())
     monkeypatch.setattr(module, "WindowedLimiter", lambda **kwargs: object())
 
@@ -290,14 +286,14 @@ def _quote_the_message_into_the_context(context: dict) -> None:
 
 
 @pytest.mark.parametrize("fire", [_fire_standard, _fire_admin])
-async def test_what_the_script_writes_into_the_context_never_reaches_the_row(
+async def test_the_audit_row_is_built_from_the_payload_not_what_the_script_leaves(
     monkeypatch, test_engine, fire
 ):
-    """The audit copy is taken before the script runs, not after.
+    """The audit copy is taken from the payload before the script runs.
 
-    The sandbox is handed the live context dict. If the row were built from that
-    dict afterwards, anything the script appended or added — a key no redaction
-    rule knows about — would be stored verbatim and outlive the fire.
+    A row built from whatever the runtime hands back afterwards could carry a
+    key no redaction rule knows about; the copy is defensive, not a claim that
+    the sandbox writes into the caller's dict.
     """
     captured = await fire(
         test_engine,
