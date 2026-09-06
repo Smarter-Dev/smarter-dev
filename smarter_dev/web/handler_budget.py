@@ -64,6 +64,9 @@ ADMIN_MAX_TIMERS = 5
 ADMIN_MAX_LOOKUPS = 10
 ADMIN_WALL_CLOCK_SECONDS = 120.0
 
+# The trigger whose fires may take no moderation action of their own.
+_MOD_ACTION_TRIGGER = "mod_action"
+
 
 class CapExceeded(Exception):
     """Raised the moment a per-fire cap would be exceeded.
@@ -271,12 +274,22 @@ class HandlerBudget:
         }
 
 
-def admin_budget() -> "HandlerBudget":
-    """A trusted, looser per-fire budget for admin handlers (incl. mod actions)."""
+def admin_budget(trigger_type: str | None = None) -> "HandlerBudget":
+    """A trusted, looser per-fire budget for admin handlers (incl. mod actions).
+
+    The loop rail (§3.5, HARD) lives here: a handler triggered BY a moderation
+    action formats that action into the mod log, and any action of its own would
+    write the audit row that re-fires it. Its moderation pool is forced to zero,
+    which makes the loop structurally impossible rather than merely bounded —
+    the chain-depth counter behind this would still permit three generations of
+    a ban wave, this permits none.
+    """
     return HandlerBudget(
         max_messages=ADMIN_MAX_MESSAGES,
         max_agent_calls=ADMIN_MAX_AGENT_CALLS,
-        max_mod_actions=ADMIN_MAX_MOD_ACTIONS,
+        max_mod_actions=(
+            0 if trigger_type == _MOD_ACTION_TRIGGER else ADMIN_MAX_MOD_ACTIONS
+        ),
         max_discord_reads=ADMIN_MAX_DISCORD_READS,
         max_thread_ops=ADMIN_MAX_THREAD_OPS,
         max_role_changes=ADMIN_MAX_ROLE_CHANGES,

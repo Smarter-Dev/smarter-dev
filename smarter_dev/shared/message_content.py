@@ -32,6 +32,7 @@ keys a handler script chose, which is why that whole value is emptied.
 
 from __future__ import annotations
 
+import copy
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
@@ -213,8 +214,13 @@ def redact_trigger_context(context: dict) -> dict:
     which trigger fired, in which channel, for whom. A timer re-fire's payload
     is emptied whole: a script chose what to carry across the wait, and it may
     have carried the message it was reacting to.
+
+    The result shares no mutable value with ``context``. A fire takes this copy
+    and then hands the same dict to a sandboxed script that keeps running, so a
+    kept list or dict that aliased the original would still be changing — and
+    whatever the script appended to it would land in the durable row.
     """
-    return _redact_mapping(context, _is_redacted_handler_key)
+    return _redact_mapping(copy.deepcopy(context), _is_redacted_handler_key)
 
 
 def oldest_retained_stream_id(now: datetime) -> str:

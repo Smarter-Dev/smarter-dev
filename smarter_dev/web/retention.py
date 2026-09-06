@@ -275,6 +275,12 @@ async def scrub_handler_runs(
     have to be rewritten key-by-key, so this is a read-modify-write rather than
     a single UPDATE. Rows written since the write-time redaction landed already
     hold placeholders; re-redacting them is a no-op.
+
+    ``error`` is cleared with it. A script that trips over the message it is
+    reacting to puts that text into its exception message, and nothing at write
+    time can tell which errors quote a member — so it is treated like every
+    other derived text the sweep owns. The outcome and every counter stay, so a
+    long-dead failure is still visible as a failure.
     """
     scrubbed = 0
     while True:
@@ -296,6 +302,7 @@ async def scrub_handler_runs(
                 .where(HandlerRun.id == run_id)
                 .values(
                     trigger_context=redact_trigger_context(context or {}),
+                    error=None,
                     content_purged_at=now,
                 )
             )

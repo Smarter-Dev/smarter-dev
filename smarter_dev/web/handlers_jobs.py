@@ -14,7 +14,7 @@ dispatch jobs without pulling in the inference stack — the same discipline as
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
@@ -33,12 +33,16 @@ from smarter_dev.web.handler_caps import (
     claim_fire_attempt,
 )
 from smarter_dev.web.handler_emitter import DiscordEmitter
+from smarter_dev.web.handler_memory import persist_handler_memory
 from smarter_dev.web.handler_notify import notify_handler_error
-from smarter_dev.web.handler_run_audit import is_schedule_fire, record_skipped_run
-from smarter_dev.web.handler_schedule import next_fire_at
-from smarter_dev.web.models import ChannelHandler, HandlerRun
+from smarter_dev.web.handler_run_audit import record_completed_run, record_skipped_run
+from smarter_dev.web.handler_schedule import RecurringFireChain
+from smarter_dev.web.models import ChannelHandler
 
 logger = logging.getLogger(__name__)
+
+# Which tier of handler this job fires, as it is named in the audit row.
+HANDLER_KIND = "standard"
 
 
 class HandlerFirePayload(BaseModel):
@@ -52,6 +56,14 @@ class HandlerFirePayload(BaseModel):
     # Defaulted so an omitted field means "chain root", not a crash — schedule
     # re-arms and any older enqueued job read as roots, which is what they are.
     chain_depth: int = 0
+
+
+_recurring_chain = RecurringFireChain(
+    handler_model=ChannelHandler,
+    build_fire_payload=lambda handler_id: HandlerFirePayload(
+        handler_id=handler_id, trigger_context={"trigger_type": "schedule"}
+    ),
+)
 
 
 @handler(
@@ -74,6 +86,9 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
         return {"status": "disabled"}
 
     handler_id = UUID(payload.handler_id)
+    # Snapshotted BEFORE the script runs: the sandbox is handed the live context
+    # dict, so a copy taken afterwards could carry text the script wrote into it.
+    audit_trigger_context = redact_trigger_context(payload.trigger_context)
     async with get_db_session_context() as session:
         record = await session.get(ChannelHandler, handler_id)
         if record is None or not record.enabled:
@@ -130,9 +145,13 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
             "the script; skipping execution so emits aren't duplicated",
             context.job.id,
         )
-        await record_skipped_run(handler_id, "standard", payload.trigger_context)
-        if is_schedule_fire(trigger_type, payload.trigger_context):
-            await _reschedule(handler_id, handler_settings)
+        await record_skipped_run(handler_id, HANDLER_KIND, audit_trigger_context)
+        await _recurring_chain.rearm_after_fire(
+            handler_id=handler_id,
+            trigger_type=trigger_type,
+            trigger_context=payload.trigger_context,
+            handler_settings=handler_settings,
+        )
         return {"status": "skipped"}
 
     result = await run_handler_script(
@@ -151,31 +170,20 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
     )
 
     async with get_db_session_context() as session:
-        session.add(
-            HandlerRun(
-                handler_id=handler_id,
-                trigger_context=redact_trigger_context(payload.trigger_context),
-                outcome=result.outcome,
-                cap=result.cap,
-                error=result.error,
-                messages_sent=result.usage["messages_sent"],
-                web_searches=result.usage["web_searches"],
-                web_reads=result.usage["web_reads"],
-                agent_calls=result.usage["agent_calls"],
-                discord_reads=result.usage.get("discord_reads", 0),
-                thread_ops=result.usage.get("thread_ops", 0),
-                role_changes=result.usage.get("role_changes", 0),
-                timers_scheduled=result.usage.get("timers_scheduled", 0),
-                duration_ms=result.duration_ms,
-                finished_at=datetime.now(timezone.utc),
-            )
+        await record_completed_run(
+            session,
+            handler_id=handler_id,
+            handler_kind=HANDLER_KIND,
+            trigger_context=audit_trigger_context,
+            result=result,
         )
-        # Persist memory only when the script changed it (the common message-handler
-        # path leaves it untouched and skips the write).
-        if result.memory_changed:
-            record = await session.get(ChannelHandler, handler_id)
-            if record is not None:
-                record.memory = result.memory
+        await persist_handler_memory(
+            session,
+            ChannelHandler,
+            handler_id,
+            result.memory,
+            changed=result.memory_changed,
+        )
         await session.commit()
 
     # On an error (not a cap breach), tell the channel so it can be fixed.
@@ -190,28 +198,11 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
             error=result.error,
         )
 
-    if is_schedule_fire(trigger_type, payload.trigger_context):
-        await _reschedule(handler_id, handler_settings)
+    await _recurring_chain.rearm_after_fire(
+        handler_id=handler_id,
+        trigger_type=trigger_type,
+        trigger_context=payload.trigger_context,
+        handler_settings=handler_settings,
+    )
 
     return {"status": result.outcome, "cap": result.cap}
-
-
-async def _reschedule(handler_id: UUID, handler_settings: dict) -> None:
-    """Enqueue the next occurrence of a recurring schedule, if still enabled."""
-    nxt = next_fire_at(handler_settings, datetime.now(timezone.utc))
-    if nxt is None:
-        return
-    job_id = uuid4().hex
-    await worker_submit(
-        HandlerFirePayload(
-            handler_id=str(handler_id),
-            trigger_context={"trigger_type": "schedule"},
-        ),
-        scheduled_for=nxt,
-        job_id=job_id,
-    )
-    async with get_db_session_context() as session:
-        record = await session.get(ChannelHandler, handler_id)
-        if record is not None and record.enabled:
-            record.scheduled_job_id = job_id
-            await session.commit()

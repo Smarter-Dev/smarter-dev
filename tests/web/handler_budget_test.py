@@ -9,6 +9,8 @@ import pytest
 from smarter_dev.web.handler_budget import (
     ADMIN_MAX_DISCORD_READS,
     ADMIN_MAX_LOOKUPS,
+    ADMIN_MAX_MESSAGES,
+    ADMIN_MAX_MOD_ACTIONS,
     ADMIN_MAX_ROLE_CHANGES,
     ADMIN_MAX_THREAD_OPS,
     ADMIN_MAX_TIMERS,
@@ -282,3 +284,25 @@ def test_lookup_checks_deadline_first():
     with pytest.raises(CapExceeded) as exc:
         budget.spend_lookup()
     assert exc.value.cap == "wall_clock"
+
+
+# -- the mod_action loop rail (§3.5) -------------------------------------------
+
+
+def test_a_mod_action_triggered_admin_handler_gets_no_mod_actions():
+    # A handler triggered BY a moderation action formats that action for the mod
+    # log. If it could ban, its own action would write the audit row that
+    # re-fires it, so the rail forces the pool to zero rather than trusting depth.
+    budget = admin_budget("mod_action")
+    assert budget.max_mod_actions == 0
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_mod_action()
+    assert exc.value.cap == "mod_actions"
+
+
+def test_every_other_trigger_keeps_the_admin_mod_action_pool():
+    assert admin_budget("message").max_mod_actions == ADMIN_MAX_MOD_ACTIONS
+    assert admin_budget().max_mod_actions == ADMIN_MAX_MOD_ACTIONS
+    # The clamp is the only difference: the rest of the admin budget is intact.
+    assert admin_budget("mod_action").max_messages == ADMIN_MAX_MESSAGES
+    assert admin_budget("mod_action").max_role_changes == ADMIN_MAX_ROLE_CHANGES

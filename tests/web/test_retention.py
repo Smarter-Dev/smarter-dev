@@ -405,6 +405,33 @@ class TestHandlerRuns:
         assert run.trigger_context == context
         assert run.content_purged_at is None
 
+    async def test_clears_the_script_error_message(self, db_session):
+        # A script that trips over the message it is reacting to puts that text
+        # into its exception message, which lands in `error` — derived text the
+        # sweep owns, exactly like an agent's output.
+        run = await self._run(db_session, STALE, {"trigger_type": "message"})
+        run.outcome = "error"
+        run.error = "runtime: ValueError: what someone said"
+        await db_session.flush()
+
+        await run_retention_sweep(db_session, now=NOW)
+
+        run = (await db_session.execute(select(HandlerRun))).scalar_one()
+        assert run.error is None
+        # The row still says the fire failed, and how much it spent doing it.
+        assert run.outcome == "error"
+        assert run.messages_sent == 1
+
+    async def test_leaves_a_fresh_error_readable(self, db_session):
+        run = await self._run(db_session, FRESH, {"trigger_type": "message"})
+        run.error = "runtime: ValueError: what someone said"
+        await db_session.flush()
+
+        await run_retention_sweep(db_session, now=NOW)
+
+        run = (await db_session.execute(select(HandlerRun))).scalar_one()
+        assert run.error == "runtime: ValueError: what someone said"
+
     async def test_handles_an_empty_context(self, db_session):
         await self._run(db_session, STALE, {})
 

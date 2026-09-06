@@ -1,4 +1,4 @@
-"""Time-trigger scheduling for handlers (pure, testable functions).
+"""When a time-triggered handler fires next, and keeping a recurring chain alive.
 
 Timers fire once; schedules recur. To keep a toy simple and dependency-free we
 support a small, explicit settings vocabulary rather than full cron:
@@ -8,15 +8,29 @@ support a small, explicit settings vocabulary rather than full cron:
   optionally with ``{"start_at": "<ISO-8601 UTC>"}``
 
 The chatbot passes timing in ``settings`` for time triggers; the author/runtime
-translate it through here. All functions take ``now`` explicitly so they can be
-tested deterministically.
+translate it through here. Every computation takes ``now`` explicitly so it can
+be tested deterministically.
+
+A recurring schedule has no cron daemon behind it: the running fire is the only
+thing that enqueues its successor. :class:`RecurringFireChain` owns that whole
+step for one handler tier — whether this fire is the one that re-arms, when the
+next occurrence is, enqueueing it, and stamping the job id back on the row so a
+later disable can cancel it.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
+from uuid import UUID
+from uuid import uuid4
+
+from skrift.workers import submit as worker_submit
+
+from smarter_dev.shared.database import get_db_session_context
 
 # Min-interval floors — a recurring handler may not fire more often than this,
 # and tighter when it spawns an agent (each fire is far more expensive).
@@ -204,3 +218,54 @@ def next_fire_at(settings: dict, now: datetime) -> datetime | None:
     if "daily_time" in settings:
         return _daily_next(settings["daily_time"], now, start_at)
     return None
+
+
+def _fire_owns_rearming(trigger_type: str, trigger_context: dict) -> bool:
+    """Whether this fire is the one that enqueues the next occurrence.
+
+    Only a genuine scheduled fire re-arms. A schedule handler that self-arms a
+    ``schedule_timer`` re-fires with trigger_type "timer" in its context; that
+    re-fire must NOT re-arm, or it forks a duplicate perpetual chain and
+    clobbers ``scheduled_job_id`` (orphaning the original chain's job, so
+    disable/update can no longer cancel it).
+    """
+    return trigger_type == "schedule" and trigger_context.get("trigger_type") != "timer"
+
+
+@dataclass(frozen=True)
+class RecurringFireChain:
+    """One handler tier's self-perpetuating schedule chain.
+
+    The tier supplies its ORM model and how to build its fire payload once; the
+    chain then answers a fire with the whole re-arm decision, so a caller cannot
+    enqueue an occurrence for a fire that does not own the chain.
+    """
+
+    handler_model: type
+    build_fire_payload: Callable[[str], object]
+
+    async def rearm_after_fire(
+        self,
+        *,
+        handler_id: UUID,
+        trigger_type: str,
+        trigger_context: dict,
+        handler_settings: dict,
+    ) -> None:
+        """Enqueue this handler's next occurrence, if this fire owns the chain."""
+        if not _fire_owns_rearming(trigger_type, trigger_context):
+            return
+        next_occurrence = next_fire_at(handler_settings, datetime.now(UTC))
+        if next_occurrence is None:
+            return
+        job_id = uuid4().hex
+        await worker_submit(
+            self.build_fire_payload(str(handler_id)),
+            scheduled_for=next_occurrence,
+            job_id=job_id,
+        )
+        async with get_db_session_context() as session:
+            record = await session.get(self.handler_model, handler_id)
+            if record is not None and record.enabled:
+                record.scheduled_job_id = job_id
+                await session.commit()

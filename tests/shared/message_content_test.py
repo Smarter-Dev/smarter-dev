@@ -570,6 +570,15 @@ class TestRedactTriggerContext:
         once = redact_trigger_context({"trigger_type": "message", "content": "hi"})
         assert redact_trigger_context(once) == once
 
+    def test_the_redacted_copy_shares_nothing_with_the_original(self):
+        # The caller keeps using the verbatim context after taking this copy —
+        # a handler script runs against it — so a kept value that aliased the
+        # original would still be changing after the audit copy was taken.
+        context = {"author_role_ids": ["R1"], "payload": {"user_id": "U1"}}
+        redacted = redact_trigger_context(context)
+        context["author_role_ids"].append("what the script quoted back")
+        assert redacted["author_role_ids"] == ["R1"]
+
 
 class TestOldestRetainedStreamId:
     def test_is_the_millisecond_id_of_the_retention_cutoff(self):

@@ -15,12 +15,25 @@ from uuid import UUID, uuid4
 import pytest
 
 import smarter_dev.web.admin_handlers_jobs as admin_handlers_jobs
+import smarter_dev.web.admin_script_services as admin_script_services
 import smarter_dev.web.handler_agent as handler_agent
+import smarter_dev.web.handler_schedule as handler_schedule
 import smarter_dev.web.handlers_jobs as handlers_jobs
 import smarter_dev.web.handler_runtime as handler_runtime
 from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
 from smarter_dev.web.handler_runtime import HandlerResult
 from smarter_dev.web.handlers_jobs import HandlerFirePayload
+
+def _patch_seam(monkeypatch, name, value, *modules):
+    """Patch one seam wherever it is used.
+
+    A fire spreads over three modules: the job, the admin host services it
+    lends its script, and the schedule chain that re-arms it. They import the
+    same worker/session seams, so a test stubbing one has to stub all of them.
+    """
+    for module in modules:
+        monkeypatch.setattr(module, name, value)
+
 
 def _ctx(job_id: str | None = None) -> SimpleNamespace:
     """Minimal stand-in for the WorkerContext skrift injects into a fire job.
@@ -261,8 +274,13 @@ def _patch_admin_job(monkeypatch, engine, fake_result, captured=None):
         "get_settings",
         lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
     )
-    monkeypatch.setattr(
-        admin_handlers_jobs, "get_db_session_context", _RealSessionCtx(engine)
+    _patch_seam(
+        monkeypatch,
+        "get_db_session_context",
+        _RealSessionCtx(engine),
+        admin_handlers_jobs,
+        admin_script_services,
+        handler_schedule,
     )
     monkeypatch.setattr(admin_handlers_jobs, "get_redis_client", lambda: object())
     monkeypatch.setattr(
@@ -519,14 +537,18 @@ def _patch_std_job(monkeypatch, record, *, fake_run, submits, limiter_kwargs):
     monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
     monkeypatch.setattr(handler_agent, "run_gathering_agent", fake_agent)
     monkeypatch.setattr(handlers_jobs, "notify_handler_error", fake_notify)
-    monkeypatch.setattr(handlers_jobs, "worker_submit", fake_submit)
+    _patch_seam(monkeypatch, "worker_submit", fake_submit, handlers_jobs, handler_schedule)
     monkeypatch.setattr(
         handlers_jobs,
         "get_settings",
         lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
     )
-    monkeypatch.setattr(
-        handlers_jobs, "get_db_session_context", lambda: _FakeSessionCtx(record)
+    _patch_seam(
+        monkeypatch,
+        "get_db_session_context",
+        lambda: _FakeSessionCtx(record),
+        handlers_jobs,
+        handler_schedule,
     )
     monkeypatch.setattr(handlers_jobs, "get_redis_client", lambda: object())
     monkeypatch.setattr(handlers_jobs, "WindowedLimiter", fake_limiter)
@@ -597,7 +619,9 @@ async def test_admin_fire_arms_timer_submits_admin_payload(monkeypatch):
     monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
     monkeypatch.setattr(handler_agent, "run_gathering_agent", fake_agent)
     monkeypatch.setattr(admin_handlers_jobs, "notify_handler_error", fake_notify)
-    monkeypatch.setattr(admin_handlers_jobs, "worker_submit", fake_submit)
+    _patch_seam(
+        monkeypatch, "worker_submit", fake_submit, admin_script_services, handler_schedule
+    )
     monkeypatch.setattr(
         admin_handlers_jobs,
         "get_settings",
@@ -610,8 +634,13 @@ async def test_admin_fire_arms_timer_submits_admin_payload(monkeypatch):
     monkeypatch.setattr(
         admin_handlers_jobs, "load_guild_memory", fake_load_guild_memory
     )
-    monkeypatch.setattr(
-        admin_handlers_jobs, "get_db_session_context", lambda: _FakeSessionCtx(record)
+    _patch_seam(
+        monkeypatch,
+        "get_db_session_context",
+        lambda: _FakeSessionCtx(record),
+        admin_handlers_jobs,
+        admin_script_services,
+        handler_schedule,
     )
     monkeypatch.setattr(admin_handlers_jobs, "get_redis_client", lambda: object())
     monkeypatch.setattr(admin_handlers_jobs, "WindowedLimiter", fake_limiter)
@@ -716,7 +745,7 @@ async def test_schedule_row_scheduled_fire_reschedules(monkeypatch):
 
 async def test_schedule_row_timer_refire_does_not_reschedule(monkeypatch):
     # A "schedule" row that self-arms a schedule_timer re-fires with a "timer"
-    # context; that re-fire must NOT re-enter _reschedule (which would fork a
+    # context; that re-fire must NOT re-arm the chain (which would fork a
     # duplicate perpetual chain and clobber scheduled_job_id). The mocked run
     # arms nothing, so ANY submit here would be a spurious reschedule.
     record = SimpleNamespace(
@@ -760,7 +789,9 @@ def _patch_admin_reschedule_job(monkeypatch, record, submits):
     monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
     monkeypatch.setattr(handler_agent, "run_gathering_agent", fake_agent)
     monkeypatch.setattr(admin_handlers_jobs, "notify_handler_error", fake_notify)
-    monkeypatch.setattr(admin_handlers_jobs, "worker_submit", fake_submit)
+    _patch_seam(
+        monkeypatch, "worker_submit", fake_submit, admin_script_services, handler_schedule
+    )
     monkeypatch.setattr(
         admin_handlers_jobs, "load_guild_memory", fake_load_guild_memory
     )
@@ -769,8 +800,13 @@ def _patch_admin_reschedule_job(monkeypatch, record, submits):
         "get_settings",
         lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
     )
-    monkeypatch.setattr(
-        admin_handlers_jobs, "get_db_session_context", lambda: _FakeSessionCtx(record)
+    _patch_seam(
+        monkeypatch,
+        "get_db_session_context",
+        lambda: _FakeSessionCtx(record),
+        admin_handlers_jobs,
+        admin_script_services,
+        handler_schedule,
     )
     monkeypatch.setattr(admin_handlers_jobs, "get_redis_client", lambda: object())
     monkeypatch.setattr(
@@ -1413,7 +1449,7 @@ async def test_admin_timer_refire_descends_one_generation(monkeypatch, test_engi
     async def fake_submit(payload, scheduled_for=None, job_id=None):
         submits.append(payload)
 
-    monkeypatch.setattr(admin_handlers_jobs, "worker_submit", fake_submit)
+    monkeypatch.setattr(admin_script_services, "worker_submit", fake_submit)
 
     await _admin_fire(
         AdminHandlerFirePayload(

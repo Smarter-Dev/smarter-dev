@@ -50,11 +50,16 @@ hours is the window where that is still actionable.
 | `chat_agent_errors` | provider error body (can echo the prompt) | error type, traceback, status code |
 | `forum_agent_responses` | post title/content/attachments, decision reason, reply | confidence, tokens, responded flag |
 | `moderation_actions` | AI context summary | action, target, moderator, reason, duration, timestamp |
-| `handler_runs` | message text inside `trigger_context` | trigger type, ids, flags, all counters |
+| `handler_runs` | message text inside `trigger_context`, the script error message | trigger type, ids, flags, outcome, all counters |
 
 `handler_runs` keeps the non-content parts of its trigger context — which
-trigger fired, in which channel, for whom — and drops every key that carries
-message text, including any future key following the `*_content` convention.
+trigger fired, in which channel, for whom — and replaces every key that carries
+message text with the placeholder, including any future key following the
+`*_content` convention. Its `error` goes too: a script that trips over the
+message it is reacting to puts that text into its exception message, and nothing
+at write time can tell which errors quote a member. The `outcome` column still
+says the fire failed, so an old failure stays visible as a failure — only the
+message a developer would have read within the first 48 hours is gone.
 
 Moderation keeps everything except the AI's retelling of the exchange. An
 action's `reason` — whether a moderator typed it or the triage agent wrote it —

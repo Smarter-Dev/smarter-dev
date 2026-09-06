@@ -10,6 +10,7 @@ rows.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from types import SimpleNamespace
 from uuid import UUID
 from uuid import uuid4
@@ -63,6 +64,8 @@ TIMER_REFIRE_CONTEXT = {
     "scheduled_at": "2026-09-06T12:00:00+00:00",
 }
 
+SCRIPT_INJECTED_TEXT = "what the script quoted back"
+
 TIMERLESS_PAYLOAD_REFIRE_CONTEXT = {
     "trigger_type": "timer",
     "payload": {},
@@ -93,9 +96,13 @@ def _worker_context() -> SimpleNamespace:
     return SimpleNamespace(job=SimpleNamespace(id=uuid4().hex))
 
 
-def _patch_job(module, monkeypatch, engine, captured, *, claim_granted=True):
+def _patch_job(
+    module, monkeypatch, engine, captured, *, claim_granted=True, script_effect=None
+):
     async def fake_run(script, context, **kwargs):
         captured["context"] = context
+        if script_effect is not None:
+            script_effect(context)
         return HandlerResult(outcome="ok", usage=dict(_USAGE), duration_ms=1)
 
     async def fake_agent(*args, **kwargs):
@@ -274,3 +281,31 @@ async def test_skipped_retry_row_stores_placeholders_too(
     assert run.trigger_context["message_content"] == MESSAGE_CONTENT_PLACEHOLDER
     assert run.trigger_context["attachments"] == []
     assert run.trigger_context["message_id"] == "M1"
+
+
+def _quote_the_message_into_the_context(context: dict) -> None:
+    """What a script could do to the dict it is handed while it runs."""
+    context["author_role_ids"].append(SCRIPT_INJECTED_TEXT)
+    context["injected"] = SCRIPT_INJECTED_TEXT
+
+
+@pytest.mark.parametrize("fire", [_fire_standard, _fire_admin])
+async def test_what_the_script_writes_into_the_context_never_reaches_the_row(
+    monkeypatch, test_engine, fire
+):
+    """The audit copy is taken before the script runs, not after.
+
+    The sandbox is handed the live context dict. If the row were built from that
+    dict afterwards, anything the script appended or added — a key no redaction
+    rule knows about — would be stored verbatim and outlive the fire.
+    """
+    captured = await fire(
+        test_engine,
+        monkeypatch,
+        deepcopy(MESSAGE_TRIGGER_CONTEXT),
+        script_effect=_quote_the_message_into_the_context,
+    )
+    stored = captured["run"].trigger_context
+    assert stored["author_role_ids"] == ["R1", "R2"]
+    assert "injected" not in stored
+    assert SCRIPT_INJECTED_TEXT in captured["context"]["author_role_ids"]
