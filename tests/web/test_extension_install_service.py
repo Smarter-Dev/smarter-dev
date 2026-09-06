@@ -22,6 +22,7 @@ from smarter_dev.extensions.schema import (
     HandlerTemplate,
 )
 from smarter_dev.web import extension_installs as svc
+from smarter_dev.web import handler_recurrence
 from smarter_dev.web.extension_installs import (
     ExtensionConfigOutdatedError,
     ExtensionInstallError,
@@ -58,7 +59,7 @@ def worker_stub(monkeypatch):
         async def cancel(self):
             cancelled.append(self.job_id)
 
-    monkeypatch.setattr(svc, "worker_submit", _submit)
+    monkeypatch.setattr(handler_recurrence, "worker_submit", _submit)
     monkeypatch.setattr(svc, "get_handle", _Handle)
     return types.SimpleNamespace(submitted=submitted, cancelled=cancelled)
 

@@ -718,7 +718,7 @@ async def test_timer_trigger_row_does_not_reschedule(monkeypatch):
 async def test_schedule_row_scheduled_fire_reschedules(monkeypatch):
     # A genuine scheduled fire of a "schedule" row enqueues the next occurrence.
     record = SimpleNamespace(
-        enabled=True, script="pass", channel_id="C1", guild_id="G1",
+        id=uuid4(), enabled=True, script="pass", channel_id="C1", guild_id="G1",
         trigger_type="schedule",
         settings={
             "interval_seconds": 300,
@@ -819,7 +819,7 @@ def _patch_admin_reschedule_job(monkeypatch, record, submits):
 
 async def test_admin_schedule_row_scheduled_fire_reschedules(monkeypatch):
     record = SimpleNamespace(
-        enabled=True, script="pass", name="h", guild_id="G1",
+        id=uuid4(), enabled=True, script="pass", name="h", guild_id="G1",
         trigger_type="schedule", channel_ids=["C1"],
         settings={
             "interval_seconds": 300,
