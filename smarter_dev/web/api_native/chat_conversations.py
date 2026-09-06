@@ -31,6 +31,13 @@ Error-shape parity: the legacy 404 (unknown engagement) came from a bare
 :func:`errors.plain_error`. A malformed ``engagement_id`` path segment answers
 422 (the FastAPI ``UUID`` path param validated before the handler ran),
 reproduced via :func:`_parse_uuid_path`.
+
+The bot still sends verbatim Discord message text on the turn write — the
+retained artefact is the row, not the request — so the turn's triggering
+messages, its model-message delta and each compaction event's original content
+go through :mod:`smarter_dev.shared.message_content` on the way into the row.
+Agent output, tool calls, summaries, char counts and every token/cost field are
+ours, not Discord's, and are stored as sent.
 """
 
 from __future__ import annotations
@@ -57,6 +64,9 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.config import get_settings
+from smarter_dev.shared.message_content import redact_chat_agent_messages
+from smarter_dev.shared.message_content import redact_model_message_parts
+from smarter_dev.shared.message_content import redact_text
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
@@ -350,9 +360,11 @@ class ChatConversationController(Controller):
             request_id=data.request_id,
             turn_kind=data.turn_kind,
             output_kind=data.output_kind,
-            triggering_messages=data.triggering_messages,
+            triggering_messages=redact_chat_agent_messages(data.triggering_messages),
             agent_output=data.agent_output,
-            model_messages_delta=data.model_messages_delta,
+            model_messages_delta=redact_model_message_parts(
+                data.model_messages_delta
+            ),
             duration_ms=data.duration_ms,
             chat_tokens_input=data.chat_tokens_input,
             chat_tokens_output=data.chat_tokens_output,
@@ -440,7 +452,7 @@ class ChatConversationController(Controller):
                 turn_id=turn.id,
                 event_kind=ev.event_kind,
                 tool_name=ev.tool_name,
-                original_content=ev.original_content,
+                original_content=redact_text(ev.original_content),
                 summary=ev.summary,
                 original_chars=ev.original_chars,
                 summary_chars=ev.summary_chars,
