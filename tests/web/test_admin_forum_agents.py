@@ -278,8 +278,6 @@ def test_format_response_details_shapes_payload():
     response = SimpleNamespace(
         id=uuid4(),
         thread_id="333",
-        post_title="Title",
-        post_content="Body",
         author_display_name="Author",
         post_tags=["x"],
         confidence_score=0.9,
@@ -294,8 +292,9 @@ def test_format_response_details_shapes_payload():
     agent = SimpleNamespace(name="Helper")
     payload = format_response_details(response, agent)
     assert payload["agent_name"] == "Helper"
-    assert payload["post_title"] == "Title"
     assert payload["thread_id"] == "333"
+    assert "post_title" not in payload
+    assert "post_content" not in payload
     assert payload["decision_reasoning"] == "reason"
     assert payload["created_at"] == now.isoformat()
 
@@ -658,6 +657,7 @@ async def test_analytics_recent_responses_carry_thread_id(db_session):
 
     recent = response.context["recent_responses"]
     assert [row.thread_id for row in recent] == ["333"]
+    assert not hasattr(recent[0], "post_title")
 
 
 async def test_analytics_missing_agent_returns_404(db_session):
