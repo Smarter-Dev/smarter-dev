@@ -35,6 +35,7 @@ from litestar.exceptions import ValidationException
 from litestar.status_codes import HTTP_200_OK
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import and_, func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from skrift.auth.guards import APIKeyOnly, Permission
@@ -156,7 +157,7 @@ class ForumAgentController(Controller):
         The forum post is a member's Discord message, so the row keeps only
         what the agent decided about it: the tags it was filed under, the
         decision reason and the agent's own reply. The title and body a member
-        typed are redacted and the attachment urls are dropped.
+        typed are redacted and the attachment filenames are dropped.
         """
         # FastAPI validated the ``agent_id`` UUID path param (422) before the
         # handler body ran its ``guild_id`` snowflake check (400) — same order.
@@ -196,7 +197,8 @@ class ForumAgentController(Controller):
             }
         except BotApiException:
             raise
-        except Exception as error:
+        except SQLAlchemyError as error:
+            await db_session.rollback()
             raise plain_error(500, f"Failed to record agent response: {error}")
 
     @get("/{agent_id:str}/responses/count", status_code=HTTP_200_OK, guards=BOT_API_GUARDS)

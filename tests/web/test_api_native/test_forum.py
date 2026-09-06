@@ -20,6 +20,7 @@ from uuid import uuid4
 
 import pytest
 from litestar.testing import TestClient
+from sqlalchemy.exc import IntegrityError
 
 from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 
@@ -636,3 +637,48 @@ def test_record_agent_response_null_post_text_stores_the_empty_string(
     )
     assert row.post_title == ""
     assert row.post_content == ""
+
+
+def test_record_agent_response_db_failure_500_rolls_back(
+    forum_client: TestClient,
+    forum_agent_ops_mock: Mock,
+    session_mock: AsyncMock,
+    guild_id: str,
+):
+    forum_agent_ops_mock.get_agent.return_value = _agent(guild_id)
+    session_mock.commit = AsyncMock(
+        side_effect=IntegrityError(
+            "INSERT INTO forum_agent_responses",
+            {},
+            Exception("NOT NULL constraint failed: post_title"),
+        )
+    )
+
+    response = forum_client.post(
+        f"/api/guilds/{guild_id}/forum-agents/{_AGENT_ID}/responses",
+        json={"post_title": "t", "post_content": "c", "response_content": "answer"},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"].startswith("Failed to record agent response")
+    session_mock.rollback.assert_awaited_once()
+
+
+def test_record_agent_response_non_database_failure_propagates(
+    forum_client: TestClient,
+    forum_agent_ops_mock: Mock,
+    session_mock: AsyncMock,
+    guild_id: str,
+):
+    forum_agent_ops_mock.get_agent.side_effect = RuntimeError("not a database problem")
+
+    response = forum_client.post(
+        f"/api/guilds/{guild_id}/forum-agents/{_AGENT_ID}/responses",
+        json={"post_title": "t", "post_content": "c", "response_content": "answer"},
+    )
+
+    # Litestar's own handler answers an unhandled exception; the route must not
+    # dress a programming error up as a database failure or roll back for it.
+    assert response.status_code == 500
+    assert "Failed to record agent response" not in response.text
+    session_mock.rollback.assert_not_awaited()
