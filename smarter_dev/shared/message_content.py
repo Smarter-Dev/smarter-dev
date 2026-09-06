@@ -26,7 +26,8 @@ its kind is in :data:`_MODEL_AUTHORED_PART_KINDS` and otherwise keeps
 therefore redacted until somebody decides it is safe, which is the failure
 mode the intent policy can live with. The handler trigger context is the one
 redact-list (:data:`_HANDLER_CONTENT_KEYS` plus the ``_content`` suffix)
-because its keys are ours, not a library's.
+because we build every key in it — except a timer re-fire's ``payload``, whose
+keys a handler script chose, which is why that whole value is emptied.
 """
 
 from __future__ import annotations
@@ -93,6 +94,7 @@ _HANDLER_CONTENT_KEYS = frozenset(
         "attachment_urls",
         "embeds",
         "thread_name",
+        "payload",
     }
 )
 
@@ -208,7 +210,9 @@ def redact_trigger_context(context: dict) -> dict:
     """Redact the message text a handler run's audit context carries.
 
     Ids, flags, counts, role lists and timestamps stay, so the run still shows
-    which trigger fired, in which channel, for whom.
+    which trigger fired, in which channel, for whom. A timer re-fire's payload
+    is emptied whole: a script chose what to carry across the wait, and it may
+    have carried the message it was reacting to.
     """
     return _redact_mapping(context, _is_redacted_handler_key)
 
