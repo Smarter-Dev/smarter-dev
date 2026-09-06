@@ -29,11 +29,36 @@ MESSAGE_CONTENT_PLACEHOLDER: str = "[message content]"
 
 CONTENT_RETENTION_WINDOW: timedelta = timedelta(hours=48)
 
-_CHAT_MESSAGE_CONTENT_KEYS = frozenset({"body", "attachments"})
+_CHAT_PRESERVED_KEYS = frozenset(
+    {
+        "message_id",
+        "author_id",
+        "reply_to_message_id",
+        "reply_to_author_id",
+        "reply_to_is_self",
+        "reactions",
+        "sent_at",
+        "mentions_bot",
+    }
+)
 
 _HELP_PRESERVED_KEYS = frozenset({"author", "timestamp"})
 
-_HUMAN_TEXT_PART_KINDS = frozenset({"user-prompt", "tool-return"})
+_MODEL_AUTHORED_PART_KINDS = frozenset(
+    {
+        "system-prompt",
+        "text",
+        "thinking",
+        "tool-call",
+        "tool-search-call",
+        "builtin-tool-call",
+        "builtin-tool-search-call",
+        "builtin-tool-return",
+        "builtin-tool-search-return",
+        "compaction",
+        "file",
+    }
+)
 
 _EXPLICIT_SUBMISSION_INTERACTION_TYPES = frozenset({"slash_command"})
 
@@ -73,7 +98,7 @@ def _redact_mapping(mapping: dict, carries_message_text: Callable[[str], bool]) 
 
 
 def _carries_chat_message_text(key: str) -> bool:
-    return key in _CHAT_MESSAGE_CONTENT_KEYS
+    return key not in _CHAT_PRESERVED_KEYS
 
 
 def _carries_help_message_text(key: str) -> bool:
@@ -85,7 +110,7 @@ def _carries_handler_message_text(key: str) -> bool:
 
 
 def _redact_part(part: dict) -> dict:
-    if part.get("part_kind") not in _HUMAN_TEXT_PART_KINDS:
+    if part.get("part_kind") in _MODEL_AUTHORED_PART_KINDS:
         return dict(part)
     return part | {"content": _redact_value(part.get("content"))}
 
@@ -99,7 +124,8 @@ def redact_chat_agent_messages(messages: list[dict] | None) -> list[dict]:
     """Redact serialised chat-agent messages, the shape of a turn's triggers.
 
     Keeps the ids, reply pointers, reactions and flags the conversation detail
-    view renders around the message body.
+    view renders around the message body and nothing else, so a field added
+    upstream carries a placeholder rather than what somebody said.
     """
     return [
         _redact_mapping(message, _carries_chat_message_text)
@@ -110,8 +136,12 @@ def redact_chat_agent_messages(messages: list[dict] | None) -> list[dict]:
 def redact_model_message_parts(messages: list[dict] | None) -> list[dict] | None:
     """Redact the human text inside a serialised pydantic-ai message list.
 
-    Model output, tool calls and system prompts pass through, so the transcript
-    still shows which tools ran with which arguments and what the agent said.
+    Parts the model or its provider authored pass through: the system prompt,
+    reply text, reasoning, tool calls and provider-side tool results. Reasoning
+    may restate what a member said, but it is derived text in the same class
+    as ``agent_output`` and the retention sweep bounds it at 48h with the rest
+    of the delta. Everything else we send the model — prompts, tool returns,
+    retry prompts and any kind this module has never seen — is redacted.
     """
     if messages is None:
         return None
