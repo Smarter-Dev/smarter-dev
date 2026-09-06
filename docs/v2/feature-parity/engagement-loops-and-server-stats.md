@@ -6,6 +6,8 @@
 
 **Target:** the smarter-dev handler system (`smarter_dev/web/handler_*.py`, `smarter_dev/bot/plugins/handler_events.py`, `smarter_dev/bot/agents/handler_authoring.py`), extended where needed. No bot-core work — the one candidate (gateway presence aggregation) was dropped along with the online-count features (decision 2026-07-18).
 
+> **Removed 2026-09 — prefix commands are prohibited.** Discord's message-content-intent policy rules out bot behaviour triggered by a member's message text, so the `!bumpers` / `!bumps` / `!update bump king` command surface (rows 10-12) and the whole `bump-commands` handler it planned were removed from the shipped `disboard-bumping` extension. What ships is the `bump-tracker` handler alone: it reacts to the Disboard bot's confirmation embed, never to human text. Everything else in this plan stands.
+
 ## 1. Overview
 
 This group covers two legacy features that are structurally the same thing: **schedule-driven engagement/stats loops built on persistent counters**.
@@ -261,7 +263,7 @@ if (last is None or now - last >= 7200) and not await shared_get("reminded"):
 
 Persistent memory makes this self-healing across restarts — no recovery scan. Worst-case reminder lateness is one poll interval (~5 min on a 2h cycle), which is fine. The `last is None` branch is the cold-start bootstrap: on first install or after a shared-memory wipe the reminder fires on the next poll rather than waiting for someone to bump unprompted. Known behavior delta vs the legacy history scan: if a bump actually happened <2h before a memory wipe, one early reminder goes out — accepted (rare, self-correcting on the next confirmed bump) rather than porting a channel-history read.
 
-**Handler 3 — `bump-commands`** (message trigger, installed in a general/bot-commands channel — NOT the bump channel, where the cleaner would eat the command):
+**Handler 3 — `bump-commands`** — **REMOVED** (see the note at the top); kept below as a record of the original plan. It was to be a message trigger installed in a general/bot-commands channel — NOT the bump channel, where the cleaner would eat the command:
 
 Command surface decision: the read-only queries keep lightweight text forms (`!bumpers`, `!bumps`) as exact-match branches — they are cheap, guarded, and channel-scoped, and porting them as handler branches is idiomatic here. The admin `!update bump king` becomes a branch gated on `author_is_admin` (E7); the alternative of dropping it for an authoring-chat re-fire is Q6.
 

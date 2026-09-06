@@ -9,6 +9,7 @@ nothing bad is written to the real catalog directory.
 
 from __future__ import annotations
 
+import re
 import types
 
 import pytest
@@ -47,6 +48,24 @@ def test_all_shipped_examples_render_and_lint_clean():
             ext.manifest, ext.manifest.example_config, ext.scripts
         )
         assert len(bundle) == len(ext.manifest.handlers)
+
+
+# A prefix command is a script branching on a leading command word in a member's
+# message, so its command word is a string literal that starts with "!".
+_PREFIX_COMMAND_LITERAL = re.compile(r"""["']!""")
+
+
+def test_no_shipped_script_implements_a_text_prefix_command():
+    """Prefix commands are prohibited under Discord's message-content-intent
+    policy, so no bundled handler may branch on a message's leading command word.
+    """
+    offenders = [
+        f"{ext.manifest.slug}/{key}"
+        for ext in load_registry().all()
+        for key, script in ext.scripts.items()
+        if _PREFIX_COMMAND_LITERAL.search(script)
+    ]
+    assert offenders == []
 
 
 def test_registry_get_unknown_slug_raises():

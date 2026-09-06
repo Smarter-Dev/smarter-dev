@@ -90,6 +90,41 @@
                 {% endif %}
             </div>
         </div>
+
+        {% if orphaned_installs %}
+        <div class="sk-panel">
+            <div class="sk-panel-head">Installed but no longer in the catalog ({{ orphaned_installs|length }})</div>
+            <div class="sk-panel-body">
+                <p class="sk-text-muted">
+                    These extensions were removed from the catalog, so there is no
+                    longer anything to configure or update them against. Their
+                    handlers keep running until you uninstall them.
+                </p>
+                <div style="display:flex; flex-direction:column; gap:1rem;">
+                    {% for install in orphaned_installs %}
+                    <div class="sk-panel" style="margin:0;">
+                        <div class="sk-panel-body">
+                            <div style="display:flex; justify-content:space-between; align-items:baseline; gap:1rem; flex-wrap:wrap;">
+                                <div>
+                                    <code>{{ install.extension_slug }}</code>
+                                    <span class="sk-pill sk-pill-draft">v{{ install.installed_version }}</span>
+                                    {% if install.enabled %}
+                                    <span class="sk-pill sk-pill-published">Enabled</span>
+                                    {% else %}
+                                    <span class="sk-pill sk-pill-draft">Disabled</span>
+                                    {% endif %}
+                                </div>
+                                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/extensions/{{ install.extension_slug }}/uninstall" style="display:inline;" onsubmit="return confirm('Uninstall this extension? Its handlers will be removed from this guild.')">
+                                    <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Uninstall</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

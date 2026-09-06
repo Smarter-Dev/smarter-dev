@@ -9,6 +9,8 @@ beginner.py `!sus` command.
 - `beginner.codes-bot/docs/features/celebration-engagement.md`
 - `beginner.py-bot/docs/prod-functionality/02-sus-command.md`
 
+> **Removed 2026-09 — prefix commands are prohibited.** Discord's message-content-intent policy rules out bot behaviour triggered by a member's message text, so the `!sus` / `!list_sus` command surface (the `py-sus-command` rows and §4.3) was removed: the `sus` extension package and its tests are deleted and nothing ships in their place. Onboarding and celebration/engagement are unaffected, and the rails they share with sus — member triggers, role mutation, `schedule_timer` — stand as written.
+
 ## 1. Overview
 
 These three legacy features all ride the same two rails that the handler system does not
@@ -590,6 +592,8 @@ accept a bare URL (Q14).
 **Dropped:** both `!set`/`!test` commands and the missing-channel failure mode (§6).
 
 ### 4.3 `!sus` (beginner.py)
+
+**REMOVED — see the note at the top; kept here as a record of the original plan.**
 
 **One admin handler `sus`** — trigger `message`, scope all channels
 (`ADMIN_FIRES_PER_MIN = 120` absorbs guild-wide message volume; the first line is a cheap
