@@ -3,14 +3,19 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import get_args
 
 import pytest
 from pydantic_ai.messages import (
     ModelMessagesTypeAdapter,
     ModelRequest,
+    ModelRequestPart,
     ModelResponse,
+    ModelResponsePart,
+    RetryPromptPart,
     SystemPromptPart,
     TextPart,
+    ThinkingPart,
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
@@ -79,6 +84,16 @@ def model_messages_dump() -> list[dict]:
     )
 
 
+def part_kinds_of(part_union) -> set[str]:
+    """The ``part_kind`` tags pydantic-ai discriminates a part union on."""
+    return {
+        meta.tag
+        for member in get_args(get_args(part_union)[0])
+        for meta in member.__metadata__
+        if hasattr(meta, "tag")
+    }
+
+
 def help_context_message(**overrides) -> dict:
     """A ``HelpConversation.context_messages`` entry as the help plugin builds it."""
     return {
@@ -144,9 +159,17 @@ class TestRedactChatAgentMessages:
         once = redact_chat_agent_messages([chat_message_dict()])
         assert redact_chat_agent_messages(once) == once
 
-    def test_a_help_shaped_dict_keeps_its_content_key(self):
+    def test_a_help_shaped_dict_loses_its_content(self):
         [redacted] = redact_chat_agent_messages([help_context_message()])
-        assert redacted["content"] == "what someone said"
+        assert redacted["content"] == MESSAGE_CONTENT_PLACEHOLDER
+
+    def test_redacts_a_key_chat_models_add_later(self):
+        # Only the ids, pointers, reactions and flags the detail view renders
+        # are kept, so a new text field carries a placeholder into storage.
+        [redacted] = redact_chat_agent_messages(
+            [chat_message_dict(reply_to_body="what someone else said")]
+        )
+        assert redacted["reply_to_body"] == MESSAGE_CONTENT_PLACEHOLDER
 
     def test_the_serialised_shape_has_not_drifted(self):
         # A field added to chat_models.Message reaches chat_agent_turns
@@ -237,6 +260,67 @@ class TestRedactModelMessageParts:
         )
         redacted = redact_model_message_parts(dump)
         assert len(list(ModelMessagesTypeAdapter.validate_python(redacted))) == 1
+
+    def test_reasoning_is_ai_authored_and_passes_through(self):
+        # Reasoning summaries are the model's own text, like agent_output; the
+        # retention sweep bounds them at 48h with the rest of the delta.
+        dump = ModelMessagesTypeAdapter.dump_python(
+            [ModelResponse(parts=[ThinkingPart(content="the user asked about uv")])],
+            mode="json",
+        )
+        [message] = redact_model_message_parts(dump)
+        assert message["parts"][0]["content"] == "the user asked about uv"
+
+    def test_redacts_a_retry_prompt(self):
+        dump = ModelMessagesTypeAdapter.dump_python(
+            [
+                ModelRequest(
+                    parts=[
+                        RetryPromptPart(
+                            content="echoed what someone said",
+                            tool_name="search",
+                            tool_call_id="c1",
+                        )
+                    ]
+                )
+            ],
+            mode="json",
+        )
+        [message] = redact_model_message_parts(dump)
+        assert message["parts"][0]["content"] == MESSAGE_CONTENT_PLACEHOLDER
+        assert message["parts"][0]["tool_name"] == "search"
+
+    def test_redacts_a_part_kind_it_has_never_seen(self):
+        # A kind pydantic-ai adds later is redacted until someone decides it
+        # is model-authored and adds it to the preserved set.
+        [message] = redact_model_message_parts(
+            [{"parts": [{"part_kind": "future-return", "content": "said this"}]}]
+        )
+        assert message["parts"][0]["content"] == MESSAGE_CONTENT_PLACEHOLDER
+
+    def test_the_library_part_kinds_have_not_drifted(self):
+        # Every kind pydantic-ai can emit has been classified as either
+        # carrying what a member said or being model-authored. A new kind
+        # must fail here and force that decision.
+        assert part_kinds_of(ModelRequestPart) == {
+            "system-prompt",
+            "user-prompt",
+            "tool-return",
+            "tool-search-return",
+            "retry-prompt",
+        }
+        assert part_kinds_of(ModelResponsePart) == {
+            "text",
+            "thinking",
+            "tool-call",
+            "tool-search-call",
+            "builtin-tool-call",
+            "builtin-tool-search-call",
+            "builtin-tool-return",
+            "builtin-tool-search-return",
+            "compaction",
+            "file",
+        }
 
 
 class TestRedactHelpContextMessages:
