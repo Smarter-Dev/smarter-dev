@@ -5877,9 +5877,10 @@ class HandlerRun(Base):
         nullable=True,
         index=True,
         doc=(
-            "When the message text inside ``trigger_context`` was scrubbed by "
-            "the retention sweep. The non-content trigger fields (ids, flags, "
-            "trigger type) and every counter survive."
+            "When the message text inside ``trigger_context`` — and the script "
+            "error message, which can quote it — was scrubbed by the retention "
+            "sweep. The non-content trigger fields (ids, flags, trigger type), "
+            "the outcome and every counter survive."
         ),
     )
 

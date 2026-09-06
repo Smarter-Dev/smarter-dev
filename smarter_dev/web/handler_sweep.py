@@ -3,8 +3,8 @@
 A recurring schedule has no scheduler behind it. It exists at runtime as a
 single in-flight worker job, and the ONLY thing that enqueues the next
 occurrence is the successful completion of the current one
-(``handlers_jobs._reschedule``). That makes the chain a linked list with no head
-pointer: break one link — a dead-lettered job, an evicted pod, a deploy that
+(``handler_schedule.RecurringFireChain``). That makes the chain a linked list
+with no head pointer: break one link — a dead-lettered job, an evicted pod, a deploy that
 makes every fire raise — and the schedule stops forever, silently, even though
 the handler row is still ``enabled`` and still carries everything needed to
 compute the next fire.
