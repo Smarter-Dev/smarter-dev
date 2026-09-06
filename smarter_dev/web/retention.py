@@ -8,7 +8,7 @@ a bad answer, to prove out an abuse report.
 
 None of that needs to be permanent, and none of it was *submitted* to us in the
 way a modal entry is. So every table that captures message text passively is
-swept on a fixed :data:`~smarter_dev.web.models.CONTENT_RETENTION_WINDOW`
+swept on a fixed :data:`~smarter_dev.shared.message_content.CONTENT_RETENTION_WINDOW`
 (48 hours): the human text is nulled out and the row is stamped
 ``content_purged_at``. The row itself stays — timestamps, token counts, cost,
 model name, the decision the agent took — so cost dashboards and abuse

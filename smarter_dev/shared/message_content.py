@@ -17,6 +17,16 @@ bounds the age of the Redis streams that carry message text in flight. Every
 function here is pure — value in, new value out, argument untouched — because
 a handler still runs against the verbatim trigger context whose audit copy is
 redacted.
+
+Each stored shape is redacted by a keep-list, never a redact-list: a chat
+message keeps :data:`_CHAT_PRESERVED_KEYS`, a help context message keeps
+:data:`_HELP_PRESERVED_KEYS`, a pydantic-ai part keeps its whole self only when
+its kind is in :data:`_MODEL_AUTHORED_PART_KINDS` and otherwise keeps
+:data:`_REDACTED_PART_PRESERVED_FIELDS`. Anything upstream adds later is
+therefore redacted until somebody decides it is safe, which is the failure
+mode the intent policy can live with. The handler trigger context is the one
+redact-list (:data:`_HANDLER_CONTENT_KEYS` plus the ``_content`` suffix)
+because its keys are ours, not a library's.
 """
 
 from __future__ import annotations
@@ -60,6 +70,17 @@ _MODEL_AUTHORED_PART_KINDS = frozenset(
     }
 )
 
+_REDACTED_PART_PRESERVED_FIELDS = frozenset(
+    {
+        "part_kind",
+        "tool_name",
+        "tool_call_id",
+        "tool_kind",
+        "timestamp",
+        "outcome",
+    }
+)
+
 _EXPLICIT_SUBMISSION_INTERACTION_TYPES = frozenset({"slash_command"})
 
 _HANDLER_CONTENT_KEYS = frozenset(
@@ -90,29 +111,33 @@ def _redact_value(value: Any) -> Any:
     return value
 
 
-def _redact_mapping(mapping: dict, carries_message_text: Callable[[str], bool]) -> dict:
+def _redact_mapping(mapping: dict, should_redact: Callable[[str], bool]) -> dict:
     return {
-        key: _redact_value(value) if carries_message_text(key) else value
+        key: _redact_value(value) if should_redact(key) else value
         for key, value in mapping.items()
     }
 
 
-def _carries_chat_message_text(key: str) -> bool:
+def _is_redacted_chat_key(key: str) -> bool:
     return key not in _CHAT_PRESERVED_KEYS
 
 
-def _carries_help_message_text(key: str) -> bool:
+def _is_redacted_help_key(key: str) -> bool:
     return key not in _HELP_PRESERVED_KEYS
 
 
-def _carries_handler_message_text(key: str) -> bool:
+def _is_redacted_handler_key(key: str) -> bool:
     return key in _HANDLER_CONTENT_KEYS or key.endswith("_content")
+
+
+def _is_redacted_part_field(key: str) -> bool:
+    return key not in _REDACTED_PART_PRESERVED_FIELDS
 
 
 def _redact_part(part: dict) -> dict:
     if part.get("part_kind") in _MODEL_AUTHORED_PART_KINDS:
         return dict(part)
-    return part | {"content": _redact_value(part.get("content"))}
+    return _redact_mapping(part, _is_redacted_part_field)
 
 
 def redact_text(text: str | None) -> str | None:
@@ -128,7 +153,7 @@ def redact_chat_agent_messages(messages: list[dict] | None) -> list[dict]:
     upstream carries a placeholder rather than what somebody said.
     """
     return [
-        _redact_mapping(message, _carries_chat_message_text)
+        _redact_mapping(message, _is_redacted_chat_key)
         for message in messages or []
     ]
 
@@ -141,7 +166,10 @@ def redact_model_message_parts(messages: list[dict] | None) -> list[dict] | None
     may restate what a member said, but it is derived text in the same class
     as ``agent_output`` and the retention sweep bounds it at 48h with the rest
     of the delta. Everything else we send the model — prompts, tool returns,
-    retry prompts and any kind this module has never seen — is redacted.
+    retry prompts and any kind this module has never seen — is redacted down
+    to its bookkeeping: kind, tool name and call id, tool kind, timestamp and
+    outcome. Content, metadata and any field added later are emptied, and a
+    field that was absent stays absent.
     """
     if messages is None:
         return None
@@ -160,7 +188,7 @@ def redact_help_context_messages(messages: list[dict] | None) -> list[dict]:
     upstream carries a placeholder rather than what somebody said.
     """
     return [
-        _redact_mapping(message, _carries_help_message_text)
+        _redact_mapping(message, _is_redacted_help_key)
         for message in messages or []
     ]
 
@@ -182,7 +210,7 @@ def redact_trigger_context(context: dict) -> dict:
     Ids, flags, counts, role lists and timestamps stay, so the run still shows
     which trigger fired, in which channel, for whom.
     """
-    return _redact_mapping(context, _carries_handler_message_text)
+    return _redact_mapping(context, _is_redacted_handler_key)
 
 
 def oldest_retained_stream_id(now: datetime) -> str:
