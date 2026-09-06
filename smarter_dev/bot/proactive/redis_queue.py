@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC
+from datetime import datetime
 
 from smarter_dev.bot.proactive.contracts import NotificationEnvelope
+from smarter_dev.shared.message_content import oldest_retained_stream_id
 
 KEY_PREFIX = "proactive:v1"
 READY_GUILDS_KEY = f"{KEY_PREFIX}:guilds-with-wakes"
 READY_STREAM_KEY = f"{KEY_PREFIX}:ready"
 SHADOW_STREAM_KEY = f"{KEY_PREFIX}:shadow"
 PENDING_LIMIT = 20
+SHADOW_STREAM_MAX_ENTRIES = 10_000
 WAKE_PAYLOAD_FIELD = "payload"
 
 _PUSH_PENDING_LUA = """
@@ -109,6 +113,8 @@ class RedisNotificationQueue:
             pipeline.xadd(
                 wake_stream_key(envelope.guild_id),
                 {WAKE_PAYLOAD_FIELD: payload},
+                minid=_oldest_retained_envelope_id(),
+                approximate=True,
             )
             pipeline.sadd(READY_GUILDS_KEY, envelope.guild_id)
             pipeline.xadd(
@@ -126,7 +132,12 @@ class RedisNotificationQueue:
                 "guild_id": envelope.guild_id,
                 WAKE_PAYLOAD_FIELD: envelope.model_dump_json(),
             },
-            maxlen=10_000,
+            maxlen=SHADOW_STREAM_MAX_ENTRIES,
+            approximate=True,
+        )
+        await self._redis.xtrim(
+            SHADOW_STREAM_KEY,
+            minid=_oldest_retained_envelope_id(),
             approximate=True,
         )
         return _decode(stream_id)
@@ -152,6 +163,10 @@ class RedisNotificationQueue:
             batch_key(guild_id, wake_id),
             batch_dropped_key(guild_id, wake_id),
         )
+
+
+def _oldest_retained_envelope_id() -> str:
+    return oldest_retained_stream_id(datetime.now(UTC))
 
 
 def _decode(value) -> str:
