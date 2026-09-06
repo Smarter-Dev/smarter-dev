@@ -154,9 +154,9 @@ class ForumAgentController(Controller):
         """Record a forum agent response.
 
         The forum post is a member's Discord message, so the row keeps only
-        what the agent decided about it: the title, tags, decision reason and
-        the agent's own reply. The post body is redacted and its attachment
-        urls are dropped.
+        what the agent decided about it: the tags it was filed under, the
+        decision reason and the agent's own reply. The title and body a member
+        typed are redacted and the attachment urls are dropped.
         """
         # FastAPI validated the ``agent_id`` UUID path param (422) before the
         # handler body ran its ``guild_id`` snowflake check (400) — same order.
@@ -174,7 +174,7 @@ class ForumAgentController(Controller):
                 guild_id=guild_id,
                 channel_id=data.get("channel_id", ""),
                 thread_id=data.get("thread_id", ""),
-                post_title=data.get("post_title", ""),
+                post_title=redact_text(data.get("post_title", "")),
                 post_content=redact_text(data.get("post_content", "")),
                 author_display_name=data.get("author_display_name", "Unknown"),
                 post_tags=data.get("post_tags", []),

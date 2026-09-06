@@ -272,17 +272,21 @@ def test_streak_celebration_question_is_stored_as_placeholder(client):
     assert stored["user_question"] == MESSAGE_CONTENT_PLACEHOLDER
 
 
-def test_context_messages_are_redacted_for_every_interaction_type(client):
-    for interaction_type in ("mention", "slash_command", "streak_celebration"):
-        stored = _created_conversation(
-            client,
-            interaction_type=interaction_type,
-            context_messages=_context_messages(),
-        )
-        assert [message["content"] for message in stored["context_messages"]] == [
-            MESSAGE_CONTENT_PLACEHOLDER,
-            MESSAGE_CONTENT_PLACEHOLDER,
-        ]
+@pytest.mark.parametrize(
+    "interaction_type", ["mention", "slash_command", "streak_celebration"]
+)
+def test_context_messages_are_redacted_for_every_interaction_type(
+    client, interaction_type
+):
+    stored = _created_conversation(
+        client,
+        interaction_type=interaction_type,
+        context_messages=_context_messages(),
+    )
+    assert [message["content"] for message in stored["context_messages"]] == [
+        MESSAGE_CONTENT_PLACEHOLDER,
+        MESSAGE_CONTENT_PLACEHOLDER,
+    ]
 
 
 def test_context_message_author_and_timestamp_survive(client):

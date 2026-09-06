@@ -540,7 +540,7 @@ def test_record_agent_response_empties_attachments(
     assert row.attachments == []
 
 
-def test_record_agent_response_keeps_everything_but_the_post_body(
+def test_record_agent_response_stores_placeholder_post_title(
     forum_client: TestClient,
     forum_agent_ops_mock: Mock,
     session_mock: AsyncMock,
@@ -549,7 +549,30 @@ def test_record_agent_response_keeps_everything_but_the_post_body(
     row = _recorded_response_row(
         forum_client, forum_agent_ops_mock, session_mock, guild_id
     )
-    assert row.post_title == "Bot crashes on startup"
+    assert row.post_title == MESSAGE_CONTENT_PLACEHOLDER
+
+
+def test_record_agent_response_empty_post_title_stays_empty(
+    forum_client: TestClient,
+    forum_agent_ops_mock: Mock,
+    session_mock: AsyncMock,
+    guild_id: str,
+):
+    row = _recorded_response_row(
+        forum_client, forum_agent_ops_mock, session_mock, guild_id, post_title=""
+    )
+    assert row.post_title == ""
+
+
+def test_record_agent_response_keeps_everything_the_agent_decided(
+    forum_client: TestClient,
+    forum_agent_ops_mock: Mock,
+    session_mock: AsyncMock,
+    guild_id: str,
+):
+    row = _recorded_response_row(
+        forum_client, forum_agent_ops_mock, session_mock, guild_id
+    )
     assert row.response_content == "check your event loop setup"
     assert row.decision_reason == "question matches the agent's topic"
     assert row.post_tags == ["python", "help"]
@@ -574,7 +597,7 @@ def test_record_agent_response_empty_post_content_stays_empty(
     assert row.post_content == ""
 
 
-def test_record_agent_response_absent_post_content_stays_empty(
+def test_record_agent_response_absent_post_text_stays_empty(
     forum_client: TestClient,
     forum_agent_ops_mock: Mock,
     session_mock: AsyncMock,
@@ -584,10 +607,11 @@ def test_record_agent_response_absent_post_content_stays_empty(
 
     response = forum_client.post(
         f"/api/guilds/{guild_id}/forum-agents/{_AGENT_ID}/responses",
-        json={"post_title": "Title", "response_content": "answer"},
+        json={"response_content": "answer"},
     )
 
     assert response.status_code == 200
     row = session_mock.add.call_args.args[0]
+    assert row.post_title == ""
     assert row.post_content == ""
     assert row.attachments == []
