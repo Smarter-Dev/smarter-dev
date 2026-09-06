@@ -395,6 +395,13 @@ class TestCreateTurn:
             "chat_model_name": "kimi-k2.6",
             "chat_tokens_input": 1000,
             "chat_tokens_output": 500,
+            "compaction_events": [
+                _compaction_event(
+                    summarizer_model_name="kimi-k2.6",
+                    summarizer_tokens_input=2000,
+                    summarizer_tokens_output=100,
+                )
+            ],
         }
 
         first = await _post_turn(client, engagement, **metered)
@@ -402,11 +409,13 @@ class TestCreateTurn:
 
         assert replay["id"] == first["id"]
         assert replay["started_at"] == first["started_at"]
+        assert Decimal(first["summarizer_cost_usd_total"]) > 0
         for cost_field in _TURN_COST_FIELDS:
             assert Decimal(replay[cost_field]) == Decimal(first[cost_field])
         assert str((await _stored_turn(session)).id) == first["id"]
+        assert len(await _stored_compaction_events(session)) == 1
         usage_rows = (await session.execute(select(UsageCostRow))).scalars().all()
-        assert len(usage_rows) == 1
+        assert len(usage_rows) == 2
         await session.refresh(engagement)
         assert engagement.total_chat_tokens_input == 1000
         assert engagement.total_chat_tokens_output == 500
@@ -529,6 +538,8 @@ class TestCreateTurn:
 
         candidates = (await session.execute(select(CandidateBlogTopic))).scalars().all()
         assert len(candidates) == 1
+        assert candidates[0].engagement_id == engagement.id
+        assert candidates[0].turn_id == (await _stored_turn(session)).id
         assert candidates[0].headline == "A neat pattern"
         assert candidates[0].evidence == ["msg1", "msg2"]
 
@@ -889,3 +900,38 @@ class TestDetailTemplateRendersRedactedRows:
         assert "search" in html
         assert "web_read" in html
         assert re.search(r"returned \d+ chars", html) is None
+
+    async def test_explains_message_text_is_never_stored(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+        await _post_turn(client, engagement)
+        turn = await _stored_turn(session)
+
+        html = render_admin_template(
+            "admin/chat-conversations/detail.html",
+            engagement=engagement,
+            turns=[turn],
+        )
+
+        assert "Discord message text is never stored" in html
+        assert "kept for 48 hours" not in html
+        assert "purged" not in html
+
+    async def test_purge_stamp_names_derived_text_only(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+        await _post_turn(client, engagement)
+        turn = await _stored_turn(session)
+        turn.content_purged_at = datetime(2026, 7, 28, 14, 30, tzinfo=UTC)
+
+        html = render_admin_template(
+            "admin/chat-conversations/detail.html",
+            engagement=engagement,
+            turns=[turn],
+        )
+
+        assert "Derived text purged 2026-07-28 14:30 UTC" in html
+        assert "Discord message text is never stored" in html
+        assert "kept for 48 hours" not in html
