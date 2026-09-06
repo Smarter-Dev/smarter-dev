@@ -196,7 +196,8 @@ class ExtensionsAdminController(Controller):
     async def extensions_list(
         self, request: Request, db_session: AsyncSession, guild_id: str
     ) -> Response:
-        """Render the catalog with each extension's per-guild install state."""
+        """Render the catalog with each extension's per-guild install state,
+        plus any install whose slug has left the catalog."""
         guild, error = await fetch_guild_or_error(request, db_session, guild_id)
         if error is not None:
             return error
@@ -213,6 +214,7 @@ class ExtensionsAdminController(Controller):
                 "guild_id": guild_id,
                 "extensions": _registry.all(),
                 "installs_by_slug": installs_by_slug,
+                "orphaned_installs": _orphaned(installs),
                 "active_page": _ACTIVE_PAGE,
                 "flash_messages": get_flash_messages(request),
                 **ctx,
@@ -435,6 +437,18 @@ def _lookup(slug: str) -> LoadedExtension | None:
         return _registry.get(slug)
     except ExtensionRegistryError:
         return None
+
+
+def _orphaned(installs: list[ExtensionInstall]) -> list[ExtensionInstall]:
+    """Installs whose slug has left the catalog (a removed extension).
+
+    They have no manifest to render, configure or update against, so the page
+    offers them nothing but uninstall — without which the rows would be stranded
+    in the guild with no operator path to remove them.
+    """
+    return [
+        install for install in installs if _lookup(install.extension_slug) is None
+    ]
 
 
 async def _find_install(

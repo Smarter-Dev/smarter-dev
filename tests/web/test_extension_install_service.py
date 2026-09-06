@@ -653,3 +653,68 @@ async def test_cross_session_double_install_leaves_one(
     ).scalar_one()
     assert installs == 1
     assert await _count_handlers(db_session, GUILD) == 2
+
+
+# -- orphaned install (the catalog dropped its slug) ---------------------------
+
+
+async def _orphaned_install(db_session, worker_stub, monkeypatch) -> ExtensionInstall:
+    """Install an extension, then take its slug out of the catalog.
+
+    This is the production shape after a bundled extension is deleted from the
+    repo: the install row and its handler rows outlive the manifest.
+    """
+    _use_registry(monkeypatch, _relay())
+    install = await install_extension(
+        db_session, guild_id=GUILD, slug="test-relay",
+        raw_config={"chan": CHAN_A}, installed_by="admin",
+    )
+    _use_registry(monkeypatch)
+    return install
+
+
+async def test_orphaned_install_is_still_listed(
+    db_session, worker_stub, monkeypatch
+):
+    await _orphaned_install(db_session, worker_stub, monkeypatch)
+    installs = await list_installs(db_session, GUILD)
+    assert [i.extension_slug for i in installs] == ["test-relay"]
+
+
+async def test_orphaned_install_can_be_disabled(
+    db_session, worker_stub, monkeypatch
+):
+    install = await _orphaned_install(db_session, worker_stub, monkeypatch)
+    updated = await set_extension_enabled(
+        db_session, guild_id=GUILD, slug="test-relay", enabled=False
+    )
+    assert updated.enabled is False
+    assert all(not row.enabled for row in await _owned(db_session, install.id))
+
+
+async def test_orphaned_install_can_be_uninstalled(
+    db_session, worker_stub, monkeypatch
+):
+    install = await _orphaned_install(db_session, worker_stub, monkeypatch)
+    await uninstall_extension(db_session, guild_id=GUILD, slug="test-relay")
+    assert await get_install(db_session, GUILD, "test-relay") is None
+    assert await _owned(db_session, install.id) == []
+
+
+async def test_orphaned_install_cannot_be_reconfigured(
+    db_session, worker_stub, monkeypatch
+):
+    await _orphaned_install(db_session, worker_stub, monkeypatch)
+    with pytest.raises(ExtensionInstallError, match="unknown extension"):
+        await edit_extension_config(
+            db_session, guild_id=GUILD, slug="test-relay",
+            raw_config={"chan": CHAN_B},
+        )
+
+
+async def test_orphaned_install_cannot_be_updated(
+    db_session, worker_stub, monkeypatch
+):
+    await _orphaned_install(db_session, worker_stub, monkeypatch)
+    with pytest.raises(ExtensionInstallError, match="unknown extension"):
+        await update_extension(db_session, guild_id=GUILD, slug="test-relay")

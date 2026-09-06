@@ -358,19 +358,20 @@ Provided async functions — you MUST `await` every call:
       Arm a single re-fire of this handler at now + delay_seconds. The re-fire arrives with
       context["trigger_type"] == "timer", context["payload"] == the dict you passed, and
       context["scheduled_at"]. This is the durable replacement for volatile timers — use it for
-      "promote after 2 days", "remove the sus role after 24 h", "follow up in an hour". RAILS:
+      "promote after 2 days", "remove a temporary role after 24 h", "follow up in an hour". RAILS:
       delay_seconds in [60, 2592000] (60s .. 30 days) or the fire ERRORS; payload JSON-serializable
       and ≤ 4 KB; at most 5 timers/fire (30/hour across fires). schedule_timer does NOT itself grant
       or remove roles — the re-fire's script does that via add_role/remove_role (put those role ids
       in allowed_role_ids as usual).
-      MANDATORY: a script that calls schedule_timer MUST handle the re-fire, e.g. a sus handler:
+      MANDATORY: a script that calls schedule_timer MUST handle the re-fire, e.g. a
+      handler that gives a new member a temporary role on member_join:
 
         if context["trigger_type"] == "timer":
-            await remove_role(context["payload"]["user_id"], "644...", reason="sus expired")
+            await remove_role(context["payload"]["user_id"], "644...", reason="trial over")
             return
-        # ... on the !sus message: add the role AND arm its removal:
-        await add_role(target_id, "644...", reason="sus")
-        await schedule_timer(86400, {"user_id": target_id})
+        # ... on the member_join: add the role AND arm its removal:
+        await add_role(context["member_id"], "644...", reason="trial member")
+        await schedule_timer(86400, {"user_id": context["member_id"]})
 
       Without the timer branch the re-fire has nothing to do and ERRORS every time.
 
@@ -456,6 +457,15 @@ the same draft again.
   the four member_* triggers, for dm_message (a DM has no channel), AND for mod_action (guild-wide,
   no home channel); message_edit IS channel-keyed (scope it by channel_ids like a message handler,
   empty = all).
+- NEVER BUILD A TEXT PREFIX COMMAND. A handler must not implement commands like "!ping",
+  "!stats" or "?help", and must never branch on a message's leading command word (no
+  `text.startswith("!")`, no `text.split()[0] == "!thing"`, no equality test against a command
+  literal). Discord's message-content-intent policy prohibits it, so a script that does this is
+  rejected. Trigger on the EVENT instead — a reaction, member_join, member_role_change,
+  thread_create, a schedule/timer, or a specific bot's message (include_bot_messages) — or, for
+  anything that genuinely needs a member to type something, set feasible=false and say a slash
+  command or the chat bot is the right surface. Matching a keyword ANYWHERE in a message for
+  moderation or a keyword watch is fine; what is banned is treating the leading word as a command.
 - MEMBER EVENTS HAVE NO HOME CHANNEL. On a member_* trigger, send_message(content) with no
   channel_id FAILS — every send must name a channel constant (resolve names via list_channels).
 - RAID FREQUENCY. member_join and member_leave fire on EVERY join/leave and burst during raids and
@@ -469,7 +479,7 @@ the same draft again.
   trigger context (context["thread_id"]) or a list_threads result — NEVER a hardcoded id literal or
   id arithmetic. A hardcoded destructive target is unreviewable and will be rejected.
 - ROLE GRANT DISCIPLINE. add_role / remove_role must be CONDITIONAL on trigger context (a promotion
-  gated on rules acceptance, a flag gated on a command) — never grant a role unconditionally on
+  gated on rules acceptance, a temporary role gated on a moderator's reaction) — never grant a role unconditionally on
   member_join (raid frequency). The role_id is a STRING LITERAL constant (the user_id is dynamic),
   and every literal must appear in settings["allowed_role_ids"]. State each role's purpose.
 - Decide channel scope. channel_ids = [] means ALL channels in the guild; otherwise the specific
