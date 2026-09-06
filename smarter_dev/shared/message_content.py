@@ -43,6 +43,7 @@ from typing import Any
 MESSAGE_CONTENT_PLACEHOLDER: str = "[message content]"
 
 CONTENT_RETENTION_WINDOW: timedelta = timedelta(hours=48)
+CONTENT_RETENTION_MILLISECONDS: int = int(CONTENT_RETENTION_WINDOW.total_seconds() * 1000)
 
 _CHAT_PRESERVED_KEYS = frozenset(
     {
@@ -255,4 +256,4 @@ def oldest_retained_stream_id(now: datetime) -> str:
     """
     if now.tzinfo is None:
         raise ValueError("oldest_retained_stream_id requires a timezone-aware datetime")
-    return f"{int((now - CONTENT_RETENTION_WINDOW).timestamp() * 1000)}-0"
+    return f"{int(now.timestamp() * 1000) - CONTENT_RETENTION_MILLISECONDS}-0"

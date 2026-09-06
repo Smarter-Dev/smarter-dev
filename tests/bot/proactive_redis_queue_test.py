@@ -17,12 +17,12 @@ import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError
 
 from smarter_dev.bot.plugins import proactive
+from smarter_dev.bot.proactive import redis_queue
 from smarter_dev.bot.proactive.contracts import ControlCommand
 from smarter_dev.bot.proactive.contracts import NotificationEnvelope
 from smarter_dev.bot.proactive.notifications import Notification
 from smarter_dev.bot.proactive.redis_queue import READY_GUILDS_KEY
 from smarter_dev.bot.proactive.redis_queue import READY_STREAM_KEY
-from smarter_dev.bot.proactive.redis_queue import RETENTION_WINDOW_MILLISECONDS
 from smarter_dev.bot.proactive.redis_queue import SHADOW_STREAM_KEY
 from smarter_dev.bot.proactive.redis_queue import SHADOW_STREAM_MAX_ENTRIES
 from smarter_dev.bot.proactive.redis_queue import RedisNotificationQueue
@@ -31,6 +31,7 @@ from smarter_dev.bot.proactive.redis_queue import batch_key
 from smarter_dev.bot.proactive.redis_queue import ownership_key
 from smarter_dev.bot.proactive.redis_queue import pending_key
 from smarter_dev.bot.proactive.redis_queue import wake_stream_key
+from smarter_dev.shared.message_content import CONTENT_RETENTION_MILLISECONDS
 from smarter_dev.shared.message_content import oldest_retained_stream_id
 
 try:
@@ -193,7 +194,7 @@ async def test_claim_is_crash_safe_and_new_pending_waits_for_next_wake(redis_cli
 
 
 def _assert_ttl_is_inside_the_retention_window(ttl_milliseconds: int) -> None:
-    assert 0 < ttl_milliseconds <= RETENTION_WINDOW_MILLISECONDS
+    assert 0 < ttl_milliseconds <= CONTENT_RETENTION_MILLISECONDS
 
 
 @pytest.mark.asyncio
@@ -641,12 +642,33 @@ async def test_trim_expired_envelopes_tolerates_a_guild_whose_stream_is_gone(
 
 
 @pytest.mark.asyncio
-async def test_trim_expired_envelopes_rejects_a_corrupt_index_member(redis_client):
-    queue = RedisNotificationQueue(redis_client)
+async def test_trim_expired_envelopes_skips_a_corrupt_index_member_and_trims_the_rest(
+    redis_client, caplog
+):
+    await _seed_abandoned_wake_stream(redis_client, "111", 49, indexed=True)
     await redis_client.sadd(READY_GUILDS_KEY, "not-a-snowflake")
+    queue = RedisNotificationQueue(redis_client)
+
+    with caplog.at_level(logging.WARNING, logger=redis_queue.logger.name):
+        dropped = await queue.trim_expired_envelopes([])
+
+    assert dropped == 1
+    assert await _payloads_in(redis_client, wake_stream_key("111")) == []
+    assert "not-a-snowflake" in caplog.text
+    assert await redis_client.smembers(READY_GUILDS_KEY) == {
+        b"111",
+        b"not-a-snowflake",
+    }
+
+
+@pytest.mark.asyncio
+async def test_trim_expired_envelopes_still_rejects_a_corrupt_caller_guild_id(
+    redis_client,
+):
+    queue = RedisNotificationQueue(redis_client)
 
     with pytest.raises(ValueError, match="snowflake"):
-        await queue.trim_expired_envelopes([])
+        await queue.trim_expired_envelopes(["not-a-snowflake"])
 
 
 def _bot_seeing_guilds(redis_client, *guild_ids: int) -> SimpleNamespace:
@@ -727,9 +749,57 @@ async def test_a_redis_outage_during_the_retention_trim_is_logged_not_raised(cap
 
 
 @pytest.mark.asyncio
-async def test_a_corrupt_guild_index_fails_the_sweep_loudly(redis_client):
+async def test_a_corrupt_guild_index_member_is_skipped_by_the_sweep(
+    redis_client, caplog
+):
+    await _seed_abandoned_wake_stream(redis_client, "111", 49, indexed=False)
     await redis_client.sadd(READY_GUILDS_KEY, "not-a-snowflake")
     run = _embedded_runtime(_bot_seeing_guilds(redis_client, 111))
 
-    with pytest.raises(ValueError, match="snowflake"):
+    with caplog.at_level(logging.INFO):
         await proactive._sweep_expired_envelopes(run)
+
+    assert await _payloads_in(redis_client, wake_stream_key("111")) == []
+    assert "not-a-snowflake" in caplog.text
+    assert "proactive envelope retention trim dropped=1" in caplog.text
+
+
+class _RedisFailingOnce:
+    """A client whose first ``smembers`` is an outage and every later call works."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.failures_left = 1
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    async def smembers(self, name):
+        if self.failures_left:
+            self.failures_left -= 1
+            raise RedisConnectionError("redis is unreachable")
+        return await self._inner.smembers(name)
+
+
+@pytest.mark.asyncio
+async def test_passive_ticker_keeps_ticking_after_a_retention_sweep_failure(
+    redis_client, monkeypatch, caplog
+):
+    await _seed_abandoned_wake_stream(redis_client, "111", 49, 47)
+    failing_once = _RedisFailingOnce(redis_client)
+    monkeypatch.setattr(proactive, "PASSIVE_SECONDS", 0)
+    monkeypatch.setattr(
+        proactive, "runtime", _embedded_runtime(_bot_seeing_guilds(failing_once))
+    )
+
+    with caplog.at_level(logging.ERROR, logger=proactive.logger.name):
+        ticker = asyncio.create_task(proactive._passive_ticker())
+        await asyncio.sleep(0.05)
+    assert not ticker.done()
+    ticker.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await ticker
+
+    assert failing_once.failures_left == 0
+    assert "proactive envelope retention trim failed" in caplog.text
+    assert await _payloads_in(redis_client, wake_stream_key("111")) == [b"aged-47"]

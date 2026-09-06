@@ -25,6 +25,7 @@ from pydantic_ai.messages import (
 
 from smarter_dev.bot.agents.chat_models import Message, MessageAttachment
 from smarter_dev.shared.message_content import (
+    CONTENT_RETENTION_MILLISECONDS,
     CONTENT_RETENTION_WINDOW,
     MESSAGE_CONTENT_PLACEHOLDER,
     oldest_retained_stream_id,
@@ -669,6 +670,12 @@ class TestOldestRetainedStreamId:
 
     def test_the_window_is_forty_eight_hours(self):
         assert CONTENT_RETENTION_WINDOW.total_seconds() == 48 * 60 * 60
+
+    def test_the_millisecond_window_is_the_same_forty_eight_hours(self):
+        assert CONTENT_RETENTION_MILLISECONDS == 48 * 60 * 60 * 1000
+        assert CONTENT_RETENTION_MILLISECONDS == int(
+            CONTENT_RETENTION_WINDOW.total_seconds() * 1000
+        )
 
     def test_rejects_a_naive_datetime(self):
         with pytest.raises(ValueError):

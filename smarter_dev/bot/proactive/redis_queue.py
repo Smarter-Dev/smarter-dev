@@ -1,24 +1,29 @@
 """Redis producer primitives for guild-scoped proactive notifications.
 
-Envelopes carry verbatim Discord message text, so every key that holds them is
-bounded to ``CONTENT_RETENTION_WINDOW``: the wake and shadow streams are
+Envelopes carry verbatim Discord message text, so the keys that hold them are
+bounded by the content retention window where a bound is possible. The wake
+and shadow streams hold no entry written more than the window ago: each is
 trimmed exactly at the cutoff (approximate trimming skips a quiet stream whose
 entries all sit in the open macro node) on every publish and again by
-``trim_expired_envelopes`` on the bot's passive tick, and a claimed batch
-expires at claim time. The pending list is the one exception; see
-``publish``.
+``trim_expired_envelopes`` on the bot's passive tick. A claimed batch expires
+one window after the claim, not after the write, so its envelopes can outlive
+their own write cutoff by up to one more window. The pending list is bounded
+by count only and is the known exception; see ``publish``.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
 
 from smarter_dev.bot.proactive.contracts import NotificationEnvelope
-from smarter_dev.shared.message_content import CONTENT_RETENTION_WINDOW
+from smarter_dev.shared.message_content import CONTENT_RETENTION_MILLISECONDS
 from smarter_dev.shared.message_content import oldest_retained_stream_id
+
+logger = logging.getLogger(__name__)
 
 KEY_PREFIX = "proactive:v1"
 READY_GUILDS_KEY = f"{KEY_PREFIX}:guilds-with-wakes"
@@ -26,7 +31,6 @@ READY_STREAM_KEY = f"{KEY_PREFIX}:ready"
 SHADOW_STREAM_KEY = f"{KEY_PREFIX}:shadow"
 PENDING_LIMIT = 20
 SHADOW_STREAM_MAX_ENTRIES = 10_000
-RETENTION_WINDOW_MILLISECONDS = int(CONTENT_RETENTION_WINDOW.total_seconds() * 1000)
 WAKE_PAYLOAD_FIELD = "payload"
 
 _PUSH_PENDING_LUA = """
@@ -59,8 +63,12 @@ return values
 """
 
 
+def _is_snowflake(guild_id: str) -> bool:
+    return guild_id.isdigit() and len(guild_id) <= 20
+
+
 def _guild_tag(guild_id: str) -> str:
-    if not guild_id.isdigit() or len(guild_id) > 20:
+    if not _is_snowflake(guild_id):
         raise ValueError("guild_id must be a Discord snowflake")
     return f"{{guild:{guild_id}}}"
 
@@ -166,12 +174,18 @@ class RedisNotificationQueue:
         their envelopes until this runs. Visits the wake stream of every guild
         in ``guild_ids`` (the guilds the caller can see) and of every guild the
         ready index still names, so retention does not depend on the worker
-        leaving that index untouched. Returns the number of envelopes dropped.
+        leaving that index untouched. The index is shared with the external
+        worker, so a member that is not a snowflake is skipped with a warning
+        rather than aborting the trim of every well-formed guild. Returns the
+        number of envelopes dropped.
         """
         age_bound = _exact_retention_age_bound()
-        indexed_guild_ids = await self._redis.smembers(READY_GUILDS_KEY)
+        indexed_guild_ids = {
+            _decode(guild_id)
+            for guild_id in await self._redis.smembers(READY_GUILDS_KEY)
+        }
         stream_guild_ids = sorted(
-            {*guild_ids, *(_decode(guild_id) for guild_id in indexed_guild_ids)}
+            {*guild_ids, *_well_formed_guild_ids(indexed_guild_ids)}
         )
         async with self._redis.pipeline(transaction=False) as pipeline:
             for guild_id in stream_guild_ids:
@@ -189,7 +203,7 @@ class RedisNotificationQueue:
             batch_key(guild_id, wake_id),
             pending_dropped_key(guild_id),
             batch_dropped_key(guild_id, wake_id),
-            RETENTION_WINDOW_MILLISECONDS,
+            CONTENT_RETENTION_MILLISECONDS,
         )
         dropped = int(_decode(raw[0]))
         notifications = tuple(
@@ -212,6 +226,18 @@ def _exact_retention_age_bound() -> dict[str, object]:
         "minid": oldest_retained_stream_id(datetime.now(UTC)),
         "approximate": False,
     }
+
+
+def _well_formed_guild_ids(indexed_guild_ids: set[str]) -> set[str]:
+    corrupt_members = {
+        guild_id for guild_id in indexed_guild_ids if not _is_snowflake(guild_id)
+    }
+    for member in sorted(corrupt_members):
+        logger.warning(
+            "proactive ready index member is not a guild snowflake, skipped: %r",
+            member,
+        )
+    return indexed_guild_ids - corrupt_members
 
 
 def _decode(value) -> str:
