@@ -221,7 +221,6 @@
             {% if msg.mentions_bot %}<span class="cc-tag" title="mentions_bot=True">📣 mentioned</span>{% endif %}
             {% if msg.reply_to_is_self %}<span class="cc-tag" title="reply_to_is_self=True">↩ replied to bot</span>{% endif %}
             <span class="cc-tag">msg {{ msg.message_id }}</span>
-            {% if msg.has_attachments %}<span class="cc-tag">📎 attachments (not visible)</span>{% endif %}
         </div>
         <div class="cc-body">{{ msg.body }}</div>
         {% if msg.reactions %}

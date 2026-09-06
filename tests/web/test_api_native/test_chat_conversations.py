@@ -23,6 +23,7 @@ from collections.abc import AsyncIterator
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
@@ -61,6 +62,7 @@ from tests.web.admin_template_rendering import render_admin_template
 
 _GUILD = "123456789012345678"
 _CHANNEL = "555000111222333444"
+_TURN_COST_FIELDS = ("chat_cost_usd", "voice_cost_usd", "summarizer_cost_usd_total")
 
 
 @pytest.fixture
@@ -161,6 +163,92 @@ async def _stored_compaction_events(session) -> list[ChatAgentCompactionEvent]:
     return list(
         (await session.execute(select(ChatAgentCompactionEvent))).scalars().all()
     )
+
+
+def _serialised_triggering_message(**overrides) -> dict:
+    """A triggering message exactly as ``chat_engine`` serialises it."""
+    message = ChatMessage(
+        message_id="444",
+        author_id="333",
+        body="what someone actually said",
+        reactions=["👍"],
+        attachments=[MessageAttachment(url="https://cdn/x.png", filename="x.png")],
+        sent_at=datetime(2026, 7, 26, 12, 0, tzinfo=UTC),
+        mentions_bot=True,
+        reply_to_message_id="443",
+        reply_to_author_id="222",
+        reply_to_is_self=True,
+    )
+    return message.model_dump(mode="json") | overrides
+
+
+def _serialised_model_messages() -> list[dict]:
+    """A pydantic-ai message delta carrying every part kind the agent emits."""
+    return ModelMessagesTypeAdapter.dump_python(
+        [
+            ModelRequest(
+                parts=[
+                    SystemPromptPart(content="you are a bot"),
+                    UserPromptPart(content="what someone actually said"),
+                ]
+            ),
+            ModelResponse(
+                parts=[
+                    TextPart(content="the agent reply"),
+                    ToolCallPart(
+                        tool_name="web_read",
+                        args={"query": "a phrase"},
+                        tool_call_id="c1",
+                    ),
+                ]
+            ),
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(
+                        tool_name="web_read",
+                        content={"messages": ["what someone actually said"]},
+                        tool_call_id="c1",
+                    )
+                ]
+            ),
+        ],
+        mode="json",
+    )
+
+
+def _compaction_event(**overrides) -> dict:
+    """A compaction event exactly as ``chat_compaction`` reports it."""
+    return {
+        "event_kind": "tool_summary",
+        "tool_name": "search",
+        "original_content": "everything the channel said",
+        "summary": "they said hello",
+        "original_chars": 27,
+        "summary_chars": 15,
+    } | overrides
+
+
+def _turn_payload(engagement_id: str, **overrides) -> dict:
+    """A turn-create request body as the bot sends it, required fields filled."""
+    return {
+        "engagement_id": engagement_id,
+        "request_id": "req-turn",
+        "turn_kind": "initial",
+        "output_kind": "send_response",
+        "triggering_messages": [_serialised_triggering_message()],
+        "agent_output": {"topic": "greetings", "notes": "friendly"},
+        "model_messages_delta": _serialised_model_messages(),
+    } | overrides
+
+
+async def _post_turn(client: AsyncClient, engagement, **overrides) -> dict:
+    """POST one turn for ``engagement`` and return the 201 body."""
+    response = await client.post(
+        "/api/chat-conversations/turns",
+        json=_turn_payload(str(engagement.id), **overrides),
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
 
 
 class TestCreateEngagement:
@@ -267,22 +355,13 @@ class TestCreateTurn:
     ):
         engagement = await _seed_engagement(session)
 
-        response = await client.post(
-            "/api/chat-conversations/turns",
-            json={
-                "engagement_id": str(engagement.id),
-                "request_id": "req-1",
-                "turn_kind": "initial",
-                "output_kind": "send_response",
-                "triggering_messages": [{"id": "m1"}],
-                "agent_output": {"topic": "greetings", "notes": "friendly"},
-                "chat_tokens_input": 100,
-                "chat_tokens_output": 50,
-                "chat_reasoning_level": "high",
-            },
+        body = await _post_turn(
+            client,
+            engagement,
+            chat_tokens_input=100,
+            chat_tokens_output=50,
+            chat_reasoning_level="high",
         )
-        assert response.status_code == 201
-        body = response.json()
         assert body["id"]
         # Unknown / absent model → zero cost, serialised as a string.
         assert body["chat_cost_usd"] == "0"
@@ -298,23 +377,46 @@ class TestCreateTurn:
         assert engagement.last_topic == "greetings"
         assert engagement.last_notes == "friendly"
 
+    async def test_unknown_engagement_is_404(self, client: AsyncClient, session):
+        response = await client.post(
+            "/api/chat-conversations/turns",
+            json=_turn_payload(str(uuid4())),
+        )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Engagement not found"
+        assert (await session.execute(select(ChatAgentTurn))).scalars().all() == []
+
+    async def test_replaying_a_request_id_returns_the_first_turn(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+        metered = {
+            "chat_model_name": "kimi-k2.6",
+            "chat_tokens_input": 1000,
+            "chat_tokens_output": 500,
+        }
+
+        first = await _post_turn(client, engagement, **metered)
+        replay = await _post_turn(client, engagement, **metered)
+
+        assert replay["id"] == first["id"]
+        assert replay["started_at"] == first["started_at"]
+        for cost_field in _TURN_COST_FIELDS:
+            assert Decimal(replay[cost_field]) == Decimal(first[cost_field])
+        assert str((await _stored_turn(session)).id) == first["id"]
+        usage_rows = (await session.execute(select(UsageCostRow))).scalars().all()
+        assert len(usage_rows) == 1
+        await session.refresh(engagement)
+        assert engagement.total_chat_tokens_input == 1000
+        assert engagement.total_chat_tokens_output == 500
+
     async def test_reasoning_level_defaults_to_null_when_absent(
         self, client: AsyncClient, session
     ):
         engagement = await _seed_engagement(session)
 
-        response = await client.post(
-            "/api/chat-conversations/turns",
-            json={
-                "engagement_id": str(engagement.id),
-                "request_id": "req-noreason",
-                "turn_kind": "initial",
-                "output_kind": "no_response",
-                "triggering_messages": [],
-                "agent_output": {},
-            },
-        )
-        assert response.status_code == 201
+        await _post_turn(client, engagement, output_kind="no_response")
 
         turn = await _stored_turn(session)
         assert turn.chat_reasoning_level is None
@@ -324,24 +426,15 @@ class TestCreateTurn:
     ):
         engagement = await _seed_engagement(session)
 
-        response = await client.post(
-            "/api/chat-conversations/turns",
-            json={
-                "engagement_id": str(engagement.id),
-                "request_id": "req-cache",
-                "turn_kind": "initial",
-                "output_kind": "send_response",
-                "triggering_messages": [],
-                "agent_output": {"topic": "t"},
-                "chat_tokens_input": 1000,
-                "chat_tokens_output": 500,
-                "chat_model_name": "kimi-k2.6",
-                "chat_cache_read_tokens": 400,
-                "chat_cache_write_tokens": 0,
-            },
+        body = await _post_turn(
+            client,
+            engagement,
+            chat_tokens_input=1000,
+            chat_tokens_output=500,
+            chat_model_name="kimi-k2.6",
+            chat_cache_read_tokens=400,
+            chat_cache_write_tokens=0,
         )
-        assert response.status_code == 201
-        body = response.json()
         # 600 uncached input @0.76 + 500 out @3.20 + 400 cached @0.19, per Mtok.
         assert body["chat_cost_usd"] == "0.002132"
 
@@ -354,22 +447,13 @@ class TestCreateTurn:
     ):
         engagement = await _seed_engagement(session)
 
-        response = await client.post(
-            "/api/chat-conversations/turns",
-            json={
-                "engagement_id": str(engagement.id),
-                "request_id": "req-nocache",
-                "turn_kind": "initial",
-                "output_kind": "send_response",
-                "triggering_messages": [],
-                "agent_output": {"topic": "t"},
-                "chat_tokens_input": 1000,
-                "chat_tokens_output": 500,
-                "chat_model_name": "kimi-k2.6",
-            },
+        body = await _post_turn(
+            client,
+            engagement,
+            chat_tokens_input=1000,
+            chat_tokens_output=500,
+            chat_model_name="kimi-k2.6",
         )
-        assert response.status_code == 201
-        body = response.json()
         # No cache split → full 1000 input @0.76 + 500 out @3.20.
         assert body["chat_cost_usd"] == "0.00236"
 
@@ -382,34 +466,23 @@ class TestCreateTurn:
     ):
         engagement = await _seed_engagement(session)
 
-        response = await client.post(
-            "/api/chat-conversations/turns",
-            json={
-                "engagement_id": str(engagement.id),
-                "request_id": "req-summ-cache",
-                "turn_kind": "followup",
-                "output_kind": "no_response",
-                "triggering_messages": [],
-                "agent_output": {},
-                "compaction_events": [
-                    {
-                        "event_kind": "conversation",
-                        "tool_name": None,
-                        "original_content": "aaaa",
-                        "summary": "a",
-                        "original_chars": 4,
-                        "summary_chars": 1,
-                        "summarizer_tokens_input": 2000,
-                        "summarizer_tokens_output": 100,
-                        "summarizer_model_name": "kimi-k2.6",
-                        "summarizer_cache_read_tokens": 1500,
-                        "summarizer_cache_write_tokens": 0,
-                    }
-                ],
-            },
+        body = await _post_turn(
+            client,
+            engagement,
+            turn_kind="followup",
+            output_kind="no_response",
+            compaction_events=[
+                _compaction_event(
+                    event_kind="conversation",
+                    tool_name=None,
+                    summarizer_tokens_input=2000,
+                    summarizer_tokens_output=100,
+                    summarizer_model_name="kimi-k2.6",
+                    summarizer_cache_read_tokens=1500,
+                    summarizer_cache_write_tokens=0,
+                )
+            ],
         )
-        assert response.status_code == 201
-        body = response.json()
         # 500 uncached @0.76 + 100 out @3.20 + 1500 cached @0.19, per Mtok.
         assert body["summarizer_cost_usd_total"] == "0.000985"
 
@@ -421,61 +494,38 @@ class TestCreateTurn:
     async def test_persists_compaction_events(self, client: AsyncClient, session):
         engagement = await _seed_engagement(session)
 
-        response = await client.post(
-            "/api/chat-conversations/turns",
-            json={
-                "engagement_id": str(engagement.id),
-                "request_id": "req-2",
-                "turn_kind": "followup",
-                "output_kind": "no_response",
-                "triggering_messages": [],
-                "agent_output": {},
-                "compaction_events": [
-                    {
-                        "event_kind": "tool_summary",
-                        "tool_name": "search",
-                        "original_content": "aaaa",
-                        "summary": "a",
-                        "original_chars": 4,
-                        "summary_chars": 1,
-                        "summarizer_reasoning_level": "low",
-                    }
-                ],
-            },
+        await _post_turn(
+            client,
+            engagement,
+            turn_kind="followup",
+            output_kind="no_response",
+            compaction_events=[_compaction_event(summarizer_reasoning_level="low")],
         )
-        assert response.status_code == 201
 
         events = await _stored_compaction_events(session)
         assert len(events) == 1
-        assert events[0].chars_saved == 3
+        assert events[0].chars_saved == 12
         assert events[0].summarizer_reasoning_level == "low"
 
     async def test_captures_blog_topic_candidates(self, client: AsyncClient, session):
         engagement = await _seed_engagement(session)
 
-        response = await client.post(
-            "/api/chat-conversations/turns",
-            json={
-                "engagement_id": str(engagement.id),
-                "request_id": "req-3",
-                "turn_kind": "initial",
-                "output_kind": "send_response",
-                "triggering_messages": [],
-                "agent_output": {
-                    "blog_topic_candidates": [
-                        {
-                            "headline": "A neat pattern",
-                            "observation": "People keep asking the same thing",
-                            "scope": "community",
-                            "evidence": ["msg1", "msg2"],
-                            "category": "trend",
-                        },
-                        {"headline": "", "observation": "dropped — no headline"},
-                    ]
-                },
+        await _post_turn(
+            client,
+            engagement,
+            agent_output={
+                "blog_topic_candidates": [
+                    {
+                        "headline": "A neat pattern",
+                        "observation": "People keep asking the same thing",
+                        "scope": "community",
+                        "evidence": ["msg1", "msg2"],
+                        "category": "trend",
+                    },
+                    {"headline": "", "observation": "dropped — no headline"},
+                ]
             },
         )
-        assert response.status_code == 201
 
         candidates = (await session.execute(select(CandidateBlogTopic))).scalars().all()
         assert len(candidates) == 1
@@ -486,26 +536,13 @@ class TestCreateTurn:
 class TestTurnUsageCostRows:
     """The metering rows a turn files, one per model that billed for it."""
 
-    async def _post_metered_turn(self, client: AsyncClient, engagement, **overrides):
-        payload = {
-            "engagement_id": str(engagement.id),
-            "request_id": "req-usage",
-            "turn_kind": "initial",
-            "output_kind": "send_response",
-            "triggering_messages": [],
-            "agent_output": {},
-        }
-        payload.update(overrides)
-        response = await client.post("/api/chat-conversations/turns", json=payload)
-        assert response.status_code == 201, response.text
-        return response.json()
-
     async def test_chat_model_files_a_primary_row(self, client: AsyncClient, session):
         engagement = await _seed_engagement(session)
 
-        await self._post_metered_turn(
+        await _post_turn(
             client,
             engagement,
+            request_id="req-usage",
             chat_model_name="kimi-k3",
             chat_reasoning_level="high",
             chat_tokens_input=1000,
@@ -535,9 +572,10 @@ class TestTurnUsageCostRows:
     async def test_voice_model_files_a_voice_row(self, client: AsyncClient, session):
         engagement = await _seed_engagement(session)
 
-        await self._post_metered_turn(
+        await _post_turn(
             client,
             engagement,
+            request_id="req-usage",
             voice_model_name="kimi-k3",
             voice_tokens_input=30,
             voice_tokens_output=40,
@@ -561,7 +599,7 @@ class TestTurnUsageCostRows:
     ):
         engagement = await _seed_engagement(session)
 
-        await self._post_metered_turn(
+        await _post_turn(
             client,
             engagement,
             compaction_events=[
@@ -593,9 +631,7 @@ class TestTurnUsageCostRows:
     ):
         engagement = await _seed_engagement(session)
 
-        await self._post_metered_turn(
-            client, engagement, compaction_events=[_compaction_event()]
-        )
+        await _post_turn(client, engagement, compaction_events=[_compaction_event()])
 
         rows = (await session.execute(select(UsageCostRow))).scalars().all()
         assert list(rows) == []
@@ -676,85 +712,6 @@ class TestUsageLeaderboard:
     async def test_missing_guild_id_is_422(self, client: AsyncClient):
         response = await client.get("/api/chat-conversations/usage-leaderboard")
         assert response.status_code == 422
-
-
-def _serialised_triggering_message(**overrides) -> dict:
-    """A triggering message exactly as ``chat_engine`` serialises it."""
-    message = ChatMessage(
-        message_id="444",
-        author_id="333",
-        body="what someone actually said",
-        reactions=["👍"],
-        attachments=[MessageAttachment(url="https://cdn/x.png", filename="x.png")],
-        sent_at=datetime(2026, 7, 26, 12, 0, tzinfo=UTC),
-        mentions_bot=True,
-        reply_to_message_id="443",
-        reply_to_author_id="222",
-        reply_to_is_self=True,
-    )
-    return message.model_dump(mode="json") | overrides
-
-
-def _serialised_model_messages() -> list[dict]:
-    """A pydantic-ai message delta carrying every part kind the agent emits."""
-    return ModelMessagesTypeAdapter.dump_python(
-        [
-            ModelRequest(
-                parts=[
-                    SystemPromptPart(content="you are a bot"),
-                    UserPromptPart(content="what someone actually said"),
-                ]
-            ),
-            ModelResponse(
-                parts=[
-                    TextPart(content="the agent reply"),
-                    ToolCallPart(
-                        tool_name="web_read",
-                        args={"query": "a phrase"},
-                        tool_call_id="c1",
-                    ),
-                ]
-            ),
-            ModelRequest(
-                parts=[
-                    ToolReturnPart(
-                        tool_name="web_read",
-                        content={"messages": ["what someone actually said"]},
-                        tool_call_id="c1",
-                    )
-                ]
-            ),
-        ],
-        mode="json",
-    )
-
-
-def _compaction_event(**overrides) -> dict:
-    """A compaction event exactly as ``chat_compaction`` reports it."""
-    return {
-        "event_kind": "tool_summary",
-        "tool_name": "search",
-        "original_content": "everything the channel said",
-        "summary": "they said hello",
-        "original_chars": 27,
-        "summary_chars": 15,
-    } | overrides
-
-
-async def _post_turn(client: AsyncClient, engagement, **overrides) -> dict:
-    payload = {
-        "engagement_id": str(engagement.id),
-        "request_id": "req-redact",
-        "turn_kind": "initial",
-        "output_kind": "send_response",
-        "triggering_messages": [_serialised_triggering_message()],
-        "agent_output": {"topic": "greetings", "notes": "friendly"},
-        "model_messages_delta": _serialised_model_messages(),
-    }
-    payload.update(overrides)
-    response = await client.post("/api/chat-conversations/turns", json=payload)
-    assert response.status_code == 201, response.text
-    return response.json()
 
 
 class TestTurnStoresPlaceholdersForMessageText:

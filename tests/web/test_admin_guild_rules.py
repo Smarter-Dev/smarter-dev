@@ -25,7 +25,7 @@ from smarter_dev.web.discord_admin_client import DiscordGuildDetail
 from smarter_dev.web.discord_admin_client import GuildNotFoundError
 from smarter_dev.web.guild_rules import parse_guild_rules
 from smarter_dev.web.models import GuildRulesConfig
-from tests.web.admin_template_rendering import TEMPLATES_ROOT
+from tests.web.admin_template_rendering import admin_template_source
 from tests.web.admin_template_rendering import render_admin_template
 
 _GUILD = "111111111111111111"
@@ -323,7 +323,7 @@ def test_rules_template_survives_an_empty_document():
 
 
 def test_sidebar_links_the_guild_rules_page():
-    sidebar = (TEMPLATES_ROOT / "admin" / "bot" / "_sidebar.html").read_text()
+    sidebar = admin_template_source("admin/bot/_sidebar.html")
 
     assert "/rules" in sidebar
     assert "active_page == 'guild_rules'" in sidebar
