@@ -145,8 +145,6 @@ class TestRedactChatAgentMessages:
         assert redact_chat_agent_messages(once) == once
 
     def test_a_help_shaped_dict_keeps_its_content_key(self):
-        # The chat shape is keyed on ``body``; routing a help message through
-        # this function would leave its text in place.
         [redacted] = redact_chat_agent_messages([help_context_message()])
         assert redacted["content"] == "what someone said"
 
@@ -215,6 +213,14 @@ class TestRedactModelMessageParts:
         redacted = redact_model_message_parts(model_messages_dump())
         assert len(list(ModelMessagesTypeAdapter.validate_python(redacted))) == 3
 
+    def test_a_redacted_multimodal_prompt_stays_valid(self):
+        dump = ModelMessagesTypeAdapter.dump_python(
+            [ModelRequest(parts=[UserPromptPart(content=["said this", "and this"])])],
+            mode="json",
+        )
+        redacted = redact_model_message_parts(dump)
+        assert len(list(ModelMessagesTypeAdapter.validate_python(redacted))) == 1
+
 
 class TestRedactHelpContextMessages:
     def test_replaces_the_content(self):
@@ -233,6 +239,12 @@ class TestRedactHelpContextMessages:
     def test_none_becomes_an_empty_list(self):
         assert redact_help_context_messages(None) == []
 
+    def test_a_structured_content_value_becomes_an_empty_container(self):
+        [redacted] = redact_help_context_messages(
+            [help_context_message(content=["a line", "another line"])]
+        )
+        assert redacted["content"] == []
+
     def test_does_not_mutate_its_argument(self):
         original = help_context_message()
         redact_help_context_messages([original])
@@ -243,8 +255,6 @@ class TestRedactHelpContextMessages:
         assert redact_help_context_messages(once) == once
 
     def test_a_chat_shaped_dict_keeps_its_body(self):
-        # The help shape is keyed on ``content``; the chat shape needs the
-        # chat function.
         [redacted] = redact_help_context_messages([chat_message_dict()])
         assert redacted["body"] == "what someone said"
 
@@ -377,6 +387,10 @@ class TestOldestRetainedStreamId:
 
     def test_the_window_is_forty_eight_hours(self):
         assert CONTENT_RETENTION_WINDOW.total_seconds() == 48 * 60 * 60
+
+    def test_rejects_a_naive_datetime(self):
+        with pytest.raises(ValueError):
+            oldest_retained_stream_id(datetime(2026, 7, 26, 12, 0))
 
     def test_moves_forward_with_the_clock(self):
         earlier = datetime(2026, 7, 26, 12, 0, tzinfo=UTC)
