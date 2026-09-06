@@ -39,6 +39,7 @@ from smarter_dev.web.handler_guild_memory import (
 from smarter_dev.web.crud import GuildRulesConfigOperations, ModerationActionOperations
 from smarter_dev.web.guild_rules import parse_guild_rules
 from smarter_dev.web.handler_notify import notify_handler_error
+from smarter_dev.web.handler_run_audit import is_schedule_fire, record_skipped_run
 from smarter_dev.web.handler_schedule import next_fire_at
 from smarter_dev.web.models import AdminHandler, HandlerRun, ModerationAction
 
@@ -98,10 +99,6 @@ async def run_admin_handler_fire(
         return {"status": "disabled"}
 
     handler_id = UUID(payload.admin_handler_id)
-    # The script reads the message it is reacting to, so the runtime gets
-    # payload.trigger_context verbatim; every durable row this fire writes gets
-    # this copy, redacted once here rather than at each construction.
-    audit_trigger_context = redact_trigger_context(payload.trigger_context)
     async with get_db_session_context() as session:
         record = await session.get(AdminHandler, handler_id)
         if record is None or not record.enabled:
@@ -274,8 +271,8 @@ async def run_admin_handler_fire(
             "entered the script; skipping execution so actions aren't duplicated",
             context.job.id,
         )
-        await _record_skipped_run(handler_id, audit_trigger_context)
-        if _is_schedule_fire(trigger_type, payload.trigger_context):
+        await record_skipped_run(handler_id, "admin", payload.trigger_context)
+        if is_schedule_fire(trigger_type, payload.trigger_context):
             await _reschedule(handler_id, handler_settings)
         return {"status": "skipped"}
 
@@ -307,7 +304,7 @@ async def run_admin_handler_fire(
             HandlerRun(
                 handler_id=handler_id,
                 handler_kind="admin",
-                trigger_context=audit_trigger_context,
+                trigger_context=redact_trigger_context(payload.trigger_context),
                 outcome=result.outcome,
                 cap=result.cap,
                 error=result.error,
@@ -354,45 +351,10 @@ async def run_admin_handler_fire(
             error=result.error,
         )
 
-    if _is_schedule_fire(trigger_type, payload.trigger_context):
+    if is_schedule_fire(trigger_type, payload.trigger_context):
         await _reschedule(handler_id, handler_settings)
 
     return {"status": result.outcome, "cap": result.cap}
-
-
-def _is_schedule_fire(trigger_type: str, trigger_context: dict) -> bool:
-    """Whether this fire is the one that owns re-arming the recurring chain.
-
-    Only a genuine scheduled fire re-arms. A schedule handler that self-arms a
-    schedule_timer re-fires with trigger_type "timer" in its context; that
-    re-fire must NOT re-enter ``_reschedule`` or it forks a duplicate perpetual
-    chain and clobbers scheduled_job_id (orphaning the original chain's job so
-    disable/update can no longer cancel it).
-    """
-    return trigger_type == "schedule" and trigger_context.get("trigger_type") != "timer"
-
-
-async def _record_skipped_run(handler_id: UUID, audit_trigger_context: dict) -> None:
-    """Audit a retry that declined to re-run an already-started admin script.
-
-    Takes the redacted context the fire built, not the verbatim one the script
-    would have run against.
-    """
-    async with get_db_session_context() as session:
-        session.add(
-            HandlerRun(
-                handler_id=handler_id,
-                handler_kind="admin",
-                trigger_context=audit_trigger_context,
-                outcome="skipped",
-                error=(
-                    "retry of a fire whose script had already started; skipped to "
-                    "avoid duplicate side effects"
-                ),
-                finished_at=datetime.now(timezone.utc),
-            )
-        )
-        await session.commit()
 
 
 async def _reschedule(handler_id: UUID, handler_settings: dict) -> None:

@@ -514,6 +514,21 @@ class TestRedactTriggerContext:
             "dm_channel_id": "555",
         }
 
+    def test_empties_a_script_authored_timer_payload(self):
+        # A handler script chooses what it carries across a schedule_timer, so
+        # the payload it built may quote the message the fire was reacting to.
+        assert redact_trigger_context(
+            {
+                "trigger_type": "timer",
+                "payload": {"user_id": "333", "quote": "what someone said"},
+                "scheduled_at": "2026-09-06T12:00:00+00:00",
+            }
+        ) == {
+            "trigger_type": "timer",
+            "payload": {},
+            "scheduled_at": "2026-09-06T12:00:00+00:00",
+        }
+
     def test_covers_unknown_keys_following_the_content_convention(self):
         # A trigger type added later gets covered without touching this module.
         assert redact_trigger_context(

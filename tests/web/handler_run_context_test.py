@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 import smarter_dev.web.admin_handlers_jobs as admin_handlers_jobs
 import smarter_dev.web.handler_agent as handler_agent
+import smarter_dev.web.handler_run_audit as handler_run_audit
 import smarter_dev.web.handler_runtime as handler_runtime
 import smarter_dev.web.handlers_jobs as handlers_jobs
 from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
@@ -54,12 +55,18 @@ MESSAGE_TRIGGER_CONTEXT = {
     "is_bot": False,
 }
 
+# The shape HandlerRuntime._schedule_timer builds: the payload under it is
+# whatever the script chose to carry, so it may quote the triggering message.
 TIMER_REFIRE_CONTEXT = {
     "trigger_type": "timer",
-    "message_id": "M1",
-    "author_id": "U1",
-    "strike_count": 3,
-    "escalate": True,
+    "payload": {"user_id": "U1", "quote": "the plaintext nobody may keep"},
+    "scheduled_at": "2026-09-06T12:00:00+00:00",
+}
+
+TIMERLESS_PAYLOAD_REFIRE_CONTEXT = {
+    "trigger_type": "timer",
+    "payload": {},
+    "scheduled_at": "2026-09-06T12:00:00+00:00",
 }
 
 
@@ -110,6 +117,9 @@ def _patch_job(module, monkeypatch, engine, captured, *, claim_granted=True):
         lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
     )
     monkeypatch.setattr(module, "get_db_session_context", _SessionCtx(engine))
+    monkeypatch.setattr(
+        handler_run_audit, "get_db_session_context", _SessionCtx(engine)
+    )
     monkeypatch.setattr(module, "get_redis_client", lambda: object())
     monkeypatch.setattr(module, "WindowedLimiter", lambda **kwargs: object())
 
@@ -232,10 +242,22 @@ async def test_the_script_still_runs_against_the_verbatim_context(
 async def test_timer_refire_context_without_message_text_is_stored_unchanged(
     monkeypatch, test_engine, fire
 ):
-    stored = (await fire(test_engine, monkeypatch, dict(TIMER_REFIRE_CONTEXT)))[
-        "run"
-    ].trigger_context
-    assert stored == TIMER_REFIRE_CONTEXT
+    stored = (
+        await fire(test_engine, monkeypatch, dict(TIMERLESS_PAYLOAD_REFIRE_CONTEXT))
+    )["run"].trigger_context
+    assert stored == TIMERLESS_PAYLOAD_REFIRE_CONTEXT
+
+
+@pytest.mark.parametrize("fire", [_fire_standard, _fire_admin])
+async def test_timer_refire_stores_when_it_fired_but_not_what_it_carried(
+    monkeypatch, test_engine, fire
+):
+    captured = await fire(test_engine, monkeypatch, dict(TIMER_REFIRE_CONTEXT))
+    stored = captured["run"].trigger_context
+    assert stored["trigger_type"] == "timer"
+    assert stored["scheduled_at"] == TIMER_REFIRE_CONTEXT["scheduled_at"]
+    assert stored["payload"] == {}
+    assert captured["context"]["payload"] == TIMER_REFIRE_CONTEXT["payload"]
 
 
 @pytest.mark.parametrize("fire", [_fire_standard, _fire_admin])
