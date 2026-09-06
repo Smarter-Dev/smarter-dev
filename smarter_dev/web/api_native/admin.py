@@ -57,6 +57,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from skrift.auth.guards import APIKeyOnly, Permission
 
+from smarter_dev.shared.message_content import (
+    redact_help_context_messages,
+    redact_help_question,
+)
 from smarter_dev.web.api_native.schemas import (
     HelpConversationCreate,
     HelpConversationCreateResponse,
@@ -105,7 +109,13 @@ class AdminController(Controller):
         db_session: AsyncSession,
         data: HelpConversationCreate,
     ) -> HelpConversationCreateResponse:
-        """Store a help-agent conversation record (bot write path)."""
+        """Store a help-agent conversation record (bot write path).
+
+        The member's own Discord text is redacted before the row exists: the
+        channel scrape in ``context_messages`` always, and ``user_question``
+        unless the member typed it at the bot as a slash-command argument.
+        The bot's own answer is kept.
+        """
         caller = await resolve_request_api_key(request)
         try:
             conversation = HelpConversation(
@@ -115,8 +125,10 @@ class AdminController(Controller):
                 user_id=data.user_id,
                 user_username=data.user_username,
                 interaction_type=data.interaction_type,
-                context_messages=data.context_messages,
-                user_question=data.user_question,
+                context_messages=redact_help_context_messages(data.context_messages),
+                user_question=redact_help_question(
+                    data.user_question, data.interaction_type
+                ),
                 bot_response=data.bot_response,
                 tokens_used=data.tokens_used,
                 response_time_ms=data.response_time_ms,
