@@ -31,7 +31,7 @@ CONTENT_RETENTION_WINDOW: timedelta = timedelta(hours=48)
 
 _CHAT_MESSAGE_CONTENT_KEYS = frozenset({"body", "attachments"})
 
-_HELP_MESSAGE_CONTENT_KEYS = frozenset({"content"})
+_HELP_PRESERVED_KEYS = frozenset({"author", "timestamp"})
 
 _HUMAN_TEXT_PART_KINDS = frozenset({"user-prompt", "tool-return"})
 
@@ -65,22 +65,22 @@ def _redact_value(value: Any) -> Any:
     return value
 
 
-def _redact_mapping(mapping: dict, is_content_key: Callable[[str], bool]) -> dict:
+def _redact_mapping(mapping: dict, carries_message_text: Callable[[str], bool]) -> dict:
     return {
-        key: _redact_value(value) if is_content_key(key) else value
+        key: _redact_value(value) if carries_message_text(key) else value
         for key, value in mapping.items()
     }
 
 
-def _is_chat_message_content_key(key: str) -> bool:
+def _carries_chat_message_text(key: str) -> bool:
     return key in _CHAT_MESSAGE_CONTENT_KEYS
 
 
-def _is_help_message_content_key(key: str) -> bool:
-    return key in _HELP_MESSAGE_CONTENT_KEYS
+def _carries_help_message_text(key: str) -> bool:
+    return key not in _HELP_PRESERVED_KEYS
 
 
-def _is_handler_content_key(key: str) -> bool:
+def _carries_handler_message_text(key: str) -> bool:
     return key in _HANDLER_CONTENT_KEYS or key.endswith("_content")
 
 
@@ -102,7 +102,7 @@ def redact_chat_agent_messages(messages: list[dict] | None) -> list[dict]:
     view renders around the message body.
     """
     return [
-        _redact_mapping(message, _is_chat_message_content_key)
+        _redact_mapping(message, _carries_chat_message_text)
         for message in messages or []
     ]
 
@@ -126,10 +126,11 @@ def redact_model_message_parts(messages: list[dict] | None) -> list[dict] | None
 def redact_help_context_messages(messages: list[dict] | None) -> list[dict]:
     """Redact the channel scrape a help conversation was answered against.
 
-    Keeps each message's author and timestamp.
+    Keeps each message's author and timestamp and nothing else, so a key added
+    upstream carries a placeholder rather than what somebody said.
     """
     return [
-        _redact_mapping(message, _is_help_message_content_key)
+        _redact_mapping(message, _carries_help_message_text)
         for message in messages or []
     ]
 
@@ -151,7 +152,7 @@ def redact_trigger_context(context: dict) -> dict:
     Ids, flags, counts, role lists and timestamps stay, so the run still shows
     which trigger fired, in which channel, for whom.
     """
-    return _redact_mapping(context, _is_handler_content_key)
+    return _redact_mapping(context, _carries_handler_message_text)
 
 
 def oldest_retained_stream_id(now: datetime) -> str:

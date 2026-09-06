@@ -148,6 +148,23 @@ class TestRedactChatAgentMessages:
         [redacted] = redact_chat_agent_messages([help_context_message()])
         assert redacted["content"] == "what someone said"
 
+    def test_the_serialised_shape_has_not_drifted(self):
+        # A field added to chat_models.Message reaches chat_agent_turns
+        # verbatim unless it is redacted here, so adding one must fail this
+        # test and force that decision.
+        assert set(chat_message_dict()) == {
+            "message_id",
+            "author_id",
+            "reply_to_message_id",
+            "reply_to_author_id",
+            "reply_to_is_self",
+            "body",
+            "reactions",
+            "attachments",
+            "sent_at",
+            "mentions_bot",
+        }
+
 
 class TestRedactModelMessageParts:
     def test_replaces_user_prompt_content(self):
@@ -254,9 +271,17 @@ class TestRedactHelpContextMessages:
         once = redact_help_context_messages([help_context_message()])
         assert redact_help_context_messages(once) == once
 
-    def test_a_chat_shaped_dict_keeps_its_body(self):
+    def test_redacts_a_key_the_help_plugins_add_later(self):
+        # Only author and timestamp are kept, so a new key carries a
+        # placeholder into storage instead of what somebody said.
+        [redacted] = redact_help_context_messages(
+            [help_context_message(reply_to_content="what someone else said")]
+        )
+        assert redacted["reply_to_content"] == MESSAGE_CONTENT_PLACEHOLDER
+
+    def test_a_chat_shaped_dict_loses_its_body(self):
         [redacted] = redact_help_context_messages([chat_message_dict()])
-        assert redacted["body"] == "what someone said"
+        assert redacted["body"] == MESSAGE_CONTENT_PLACEHOLDER
 
 
 class TestRedactHelpQuestion:
