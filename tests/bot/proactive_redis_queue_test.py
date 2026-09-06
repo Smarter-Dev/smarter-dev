@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import NamedTuple
 from uuid import UUID
 
 import pytest
@@ -19,6 +21,7 @@ from smarter_dev.bot.proactive.notifications import Notification
 from smarter_dev.bot.proactive.redis_queue import READY_GUILDS_KEY
 from smarter_dev.bot.proactive.redis_queue import READY_STREAM_KEY
 from smarter_dev.bot.proactive.redis_queue import SHADOW_STREAM_KEY
+from smarter_dev.bot.proactive.redis_queue import SHADOW_STREAM_MAX_ENTRIES
 from smarter_dev.bot.proactive.redis_queue import RedisNotificationQueue
 from smarter_dev.bot.proactive.redis_queue import ownership_key
 from smarter_dev.bot.proactive.redis_queue import pending_key
@@ -264,9 +267,31 @@ def test_runtime_rejects_unknown_execution_mode():
         )
 
 
-def _stream_id_for_age(hours: float) -> str:
+def _stream_id_for_age(hours: int) -> str:
     aged = datetime.now(UTC) - timedelta(hours=hours)
     return f"{int(aged.timestamp() * 1000)}-0"
+
+
+async def _seed_abandoned_wake_stream(redis_client, guild_id: str, *ages: int) -> None:
+    """A registered guild whose stream ages with no further publish to trim it."""
+    for hours in ages:
+        await redis_client.xadd(
+            wake_stream_key(guild_id),
+            {"payload": f"aged-{hours}".encode()},
+            id=_stream_id_for_age(hours),
+        )
+    await redis_client.sadd(READY_GUILDS_KEY, guild_id)
+
+
+async def _payloads_in(redis_client, stream_key: str) -> list[bytes]:
+    return [fields[b"payload"] for _, fields in await redis_client.xrange(stream_key)]
+
+
+class _StreamWrite(NamedTuple):
+    command: str
+    key: str
+    kwargs: dict
+    via_pipeline: bool
 
 
 class _RecordingPipeline:
@@ -285,31 +310,33 @@ class _RecordingPipeline:
         return await self._inner.__aexit__(*exc_info)
 
     def xadd(self, name, fields, **kwargs):
-        self._recorder.stream_writes.append(("xadd", name, kwargs))
+        self._recorder.record("xadd", name, kwargs, via_pipeline=True)
         return self._inner.xadd(name, fields, **kwargs)
 
     def xtrim(self, name, **kwargs):
-        self._recorder.stream_writes.append(("xtrim", name, kwargs))
+        self._recorder.record("xtrim", name, kwargs, via_pipeline=True)
         return self._inner.xtrim(name, **kwargs)
 
 
 class _RecordingRedis:
     def __init__(self, inner):
         self._inner = inner
-        self.stream_writes: list[tuple[str, str, dict]] = []
-        self.direct_calls: list[tuple[str, str]] = []
+        self.stream_writes: list[_StreamWrite] = []
 
     def __getattr__(self, name):
         return getattr(self._inner, name)
 
+    def record(self, command: str, name, kwargs: dict, *, via_pipeline: bool) -> None:
+        self.stream_writes.append(
+            _StreamWrite(command, _decode_key(name), kwargs, via_pipeline)
+        )
+
     async def xadd(self, name, fields, **kwargs):
-        self.stream_writes.append(("xadd", name, kwargs))
-        self.direct_calls.append(("xadd", _decode_key(name)))
+        self.record("xadd", name, kwargs, via_pipeline=False)
         return await self._inner.xadd(name, fields, **kwargs)
 
     async def xtrim(self, name, **kwargs):
-        self.stream_writes.append(("xtrim", name, kwargs))
-        self.direct_calls.append(("xtrim", _decode_key(name)))
+        self.record("xtrim", name, kwargs, via_pipeline=False)
         return await self._inner.xtrim(name, **kwargs)
 
     def pipeline(self, transaction=True):
@@ -319,9 +346,7 @@ class _RecordingRedis:
 
     def stream_write_kwargs_for(self, stream_key: str) -> list[dict]:
         return [
-            kwargs
-            for _, name, kwargs in self.stream_writes
-            if _decode_key(name) == stream_key
+            write.kwargs for write in self.stream_writes if write.key == stream_key
         ]
 
 
@@ -347,7 +372,7 @@ async def test_publish_trims_wake_entries_past_the_retention_window(redis_client
 
     await queue.publish(_envelope(guild_id="111", wakes=True, kind="mention"))
 
-    bodies = [fields[b"payload"] for _, fields in await redis_client.xrange(stream)]
+    bodies = await _payloads_in(redis_client, stream)
     assert b"expired" not in bodies
     assert b"retained" in bodies
     assert len(bodies) == 2
@@ -365,8 +390,7 @@ async def test_publish_shadow_trims_entries_past_the_retention_window(redis_clie
 
     await queue.publish_shadow(_envelope(guild_id="111", wakes=True, kind="mention"))
 
-    entries = await redis_client.xrange(SHADOW_STREAM_KEY)
-    bodies = [fields[b"payload"] for _, fields in entries]
+    bodies = await _payloads_in(redis_client, SHADOW_STREAM_KEY)
     assert b"expired" not in bodies
     assert b"retained" in bodies
     assert len(bodies) == 2
@@ -401,7 +425,10 @@ async def test_publish_shadow_keeps_its_count_bound_and_adds_the_age_bound(
     after = datetime.now(UTC)
 
     bounds = recording.stream_write_kwargs_for(SHADOW_STREAM_KEY)
-    assert [kwargs.get("maxlen") for kwargs in bounds] == [10_000, None]
+    assert [kwargs.get("maxlen") for kwargs in bounds] == [
+        SHADOW_STREAM_MAX_ENTRIES,
+        None,
+    ]
     count_bound = next(kwargs for kwargs in bounds if kwargs.get("maxlen"))
     assert count_bound["approximate"] is True
     age_bound = next(kwargs for kwargs in bounds if kwargs.get("minid"))
@@ -409,23 +436,6 @@ async def test_publish_shadow_keeps_its_count_bound_and_adds_the_age_bound(
     _assert_minid_is_the_retention_cutoff(
         age_bound["minid"], before=before, after=after
     )
-
-
-@pytest.mark.asyncio
-async def test_age_bound_is_exact_so_a_quiet_stream_is_still_trimmed(redis_client):
-    recording = _RecordingRedis(redis_client)
-    queue = RedisNotificationQueue(recording)
-
-    await queue.publish(_envelope(guild_id="111", wakes=True, kind="mention"))
-    await queue.publish_shadow(_envelope(guild_id="111", wakes=True, kind="mention"))
-
-    age_bounds = [
-        kwargs
-        for _, _, kwargs in recording.stream_writes
-        if kwargs.get("minid")
-    ]
-    assert len(age_bounds) == 2
-    assert [kwargs["approximate"] for kwargs in age_bounds] == [False, False]
 
 
 @pytest.mark.asyncio
@@ -437,14 +447,14 @@ async def test_publish_shadow_bounds_and_adds_in_one_round_trip(redis_client):
         _envelope(guild_id="111", wakes=True, kind="mention")
     )
 
-    assert recording.direct_calls == []
+    assert all(write.via_pipeline for write in recording.stream_writes)
     assert await redis_client.xlen(SHADOW_STREAM_KEY) == 1
     entries = await redis_client.xrange(SHADOW_STREAM_KEY)
     assert _decode_key(entries[0][0]) == stream_id
 
 
 @pytest.mark.asyncio
-async def test_ready_stream_of_guild_ids_is_never_trimmed_by_age(redis_client):
+async def test_ready_stream_of_guild_ids_carries_no_age_bound(redis_client):
     recording = _RecordingRedis(redis_client)
     queue = RedisNotificationQueue(recording)
     await redis_client.xadd(
@@ -453,7 +463,7 @@ async def test_ready_stream_of_guild_ids_is_never_trimmed_by_age(redis_client):
 
     await queue.publish(_envelope(guild_id="111", wakes=True, kind="mention"))
 
-    assert recording.stream_write_kwargs_for(READY_STREAM_KEY) == [{}]
+    assert "minid" not in recording.stream_write_kwargs_for(READY_STREAM_KEY)[0]
     assert await redis_client.xlen(READY_STREAM_KEY) == 2
 
 
@@ -466,3 +476,134 @@ async def test_publish_without_a_wake_issues_no_stream_trim(redis_client):
 
     assert recording.stream_writes == []
     assert await redis_client.llen(pending_key("111")) == 1
+
+
+@pytest.mark.asyncio
+async def test_trim_expired_envelopes_clears_streams_no_publish_reaches(redis_client):
+    queue = RedisNotificationQueue(redis_client)
+    await _seed_abandoned_wake_stream(redis_client, "111", 49, 47)
+    await _seed_abandoned_wake_stream(redis_client, "222", 72)
+
+    dropped = await queue.trim_expired_envelopes()
+
+    assert await _payloads_in(redis_client, wake_stream_key("111")) == [b"aged-47"]
+    assert await _payloads_in(redis_client, wake_stream_key("222")) == []
+    assert dropped == 2
+
+
+@pytest.mark.asyncio
+async def test_trim_expired_envelopes_bounds_the_shadow_stream_after_shadow_mode_ends(
+    redis_client,
+):
+    queue = RedisNotificationQueue(redis_client)
+    await redis_client.xadd(
+        SHADOW_STREAM_KEY, {"payload": b"expired"}, id=_stream_id_for_age(49)
+    )
+    await redis_client.xadd(
+        SHADOW_STREAM_KEY, {"payload": b"retained"}, id=_stream_id_for_age(47)
+    )
+
+    await queue.trim_expired_envelopes()
+
+    assert await _payloads_in(redis_client, SHADOW_STREAM_KEY) == [b"retained"]
+
+
+@pytest.mark.asyncio
+async def test_trim_expired_envelopes_leaves_ready_signals_and_the_guild_index(
+    redis_client,
+):
+    queue = RedisNotificationQueue(redis_client)
+    await _seed_abandoned_wake_stream(redis_client, "111", 49)
+    await redis_client.xadd(
+        READY_STREAM_KEY, {"guild_id": b"111"}, id=_stream_id_for_age(200)
+    )
+
+    await queue.trim_expired_envelopes()
+
+    assert await redis_client.xlen(READY_STREAM_KEY) == 1
+    assert await redis_client.smembers(READY_GUILDS_KEY) == {b"111"}
+
+
+@pytest.mark.asyncio
+async def test_trim_expired_envelopes_bounds_every_stream_at_the_exact_cutoff(
+    redis_client,
+):
+    await _seed_abandoned_wake_stream(redis_client, "111", 49)
+    recording = _RecordingRedis(redis_client)
+    queue = RedisNotificationQueue(recording)
+
+    before = datetime.now(UTC)
+    await queue.trim_expired_envelopes()
+    after = datetime.now(UTC)
+
+    assert [write.key for write in recording.stream_writes] == [
+        wake_stream_key("111"),
+        SHADOW_STREAM_KEY,
+    ]
+    for write in recording.stream_writes:
+        assert write.command == "xtrim"
+        assert write.kwargs["approximate"] is False
+        _assert_minid_is_the_retention_cutoff(
+            write.kwargs["minid"], before=before, after=after
+        )
+
+
+@pytest.mark.asyncio
+async def test_trim_expired_envelopes_tolerates_a_guild_whose_stream_is_gone(
+    redis_client,
+):
+    queue = RedisNotificationQueue(redis_client)
+    await redis_client.sadd(READY_GUILDS_KEY, "111")
+
+    assert await queue.trim_expired_envelopes() == 0
+
+
+def _embedded_runtime(redis_client) -> proactive.ProactiveRuntime:
+    return proactive.ProactiveRuntime(
+        SimpleNamespace(d={"chat_memory_redis": redis_client}),
+        start_consumers=False,
+        execution_mode=proactive.EMBEDDED_EXECUTION_MODE,
+    )
+
+
+@pytest.mark.asyncio
+async def test_passive_tick_trims_streams_that_stopped_receiving_publishes(
+    redis_client, monkeypatch
+):
+    await _seed_abandoned_wake_stream(redis_client, "111", 49, 47)
+    monkeypatch.setattr(proactive, "PASSIVE_SECONDS", 0)
+    monkeypatch.setattr(proactive, "runtime", _embedded_runtime(redis_client))
+
+    ticker = asyncio.create_task(proactive._passive_ticker())
+    await asyncio.sleep(0.05)
+    ticker.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await ticker
+
+    assert await _payloads_in(redis_client, wake_stream_key("111")) == [b"aged-47"]
+
+
+@pytest.mark.asyncio
+async def test_retention_trim_is_skipped_when_redis_is_unconfigured():
+    run = proactive.ProactiveRuntime(
+        SimpleNamespace(d={}),
+        start_consumers=False,
+        execution_mode=proactive.EMBEDDED_EXECUTION_MODE,
+    )
+
+    assert await proactive._sweep_expired_envelopes(run) is None
+
+
+@pytest.mark.asyncio
+async def test_a_redis_outage_during_the_retention_trim_keeps_the_ticker_alive():
+    class _UnreachableRedis:
+        async def smembers(self, name):
+            raise ConnectionError("redis is unreachable")
+
+    run = proactive.ProactiveRuntime(
+        SimpleNamespace(d={"chat_memory_redis": _UnreachableRedis()}),
+        start_consumers=False,
+        execution_mode=proactive.EMBEDDED_EXECUTION_MODE,
+    )
+
+    assert await proactive._sweep_expired_envelopes(run) is None

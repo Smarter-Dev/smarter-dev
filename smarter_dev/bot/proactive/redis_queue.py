@@ -113,8 +113,7 @@ class RedisNotificationQueue:
             pipeline.xadd(
                 wake_stream_key(envelope.guild_id),
                 {WAKE_PAYLOAD_FIELD: payload},
-                minid=_oldest_retained_envelope_id(),
-                approximate=False,
+                **_exact_retention_age_bound(),
             )
             pipeline.sadd(READY_GUILDS_KEY, envelope.guild_id)
             pipeline.xadd(
@@ -136,13 +135,24 @@ class RedisNotificationQueue:
                 maxlen=SHADOW_STREAM_MAX_ENTRIES,
                 approximate=True,
             )
-            pipeline.xtrim(
-                SHADOW_STREAM_KEY,
-                minid=_oldest_retained_envelope_id(),
-                approximate=False,
-            )
+            pipeline.xtrim(SHADOW_STREAM_KEY, **_exact_retention_age_bound())
             stream_id, _ = await pipeline.execute()
         return _decode(stream_id)
+
+    async def trim_expired_envelopes(self) -> int:
+        """Drop past-window envelopes from every stream no publish still reaches.
+
+        A publish only bounds the stream it writes, so a guild whose last wake
+        was its final one, and the shadow stream after canary mode ends, keep
+        their envelopes until this runs.
+        """
+        age_bound = _exact_retention_age_bound()
+        guild_ids = await self._redis.smembers(READY_GUILDS_KEY)
+        async with self._redis.pipeline(transaction=False) as pipeline:
+            for guild_id in guild_ids:
+                pipeline.xtrim(wake_stream_key(_decode(guild_id)), **age_bound)
+            pipeline.xtrim(SHADOW_STREAM_KEY, **age_bound)
+            return sum(await pipeline.execute())
 
     async def claim_pending(self, guild_id: str, wake_id: str) -> ClaimedPending:
         raw = await self._redis.eval(
@@ -167,14 +177,13 @@ class RedisNotificationQueue:
         )
 
 
-def _oldest_retained_envelope_id() -> str:
-    """The exact stream id below which an envelope is past the retention window.
-
-    Consumed with ``approximate=False``: Redis only trims approximately when it
-    can drop a whole macro node, so a quiet guild whose entries all sit in the
-    open head node would keep verbatim message text forever.
-    """
-    return oldest_retained_stream_id(datetime.now(UTC))
+def _exact_retention_age_bound() -> dict[str, object]:
+    """Approximate trimming only drops whole macro nodes, so it spares a quiet
+    stream whose entries all sit in the open head node."""
+    return {
+        "minid": oldest_retained_stream_id(datetime.now(UTC)),
+        "approximate": False,
+    }
 
 
 def _decode(value) -> str:
