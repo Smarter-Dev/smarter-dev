@@ -22,7 +22,6 @@ from collections.abc import AsyncIterator
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
-from datetime import timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -469,7 +468,7 @@ class TestUsageLeaderboard:
                 output_kind="send_response",
                 triggering_messages=[],
                 agent_output={},
-                started_at=started_at or datetime.now(timezone.utc),
+                started_at=started_at or datetime.now(UTC),
                 chat_tokens_input=tokens_in,
                 chat_tokens_output=tokens_out,
             )
@@ -502,7 +501,7 @@ class TestUsageLeaderboard:
 
     async def test_excludes_turns_outside_window(self, client: AsyncClient, session):
         engagement = await _seed_engagement(session, channel_id="C1")
-        old = datetime.now(timezone.utc) - timedelta(days=10)
+        old = datetime.now(UTC) - timedelta(days=10)
         await self._seed_turn(session, engagement, 999, 999, started_at=old)
         await self._seed_turn(session, engagement, 100, 0)
 
@@ -565,7 +564,7 @@ def _serialised_model_messages() -> list[dict]:
                 parts=[
                     TextPart(content="the agent reply"),
                     ToolCallPart(
-                        tool_name="search",
+                        tool_name="web_read",
                         args={"query": "a phrase"},
                         tool_call_id="c1",
                     ),
@@ -574,7 +573,7 @@ def _serialised_model_messages() -> list[dict]:
             ModelRequest(
                 parts=[
                     ToolReturnPart(
-                        tool_name="search",
+                        tool_name="web_read",
                         content={"messages": ["what someone actually said"]},
                         tool_call_id="c1",
                     )
@@ -583,6 +582,18 @@ def _serialised_model_messages() -> list[dict]:
         ],
         mode="json",
     )
+
+
+def _compaction_event(**overrides) -> dict:
+    """A compaction event exactly as ``chat_compaction`` reports it."""
+    return {
+        "event_kind": "tool_summary",
+        "tool_name": "search",
+        "original_content": "everything the channel said",
+        "summary": "they said hello",
+        "original_chars": 27,
+        "summary_chars": 15,
+    } | overrides
 
 
 async def _post_turn(client: AsyncClient, engagement, **overrides) -> dict:
@@ -701,10 +712,10 @@ class TestTurnDeltaRedaction:
         ]
         by_kind = {part["part_kind"]: part for part in parts}
         assert by_kind["text"]["content"] == "the agent reply"
-        assert by_kind["tool-call"]["tool_name"] == "search"
+        assert by_kind["tool-call"]["tool_name"] == "web_read"
         assert by_kind["tool-call"]["args"] == {"query": "a phrase"}
         assert by_kind["system-prompt"]["content"] == "you are a bot"
-        assert by_kind["tool-return"]["tool_name"] == "search"
+        assert by_kind["tool-return"]["tool_name"] == "web_read"
 
     async def test_absent_delta_stays_null(self, client: AsyncClient, session):
         engagement = await _seed_engagement(session)
@@ -724,14 +735,7 @@ class TestCompactionEventRedaction:
             client,
             engagement,
             compaction_events=[
-                {
-                    "event_kind": "tool_summary",
-                    "tool_name": "search",
-                    "original_content": "everything the channel said",
-                    "summary": "they said hello",
-                    "original_chars": 27,
-                    "summary_chars": 15,
-                }
+                _compaction_event()
             ],
         )
 
@@ -755,14 +759,12 @@ class TestCompactionEventRedaction:
             client,
             engagement,
             compaction_events=[
-                {
-                    "event_kind": "tool_summary",
-                    "tool_name": "search",
-                    "original_content": "",
-                    "summary": "nothing to say",
-                    "original_chars": 0,
-                    "summary_chars": 14,
-                }
+                _compaction_event(
+                    original_content="",
+                    summary="nothing to say",
+                    original_chars=0,
+                    summary_chars=14,
+                )
             ],
         )
 
@@ -781,14 +783,7 @@ class TestDetailTemplateRendersRedactedRows:
             client,
             engagement,
             compaction_events=[
-                {
-                    "event_kind": "tool_summary",
-                    "tool_name": "search",
-                    "original_content": "everything the channel said",
-                    "summary": "they said hello",
-                    "original_chars": 27,
-                    "summary_chars": 15,
-                }
+                _compaction_event()
             ],
         )
         turn = (
@@ -806,10 +801,13 @@ class TestDetailTemplateRendersRedactedRows:
         assert "everything the channel said" not in html
         assert "they said hello" in html
         assert "search" in html
+        assert "web_read" in html
         assert "returned 2 chars" in html
 
 
-def _render_detail_template(**context) -> str:
+def _render_detail_template(
+    engagement: ChatAgentEngagement, turns: list[ChatAgentTurn]
+) -> str:
     """Render the real admin detail template with its layout stubbed out."""
     environment = Environment(  # nosemgrep: python.flask.security.xss.audit.direct-use-of-jinja2.direct-use-of-jinja2
         loader=ChoiceLoader(
@@ -822,5 +820,5 @@ def _render_detail_template(**context) -> str:
     )
     environment.globals.update(site_name=lambda: "Smarter Dev", csp_nonce=lambda: "n")
     return environment.get_template("admin/chat-conversations/detail.html").render(
-        **context
+        engagement=engagement, turns=turns
     )
