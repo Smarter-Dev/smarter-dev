@@ -9,54 +9,49 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock
+from unittest.mock import Mock
+from unittest.mock import patch
 
 import pytest
+from skrift.auth.guards import Permission
+from skrift.auth.guards import auth_guard
 
-from skrift.auth.guards import Permission, auth_guard
-
+from smarter_dev.web.bot_admin.guild_configs import DISCORD_MAX_TIMEOUT_SECONDS
+from smarter_dev.web.bot_admin.guild_configs import ConfigFormError
+from smarter_dev.web.bot_admin.guild_configs import GuildConfigsAdminController
+from smarter_dev.web.bot_admin.guild_configs import InvalidChannelError
+from smarter_dev.web.bot_admin.guild_configs import InvalidDomainError
+from smarter_dev.web.bot_admin.guild_configs import InvalidRoleError
+from smarter_dev.web.bot_admin.guild_configs import InvalidThresholdError
+from smarter_dev.web.bot_admin.guild_configs import ThresholdCeiling
+from smarter_dev.web.bot_admin.guild_configs import load_or_create_advent_config
+from smarter_dev.web.bot_admin.guild_configs import load_or_create_attachment_config
+from smarter_dev.web.bot_admin.guild_configs import load_or_create_audit_config
 from smarter_dev.web.bot_admin.guild_configs import (
-    DISCORD_MAX_TIMEOUT_SECONDS,
-    ConfigFormError,
-    GuildConfigsAdminController,
-    InvalidChannelError,
-    InvalidDomainError,
-    InvalidRoleError,
-    InvalidThresholdError,
-    load_or_create_advent_config,
-    load_or_create_attachment_config,
-    load_or_create_audit_config,
     load_or_create_moderation_filter_config,
-    parse_advent_of_code_form,
-    parse_attachment_filter_form,
-    parse_audit_log_form,
-    parse_extensions,
-    parse_moderation_filter_form,
-    parse_positive_int,
-    parse_role_ids,
-    ThresholdCeiling,
-    validate_channel_id,
-    validate_role_id,
 )
-from smarter_dev.web.crud import (
-    AdventOfCodeConfigOperations,
-    AttachmentFilterConfigOperations,
-    AuditLogConfigOperations,
-    ModerationFilterConfigOperations,
-)
-from smarter_dev.web.discord_admin_client import (
-    DiscordAdminError,
-    DiscordChannel,
-    DiscordGuildDetail,
-    DiscordRole,
-    GuildNotFoundError,
-)
+from smarter_dev.web.bot_admin.guild_configs import parse_advent_of_code_form
+from smarter_dev.web.bot_admin.guild_configs import parse_attachment_filter_form
+from smarter_dev.web.bot_admin.guild_configs import parse_audit_log_form
+from smarter_dev.web.bot_admin.guild_configs import parse_extensions
+from smarter_dev.web.bot_admin.guild_configs import parse_moderation_filter_form
+from smarter_dev.web.bot_admin.guild_configs import parse_positive_int
+from smarter_dev.web.bot_admin.guild_configs import parse_role_ids
+from smarter_dev.web.bot_admin.guild_configs import validate_channel_id
+from smarter_dev.web.bot_admin.guild_configs import validate_role_id
+from smarter_dev.web.crud import AdventOfCodeConfigOperations
+from smarter_dev.web.crud import AttachmentFilterConfigOperations
+from smarter_dev.web.crud import AuditLogConfigOperations
+from smarter_dev.web.crud import ModerationFilterConfigOperations
+from smarter_dev.web.discord_admin_client import DiscordAdminError
+from smarter_dev.web.discord_admin_client import DiscordChannel
+from smarter_dev.web.discord_admin_client import DiscordGuildDetail
+from smarter_dev.web.discord_admin_client import DiscordRole
+from smarter_dev.web.discord_admin_client import GuildNotFoundError
 from smarter_dev.web.models import ModerationFilterConfig
-
-from tests.web.admin_template_rendering import (
-    TEMPLATES_ROOT,
-    render_admin_template,
-)
+from tests.web.admin_template_rendering import admin_template_source
+from tests.web.admin_template_rendering import render_admin_template
 
 _GUILD = "111111111111111111"
 _TEXT_CHANNEL = "333333333333333333"
@@ -1012,7 +1007,7 @@ def test_moderation_template_survives_empty_pickers():
 
 
 def test_sidebar_links_the_moderation_filter_page():
-    sidebar = (TEMPLATES_ROOT / "admin" / "bot" / "_sidebar.html").read_text()
+    sidebar = admin_template_source("admin/bot/_sidebar.html")
     assert "/moderation-filter" in sidebar
     assert "active_page == 'moderation_filter'" in sidebar
 
