@@ -39,7 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from skrift.auth.guards import APIKeyOnly, Permission
 
-from smarter_dev.shared.message_content import redact_text
+from smarter_dev.shared.message_content import redact_forum_post
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import (
     BOT_API_EXCEPTION_HANDLERS,
@@ -174,11 +174,9 @@ class ForumAgentController(Controller):
                 guild_id=guild_id,
                 channel_id=data.get("channel_id", ""),
                 thread_id=data.get("thread_id", ""),
-                post_title=redact_text(data.get("post_title", "")),
-                post_content=redact_text(data.get("post_content", "")),
                 author_display_name=data.get("author_display_name", "Unknown"),
                 post_tags=data.get("post_tags", []),
-                attachments=[],
+                **redact_forum_post(data),
                 decision_reason=data.get("decision_reason", ""),
                 confidence_score=data.get("confidence_score", 0.0),
                 response_content=data.get("response_content", ""),

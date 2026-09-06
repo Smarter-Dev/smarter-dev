@@ -22,10 +22,13 @@ Each stored shape is redacted by a keep-list, never a redact-list: a chat
 message keeps :data:`_CHAT_PRESERVED_KEYS`, a help context message keeps
 :data:`_HELP_PRESERVED_KEYS`, a pydantic-ai part keeps its whole self only when
 its kind is in :data:`_MODEL_AUTHORED_PART_KINDS` and otherwise keeps
-:data:`_REDACTED_PART_PRESERVED_FIELDS`. Anything upstream adds later is
-therefore redacted until somebody decides it is safe, which is the failure
-mode the intent policy can live with. The handler trigger context is the one
-redact-list (:data:`_HANDLER_CONTENT_KEYS` plus the ``_content`` suffix)
+:data:`_REDACTED_PART_PRESERVED_FIELDS`. A forum post goes further and is
+built rather than filtered: :func:`redact_forum_post` returns the three
+member-authored columns of the row and reads nothing else, so a key the sender
+invents cannot reach it. Anything upstream adds later is therefore redacted
+until somebody decides it is safe, which is the failure mode the intent policy
+can live with. The handler trigger context is the one redact-list
+(:data:`_HANDLER_CONTENT_KEYS` plus the ``_content`` suffix)
 because we build every key in it — except a timer re-fire's ``payload``, whose
 keys a handler script chose, which is why that whole value is emptied.
 """
@@ -205,6 +208,26 @@ def redact_help_question(question: str, interaction_type: str) -> str:
     if interaction_type in _EXPLICIT_SUBMISSION_INTERACTION_TYPES:
         return question
     return _redact_present_text(question)
+
+
+def redact_forum_post(post: dict) -> dict:
+    """The member-authored columns of a forum-agent response row.
+
+    A forum post's title is as much a member's own words as its body, and its
+    attachment urls are message content, so all three are redacted and only
+    what the agent decided about the post is stored verbatim. Text that is
+    absent or null becomes the empty string those not-null columns expect
+    rather than an invented placeholder, so a starter post carrying only an
+    image still leaves an audit row.
+
+    Returns exactly the columns it redacts, so the route it feeds cannot
+    smuggle a sender-chosen key into the row.
+    """
+    return {
+        "post_title": _redact_present_text(post.get("post_title") or ""),
+        "post_content": _redact_present_text(post.get("post_content") or ""),
+        "attachments": [],
+    }
 
 
 def redact_trigger_context(context: dict) -> dict:

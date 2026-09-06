@@ -52,6 +52,14 @@ hours is the window where that is still actionable.
 | `moderation_actions` | AI context summary | action, target, moderator, reason, duration, timestamp |
 | `handler_runs` | message text inside `trigger_context`, the script error message | trigger type, ids, flags, outcome, all counters |
 
+`forum_agent_responses` never sees a verbatim post at all: the API stores the
+placeholder for the post title and the post body, and an empty attachment list,
+at the moment the row is written. A forum post's title is as much a member's own
+words as its body, so both are redacted; only what the agent decided — the tags,
+the confidence, the decision reason and its own reply — is stored as written.
+The sweep still blanks those columns, which is what clears rows written before
+write-time redaction and the agent's own derived text.
+
 `handler_runs` keeps the non-content parts of its trigger context — which
 trigger fired, in which channel, for whom — and replaces every key that carries
 message text with the placeholder, including any future key following the
