@@ -114,7 +114,7 @@ class RedisNotificationQueue:
                 wake_stream_key(envelope.guild_id),
                 {WAKE_PAYLOAD_FIELD: payload},
                 minid=_oldest_retained_envelope_id(),
-                approximate=True,
+                approximate=False,
             )
             pipeline.sadd(READY_GUILDS_KEY, envelope.guild_id)
             pipeline.xadd(
@@ -126,20 +126,22 @@ class RedisNotificationQueue:
 
     async def publish_shadow(self, envelope: NotificationEnvelope) -> str:
         """Record a canary envelope where production workers cannot consume it."""
-        stream_id = await self._redis.xadd(
-            SHADOW_STREAM_KEY,
-            {
-                "guild_id": envelope.guild_id,
-                WAKE_PAYLOAD_FIELD: envelope.model_dump_json(),
-            },
-            maxlen=SHADOW_STREAM_MAX_ENTRIES,
-            approximate=True,
-        )
-        await self._redis.xtrim(
-            SHADOW_STREAM_KEY,
-            minid=_oldest_retained_envelope_id(),
-            approximate=True,
-        )
+        async with self._redis.pipeline(transaction=True) as pipeline:
+            pipeline.xadd(
+                SHADOW_STREAM_KEY,
+                {
+                    "guild_id": envelope.guild_id,
+                    WAKE_PAYLOAD_FIELD: envelope.model_dump_json(),
+                },
+                maxlen=SHADOW_STREAM_MAX_ENTRIES,
+                approximate=True,
+            )
+            pipeline.xtrim(
+                SHADOW_STREAM_KEY,
+                minid=_oldest_retained_envelope_id(),
+                approximate=False,
+            )
+            stream_id, _ = await pipeline.execute()
         return _decode(stream_id)
 
     async def claim_pending(self, guild_id: str, wake_id: str) -> ClaimedPending:
@@ -166,6 +168,12 @@ class RedisNotificationQueue:
 
 
 def _oldest_retained_envelope_id() -> str:
+    """The exact stream id below which an envelope is past the retention window.
+
+    Consumed with ``approximate=False``: Redis only trims approximately when it
+    can drop a whole macro node, so a quiet guild whose entries all sit in the
+    open head node would keep verbatim message text forever.
+    """
     return oldest_retained_stream_id(datetime.now(UTC))
 
 

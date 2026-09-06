@@ -288,23 +288,28 @@ class _RecordingPipeline:
         self._recorder.stream_writes.append(("xadd", name, kwargs))
         return self._inner.xadd(name, fields, **kwargs)
 
+    def xtrim(self, name, **kwargs):
+        self._recorder.stream_writes.append(("xtrim", name, kwargs))
+        return self._inner.xtrim(name, **kwargs)
+
 
 class _RecordingRedis:
-    """Redis client that records the trim bounds of every stream write."""
-
     def __init__(self, inner):
         self._inner = inner
         self.stream_writes: list[tuple[str, str, dict]] = []
+        self.direct_calls: list[tuple[str, str]] = []
 
     def __getattr__(self, name):
         return getattr(self._inner, name)
 
     async def xadd(self, name, fields, **kwargs):
         self.stream_writes.append(("xadd", name, kwargs))
+        self.direct_calls.append(("xadd", _decode_key(name)))
         return await self._inner.xadd(name, fields, **kwargs)
 
     async def xtrim(self, name, **kwargs):
         self.stream_writes.append(("xtrim", name, kwargs))
+        self.direct_calls.append(("xtrim", _decode_key(name)))
         return await self._inner.xtrim(name, **kwargs)
 
     def pipeline(self, transaction=True):
@@ -312,7 +317,7 @@ class _RecordingRedis:
             self._inner.pipeline(transaction=transaction), self
         )
 
-    def trim_bounds_for(self, stream_key: str) -> list[dict]:
+    def stream_write_kwargs_for(self, stream_key: str) -> list[dict]:
         return [
             kwargs
             for _, name, kwargs in self.stream_writes
@@ -376,9 +381,9 @@ async def test_publish_bounds_the_wake_stream_at_the_retention_cutoff(redis_clie
     await queue.publish(_envelope(guild_id="111", wakes=True, kind="mention"))
     after = datetime.now(UTC)
 
-    bounds = recording.trim_bounds_for(wake_stream_key("111"))
+    bounds = recording.stream_write_kwargs_for(wake_stream_key("111"))
     assert len(bounds) == 1
-    assert bounds[0]["approximate"] is True
+    assert bounds[0]["approximate"] is False
     _assert_minid_is_the_retention_cutoff(
         bounds[0]["minid"], before=before, after=after
     )
@@ -395,14 +400,47 @@ async def test_publish_shadow_keeps_its_count_bound_and_adds_the_age_bound(
     await queue.publish_shadow(_envelope(guild_id="111", wakes=True, kind="mention"))
     after = datetime.now(UTC)
 
-    bounds = recording.trim_bounds_for(SHADOW_STREAM_KEY)
+    bounds = recording.stream_write_kwargs_for(SHADOW_STREAM_KEY)
     assert [kwargs.get("maxlen") for kwargs in bounds] == [10_000, None]
-    assert all(kwargs["approximate"] is True for kwargs in bounds)
+    count_bound = next(kwargs for kwargs in bounds if kwargs.get("maxlen"))
+    assert count_bound["approximate"] is True
     age_bound = next(kwargs for kwargs in bounds if kwargs.get("minid"))
-    assert age_bound["approximate"] is True
+    assert age_bound["approximate"] is False
     _assert_minid_is_the_retention_cutoff(
         age_bound["minid"], before=before, after=after
     )
+
+
+@pytest.mark.asyncio
+async def test_age_bound_is_exact_so_a_quiet_stream_is_still_trimmed(redis_client):
+    recording = _RecordingRedis(redis_client)
+    queue = RedisNotificationQueue(recording)
+
+    await queue.publish(_envelope(guild_id="111", wakes=True, kind="mention"))
+    await queue.publish_shadow(_envelope(guild_id="111", wakes=True, kind="mention"))
+
+    age_bounds = [
+        kwargs
+        for _, _, kwargs in recording.stream_writes
+        if kwargs.get("minid")
+    ]
+    assert len(age_bounds) == 2
+    assert [kwargs["approximate"] for kwargs in age_bounds] == [False, False]
+
+
+@pytest.mark.asyncio
+async def test_publish_shadow_bounds_and_adds_in_one_round_trip(redis_client):
+    recording = _RecordingRedis(redis_client)
+    queue = RedisNotificationQueue(recording)
+
+    stream_id = await queue.publish_shadow(
+        _envelope(guild_id="111", wakes=True, kind="mention")
+    )
+
+    assert recording.direct_calls == []
+    assert await redis_client.xlen(SHADOW_STREAM_KEY) == 1
+    entries = await redis_client.xrange(SHADOW_STREAM_KEY)
+    assert _decode_key(entries[0][0]) == stream_id
 
 
 @pytest.mark.asyncio
@@ -415,7 +453,7 @@ async def test_ready_stream_of_guild_ids_is_never_trimmed_by_age(redis_client):
 
     await queue.publish(_envelope(guild_id="111", wakes=True, kind="mention"))
 
-    assert recording.trim_bounds_for(READY_STREAM_KEY) == [{}]
+    assert recording.stream_write_kwargs_for(READY_STREAM_KEY) == [{}]
     assert await redis_client.xlen(READY_STREAM_KEY) == 2
 
 
