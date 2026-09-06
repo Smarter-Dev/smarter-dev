@@ -274,7 +274,7 @@ class HandlerBudget:
         }
 
 
-def admin_budget(trigger_type: str | None = None) -> "HandlerBudget":
+def admin_budget(trigger_type: str) -> "HandlerBudget":
     """A trusted, looser per-fire budget for admin handlers (incl. mod actions).
 
     The loop rail (§3.5, HARD) lives here: a handler triggered BY a moderation
@@ -282,7 +282,8 @@ def admin_budget(trigger_type: str | None = None) -> "HandlerBudget":
     write the audit row that re-fires it. Its moderation pool is forced to zero,
     which makes the loop structurally impossible rather than merely bounded —
     the chain-depth counter behind this would still permit three generations of
-    a ban wave, this permits none.
+    a ban wave, this permits none. The trigger type is required so no caller
+    can reach the full pool by leaving it out.
     """
     return HandlerBudget(
         max_messages=ADMIN_MAX_MESSAGES,

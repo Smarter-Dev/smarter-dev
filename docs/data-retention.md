@@ -55,11 +55,14 @@ hours is the window where that is still actionable.
 `handler_runs` keeps the non-content parts of its trigger context — which
 trigger fired, in which channel, for whom — and replaces every key that carries
 message text with the placeholder, including any future key following the
-`*_content` convention. Its `error` goes too: a script that trips over the
-message it is reacting to puts that text into its exception message, and nothing
-at write time can tell which errors quote a member. The `outcome` column still
-says the fire failed, so an old failure stays visible as a failure — only the
-message a developer would have read within the first 48 hours is gone.
+`*_content` convention. Its `error` goes too when a script wrote it (`error`
+and `cap_exceeded` outcomes): a script that trips over the message it is
+reacting to puts that text into its exception message, and nothing at write
+time can tell which errors quote a member. The `outcome` column still says the
+fire failed, so an old failure stays visible as a failure — only the message a
+developer would have read within the first 48 hours is gone. The explanations
+on `skipped` and `rearmed` rows are written by the bot itself, never by a
+script, so they stay.
 
 Moderation keeps everything except the AI's retelling of the exchange. An
 action's `reason` — whether a moderator typed it or the triage agent wrote it —

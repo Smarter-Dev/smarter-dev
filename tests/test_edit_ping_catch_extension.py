@@ -117,7 +117,7 @@ async def _run(context: dict):
         guild_id="G1",
         emitter=emitter,
         limiter=_Limiter(),
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=actor,
         channel_ids=[],
         memory={},

@@ -14,12 +14,9 @@ dispatch jobs without pulling in the inference stack — the same discipline as
 from __future__ import annotations
 
 import logging
-from datetime import datetime
-from uuid import UUID, uuid4
+from uuid import UUID
 
-from pydantic import BaseModel
 from skrift.workers import RetryPolicy, WorkerContext, handler
-from skrift.workers import submit as worker_submit
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import get_db_session_context
@@ -33,37 +30,21 @@ from smarter_dev.web.handler_caps import (
     claim_fire_attempt,
 )
 from smarter_dev.web.handler_emitter import DiscordEmitter
+from smarter_dev.web.handler_fire_payloads import HandlerFirePayload
 from smarter_dev.web.handler_memory import persist_handler_memory
 from smarter_dev.web.handler_notify import notify_handler_error
+from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
 from smarter_dev.web.handler_run_audit import record_completed_run, record_skipped_run
-from smarter_dev.web.handler_schedule import RecurringFireChain
+from smarter_dev.web.handler_script_services import HandlerTimerScheduler
 from smarter_dev.web.models import ChannelHandler
+
+__all__ = ["HandlerFirePayload", "run_handler_fire"]
 
 logger = logging.getLogger(__name__)
 
-# Which tier of handler this job fires, as it is named in the audit row.
 HANDLER_KIND = "standard"
 
-
-class HandlerFirePayload(BaseModel):
-    """Job payload for one handler firing."""
-
-    handler_id: str
-    trigger_context: dict = {}
-    # How many handler fires deep this fire is (0 = caused by a gateway event).
-    # An explicit FIELD, never a trigger_context key: context goes to the sandbox
-    # verbatim, so a depth in there would be script-readable and script-forgeable.
-    # Defaulted so an omitted field means "chain root", not a crash — schedule
-    # re-arms and any older enqueued job read as roots, which is what they are.
-    chain_depth: int = 0
-
-
-_recurring_chain = RecurringFireChain(
-    handler_model=ChannelHandler,
-    build_fire_payload=lambda handler_id: HandlerFirePayload(
-        handler_id=handler_id, trigger_context={"trigger_type": "schedule"}
-    ),
-)
+_recurring_chain = RECURRING_CHAINS[HANDLER_KIND]
 
 
 @handler(
@@ -86,8 +67,6 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
         return {"status": "disabled"}
 
     handler_id = UUID(payload.handler_id)
-    # Snapshotted BEFORE the script runs: the sandbox is handed the live context
-    # dict, so a copy taken afterwards could carry text the script wrote into it.
     audit_trigger_context = redact_trigger_context(payload.trigger_context)
     async with get_db_session_context() as session:
         record = await session.get(ChannelHandler, handler_id)
@@ -111,29 +90,18 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
     emitter = DiscordEmitter(bot_token=settings.discord_bot_token, guild_id=guild_id)
     redis = get_redis_client()
     limiter = WindowedLimiter(redis=redis)
-    # schedule_timer arms a durable one-shot re-fire of THIS handler. The closure
-    # owns the payload class + handler_id, keeping the runtime import-clean; the
-    # timer limiter is a separate 3600s window (self.limiter is fixed at 60s).
+    # The timer limiter is a separate 3600s window (self.limiter is fixed at 60s).
     timer_limiter = WindowedLimiter(
         redis=redis, window_seconds=TIMER_ARMING_WINDOW_SECONDS
     )
-
-    async def schedule_timer(fire_at: datetime, refire_context: dict) -> None:
-        await worker_submit(
-            HandlerFirePayload(
-                handler_id=str(handler_id),
-                trigger_context=refire_context,
-                # A timer re-fire is caused BY this fire, so it descends one
-                # generation. The re-fire itself is still enqueued (the depth
-                # check lives at the dispatch choke point, and the arming window
-                # is what bounds a self-deferring handler); carrying the depth is
-                # what makes anything that re-fire DISPATCHES get refused once
-                # the chain has run past MAX_CHAIN_DEPTH.
-                chain_depth=payload.chain_depth + 1,
-            ),
-            scheduled_for=fire_at,
-            job_id=uuid4().hex,
-        )
+    timer_scheduler = HandlerTimerScheduler(
+        chain_depth=payload.chain_depth,
+        build_refire_payload=lambda refire_context, chain_depth: HandlerFirePayload(
+            handler_id=str(handler_id),
+            trigger_context=refire_context,
+            chain_depth=chain_depth,
+        ),
+    )
 
     # At-most-once side effects across retries. Claimed as late as possible —
     # everything above (the lazy import, the record load, emitter setup) is
@@ -145,7 +113,14 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
             "the script; skipping execution so emits aren't duplicated",
             context.job.id,
         )
-        await record_skipped_run(handler_id, HANDLER_KIND, audit_trigger_context)
+        async with get_db_session_context() as session:
+            record_skipped_run(
+                session,
+                handler_id=handler_id,
+                handler_kind=HANDLER_KIND,
+                trigger_context=audit_trigger_context,
+            )
+            await session.commit()
         await _recurring_chain.rearm_after_fire(
             handler_id=handler_id,
             trigger_type=trigger_type,
@@ -163,14 +138,14 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
         limiter=limiter,
         agent_runner=run_gathering_agent,
         handler_id=str(handler_id),
-        timer_scheduler=schedule_timer,
+        timer_scheduler=timer_scheduler.schedule_timer,
         timer_limiter=timer_limiter,
         budget=budget,
         memory=memory,
     )
 
     async with get_db_session_context() as session:
-        await record_completed_run(
+        record_completed_run(
             session,
             handler_id=handler_id,
             handler_kind=HANDLER_KIND,

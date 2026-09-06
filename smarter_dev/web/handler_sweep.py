@@ -3,11 +3,11 @@
 A recurring schedule has no scheduler behind it. It exists at runtime as a
 single in-flight worker job, and the ONLY thing that enqueues the next
 occurrence is the successful completion of the current one
-(``handler_schedule.RecurringFireChain``). That makes the chain a linked list
-with no head pointer: break one link — a dead-lettered job, an evicted pod, a deploy that
-makes every fire raise — and the schedule stops forever, silently, even though
-the handler row is still ``enabled`` and still carries everything needed to
-compute the next fire.
+(``handler_recurrence.RecurringFireChain``). That makes the chain a linked list
+with no head pointer: break one link — a dead-lettered job, an evicted pod, a
+deploy that makes every fire raise — and the schedule stops forever, silently,
+even though the handler row is still ``enabled`` and still carries everything
+needed to compute the next fire.
 
 This module supplies the missing head pointer. The handler row is the source of
 truth; the queued job is only a cache of the next occurrence. A sweep asks one
@@ -27,11 +27,14 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from uuid import UUID, uuid4
+from uuid import UUID
 
+from skrift.workers import get_handle
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
+from smarter_dev.web.handler_run_audit import record_rearmed_run
 from smarter_dev.web.handler_schedule import ScheduleError, next_fire_at
 from smarter_dev.web.models import AdminHandler, ChannelHandler, HandlerRun
 
@@ -206,14 +209,9 @@ async def rearm_chain(
     already, but if it somehow isn't, letting it run would leave two live chains
     for one handler — the one outcome worse than a stalled schedule.
     """
-    # Imported lazily: this module is imported by the admin web tier to render
-    # schedule health, which must not pull the worker submit path.
-    from skrift.workers import get_handle
-    from skrift.workers import submit as worker_submit
-
     now = now or datetime.now(timezone.utc)
-    model = ChannelHandler if chain.kind == "standard" else AdminHandler
-    record = await session.get(model, chain.handler_id)
+    tier_chain = RECURRING_CHAINS[chain.kind]
+    record = await session.get(tier_chain.handler_model, chain.handler_id)
     if record is None or not record.enabled:
         return None
 
@@ -231,40 +229,15 @@ async def rearm_chain(
         except Exception:  # noqa: BLE001 — best-effort; it is normally long dead
             logger.debug("stale job %s not cancellable", record.scheduled_job_id)
 
-    if chain.kind == "standard":
-        from smarter_dev.web.handlers_jobs import HandlerFirePayload
-
-        job_payload = HandlerFirePayload(
-            handler_id=str(chain.handler_id),
-            trigger_context={"trigger_type": "schedule"},
-        )
-    else:
-        from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
-
-        job_payload = AdminHandlerFirePayload(
-            admin_handler_id=str(chain.handler_id),
-            channel_id="",
-            trigger_context={"trigger_type": "schedule"},
-        )
-
-    job_id = uuid4().hex
-    await worker_submit(job_payload, scheduled_for=nxt, job_id=job_id)
-    record.scheduled_job_id = job_id
-
-    session.add(
-        HandlerRun(
-            handler_id=chain.handler_id,
-            handler_kind=chain.kind,
-            trigger_context={"trigger_type": "sweep"},
-            outcome="rearmed",
-            error=(
-                f"schedule chain had stopped firing (last fire "
-                f"{chain.last_fired_at.isoformat() if chain.last_fired_at else 'never'}, "
-                f"overdue by {chain.overdue_by}); re-armed for {nxt.isoformat()}"
-            ),
-            fired_at=now,
-            finished_at=now,
-        )
+    await tier_chain.arm_next(session, chain.handler_id, nxt)
+    record_rearmed_run(
+        session,
+        handler_id=chain.handler_id,
+        handler_kind=chain.kind,
+        last_fired_at=chain.last_fired_at,
+        overdue_by=chain.overdue_by,
+        next_occurrence=nxt,
+        now=now,
     )
     return nxt
 

@@ -116,7 +116,7 @@ async def _fire(context: dict, *, memory: dict | None = None, gone=None):
         guild_id="G1",
         emitter=emitter,
         limiter=_StubLimiter(),
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=actor,
         channel_ids=[],
         allowed_role_ids=handler.settings["allowed_role_ids"],

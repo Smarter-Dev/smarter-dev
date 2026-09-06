@@ -50,7 +50,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import case, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.message_content import redact_trigger_context
@@ -266,6 +266,9 @@ async def scrub_moderation_actions(
     )
 
 
+_SCRIPT_AUTHORED_ERROR_OUTCOMES = ("error", "cap_exceeded")
+
+
 async def scrub_handler_runs(
     session: AsyncSession, cutoff: datetime, now: datetime
 ) -> int:
@@ -276,11 +279,14 @@ async def scrub_handler_runs(
     a single UPDATE. Rows written since the write-time redaction landed already
     hold placeholders; re-redacting them is a no-op.
 
-    ``error`` is cleared with it. A script that trips over the message it is
-    reacting to puts that text into its exception message, and nothing at write
-    time can tell which errors quote a member — so it is treated like every
-    other derived text the sweep owns. The outcome and every counter stay, so a
-    long-dead failure is still visible as a failure.
+    ``error`` is cleared with it when a script wrote it. A script that trips
+    over the message it is reacting to puts that text into its exception
+    message, and nothing at write time can tell which errors quote a member —
+    so it is treated like every other derived text the sweep owns. The
+    host-authored explanations on ``skipped`` and ``rearmed`` rows name no
+    member and stay: they are the only record of why a chain stalled. The
+    outcome and every counter stay too, so a long-dead failure is still visible
+    as a failure.
     """
     scrubbed = 0
     while True:
@@ -302,7 +308,10 @@ async def scrub_handler_runs(
                 .where(HandlerRun.id == run_id)
                 .values(
                     trigger_context=redact_trigger_context(context or {}),
-                    error=None,
+                    error=case(
+                        (HandlerRun.outcome.in_(_SCRIPT_AUTHORED_ERROR_OUTCOMES), None),
+                        else_=HandlerRun.error,
+                    ),
                     content_purged_at=now,
                 )
             )

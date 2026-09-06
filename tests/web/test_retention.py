@@ -422,6 +422,35 @@ class TestHandlerRuns:
         assert run.outcome == "error"
         assert run.messages_sent == 1
 
+    @pytest.mark.parametrize("outcome", ["error", "cap_exceeded"])
+    async def test_clears_every_script_authored_error(self, db_session, outcome):
+        run = await self._run(db_session, STALE, {"trigger_type": "message"})
+        run.outcome = outcome
+        run.error = "runtime: ValueError: what someone said"
+        await db_session.flush()
+
+        await run_retention_sweep(db_session, now=NOW)
+
+        run = (await db_session.execute(select(HandlerRun))).scalar_one()
+        assert run.error is None
+
+    @pytest.mark.parametrize("outcome", ["rearmed", "skipped"])
+    async def test_keeps_a_host_authored_explanation(self, db_session, outcome):
+        # The sweep's re-arm note and the skipped-retry note are written by us,
+        # never by a script, so they cannot quote a member. Clearing them would
+        # lose the only record of why a chain stalled, for no retention gain.
+        explanation = "schedule chain had stopped firing; re-armed"
+        run = await self._run(db_session, STALE, {"trigger_type": "sweep"})
+        run.outcome = outcome
+        run.error = explanation
+        await db_session.flush()
+
+        await run_retention_sweep(db_session, now=NOW)
+
+        run = (await db_session.execute(select(HandlerRun))).scalar_one()
+        assert run.error == explanation
+        assert purged_at(run.content_purged_at) == NOW
+
     async def test_leaves_a_fresh_error_readable(self, db_session):
         run = await self._run(db_session, FRESH, {"trigger_type": "message"})
         run.error = "runtime: ValueError: what someone said"

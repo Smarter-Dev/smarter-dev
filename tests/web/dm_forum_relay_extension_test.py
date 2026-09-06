@@ -110,7 +110,7 @@ async def _fire(item, context, *, emitter, actor=None, guild_memory=None, memory
         guild_id="G1",
         emitter=emitter,
         limiter=_Limiter(),
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=actor or _Actor(),
         channel_ids=item.channel_ids,
         guild_memory=guild_memory if guild_memory is not None else {},

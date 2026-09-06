@@ -70,7 +70,7 @@ from smarter_dev.web.handler_dispatch import dispatch_handler_event
 from smarter_dev.web.handler_schedule import ScheduleError
 from smarter_dev.web.handler_schedule import first_fire_at
 from smarter_dev.web.handler_schedule import validate_time_trigger_settings
-from smarter_dev.web.handlers_jobs import HandlerFirePayload
+from smarter_dev.web.handler_fire_payloads import HandlerFirePayload
 from smarter_dev.web.models import ADMIN_HANDLER_EVENT_TRIGGERS
 from smarter_dev.web.models import HANDLER_EVENT_TRIGGERS
 from smarter_dev.web.models import HANDLER_TRIGGER_TYPES
