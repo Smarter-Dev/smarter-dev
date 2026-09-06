@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import fields
 from datetime import UTC, datetime
 from typing import get_args
 
@@ -18,6 +19,7 @@ from pydantic_ai.messages import (
     ThinkingPart,
     ToolCallPart,
     ToolReturnPart,
+    ToolSearchReturnPart,
     UserPromptPart,
 )
 
@@ -164,8 +166,6 @@ class TestRedactChatAgentMessages:
         assert redacted["content"] == MESSAGE_CONTENT_PLACEHOLDER
 
     def test_redacts_a_key_chat_models_add_later(self):
-        # Only the ids, pointers, reactions and flags the detail view renders
-        # are kept, so a new text field carries a placeholder into storage.
         [redacted] = redact_chat_agent_messages(
             [chat_message_dict(reply_to_body="what someone else said")]
         )
@@ -298,6 +298,76 @@ class TestRedactModelMessageParts:
         )
         assert message["parts"][0]["content"] == MESSAGE_CONTENT_PLACEHOLDER
 
+    def test_empties_tool_return_metadata_and_keeps_its_bookkeeping(self):
+        dump = ModelMessagesTypeAdapter.dump_python(
+            [
+                ModelRequest(
+                    parts=[
+                        ToolReturnPart(
+                            tool_name="search",
+                            content={"messages": ["what someone said"]},
+                            tool_call_id="c1",
+                            metadata={"raw": "what someone said"},
+                        )
+                    ]
+                )
+            ],
+            mode="json",
+        )
+        [message] = redact_model_message_parts(dump)
+        part = message["parts"][0]
+        assert part["metadata"] == {}
+        assert part["outcome"] == "success"
+        assert part["tool_kind"] == dump[0]["parts"][0]["tool_kind"]
+        assert part["timestamp"] == dump[0]["parts"][0]["timestamp"]
+        assert len(list(ModelMessagesTypeAdapter.validate_python([message]))) == 1
+
+    def test_a_redacted_part_without_content_stays_without_it(self):
+        [message] = redact_model_message_parts(
+            [{"parts": [{"part_kind": "future-return", "tool_call_id": "c1"}]}]
+        )
+        assert message["parts"][0] == {"part_kind": "future-return", "tool_call_id": "c1"}
+
+    def test_redacts_a_field_a_redacted_part_kind_gains_later(self):
+        [message] = redact_model_message_parts(
+            [
+                {
+                    "parts": [
+                        {
+                            "part_kind": "user-prompt",
+                            "content": "what someone said",
+                            "raw_text": "what someone said",
+                        }
+                    ]
+                }
+            ]
+        )
+        assert message["parts"][0]["raw_text"] == MESSAGE_CONTENT_PLACEHOLDER
+
+    def test_the_redacted_part_fields_have_not_drifted(self):
+        # Every field a redacted part kind carries has been classified as
+        # either bookkeeping to keep or text to redact. A new field must fail
+        # here and force that decision.
+        assert {
+            field.name
+            for part_type in (
+                UserPromptPart,
+                ToolReturnPart,
+                ToolSearchReturnPart,
+                RetryPromptPart,
+            )
+            for field in fields(part_type)
+        } == {
+            "part_kind",
+            "tool_name",
+            "tool_call_id",
+            "tool_kind",
+            "timestamp",
+            "outcome",
+            "content",
+            "metadata",
+        }
+
     def test_the_library_part_kinds_have_not_drifted(self):
         # Every kind pydantic-ai can emit has been classified as either
         # carrying what a member said or being model-authored. A new kind
@@ -356,8 +426,6 @@ class TestRedactHelpContextMessages:
         assert redact_help_context_messages(once) == once
 
     def test_redacts_a_key_the_help_plugins_add_later(self):
-        # Only author and timestamp are kept, so a new key carries a
-        # placeholder into storage instead of what somebody said.
         [redacted] = redact_help_context_messages(
             [help_context_message(reply_to_content="what someone else said")]
         )
