@@ -21,6 +21,7 @@ redacted.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -29,6 +30,8 @@ MESSAGE_CONTENT_PLACEHOLDER: str = "[message content]"
 CONTENT_RETENTION_WINDOW: timedelta = timedelta(hours=48)
 
 _CHAT_MESSAGE_CONTENT_KEYS = frozenset({"body", "attachments"})
+
+_HELP_MESSAGE_CONTENT_KEYS = frozenset({"content"})
 
 _HUMAN_TEXT_PART_KINDS = frozenset({"user-prompt", "tool-return"})
 
@@ -48,14 +51,37 @@ _HANDLER_CONTENT_KEYS = frozenset(
 )
 
 
+def _redact_present_text(text: str) -> str:
+    return text if text == "" else MESSAGE_CONTENT_PLACEHOLDER
+
+
 def _redact_value(value: Any) -> Any:
     if isinstance(value, str):
-        return redact_text(value)
+        return _redact_present_text(value)
     if isinstance(value, list):
         return []
     if isinstance(value, dict):
         return {}
     return value
+
+
+def _redact_mapping(mapping: dict, is_content_key: Callable[[str], bool]) -> dict:
+    return {
+        key: _redact_value(value) if is_content_key(key) else value
+        for key, value in mapping.items()
+    }
+
+
+def _is_chat_message_content_key(key: str) -> bool:
+    return key in _CHAT_MESSAGE_CONTENT_KEYS
+
+
+def _is_help_message_content_key(key: str) -> bool:
+    return key in _HELP_MESSAGE_CONTENT_KEYS
+
+
+def _is_handler_content_key(key: str) -> bool:
+    return key in _HANDLER_CONTENT_KEYS or key.endswith("_content")
 
 
 def _redact_part(part: dict) -> dict:
@@ -66,9 +92,7 @@ def _redact_part(part: dict) -> dict:
 
 def redact_text(text: str | None) -> str | None:
     """The placeholder, unless there was no text to hide."""
-    if text is None or text == "":
-        return text
-    return MESSAGE_CONTENT_PLACEHOLDER
+    return None if text is None else _redact_present_text(text)
 
 
 def redact_chat_agent_messages(messages: list[dict] | None) -> list[dict]:
@@ -78,10 +102,7 @@ def redact_chat_agent_messages(messages: list[dict] | None) -> list[dict]:
     view renders around the message body.
     """
     return [
-        {
-            key: _redact_value(value) if key in _CHAT_MESSAGE_CONTENT_KEYS else value
-            for key, value in message.items()
-        }
+        _redact_mapping(message, _is_chat_message_content_key)
         for message in messages or []
     ]
 
@@ -108,10 +129,7 @@ def redact_help_context_messages(messages: list[dict] | None) -> list[dict]:
     Keeps each message's author and timestamp.
     """
     return [
-        {
-            key: redact_text(value) if key == "content" else value
-            for key, value in message.items()
-        }
+        _redact_mapping(message, _is_help_message_content_key)
         for message in messages or []
     ]
 
@@ -124,7 +142,7 @@ def redact_help_question(question: str, interaction_type: str) -> str:
     """
     if interaction_type in _EXPLICIT_SUBMISSION_INTERACTION_TYPES:
         return question
-    return redact_text(question)
+    return _redact_present_text(question)
 
 
 def redact_trigger_context(context: dict) -> dict:
@@ -133,14 +151,16 @@ def redact_trigger_context(context: dict) -> dict:
     Ids, flags, counts, role lists and timestamps stay, so the run still shows
     which trigger fired, in which channel, for whom.
     """
-    return {
-        key: _redact_value(value)
-        if key in _HANDLER_CONTENT_KEYS or key.endswith("_content")
-        else value
-        for key, value in context.items()
-    }
+    return _redact_mapping(context, _is_handler_content_key)
 
 
 def oldest_retained_stream_id(now: datetime) -> str:
-    """The Redis stream id below which entries are past the retention window."""
+    """The Redis stream id below which entries are past the retention window.
+
+    Raises:
+        ValueError: if ``now`` is naive, which would read as local time and
+            move the cutoff by the machine's UTC offset.
+    """
+    if now.tzinfo is None:
+        raise ValueError("oldest_retained_stream_id requires a timezone-aware datetime")
     return f"{int((now - CONTENT_RETENTION_WINDOW).timestamp() * 1000)}-0"

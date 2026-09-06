@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta, timezone, date
+from datetime import UTC, datetime, timezone, date
 from typing import Optional
 from uuid import UUID, uuid4
 
@@ -27,12 +27,8 @@ from sqlalchemy.sql import func
 
 from smarter_dev.shared.database import Base
 
-# How long Discord-sourced message text may live in our database before the
-# retention sweep scrubs it. Owned by
-# :mod:`smarter_dev.shared.message_content` because the bot tier bounds its
-# Redis streams on the same window and must not import web models; re-exported
-# here because the schema's expiry defaults and the sweep are written against
-# ``smarter_dev.web.models``.
+# Re-exported so the sweep and the schema keep importing it from here; the bot
+# tier must not import web models.
 from smarter_dev.shared.message_content import CONTENT_RETENTION_WINDOW
 
 # The chat agent's three-layer per-guild memory. These caps are the schema's
