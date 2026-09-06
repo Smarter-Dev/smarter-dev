@@ -26,6 +26,7 @@ from smarter_dev.web.handler_sweep import (
     MIN_GRACE_SECONDS,
     STALE_PERIOD_MULTIPLIER,
     StalledChain,
+    find_stalled_chains,
     grace_seconds,
     is_stalled,
     rearm_chain,
@@ -35,6 +36,9 @@ from smarter_dev.web.models import AdminHandler, ChannelHandler, HandlerRun
 
 NOW = datetime(2026, 8, 3, 12, 0, tzinfo=timezone.utc)
 CREATED = NOW - timedelta(days=30)
+# The SQLite test engine round-trips every column as offset-naive, where
+# Postgres hands back timestamptz; the sweep compares like with like.
+SQLITE_NAIVE_NOW = NOW.replace(tzinfo=None)
 
 # The real Discord.me reminder that died on 2026-07-30.
 SIX_HOURLY = {"start_at": "2026-07-25T17:59:30Z", "interval_seconds": 21600}
@@ -138,6 +142,92 @@ def test_overdue_is_measured_against_the_expected_fire():
 @pytest.mark.parametrize("hours", [0, 1, 6, 11])
 def test_no_false_positives_across_the_healthy_range(hours):
     assert is_stalled(SIX_HOURLY, NOW - timedelta(hours=hours), CREATED, NOW) is None
+
+
+# -- finding stalled chains asks every tier's chain for its schedules ---------
+
+
+async def _seed_run(engine, handler_id, kind: str, outcome: str, fired_at: datetime):
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        session.add(
+            HandlerRun(
+                handler_id=handler_id,
+                handler_kind=kind,
+                trigger_context={"trigger_type": "schedule"},
+                outcome=outcome,
+                fired_at=fired_at,
+                finished_at=fired_at,
+            )
+        )
+        await session.commit()
+
+
+def _channel_handler_fields(**overrides) -> dict:
+    fields = {
+        "id": uuid4(),
+        "guild_id": "G1",
+        "channel_id": "C1",
+        "name": "six-hourly",
+        "trigger_type": "schedule",
+        "settings": SIX_HOURLY,
+        "description": "d",
+        "script": "pass\n",
+        "created_by": "U1",
+        "created_at": CREATED,
+    }
+    return {**fields, **overrides}
+
+
+def _admin_handler_fields(**overrides) -> dict:
+    fields = {
+        "id": uuid4(),
+        "guild_id": "G1",
+        "name": "six-hourly-admin",
+        "trigger_type": "schedule",
+        "settings": SIX_HOURLY,
+        "channel_ids": [],
+        "description": "d",
+        "script": "pass\n",
+        "created_by_admin": "A1",
+        "created_at": CREATED,
+    }
+    return {**fields, **overrides}
+
+
+async def test_find_stalled_chains_covers_both_tiers_and_only_dead_schedules(
+    test_engine,
+):
+    dead_standard = await _seed(test_engine, ChannelHandler, **_channel_handler_fields())
+    dead_admin = await _seed(test_engine, AdminHandler, **_admin_handler_fields())
+    alive = await _seed(
+        test_engine, ChannelHandler, **_channel_handler_fields(name="alive")
+    )
+    await _seed(
+        test_engine, ChannelHandler, **_channel_handler_fields(name="off", enabled=False)
+    )
+    await _seed(
+        test_engine,
+        ChannelHandler,
+        **_channel_handler_fields(name="on-message", trigger_type="message", settings={}),
+    )
+    await _seed_run(test_engine, alive.id, "standard", "ok", NOW - timedelta(minutes=5))
+    # The sweep's own re-arm rows never count as a fire, or a chain it healed
+    # once would look alive forever.
+    await _seed_run(
+        test_engine, dead_standard.id, "standard", "rearmed", NOW - timedelta(minutes=1)
+    )
+
+    async with async_sessionmaker(test_engine, expire_on_commit=False)() as session:
+        stalled = await find_stalled_chains(session, SQLITE_NAIVE_NOW)
+
+    assert {(chain.handler_id, chain.kind) for chain in stalled} == {
+        (dead_standard.id, "standard"),
+        (dead_admin.id, "admin"),
+    }
+    by_id = {chain.handler_id: chain for chain in stalled}
+    assert by_id[dead_standard.id].settings == SIX_HOURLY
+    assert by_id[dead_standard.id].last_fired_at is None
+    assert by_id[dead_admin.id].name == "six-hourly-admin"
 
 
 # -- re-arming goes through the tier's chain and the audit owner --------------

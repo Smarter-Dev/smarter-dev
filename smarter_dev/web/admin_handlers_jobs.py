@@ -6,8 +6,10 @@ cross-channel send), the looser :func:`admin_budget`, and the host services in
 ``handler_script_services``. Audited in ``handler_runs`` with
 ``handler_kind="admin"``.
 
-Import-clean of pydantic-ai/Monty (lazy inside the job) so the web tier can
-import ``AdminHandlerFirePayload`` to dispatch without the inference stack.
+pydantic-ai and Monty are imported lazily inside the job, never at module
+load: ``app.yaml`` lists this module under the worker ``imports`` block so the
+web tier imports it to register the job type, and only the agent-worker should
+pay for the inference stack. The payload lives in ``handler_fire_payloads``.
 """
 
 from __future__ import annotations

@@ -13,6 +13,8 @@ from datetime import timedelta
 from uuid import uuid4
 
 import pytest
+from redis.exceptions import RedisError
+from sqlalchemy.exc import SQLAlchemyError
 
 import smarter_dev.web.handler_script_services as handler_script_services
 from smarter_dev.web.admin_actions import AdminActionError
@@ -98,9 +100,9 @@ async def test_a_programming_error_in_the_lookup_is_not_swallowed():
         await services._resolve_username("U1")
 
 
-async def test_a_mod_action_dispatch_failure_never_breaks_the_warn(monkeypatch):
+def _patch_dispatch(monkeypatch, error: Exception) -> None:
     async def failing_dispatch(session, **kwargs):
-        raise RuntimeError("queue down")
+        raise error
 
     monkeypatch.setattr(
         handler_script_services, "dispatch_handler_event", failing_dispatch
@@ -108,4 +110,20 @@ async def test_a_mod_action_dispatch_failure_never_breaks_the_warn(monkeypatch):
     monkeypatch.setattr(
         handler_script_services, "build_mod_action_context", lambda action: {}
     )
+
+
+@pytest.mark.parametrize(
+    "transport_error",
+    [RedisError("fire-window limiter down"), SQLAlchemyError("handler lookup down")],
+)
+async def test_a_mod_action_dispatch_transport_failure_never_breaks_the_warn(
+    monkeypatch, transport_error
+):
+    _patch_dispatch(monkeypatch, transport_error)
     await _services(_Actor())._announce_warn(object(), object())
+
+
+async def test_a_programming_error_in_the_dispatch_is_not_swallowed(monkeypatch):
+    _patch_dispatch(monkeypatch, TypeError("bad keyword"))
+    with pytest.raises(TypeError):
+        await _services(_Actor())._announce_warn(object(), object())

@@ -25,7 +25,9 @@ from uuid import UUID
 from uuid import uuid4
 
 from pydantic import BaseModel
+from redis.exceptions import RedisError
 from skrift.workers import submit as worker_submit
+from sqlalchemy.exc import SQLAlchemyError
 
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.admin_actions import AdminActionError
@@ -177,9 +179,11 @@ class AdminScriptServices:
         """Fire the synthetic mod_action trigger for mod-log handlers.
 
         A handler-issued warn must reach them exactly like ``/warn`` does. Best
-        effort, mirroring mod_action_dispatch: a dispatch failure is logged,
-        NEVER propagated into the warn, whose notice and audit row have both
-        already landed.
+        effort against the transports dispatch depends on, mirroring
+        mod_action_dispatch: a Redis failure in the fire-window limiter or a
+        database failure in the handler lookup is logged and NEVER propagated
+        into the warn, whose notice and audit row have both already landed.
+        Anything else is a programming error and surfaces.
         """
         # warn -> mod-log handler -> whatever THAT warns is a real chain, so it
         # descends one generation and the choke point cuts it past
@@ -195,5 +199,5 @@ class AdminScriptServices:
                 trigger_context=trigger_context,
                 chain_depth=self.chain_depth + 1,
             )
-        except Exception:  # noqa: BLE001 — dispatch never breaks the warn
+        except (RedisError, SQLAlchemyError):
             logger.debug("handler warn mod_action dispatch failed", exc_info=True)

@@ -30,7 +30,6 @@ import logging
 from datetime import UTC
 from datetime import datetime
 from uuid import UUID
-from uuid import uuid4
 
 from litestar import Controller
 from litestar import delete
@@ -44,17 +43,16 @@ from pydantic import Field
 from skrift.auth.guards import APIKeyOnly
 from skrift.auth.guards import Permission
 from skrift.workers import get_handle
-from skrift.workers import submit as worker_submit
 from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from smarter_dev.web.handler_fire_payloads import AdminHandlerFirePayload
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.api_native.errors import parse_uuid_path
 from smarter_dev.web.api_native.errors import plain_error
 from smarter_dev.web.handler_caps import MAX_ADMIN_HANDLERS_PER_GUILD
+from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
 from smarter_dev.web.handler_schedule import ScheduleError
 from smarter_dev.web.handler_schedule import first_fire_at
 from smarter_dev.web.handler_schedule import validate_time_trigger_settings
@@ -62,6 +60,8 @@ from smarter_dev.web.models import ADMIN_HANDLER_TRIGGER_TYPES
 from smarter_dev.web.models import AdminHandler
 
 logger = logging.getLogger(__name__)
+
+_recurring_chain = RECURRING_CHAINS["admin"]
 
 # Permission granted to the bot's Skrift service key (see roles.py `bot-service`
 # role and the phase-01 key-mint runbook).
@@ -173,17 +173,7 @@ async def _reschedule(record: AdminHandler) -> None:
     fire_at = first_fire_at(
         record.trigger_type, record.settings or {}, datetime.now(UTC)
     )
-    job_id = uuid4().hex
-    await worker_submit(
-        AdminHandlerFirePayload(
-            admin_handler_id=str(record.id),
-            channel_id=(record.channel_ids[0] if record.channel_ids else ""),
-            trigger_context={"trigger_type": record.trigger_type},
-        ),
-        scheduled_for=fire_at,
-        job_id=job_id,
-    )
-    record.scheduled_job_id = job_id
+    await _recurring_chain.arm_occurrence(record, fire_at)
 
 
 class AdminHandlerController(Controller):

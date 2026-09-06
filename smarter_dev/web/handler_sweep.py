@@ -36,7 +36,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
 from smarter_dev.web.handler_run_audit import record_rearmed_run
 from smarter_dev.web.handler_schedule import ScheduleError, next_fire_at
-from smarter_dev.web.models import AdminHandler, ChannelHandler, HandlerRun
+from smarter_dev.web.models import HandlerRun
 
 logger = logging.getLogger(__name__)
 
@@ -142,42 +142,18 @@ async def _last_fire_times(
 async def find_stalled_chains(
     session: AsyncSession, now: datetime | None = None
 ) -> list[StalledChain]:
-    """Every enabled recurring schedule (both tiers) that has stopped firing."""
+    """Every enabled recurring schedule (every tier) that has stopped firing."""
     now = now or datetime.now(timezone.utc)
 
-    channel_rows = list(
-        (
-            await session.execute(
-                select(ChannelHandler).where(
-                    ChannelHandler.enabled.is_(True),
-                    ChannelHandler.trigger_type == "schedule",
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    admin_rows = list(
-        (
-            await session.execute(
-                select(AdminHandler).where(
-                    AdminHandler.enabled.is_(True),
-                    AdminHandler.trigger_type == "schedule",
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
+    scheduled: list[tuple[object, str]] = []
+    for kind, tier_chain in RECURRING_CHAINS.items():
+        for record in await tier_chain.load_enabled_schedule_handlers(session):
+            scheduled.append((record, kind))
 
-    last_fired = await _last_fire_times(
-        session, [r.id for r in channel_rows] + [r.id for r in admin_rows]
-    )
+    last_fired = await _last_fire_times(session, [record.id for record, _ in scheduled])
 
     stalled: list[StalledChain] = []
-    for record, kind in [(r, "standard") for r in channel_rows] + [
-        (r, "admin") for r in admin_rows
-    ]:
+    for record, kind in scheduled:
         settings = dict(record.settings or {})
         overdue = is_stalled(
             settings, last_fired.get(record.id), record.created_at, now
@@ -211,8 +187,8 @@ async def rearm_chain(
     """
     now = now or datetime.now(timezone.utc)
     tier_chain = RECURRING_CHAINS[chain.kind]
-    record = await session.get(tier_chain.handler_model, chain.handler_id)
-    if record is None or not record.enabled:
+    record = await tier_chain.load_enabled_handler(session, chain.handler_id)
+    if record is None:
         return None
 
     try:
@@ -229,7 +205,7 @@ async def rearm_chain(
         except Exception:  # noqa: BLE001 — best-effort; it is normally long dead
             logger.debug("stale job %s not cancellable", record.scheduled_job_id)
 
-    await tier_chain.arm_next(session, chain.handler_id, nxt)
+    await tier_chain.arm_occurrence(record, nxt)
     record_rearmed_run(
         session,
         handler_id=chain.handler_id,

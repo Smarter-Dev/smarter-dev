@@ -5,10 +5,12 @@ this job loads the handler, runs its script under all the rails, writes a durabl
 :class:`~smarter_dev.web.models.HandlerRun`, and — for recurring schedules —
 enqueues the next occurrence.
 
-Kept import-clean of pydantic-ai and Monty at module load (they are imported
-lazily inside the job) so the web tier can import ``HandlerFirePayload`` to
-dispatch jobs without pulling in the inference stack — the same discipline as
-``resources_jobs``.
+pydantic-ai and Monty are imported lazily inside the job, never at module
+load. ``app.yaml`` lists this module under the worker ``imports`` block so the
+web tier imports it to register the job type, and only the agent-worker should
+pay for the inference stack — the same discipline as ``resources_jobs``. The
+payload itself lives in ``handler_fire_payloads``; dispatch, the recurring
+chain and the timer scheduler import it from there.
 """
 
 from __future__ import annotations
