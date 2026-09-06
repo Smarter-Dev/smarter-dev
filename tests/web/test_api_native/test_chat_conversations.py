@@ -18,20 +18,16 @@ separately by ``test_auth.py``.
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
-from pathlib import Path
 from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport
 from httpx import AsyncClient
-from jinja2 import ChoiceLoader
-from jinja2 import DictLoader
-from jinja2 import Environment
-from jinja2 import FileSystemLoader
 from litestar import Litestar
 from litestar.di import Provide
 from litestar.plugins.pydantic import PydanticPlugin
@@ -60,8 +56,8 @@ from smarter_dev.web.models import ChatAgentCompactionEvent
 from smarter_dev.web.models import ChatAgentEngagement
 from smarter_dev.web.models import ChatAgentError
 from smarter_dev.web.models import ChatAgentTurn
-
-_TEMPLATES_ROOT = str(Path(__file__).resolve().parents[3] / "templates")
+from smarter_dev.web.models import UsageCostRow
+from tests.web.admin_template_rendering import render_admin_template
 
 _GUILD = "123456789012345678"
 _CHANNEL = "555000111222333444"
@@ -99,9 +95,7 @@ async def client(session) -> AsyncIterator[AsyncClient]:
         app = Litestar(
             route_handlers=[ChatConversationController],
             plugins=[PydanticPlugin()],
-            dependencies={
-                "db_session": Provide(lambda: session, sync_to_thread=False)
-            },
+            dependencies={"db_session": Provide(lambda: session, sync_to_thread=False)},
         )
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://t") as http_client:
@@ -126,6 +120,47 @@ async def _seed_engagement(session, **overrides) -> ChatAgentEngagement:
     await session.commit()
     await session.refresh(engagement)
     return engagement
+
+
+async def _stored_turn(session) -> ChatAgentTurn:
+    """The single turn row the request under test wrote, compactions loaded."""
+    turns = (
+        (
+            await session.execute(
+                select(ChatAgentTurn).options(
+                    selectinload(ChatAgentTurn.compaction_events)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(turns) == 1
+    return turns[0]
+
+
+async def _stored_usage_cost_row(session, operation_type: str) -> UsageCostRow:
+    """The single metering row filed for ``operation_type``."""
+    rows = (
+        (
+            await session.execute(
+                select(UsageCostRow).where(
+                    UsageCostRow.operation_type == operation_type
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    return rows[0]
+
+
+async def _stored_compaction_events(session) -> list[ChatAgentCompactionEvent]:
+    """Every compaction-event row written, oldest query order."""
+    return list(
+        (await session.execute(select(ChatAgentCompactionEvent))).scalars().all()
+    )
 
 
 class TestCreateEngagement:
@@ -227,7 +262,9 @@ class TestCreateError:
 
 
 class TestCreateTurn:
-    async def test_creates_turn_and_bumps_aggregates(self, client: AsyncClient, session):
+    async def test_creates_turn_and_bumps_aggregates(
+        self, client: AsyncClient, session
+    ):
         engagement = await _seed_engagement(session)
 
         response = await client.post(
@@ -252,9 +289,8 @@ class TestCreateTurn:
         assert body["voice_cost_usd"] == "0"
         assert body["summarizer_cost_usd_total"] == "0"
 
-        turns = (await session.execute(select(ChatAgentTurn))).scalars().all()
-        assert len(turns) == 1
-        assert turns[0].chat_reasoning_level == "high"
+        turn = await _stored_turn(session)
+        assert turn.chat_reasoning_level == "high"
 
         await session.refresh(engagement)
         assert engagement.total_chat_tokens_input == 100
@@ -280,9 +316,8 @@ class TestCreateTurn:
         )
         assert response.status_code == 201
 
-        turns = (await session.execute(select(ChatAgentTurn))).scalars().all()
-        assert len(turns) == 1
-        assert turns[0].chat_reasoning_level is None
+        turn = await _stored_turn(session)
+        assert turn.chat_reasoning_level is None
 
     async def test_chat_cache_tokens_flow_to_row_and_discount_cost(
         self, client: AsyncClient, session
@@ -310,10 +345,9 @@ class TestCreateTurn:
         # 600 uncached input @0.76 + 500 out @3.20 + 400 cached @0.19, per Mtok.
         assert body["chat_cost_usd"] == "0.002132"
 
-        turns = (await session.execute(select(ChatAgentTurn))).scalars().all()
-        assert len(turns) == 1
-        assert turns[0].chat_cache_read_tokens == 400
-        assert turns[0].chat_cache_write_tokens == 0
+        turn = await _stored_turn(session)
+        assert turn.chat_cache_read_tokens == 400
+        assert turn.chat_cache_write_tokens == 0
 
     async def test_chat_cache_tokens_absent_uses_full_input_rate(
         self, client: AsyncClient, session
@@ -339,10 +373,9 @@ class TestCreateTurn:
         # No cache split → full 1000 input @0.76 + 500 out @3.20.
         assert body["chat_cost_usd"] == "0.00236"
 
-        turns = (await session.execute(select(ChatAgentTurn))).scalars().all()
-        assert len(turns) == 1
-        assert turns[0].chat_cache_read_tokens is None
-        assert turns[0].chat_cache_write_tokens is None
+        turn = await _stored_turn(session)
+        assert turn.chat_cache_read_tokens is None
+        assert turn.chat_cache_write_tokens is None
 
     async def test_summarizer_cache_tokens_flow_to_row_and_discount_cost(
         self, client: AsyncClient, session
@@ -380,9 +413,7 @@ class TestCreateTurn:
         # 500 uncached @0.76 + 100 out @3.20 + 1500 cached @0.19, per Mtok.
         assert body["summarizer_cost_usd_total"] == "0.000985"
 
-        events = (
-            await session.execute(select(ChatAgentCompactionEvent))
-        ).scalars().all()
+        events = await _stored_compaction_events(session)
         assert len(events) == 1
         assert events[0].summarizer_cache_read_tokens == 1500
         assert events[0].summarizer_cache_write_tokens == 0
@@ -414,9 +445,7 @@ class TestCreateTurn:
         )
         assert response.status_code == 201
 
-        events = (
-            await session.execute(select(ChatAgentCompactionEvent))
-        ).scalars().all()
+        events = await _stored_compaction_events(session)
         assert len(events) == 1
         assert events[0].chars_saved == 3
         assert events[0].summarizer_reasoning_level == "low"
@@ -448,12 +477,128 @@ class TestCreateTurn:
         )
         assert response.status_code == 201
 
-        candidates = (
-            await session.execute(select(CandidateBlogTopic))
-        ).scalars().all()
+        candidates = (await session.execute(select(CandidateBlogTopic))).scalars().all()
         assert len(candidates) == 1
         assert candidates[0].headline == "A neat pattern"
         assert candidates[0].evidence == ["msg1", "msg2"]
+
+
+class TestTurnUsageCostRows:
+    """The metering rows a turn files, one per model that billed for it."""
+
+    async def _post_metered_turn(self, client: AsyncClient, engagement, **overrides):
+        payload = {
+            "engagement_id": str(engagement.id),
+            "request_id": "req-usage",
+            "turn_kind": "initial",
+            "output_kind": "send_response",
+            "triggering_messages": [],
+            "agent_output": {},
+        }
+        payload.update(overrides)
+        response = await client.post("/api/chat-conversations/turns", json=payload)
+        assert response.status_code == 201, response.text
+        return response.json()
+
+    async def test_chat_model_files_a_primary_row(self, client: AsyncClient, session):
+        engagement = await _seed_engagement(session)
+
+        await self._post_metered_turn(
+            client,
+            engagement,
+            chat_model_name="kimi-k3",
+            chat_reasoning_level="high",
+            chat_tokens_input=1000,
+            chat_tokens_output=500,
+            chat_cache_read_tokens=400,
+            chat_cache_write_tokens=7,
+        )
+
+        turn = await _stored_turn(session)
+        row = await _stored_usage_cost_row(session, "primary")
+        assert row.operation_key == f"discord:turn:{turn.id}:primary"
+        assert row.product_mode == "discord"
+        assert row.discord_user_id == engagement.activation_user_id
+        assert row.conversation_id == engagement.id
+        assert row.root_turn_id == turn.id
+        assert row.provider_key == "opencode_zen"
+        assert row.catalog_model_key == "kimi-k3"
+        assert row.model_id == "kimi-k3"
+        assert row.reasoning_level == "high"
+        assert row.input_tokens == 1000
+        assert row.output_tokens == 500
+        assert row.cache_read_tokens == 400
+        assert row.cache_write_tokens == 7
+        assert row.cost_usd == turn.chat_cost_usd
+        assert row.details == {"request_id": "req-usage"}
+
+    async def test_voice_model_files_a_voice_row(self, client: AsyncClient, session):
+        engagement = await _seed_engagement(session)
+
+        await self._post_metered_turn(
+            client,
+            engagement,
+            voice_model_name="kimi-k3",
+            voice_tokens_input=30,
+            voice_tokens_output=40,
+        )
+
+        turn = await _stored_turn(session)
+        row = await _stored_usage_cost_row(session, "voice")
+        assert row.operation_key == f"discord:turn:{turn.id}:voice"
+        assert row.root_turn_id == turn.id
+        assert row.discord_user_id == engagement.activation_user_id
+        assert row.reasoning_level is None
+        assert row.input_tokens == 30
+        assert row.output_tokens == 40
+        assert row.cache_read_tokens == 0
+        assert row.cache_write_tokens == 0
+        assert row.cost_usd == turn.voice_cost_usd
+        assert row.details == {"request_id": "req-usage"}
+
+    async def test_each_summarized_compaction_files_a_compaction_row(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+
+        await self._post_metered_turn(
+            client,
+            engagement,
+            compaction_events=[
+                _compaction_event(
+                    summarizer_model_name="kimi-k3",
+                    summarizer_reasoning_level="low",
+                    summarizer_tokens_input=200,
+                    summarizer_tokens_output=20,
+                    summarizer_cache_read_tokens=100,
+                    summarizer_cache_write_tokens=0,
+                )
+            ],
+        )
+
+        turn = await _stored_turn(session)
+        event = (await _stored_compaction_events(session))[0]
+        row = await _stored_usage_cost_row(session, "compaction")
+        assert row.operation_key == f"discord:turn:{turn.id}:compaction:{event.id}"
+        assert row.root_turn_id == turn.id
+        assert row.reasoning_level == "low"
+        assert row.input_tokens == 200
+        assert row.output_tokens == 20
+        assert row.cache_read_tokens == 100
+        assert row.cost_usd == event.summarizer_cost_usd
+        assert row.details == {"event_kind": "tool_summary"}
+
+    async def test_a_turn_without_model_names_files_nothing(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+
+        await self._post_metered_turn(
+            client, engagement, compaction_events=[_compaction_event()]
+        )
+
+        rows = (await session.execute(select(UsageCostRow))).scalars().all()
+        assert list(rows) == []
 
 
 class TestUsageLeaderboard:
@@ -612,12 +757,6 @@ async def _post_turn(client: AsyncClient, engagement, **overrides) -> dict:
     return response.json()
 
 
-async def _stored_turn(session) -> ChatAgentTurn:
-    turns = (await session.execute(select(ChatAgentTurn))).scalars().all()
-    assert len(turns) == 1
-    return turns[0]
-
-
 class TestTurnStoresPlaceholdersForMessageText:
     async def test_triggering_message_body_is_a_placeholder(
         self, client: AsyncClient, session
@@ -734,14 +873,10 @@ class TestCompactionEventRedaction:
         await _post_turn(
             client,
             engagement,
-            compaction_events=[
-                _compaction_event()
-            ],
+            compaction_events=[_compaction_event()],
         )
 
-        events = (
-            (await session.execute(select(ChatAgentCompactionEvent))).scalars().all()
-        )
+        events = await _stored_compaction_events(session)
         assert len(events) == 1
         assert events[0].original_content == MESSAGE_CONTENT_PLACEHOLDER
         assert events[0].summary == "they said hello"
@@ -768,9 +903,7 @@ class TestCompactionEventRedaction:
             ],
         )
 
-        events = (
-            (await session.execute(select(ChatAgentCompactionEvent))).scalars().all()
-        )
+        events = await _stored_compaction_events(session)
         assert events[0].original_content == ""
 
 
@@ -782,19 +915,15 @@ class TestDetailTemplateRendersRedactedRows:
         await _post_turn(
             client,
             engagement,
-            compaction_events=[
-                _compaction_event()
-            ],
+            compaction_events=[_compaction_event()],
         )
-        turn = (
-            await session.execute(
-                select(ChatAgentTurn).options(
-                    selectinload(ChatAgentTurn.compaction_events)
-                )
-            )
-        ).scalar_one()
+        turn = await _stored_turn(session)
 
-        html = _render_detail_template(engagement=engagement, turns=[turn])
+        html = render_admin_template(
+            "admin/chat-conversations/detail.html",
+            engagement=engagement,
+            turns=[turn],
+        )
 
         assert MESSAGE_CONTENT_PLACEHOLDER in html
         assert "what someone actually said" not in html
@@ -802,23 +931,4 @@ class TestDetailTemplateRendersRedactedRows:
         assert "they said hello" in html
         assert "search" in html
         assert "web_read" in html
-        assert "returned 2 chars" in html
-
-
-def _render_detail_template(
-    engagement: ChatAgentEngagement, turns: list[ChatAgentTurn]
-) -> str:
-    """Render the real admin detail template with its layout stubbed out."""
-    environment = Environment(  # nosemgrep: python.flask.security.xss.audit.direct-use-of-jinja2.direct-use-of-jinja2
-        loader=ChoiceLoader(
-            [
-                DictLoader({"admin/base.html": "{% block admin_content %}{% endblock %}"}),
-                FileSystemLoader(_TEMPLATES_ROOT),
-            ]
-        ),
-        autoescape=True,
-    )
-    environment.globals.update(site_name=lambda: "Smarter Dev", csp_nonce=lambda: "n")
-    return environment.get_template("admin/chat-conversations/detail.html").render(
-        engagement=engagement, turns=turns
-    )
+        assert re.search(r"returned \d+ chars", html) is None

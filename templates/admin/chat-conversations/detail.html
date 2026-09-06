@@ -264,7 +264,7 @@
                 </details>
                 {% elif part.part_kind == 'tool-return' %}
                 <details class="cc-tool-event">
-                    <summary>🛠 <strong>{{ part.tool_name }}</strong> → returned {{ (part.content | string)|length }} chars</summary>
+                    <summary>🛠 <strong>{{ part.tool_name }}</strong> → tool return</summary>
                     <pre class="cc-dump">{{ part.content | tojson(indent=2) if part.content is mapping else part.content }}</pre>
                 </details>
                 {% endif %}

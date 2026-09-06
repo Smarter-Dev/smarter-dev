@@ -8,12 +8,10 @@ the legacy ``smarter_dev.web.admin.views`` onto
 from __future__ import annotations
 
 from contextlib import contextmanager
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
-from jinja2 import ChoiceLoader, DictLoader, Environment, FileSystemLoader
 
 from skrift.auth.guards import Permission, auth_guard
 
@@ -54,6 +52,11 @@ from smarter_dev.web.discord_admin_client import (
     GuildNotFoundError,
 )
 from smarter_dev.web.models import ModerationFilterConfig
+
+from tests.web.admin_template_rendering import (
+    TEMPLATES_ROOT,
+    render_admin_template,
+)
 
 _GUILD = "111111111111111111"
 _TEXT_CHANNEL = "333333333333333333"
@@ -885,29 +888,11 @@ async def test_moderation_post_invalid_role_flashes_error_and_does_not_save(
 # --- moderation filter: template ----------------------------------------------
 
 
-_TEMPLATES_DIR = Path(__file__).parents[2] / "templates"
-
-
 def _render_moderation_template(config: SimpleNamespace) -> str:
     """Render the moderation-filter page against a stub admin base template."""
-    stub_base = (
-        "{% block title %}{% endblock %}{% block admin_content %}{% endblock %}"
-    )
-    environment = Environment(
-        loader=ChoiceLoader(
-            [
-                DictLoader({"admin/base.html": stub_base}),
-                FileSystemLoader(_TEMPLATES_DIR),
-            ]
-        ),
-        autoescape=True,
-    )
-    environment.globals["site_name"] = lambda: "Smarter Dev"
-    template = environment.get_template(
-        "admin/bot/guild_configs/moderation_filter.html"
-    )
     client = _admin_client()
-    return template.render(
+    return render_admin_template(
+        "admin/bot/guild_configs/moderation_filter.html",
         guild=_guild_detail(),
         config=config,
         text_channels=[
@@ -1010,22 +995,8 @@ def test_moderation_template_seeds_scam_link_domains_from_config():
 def test_moderation_template_survives_empty_pickers():
     config = ModerationFilterConfig.get_defaults(_GUILD)
 
-    stub_base = (
-        "{% block title %}{% endblock %}{% block admin_content %}{% endblock %}"
-    )
-    environment = Environment(
-        loader=ChoiceLoader(
-            [
-                DictLoader({"admin/base.html": stub_base}),
-                FileSystemLoader(_TEMPLATES_DIR),
-            ]
-        ),
-        autoescape=True,
-    )
-    environment.globals["site_name"] = lambda: "Smarter Dev"
-    html = environment.get_template(
-        "admin/bot/guild_configs/moderation_filter.html"
-    ).render(
+    html = render_admin_template(
+        "admin/bot/guild_configs/moderation_filter.html",
         guild=_guild_detail(),
         config=config,
         text_channels=[],
@@ -1041,7 +1012,7 @@ def test_moderation_template_survives_empty_pickers():
 
 
 def test_sidebar_links_the_moderation_filter_page():
-    sidebar = (_TEMPLATES_DIR / "admin" / "bot" / "_sidebar.html").read_text()
+    sidebar = (TEMPLATES_ROOT / "admin" / "bot" / "_sidebar.html").read_text()
     assert "/moderation-filter" in sidebar
     assert "active_page == 'moderation_filter'" in sidebar
 
