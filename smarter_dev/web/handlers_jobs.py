@@ -23,6 +23,7 @@ from skrift.workers import submit as worker_submit
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import get_db_session_context
+from smarter_dev.shared.message_content import redact_trigger_context
 from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.handler_budget import HandlerBudget
 from smarter_dev.web.handler_caps import (
@@ -72,6 +73,10 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
         return {"status": "disabled"}
 
     handler_id = UUID(payload.handler_id)
+    # The script reads the message it is reacting to, so the runtime gets
+    # payload.trigger_context verbatim; every durable row this fire writes gets
+    # this copy, redacted once here rather than at each construction.
+    audit_trigger_context = redact_trigger_context(payload.trigger_context)
     async with get_db_session_context() as session:
         record = await session.get(ChannelHandler, handler_id)
         if record is None or not record.enabled:
@@ -128,7 +133,7 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
             "the script; skipping execution so emits aren't duplicated",
             context.job.id,
         )
-        await _record_skipped_run(handler_id, payload.trigger_context)
+        await _record_skipped_run(handler_id, audit_trigger_context)
         if _is_schedule_fire(trigger_type, payload.trigger_context):
             await _reschedule(handler_id, handler_settings)
         return {"status": "skipped"}
@@ -152,7 +157,7 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
         session.add(
             HandlerRun(
                 handler_id=handler_id,
-                trigger_context=payload.trigger_context,
+                trigger_context=audit_trigger_context,
                 outcome=result.outcome,
                 cap=result.cap,
                 error=result.error,
@@ -206,13 +211,17 @@ def _is_schedule_fire(trigger_type: str, trigger_context: dict) -> bool:
     return trigger_type == "schedule" and trigger_context.get("trigger_type") != "timer"
 
 
-async def _record_skipped_run(handler_id: UUID, trigger_context: dict) -> None:
-    """Audit a retry that declined to re-run an already-started script."""
+async def _record_skipped_run(handler_id: UUID, audit_trigger_context: dict) -> None:
+    """Audit a retry that declined to re-run an already-started script.
+
+    Takes the redacted context the fire built, not the verbatim one the script
+    would have run against.
+    """
     async with get_db_session_context() as session:
         session.add(
             HandlerRun(
                 handler_id=handler_id,
-                trigger_context=trigger_context,
+                trigger_context=audit_trigger_context,
                 outcome="skipped",
                 error=(
                     "retry of a fire whose script had already started; skipped to "
