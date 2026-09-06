@@ -24,6 +24,7 @@ import pytest
 from litestar.di import Provide
 from litestar.plugins.pydantic import PydanticPlugin
 from litestar.testing import TestClient, create_test_client
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -331,3 +332,43 @@ def test_search_matches_a_slash_command_question_not_a_mention(client):
     found = client.get("/api/admin/conversations", params={"search": "squads"})
     assert found.json()["total"] == 1
     assert found.json()["items"][0]["interaction_type"] == "slash_command"
+
+
+def test_create_conversation_db_failure_500_rolls_back(client, db_session, monkeypatch):
+    monkeypatch.setattr(
+        db_session,
+        "commit",
+        AsyncMock(
+            side_effect=IntegrityError(
+                "INSERT INTO help_conversations",
+                {},
+                Exception("NOT NULL constraint failed: user_question"),
+            )
+        ),
+    )
+    monkeypatch.setattr(db_session, "rollback", AsyncMock())
+
+    response = client.post("/api/admin/conversations", json=_conversation_body())
+
+    assert response.status_code == 500
+    assert response.json()["detail"].startswith("Failed to create conversation record")
+    db_session.rollback.assert_awaited_once()
+
+
+def test_create_conversation_non_database_failure_propagates(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setattr(db_session, "rollback", AsyncMock())
+    monkeypatch.setattr(
+        admin_module,
+        "get_security_logger",
+        Mock(side_effect=RuntimeError("not a database problem")),
+    )
+
+    response = client.post("/api/admin/conversations", json=_conversation_body())
+
+    # Litestar's own handler answers an unhandled exception; the route must not
+    # dress a programming error up as a database failure or roll back for it.
+    assert response.status_code == 500
+    assert "Failed to create conversation record" not in response.text
+    db_session.rollback.assert_not_awaited()

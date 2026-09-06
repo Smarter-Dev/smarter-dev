@@ -1912,7 +1912,6 @@ class ForumAgentOperations:
                 response_obj = SimpleNamespace(
                     id=str(response.id),
                     thread_id=response.thread_id,
-                    post_title=response.post_title or "Untitled",
                     author_display_name=response.author_display_name or "Unknown",  # Match template expectation
                     confidence_score=response.confidence_score,
                     responded=response.responded,

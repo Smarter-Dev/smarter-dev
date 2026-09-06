@@ -19,7 +19,11 @@ Error-shape parity:
   ``detail``, ``request_id=None`` because the router passed no request) —
   reproduced via :func:`errors.nested_validation_error` /
   :func:`errors.nested_not_found_error`. Its catch-all wraps every other failure
-  in a *plain* ``{"detail": "Failed to ...: <exc>"}`` 500.
+  in a *plain* ``{"detail": "Failed to ...: <exc>"}`` 500. ``record_agent_response``
+  deviates from that parity catch-all: it catches
+  :class:`sqlalchemy.exc.SQLAlchemyError` only, rolls the session back, and lets
+  any other exception propagate, so a programming error is not relabelled as a
+  database failure.
 - ``forum_notifications`` answered every failure with a bare ``HTTPException`` — a
   plain ``{"detail": "<string>"}`` body — reproduced via :func:`errors.plain_error`.
 """

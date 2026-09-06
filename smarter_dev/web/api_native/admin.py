@@ -41,7 +41,11 @@ Error-shape parity: bare ``HTTPException`` plain ``{"detail": "<string>"}``
 bodies via :func:`errors.plain_error`; malformed UUID path segments answer 422
 via :func:`errors.parse_uuid_path`; request-model validation failures answer
 422 via the shared exception handlers. The legacy broad ``except`` → 500
-wrappers on the conversation endpoints are ported as-is (parity port).
+wrappers on the read endpoints are ported as-is (parity port).
+``create_conversation`` deviates: it catches
+:class:`sqlalchemy.exc.SQLAlchemyError` only, rolls the session back, and lets
+any other exception propagate, so a programming error is not relabelled as a
+database failure.
 """
 
 from __future__ import annotations
@@ -53,6 +57,7 @@ from litestar import Controller, Request, get, post
 from litestar.params import Parameter
 from litestar.status_codes import HTTP_200_OK, HTTP_201_CREATED
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from skrift.auth.guards import APIKeyOnly, Permission
@@ -157,7 +162,7 @@ class AdminController(Controller):
                 message="Conversation recorded successfully",
                 created_at=conversation.created_at,
             )
-        except Exception as create_error:  # Parity port of the legacy 500 wrapper
+        except SQLAlchemyError as create_error:
             await db_session.rollback()
             raise plain_error(
                 500, f"Failed to create conversation record: {str(create_error)}"
