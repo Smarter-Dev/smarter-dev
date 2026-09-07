@@ -616,6 +616,18 @@ class TestGatherMessageContextAttachments:
 
         assert gathered[0].content == f"{MEMBER_TEXT} 📎 diagram.png 📎 notes.txt"
 
+    async def test_builder_message_list_names_attachments_the_same_way(self):
+        message = _fake_message(22222, MEMBER_TEXT)
+        message.attachments = [
+            SimpleNamespace(filename="diagram.png", url="https://cdn/x/diagram.png"),
+            SimpleNamespace(filename="", url="https://cdn/x/notes.txt?ex=1"),
+        ]
+        builder = ConversationContextBuilder(_bot_returning([message]))
+
+        listed = await builder._build_message_list([message], trigger_message_id=None)
+
+        assert listed[0]["content"] == f"{MEMBER_TEXT} 📎 diagram.png 📎 notes.txt"
+
 
 class TestBotToolUsagePredicate:
     """The predicate answers a question about a message and does nothing else."""
