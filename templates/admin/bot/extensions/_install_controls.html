@@ -1,0 +1,13 @@
+{% macro enablement_pill(install) -%}
+{% if install.enabled %}
+<span class="sk-pill sk-pill-published">Enabled</span>
+{% else %}
+<span class="sk-pill sk-pill-draft">Disabled</span>
+{% endif %}
+{%- endmacro %}
+
+{% macro uninstall_form(guild_id, slug) -%}
+<form method="post" action="/admin/bot/guilds/{{ guild_id }}/extensions/{{ slug }}/uninstall" style="display:inline;" onsubmit="return confirm('Uninstall this extension? Its handlers will be removed from this guild.')">
+    <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Uninstall</button>
+</form>
+{%- endmacro %}

@@ -35,6 +35,7 @@ from smarter_dev.extensions.rendering import (
     RenderedHandler,
     render_bundle,
     validate_config_values,
+    validate_stored_config,
 )
 from smarter_dev.extensions.schema import ExtensionManifest
 from smarter_dev.web.handler_caps import MAX_ADMIN_HANDLERS_PER_GUILD
@@ -167,11 +168,12 @@ async def update_extension(
 ) -> ExtensionInstall:
     """Re-materialise the install at the current catalog version using its stored
     config. Raises :class:`ExtensionConfigOutdatedError` when the stored config
-    no longer satisfies a newer schema (e.g. a new required field)."""
+    no longer satisfies a newer schema (e.g. a new required field); a field the
+    newer schema dropped is discarded rather than blocking the update."""
     install = await _locked_install(session, guild_id, slug)
     loaded = _get_loaded(slug)
     try:
-        cleaned = validate_config_values(loaded.manifest, install.config)
+        cleaned = validate_stored_config(loaded.manifest, install.config)
     except RenderError as exc:
         raise ExtensionConfigOutdatedError(
             f"this extension's saved config is missing something the new "
