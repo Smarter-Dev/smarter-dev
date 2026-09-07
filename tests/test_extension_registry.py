@@ -51,8 +51,20 @@ def test_all_shipped_examples_render_and_lint_clean():
 
 
 # A prefix command is a script branching on a leading command word in a member's
-# message, so its command word is a string literal that starts with "!".
-_PREFIX_COMMAND_LITERAL = re.compile(r"""["']!""")
+# message, so its command word is a string literal that starts with "!". The
+# lookahead keeps the closing quote of a `"ok"!=reply` comparison out of it.
+_PREFIX_COMMAND_LITERAL = re.compile(r"""["']!(?!=)[^"'\n]{0,24}""")
+
+
+def _prefix_command_literals(script: str) -> list[str]:
+    return [match.group(0) for match in _PREFIX_COMMAND_LITERAL.finditer(script)]
+
+
+def test_prefix_command_literals_match_command_words_not_comparisons():
+    assert _prefix_command_literals('if text.startswith("!ping"):') == ['"!ping']
+    assert _prefix_command_literals("if word == '!sus':") == ["'!sus"]
+    assert _prefix_command_literals('if reply != "ok":') == []
+    assert _prefix_command_literals('if "ok"!=reply:') == []
 
 
 def test_no_shipped_script_implements_a_text_prefix_command():
@@ -60,10 +72,10 @@ def test_no_shipped_script_implements_a_text_prefix_command():
     policy, so no bundled handler may branch on a message's leading command word.
     """
     offenders = [
-        f"{ext.manifest.slug}/{key}"
+        f"{ext.manifest.slug}/{key}: {literal}"
         for ext in load_registry().all()
         for key, script in ext.scripts.items()
-        if _PREFIX_COMMAND_LITERAL.search(script)
+        for literal in _prefix_command_literals(script)
     ]
     assert offenders == []
 

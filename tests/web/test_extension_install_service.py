@@ -476,6 +476,60 @@ async def test_update_with_new_required_field_raises_and_no_changes(
     assert keys_after == keys_before
 
 
+def _relay_v2_dropped_field() -> LoadedExtension:
+    """v2 of the same bundle with the ``every`` config field removed."""
+    manifest = ExtensionManifest(
+        slug="test-relay",
+        title="Relay",
+        summary="S",
+        version=2,
+        config=[ConfigField(name="chan", type="channel_id", label="C")],
+        handlers=[
+            HandlerTemplate(
+                key="mirror",
+                name="test-mirror",
+                trigger_type="message",
+                description="mirror",
+                script_file="mirror.monty",
+                channel_scope=["chan"],
+            ),
+            HandlerTemplate(
+                key="digest",
+                name="test-digest",
+                trigger_type="schedule",
+                description="digest",
+                script_file="digest.monty",
+                settings={"interval_seconds": 900},
+            ),
+        ],
+        example_config={"chan": CHAN_A},
+    )
+    return _loaded(manifest, {"mirror": _MIRROR_SCRIPT, "digest": _DIGEST_SCRIPT})
+
+
+async def test_update_succeeds_when_the_new_manifest_drops_a_config_field(
+    db_session, worker_stub, monkeypatch
+):
+    """A field the schema removed is valid evolution, not an outdated config."""
+    _use_registry(monkeypatch, _relay())
+    install = await install_extension(
+        db_session, guild_id=GUILD, slug="test-relay",
+        raw_config={"chan": CHAN_A, "every": "300"}, installed_by="admin",
+    )
+    assert install.config == {"chan": CHAN_A, "every": 300}
+
+    _use_registry(monkeypatch, _relay_v2_dropped_field())
+    updated = await update_extension(db_session, guild_id=GUILD, slug="test-relay")
+
+    assert updated.installed_version == 2
+    assert updated.config == {"chan": CHAN_A}
+    digest = next(
+        r for r in await _owned(db_session, install.id)
+        if r.extension_handler_key == "digest"
+    )
+    assert digest.settings == {"interval_seconds": 900}
+
+
 # -- enable / disable ----------------------------------------------------------
 
 

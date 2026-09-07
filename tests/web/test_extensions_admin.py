@@ -576,14 +576,14 @@ async def test_administrator_permission_denies_non_admin_and_allows_admin():
 _RETIRED_SLUG = "retired-prefix-commands"
 
 
-async def _seed_orphaned_install(db_session, *, enabled: bool = True):
+async def _seed_orphaned_install(db_session):
     """An install of a slug the catalog no longer ships (a deleted extension)."""
     install = ExtensionInstall(
         guild_id=_GUILD,
         extension_slug=_RETIRED_SLUG,
         installed_version=1,
         config={},
-        enabled=enabled,
+        enabled=True,
         installed_by="admin@example.com",
     )
     db_session.add(install)
@@ -620,7 +620,12 @@ async def test_list_leaves_orphaned_installs_empty_for_a_catalog_slug(db_session
     assert response.context["orphaned_installs"] == []
 
 
-def test_list_template_offers_only_uninstall_for_an_orphaned_install():
+@pytest.mark.parametrize(
+    ("enabled", "expected_pill"), [(True, "Enabled"), (False, "Disabled")]
+)
+def test_list_template_offers_only_uninstall_for_an_orphaned_install(
+    enabled, expected_pill
+):
     html = render_admin_template(
         "admin/bot/extensions/list.html",
         guild=SimpleNamespace(id=_GUILD, name="Alpha Guild"),
@@ -629,7 +634,7 @@ def test_list_template_offers_only_uninstall_for_an_orphaned_install():
         installs_by_slug={},
         orphaned_installs=[
             SimpleNamespace(
-                extension_slug=_RETIRED_SLUG, enabled=True, installed_version=1
+                extension_slug=_RETIRED_SLUG, enabled=enabled, installed_version=1
             )
         ],
         active_page="extensions",
@@ -639,6 +644,7 @@ def test_list_template_offers_only_uninstall_for_an_orphaned_install():
     base = f"/admin/bot/guilds/{_GUILD}/extensions/{_RETIRED_SLUG}"
     assert _RETIRED_SLUG in html
     assert f'action="{base}/uninstall"' in html
+    assert f">{expected_pill}</span>" in html
     for absent in ("configure", "update", "enable", "disable", "install"):
         assert f"{base}/{absent}" not in html
 

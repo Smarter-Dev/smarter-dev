@@ -1,4 +1,5 @@
 {% extends "admin/base.html" %}
+{% from "admin/bot/extensions/_install_controls.html" import enablement_pill, uninstall_form %}
 
 {% block title %}Extensions - {{ guild.name }} - {{ site_name() }}{% endblock %}
 
@@ -39,11 +40,7 @@
                                     <strong style="font-size:1.05rem;">{{ manifest.title }}</strong>
                                     <span class="sk-pill sk-pill-draft">v{{ manifest.version }}</span>
                                     {% if install %}
-                                        {% if install.enabled %}
-                                        <span class="sk-pill sk-pill-published">Enabled</span>
-                                        {% else %}
-                                        <span class="sk-pill sk-pill-draft">Disabled</span>
-                                        {% endif %}
+                                        {{ enablement_pill(install) }}
                                         {% if manifest.version > install.installed_version %}
                                         <span class="sk-pill sk-pill-draft">Update available (v{{ install.installed_version }} &rarr; v{{ manifest.version }})</span>
                                         {% endif %}
@@ -76,9 +73,7 @@
                                     <button type="submit" class="sk-btn-outline sk-btn-small">Enable</button>
                                 </form>
                                 {% endif %}
-                                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/uninstall" style="display:inline;" onsubmit="return confirm('Uninstall this extension? Its handlers will be removed from this guild.')">
-                                    <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Uninstall</button>
-                                </form>
+                                {{ uninstall_form(guild.id, manifest.slug) }}
                                 {% endif %}
                             </div>
                         </div>
@@ -108,15 +103,9 @@
                                 <div>
                                     <code>{{ install.extension_slug }}</code>
                                     <span class="sk-pill sk-pill-draft">v{{ install.installed_version }}</span>
-                                    {% if install.enabled %}
-                                    <span class="sk-pill sk-pill-published">Enabled</span>
-                                    {% else %}
-                                    <span class="sk-pill sk-pill-draft">Disabled</span>
-                                    {% endif %}
+                                    {{ enablement_pill(install) }}
                                 </div>
-                                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/extensions/{{ install.extension_slug }}/uninstall" style="display:inline;" onsubmit="return confirm('Uninstall this extension? Its handlers will be removed from this guild.')">
-                                    <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Uninstall</button>
-                                </form>
+                                {{ uninstall_form(guild.id, install.extension_slug) }}
                             </div>
                         </div>
                     </div>
