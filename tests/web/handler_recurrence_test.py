@@ -88,9 +88,11 @@ def _chain_under_test(
     monkeypatch.setattr(handler_recurrence, "get_db_session_context", session_ctx)
     chain = RecurringFireChain(
         handler_model=_HandlerModel,
-        build_fire_payload=lambda handler_id, trigger_context: {
+        build_fire_payload=lambda handler_id, trigger_context, chain_depth, channel_id: {
             "handler_id": handler_id,
             "trigger_context": trigger_context,
+            "chain_depth": chain_depth,
+            "channel_id": channel_id,
         },
     )
     return chain, submits, session_ctx
@@ -137,6 +139,8 @@ async def test_a_re_arm_enqueues_the_tier_payload_at_the_next_occurrence(monkeyp
     assert payload == {
         "handler_id": str(record.id),
         "trigger_context": {"trigger_type": "schedule"},
+        "chain_depth": 0,
+        "channel_id": "",
     }
     assert scheduled_for == NEXT_OCCURRENCE
     # The enqueued job id is stamped on the tier's row so a later disable or
@@ -226,6 +230,8 @@ async def test_arm_occurrence_enqueues_the_rows_trigger_and_stamps_it(monkeypatc
             {
                 "handler_id": str(record.id),
                 "trigger_context": {"trigger_type": "schedule"},
+                "chain_depth": 0,
+                "channel_id": "",
             },
             FIRST_FIRE,
             job_id,
@@ -374,3 +380,43 @@ async def test_the_admin_chain_arms_an_admin_handler_payload(monkeypatch, test_e
     assert payload.trigger_context == {"trigger_type": "timer"}
     assert payload.chain_depth == 0
 
+
+
+# -- build_fire_payload: the one place a tier's payload shape is stated -------
+
+
+TIMER_REFIRE_CONTEXT = {
+    "trigger_type": "timer",
+    "payload": {"user_id": "U1"},
+    "scheduled_at": "2026-09-06T12:00:00+00:00",
+}
+
+
+def test_the_standard_chain_builds_its_tier_payload_for_a_timer_refire():
+    payload = RECURRING_CHAINS["standard"].build_fire_payload(
+        "h1", TIMER_REFIRE_CONTEXT, chain_depth=3
+    )
+    assert isinstance(payload, HandlerFirePayload)
+    assert payload.handler_id == "h1"
+    assert payload.trigger_context == TIMER_REFIRE_CONTEXT
+    assert payload.chain_depth == 3
+
+
+def test_the_admin_chain_builds_its_tier_payload_for_a_timer_refire():
+    payload = RECURRING_CHAINS["admin"].build_fire_payload(
+        "h1", TIMER_REFIRE_CONTEXT, chain_depth=3, channel_id="C1"
+    )
+    assert isinstance(payload, AdminHandlerFirePayload)
+    assert payload.admin_handler_id == "h1"
+    assert payload.channel_id == "C1"
+    assert payload.trigger_context == TIMER_REFIRE_CONTEXT
+    assert payload.chain_depth == 3
+
+
+@pytest.mark.parametrize("kind", ["standard", "admin"])
+def test_a_payload_nobody_deepens_is_a_chain_root_in_no_channel(kind):
+    payload = RECURRING_CHAINS[kind].build_fire_payload(
+        "h1", {"trigger_type": "schedule"}
+    )
+    assert payload.chain_depth == 0
+    assert getattr(payload, "channel_id", "") == ""

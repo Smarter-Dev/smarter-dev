@@ -7,9 +7,10 @@ property — a script supplies a target user and a reason, never the guild whose
 history it reads or the moderator name that lands in a permanent audit row.
 
 :class:`HandlerTimerScheduler` is the one service both tiers share: a
-script-armed timer re-fires the same handler one generation deeper, and only
-the payload differs per tier. :class:`AdminScriptServices` is what the admin
-fire adds on top. Gathering them into objects is what keeps the fire jobs
+script-armed timer re-fires the same handler one generation deeper, and the
+tier's :class:`~smarter_dev.web.handler_recurrence.RecurringFireChain` says what
+that fire's payload is. :class:`AdminScriptServices` is what the admin fire adds
+on top. Gathering them into objects is what keeps the fire jobs
 readable: a job builds these once from the facts it just loaded and hands the
 methods to the runtime, instead of carrying closures over the same variables.
 """
@@ -17,14 +18,12 @@ methods to the runtime, instead of carrying closures over the same variables.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 from uuid import uuid4
 
-from pydantic import BaseModel
 from redis.exceptions import RedisError
 from skrift.workers import submit as worker_submit
 from sqlalchemy.exc import SQLAlchemyError
@@ -40,6 +39,7 @@ from smarter_dev.web.models import ModerationAction
 
 if TYPE_CHECKING:
     from smarter_dev.web.admin_actions import AdminActor
+    from smarter_dev.web.handler_recurrence import RecurringFireChain
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +51,14 @@ _guild_rules_ops = GuildRulesConfigOperations()
 class HandlerTimerScheduler:
     """Arms durable one-shot re-fires of the handler that is currently firing.
 
-    ``build_refire_payload`` is the tier's own: given the re-fire context and
-    the depth the re-fire runs at, it returns that tier's fire payload.
+    Holds only which handler is firing, where, and how deep the current fire
+    is; the tier's chain owns the payload that carries those facts.
     """
 
-    chain_depth: int
-    build_refire_payload: Callable[[dict, int], BaseModel]
+    chain: RecurringFireChain
+    handler_id: str
+    channel_id: str = ""
+    chain_depth: int = 0
 
     async def schedule_timer(self, fire_at: datetime, refire_context: dict) -> None:
         """Arm a durable one-shot re-fire of this handler.
@@ -68,7 +70,12 @@ class HandlerTimerScheduler:
         MAX_CHAIN_DEPTH.
         """
         await worker_submit(
-            self.build_refire_payload(refire_context, self.chain_depth + 1),
+            self.chain.build_fire_payload(
+                self.handler_id,
+                refire_context,
+                chain_depth=self.chain_depth + 1,
+                channel_id=self.channel_id,
+            ),
             scheduled_for=fire_at,
             job_id=uuid4().hex,
         )

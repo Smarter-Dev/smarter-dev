@@ -60,10 +60,30 @@ class RecurringFireChain:
     def __init__(
         self,
         handler_model: type[HandlerRecord],
-        build_fire_payload: Callable[[str, dict], BaseModel],
+        build_fire_payload: Callable[[str, dict, int, str], BaseModel],
     ) -> None:
         self._handler_model = handler_model
         self._build_fire_payload = build_fire_payload
+
+    def build_fire_payload(
+        self,
+        handler_id: str,
+        trigger_context: dict,
+        *,
+        chain_depth: int = 0,
+        channel_id: str = "",
+    ) -> BaseModel:
+        """This tier's job payload for one fire of ``handler_id``.
+
+        Everything that enqueues a fire of an existing handler — an armed
+        occurrence, a script-armed timer re-fire — asks here, so which payload
+        class the tier uses and what its id field is called is stated once. A
+        payload nobody deepens is a chain root; a tier without a per-fire
+        channel ignores ``channel_id``.
+        """
+        return self._build_fire_payload(
+            handler_id, trigger_context, chain_depth, channel_id
+        )
 
     async def load_enabled_handler(
         self, session: AsyncSession, handler_id: UUID
@@ -100,7 +120,7 @@ class RecurringFireChain:
         """
         job_id = uuid4().hex
         await worker_submit(
-            self._build_fire_payload(
+            self.build_fire_payload(
                 str(record.id), {"trigger_type": record.trigger_type}
             ),
             scheduled_for=fire_at,
@@ -136,17 +156,36 @@ class RecurringFireChain:
             await session.commit()
 
 
+def _standard_fire_payload(
+    handler_id: str, trigger_context: dict, chain_depth: int, channel_id: str
+) -> HandlerFirePayload:
+    """The member tier fires in the handler's own channel, so it pins none."""
+    return HandlerFirePayload(
+        handler_id=handler_id,
+        trigger_context=trigger_context,
+        chain_depth=chain_depth,
+    )
+
+
+def _admin_fire_payload(
+    handler_id: str, trigger_context: dict, chain_depth: int, channel_id: str
+) -> AdminHandlerFirePayload:
+    """An admin fire carries the channel it is acting in; a scheduled one has none."""
+    return AdminHandlerFirePayload(
+        admin_handler_id=handler_id,
+        channel_id=channel_id,
+        trigger_context=trigger_context,
+        chain_depth=chain_depth,
+    )
+
+
 RECURRING_CHAINS: dict[str, RecurringFireChain] = {
     "standard": RecurringFireChain(
         handler_model=ChannelHandler,
-        build_fire_payload=lambda handler_id, trigger_context: HandlerFirePayload(
-            handler_id=handler_id, trigger_context=trigger_context
-        ),
+        build_fire_payload=_standard_fire_payload,
     ),
     "admin": RecurringFireChain(
         handler_model=AdminHandler,
-        build_fire_payload=lambda handler_id, trigger_context: AdminHandlerFirePayload(
-            admin_handler_id=handler_id, trigger_context=trigger_context
-        ),
+        build_fire_payload=_admin_fire_payload,
     ),
 }
