@@ -6,10 +6,12 @@ would otherwise carry it is written with the placeholder
 (``[message content]``) at write time, in the web tier, at the moment the row
 is built — see ``docs/data-retention.md`` for the per-table list. Verbatim text
 survives only in the agents' own working history: the chat agent's Redis
-history (a 2-hour TTL, and a 20,000-character verbatim tail after compaction)
-and the proactive agent's history (a trailing-message tail after compaction,
-with a recovery copy in ``proactive_agent_histories``). The proactive Redis
-streams that carry notification envelopes are trimmed to the same
+history, bounded by its key TTL and by a verbatim tail after compaction, and
+the proactive agent's history, bounded by a trailing-message tail after
+compaction, with a recovery copy in ``proactive_agent_histories``. Both bounds
+are numbers ``docs/data-retention.md`` owns; this docstring does not repeat
+them. The proactive Redis streams that carry notification envelopes are trimmed
+to the same
 :data:`~smarter_dev.shared.message_content.CONTENT_RETENTION_WINDOW` (48 hours)
 by the bot, not by this sweep.
 
