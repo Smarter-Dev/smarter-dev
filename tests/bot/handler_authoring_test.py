@@ -14,6 +14,8 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.openai import OpenAIResponsesModel
 
 from smarter_dev.bot.agents import handler_authoring
+from smarter_dev.bot.agents.handler_authoring import ADMIN_AUTHOR_PROMPT
+from smarter_dev.bot.agents.handler_authoring import ADMIN_JUDGE_PROMPT
 from smarter_dev.bot.agents.handler_authoring import AdminHandlerPlan
 from smarter_dev.bot.agents.handler_authoring import HandlerPlan
 from smarter_dev.bot.agents.handler_authoring import JudgeVerdict
@@ -1312,3 +1314,63 @@ def test_handler_model_settings_falls_back_for_non_catalog_ids():
         _handler_model_settings("gemini-3-flash-preview", ReasoningLevel.HIGH)
         is _HANDLER_THINKING
     )
+
+
+# -- prompt policy: prefix commands are prohibited -----------------------------
+# Discord's message-content-intent policy bans bot behaviour triggered by a
+# member's message text, so neither the authoring prompt nor the review prompt
+# may teach, exemplify, or approve one.
+
+
+def _prompt_span(prompt: str, start_marker: str, end_marker: str) -> str:
+    start = prompt.index(start_marker)
+    return prompt[start : prompt.index(end_marker, start)]
+
+
+def _prompt_bullet(prompt: str, phrase: str) -> str:
+    start = prompt.rindex("\n- ", 0, prompt.index(phrase))
+    end = prompt.find("\n- ", start + 1)
+    return prompt[start : end if end != -1 else len(prompt)]
+
+
+def test_admin_author_prompt_never_teaches_a_command_prefix_guard():
+    taught_commands = ("command-prefix match", "!lookup", "!whois", "!history")
+    assert [
+        phrase for phrase in taught_commands if phrase in ADMIN_AUTHOR_PROMPT
+    ] == []
+
+
+def test_admin_author_prompt_bans_leading_command_word_branching():
+    rule = _prompt_bullet(ADMIN_AUTHOR_PROMPT, "NEVER BUILD A TEXT PREFIX COMMAND")
+    assert "startswith" in rule
+    assert "split()[0]" in rule
+    assert "keyword" in rule
+
+
+def test_schedule_timer_example_grants_its_role_behind_a_guard():
+    """The prompt's own ROLE GRANT DISCIPLINE forbids an unguarded grant."""
+    example = _prompt_span(
+        ADMIN_AUTHOR_PROMPT,
+        "MANDATORY: a script that calls schedule_timer",
+        "Without the timer branch",
+    )
+    lines = [line.strip() for line in example.splitlines() if line.strip()]
+    timer_branch = lines.index('if context["trigger_type"] == "timer":')
+    grant = next(
+        index for index, line in enumerate(lines) if line.startswith("await add_role(")
+    )
+    assert grant > timer_branch
+    guards = [
+        line
+        for line in lines[timer_branch + 1 : grant]
+        if line.startswith("if ") and line.endswith(":")
+    ]
+    assert guards, f"the example grants a role unconditionally: {lines[grant]!r}"
+
+
+def test_admin_judge_prompt_rejects_leading_command_word_branching():
+    rule = _prompt_bullet(ADMIN_JUDGE_PROMPT, "prefix command")
+    assert "startswith" in rule
+    assert "split()[0]" in rule
+    assert "keyword" in rule
+    assert "actions_appropriate" in rule

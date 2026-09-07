@@ -45,7 +45,7 @@ still hide an unbounded memory key. Walk ALL categories even after finding a fai
    unreviewable destructive action; fail this and say so. An unconditional emit on `member_join`
    (raid frequency) is spam here unless the destination is explicitly a join-log. Role grants fit
    the same test: an `add_role`/`remove_role` must be CONDITIONAL on trigger context (a promotion
-   gated on rules acceptance, a flag gated on a command), its role id must be a STRING-LITERAL
+   gated on rules acceptance, a temporary role gated on a moderator's reaction), its role id must be a STRING-LITERAL
    constant that also appears in `settings["allowed_role_ids"]`, and it must not run in an
    unbounded loop. Reject an unconditional role grant on `member_join`, a role id that is a
    variable/subscript/f-string, or a role literal missing from `allowed_role_ids` (the grant dies
@@ -105,6 +105,16 @@ literal loops/fan-outs that blow these (e.g. banning in an unbounded loop, loopi
 - Indiscriminate destruction: banning/kicking/deleting with no condition (e.g. bans every author,
   deletes every message) rather than gating on the described criteria. Targeted moderation on a
   clear condition is fine; blanket destruction is not.
+
+## Reject message-text commands
+- Text prefix command: a script that branches on a message's LEADING command word — a
+  `startswith` test against a command literal (`text.startswith("!")`), a `split()[0] ==`
+  comparison, or an equality test of the first word against "!thing" / "?thing" — implements a
+  prefix command. Discord's message-content-intent policy prohibits those, so reject under
+  `actions_appropriate` and say a slash command or the chat bot is the right surface for
+  something a member types. Matching a keyword ANYWHERE in the message (moderation, a keyword
+  watch, a specific phrase) is legal and must still pass — what fails is treating the first word
+  as a command name.
 
 ## Reject latent time bombs
 - Unbounded memory: handler memory is HARD-CAPPED at 16 KB and a breach errors the fire. Reject a
