@@ -63,13 +63,15 @@ all of that without the row holding anybody's words.
 | Proactive agent history (`smarter_dev/bot/proactive/history_store.py`, Redis, with a recovery copy in `proactive_agent_histories`) | The running history the proactive agent reasons over. | Compaction keeps at most the trailing 8 messages verbatim and replaces the rest with a summary. |
 | Proactive wake stream, one per guild (Redis) | The notification envelope that woke a guild, message text included. | Trimmed to 48 hours by stream id on every publish, and again on the passive tick for guilds that stopped publishing. |
 | Proactive shadow stream (Redis) | The same envelopes, copied where canary workers can read them. | The same 48-hour trim, plus a 10,000-entry cap. |
-| A claimed proactive batch (Redis) | Envelopes handed to a wake that has not acknowledged them. | Expires after 48 hours. |
+| A claimed proactive batch (Redis) | Envelopes handed to a wake that has not acknowledged them. | Expires 48 hours after the claim, not after the write, so a claimed envelope can outlive its own write cutoff by up to one more window. |
 
 The two agent histories are the "chat bot history" the policy carves out: they
 are the bot's short-term working memory, they are not queryable by an operator,
 and they are not in the database except as the proactive agent's crash-recovery
-copy. Every other row in the table above is a Redis hand-off between the bot and
-the proactive worker, bounded by the same 48-hour window the sweep uses.
+copy. The two proactive streams are Redis hand-offs between the bot and the
+proactive worker, bounded by the same 48-hour window the sweep uses. A claimed
+batch is bounded by one window from the *claim*, so it is the one place an
+envelope can outlive its own write cutoff.
 
 One gap, stated plainly: the proactive *pending* list (a non-waking envelope
 queued for the next wake) is capped at 20 envelopes by count, not by age. It is
@@ -88,7 +90,7 @@ only thing that decides what may go in them.
 | `chat_agent_compaction_events` | the compacted original content | the compaction `summary` and all char counts |
 | `help_conversations` | every scraped context message, whatever the interaction type; `user_question` when the member reached the bot by mention or streak reply | `user_question` when the member typed it as a slash-command argument, plus `bot_response`, tokens, latency |
 | `forum_agent_responses` | the post title, the post body, and the attachment list (emptied) | tags, confidence, `decision_reason`, `response_content`, responded flag |
-| `handler_runs` | every message-bearing key of `trigger_context`, including any future key following the `*_content` convention | trigger type, ids, flags, counters, role lists, outcome |
+| `handler_runs` | every message-bearing key of `trigger_context`, including any future key following the `*_content` convention, plus a timer re-fire's `payload`, whose keys a handler script chose rather than the host, so the whole value is emptied | trigger type, ids, flags, counters, role lists, outcome |
 
 `help_conversations` redacts context for slash commands too: `/tldr` is a slash
 command whose context is a verbatim channel scrape. Only `user_question` is
@@ -143,11 +145,16 @@ nothing but the `!sus` and `!list_sus` commands, so it was deleted outright.
 tracker, which reacts to the Disboard bot's confirmation embed rather than to
 anything a person typed.
 
-The rule is enforced, not just documented: `smarter_dev/web/handler_lint.py`
-rejects any stored script that branches on a message's leading command word,
-and every handler-authoring prompt carries the same rule in prose. Matching a
-keyword anywhere in a message is still allowed — that is a keyword watch, not a
-command.
+The rule is enforced where scripts are produced, not just documented:
+`smarter_dev/web/handler_lint.py` rejects a script that branches on a message's
+leading command word, and it runs on every AI-authored script before that script
+is offered for approval (`smarter_dev/bot/agents/handler_authoring.py`) and on
+every bundled extension script as it is rendered
+(`smarter_dev/extensions/rendering.py`). Every handler-authoring prompt carries
+the same rule in prose. The write endpoints themselves do not re-run the lint,
+so a script pushed straight into the API by an operator is held to the rule by
+review rather than by code. Matching a keyword anywhere in a message stays
+allowed — that is a keyword watch, not a command.
 
 ## What is out of scope, and why
 

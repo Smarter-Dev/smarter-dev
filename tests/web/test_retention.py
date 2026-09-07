@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -12,6 +13,10 @@ from sqlalchemy import select
 
 from smarter_dev.bot.agents.chat_compaction import KEEP_RECENT_CHARS
 from smarter_dev.bot.proactive.agent import COMPACTION_KEEP_MESSAGES
+from smarter_dev.bot.proactive.redis_queue import (
+    PENDING_LIMIT,
+    SHADOW_STREAM_MAX_ENTRIES,
+)
 from smarter_dev.bot.services.chat_memory import HISTORY_TTL_SECONDS
 
 from smarter_dev.web.models import (
@@ -597,9 +602,26 @@ DERIVED_TEXT_COLUMNS = (
 )
 
 
+HANDLER_LINT_MODULE = REPO_ROOT / "smarter_dev" / "web" / "handler_lint.py"
+
+
 def states_hours(text: str, hours: int) -> bool:
-    """Whether ``text`` states a duration of ``hours`` in either spelling."""
-    return f"{hours} hour" in text or f"{hours}-hour" in text
+    """Whether ``text`` states a duration of ``hours`` in either spelling.
+
+    The number has to stand on its own: a doc that says "48 hours" does not
+    thereby state 8 hours, so a constant that shrinks to a tail of a number
+    already in the prose still fails its pin.
+    """
+    return re.search(rf"\b{hours}[ -]hours?\b", text) is not None
+
+
+def modules_running_the_handler_lint() -> set[str]:
+    """Repo-relative paths of the modules that call ``lint_script``."""
+    return {
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in (REPO_ROOT / "smarter_dev").rglob("*.py")
+        if path != HANDLER_LINT_MODULE and "lint_script(" in path.read_text()
+    }
 
 
 @pytest.fixture(scope="module")
@@ -655,6 +677,34 @@ class TestDocumentedBehaviour:
         assert "wake stream" in retention_doc
         assert "shadow stream" in retention_doc
 
+    def test_states_the_shadow_stream_cap(self, retention_doc):
+        assert f"{SHADOW_STREAM_MAX_ENTRIES:,}-entry" in retention_doc
+
+    def test_states_the_pending_list_cap(self, retention_doc):
+        assert f"{PENDING_LIMIT} envelopes" in retention_doc
+
+    def test_states_that_a_claimed_batch_is_bounded_from_its_claim(
+        self, retention_doc
+    ):
+        claimed_batch_row = self._table_row(retention_doc, "| A claimed proactive")
+        assert "after the claim" in claimed_batch_row
+        assert states_hours(
+            claimed_batch_row,
+            int(CONTENT_RETENTION_WINDOW.total_seconds() // 3600),
+        )
+
+    def test_states_that_a_handler_run_stores_no_timer_payload(self, retention_doc):
+        handler_run_row = self._table_row(retention_doc, "| `handler_runs` |")
+        assert "`payload`" in handler_run_row
+
+    def test_names_every_module_that_runs_the_handler_lint(self, retention_doc):
+        for module in modules_running_the_handler_lint():
+            assert module in retention_doc
+
+    @staticmethod
+    def _table_row(doc: str, prefix: str) -> str:
+        return next(line for line in doc.splitlines() if line.startswith(prefix))
+
     def test_states_that_moderation_auditing_uses_the_activity_audit_log(
         self, retention_doc
     ):
@@ -689,3 +739,30 @@ class TestDocumentedBehaviour:
     def test_module_docstring_keeps_the_memory_exemption(self, module_docstring):
         for table in CHAT_MEMORY_TABLES:
             assert f"``{table}``" in module_docstring
+
+    def test_module_docstring_states_the_retention_window(self, module_docstring):
+        assert states_hours(
+            module_docstring,
+            int(CONTENT_RETENTION_WINDOW.total_seconds() // 3600),
+        )
+
+    def test_module_docstring_leaves_the_history_bounds_to_the_doc(
+        self, module_docstring
+    ):
+        assert "docs/data-retention.md" in module_docstring
+        assert not states_hours(module_docstring, HISTORY_TTL_SECONDS // 3600)
+        assert f"{KEEP_RECENT_CHARS:,}" not in module_docstring
+
+
+class TestStatesHours:
+    """The pin itself: a number only counts when it stands on its own."""
+
+    def test_matches_either_spelling(self):
+        assert states_hours("refreshed on a 2-hour TTL", 2)
+        assert states_hours("trimmed after 48 hours", 48)
+
+    def test_rejects_a_number_that_only_ends_the_stated_one(self):
+        assert not states_hours("trimmed after 48 hours", 8)
+
+    def test_rejects_a_number_that_only_starts_the_stated_one(self):
+        assert not states_hours("held for 480 hours", 48)
