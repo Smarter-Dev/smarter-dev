@@ -12,6 +12,7 @@ from datetime import datetime
 from datetime import timedelta
 from uuid import uuid4
 
+import httpx
 import pytest
 from redis.exceptions import RedisError
 from sqlalchemy.exc import SQLAlchemyError
@@ -118,6 +119,11 @@ async def test_username_comes_from_discord_for_the_audit_row():
 
 async def test_a_discord_lookup_failure_degrades_to_the_raw_id():
     services = _services(_Actor(error=AdminActionError("boom")))
+    assert await services._resolve_username("U1") == "U1"
+
+
+async def test_a_discord_transport_failure_degrades_to_the_raw_id():
+    services = _services(_Actor(error=httpx.ConnectError("discord unreachable")))
     assert await services._resolve_username("U1") == "U1"
 
 

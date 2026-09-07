@@ -38,7 +38,8 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import datetime
+from datetime import timedelta
 from typing import Any
 
 MESSAGE_CONTENT_PLACEHOLDER: str = "[message content]"

@@ -3,40 +3,38 @@
 from __future__ import annotations
 
 from dataclasses import fields
-from datetime import UTC, datetime
+from datetime import UTC
+from datetime import datetime
 from typing import get_args
 
 import pytest
-from pydantic_ai.messages import (
-    ModelMessagesTypeAdapter,
-    ModelRequest,
-    ModelRequestPart,
-    ModelResponse,
-    ModelResponsePart,
-    RetryPromptPart,
-    SystemPromptPart,
-    TextPart,
-    ThinkingPart,
-    ToolCallPart,
-    ToolReturnPart,
-    ToolSearchReturnPart,
-    UserPromptPart,
-)
+from pydantic_ai.messages import ModelMessagesTypeAdapter
+from pydantic_ai.messages import ModelRequest
+from pydantic_ai.messages import ModelRequestPart
+from pydantic_ai.messages import ModelResponse
+from pydantic_ai.messages import ModelResponsePart
+from pydantic_ai.messages import RetryPromptPart
+from pydantic_ai.messages import SystemPromptPart
+from pydantic_ai.messages import TextPart
+from pydantic_ai.messages import ThinkingPart
+from pydantic_ai.messages import ToolCallPart
+from pydantic_ai.messages import ToolReturnPart
+from pydantic_ai.messages import ToolSearchReturnPart
+from pydantic_ai.messages import UserPromptPart
 
-from smarter_dev.bot.agents.chat_models import Message, MessageAttachment
-from smarter_dev.shared.message_content import (
-    CONTENT_RETENTION_MILLISECONDS,
-    CONTENT_RETENTION_WINDOW,
-    MESSAGE_CONTENT_PLACEHOLDER,
-    oldest_retained_stream_id,
-    redact_chat_agent_messages,
-    redact_forum_post,
-    redact_help_context_messages,
-    redact_help_question,
-    redact_model_message_parts,
-    redact_text,
-    redact_trigger_context,
-)
+from smarter_dev.bot.agents.chat_models import Message
+from smarter_dev.bot.agents.chat_models import MessageAttachment
+from smarter_dev.shared.message_content import CONTENT_RETENTION_MILLISECONDS
+from smarter_dev.shared.message_content import CONTENT_RETENTION_WINDOW
+from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
+from smarter_dev.shared.message_content import oldest_retained_stream_id
+from smarter_dev.shared.message_content import redact_chat_agent_messages
+from smarter_dev.shared.message_content import redact_forum_post
+from smarter_dev.shared.message_content import redact_help_context_messages
+from smarter_dev.shared.message_content import redact_help_question
+from smarter_dev.shared.message_content import redact_model_message_parts
+from smarter_dev.shared.message_content import redact_text
+from smarter_dev.shared.message_content import redact_trigger_context
 
 
 def chat_message_dict(**overrides) -> dict:

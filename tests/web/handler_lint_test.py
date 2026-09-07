@@ -128,6 +128,14 @@ def test_rejects_startswith_command_word():
     assert reason and "leading command word" in reason
 
 
+def test_rejects_bare_prefix_guard():
+    # The router form: dispatch on any message that opens with the prefix.
+    reason = _prefix_command_reason('if context["message_content"].startswith("!"):')
+    assert reason and "leading command word" in reason
+    assert _prefix_command_reason("if text[0] == '?':")
+    assert _prefix_command_reason('if "!" in text:') is None
+
+
 def test_rejects_equality_against_command_word():
     assert _prefix_command_reason("if word == '!sus':")
     assert _prefix_command_reason('if text.split()[0] == "?help":')

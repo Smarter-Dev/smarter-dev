@@ -70,10 +70,11 @@ _ROLE_ID_LITERAL = re.compile(
 # — prohibited under Discord's message-content-intent policy, and the
 # machine-checked twin of ``handler_authoring.PREFIX_COMMAND_RULE``. A command
 # word is a quoted literal opening with a bot prefix and a letter ("!ping",
-# "?help"); the branch is that word in a startswith test, either side of an
+# "?help"), or the bare prefix itself (a startswith("!") guard is the command
+# router); the branch is that word in a startswith test, either side of an
 # (in)equality, or inside a membership tuple/list. A word ANYWHERE in the body
 # (`"?help" in text`) is a keyword watch, not a command, and is left alone.
-_COMMAND_WORD = r"""["'][!?][A-Za-z][^"'\n]{0,23}["']"""
+_COMMAND_WORD = r"""["'][!?](?:[A-Za-z][^"'\n]{0,23})?["']"""
 _PREFIX_COMMAND_BRANCH = re.compile(
     rf"""startswith\(\s*{_COMMAND_WORD}"""
     rf"""|[!=]=\s*{_COMMAND_WORD}"""
