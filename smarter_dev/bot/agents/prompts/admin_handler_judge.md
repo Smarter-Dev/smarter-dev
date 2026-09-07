@@ -106,16 +106,6 @@ literal loops/fan-outs that blow these (e.g. banning in an unbounded loop, loopi
   deletes every message) rather than gating on the described criteria. Targeted moderation on a
   clear condition is fine; blanket destruction is not.
 
-## Reject message-text commands
-- Text prefix command: a script that branches on a message's LEADING command word — a
-  `startswith` test against a command literal (`text.startswith("!")`), a `split()[0] ==`
-  comparison, or an equality test of the first word against "!thing" / "?thing" — implements a
-  prefix command. Discord's message-content-intent policy prohibits those, so reject under
-  `actions_appropriate` and say a slash command or the chat bot is the right surface for
-  something a member types. Matching a keyword ANYWHERE in the message (moderation, a keyword
-  watch, a specific phrase) is legal and must still pass — what fails is treating the first word
-  as a command name.
-
 ## Reject latent time bombs
 - Unbounded memory: handler memory is HARD-CAPPED at 16 KB and a breach errors the fire. Reject a
   script that writes a memory key per user, per message, or per day with no pruning — a

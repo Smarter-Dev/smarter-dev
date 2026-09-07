@@ -458,15 +458,6 @@ the same draft again.
   the four member_* triggers, for dm_message (a DM has no channel), AND for mod_action (guild-wide,
   no home channel); message_edit IS channel-keyed (scope it by channel_ids like a message handler,
   empty = all).
-- NEVER BUILD A TEXT PREFIX COMMAND. A handler must not implement commands like "!ping",
-  "!stats" or "?help", and must never branch on a message's leading command word (no
-  `text.startswith("!")`, no `text.split()[0] == "!thing"`, no equality test against a command
-  literal). Discord's message-content-intent policy prohibits it, so a script that does this is
-  rejected. Trigger on the EVENT instead — a reaction, member_join, member_role_change,
-  thread_create, a schedule/timer, or a specific bot's message (include_bot_messages) — or, for
-  anything that genuinely needs a member to type something, set feasible=false and say a slash
-  command or the chat bot is the right surface. Matching a keyword ANYWHERE in a message for
-  moderation or a keyword watch is fine; what is banned is treating the leading word as a command.
 - MEMBER EVENTS HAVE NO HOME CHANNEL. On a member_* trigger, send_message(content) with no
   channel_id FAILS — every send must name a channel constant (resolve names via list_channels).
 - RAID FREQUENCY. member_join and member_leave fire on EVERY join/leave and burst during raids and

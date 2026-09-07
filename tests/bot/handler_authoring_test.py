@@ -5,6 +5,7 @@ Author and judge are injected, so these run with no model calls.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC
 from datetime import datetime
 from types import SimpleNamespace
@@ -13,9 +14,14 @@ from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.openai import OpenAIResponsesModel
 
+import pytest
+
 from smarter_dev.bot.agents import handler_authoring
 from smarter_dev.bot.agents.handler_authoring import ADMIN_AUTHOR_PROMPT
 from smarter_dev.bot.agents.handler_authoring import ADMIN_JUDGE_PROMPT
+from smarter_dev.bot.agents.handler_authoring import AUTHOR_PROMPT
+from smarter_dev.bot.agents.handler_authoring import JUDGE_PROMPT
+from smarter_dev.bot.agents.handler_authoring import PREFIX_COMMAND_RULE
 from smarter_dev.bot.agents.handler_authoring import AdminHandlerPlan
 from smarter_dev.bot.agents.handler_authoring import HandlerPlan
 from smarter_dev.bot.agents.handler_authoring import JudgeVerdict
@@ -1318,8 +1324,21 @@ def test_handler_model_settings_falls_back_for_non_catalog_ids():
 
 # -- prompt policy: prefix commands are prohibited -----------------------------
 # Discord's message-content-intent policy bans bot behaviour triggered by a
-# member's message text, so neither the authoring prompt nor the review prompt
-# may teach, exemplify, or approve one.
+# member's message text. The rule binds both tiers and both roles, so it is one
+# module constant appended to every prompt: no prompt may teach, exemplify or
+# approve a prefix command, and none may restate the rule in its own words.
+
+ALL_PROMPTS = (
+    ("member author", AUTHOR_PROMPT),
+    ("member judge", JUDGE_PROMPT),
+    ("admin author", ADMIN_AUTHOR_PROMPT),
+    ("admin judge", ADMIN_JUDGE_PROMPT),
+)
+
+COMMAND_SHAPED_LITERAL = re.compile(r"""["'`][!?][A-Za-z]""")
+
+# The rule is line-wrapped markdown, so a phrase may straddle a newline.
+UNWRAPPED_RULE = " ".join(PREFIX_COMMAND_RULE.split())
 
 
 def _prompt_span(prompt: str, start_marker: str, end_marker: str) -> str:
@@ -1327,24 +1346,36 @@ def _prompt_span(prompt: str, start_marker: str, end_marker: str) -> str:
     return prompt[start : prompt.index(end_marker, start)]
 
 
-def _prompt_bullet(prompt: str, phrase: str) -> str:
-    start = prompt.rindex("\n- ", 0, prompt.index(phrase))
-    end = prompt.find("\n- ", start + 1)
-    return prompt[start : end if end != -1 else len(prompt)]
+@pytest.mark.parametrize("tier, prompt", ALL_PROMPTS, ids=[name for name, _ in ALL_PROMPTS])
+def test_every_prompt_carries_the_one_prefix_command_rule(tier, prompt):
+    assert prompt.count(PREFIX_COMMAND_RULE) == 1
 
 
-def test_admin_author_prompt_never_teaches_a_command_prefix_guard():
-    taught_commands = ("command-prefix match", "!lookup", "!whois", "!history")
-    assert [
-        phrase for phrase in taught_commands if phrase in ADMIN_AUTHOR_PROMPT
-    ] == []
+def test_the_prefix_command_rule_bans_leading_command_word_branching():
+    assert "startswith" in UNWRAPPED_RULE
+    assert "split()[0]" in UNWRAPPED_RULE
+    assert "keyword" in UNWRAPPED_RULE
 
 
-def test_admin_author_prompt_bans_leading_command_word_branching():
-    rule = _prompt_bullet(ADMIN_AUTHOR_PROMPT, "NEVER BUILD A TEXT PREFIX COMMAND")
-    assert "startswith" in rule
-    assert "split()[0]" in rule
-    assert "keyword" in rule
+def test_the_prefix_command_rule_tells_an_author_what_to_do_instead():
+    assert "feasible=false" in UNWRAPPED_RULE
+    assert "slash command" in UNWRAPPED_RULE
+
+
+def test_the_prefix_command_rule_names_the_checklist_category_a_judge_rejects_under():
+    assert "actions_appropriate" in UNWRAPPED_RULE
+
+
+@pytest.mark.parametrize("tier, prompt", ALL_PROMPTS, ids=[name for name, _ in ALL_PROMPTS])
+def test_no_prompt_shows_a_command_shaped_example_outside_the_rule(tier, prompt):
+    rule_start = prompt.index(PREFIX_COMMAND_RULE)
+    rule_span = range(rule_start, rule_start + len(PREFIX_COMMAND_RULE))
+    outside = [
+        prompt[max(0, match.start() - 70) : match.start() + 30]
+        for match in COMMAND_SHAPED_LITERAL.finditer(prompt)
+        if match.start() not in rule_span
+    ]
+    assert outside == []
 
 
 def test_schedule_timer_example_grants_its_role_behind_a_guard():
@@ -1366,11 +1397,3 @@ def test_schedule_timer_example_grants_its_role_behind_a_guard():
         if line.startswith("if ") and line.endswith(":")
     ]
     assert guards, f"the example grants a role unconditionally: {lines[grant]!r}"
-
-
-def test_admin_judge_prompt_rejects_leading_command_word_branching():
-    rule = _prompt_bullet(ADMIN_JUDGE_PROMPT, "prefix command")
-    assert "startswith" in rule
-    assert "split()[0]" in rule
-    assert "keyword" in rule
-    assert "actions_appropriate" in rule
