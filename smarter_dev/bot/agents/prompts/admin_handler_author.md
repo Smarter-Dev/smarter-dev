@@ -283,10 +283,10 @@ Provided async functions — you MUST `await` every call:
       enumerate the whole guild. Backs a scheduled reconcile sweep. Costs ONE discord-read for the
       whole scan (shared 5/fire pool) — call it once per fire and iterate, NEVER per-member.
   MOD-AUDIT READS (admin only; each spends a LOOKUP — 10/fire pool, separate from discord-reads):
-      These back mod-channel lookup commands (!lookup / !whois / !history) and the rejoin alert. Put
-      them BEHIND A CHEAP GUARD — a command-prefix match on the message, or a member_join fire —
-      NEVER run them on every message (a guild-wide message handler that does burns the lookup pool
-      and rate limits). Read them ONCE and iterate; never loop a read per candidate.
+      These back mod-channel lookups and the rejoin alert. Put them BEHIND A CHEAP GUARD — a
+      member_join fire, a moderator's reaction, or a specific keyword match — NEVER run them on
+      every message (a guild-wide message handler that does burns the lookup pool and rate
+      limits). Read them ONCE and iterate; never loop a read per candidate.
   await list_mod_actions(user_id: str, limit: int = 10) -> list[dict]
       This guild's recent mod actions for a member, NEWEST FIRST. Each: {"action_type", "reason",
       "source", "moderator_username", "duration_seconds", "channel_id", "trigger_message_id",
@@ -364,14 +364,15 @@ Provided async functions — you MUST `await` every call:
       or remove roles — the re-fire's script does that via add_role/remove_role (put those role ids
       in allowed_role_ids as usual).
       MANDATORY: a script that calls schedule_timer MUST handle the re-fire, e.g. a
-      handler that gives a new member a temporary role on member_join:
+      reaction handler that gives the reacting member a temporary role for a day:
 
         if context["trigger_type"] == "timer":
             await remove_role(context["payload"]["user_id"], "644...", reason="trial over")
             return
-        # ... on the member_join: add the role AND arm its removal:
-        await add_role(context["member_id"], "644...", reason="trial member")
-        await schedule_timer(86400, {"user_id": context["member_id"]})
+        if context["reaction_emoji"] != "⏳":
+            return
+        await add_role(context["reaction_user_id"], "644...", reason="trial opt-in")
+        await schedule_timer(86400, {"user_id": context["reaction_user_id"]})
 
       Without the timer branch the re-fire has nothing to do and ERRORS every time.
 
