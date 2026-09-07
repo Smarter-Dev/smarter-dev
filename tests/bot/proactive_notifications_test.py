@@ -222,7 +222,7 @@ def test_render_notifications_prefixes_channel_name():
 
     rendered = notifications.render_notifications([item])
 
-    assert "[#python-help] [12:00 UTC, mode_change]" in rendered
+    assert "[#python-help] [2026-08-19T12:00:00Z, mode_change]" in rendered
 
 
 def test_render_notifications_falls_back_to_channel_id():
@@ -234,7 +234,7 @@ def test_render_notifications_falls_back_to_channel_id():
 
     rendered = notifications.render_notifications([item])
 
-    assert "[#123] [12:00 UTC, mode_change]" in rendered
+    assert "[#123] [2026-08-19T12:00:00Z, mode_change]" in rendered
 
 
 def test_render_notifications_without_provenance_omits_channel_prefix():
@@ -246,4 +246,4 @@ def test_render_notifications_without_provenance_omits_channel_prefix():
     rendered = notifications.render_notifications([item])
 
     assert "[#]" not in rendered
-    assert "[12:00 UTC, mode_change]" in rendered
+    assert "[2026-08-19T12:00:00Z, mode_change]" in rendered

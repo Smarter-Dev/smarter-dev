@@ -14,9 +14,10 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from dataclasses import field
-from datetime import UTC
 from datetime import datetime
 
+from smarter_dev.bot.proactive.timestamps import as_utc
+from smarter_dev.bot.proactive.timestamps import utc_timestamp
 from smarter_dev.bot.proactive.types import ChannelMessage
 
 NOTIFICATION_QUEUE_LIMIT = 20
@@ -56,7 +57,7 @@ def mention_notification(
         created_at=message.timestamp,
         body=(
             f"You were @mentioned by {_user_metadata(message)} in message "
-            f"id={message.id}:\n> {message.content}"
+            f"id={message.id} (sent_at={utc_timestamp(message.timestamp)}):\n> {message.content}"
         ),
         channel_id=channel_id,
         channel_name=channel_name,
@@ -72,7 +73,8 @@ def reply_notification(
     channel_name: str = "",
 ) -> Notification:
     replied_line = (
-        f'your message id={replied_to.id} ("{replied_to.content[:120]}")'
+        f'your message id={replied_to.id} '
+        f'(sent_at={utc_timestamp(replied_to.timestamp)}, "{replied_to.content[:120]}")'
         if replied_to is not None
         else "one of your messages"
     )
@@ -81,7 +83,7 @@ def reply_notification(
         created_at=message.timestamp,
         body=(
             f"{_user_metadata(message)} replied to {replied_line} with "
-            f"message id={message.id}:\n> {message.content}"
+            f"message id={message.id} (sent_at={utc_timestamp(message.timestamp)}):\n> {message.content}"
         ),
         channel_id=channel_id,
         channel_name=channel_name,
@@ -144,7 +146,7 @@ def mode_change_notification(
     channel_id: str = "",
     channel_name: str = "",
 ) -> Notification:
-    until_text = f" until {until:%H:%M} UTC" if until else ""
+    until_text = f" until {utc_timestamp(until)}" if until else ""
     return Notification(
         kind="mode_change",
         created_at=created_at,
@@ -282,12 +284,18 @@ def render_notifications(items: list[Notification], dropped: int = 0) -> str:
     lines = ["NOTIFICATIONS since your last wake (oldest first):"]
     if dropped:
         lines.append(f"({dropped} older notifications were dropped)")
+    if items:
+        latest = utc_timestamp(max(as_utc(item.created_at) for item in items))
+        lines.append(
+            f"Most recent notification: {latest} "
+            "(approximate current time; delivery may be delayed)."
+        )
     for notification in items:
-        stamp = notification.created_at.astimezone(UTC).strftime("%H:%M")
+        stamp = utc_timestamp(notification.created_at)
         channel = notification.channel_name or notification.channel_id
         channel_prefix = f"[#{channel}] " if channel else ""
         lines.append(
-            f"{channel_prefix}[{stamp} UTC, {notification.kind}] "
+            f"{channel_prefix}[{stamp}, {notification.kind}] "
             f"{notification.body}"
         )
     return "\n".join(lines)

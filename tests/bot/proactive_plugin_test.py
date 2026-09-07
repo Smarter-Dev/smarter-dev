@@ -290,6 +290,7 @@ def _fake_bot(history_messages, service, *, channel_names=None):
                 name=channel_names.get(cid, str(cid))
             ),
             get_guild=lambda gid: SimpleNamespace(name="Smarter Dev"),
+            get_guilds_view=lambda: {2: SimpleNamespace(id=2)},
         ),
     )
 
@@ -917,6 +918,42 @@ async def test_passive_sweep_drains_buffered_channels(listener_setup):
 # --- independent producer and consumer state ---------------------------------
 
 
+async def test_passive_ticker_sweeps_after_two_minutes_then_every_fifteen(monkeypatch):
+    run = SimpleNamespace()
+    delays = []
+    sweep = AsyncMock()
+
+    async def fake_sleep(delay):
+        delays.append(delay)
+        if len(delays) == 3:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(proactive, "runtime", run)
+    monkeypatch.setattr(proactive.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(proactive, "_passive_sweep", sweep)
+    monkeypatch.setattr(proactive, "_sweep_expired_envelopes", AsyncMock())
+
+    with pytest.raises(asyncio.CancelledError):
+        await proactive._passive_ticker()
+
+    assert delays == [120, 900, 900]
+    assert sweep.await_count == 2
+    sweep.assert_awaited_with(run)
+
+
+async def test_passive_ticker_stops_if_runtime_removed_during_initial_wait(monkeypatch):
+    sleep = AsyncMock()
+    sweep = AsyncMock()
+    monkeypatch.setattr(proactive, "runtime", None)
+    monkeypatch.setattr(proactive.asyncio, "sleep", sleep)
+    monkeypatch.setattr(proactive, "_passive_sweep", sweep)
+
+    await proactive._passive_ticker()
+
+    sleep.assert_awaited_once_with(120)
+    sweep.assert_not_awaited()
+
+
 async def test_mention_queues_verbatim_while_consumer_is_busy(listener_setup):
     state = listener_setup.runtime.state_for(2, 1)
 
@@ -1153,6 +1190,44 @@ async def test_cursor_advances_only_after_guild_wake_is_consumed(persistence_set
 
     cursor_after_wake = await persistence_setup.store.read_cursor(1)
     assert cursor_after_wake == {"guild_id": "2", "last_message_id": "555"}
+
+
+@pytest.mark.parametrize("publish_fails", [False, True])
+async def test_external_producer_persists_cursor_only_after_publish(
+    persistence_setup, monkeypatch, publish_fails
+):
+    run = persistence_setup.runtime
+    run.execution_mode = proactive.EXTERNAL_EXECUTION_MODE
+    publish = AsyncMock(side_effect=RuntimeError("Redis unavailable") if publish_fails else None)
+    monkeypatch.setattr(run, "enqueue_notification", publish)
+    state = run.state_for(2, 1)
+    state.buffer.append(proactive.channel_message_from_hikari(_hikari_message(id=555)))
+    if publish_fails:
+        with pytest.raises(RuntimeError, match="Redis unavailable"):
+            await proactive._run_producer(state)
+        assert await persistence_setup.store.read_cursor(1) is None
+    else:
+        await proactive._run_producer(state)
+        publish.assert_awaited_once()
+        assert await persistence_setup.store.read_cursor(1) == {
+            "guild_id": "2", "last_message_id": "555",
+        }
+
+
+async def test_recovery_discovers_channel_without_cursor(persistence_setup, monkeypatch):
+    missed = _hikari_message(id=501, created_at=datetime.now(UTC), user_mentions_ids=(999,))
+    persistence_setup.bot.rest.fetch_messages = lambda channel_id, after=None: _FakeIterator([missed])
+    monkeypatch.setattr(proactive, "WatcherProducer", WatcherProducer)
+    await proactive._recover_channels(persistence_setup.runtime)
+    queued = persistence_setup.runtime.guild_state_for(2).queue.items
+    assert any(n.kind == "mention" and n.message_ids == ("501",) for n in queued)
+    assert 1 in persistence_setup.runtime.channel_states
+
+
+async def test_recovery_registers_quiet_channel_without_cursor(persistence_setup):
+    persistence_setup.bot.rest.fetch_messages = lambda channel_id, after=None: _FakeIterator([])
+    await proactive._recover_channels(persistence_setup.runtime)
+    assert 1 in persistence_setup.runtime.channel_states
 
 
 async def test_recovery_wakes_enabled_channels_on_missed_messages(
