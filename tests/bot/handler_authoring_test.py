@@ -677,6 +677,11 @@ async def test_standard_pipeline_rejects_admin_only_trigger():
 # -- admin fix round -----------------------------------------------------------
 
 CLEAN_ADMIN_SCRIPT = (
+    'if "raid" in context["message_content"]:\n'
+    '    await send_message("raid reported", "MODCHAT")\n'
+)
+
+PREFIX_COMMAND_SCRIPT = (
     'if context["message_content"].startswith("!raid"):\n'
     '    await send_message("raid reported", "MODCHAT")\n'
 )
@@ -1424,3 +1429,40 @@ def test_schedule_timer_example_grants_its_role_behind_a_guard():
         if line.startswith("if ") and line.endswith(":")
     ]
     assert guards, f"the example grants a role unconditionally: {lines[grant]!r}"
+
+
+# -- text prefix commands are stopped by the lint, not left to the judge --------
+
+
+async def test_standard_pipeline_lint_rejects_a_prefix_command():
+    result = await run_creation_pipeline(
+        request="reply pong when someone types !ping",
+        trigger_type="message",
+        settings={},
+        existing_handlers=[],
+        author=_author_returning(_plan(script=PREFIX_COMMAND_SCRIPT)),
+        judge=_judge_approving(),
+    )
+    assert not result.ok
+    assert "safety lint" in result.error
+    assert "prefix commands are prohibited" in result.error
+
+
+async def test_admin_pipeline_lint_sends_a_prefix_command_back_to_the_author():
+    # An approving judge must never be the last line: the lint rejects the
+    # command-shaped draft mechanically and the fix round gets the reason.
+    author, requests = _admin_author_drafting(
+        _admin_plan(script=PREFIX_COMMAND_SCRIPT),
+        _admin_plan(script=CLEAN_ADMIN_SCRIPT),
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods when someone types !raid",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=_judge_approving(),
+    )
+    assert result.ok
+    assert result.script == CLEAN_ADMIN_SCRIPT
+    assert len(requests) == 2
+    assert "prefix commands are prohibited" in requests[1]

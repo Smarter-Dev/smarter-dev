@@ -114,3 +114,62 @@ def test_remove_role_with_fstring_role_id_rejected():
 def test_add_role_with_subscript_role_id_rejected():
     reason = check_static('await add_role(context["member_id"], roles["holding"])\n')
     assert reason and "role id" in reason
+
+
+# -- text prefix commands (prohibited under Discord's message-content-intent policy)
+
+
+def _prefix_command_reason(snippet: str) -> str | None:
+    return check_static(f"{snippet}\n    await send_message('hi')\n")
+
+
+def test_rejects_startswith_command_word():
+    reason = _prefix_command_reason('if text.startswith("!ping"):')
+    assert reason and "leading command word" in reason
+
+
+def test_rejects_equality_against_command_word():
+    assert _prefix_command_reason("if word == '!sus':")
+    assert _prefix_command_reason('if text.split()[0] == "?help":')
+    assert _prefix_command_reason('if "!ping" == word:')
+
+
+def test_rejects_inverted_equality_against_command_word():
+    # The first line of the deleted bump_commands.monty: a guard that returns
+    # unless the message IS the command word.
+    assert _prefix_command_reason('if text != "!bumpers" and text != "!bumps":')
+    assert _prefix_command_reason('if "!bumps"!=text:')
+
+
+def test_rejects_membership_in_command_word_collection():
+    assert _prefix_command_reason('if text in ("!sus", "!list_sus"):')
+    assert _prefix_command_reason('if text in ["!sus"]:')
+    assert _prefix_command_reason('if word in (\n    "!a",\n    "?b",\n):')
+
+
+def test_allows_comparisons_that_are_not_command_words():
+    assert _prefix_command_reason('if reply != "ok":') is None
+    assert _prefix_command_reason('if "ok"!=reply:') is None
+    assert _prefix_command_reason('if word == "hello":') is None
+    assert _prefix_command_reason('if text in ("yes", "no"):') is None
+
+
+def test_allows_keyword_anywhere_in_message():
+    # Matching a word anywhere in the body is a keyword watch, not a command.
+    assert _prefix_command_reason('if "?help" in text:') is None
+    assert _prefix_command_reason('if "raid" in context["message_content"]:') is None
+
+
+def test_allows_exclamation_that_is_not_a_command_word():
+    assert _prefix_command_reason('await send_message("!! raid alert")') is None
+    assert _prefix_command_reason('if "!" in text:') is None
+
+
+def test_lint_script_rejects_a_prefix_command_before_compile():
+    script = (
+        'text = context["message_content"].strip().lower()\n'
+        'if text != "!bumpers" and text != "!bumps":\n'
+        "    pass\n"
+    )
+    reason = lint_script(script)
+    assert reason and "prefix commands are prohibited" in reason
