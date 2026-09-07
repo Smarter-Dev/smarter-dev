@@ -50,21 +50,35 @@ def test_all_shipped_examples_render_and_lint_clean():
         assert len(bundle) == len(ext.manifest.handlers)
 
 
-# A prefix command is a script branching on a leading command word in a member's
-# message, so its command word is a string literal that starts with "!". The
-# lookahead keeps the closing quote of a `"ok"!=reply` comparison out of it.
-_PREFIX_COMMAND_LITERAL = re.compile(r"""["']!(?!=)[^"'\n]{0,24}""")
+# A prefix command keys behaviour to the LEADING word of a member's message, the
+# shape the authoring prompts ban in
+# ``handler_authoring.PREFIX_COMMAND_RULE``: a startswith test, a
+# ``split()[0] ==`` test, or an equality test against a command word. A command
+# word is a quoted literal opening with one of the prefixes Discord bots use;
+# the lookahead keeps the closing quote of a `"ok"!=reply` comparison out of it.
+_COMMAND_PREFIXES = "!?"
+_COMMAND_WORD = rf"""["'][{_COMMAND_PREFIXES}](?!=)[^"'\n]{{0,24}}["']"""
+_PREFIX_COMMAND_COMPARISON = re.compile(
+    rf"""startswith\(\s*{_COMMAND_WORD}|==\s*{_COMMAND_WORD}|{_COMMAND_WORD}\s*=="""
+)
 
 
-def _prefix_command_literals(script: str) -> list[str]:
-    return [match.group(0) for match in _PREFIX_COMMAND_LITERAL.finditer(script)]
+def _prefix_command_comparisons(script: str) -> list[str]:
+    return [match.group(0) for match in _PREFIX_COMMAND_COMPARISON.finditer(script)]
 
 
-def test_prefix_command_literals_match_command_words_not_comparisons():
-    assert _prefix_command_literals('if text.startswith("!ping"):') == ['"!ping']
-    assert _prefix_command_literals("if word == '!sus':") == ["'!sus"]
-    assert _prefix_command_literals('if reply != "ok":') == []
-    assert _prefix_command_literals('if "ok"!=reply:') == []
+def test_prefix_command_matches_command_branches_not_message_bodies():
+    assert _prefix_command_comparisons('if text.startswith("!ping"):') == [
+        'startswith("!ping"'
+    ]
+    assert _prefix_command_comparisons("if word == '!sus':") == ["== '!sus'"]
+    assert _prefix_command_comparisons('if text.split()[0] == "?help":') == [
+        '== "?help"'
+    ]
+    assert _prefix_command_comparisons('if "!ping" == word:') == ['"!ping" ==']
+    assert _prefix_command_comparisons('if reply != "ok":') == []
+    assert _prefix_command_comparisons('if "ok"!=reply:') == []
+    assert _prefix_command_comparisons('await send_message("!! raid alert")') == []
 
 
 def test_no_shipped_script_implements_a_text_prefix_command():
@@ -75,7 +89,7 @@ def test_no_shipped_script_implements_a_text_prefix_command():
         f"{ext.manifest.slug}/{key}: {literal}"
         for ext in load_registry().all()
         for key, script in ext.scripts.items()
-        for literal in _prefix_command_literals(script)
+        for literal in _prefix_command_comparisons(script)
     ]
     assert offenders == []
 

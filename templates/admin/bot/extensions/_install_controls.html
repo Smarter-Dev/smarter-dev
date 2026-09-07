@@ -6,6 +6,12 @@
 {% endif %}
 {%- endmacro %}
 
+{% macro disable_form(guild_id, slug) -%}
+<form method="post" action="/admin/bot/guilds/{{ guild_id }}/extensions/{{ slug }}/disable" style="display:inline;">
+    <button type="submit" class="sk-btn-outline sk-btn-small">Disable</button>
+</form>
+{%- endmacro %}
+
 {% macro uninstall_form(guild_id, slug) -%}
 <form method="post" action="/admin/bot/guilds/{{ guild_id }}/extensions/{{ slug }}/uninstall" style="display:inline;" onsubmit="return confirm('Uninstall this extension? Its handlers will be removed from this guild.')">
     <button type="submit" class="sk-btn-outline sk-btn-small sk-btn-danger">Uninstall</button>
