@@ -505,18 +505,10 @@ class ConversationContextBuilder:
                 trigger_timestamp = trigger_msg.created_at
 
         for message in messages:
-            # Resolve mentions in content
             content = await resolve_mentions(message.content or "", self.bot, self.guild_id)
-
-            # Add attachment info
-            if message.attachments:
-                attachment_info = []
-                for attachment in message.attachments:
-                    if hasattr(attachment, "filename") and attachment.filename:
-                        attachment_info.append(f"📎 {attachment.filename}")
-
-                if attachment_info:
-                    content = f"{content} {' '.join(attachment_info)}".strip()
+            attachment_names = _describe_attachments(message)
+            if attachment_names:
+                content = f"{content} {attachment_names}".strip()
 
             # Determine if message is "new"
             is_new = False
