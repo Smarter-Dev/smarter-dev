@@ -804,7 +804,7 @@ async def extract_forum_post_data(
 
     # Extract message information if available
     if initial_message:
-        content = getattr(initial_message, "content", "")
+        content = getattr(initial_message, "content", "") or ""
         author = getattr(initial_message, "author", None)
         author_name = (
             getattr(author, "display_name", getattr(author, "username", "Unknown"))
@@ -820,7 +820,7 @@ async def extract_forum_post_data(
                 for att in initial_message.attachments
             ]
 
-        logger.debug(f"FORUM EXTRACT DEBUG: Content: {len(content or '')} chars")
+        logger.debug(f"FORUM EXTRACT DEBUG: Content: {len(content)} chars")
         logger.debug(f"FORUM EXTRACT DEBUG: Author: '{author_name}'")
         logger.debug(f"FORUM EXTRACT DEBUG: Attachments: {len(attachments)}")
     else:
