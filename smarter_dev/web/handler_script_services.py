@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 from uuid import uuid4
 
+import httpx
 from redis.exceptions import RedisError
 from skrift.workers import submit as worker_submit
 from sqlalchemy.exc import SQLAlchemyError
@@ -168,12 +169,13 @@ class AdminScriptServices:
 
         Never trusted from the script (a script-supplied name could impersonate
         anyone in the log). One UNMETERED fetch — it is a host rail, not a
-        script-visible read — and a Discord failure degrades to the raw id
-        rather than failing a warn whose notice has already posted.
+        script-visible read — and a Discord rejection or transport failure
+        degrades to the raw id rather than failing a warn whose notice has
+        already posted.
         """
         try:
             info = await self.actor.get_member_info(target_user_id)
-        except AdminActionError:
+        except (AdminActionError, httpx.HTTPError):
             logger.debug(
                 "warn_user could not resolve username for %s",
                 target_user_id,
