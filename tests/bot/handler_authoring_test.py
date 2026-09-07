@@ -31,6 +31,8 @@ from smarter_dev.bot.agents.handler_authoring import _build_admin_author_prompt
 from smarter_dev.bot.agents.handler_authoring import _build_configured_model
 from smarter_dev.bot.agents.handler_authoring import _handler_model_settings
 from smarter_dev.shared.config import Settings
+from smarter_dev.web.models import ADMIN_HANDLER_TRIGGER_TYPES
+from smarter_dev.web.models import HANDLER_TRIGGER_TYPES
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.bot.agents.handler_authoring import _build_author_prompt
 from smarter_dev.bot.agents.handler_authoring import checklist_failures
@@ -1335,6 +1337,13 @@ ALL_PROMPTS = (
     ("admin judge", ADMIN_JUDGE_PROMPT),
 )
 
+# The triggers a prompt may name are the ones its tier can actually author: a
+# member plan naming an admin-only trigger is rejected by the handlers API.
+TIER_TRIGGER_TYPES = {
+    "member": frozenset(HANDLER_TRIGGER_TYPES),
+    "admin": frozenset(ADMIN_HANDLER_TRIGGER_TYPES),
+}
+
 COMMAND_SHAPED_LITERAL = re.compile(r"""["'`][!?][A-Za-z]""")
 
 # The rule is line-wrapped markdown, so a phrase may straddle a newline.
@@ -1360,6 +1369,24 @@ def test_the_prefix_command_rule_bans_leading_command_word_branching():
 def test_the_prefix_command_rule_tells_an_author_what_to_do_instead():
     assert "feasible=false" in UNWRAPPED_RULE
     assert "slash command" in UNWRAPPED_RULE
+
+
+def test_the_prefix_command_rule_keeps_anchored_protocol_parsing_required():
+    """The DM and spawn_agent rules demand startswith on a protocol keyword."""
+    assert "anchored parsing" in UNWRAPPED_RULE
+    assert "not a prefix command" in UNWRAPPED_RULE
+    assert "command prefix" in UNWRAPPED_RULE
+
+
+@pytest.mark.parametrize("tier, prompt", ALL_PROMPTS, ids=[name for name, _ in ALL_PROMPTS])
+def test_no_prompt_names_a_trigger_outside_its_tier(tier, prompt):
+    allowed = TIER_TRIGGER_TYPES[tier.split()[0]]
+    named = {
+        trigger
+        for trigger in ADMIN_HANDLER_TRIGGER_TYPES
+        if re.search(rf"\b{trigger}\b", prompt)
+    }
+    assert named <= allowed, sorted(named - allowed)
 
 
 def test_the_prefix_command_rule_names_the_checklist_category_a_judge_rejects_under():
