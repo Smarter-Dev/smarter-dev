@@ -219,7 +219,7 @@ async def gather_message_context(
             # Include ALL messages - no filtering except for short messages if explicitly requested
             if skip_short_messages and len(message.content.strip()) < min_message_length:
                 skipped_count += 1
-                logger.debug(f"Skipped short message: '{message.content[:20]}...'")
+                logger.debug(f"Skipped short message {message.id} ({len(message.content)} chars)")
                 continue
 
             # Extract reply context separately
@@ -289,7 +289,7 @@ async def gather_message_context(
         if reversed_messages:
             logger.debug(f"Selected {len(reversed_messages)} messages for context:")
             for i, msg in enumerate(reversed_messages):
-                logger.debug(f"  {i+1}. {msg.author}: {msg.content[:50]}... ({msg.timestamp.strftime('%H:%M:%S')})")
+                logger.debug(f"  {i+1}. message {msg.message_id} from author {msg.author_id} ({len(msg.content)} chars) ({msg.timestamp.strftime('%H:%M:%S')})")
 
         return reversed_messages
 
@@ -415,7 +415,7 @@ class ConversationContextBuilder:
 
             # Skip bot messages that start with '-#' (tool usage messages)
             if message.author.id == bot_user_id and message.content and message.content.startswith("-#"):
-                logger.debug(f"Skipping bot tool usage message: {message.content[:50]}")
+                logger.debug(f"Skipping bot tool usage message {message.id} ({len(message.content)} chars)")
                 continue
 
             messages.append(message)
@@ -453,7 +453,7 @@ class ConversationContextBuilder:
 
             # Skip bot messages that start with '-#' (tool usage messages)
             if message.author.id == bot_user_id and message.content and message.content.startswith("-#"):
-                logger.debug(f"Skipping bot tool usage message: {message.content[:50]}")
+                logger.debug(f"Skipping bot tool usage message {message.id} ({len(message.content)} chars)")
                 continue
 
             messages.append(message)
