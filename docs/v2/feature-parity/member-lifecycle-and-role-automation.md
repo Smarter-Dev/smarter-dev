@@ -9,7 +9,7 @@ beginner.py `!sus` command.
 - `beginner.codes-bot/docs/features/celebration-engagement.md`
 - `beginner.py-bot/docs/prod-functionality/02-sus-command.md`
 
-> **Removed 2026-09 — prefix commands are prohibited.** Discord's message-content-intent policy rules out bot behaviour triggered by a member's message text, so the `!sus` / `!list_sus` command surface (the `py-sus-command` rows and §4.3) was removed: the `sus` extension package and its tests are deleted and nothing ships in their place. Onboarding and celebration/engagement are unaffected, and the rails they share with sus — member triggers, role mutation, `schedule_timer` — stand as written.
+> **Removed 2026-09 — prefix commands are prohibited.** Discord's message-content-intent policy rules out bot behaviour triggered by a member's message text, so the `!sus` / `!list_sus` command surface (the `py-sus-command` rows and §4.3) was removed: the `sus` extension package and its tests are deleted and nothing ships in their place. Guilds that already installed it are cleaned by alembic revision `a4c7e2f9b6d3`, which deletes the install and its handler rows on deploy — no operator action needed. Onboarding and celebration/engagement are unaffected, and the rails they share with sus — member triggers, role mutation, `schedule_timer` — stand as written.
 
 ## 1. Overview
 

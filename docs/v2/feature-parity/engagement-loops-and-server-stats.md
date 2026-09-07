@@ -6,7 +6,7 @@
 
 **Target:** the smarter-dev handler system (`smarter_dev/web/handler_*.py`, `smarter_dev/bot/plugins/handler_events.py`, `smarter_dev/bot/agents/handler_authoring.py`), extended where needed. No bot-core work — the one candidate (gateway presence aggregation) was dropped along with the online-count features (decision 2026-07-18).
 
-> **Removed 2026-09 — prefix commands are prohibited.** Discord's message-content-intent policy rules out bot behaviour triggered by a member's message text, so the `!bumpers` / `!bumps` / `!update bump king` command surface (rows 10-12) and the whole `bump-commands` handler it planned were removed from the shipped `disboard-bumping` extension. What ships is the `bump-tracker` handler alone: it reacts to the Disboard bot's confirmation embed, never to human text. Everything else in this plan stands.
+> **Removed 2026-09 — prefix commands are prohibited.** Discord's message-content-intent policy rules out bot behaviour triggered by a member's message text, so the `!bumpers` / `!bumps` / `!update bump king` command surface (rows 10-12) and the whole `bump-commands` handler it planned were removed from the shipped `disboard-bumping` extension. What ships is the `bump-tracker` handler alone: it reacts to the Disboard bot's confirmation embed, never to human text. Guilds that already installed the bundle are cleaned by alembic revision `a4c7e2f9b6d3`, which deletes their `bump-commands` handler rows on deploy — no operator action needed; their install keeps its `bump-tracker` row and still offers "update available", which re-renders it without the retired `commands_channel_id`. Everything else in this plan stands.
 
 ## 1. Overview
 
