@@ -97,7 +97,7 @@ async def _fire(rendered: RenderedHandler, *, memory: dict):
         guild_id="G1",
         emitter=emitter,
         limiter=_Limiter(),
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=_Actor(),
         channel_ids=rendered.channel_ids,
         memory=memory,

@@ -167,7 +167,7 @@ async def _fire(members: list[dict], *, actor=None, budget=None):
         guild_id="G1",
         emitter=emitter,
         limiter=limiter,
-        budget=budget or admin_budget(),
+        budget=budget or admin_budget("message"),
         actor=actor,
         allowed_role_ids=list(item.settings["allowed_role_ids"]),
     )

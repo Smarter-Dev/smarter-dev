@@ -19,7 +19,11 @@ Error-shape parity:
   ``detail``, ``request_id=None`` because the router passed no request) —
   reproduced via :func:`errors.nested_validation_error` /
   :func:`errors.nested_not_found_error`. Its catch-all wraps every other failure
-  in a *plain* ``{"detail": "Failed to ...: <exc>"}`` 500.
+  in a *plain* ``{"detail": "Failed to ...: <exc>"}`` 500. ``record_agent_response``
+  deviates from that parity catch-all: it catches
+  :class:`sqlalchemy.exc.SQLAlchemyError` only, rolls the session back, and lets
+  any other exception propagate, so a programming error is not relabelled as a
+  database failure.
 - ``forum_notifications`` answered every failure with a bare ``HTTPException`` — a
   plain ``{"detail": "<string>"}`` body — reproduced via :func:`errors.plain_error`.
 """
@@ -35,10 +39,12 @@ from litestar.exceptions import ValidationException
 from litestar.status_codes import HTTP_200_OK
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import and_, func, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from skrift.auth.guards import APIKeyOnly, Permission
 
+from smarter_dev.shared.message_content import redact_forum_post
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import (
     BOT_API_EXCEPTION_HANDLERS,
@@ -150,7 +156,13 @@ class ForumAgentController(Controller):
         agent_id: str,
         data: dict,
     ) -> dict:
-        """Record a forum agent response."""
+        """Record a forum agent response.
+
+        The forum post is a member's Discord message, so the row keeps only
+        what the agent decided about it: the tags it was filed under, the
+        decision reason and the agent's own reply. The title and body a member
+        typed are redacted and the attachment filenames are dropped.
+        """
         # FastAPI validated the ``agent_id`` UUID path param (422) before the
         # handler body ran its ``guild_id`` snowflake check (400) — same order.
         parsed_agent_id = _parse_agent_id(agent_id)
@@ -167,11 +179,9 @@ class ForumAgentController(Controller):
                 guild_id=guild_id,
                 channel_id=data.get("channel_id", ""),
                 thread_id=data.get("thread_id", ""),
-                post_title=data.get("post_title", ""),
-                post_content=data.get("post_content", ""),
                 author_display_name=data.get("author_display_name", "Unknown"),
                 post_tags=data.get("post_tags", []),
-                attachments=data.get("attachments", []),
+                **redact_forum_post(data),
                 decision_reason=data.get("decision_reason", ""),
                 confidence_score=data.get("confidence_score", 0.0),
                 response_content=data.get("response_content", ""),
@@ -191,7 +201,8 @@ class ForumAgentController(Controller):
             }
         except BotApiException:
             raise
-        except Exception as error:
+        except SQLAlchemyError as error:
+            await db_session.rollback()
             raise plain_error(500, f"Failed to record agent response: {error}")
 
     @get("/{agent_id:str}/responses/count", status_code=HTTP_200_OK, guards=BOT_API_GUARDS)

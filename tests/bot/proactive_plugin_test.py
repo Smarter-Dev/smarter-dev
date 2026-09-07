@@ -931,6 +931,7 @@ async def test_passive_ticker_sweeps_after_two_minutes_then_every_fifteen(monkey
     monkeypatch.setattr(proactive, "runtime", run)
     monkeypatch.setattr(proactive.asyncio, "sleep", fake_sleep)
     monkeypatch.setattr(proactive, "_passive_sweep", sweep)
+    monkeypatch.setattr(proactive, "_sweep_expired_envelopes", AsyncMock())
 
     with pytest.raises(asyncio.CancelledError):
         await proactive._passive_ticker()

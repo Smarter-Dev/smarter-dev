@@ -247,15 +247,23 @@ async def tldr_command(ctx: lightbulb.Context) -> None:
     # Get message count (default to 5)
     message_count = ctx.options.count if ctx.options.count is not None else 5
 
-    # Gather messages from the channel (include all messages for full context)
-    messages = await gather_message_context(
-        ctx.bot,
-        ctx.channel_id,
-        limit=message_count,
-        skip_short_messages=False,
-        min_message_length=10,
-        guild_id=ctx.guild_id
-    )
+    try:
+        messages = await gather_message_context(
+            ctx.bot,
+            ctx.channel_id,
+            limit=message_count,
+            skip_short_messages=False,
+            min_message_length=10,
+            guild_id=ctx.guild_id
+        )
+    except RuntimeError:
+        logger.exception(f"tldr context fetch failed for channel {ctx.channel_id}")
+        await ctx.edit_last_response(
+            "❌ **Couldn't Read This Channel**\n\n"
+            "I couldn't fetch the recent messages here. Check that I have "
+            "Read Message History in this channel and try again."
+        )
+        return
 
     if not messages:
         await ctx.edit_last_response(

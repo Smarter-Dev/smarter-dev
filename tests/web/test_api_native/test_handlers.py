@@ -20,6 +20,7 @@ from sqlalchemy.pool import StaticPool
 
 from smarter_dev.shared.database import Base
 from smarter_dev.web import handler_dispatch as dispatch_module
+from smarter_dev.web import handler_recurrence
 from smarter_dev.web.api_native import handlers as handlers_module
 from smarter_dev.web.api_native.handlers import HandlerController
 from smarter_dev.web.handler_caps import MAX_HANDLERS_PER_CHANNEL
@@ -60,14 +61,18 @@ async def db_session():
 
 @pytest.fixture
 def submitted(monkeypatch) -> list[tuple]:
-    """Capture ``worker_submit`` calls and stub the scheduling/limiter seams."""
+    """Capture ``worker_submit`` calls and stub the scheduling/limiter seams.
+
+    Time-triggered fires are armed by the tier's ``RecurringFireChain``, so the
+    submit seam for them lives in ``handler_recurrence``, not the controller.
+    """
     captured: list[tuple] = []
 
     async def _submit(payload, **kwargs):
         captured.append((payload, kwargs))
 
     _StubJobHandle.cancelled = []
-    monkeypatch.setattr(handlers_module, "worker_submit", _submit)
+    monkeypatch.setattr(handler_recurrence, "worker_submit", _submit)
     monkeypatch.setattr(handlers_module, "get_handle", _StubJobHandle)
     # The dispatch fan-out lives in handler_dispatch (the controller is a thin
     # wrapper over it), so its submit/redis/limiter seams are stubbed there.

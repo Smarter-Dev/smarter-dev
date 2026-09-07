@@ -6,6 +6,8 @@
 
 **Implementation target:** the smarter-dev handler system wherever possible (per the migration direction), with a small bot-core slice for privileged slash commands.
 
+> **Retired 2026-09 — prefix commands are prohibited.** Discord's message-content-intent policy rules out bot behaviour triggered by a member's message text, so the mod-channel command surface planned in §4.2 — Handler D (`mod-lookup`) and its `!lookup` / `!whois` / `!history` cards — is retired and cannot be built: `handler_lint.check_static` rejects any script that branches on a message's leading command word. A mod-facing read surface has to arrive as a bot-core slash command; the history it would have shown is already readable in the admin site (the mod-actions and user-history pages) and by the AI moderation agent (`smarter_dev/bot/agents/mod_tools.py`). Everything else in this plan stands: the auto-mod handlers (§4.1) fire on message *content patterns*, not on a leading command word, and the audit-log ingestion, `/purge`, the rejoin alert and the mod-log formatter are untouched.
+
 ---
 
 ## 1. Overview
@@ -169,7 +171,7 @@ Seven extensions, ordered by how many capabilities they unblock. All new trigger
 }
 ```
 
-**Loop rail (hard):** a `mod_action`-triggered fire runs with `max_mod_actions=0` in its budget (a `mod_action` handler formats and posts; it never bans). `admin_handlers_jobs.run_admin_handler_fire` sets this when `trigger_type == "mod_action"`. This makes handler-action → audit-row → handler-action loops structurally impossible.
+**Loop rail (hard):** a `mod_action`-triggered fire runs with `max_mod_actions=0` in its budget (a `mod_action` handler formats and posts; it never bans). `handler_budget.admin_budget(trigger_type)` forces the pool to zero for `"mod_action"`; the trigger type is a required argument so no fire can reach the full pool by omitting it. This makes handler-action → audit-row → handler-action loops structurally impossible.
 
 **Consumed by:** mod-action-log channel posting — one authored handler formats *all* actions (manual slash commands, AI triage, auto-mod handler) into the mod-log channel, replacing per-command hardcoded embeds. `mod_monitor`'s existing `response_channel_id` reporting stays as-is; unification is optional later.
 
@@ -298,7 +300,7 @@ Sizing: 150 entries × ~5 compact fields ≈ 6–8KB serialized; warned/muting m
 
 ### 4.2 py-moderation → native moderation + audit-log ingestion, `/purge`, mod-channel handlers
 
-**Prefix commands are not ported verbatim.** The interactive privileged actions (ban/kick/timeout-removal) are **not** rebuilt as slash commands — Discord's own right-click moderation UI covers them (decision 2026-07-18, see below); their audit trail is captured by an ingestion listener. `/purge` is the one privileged action that survives as a bot-core slash command (no native bulk-delete equivalent). Read-only views become admin handlers installed in the mod channel that respond to plain-text commands there (keeping them conversationally re-authorable — a mod can ask for a different card layout without a deploy).
+**Prefix commands are not ported verbatim.** The interactive privileged actions (ban/kick/timeout-removal) are **not** rebuilt as slash commands — Discord's own right-click moderation UI covers them (decision 2026-07-18, see below); their audit trail is captured by an ingestion listener. `/purge` is the one privileged action that survives as a bot-core slash command (no native bulk-delete equivalent). Read-only views were to become admin handlers installed in the mod channel that respond to plain-text commands there (keeping them conversationally re-authorable — a mod can ask for a different card layout without a deploy); **that half is RETIRED** (see the note at the top), because a handler may not branch on a message's leading command word.
 
 **Native moderation + audit-log ingestion (bot-core).** *Decision (Zech, 2026-07-18): do not build `/ban`, `/kick`, or `/timeout remove`.* Discord's native moderation UI (right-click Kick / Ban / Timeout / Remove Timeout, each accepting a reason) covers the interactive act as well as a custom command would, with no plugin to maintain. The single accepted loss versus a custom `/ban` is the courtesy of DM-ing the target *before* the action lands — native Discord does not send one. In exchange, the audit trail is unified: a bot-core listener ingests native moderation and records each as a `ModerationAction(source="audit_log")` row, which fires the `mod_action` trigger (§3.5) and is visible to `list_mod_actions` (§3.7), so `!history`, the rejoin alert, and the mod-log formatter (Handler F) see native kick/ban/unban/timeout exactly like manual, AI, and handler actions.
 
@@ -321,7 +323,7 @@ Every path excludes the bot's own actions (skips when the audit-log actor is the
 
 **Timeout removal is not a bot-core command.** The earlier plan to add a `/timeout remove` subcommand is reversed (2026-07-18): native "Remove Timeout" covers the act, and its audit row comes from the untimeout ingestion path above.
 
-**Handler D — `mod-lookup` (trigger: `message`, scoped to the mod channel(s) via `channel_ids`).** Replaces `!lookup`/`!history`/`!whois` with plain-text commands in the mod channel:
+**Handler D — `mod-lookup`** — **RETIRED** (see the note at the top); kept below as a record of the original plan. It was to be a message trigger scoped to the mod channel(s) via `channel_ids`, replacing `!lookup`/`!history`/`!whois` with plain-text commands there. The read functions it planned (`search_guild_members`, `get_member_info`, `list_mod_actions`) shipped and are still used by Handlers E and F:
 
 - Guard: message starts with `!lookup `, `!history `, or `!whois ` (cheap prefix guard → judge-friendly); else do nothing.
 - `!lookup <text>`: `search_guild_members(text, 15)`; format count + rows (name, nickname, joined, top role, id — matching the legacy row shape; `top_role_name` comes from §3.7); when `overflow_count > 0` append "There are N more members who matched" — rendered "N+ more" when the fetch window filled, since the exact total is a floor (§3.7); note prefix-match semantics.

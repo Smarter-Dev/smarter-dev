@@ -192,10 +192,9 @@ class ForumAgentService(BaseService):
                 "responded": responded
             }
 
-            # Debug logging for API data
             logger.debug(f"FORUM API DEBUG - Recording response for agent {agent.get('name', 'Unknown')}")
             logger.debug(f"FORUM API DEBUG - Post title: '{response_data['post_title']}'")
-            logger.debug(f"FORUM API DEBUG - Post content: '{response_data['post_content'][:100]}...' ({len(response_data['post_content'])} chars)")
+            logger.debug(f"FORUM API DEBUG - Post content: {len(response_data['post_content'])} chars")
             logger.debug(f"FORUM API DEBUG - Author: '{response_data['author_display_name']}'")
             logger.debug(f"FORUM API DEBUG - Tokens used: {response_data['tokens_used']}")
             logger.debug(f"FORUM API DEBUG - Decision: '{decision_reason[:100]}...'")
@@ -401,14 +400,14 @@ class ForumAgentService(BaseService):
         try:
             # Load all active agents for the guild
             agents = await self.load_guild_agents(guild_id)
-            logger.error(f"DEBUG NOTIFICATIONS: Loaded {len(agents)} agents: {[{k: v for k, v in agent.items() if k in ['name', 'enable_responses', 'enable_user_tagging']} for agent in agents]}")
+            logger.debug(f"DEBUG NOTIFICATIONS: Loaded {len(agents)} agents: {[{k: v for k, v in agent.items() if k in ['name', 'enable_responses', 'enable_user_tagging']} for agent in agents]}")
 
             if not agents:
                 logger.debug(f"No forum agents found for guild {guild_id}")
                 return responses, []
 
             channel_id = getattr(post, "channel_id", "")
-            logger.error(f"DEBUG NOTIFICATIONS: Processing post in channel {channel_id}")
+            logger.debug(f"DEBUG NOTIFICATIONS: Processing post in channel {channel_id}")
 
             # Get user subscriptions if any agent has tagging enabled
             has_tagging_agents = any(agent.get("enable_user_tagging", False) for agent in agents)
@@ -429,7 +428,7 @@ class ForumAgentService(BaseService):
 
                     # Determine operation mode for this agent
                     operation_mode = self.determine_agent_operation_mode(agent_data)
-                    logger.error(f"DEBUG NOTIFICATIONS: Agent {agent_data.get('name', 'unknown')} has operation_mode={operation_mode}, available_topics={len(available_topics)} topics: {available_topics}")
+                    logger.debug(f"DEBUG NOTIFICATIONS: Agent {agent_data.get('name', 'unknown')} has operation_mode={operation_mode}, available_topics={len(available_topics)} topics: {available_topics}")
 
                     # Check rate limits for response generation
                     within_rate_limit = True
@@ -495,8 +494,8 @@ class ForumAgentService(BaseService):
                         should_respond = bool(confidence >= threshold and response_content.strip())
 
                     # Collect matching topics for user notifications
-                    logger.error(f"DEBUG NOTIFICATIONS: Agent {agent_data.get('name', 'unknown')} operation_mode={operation_mode}, matching_topics={matching_topics}")
-                    logger.error(f"DEBUG NOTIFICATIONS: Post content for classification: title='{getattr(post, 'title', '')}', content='{getattr(post, 'content', '')}', author='{getattr(post, 'author_display_name', 'Unknown')}'")
+                    logger.debug(f"DEBUG NOTIFICATIONS: Agent {agent_data.get('name', 'unknown')} operation_mode={operation_mode}, matching_topics={matching_topics}")
+                    logger.debug(f"DEBUG NOTIFICATIONS: Post for classification: title='{getattr(post, 'title', '')}', content={len(getattr(post, 'content', ''))} chars, author='{getattr(post, 'author_display_name', 'Unknown')}'")
                     if matching_topics:
                         all_matching_topics.update(matching_topics)
 
@@ -528,30 +527,30 @@ class ForumAgentService(BaseService):
 
             # Generate user mentions organized by topic
             topic_user_map = {}  # topic -> set of user mentions
-            logger.error(f"DEBUG NOTIFICATIONS: all_matching_topics={all_matching_topics}, user_subscriptions={user_subscriptions}")
+            logger.debug(f"DEBUG NOTIFICATIONS: all_matching_topics={all_matching_topics}, user_subscriptions={user_subscriptions}")
 
             if all_matching_topics and user_subscriptions:
                 from datetime import datetime
                 from datetime import timedelta
                 current_time = datetime.now(UTC)
-                logger.error(f"DEBUG NOTIFICATIONS: Processing {len(user_subscriptions)} subscriptions at {current_time}")
+                logger.debug(f"DEBUG NOTIFICATIONS: Processing {len(user_subscriptions)} subscriptions at {current_time}")
 
                 for subscription in user_subscriptions:
-                    logger.error(f"DEBUG NOTIFICATIONS: Checking subscription for user {subscription.get('user_id')}")
+                    logger.debug(f"DEBUG NOTIFICATIONS: Checking subscription for user {subscription.get('user_id')}")
 
                     # Check if subscription has expired
                     if subscription.get("notification_hours", -1) != -1:
                         updated_at = datetime.fromisoformat(subscription["updated_at"].replace("Z", "+00:00"))
                         expiry_time = updated_at + timedelta(hours=subscription["notification_hours"])
-                        logger.error(f"DEBUG NOTIFICATIONS: Expiry check - current: {current_time}, expiry: {expiry_time}, expired: {current_time > expiry_time}")
+                        logger.debug(f"DEBUG NOTIFICATIONS: Expiry check - current: {current_time}, expiry: {expiry_time}, expired: {current_time > expiry_time}")
                         if current_time > expiry_time:
-                            logger.error(f"DEBUG NOTIFICATIONS: Subscription expired, skipping user {subscription.get('user_id')}")
+                            logger.debug(f"DEBUG NOTIFICATIONS: Subscription expired, skipping user {subscription.get('user_id')}")
                             continue
 
                     # Check if any subscribed topics match
                     subscribed_topics = set(subscription.get("subscribed_topics", []))
                     matching = subscribed_topics & all_matching_topics
-                    logger.error(f"DEBUG NOTIFICATIONS: Topic match check - subscribed: {subscribed_topics}, detected: {all_matching_topics}, matching: {matching}")
+                    logger.debug(f"DEBUG NOTIFICATIONS: Topic match check - subscribed: {subscribed_topics}, detected: {all_matching_topics}, matching: {matching}")
 
                     if matching:  # Intersection check
                         user_mention = f"<@{subscription['user_id']}>"
@@ -560,11 +559,11 @@ class ForumAgentService(BaseService):
                             if topic not in topic_user_map:
                                 topic_user_map[topic] = set()
                             topic_user_map[topic].add(user_mention)
-                        logger.error(f"DEBUG NOTIFICATIONS: Will notify user {subscription['username']} for topics: {matching}")
+                        logger.debug(f"DEBUG NOTIFICATIONS: Will notify user {subscription['username']} for topics: {matching}")
                     else:
-                        logger.error(f"DEBUG NOTIFICATIONS: No topic match for user {subscription.get('username')}")
+                        logger.debug(f"DEBUG NOTIFICATIONS: No topic match for user {subscription.get('username')}")
             else:
-                logger.error(f"DEBUG NOTIFICATIONS: Skipped notifications - topics empty: {not all_matching_topics}, subscriptions empty: {not user_subscriptions}")
+                logger.debug(f"DEBUG NOTIFICATIONS: Skipped notifications - topics empty: {not all_matching_topics}, subscriptions empty: {not user_subscriptions}")
 
             logger.info(f"Processed forum post through {len(responses)} agents, {sum(1 for r in responses if r['should_respond'])} will respond, topic notifications: {list(topic_user_map.keys())}")
             return responses, topic_user_map

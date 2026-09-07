@@ -18,14 +18,12 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from skrift.workers import get_handle
-from skrift.workers import submit as worker_submit
 
 from smarter_dev.extensions.registry import (
     ExtensionRegistryError,
@@ -37,14 +35,17 @@ from smarter_dev.extensions.rendering import (
     RenderedHandler,
     render_bundle,
     validate_config_values,
+    validate_stored_config,
 )
 from smarter_dev.extensions.schema import ExtensionManifest
-from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
 from smarter_dev.web.handler_caps import MAX_ADMIN_HANDLERS_PER_GUILD
+from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
 from smarter_dev.web.handler_schedule import ScheduleError, first_fire_at
 from smarter_dev.web.models import AdminHandler, ExtensionInstall
 
 logger = logging.getLogger(__name__)
+
+_recurring_chain = RECURRING_CHAINS["admin"]
 
 # AdminHandler.created_by_admin is String(20) (a Discord snowflake for bot rows);
 # panel-created rows use a literal marker (cf. repeating_messages._CREATED_BY).
@@ -167,11 +168,12 @@ async def update_extension(
 ) -> ExtensionInstall:
     """Re-materialise the install at the current catalog version using its stored
     config. Raises :class:`ExtensionConfigOutdatedError` when the stored config
-    no longer satisfies a newer schema (e.g. a new required field)."""
+    no longer satisfies a newer schema (e.g. a new required field); a field the
+    newer schema dropped is discarded rather than blocking the update."""
     install = await _locked_install(session, guild_id, slug)
     loaded = _get_loaded(slug)
     try:
-        cleaned = validate_config_values(loaded.manifest, install.config)
+        cleaned = validate_stored_config(loaded.manifest, install.config)
     except RenderError as exc:
         raise ExtensionConfigOutdatedError(
             f"this extension's saved config is missing something the new "
@@ -401,21 +403,11 @@ async def _cancel_scheduled_job(record: AdminHandler) -> None:
 
 
 async def _arm_time_trigger(record: AdminHandler) -> None:
-    """Schedule the first fire from a row's current settings (mirrors _reschedule)."""
+    """Schedule the first fire from a row's current settings."""
     fire_at = first_fire_at(
         record.trigger_type, record.settings or {}, datetime.now(timezone.utc)
     )
-    job_id = uuid4().hex
-    await worker_submit(
-        AdminHandlerFirePayload(
-            admin_handler_id=str(record.id),
-            channel_id=(record.channel_ids[0] if record.channel_ids else ""),
-            trigger_context={"trigger_type": record.trigger_type},
-        ),
-        scheduled_for=fire_at,
-        job_id=job_id,
-    )
-    record.scheduled_job_id = job_id
+    await _recurring_chain.arm_occurrence(record, fire_at)
 
 
 def _get_loaded(slug: str) -> LoadedExtension:

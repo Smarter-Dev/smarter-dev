@@ -149,3 +149,4 @@ def test_validate_timer_delay_below_floor_raises():
 def test_validate_timer_delay_above_ceiling_raises():
     with pytest.raises(ScheduleError):
         validate_timer_delay(MAX_TIMER_DELAY_SECONDS + 1)
+

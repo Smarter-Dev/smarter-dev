@@ -31,6 +31,13 @@ Error-shape parity: the legacy 404 (unknown engagement) came from a bare
 :func:`errors.plain_error`. A malformed ``engagement_id`` path segment answers
 422 (the FastAPI ``UUID`` path param validated before the handler ran),
 reproduced via :func:`_parse_uuid_path`.
+
+The bot still sends verbatim Discord message text on the turn write — the
+retained artefact is the row, not the request — so the turn's triggering
+messages, its model-message delta and each compaction event's original content
+go through :mod:`smarter_dev.shared.message_content` on the way into the row.
+Agent output, tool calls, summaries, char counts and every token/cost field are
+ours, not Discord's, and are stored as sent.
 """
 
 from __future__ import annotations
@@ -39,6 +46,7 @@ from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
 from decimal import Decimal
+from typing import NamedTuple
 from uuid import UUID
 
 from litestar import Controller
@@ -57,10 +65,14 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.config import get_settings
+from smarter_dev.shared.message_content import redact_chat_agent_messages
+from smarter_dev.shared.message_content import redact_model_message_parts
+from smarter_dev.shared.message_content import redact_text
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.api_native.errors import plain_error
+from smarter_dev.web.api_native.schemas import ChatAgentCompactionEventCreate
 from smarter_dev.web.api_native.schemas import ChatAgentEngagementEnd
 from smarter_dev.web.api_native.schemas import ChatAgentEngagementStart
 from smarter_dev.web.api_native.schemas import ChatAgentEngagementStartResponse
@@ -194,6 +206,303 @@ async def guild_total_tokens(
     return int(await db.scalar(stmt) or 0)
 
 
+class _CompactionTotals(NamedTuple):
+    """What a turn's compaction events add to the engagement's running totals."""
+
+    cost_usd: Decimal
+    tokens_input: int
+    tokens_output: int
+
+
+class _BilledModel(NamedTuple):
+    """One model that billed for a turn: its identity and the tokens it charged.
+
+    The cost and the metering row are derived from the same bundle, so a row
+    can never carry token counts that differ from the ones its cost was priced
+    on.
+    """
+
+    model_name: str
+    reasoning_level: str | None
+    input_tokens: int
+    output_tokens: int
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+
+    @property
+    def cost_usd(self) -> Decimal:
+        """What this model charged; zero (logged) for models without a price."""
+        return calc_cost(
+            self.input_tokens,
+            self.output_tokens,
+            self.model_name,
+            cache_read_tokens=self.cache_read_tokens,
+            cache_write_tokens=self.cache_write_tokens,
+        )
+
+
+def _cost_or_zero(billed: _BilledModel | None) -> Decimal:
+    """A model that did not run charged nothing."""
+    return billed.cost_usd if billed is not None else Decimal("0")
+
+
+def _billed_chat_model(data: ChatAgentTurnCreate) -> _BilledModel | None:
+    if not data.chat_model_name:
+        return None
+    return _BilledModel(
+        model_name=data.chat_model_name,
+        reasoning_level=data.chat_reasoning_level,
+        input_tokens=data.chat_tokens_input,
+        output_tokens=data.chat_tokens_output,
+        cache_read_tokens=data.chat_cache_read_tokens or 0,
+        cache_write_tokens=data.chat_cache_write_tokens or 0,
+    )
+
+
+def _billed_voice_model(data: ChatAgentTurnCreate) -> _BilledModel | None:
+    if not data.voice_model_name:
+        return None
+    return _BilledModel(
+        model_name=data.voice_model_name,
+        reasoning_level=None,
+        input_tokens=data.voice_tokens_input,
+        output_tokens=data.voice_tokens_output,
+    )
+
+
+def _billed_summarizer(event: ChatAgentCompactionEventCreate) -> _BilledModel | None:
+    if not event.summarizer_model_name:
+        return None
+    return _BilledModel(
+        model_name=event.summarizer_model_name,
+        reasoning_level=event.summarizer_reasoning_level,
+        input_tokens=event.summarizer_tokens_input,
+        output_tokens=event.summarizer_tokens_output,
+        cache_read_tokens=event.summarizer_cache_read_tokens or 0,
+        cache_write_tokens=event.summarizer_cache_write_tokens or 0,
+    )
+
+
+def _usage_cost_row(
+    *,
+    operation_key: str,
+    operation_type: str,
+    engagement: ChatAgentEngagement,
+    turn_id: UUID,
+    billed: _BilledModel,
+    details: dict,
+) -> UsageCostRow:
+    """One metering row for a model that billed for this turn."""
+    provider, catalog_key, wire_id = _normalized_model_identity(billed.model_name)
+    return UsageCostRow(
+        operation_key=operation_key,
+        product_mode="discord",
+        operation_type=operation_type,
+        discord_user_id=engagement.activation_user_id,
+        conversation_id=engagement.id,
+        root_turn_id=turn_id,
+        provider_key=provider,
+        catalog_model_key=catalog_key,
+        model_id=wire_id,
+        reasoning_level=billed.reasoning_level,
+        input_tokens=billed.input_tokens,
+        output_tokens=billed.output_tokens,
+        cache_read_tokens=billed.cache_read_tokens,
+        cache_write_tokens=billed.cache_write_tokens,
+        cost_usd=billed.cost_usd,
+        details=details,
+    )
+
+
+def _turn_usage_cost_rows(
+    *,
+    turn_id: UUID,
+    engagement: ChatAgentEngagement,
+    request_id: str,
+    billed_by_operation: dict[str, _BilledModel | None],
+) -> list[UsageCostRow]:
+    """A metering row per operation whose model actually ran on this turn."""
+    return [
+        _usage_cost_row(
+            operation_key=f"discord:turn:{turn_id}:{operation_type}",
+            operation_type=operation_type,
+            engagement=engagement,
+            turn_id=turn_id,
+            billed=billed,
+            details={"request_id": request_id},
+        )
+        for operation_type, billed in billed_by_operation.items()
+        if billed is not None
+    ]
+
+
+def _compaction_event_row(
+    turn_id: UUID,
+    event: ChatAgentCompactionEventCreate,
+    summarizer: _BilledModel | None,
+) -> ChatAgentCompactionEvent:
+    """One stored compaction event: its metrics kept, its content redacted."""
+    return ChatAgentCompactionEvent(
+        turn_id=turn_id,
+        event_kind=event.event_kind,
+        tool_name=event.tool_name,
+        original_content=redact_text(event.original_content),
+        summary=event.summary,
+        original_chars=event.original_chars,
+        summary_chars=event.summary_chars,
+        chars_saved=event.original_chars - event.summary_chars,
+        summarizer_tokens_input=event.summarizer_tokens_input,
+        summarizer_tokens_output=event.summarizer_tokens_output,
+        summarizer_model_name=event.summarizer_model_name,
+        summarizer_reasoning_level=event.summarizer_reasoning_level,
+        summarizer_cache_read_tokens=event.summarizer_cache_read_tokens,
+        summarizer_cache_write_tokens=event.summarizer_cache_write_tokens,
+        summarizer_cost_usd=_cost_or_zero(summarizer),
+    )
+
+
+async def _persist_compaction_events(
+    db_session: AsyncSession,
+    *,
+    turn_id: UUID,
+    engagement: ChatAgentEngagement,
+    events: list[ChatAgentCompactionEventCreate],
+) -> _CompactionTotals:
+    """Store each compaction event plus its metering row, and total the spend."""
+    stored_events = []
+    for event in events:
+        summarizer = _billed_summarizer(event)
+        stored_event = _compaction_event_row(turn_id, event, summarizer)
+        db_session.add(stored_event)
+        await db_session.flush()  # populate stored_event.id for the metering key
+        stored_events.append(stored_event)
+        if summarizer is not None:
+            db_session.add(
+                _usage_cost_row(
+                    operation_key=(
+                        f"discord:turn:{turn_id}:compaction:{stored_event.id}"
+                    ),
+                    operation_type="compaction",
+                    engagement=engagement,
+                    turn_id=turn_id,
+                    billed=summarizer,
+                    details={"event_kind": event.event_kind},
+                )
+            )
+    return _CompactionTotals(
+        cost_usd=sum(
+            (stored.summarizer_cost_usd for stored in stored_events), Decimal("0")
+        ),
+        tokens_input=sum(event.summarizer_tokens_input for event in events),
+        tokens_output=sum(event.summarizer_tokens_output for event in events),
+    )
+
+
+def _candidate_blog_topics(
+    *, engagement_id: UUID, turn_id: UUID, agent_output: dict
+) -> list[CandidateBlogTopic]:
+    """The blogging-agent topics this turn surfaced, minus the unusable ones.
+
+    Same neutral {headline, observation, scope, evidence, category} shape Scout
+    produces — Brainstorm forms hypotheses from these claims downstream. A
+    candidate without both a headline and an observation claims nothing, and
+    evidence that did not arrive as a list is dropped rather than guessed at.
+    """
+    topics = []
+    for candidate in agent_output.get("blog_topic_candidates") or []:
+        headline = (candidate.get("headline") or "").strip()
+        observation = (candidate.get("observation") or "").strip()
+        if not headline or not observation:
+            continue
+        evidence = candidate.get("evidence")
+        topics.append(
+            CandidateBlogTopic(
+                engagement_id=engagement_id,
+                turn_id=turn_id,
+                headline=headline[:255],
+                observation=observation,
+                scope=(candidate.get("scope") or "").strip(),
+                evidence=[str(item) for item in evidence if item]
+                if isinstance(evidence, list)
+                else [],
+                category=candidate.get("category"),
+            )
+        )
+    return topics
+
+
+async def _replayed_turn_response(
+    db_session: AsyncSession, *, engagement_id: UUID, request_id: str
+) -> ChatAgentTurnCreateResponse | None:
+    """The response already given for this request id, or None on a first write.
+
+    Bot retries replay the same request id; answering from the stored turn
+    keeps the write idempotent without a historical table constraint on rows
+    written before request ids were canonical.
+    """
+    existing = await db_session.scalar(
+        select(ChatAgentTurn).where(
+            ChatAgentTurn.engagement_id == engagement_id,
+            ChatAgentTurn.request_id == request_id,
+        )
+    )
+    if existing is None:
+        return None
+    summarizer_cost = await db_session.scalar(
+        select(
+            func.coalesce(func.sum(ChatAgentCompactionEvent.summarizer_cost_usd), 0)
+        ).where(ChatAgentCompactionEvent.turn_id == existing.id)
+    )
+    return ChatAgentTurnCreateResponse(
+        id=existing.id,
+        started_at=existing.started_at,
+        chat_cost_usd=str(existing.chat_cost_usd),
+        voice_cost_usd=str(existing.voice_cost_usd),
+        summarizer_cost_usd_total=str(Decimal(summarizer_cost)),
+    )
+
+
+def _engagement_totals_update(
+    data: ChatAgentTurnCreate,
+    *,
+    chat_cost: Decimal,
+    voice_cost: Decimal,
+    compaction: _CompactionTotals,
+) -> dict:
+    """The engagement columns this turn adds to, as SQL increment expressions.
+
+    Each increment is ``column + <one Python value>`` so the session can apply
+    it to an already-loaded engagement without re-fetching the row.
+    """
+    total_cost_delta = chat_cost + voice_cost + compaction.cost_usd
+    update_values: dict = {
+        "total_chat_tokens_input": ChatAgentEngagement.total_chat_tokens_input
+        + data.chat_tokens_input,
+        "total_chat_tokens_output": ChatAgentEngagement.total_chat_tokens_output
+        + data.chat_tokens_output,
+        "total_voice_tokens_input": ChatAgentEngagement.total_voice_tokens_input
+        + data.voice_tokens_input,
+        "total_voice_tokens_output": ChatAgentEngagement.total_voice_tokens_output
+        + data.voice_tokens_output,
+        "total_compaction_tokens_input": ChatAgentEngagement.total_compaction_tokens_input
+        + compaction.tokens_input,
+        "total_compaction_tokens_output": ChatAgentEngagement.total_compaction_tokens_output
+        + compaction.tokens_output,
+        "total_chat_cost_usd": ChatAgentEngagement.total_chat_cost_usd + chat_cost,
+        "total_voice_cost_usd": ChatAgentEngagement.total_voice_cost_usd + voice_cost,
+        "total_compaction_cost_usd": ChatAgentEngagement.total_compaction_cost_usd
+        + compaction.cost_usd,
+        "total_cost_usd": ChatAgentEngagement.total_cost_usd + total_cost_delta,
+    }
+    last_topic = data.agent_output.get("topic")
+    last_notes = data.agent_output.get("notes")
+    if last_topic is not None:
+        update_values["last_topic"] = last_topic
+    if last_notes is not None:
+        update_values["last_notes"] = last_notes
+    return update_values
+
+
 class ChatConversationController(Controller):
     """Chat-agent engagement/turn persistence plus the usage leaderboard."""
 
@@ -288,9 +597,8 @@ class ChatConversationController(Controller):
         data: ChatAgentTurnCreate,
     ) -> ChatAgentTurnCreateResponse:
         """Persist one agent turn + its compaction events. Bumps engagement totals."""
-        # Serialize requests for an engagement before checking the request id.
-        # This makes bot retries idempotent without imposing a new historical
-        # table constraint on rows written before request ids were canonical.
+        # Lock the engagement row before the replay check so concurrent bot
+        # retries for the same request id serialise on it.
         engagement = await db_session.scalar(
             select(ChatAgentEngagement)
             .where(ChatAgentEngagement.id == data.engagement_id)
@@ -298,61 +606,24 @@ class ChatConversationController(Controller):
         )
         if engagement is None:
             raise HTTPException(status_code=404, detail="Engagement not found")
-        existing = await db_session.scalar(
-            select(ChatAgentTurn).where(
-                ChatAgentTurn.engagement_id == data.engagement_id,
-                ChatAgentTurn.request_id == data.request_id,
-            )
+        replay = await _replayed_turn_response(
+            db_session, engagement_id=data.engagement_id, request_id=data.request_id
         )
-        if existing is not None:
-            summarizer_cost = Decimal(
-                await db_session.scalar(
-                    select(
-                        func.coalesce(
-                            func.sum(ChatAgentCompactionEvent.summarizer_cost_usd), 0
-                        )
-                    ).where(ChatAgentCompactionEvent.turn_id == existing.id)
-                )
-                or 0
-            )
-            return ChatAgentTurnCreateResponse(
-                id=existing.id,
-                started_at=existing.started_at,
-                chat_cost_usd=str(existing.chat_cost_usd),
-                voice_cost_usd=str(existing.voice_cost_usd),
-                summarizer_cost_usd_total=str(summarizer_cost),
-            )
-        # Cost calculations — best-effort, returns 0 on unknown models.
-        chat_cost = (
-            calc_cost(
-                data.chat_tokens_input,
-                data.chat_tokens_output,
-                data.chat_model_name,
-                cache_read_tokens=data.chat_cache_read_tokens or 0,
-                cache_write_tokens=data.chat_cache_write_tokens or 0,
-            )
-            if data.chat_model_name
-            else Decimal("0")
-        )
-        voice_cost = (
-            calc_cost(
-                data.voice_tokens_input, data.voice_tokens_output, data.voice_model_name
-            )
-            if data.voice_model_name
-            else Decimal("0")
-        )
-        summarizer_cost_total = Decimal("0")
-        summarizer_in_total = 0
-        summarizer_out_total = 0
+        if replay is not None:
+            return replay
 
+        billed_chat = _billed_chat_model(data)
+        billed_voice = _billed_voice_model(data)
+        chat_cost = _cost_or_zero(billed_chat)
+        voice_cost = _cost_or_zero(billed_voice)
         turn = ChatAgentTurn(
             engagement_id=data.engagement_id,
             request_id=data.request_id,
             turn_kind=data.turn_kind,
             output_kind=data.output_kind,
-            triggering_messages=data.triggering_messages,
+            triggering_messages=redact_chat_agent_messages(data.triggering_messages),
             agent_output=data.agent_output,
-            model_messages_delta=data.model_messages_delta,
+            model_messages_delta=redact_model_message_parts(data.model_messages_delta),
             duration_ms=data.duration_ms,
             chat_tokens_input=data.chat_tokens_input,
             chat_tokens_output=data.chat_tokens_output,
@@ -371,185 +642,38 @@ class ChatConversationController(Controller):
         db_session.add(turn)
         await db_session.flush()  # populate turn.id for compaction-event FKs
 
-        if data.chat_model_name:
-            provider, catalog_key, wire_id = _normalized_model_identity(
-                data.chat_model_name
-            )
-            db_session.add(
-                UsageCostRow(
-                    operation_key=f"discord:turn:{turn.id}:primary",
-                    product_mode="discord",
-                    operation_type="primary",
-                    discord_user_id=engagement.activation_user_id
-                    if engagement
-                    else None,
-                    conversation_id=data.engagement_id,
-                    root_turn_id=turn.id,
-                    provider_key=provider,
-                    catalog_model_key=catalog_key,
-                    model_id=wire_id,
-                    reasoning_level=data.chat_reasoning_level,
-                    input_tokens=data.chat_tokens_input,
-                    output_tokens=data.chat_tokens_output,
-                    cache_read_tokens=data.chat_cache_read_tokens or 0,
-                    cache_write_tokens=data.chat_cache_write_tokens or 0,
-                    cost_usd=chat_cost,
-                    details={"request_id": str(data.request_id)},
-                )
-            )
-        if data.voice_model_name:
-            provider, catalog_key, wire_id = _normalized_model_identity(
-                data.voice_model_name
-            )
-            db_session.add(
-                UsageCostRow(
-                    operation_key=f"discord:turn:{turn.id}:voice",
-                    product_mode="discord",
-                    operation_type="voice",
-                    discord_user_id=engagement.activation_user_id
-                    if engagement
-                    else None,
-                    conversation_id=data.engagement_id,
-                    root_turn_id=turn.id,
-                    provider_key=provider,
-                    catalog_model_key=catalog_key,
-                    model_id=wire_id,
-                    input_tokens=data.voice_tokens_input,
-                    output_tokens=data.voice_tokens_output,
-                    cost_usd=voice_cost,
-                    details={"request_id": str(data.request_id)},
-                )
-            )
-
-        for ev in data.compaction_events:
-            ev_cost = (
-                calc_cost(
-                    ev.summarizer_tokens_input,
-                    ev.summarizer_tokens_output,
-                    ev.summarizer_model_name,
-                    cache_read_tokens=ev.summarizer_cache_read_tokens or 0,
-                    cache_write_tokens=ev.summarizer_cache_write_tokens or 0,
-                )
-                if ev.summarizer_model_name
-                else Decimal("0")
-            )
-            summarizer_cost_total += ev_cost
-            summarizer_in_total += ev.summarizer_tokens_input
-            summarizer_out_total += ev.summarizer_tokens_output
-            compaction_event = ChatAgentCompactionEvent(
+        db_session.add_all(
+            _turn_usage_cost_rows(
                 turn_id=turn.id,
-                event_kind=ev.event_kind,
-                tool_name=ev.tool_name,
-                original_content=ev.original_content,
-                summary=ev.summary,
-                original_chars=ev.original_chars,
-                summary_chars=ev.summary_chars,
-                chars_saved=ev.original_chars - ev.summary_chars,
-                summarizer_tokens_input=ev.summarizer_tokens_input,
-                summarizer_tokens_output=ev.summarizer_tokens_output,
-                summarizer_model_name=ev.summarizer_model_name,
-                summarizer_reasoning_level=ev.summarizer_reasoning_level,
-                summarizer_cache_read_tokens=ev.summarizer_cache_read_tokens,
-                summarizer_cache_write_tokens=ev.summarizer_cache_write_tokens,
-                summarizer_cost_usd=ev_cost,
+                engagement=engagement,
+                request_id=str(data.request_id),
+                billed_by_operation={"primary": billed_chat, "voice": billed_voice},
             )
-            db_session.add(compaction_event)
-            await db_session.flush()
-            if ev.summarizer_model_name:
-                provider, catalog_key, wire_id = _normalized_model_identity(
-                    ev.summarizer_model_name
-                )
-                db_session.add(
-                    UsageCostRow(
-                        operation_key=f"discord:turn:{turn.id}:compaction:{compaction_event.id}",
-                        product_mode="discord",
-                        operation_type="compaction",
-                        discord_user_id=engagement.activation_user_id
-                        if engagement
-                        else None,
-                        conversation_id=data.engagement_id,
-                        root_turn_id=turn.id,
-                        provider_key=provider,
-                        catalog_model_key=catalog_key,
-                        model_id=wire_id,
-                        reasoning_level=ev.summarizer_reasoning_level,
-                        input_tokens=ev.summarizer_tokens_input,
-                        output_tokens=ev.summarizer_tokens_output,
-                        cache_read_tokens=ev.summarizer_cache_read_tokens or 0,
-                        cache_write_tokens=ev.summarizer_cache_write_tokens or 0,
-                        cost_usd=ev_cost,
-                        details={"event_kind": ev.event_kind},
-                    )
-                )
-
-        # Blogging-agent capture: file any candidate blog topics the agent
-        # surfaced this turn. Same neutral {headline, observation, scope,
-        # evidence, category} shape Scout produces — Brainstorm forms
-        # hypotheses from these claims downstream.
-        if isinstance(data.agent_output, dict):
-            for cand in data.agent_output.get("blog_topic_candidates") or []:
-                headline = (cand.get("headline") or "").strip()
-                observation = (cand.get("observation") or "").strip()
-                if not headline or not observation:
-                    continue
-                scope = (cand.get("scope") or "").strip()
-                evidence = cand.get("evidence") or []
-                if not isinstance(evidence, list):
-                    evidence = []
-                db_session.add(
-                    CandidateBlogTopic(
-                        engagement_id=data.engagement_id,
-                        turn_id=turn.id,
-                        headline=headline[:255],
-                        observation=observation,
-                        scope=scope,
-                        evidence=[str(e) for e in evidence if e],
-                        category=cand.get("category"),
-                    )
-                )
-
-        # Bump engagement aggregates + latest topic/notes denormalisation.
-        last_topic = (
-            data.agent_output.get("topic")
-            if isinstance(data.agent_output, dict)
-            else None
         )
-        last_notes = (
-            data.agent_output.get("notes")
-            if isinstance(data.agent_output, dict)
-            else None
+        compaction = await _persist_compaction_events(
+            db_session,
+            turn_id=turn.id,
+            engagement=engagement,
+            events=data.compaction_events,
         )
-        total_cost_delta = chat_cost + voice_cost + summarizer_cost_total
-
-        update_values: dict = {
-            "total_chat_tokens_input": ChatAgentEngagement.total_chat_tokens_input
-            + data.chat_tokens_input,
-            "total_chat_tokens_output": ChatAgentEngagement.total_chat_tokens_output
-            + data.chat_tokens_output,
-            "total_voice_tokens_input": ChatAgentEngagement.total_voice_tokens_input
-            + data.voice_tokens_input,
-            "total_voice_tokens_output": ChatAgentEngagement.total_voice_tokens_output
-            + data.voice_tokens_output,
-            "total_compaction_tokens_input": ChatAgentEngagement.total_compaction_tokens_input
-            + summarizer_in_total,
-            "total_compaction_tokens_output": ChatAgentEngagement.total_compaction_tokens_output
-            + summarizer_out_total,
-            "total_chat_cost_usd": ChatAgentEngagement.total_chat_cost_usd + chat_cost,
-            "total_voice_cost_usd": ChatAgentEngagement.total_voice_cost_usd
-            + voice_cost,
-            "total_compaction_cost_usd": ChatAgentEngagement.total_compaction_cost_usd
-            + summarizer_cost_total,
-            "total_cost_usd": ChatAgentEngagement.total_cost_usd + total_cost_delta,
-        }
-        if last_topic is not None:
-            update_values["last_topic"] = last_topic
-        if last_notes is not None:
-            update_values["last_notes"] = last_notes
-
+        db_session.add_all(
+            _candidate_blog_topics(
+                engagement_id=data.engagement_id,
+                turn_id=turn.id,
+                agent_output=data.agent_output,
+            )
+        )
         await db_session.execute(
             update(ChatAgentEngagement)
             .where(ChatAgentEngagement.id == data.engagement_id)
-            .values(**update_values)
+            .values(
+                **_engagement_totals_update(
+                    data,
+                    chat_cost=chat_cost,
+                    voice_cost=voice_cost,
+                    compaction=compaction,
+                )
+            )
         )
 
         await db_session.commit()
@@ -560,7 +684,7 @@ class ChatConversationController(Controller):
             started_at=turn.started_at,
             chat_cost_usd=str(chat_cost),
             voice_cost_usd=str(voice_cost),
-            summarizer_cost_usd_total=str(summarizer_cost_total),
+            summarizer_cost_usd_total=str(compaction.cost_usd),
         )
 
     @get("/usage-leaderboard", status_code=HTTP_200_OK, guards=BOT_API_GUARDS)

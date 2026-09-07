@@ -197,6 +197,11 @@
 
 <a href="/admin/chat-conversations" class="cc-back">&larr; back to list</a>
 
+<div class="cc-meta" style="padding: .5rem 0;">
+    🔒 Discord message text is never stored &mdash; every message body, prompt and tool
+    return below is a placeholder. The metrics are permanent.
+</div>
+
 <div class="cc-timeline">
     {% for turn in turns %}
     <div class="cc-turn-divider">
@@ -208,8 +213,8 @@
 
     {% if turn.content_purged_at %}
     <div class="cc-meta" style="padding: .5rem 0;">
-        🧹 Message content purged {{ turn.content_purged_at.strftime('%Y-%m-%d %H:%M') }} UTC
-        &mdash; Discord text is kept for 48 hours; the metrics above are permanent.
+        🧹 Derived text purged {{ turn.content_purged_at.strftime('%Y-%m-%d %H:%M') }} UTC
+        &mdash; the agent's own output and summaries were blanked; the metrics above are permanent.
     </div>
     {% endif %}
 
@@ -221,7 +226,6 @@
             {% if msg.mentions_bot %}<span class="cc-tag" title="mentions_bot=True">📣 mentioned</span>{% endif %}
             {% if msg.reply_to_is_self %}<span class="cc-tag" title="reply_to_is_self=True">↩ replied to bot</span>{% endif %}
             <span class="cc-tag">msg {{ msg.message_id }}</span>
-            {% if msg.has_attachments %}<span class="cc-tag">📎 attachments (not visible)</span>{% endif %}
         </div>
         <div class="cc-body">{{ msg.body }}</div>
         {% if msg.reactions %}
@@ -264,7 +268,7 @@
                 </details>
                 {% elif part.part_kind == 'tool-return' %}
                 <details class="cc-tool-event">
-                    <summary>🛠 <strong>{{ part.tool_name }}</strong> → returned {{ (part.content | string)|length }} chars</summary>
+                    <summary>🛠 <strong>{{ part.tool_name }}</strong> → tool return</summary>
                     <pre class="cc-dump">{{ part.content | tojson(indent=2) if part.content is mapping else part.content }}</pre>
                 </details>
                 {% endif %}

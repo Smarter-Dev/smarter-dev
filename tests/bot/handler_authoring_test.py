@@ -5,6 +5,7 @@ Author and judge are injected, so these run with no model calls.
 
 from __future__ import annotations
 
+import re
 from datetime import UTC
 from datetime import datetime
 from types import SimpleNamespace
@@ -13,7 +14,14 @@ from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.openai import OpenAIResponsesModel
 
+import pytest
+
 from smarter_dev.bot.agents import handler_authoring
+from smarter_dev.bot.agents.handler_authoring import ADMIN_AUTHOR_PROMPT
+from smarter_dev.bot.agents.handler_authoring import ADMIN_JUDGE_PROMPT
+from smarter_dev.bot.agents.handler_authoring import AUTHOR_PROMPT
+from smarter_dev.bot.agents.handler_authoring import JUDGE_PROMPT
+from smarter_dev.bot.agents.handler_authoring import PREFIX_COMMAND_RULE
 from smarter_dev.bot.agents.handler_authoring import AdminHandlerPlan
 from smarter_dev.bot.agents.handler_authoring import HandlerPlan
 from smarter_dev.bot.agents.handler_authoring import JudgeVerdict
@@ -23,6 +31,8 @@ from smarter_dev.bot.agents.handler_authoring import _build_admin_author_prompt
 from smarter_dev.bot.agents.handler_authoring import _build_configured_model
 from smarter_dev.bot.agents.handler_authoring import _handler_model_settings
 from smarter_dev.shared.config import Settings
+from smarter_dev.web.models import ADMIN_HANDLER_TRIGGER_TYPES
+from smarter_dev.web.models import HANDLER_TRIGGER_TYPES
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.bot.agents.handler_authoring import _build_author_prompt
 from smarter_dev.bot.agents.handler_authoring import checklist_failures
@@ -667,6 +677,11 @@ async def test_standard_pipeline_rejects_admin_only_trigger():
 # -- admin fix round -----------------------------------------------------------
 
 CLEAN_ADMIN_SCRIPT = (
+    'if "raid" in context["message_content"]:\n'
+    '    await send_message("raid reported", "MODCHAT")\n'
+)
+
+PREFIX_COMMAND_SCRIPT = (
     'if context["message_content"].startswith("!raid"):\n'
     '    await send_message("raid reported", "MODCHAT")\n'
 )
@@ -1312,3 +1327,142 @@ def test_handler_model_settings_falls_back_for_non_catalog_ids():
         _handler_model_settings("gemini-3-flash-preview", ReasoningLevel.HIGH)
         is _HANDLER_THINKING
     )
+
+
+# -- prompt policy: prefix commands are prohibited -----------------------------
+# Discord's message-content-intent policy bans bot behaviour triggered by a
+# member's message text. The rule binds both tiers and both roles, so it is one
+# module constant appended to every prompt: no prompt may teach, exemplify or
+# approve a prefix command, and none may restate the rule in its own words.
+
+ALL_PROMPTS = (
+    ("member author", AUTHOR_PROMPT),
+    ("member judge", JUDGE_PROMPT),
+    ("admin author", ADMIN_AUTHOR_PROMPT),
+    ("admin judge", ADMIN_JUDGE_PROMPT),
+)
+
+# The triggers a prompt may name are the ones its tier can actually author: a
+# member plan naming an admin-only trigger is rejected by the handlers API.
+TIER_TRIGGER_TYPES = {
+    "member": frozenset(HANDLER_TRIGGER_TYPES),
+    "admin": frozenset(ADMIN_HANDLER_TRIGGER_TYPES),
+}
+
+COMMAND_SHAPED_LITERAL = re.compile(r"""["'`][!?][A-Za-z]""")
+
+# The rule is line-wrapped markdown, so a phrase may straddle a newline.
+UNWRAPPED_RULE = " ".join(PREFIX_COMMAND_RULE.split())
+
+
+def _prompt_span(prompt: str, start_marker: str, end_marker: str) -> str:
+    start = prompt.index(start_marker)
+    return prompt[start : prompt.index(end_marker, start)]
+
+
+@pytest.mark.parametrize("tier, prompt", ALL_PROMPTS, ids=[name for name, _ in ALL_PROMPTS])
+def test_every_prompt_carries_the_one_prefix_command_rule(tier, prompt):
+    assert prompt.count(PREFIX_COMMAND_RULE) == 1
+
+
+def test_the_prefix_command_rule_bans_leading_command_word_branching():
+    assert "startswith" in UNWRAPPED_RULE
+    assert "split()[0]" in UNWRAPPED_RULE
+    assert "keyword" in UNWRAPPED_RULE
+
+
+def test_the_prefix_command_rule_tells_an_author_what_to_do_instead():
+    assert "feasible=false" in UNWRAPPED_RULE
+    assert "slash command" in UNWRAPPED_RULE
+
+
+def test_the_prefix_command_rule_keeps_anchored_protocol_parsing_required():
+    """The DM and spawn_agent rules demand startswith on a protocol keyword."""
+    assert "anchored parsing" in UNWRAPPED_RULE
+    assert "not a prefix command" in UNWRAPPED_RULE
+    assert "command prefix" in UNWRAPPED_RULE
+
+
+@pytest.mark.parametrize("tier, prompt", ALL_PROMPTS, ids=[name for name, _ in ALL_PROMPTS])
+def test_no_prompt_names_a_trigger_outside_its_tier(tier, prompt):
+    allowed = TIER_TRIGGER_TYPES[tier.split()[0]]
+    named = {
+        trigger
+        for trigger in ADMIN_HANDLER_TRIGGER_TYPES
+        if re.search(rf"\b{trigger}\b", prompt)
+    }
+    assert named <= allowed, sorted(named - allowed)
+
+
+def test_the_prefix_command_rule_names_the_checklist_category_a_judge_rejects_under():
+    assert "actions_appropriate" in UNWRAPPED_RULE
+
+
+@pytest.mark.parametrize("tier, prompt", ALL_PROMPTS, ids=[name for name, _ in ALL_PROMPTS])
+def test_no_prompt_shows_a_command_shaped_example_outside_the_rule(tier, prompt):
+    rule_start = prompt.index(PREFIX_COMMAND_RULE)
+    rule_span = range(rule_start, rule_start + len(PREFIX_COMMAND_RULE))
+    outside = [
+        prompt[max(0, match.start() - 70) : match.start() + 30]
+        for match in COMMAND_SHAPED_LITERAL.finditer(prompt)
+        if match.start() not in rule_span
+    ]
+    assert outside == []
+
+
+def test_schedule_timer_example_grants_its_role_behind_a_guard():
+    """The prompt's own ROLE GRANT DISCIPLINE forbids an unguarded grant."""
+    example = _prompt_span(
+        ADMIN_AUTHOR_PROMPT,
+        "MANDATORY: a script that calls schedule_timer",
+        "Without the timer branch",
+    )
+    lines = [line.strip() for line in example.splitlines() if line.strip()]
+    timer_branch = lines.index('if context["trigger_type"] == "timer":')
+    grant = next(
+        index for index, line in enumerate(lines) if line.startswith("await add_role(")
+    )
+    assert grant > timer_branch
+    guards = [
+        line
+        for line in lines[timer_branch + 1 : grant]
+        if line.startswith("if ") and line.endswith(":")
+    ]
+    assert guards, f"the example grants a role unconditionally: {lines[grant]!r}"
+
+
+# -- text prefix commands are stopped by the lint, not left to the judge --------
+
+
+async def test_standard_pipeline_lint_rejects_a_prefix_command():
+    result = await run_creation_pipeline(
+        request="reply pong when someone types !ping",
+        trigger_type="message",
+        settings={},
+        existing_handlers=[],
+        author=_author_returning(_plan(script=PREFIX_COMMAND_SCRIPT)),
+        judge=_judge_approving(),
+    )
+    assert not result.ok
+    assert "safety lint" in result.error
+    assert "prefix commands are prohibited" in result.error
+
+
+async def test_admin_pipeline_lint_sends_a_prefix_command_back_to_the_author():
+    # An approving judge must never be the last line: the lint rejects the
+    # command-shaped draft mechanically and the fix round gets the reason.
+    author, requests = _admin_author_drafting(
+        _admin_plan(script=PREFIX_COMMAND_SCRIPT),
+        _admin_plan(script=CLEAN_ADMIN_SCRIPT),
+    )
+
+    result = await run_admin_creation_pipeline(
+        request="alert mods when someone types !raid",
+        existing_handlers=ADMIN_EXISTING,
+        author=author,
+        judge=_judge_approving(),
+    )
+    assert result.ok
+    assert result.script == CLEAN_ADMIN_SCRIPT
+    assert len(requests) == 2
+    assert "prefix commands are prohibited" in requests[1]
