@@ -305,3 +305,14 @@ async def test_the_audit_row_is_built_from_the_payload_not_what_the_script_leave
     assert stored["author_role_ids"] == ["R1", "R2"]
     assert "injected" not in stored
     assert SCRIPT_INJECTED_TEXT in captured["context"]["author_role_ids"]
+
+
+@pytest.mark.parametrize("module", [handlers_jobs, admin_handlers_jobs])
+def test_the_fire_jobs_leave_redaction_to_the_audit_module(module):
+    """One owner: a job snapshots the context, ``handler_run_audit`` redacts it.
+
+    A job that redacted as well would leave two modules deciding what a row may
+    keep, and the audit module's guarantee would no longer be what keeps the
+    row clean.
+    """
+    assert not hasattr(module, "redact_trigger_context")

@@ -15,13 +15,13 @@ pay for the inference stack. The payload lives in ``handler_fire_payloads``.
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from uuid import UUID
 
 from skrift.workers import RetryPolicy, WorkerContext, handler
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import get_db_session_context
-from smarter_dev.shared.message_content import redact_trigger_context
 from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.handler_budget import admin_budget
 from smarter_dev.web.handler_caps import (
@@ -75,7 +75,9 @@ async def run_admin_handler_fire(
         return {"status": "disabled"}
 
     handler_id = UUID(payload.admin_handler_id)
-    audit_trigger_context = redact_trigger_context(payload.trigger_context)
+    # Snapshot: the script is handed this same dict and may write into it.
+    # What may be KEPT of it is handler_run_audit's call, not this job's.
+    trigger_context_at_fire = deepcopy(payload.trigger_context)
     async with get_db_session_context() as session:
         record = await session.get(AdminHandler, handler_id)
         if record is None or not record.enabled:
@@ -117,13 +119,10 @@ async def run_admin_handler_fire(
         actor=actor,
     )
     timer_scheduler = HandlerTimerScheduler(
+        chain=_recurring_chain,
+        handler_id=str(handler_id),
+        channel_id=channel_id,
         chain_depth=payload.chain_depth,
-        build_refire_payload=lambda refire_context, chain_depth: AdminHandlerFirePayload(
-            admin_handler_id=str(handler_id),
-            channel_id=channel_id,
-            trigger_context=refire_context,
-            chain_depth=chain_depth,
-        ),
     )
     # The timer limiter is a separate 3600s window (self.limiter is fixed at
     # 60s), and send_dm's per-recipient cap is a third window — same
@@ -148,7 +147,7 @@ async def run_admin_handler_fire(
                 session,
                 handler_id=handler_id,
                 handler_kind=HANDLER_KIND,
-                trigger_context=audit_trigger_context,
+                trigger_context=trigger_context_at_fire,
             )
             await session.commit()
         await _recurring_chain.rearm_after_fire(
@@ -187,7 +186,7 @@ async def run_admin_handler_fire(
             session,
             handler_id=handler_id,
             handler_kind=HANDLER_KIND,
-            trigger_context=audit_trigger_context,
+            trigger_context=trigger_context_at_fire,
             result=result,
         )
         await persist_handler_memory(
