@@ -4,10 +4,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+
+from smarter_dev.bot.agents.chat_compaction import KEEP_RECENT_CHARS
+from smarter_dev.bot.proactive.agent import COMPACTION_KEEP_MESSAGES
+from smarter_dev.bot.services.chat_memory import HISTORY_TTL_SECONDS
 
 from smarter_dev.web.models import (
     CONTENT_RETENTION_WINDOW,
@@ -26,6 +31,7 @@ from smarter_dev.web.models import (
     ChannelHandler,
 )
 from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
+from smarter_dev.web import retention
 from smarter_dev.web.retention import SCRUBBERS, run_retention_sweep
 
 NOW = datetime(2026, 7, 26, 12, 0, tzinfo=UTC)
@@ -569,3 +575,117 @@ class TestSweepBehaviour:
         result = await run_retention_sweep(db_session, now=NOW)
         assert result.total == 0
         assert "nothing due" in str(result)
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+RETENTION_DOC = REPO_ROOT / "docs" / "data-retention.md"
+EXTENSION_CATALOG = REPO_ROOT / "smarter_dev" / "extensions" / "catalog"
+
+CHAT_MEMORY_TABLES = (
+    "chat_agent_guild_memory",
+    "chat_agent_memory_revisions",
+    "chat_agent_memory_notes",
+)
+DERIVED_TEXT_COLUMNS = (
+    "agent_output",
+    "summary",
+    "ai_context_summary",
+    "provider_body",
+    "bot_response",
+    "response_content",
+    "decision_reason",
+)
+
+
+def states_hours(text: str, hours: int) -> bool:
+    """Whether ``text`` states a duration of ``hours`` in either spelling."""
+    return f"{hours} hour" in text or f"{hours}-hour" in text
+
+
+@pytest.fixture(scope="module")
+def retention_doc() -> str:
+    return RETENTION_DOC.read_text()
+
+
+@pytest.fixture(scope="module")
+def module_docstring() -> str:
+    return retention.__doc__ or ""
+
+
+class TestDocumentedBehaviour:
+    """The doc and the module docstring are the privileged-intent justification.
+
+    Every assertion here reads its expected value out of the code, so a
+    constant that moves without the prose moving with it fails the suite.
+    """
+
+    def test_documents_every_scrubbed_table(self, retention_doc):
+        for table in SCRUBBERS:
+            assert f"`{table}`" in retention_doc
+
+    def test_documents_the_derived_text_the_sweep_still_owns(self, retention_doc):
+        for column in DERIVED_TEXT_COLUMNS:
+            assert f"`{column}`" in retention_doc
+
+    def test_documents_the_tables_that_keep_their_text(self, retention_doc):
+        for table in (*CHAT_MEMORY_TABLES, "proactive_agent_histories"):
+            assert f"`{table}`" in retention_doc
+
+    def test_states_the_placeholder_written_in_place_of_message_text(
+        self, retention_doc
+    ):
+        assert MESSAGE_CONTENT_PLACEHOLDER in retention_doc
+        assert "write time" in retention_doc
+
+    def test_states_the_retention_window(self, retention_doc):
+        assert states_hours(
+            retention_doc, int(CONTENT_RETENTION_WINDOW.total_seconds() // 3600)
+        )
+
+    def test_states_how_long_chat_working_history_keeps_verbatim_text(
+        self, retention_doc
+    ):
+        assert states_hours(retention_doc, HISTORY_TTL_SECONDS // 3600)
+        assert f"{KEEP_RECENT_CHARS:,}" in retention_doc
+
+    def test_states_how_much_proactive_history_stays_verbatim(self, retention_doc):
+        assert f"{COMPACTION_KEEP_MESSAGES} messages" in retention_doc
+
+    def test_states_that_the_proactive_streams_are_trimmed_by_age(self, retention_doc):
+        assert "wake stream" in retention_doc
+        assert "shadow stream" in retention_doc
+
+    def test_states_that_moderation_auditing_uses_the_activity_audit_log(
+        self, retention_doc
+    ):
+        assert "activity channel" in retention_doc
+        assert "audit log" in retention_doc
+
+    def test_states_that_prefix_commands_are_prohibited(self, retention_doc):
+        assert "prefix command" in retention_doc
+        assert "prohibited" in retention_doc
+
+    def test_names_the_extensions_the_prohibition_removed(self, retention_doc):
+        assert "`!sus`" in retention_doc
+        assert "`disboard-bumping`" in retention_doc
+
+    def test_the_named_removals_match_the_shipped_catalog(self):
+        assert not (EXTENSION_CATALOG / "sus").exists()
+        assert (EXTENSION_CATALOG / "disboard_bumping").exists()
+        assert not (EXTENSION_CATALOG / "disboard_bumping" / "bump_commands.monty").exists()
+
+    def test_module_docstring_states_the_write_time_placeholder(
+        self, module_docstring
+    ):
+        assert MESSAGE_CONTENT_PLACEHOLDER in module_docstring
+        assert "write time" in module_docstring
+
+    def test_module_docstring_names_the_derived_text_the_sweep_owns(
+        self, module_docstring
+    ):
+        for column in DERIVED_TEXT_COLUMNS:
+            assert f"``{column}``" in module_docstring
+
+    def test_module_docstring_keeps_the_memory_exemption(self, module_docstring):
+        for table in CHAT_MEMORY_TABLES:
+            assert f"``{table}``" in module_docstring

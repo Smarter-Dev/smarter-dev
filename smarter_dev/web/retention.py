@@ -1,18 +1,32 @@
-"""Scheduled scrubbing of Discord-sourced message content.
+"""Scheduled scrubbing of the text our AI features derived from Discord.
 
-The bot reads Discord messages under the privileged message-content intent to
-run its AI features — the chat agent, the help agent, AI moderation, the forum
-agent and channel handlers. Running those features means the message text
-lands in our database for a while: to render an operator audit trail, to debug
-a bad answer, to prove out an abuse report.
+Verbatim Discord message text does not reach these tables. Every row that
+would otherwise carry it is written with the placeholder
+:data:`~smarter_dev.shared.message_content.MESSAGE_CONTENT_PLACEHOLDER`
+(``[message content]``) at write time, in the web tier, at the moment the row
+is built — see ``docs/data-retention.md`` for the per-table list. Verbatim text
+survives only in the agents' own working history: the chat agent's Redis
+history (a 2-hour TTL, and a 20,000-character verbatim tail after compaction)
+and the proactive agent's history (a trailing-message tail after compaction,
+with a recovery copy in ``proactive_agent_histories``). The proactive Redis
+streams that carry notification envelopes are trimmed to the same
+:data:`~smarter_dev.shared.message_content.CONTENT_RETENTION_WINDOW` (48 hours)
+by the bot, not by this sweep.
 
-None of that needs to be permanent, and none of it was *submitted* to us in the
-way a modal entry is. So every table that captures message text passively is
-swept on a fixed :data:`~smarter_dev.shared.message_content.CONTENT_RETENTION_WINDOW`
-(48 hours): the human text is nulled out and the row is stamped
-``content_purged_at``. The row itself stays — timestamps, token counts, cost,
-model name, the decision the agent took — so cost dashboards and abuse
-monitoring keep their long history without keeping anyone's words.
+What this sweep owns is the other half: text an AI *wrote* about what it read.
+A summary quotes nobody and describes everything, so it gets the same 48-hour
+window message text used to get — ``agent_output``, the compaction ``summary``,
+``ai_context_summary``, ``provider_body``, ``bot_response``,
+``response_content``, ``decision_reason``, and a handler script's own error
+message. The sweep is also the back-fill path for rows written before write-time
+redaction landed, which is why it still nulls the columns the write path now
+placeholders. Each scrubbed row is stamped ``content_purged_at``; the row
+itself stays — timestamps, token counts, cost, model name, the decision the
+agent took — so cost dashboards and abuse monitoring keep their long history
+without keeping anyone's words.
+
+Moderation auditing of what was actually said uses the audit log the bot posts
+to the guild's activity channel, not these rows.
 
 What is deliberately *not* swept here:
 
@@ -22,6 +36,8 @@ What is deliberately *not* swept here:
   not Discord.
 - ``research_sessions`` — the ``/scan`` query is an explicit command argument
   and the results are a user-facing artifact with its own lifecycle.
+- ``proactive_agent_histories`` — the proactive agent's working history, bounded
+  by its own compaction rather than by a clock.
 - Identity fields (user ids, usernames, display names) and Discord snowflakes.
   Those come from the members intent, not the message-content intent, and the
   audit trail is worthless without knowing who an action was about.
