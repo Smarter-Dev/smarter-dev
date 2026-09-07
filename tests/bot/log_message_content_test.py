@@ -18,6 +18,8 @@ from unittest.mock import patch
 
 import pytest
 
+from smarter_dev.bot.client import extract_forum_post_data
+from smarter_dev.bot.client import handle_forum_thread_create
 from smarter_dev.bot.plugins import mod_monitor
 from smarter_dev.bot.services.forum_agent_service import ForumAgentService
 from smarter_dev.bot.utils.messages import ConversationContextBuilder
@@ -103,6 +105,24 @@ class TestGatherMessageContextLogs:
         assert "tiny-secret-body" not in logged
         assert "11111" in logged
         assert f"{len('tiny-secret-body')} chars" in logged
+
+    async def test_skip_log_reports_the_length_the_filter_compared(
+        self, caplog, message_context_cache
+    ):
+        padded = _fake_message(12121, " " * 20 + "abcde")
+
+        with caplog.at_level(logging.DEBUG, logger="smarter_dev.bot.utils.messages"):
+            gathered = await gather_message_context(
+                _bot_returning([padded]),
+                channel_id=1,
+                limit=5,
+                skip_short_messages=True,
+                min_message_length=20,
+            )
+
+        assert gathered == []
+        logged = _logged_text(caplog)
+        assert "12121 (5 chars)" in logged
 
     async def test_selected_messages_log_ids_not_bodies(
         self, caplog, message_context_cache
@@ -243,6 +263,20 @@ class TestForumAgentServiceLogs:
         assert MEMBER_TEXT not in logged
         assert f"{len(MEMBER_TEXT)} chars" in logged
 
+    async def test_record_response_survives_a_post_with_no_text(self, caplog, service):
+        agent = {"id": "agent-1", "name": "Agent", "guild_id": "777"}
+        post = self._post()
+        post.content = None
+
+        with caplog.at_level(
+            logging.DEBUG, logger="smarter_dev.bot.services.forum_agent_service"
+        ):
+            await service.record_response(
+                agent, post, "reasoned", 0.9, "answer", 10, 20, True
+            )
+
+        assert "Post content: 0 chars" in _logged_text(caplog)
+
     async def test_classification_debug_omits_post_content(self, caplog, service):
         agent = {
             "id": "agent-1",
@@ -322,3 +356,55 @@ class TestForumAgentServiceLogs:
             or "operation_mode=combined, matching_topics=" in record.getMessage()
         }
         assert classification_levels == {logging.DEBUG}
+
+
+class TestForumExtractLogs:
+    """Forum post extraction logs a length, never the post body."""
+
+    def _thread(self) -> SimpleNamespace:
+        return SimpleNamespace(name="A post title", id=456, parent_id=123)
+
+    def _initial_message(self, content: str | None) -> SimpleNamespace:
+        message = _fake_message(77777, content)
+        message.attachments = []
+        return message
+
+    async def test_extract_logs_content_length_not_body(self, caplog):
+        with caplog.at_level(logging.DEBUG, logger="smarter_dev.bot.client"):
+            extracted = await extract_forum_post_data(
+                MagicMock(), self._thread(), self._initial_message(MEMBER_TEXT)
+            )
+
+        assert extracted.content == MEMBER_TEXT
+        logged = _logged_text(caplog)
+        assert MEMBER_TEXT not in logged
+        assert f"{len(MEMBER_TEXT)} chars" in logged
+
+    async def test_extract_survives_a_post_with_no_text(self, caplog):
+        with caplog.at_level(logging.DEBUG, logger="smarter_dev.bot.client"):
+            extracted = await extract_forum_post_data(
+                MagicMock(), self._thread(), self._initial_message(None)
+            )
+
+        assert extracted.content is None
+        assert "0 chars" in _logged_text(caplog)
+
+    async def test_thread_create_survives_a_post_with_no_text(self, caplog):
+        forum_agent_service = MagicMock()
+        forum_agent_service.process_forum_post_with_tagging = AsyncMock(
+            return_value=([], {})
+        )
+        bot = MagicMock()
+        bot.d = {"forum_agent_service": forum_agent_service}
+        bot.rest.fetch_messages = AsyncMock(
+            return_value=[self._initial_message(None)]
+        )
+        event = SimpleNamespace(thread=self._thread(), guild_id=777)
+
+        with caplog.at_level(logging.DEBUG, logger="smarter_dev.bot.client"):
+            await handle_forum_thread_create(bot, event)
+
+        forum_agent_service.process_forum_post_with_tagging.assert_awaited_once()
+        logged = _logged_text(caplog)
+        assert "Could not fetch initial message" not in logged
+        assert "Content length: 0" in logged

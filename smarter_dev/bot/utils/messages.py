@@ -217,9 +217,10 @@ async def gather_message_context(
             processed_count += 1
 
             # Include ALL messages - no filtering except for short messages if explicitly requested
-            if skip_short_messages and len(message.content.strip()) < min_message_length:
+            content_length = len(message.content.strip())
+            if skip_short_messages and content_length < min_message_length:
                 skipped_count += 1
-                logger.debug(f"Skipped short message {message.id} ({len(message.content)} chars)")
+                logger.debug(f"Skipped short message {message.id} ({content_length} chars)")
                 continue
 
             # Extract reply context separately
@@ -398,6 +399,19 @@ class ConversationContextBuilder:
             "last_message_id": last_message_id
         }
 
+    def _is_bot_tool_usage_message(self, message: hikari.Message, bot_user_id: int) -> bool:
+        """Report whether the bot itself sent this message as a '-#' tool usage note."""
+        is_tool_usage = (
+            message.author.id == bot_user_id
+            and bool(message.content)
+            and message.content.startswith("-#")
+        )
+        if is_tool_usage:
+            logger.debug(
+                f"Skipping bot tool usage message {message.id} ({len(message.content)} chars)"
+            )
+        return is_tool_usage
+
     async def _fetch_base_messages(self, channel_id: int, limit: int = 20) -> list[hikari.Message]:
         """Fetch the initial set of messages from the channel, skipping bot tool usage messages.
 
@@ -413,9 +427,7 @@ class ConversationContextBuilder:
         async for message in self.bot.rest.fetch_messages(channel_id).limit(max_fetch):
             self._fetched_messages[message.id] = message
 
-            # Skip bot messages that start with '-#' (tool usage messages)
-            if message.author.id == bot_user_id and message.content and message.content.startswith("-#"):
-                logger.debug(f"Skipping bot tool usage message {message.id} ({len(message.content)} chars)")
+            if self._is_bot_tool_usage_message(message, bot_user_id):
                 continue
 
             messages.append(message)
@@ -451,9 +463,7 @@ class ConversationContextBuilder:
         async for message in self.bot.rest.fetch_messages(channel_id, after=since_message_id).limit(limit):
             self._fetched_messages[message.id] = message
 
-            # Skip bot messages that start with '-#' (tool usage messages)
-            if message.author.id == bot_user_id and message.content and message.content.startswith("-#"):
-                logger.debug(f"Skipping bot tool usage message {message.id} ({len(message.content)} chars)")
+            if self._is_bot_tool_usage_message(message, bot_user_id):
                 continue
 
             messages.append(message)
