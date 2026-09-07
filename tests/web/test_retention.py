@@ -603,6 +603,7 @@ DERIVED_TEXT_COLUMNS = (
     "response_content",
     "decision_reason",
 )
+RETENTION_WINDOW_HOURS = int(CONTENT_RETENTION_WINDOW.total_seconds() // 3600)
 
 
 HANDLER_LINT_MODULE = REPO_ROOT / "smarter_dev" / "web" / "handler_lint.py"
@@ -616,6 +617,26 @@ def states_hours(text: str, hours: int) -> bool:
     already in the prose still fails its pin.
     """
     return re.search(rf"\b{hours}[ -]hours?\b", text) is not None
+
+
+def table_row(doc: str, prefix: str) -> str:
+    """The markdown table row of ``doc`` starting with ``prefix``."""
+    row = next((line for line in doc.splitlines() if line.startswith(prefix)), None)
+    assert row is not None, f"no table row starts with {prefix!r}"
+    return row
+
+
+def table_cells(row: str) -> list[str]:
+    return [cell.strip() for cell in row.strip().strip("|").split("|")]
+
+
+def paragraph_containing(doc: str, needle: str) -> str:
+    return next(block for block in doc.split("\n\n") if needle in block)
+
+
+def section(doc: str, heading: str) -> str:
+    after_heading = doc.split(heading, 1)[1]
+    return after_heading.split("\n## ", 1)[0]
 
 
 def modules_running_the_handler_lint() -> set[str]:
@@ -663,22 +684,22 @@ class TestDocumentedBehaviour:
         assert "write time" in retention_doc
 
     def test_states_the_retention_window(self, retention_doc):
-        assert states_hours(
-            retention_doc, int(CONTENT_RETENTION_WINDOW.total_seconds() // 3600)
-        )
+        assert states_hours(retention_doc, RETENTION_WINDOW_HOURS)
 
     def test_states_how_long_chat_working_history_keeps_verbatim_text(
         self, retention_doc
     ):
-        assert states_hours(retention_doc, HISTORY_TTL_SECONDS // 3600)
-        assert f"{KEEP_RECENT_CHARS:,}" in retention_doc
+        chat_history_row = table_row(retention_doc, "| Chat agent working history")
+        assert states_hours(chat_history_row, HISTORY_TTL_SECONDS // 3600)
+        assert f"{KEEP_RECENT_CHARS:,}" in chat_history_row
 
     def test_states_how_much_proactive_history_stays_verbatim(self, retention_doc):
-        assert f"{COMPACTION_KEEP_MESSAGES} messages" in retention_doc
+        history_row = table_row(retention_doc, "| Proactive agent history")
+        assert f"{COMPACTION_KEEP_MESSAGES} messages" in history_row
 
     def test_states_when_proactive_compaction_fires(self, retention_doc):
         """The trailing tail only bounds a history that compacted at all."""
-        history_row = self._table_row(retention_doc, "| Proactive agent history")
+        history_row = table_row(retention_doc, "| Proactive agent history")
         assert f"{HISTORY_TOKEN_LIMIT:,}" in history_row
         assert "no key TTL" in history_row
 
@@ -686,21 +707,46 @@ class TestDocumentedBehaviour:
         self, retention_doc
     ):
         """The pending list is a named gap, not the only one."""
-        gaps = self._paragraph_containing(retention_doc, f"{PENDING_LIMIT} envelopes")
+        gaps = paragraph_containing(retention_doc, f"{PENDING_LIMIT} envelopes")
         assert "Two places" in gaps
         assert "history" in gaps
+
+    def test_states_each_proactive_bound_in_one_place(self, retention_doc):
+        """The table owns every bound; prose that restates one can drift from it."""
+        assert retention_doc.count("no key TTL") == 1
+        assert retention_doc.count("after the claim") == 1
+        out_of_scope = section(retention_doc, "## What is out of scope, and why")
+        assert "compaction" not in out_of_scope
 
     def test_the_rule_names_the_durable_copy_of_the_proactive_history(
         self, retention_doc
     ):
         """The carve-out cannot claim working history is Redis-only."""
-        rule = self._section(retention_doc, "## The rule")
+        rule = section(retention_doc, "## The rule")
         assert "`proactive_agent_histories`" in rule
+
+    def test_the_rule_leaves_the_enumeration_of_verbatim_text_to_the_table(
+        self, retention_doc
+    ):
+        """The streams and ``provider_body`` are not working history."""
+        rule = section(retention_doc, "## The rule")
+        assert "only place" not in rule
+
+    def test_lists_the_provider_error_body_among_the_verbatim_survivors(
+        self, retention_doc
+    ):
+        """``provider_body`` is stored as sent for a whole window; the doc must say so."""
+        survivors = section(
+            retention_doc, "## Where verbatim message text still exists"
+        )
+        where, _, bound = table_cells(table_row(survivors, "| `chat_agent_errors"))
+        assert "provider_body" in where
+        assert states_hours(bound, RETENTION_WINDOW_HOURS)
 
     def test_the_chat_turn_write_row_describes_the_keep_list(self, retention_doc):
         """The row must describe what is kept, not a closed list of what is not."""
-        _, placeholdered, _ = self._table_cells(
-            self._table_row(retention_doc, "| `chat_agent_turns` |")
+        _, placeholdered, _ = table_cells(
+            table_row(retention_doc, "| `chat_agent_turns` |")
         )
         assert "except" in placeholdered
         assert "user-prompt" not in placeholdered
@@ -710,13 +756,19 @@ class TestDocumentedBehaviour:
         self, retention_doc
     ):
         """Reasoning can quote a member; the doc must say so and say for how long."""
-        *_, as_sent = self._table_cells(
-            self._table_row(retention_doc, "| `chat_agent_turns` |")
-        )
+        *_, as_sent = table_cells(table_row(retention_doc, "| `chat_agent_turns` |"))
         assert "reasoning" in as_sent
-        assert states_hours(
-            as_sent, int(CONTENT_RETENTION_WINDOW.total_seconds() // 3600)
+        assert states_hours(as_sent, RETENTION_WINDOW_HOURS)
+
+    def test_the_help_conversation_write_row_describes_the_keep_list(
+        self, retention_doc
+    ):
+        """Only a slash-command question is kept; every other type is redacted."""
+        _, placeholdered, as_sent = table_cells(
+            table_row(retention_doc, "| `help_conversations` |")
         )
+        assert "except" in placeholdered
+        assert "slash-command" in as_sent
 
     def test_states_that_the_proactive_streams_are_trimmed_by_age(self, retention_doc):
         assert "wake stream" in retention_doc
@@ -731,15 +783,12 @@ class TestDocumentedBehaviour:
     def test_states_that_a_claimed_batch_is_bounded_from_its_claim(
         self, retention_doc
     ):
-        claimed_batch_row = self._table_row(retention_doc, "| A claimed proactive")
+        claimed_batch_row = table_row(retention_doc, "| A claimed proactive")
         assert "after the claim" in claimed_batch_row
-        assert states_hours(
-            claimed_batch_row,
-            int(CONTENT_RETENTION_WINDOW.total_seconds() // 3600),
-        )
+        assert states_hours(claimed_batch_row, RETENTION_WINDOW_HOURS)
 
     def test_states_that_a_handler_run_stores_no_timer_payload(self, retention_doc):
-        handler_run_row = self._table_row(retention_doc, "| `handler_runs` |")
+        handler_run_row = table_row(retention_doc, "| `handler_runs` |")
         assert "`payload`" in handler_run_row
 
     def test_names_every_module_that_runs_the_handler_lint(self, retention_doc):
@@ -750,23 +799,6 @@ class TestDocumentedBehaviour:
         )
         for module in lint_modules:
             assert module in retention_doc
-
-    @staticmethod
-    def _table_row(doc: str, prefix: str) -> str:
-        return next(line for line in doc.splitlines() if line.startswith(prefix))
-
-    @staticmethod
-    def _table_cells(row: str) -> list[str]:
-        return [cell.strip() for cell in row.strip().strip("|").split("|")]
-
-    @staticmethod
-    def _paragraph_containing(doc: str, needle: str) -> str:
-        return next(block for block in doc.split("\n\n") if needle in block)
-
-    @staticmethod
-    def _section(doc: str, heading: str) -> str:
-        after_heading = doc.split(heading, 1)[1]
-        return after_heading.split("\n## ", 1)[0]
 
     def test_states_that_moderation_auditing_uses_the_activity_audit_log(
         self, retention_doc
@@ -804,10 +836,7 @@ class TestDocumentedBehaviour:
             assert f"``{table}``" in module_docstring
 
     def test_module_docstring_states_the_retention_window(self, module_docstring):
-        assert states_hours(
-            module_docstring,
-            int(CONTENT_RETENTION_WINDOW.total_seconds() // 3600),
-        )
+        assert states_hours(module_docstring, RETENTION_WINDOW_HOURS)
 
     def test_module_docstring_leaves_the_history_bounds_to_the_doc(
         self, module_docstring
@@ -815,6 +844,20 @@ class TestDocumentedBehaviour:
         assert "docs/data-retention.md" in module_docstring
         assert not states_hours(module_docstring, HISTORY_TTL_SECONDS // 3600)
         assert f"{KEEP_RECENT_CHARS:,}" not in module_docstring
+        assert "no key TTL" not in module_docstring
+        assert "size" not in module_docstring
+
+
+class TestTableRow:
+    """A renamed row must name the missing prefix, not raise a bare StopIteration."""
+
+    def test_returns_the_first_row_with_the_prefix(self):
+        doc = "| a | 1 |\n| b | 2 |\n| b | 3 |"
+        assert table_row(doc, "| b") == "| b | 2 |"
+
+    def test_names_the_missing_prefix(self):
+        with pytest.raises(AssertionError, match="'| missing'"):
+            table_row("| a | 1 |", "| missing")
 
 
 class TestStatesHours:
