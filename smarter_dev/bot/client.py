@@ -820,7 +820,6 @@ async def extract_forum_post_data(
                 for att in initial_message.attachments
             ]
 
-        # Debug extracted data
         logger.debug(f"FORUM EXTRACT DEBUG: Content: {len(content or '')} chars")
         logger.debug(f"FORUM EXTRACT DEBUG: Author: '{author_name}'")
         logger.debug(f"FORUM EXTRACT DEBUG: Attachments: {len(attachments)}")

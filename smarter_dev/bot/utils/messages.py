@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import AsyncIterator
 from datetime import UTC
 from datetime import datetime
 from typing import Any
@@ -216,8 +217,7 @@ async def gather_message_context(
         async for message in bot.rest.fetch_messages(channel_id).limit(max_fetch):
             processed_count += 1
 
-            # Include ALL messages - no filtering except for short messages if explicitly requested
-            content_length = len(message.content.strip())
+            content_length = len((message.content or "").strip())
             if skip_short_messages and content_length < min_message_length:
                 skipped_count += 1
                 logger.debug(f"Skipped short message {message.id} ({content_length} chars)")
@@ -399,44 +399,56 @@ class ConversationContextBuilder:
             "last_message_id": last_message_id
         }
 
-    def _is_bot_tool_usage_message(self, message: hikari.Message, bot_user_id: int) -> bool:
+    def _is_bot_tool_usage_message(self, message: hikari.Message) -> bool:
         """Report whether the bot itself sent this message as a '-#' tool usage note."""
-        is_tool_usage = (
-            message.author.id == bot_user_id
+        return (
+            message.author.id == self.bot.get_me().id
             and bool(message.content)
             and message.content.startswith("-#")
         )
-        if is_tool_usage:
-            logger.debug(
-                f"Skipping bot tool usage message {message.id} ({len(message.content)} chars)"
-            )
-        return is_tool_usage
 
-    async def _fetch_base_messages(self, channel_id: int, limit: int = 20) -> list[hikari.Message]:
-        """Fetch the initial set of messages from the channel, skipping bot tool usage messages.
+    async def _iter_context_messages(
+        self,
+        channel_id: int,
+        fetch_limit: int,
+        after: int | None = None
+    ) -> AsyncIterator[hikari.Message]:
+        """Yield newest-first channel messages worth putting in context.
 
-        Ignores messages sent by the bot that start with '-#' (tool usage messages),
-        but still fetches enough messages to meet the limit by fetching more if needed.
+        Every fetched message is cached for reply-thread completion, including
+        the bot's own '-#' tool usage notes, which are cached and then skipped.
         """
-        messages = []
-        bot_user_id = self.bot.get_me().id
+        paginator = (
+            self.bot.rest.fetch_messages(channel_id, after=after)
+            if after is not None
+            else self.bot.rest.fetch_messages(channel_id)
+        )
 
-        # Fetch up to 3x the limit to account for filtered messages
-        max_fetch = limit * 3
-
-        async for message in self.bot.rest.fetch_messages(channel_id).limit(max_fetch):
+        async for message in paginator.limit(fetch_limit):
             self._fetched_messages[message.id] = message
 
-            if self._is_bot_tool_usage_message(message, bot_user_id):
+            if self._is_bot_tool_usage_message(message):
+                logger.debug(
+                    f"Skipping bot tool usage message {message.id} ({len(message.content)} chars)"
+                )
                 continue
 
-            messages.append(message)
+            yield message
 
-            # Stop once we have enough valid messages
+    async def _fetch_base_messages(self, channel_id: int, limit: int = 20) -> list[hikari.Message]:
+        """Fetch the most recent messages from the channel, in chronological order.
+
+        Fetches up to three times the limit so that skipped tool usage messages
+        still leave enough context to meet the limit.
+        """
+        messages = []
+
+        async for message in self._iter_context_messages(channel_id, fetch_limit=limit * 3):
+            messages.append(message)
             if len(messages) >= limit:
                 break
 
-        return list(reversed(messages))  # Return in chronological order
+        return list(reversed(messages))
 
     async def _fetch_messages_since(
         self,
@@ -444,7 +456,7 @@ class ConversationContextBuilder:
         since_message_id: int,
         limit: int = 50
     ) -> list[hikari.Message]:
-        """Fetch messages sent after a specific message ID.
+        """Fetch messages sent after a specific message ID, in chronological order.
 
         Used for restart catch-up to ensure continuity.
 
@@ -456,19 +468,13 @@ class ConversationContextBuilder:
         Returns:
             List of messages in chronological order
         """
-        messages = []
-        bot_user_id = self.bot.get_me().id
+        messages = [
+            message
+            async for message in self._iter_context_messages(
+                channel_id, fetch_limit=limit, after=since_message_id
+            )
+        ]
 
-        # Fetch messages after the given ID
-        async for message in self.bot.rest.fetch_messages(channel_id, after=since_message_id).limit(limit):
-            self._fetched_messages[message.id] = message
-
-            if self._is_bot_tool_usage_message(message, bot_user_id):
-                continue
-
-            messages.append(message)
-
-        # Messages from 'after' query are in reverse chronological order, so reverse them
         return list(reversed(messages))
 
     async def _complete_reply_threads(self, messages: list[hikari.Message]) -> list[hikari.Message]:

@@ -192,7 +192,6 @@ class ForumAgentService(BaseService):
                 "responded": responded
             }
 
-            # Debug logging for API data
             logger.debug(f"FORUM API DEBUG - Recording response for agent {agent.get('name', 'Unknown')}")
             logger.debug(f"FORUM API DEBUG - Post title: '{response_data['post_title']}'")
             logger.debug(f"FORUM API DEBUG - Post content: {len(response_data['post_content'] or '')} chars")

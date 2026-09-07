@@ -408,3 +408,115 @@ class TestForumExtractLogs:
         logged = _logged_text(caplog)
         assert "Could not fetch initial message" not in logged
         assert "Content length: 0" in logged
+
+
+class TestGatherMessageContextHandlesTextlessMessages:
+    """A message with no text (attachment, embed or sticker only) is ordinary."""
+
+    async def test_textless_message_does_not_drop_the_batch(
+        self, caplog, message_context_cache
+    ):
+        textless = _fake_message(88888, None)
+        keeper = _fake_message(22222, MEMBER_TEXT)
+
+        with caplog.at_level(logging.DEBUG, logger="smarter_dev.bot.utils.messages"):
+            gathered = await gather_message_context(
+                _bot_returning([keeper, textless]), channel_id=1, limit=5
+            )
+
+        assert [message.message_id for message in gathered] == ["88888", "22222"]
+        assert "Failed to gather message context" not in _logged_text(caplog)
+
+    async def test_textless_message_is_skipped_as_zero_chars_when_filtering(
+        self, caplog, message_context_cache
+    ):
+        textless = _fake_message(88888, None)
+        keeper = _fake_message(22222, MEMBER_TEXT)
+
+        with caplog.at_level(logging.DEBUG, logger="smarter_dev.bot.utils.messages"):
+            gathered = await gather_message_context(
+                _bot_returning([keeper, textless]),
+                channel_id=1,
+                limit=5,
+                skip_short_messages=True,
+                min_message_length=10,
+            )
+
+        assert [message.message_id for message in gathered] == ["22222"]
+        assert "88888 (0 chars)" in _logged_text(caplog)
+
+
+class TestBotToolUsagePredicate:
+    """The predicate answers a question about a message and does nothing else."""
+
+    def _builder(self) -> ConversationContextBuilder:
+        return ConversationContextBuilder(_bot_returning([]))
+
+    def test_predicate_writes_no_log_line(self, caplog):
+        tool_message = _fake_message(
+            44444, f"-# {MEMBER_TEXT}", author_id=9999, is_bot=True
+        )
+
+        with caplog.at_level(logging.DEBUG, logger="smarter_dev.bot.utils.messages"):
+            assert self._builder()._is_bot_tool_usage_message(tool_message) is True
+
+        assert caplog.records == []
+
+    def test_predicate_rejects_a_members_tool_shaped_message(self):
+        member_message = _fake_message(44445, "-# not from the bot", author_id=5001)
+
+        assert self._builder()._is_bot_tool_usage_message(member_message) is False
+
+    def test_predicate_rejects_a_textless_bot_message(self):
+        textless_bot_message = _fake_message(44446, None, author_id=9999, is_bot=True)
+
+        assert (
+            self._builder()._is_bot_tool_usage_message(textless_bot_message) is False
+        )
+
+
+class TestConversationContextBuilderFetching:
+    """Both fetch paths share one loop: same caching, skipping and ordering."""
+
+    async def test_base_fetch_caches_every_message_including_skipped_ones(self):
+        tool_message = _fake_message(
+            44444, f"-# {MEMBER_TEXT}", author_id=9999, is_bot=True
+        )
+        keeper = _fake_message(22222, MEMBER_TEXT)
+        builder = ConversationContextBuilder(_bot_returning([tool_message, keeper]))
+
+        kept = await builder._fetch_base_messages(channel_id=1, limit=5)
+
+        assert [message.id for message in kept] == [22222]
+        assert set(builder._fetched_messages) == {44444, 22222}
+
+    async def test_base_fetch_stops_at_the_limit_in_chronological_order(self):
+        newest_first = [
+            _fake_message(30003, MEMBER_TEXT),
+            _fake_message(20002, MEMBER_TEXT),
+            _fake_message(10001, MEMBER_TEXT),
+        ]
+        bot = _bot_returning(newest_first)
+        builder = ConversationContextBuilder(bot)
+
+        kept = await builder._fetch_base_messages(channel_id=1, limit=2)
+
+        assert [message.id for message in kept] == [20002, 30003]
+        bot.rest.fetch_messages.assert_called_once_with(1)
+
+    async def test_since_fetch_caches_skips_and_orders_the_same_way(self):
+        tool_message = _fake_message(
+            55555, f"-# {MEMBER_TEXT}", author_id=9999, is_bot=True
+        )
+        newer = _fake_message(30003, MEMBER_TEXT)
+        older = _fake_message(20002, MEMBER_TEXT)
+        bot = _bot_returning([newer, tool_message, older])
+        builder = ConversationContextBuilder(bot)
+
+        kept = await builder._fetch_messages_since(
+            channel_id=1, since_message_id=99, limit=5
+        )
+
+        assert [message.id for message in kept] == [20002, 30003]
+        assert set(builder._fetched_messages) == {30003, 55555, 20002}
+        bot.rest.fetch_messages.assert_called_once_with(1, after=99)
