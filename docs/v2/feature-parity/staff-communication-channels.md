@@ -6,6 +6,8 @@
 
 **Target:** the agentic handler system (`smarter_dev/web/handler_runtime.py` and friends), per the "lean hard on handlers" directive.
 
+> **Retired 2026-09 — prefix commands are prohibited.** Discord's message-content-intent policy rules out bot behaviour triggered by a member's message text, so the `!!!` / `!bind` / `!modchat` / `!archive` / `!lock` command surface planned here is retired and cannot be built: `handler_lint.check_static` rejects any script that branches on a message's leading command word. DM relay shipped without it — the `dm-forum-relay` extension gives each member a persistent staff forum post and relays whatever staff type inside that post, so the reply target is the post rather than a `!bind` command. Mod chat has no shipped replacement; if it is wanted it has to arrive as a bot-core slash command or a request to the chat agent. The sketches below are kept as a record of the original plan and marked retired where they sit. Everything else in this plan — the DM mirror, the E1-E7 extensions, the caps and the thread-op budget — stands.
+
 ## 1. Overview
 
 This group covers the two legacy features that are staff-facing *communication* tooling rather than enforcement:
@@ -191,7 +193,7 @@ Seven extensions, ordered by how many capabilities consume them. All new emit fu
 
 ## 4. Per-feature plans
 
-Both features become **admin handlers** authored through the existing admin pipeline (`run_admin_creation_pipeline`). That single decision does most of the legacy permission model's work: only admins can install or edit the handlers (dual-judge reviewed), and scoping via `channel_ids` puts the command listeners where only staff can type. Legacy `!`-prefix commands are **kept as message-text commands** inside the handlers — staff muscle memory, zero new interaction surface, and the handler system has no slash trigger (moving them to slash commands would push everything to bot-core for no gain). Exact prefixes are an authoring-time choice; sketches below keep the legacy ones.
+Both features become **admin handlers** authored through the existing admin pipeline (`run_admin_creation_pipeline`). That single decision does most of the legacy permission model's work: only admins can install or edit the handlers (dual-judge reviewed), and scoping via `channel_ids` puts the command listeners where only staff can type. Legacy `!`-prefix commands were to be **kept as message-text commands** inside the handlers — staff muscle memory, zero new interaction surface, and the handler system has no slash trigger. **That decision is RETIRED** (see the note at the top): a handler may not branch on a message's leading command word, so every `!`-command in the sketches below is a record of the original plan, not a thing to author.
 
 ### 4.1 DM Relay
 
@@ -225,7 +227,7 @@ if author_id not in warned:
 
 Notes: the log channel id is a script constant the admin author resolves with its channel-lister tool (this *is* the replacement for `!set dm logging channel`). The warned-list prune means a user who last DM'd 500 senders ago gets the notice again — harmless, and it keeps the 16KB memory rail unbreachable. Attachment URLs expire (signed CDN) — mirror is best-effort by design.
 
-**Handler B — `dm-relay-commands` (trigger: `message`, scope: `["<#staff-relay-channel>"]`).**
+**Handler B — `dm-relay-commands`** — **RETIRED** (see the note at the top); kept below as a record of the original plan, and superseded by the shipped `dm-forum-relay` extension, where staff reply by typing inside the member's relay post instead of `!bind`/`!!!`. It was to be a message trigger scoped to `["<#staff-relay-channel>"]`.
 Description: *"In the staff relay channel: `!bind @user` or `!bind #channel` sets the relay target; `!!!<text>` sends the text to the current target with a 'Sent by' footer, reacting 📤 on success and ❌ on failure."*
 
 Script sketch:
@@ -273,7 +275,7 @@ Mention suppression is the emitter's job (E3) — the footer/body cannot mass-pi
 
 ### 4.2 Mod Chat (private threads)
 
-**One admin handler — `mod-chat` (trigger: `message`, scope: staff channels + the mod-chat parent channel; thread messages reach it via E6 parent-channel dispatch).** One handler (not five) so all config lives in its own memory — no guild memory needed. Config keys (`mod_chat_channel_id`, `mod_role_id`, `mod_notice_channel_id`) are seeded into handler memory at authoring time; changing them is a re-authoring conversation, which replaces both `!set` commands.
+**One admin handler — `mod-chat`** — **RETIRED** (see the note at the top); kept below as a record of the original plan. Every one of its three commands is a message-text command, so the handler as sketched cannot be installed. It was to be a message trigger scoped to staff channels + the mod-chat parent channel (thread messages reach it via E6 parent-channel dispatch). One handler (not five) so all config lives in its own memory — no guild memory needed. Config keys (`mod_chat_channel_id`, `mod_role_id`, `mod_notice_channel_id`) are seeded into handler memory at authoring time; changing them is a re-authoring conversation, which replaces both `!set` commands.
 
 Description: *"Staff mod-chat threads: `!modchat` creates a private thread under the mod-chat channel named 'Mod Chat: YYYY-MM-DD', adds the invoker and anyone they mentioned, posts an intro (naming — not pinging — the mod role), and announces the thread in the mod notice channel. Inside such a thread, `!archive` archives+locks it with an -ARCHIVED name suffix, and `!lock` first removes every member without the mod role, then archives+locks with -LOCKED. All three commands only act for invokers who hold the mod role."*
 

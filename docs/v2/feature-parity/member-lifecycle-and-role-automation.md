@@ -408,10 +408,11 @@ is its event-time complement.
 
 All legacy hardcoded ids (roles, channels) become **script constants stated during
 authoring** — the author echoes them into the script, the judge sees them, and the handler
-lives in (or targets) the channel they referred to. Legacy `!`-prefix commands are ported
-as message-trigger branches only where the command is a real member-facing feature
-(`!sus`, `!list_sus`); pure config/test commands are dropped in favor of the authoring
-pipeline itself.
+lives in (or targets) the channel they referred to. Legacy `!`-prefix commands were to be ported
+as message-trigger branches where the command is a real member-facing feature
+(`!sus`, `!list_sus`) — **RETIRED** (see the note at the top): no handler may branch on
+a message's leading command word. Pure config/test commands are dropped in favor of the
+authoring pipeline itself.
 
 ### 4.1 Onboarding & new members (beginner.codes)
 
