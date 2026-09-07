@@ -443,8 +443,8 @@ def _orphaned(installs: list[ExtensionInstall]) -> list[ExtensionInstall]:
     """Installs whose slug has left the catalog (a removed extension).
 
     They have no manifest to render, configure or update against, so the page
-    offers them nothing but uninstall — without which the rows would be stranded
-    in the guild with no operator path to remove them.
+    offers them only disable and uninstall — without which the rows would keep
+    firing in the guild with no operator path to stop or remove them.
     """
     return [
         install for install in installs if _lookup(install.extension_slug) is None

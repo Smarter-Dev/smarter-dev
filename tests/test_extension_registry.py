@@ -9,7 +9,6 @@ nothing bad is written to the real catalog directory.
 
 from __future__ import annotations
 
-import re
 import types
 
 import pytest
@@ -20,12 +19,13 @@ from smarter_dev.extensions.registry import (
     get_registry,
     load_registry,
 )
-from smarter_dev.extensions.rendering import render_bundle
+from smarter_dev.extensions.rendering import RenderError, render_bundle
 from smarter_dev.extensions.schema import (
     ConfigField,
     ExtensionManifest,
     HandlerTemplate,
 )
+from smarter_dev.web.handler_lint import lint_script
 
 
 # -- shipped catalog (the real fail-fast gate) ---------------------------------
@@ -50,46 +50,17 @@ def test_all_shipped_examples_render_and_lint_clean():
         assert len(bundle) == len(ext.manifest.handlers)
 
 
-# A prefix command keys behaviour to the LEADING word of a member's message, the
-# shape the authoring prompts ban in
-# ``handler_authoring.PREFIX_COMMAND_RULE``: a startswith test, a
-# ``split()[0] ==`` test, or an equality test against a command word. A command
-# word is a quoted literal opening with one of the prefixes Discord bots use;
-# the lookahead keeps the closing quote of a `"ok"!=reply` comparison out of it.
-_COMMAND_PREFIXES = "!?"
-_COMMAND_WORD = rf"""["'][{_COMMAND_PREFIXES}](?!=)[^"'\n]{{0,24}}["']"""
-_PREFIX_COMMAND_COMPARISON = re.compile(
-    rf"""startswith\(\s*{_COMMAND_WORD}|==\s*{_COMMAND_WORD}|{_COMMAND_WORD}\s*=="""
-)
-
-
-def _prefix_command_comparisons(script: str) -> list[str]:
-    return [match.group(0) for match in _PREFIX_COMMAND_COMPARISON.finditer(script)]
-
-
-def test_prefix_command_matches_command_branches_not_message_bodies():
-    assert _prefix_command_comparisons('if text.startswith("!ping"):') == [
-        'startswith("!ping"'
-    ]
-    assert _prefix_command_comparisons("if word == '!sus':") == ["== '!sus'"]
-    assert _prefix_command_comparisons('if text.split()[0] == "?help":') == [
-        '== "?help"'
-    ]
-    assert _prefix_command_comparisons('if "!ping" == word:') == ['"!ping" ==']
-    assert _prefix_command_comparisons('if reply != "ok":') == []
-    assert _prefix_command_comparisons('if "ok"!=reply:') == []
-    assert _prefix_command_comparisons('await send_message("!! raid alert")') == []
-
-
 def test_no_shipped_script_implements_a_text_prefix_command():
     """Prefix commands are prohibited under Discord's message-content-intent
-    policy, so no bundled handler may branch on a message's leading command word.
+    policy. The rule is owned by ``handler_lint.check_static`` (the gate every
+    stored script passes through); this pins that the shipped catalog, rendered
+    with its example config, clears it.
     """
     offenders = [
-        f"{ext.manifest.slug}/{key}: {literal}"
+        f"{ext.manifest.slug}/{item.key}: {reason}"
         for ext in load_registry().all()
-        for key, script in ext.scripts.items()
-        for literal in _prefix_command_comparisons(script)
+        for item in render_bundle(ext.manifest, ext.manifest.example_config, ext.scripts)
+        if (reason := lint_script(item.script)) is not None
     ]
     assert offenders == []
 
@@ -322,3 +293,13 @@ def test_schedule_handler_without_timing_key_rejected():
                 )
             ]
         )
+
+
+def test_render_bundle_rejects_a_prefix_command_script():
+    """The lint gate that guards LLM-authored scripts guards catalog scripts too."""
+    script = (
+        'if context["message_content"].strip() == "!ping":\n'
+        '    await send_message("pong")\n'
+    )
+    with pytest.raises(RenderError, match="prefix commands are prohibited"):
+        render_bundle(_valid_manifest(), _valid_manifest().example_config, {"h1": script})
