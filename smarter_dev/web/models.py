@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from datetime import UTC, datetime, timedelta, timezone, date
 from typing import Optional
 from uuid import UUID, uuid4
@@ -27,14 +29,11 @@ from sqlalchemy.sql import func
 
 from smarter_dev.shared.database import Base
 
-# How long Discord-sourced message text may live in our database before the
-# retention sweep scrubs it. Every table that captures message content passively
-# — i.e. text a user typed in Discord rather than typed into one of our modals —
-# carries a ``content_purged_at`` marker and is swept on this window. The row
-# itself survives (timestamps, token counts, cost, decisions) so operators keep
-# usage and abuse history; only the human text goes.
-# See :mod:`smarter_dev.web.retention`.
-CONTENT_RETENTION_WINDOW = timedelta(hours=48)
+# Re-exported so the sweep and the schema keep importing it from here; the bot
+# tier must not import web models.
+from smarter_dev.shared.message_content import CONTENT_RETENTION_WINDOW
+
+logger = logging.getLogger(__name__)
 
 # The chat agent's three-layer per-guild memory. These caps are the schema's
 # contract with the prompts that talk about them, so they live next to the
@@ -1574,7 +1573,6 @@ class ForumUserSubscription(Base):
         if self.notification_hours == -1:  # Forever
             return False
         
-        from datetime import timedelta
         expiry_time = self.updated_at + timedelta(hours=self.notification_hours)
         return datetime.now(timezone.utc) > expiry_time
     
@@ -2202,7 +2200,6 @@ class Challenge(Base):
     
     def calculate_release_time(self, campaign_start_time: datetime, release_cadence_hours: int) -> datetime:
         """Calculate when this challenge should be released based on campaign schedule."""
-        from datetime import timedelta
         hours_offset = (self.order_position - 1) * release_cadence_hours
         return campaign_start_time + timedelta(hours=hours_offset)
     
@@ -2620,7 +2617,6 @@ class SquadSaleEvent(Base):
     @property
     def end_time(self) -> datetime:
         """Calculate when the sale event ends."""
-        from datetime import timedelta
         return self.start_time + timedelta(hours=self.duration_hours)
     
     @property
@@ -2830,10 +2826,7 @@ class RepeatingMessage(Base):
         Rule: If we missed xx:11 and it's now xx:13, the next send should be xx:13 (xx:11 + 2min),
         NOT xx:15 (xx:13 + 2min). Always calculate from the original missed time.
         """
-        from datetime import timedelta
-        import logging
         
-        logger = logging.getLogger(__name__)
         now = datetime.now(timezone.utc)
         
         old_next_send_time = self.next_send_time
@@ -2853,9 +2846,7 @@ class RepeatingMessage(Base):
     
     def update_after_send(self) -> None:
         """Update statistics and next send time after successful message send."""
-        import logging
         
-        logger = logging.getLogger(__name__)
         now = datetime.now(timezone.utc)
         old_next_send_time = self.next_send_time
         
@@ -5886,9 +5877,10 @@ class HandlerRun(Base):
         nullable=True,
         index=True,
         doc=(
-            "When the message text inside ``trigger_context`` was scrubbed by "
-            "the retention sweep. The non-content trigger fields (ids, flags, "
-            "trigger type) and every counter survive."
+            "When the message text inside ``trigger_context`` — and the script "
+            "error message, which can quote it — was scrubbed by the retention "
+            "sweep. The non-content trigger fields (ids, flags, trigger type), "
+            "the outcome and every counter survive."
         ),
     )
 

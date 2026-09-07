@@ -36,7 +36,6 @@ import logging
 from datetime import UTC
 from datetime import datetime
 from uuid import UUID
-from uuid import uuid4
 
 from litestar import Controller
 from litestar import delete
@@ -50,7 +49,6 @@ from pydantic import Field
 from skrift.auth.guards import APIKeyOnly
 from skrift.auth.guards import Permission
 from skrift.workers import get_handle
-from skrift.workers import submit as worker_submit
 from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -67,10 +65,10 @@ from smarter_dev.web.handler_dispatch import CHAIN_DEPTH_DECLINE_REASON
 from smarter_dev.web.handler_dispatch import GUILD_SCOPED_ADMIN_TRIGGERS
 from smarter_dev.web.handler_dispatch import chain_depth_exceeded
 from smarter_dev.web.handler_dispatch import dispatch_handler_event
+from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
 from smarter_dev.web.handler_schedule import ScheduleError
 from smarter_dev.web.handler_schedule import first_fire_at
 from smarter_dev.web.handler_schedule import validate_time_trigger_settings
-from smarter_dev.web.handlers_jobs import HandlerFirePayload
 from smarter_dev.web.models import ADMIN_HANDLER_EVENT_TRIGGERS
 from smarter_dev.web.models import HANDLER_EVENT_TRIGGERS
 from smarter_dev.web.models import HANDLER_TRIGGER_TYPES
@@ -78,6 +76,8 @@ from smarter_dev.web.models import AdminHandler
 from smarter_dev.web.models import ChannelHandler
 
 logger = logging.getLogger(__name__)
+
+_recurring_chain = RECURRING_CHAINS["standard"]
 
 # Permission granted to the bot's Skrift service key (see roles.py `bot-service`
 # role and the phase-01 key-mint runbook).
@@ -193,16 +193,7 @@ async def _schedule_first_fire(record: ChannelHandler) -> None:
     fire_at = first_fire_at(
         record.trigger_type, record.settings or {}, datetime.now(UTC)
     )
-    job_id = uuid4().hex
-    await worker_submit(
-        HandlerFirePayload(
-            handler_id=str(record.id),
-            trigger_context={"trigger_type": record.trigger_type},
-        ),
-        scheduled_for=fire_at,
-        job_id=job_id,
-    )
-    record.scheduled_job_id = job_id
+    await _recurring_chain.arm_occurrence(record, fire_at)
 
 
 async def _cancel_scheduled_job(record: ChannelHandler | AdminHandler) -> None:

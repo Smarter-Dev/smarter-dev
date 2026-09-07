@@ -22,6 +22,7 @@ from smarter_dev.extensions.schema import (
     HandlerTemplate,
 )
 from smarter_dev.web import extension_installs as svc
+from smarter_dev.web import handler_recurrence
 from smarter_dev.web.extension_installs import (
     ExtensionConfigOutdatedError,
     ExtensionInstallError,
@@ -58,7 +59,7 @@ def worker_stub(monkeypatch):
         async def cancel(self):
             cancelled.append(self.job_id)
 
-    monkeypatch.setattr(svc, "worker_submit", _submit)
+    monkeypatch.setattr(handler_recurrence, "worker_submit", _submit)
     monkeypatch.setattr(svc, "get_handle", _Handle)
     return types.SimpleNamespace(submitted=submitted, cancelled=cancelled)
 
@@ -475,6 +476,60 @@ async def test_update_with_new_required_field_raises_and_no_changes(
     assert keys_after == keys_before
 
 
+def _relay_v2_dropped_field() -> LoadedExtension:
+    """v2 of the same bundle with the ``every`` config field removed."""
+    manifest = ExtensionManifest(
+        slug="test-relay",
+        title="Relay",
+        summary="S",
+        version=2,
+        config=[ConfigField(name="chan", type="channel_id", label="C")],
+        handlers=[
+            HandlerTemplate(
+                key="mirror",
+                name="test-mirror",
+                trigger_type="message",
+                description="mirror",
+                script_file="mirror.monty",
+                channel_scope=["chan"],
+            ),
+            HandlerTemplate(
+                key="digest",
+                name="test-digest",
+                trigger_type="schedule",
+                description="digest",
+                script_file="digest.monty",
+                settings={"interval_seconds": 900},
+            ),
+        ],
+        example_config={"chan": CHAN_A},
+    )
+    return _loaded(manifest, {"mirror": _MIRROR_SCRIPT, "digest": _DIGEST_SCRIPT})
+
+
+async def test_update_succeeds_when_the_new_manifest_drops_a_config_field(
+    db_session, worker_stub, monkeypatch
+):
+    """A field the schema removed is valid evolution, not an outdated config."""
+    _use_registry(monkeypatch, _relay())
+    install = await install_extension(
+        db_session, guild_id=GUILD, slug="test-relay",
+        raw_config={"chan": CHAN_A, "every": "300"}, installed_by="admin",
+    )
+    assert install.config == {"chan": CHAN_A, "every": 300}
+
+    _use_registry(monkeypatch, _relay_v2_dropped_field())
+    updated = await update_extension(db_session, guild_id=GUILD, slug="test-relay")
+
+    assert updated.installed_version == 2
+    assert updated.config == {"chan": CHAN_A}
+    digest = next(
+        r for r in await _owned(db_session, install.id)
+        if r.extension_handler_key == "digest"
+    )
+    assert digest.settings == {"interval_seconds": 900}
+
+
 # -- enable / disable ----------------------------------------------------------
 
 
@@ -652,3 +707,68 @@ async def test_cross_session_double_install_leaves_one(
     ).scalar_one()
     assert installs == 1
     assert await _count_handlers(db_session, GUILD) == 2
+
+
+# -- orphaned install (the catalog dropped its slug) ---------------------------
+
+
+async def _orphaned_install(db_session, worker_stub, monkeypatch) -> ExtensionInstall:
+    """Install an extension, then take its slug out of the catalog.
+
+    This is the production shape after a bundled extension is deleted from the
+    repo: the install row and its handler rows outlive the manifest.
+    """
+    _use_registry(monkeypatch, _relay())
+    install = await install_extension(
+        db_session, guild_id=GUILD, slug="test-relay",
+        raw_config={"chan": CHAN_A}, installed_by="admin",
+    )
+    _use_registry(monkeypatch)
+    return install
+
+
+async def test_orphaned_install_is_still_listed(
+    db_session, worker_stub, monkeypatch
+):
+    await _orphaned_install(db_session, worker_stub, monkeypatch)
+    installs = await list_installs(db_session, GUILD)
+    assert [i.extension_slug for i in installs] == ["test-relay"]
+
+
+async def test_orphaned_install_can_be_disabled(
+    db_session, worker_stub, monkeypatch
+):
+    install = await _orphaned_install(db_session, worker_stub, monkeypatch)
+    updated = await set_extension_enabled(
+        db_session, guild_id=GUILD, slug="test-relay", enabled=False
+    )
+    assert updated.enabled is False
+    assert all(not row.enabled for row in await _owned(db_session, install.id))
+
+
+async def test_orphaned_install_can_be_uninstalled(
+    db_session, worker_stub, monkeypatch
+):
+    install = await _orphaned_install(db_session, worker_stub, monkeypatch)
+    await uninstall_extension(db_session, guild_id=GUILD, slug="test-relay")
+    assert await get_install(db_session, GUILD, "test-relay") is None
+    assert await _owned(db_session, install.id) == []
+
+
+async def test_orphaned_install_cannot_be_reconfigured(
+    db_session, worker_stub, monkeypatch
+):
+    await _orphaned_install(db_session, worker_stub, monkeypatch)
+    with pytest.raises(ExtensionInstallError, match="unknown extension"):
+        await edit_extension_config(
+            db_session, guild_id=GUILD, slug="test-relay",
+            raw_config={"chan": CHAN_B},
+        )
+
+
+async def test_orphaned_install_cannot_be_updated(
+    db_session, worker_stub, monkeypatch
+):
+    await _orphaned_install(db_session, worker_stub, monkeypatch)
+    with pytest.raises(ExtensionInstallError, match="unknown extension"):
+        await update_extension(db_session, guild_id=GUILD, slug="test-relay")

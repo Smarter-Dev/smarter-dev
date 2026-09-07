@@ -102,6 +102,21 @@ def validate_config_values(manifest: ExtensionManifest, config: dict) -> dict:
     return cleaned
 
 
+def validate_stored_config(manifest: ExtensionManifest, config: dict) -> dict:
+    """Validate a config saved under an earlier version of the same manifest.
+
+    Fields the schema has since dropped are discarded — removing a field is
+    valid schema evolution and must not force the admin to re-save the form.
+    Everything else validates as usual, so a newly *required* field still
+    raises :class:`RenderError`.
+    """
+    declared = _fields_by_name(manifest)
+    still_declared = {
+        name: value for name, value in config.items() if name in declared
+    }
+    return validate_config_values(manifest, still_declared)
+
+
 def _clean_value(field: ConfigField, value: object) -> str | int | bool:
     if field.type in ("channel_id", "role_id"):
         if not isinstance(value, str) or not _SNOWFLAKE_RE.fullmatch(value):

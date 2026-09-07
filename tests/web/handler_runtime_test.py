@@ -361,7 +361,7 @@ async def test_add_reaction_explicit_target_reaches_thread():
     result, emitter, _ = await _run(
         'await add_reaction("M9", "📤", "T42")\n',
         actor=_FakeActor(),
-        budget=admin_budget(),
+        budget=admin_budget("message"),
     )
     assert result.outcome == "ok"
     assert emitter.reactions == [("T42", "M9", "📤")]
@@ -398,7 +398,7 @@ async def test_admin_handler_moderation_metered():
         'await send_message("banned a scammer", "MODCHAT")\n'
     )
     result, emitter, _ = await _run(
-        script, budget=admin_budget(), actor=actor,
+        script, budget=admin_budget("message"), actor=actor,
         # context needs message_id/author_id
     )
     assert result.outcome == "ok", result.error
@@ -413,7 +413,7 @@ async def test_admin_send_message_forwards_ping_role_id():
     # An admin (actor set) escalation send may ping exactly one role.
     actor = _FakeActor()
     script = 'await send_message("mods needed", ping_role_id="R7")\n'
-    result, emitter, _ = await _run(script, budget=admin_budget(), actor=actor)
+    result, emitter, _ = await _run(script, budget=admin_budget("message"), actor=actor)
     assert result.outcome == "ok", result.error
     assert emitter.message_calls == [("C1", "mods needed", "R7")]
 
@@ -447,7 +447,7 @@ async def test_standard_handler_has_no_remove_timeout():
 async def test_admin_remove_timeout_spends_mod_action():
     actor = _FakeActor()
     result, _, _ = await _run(
-        'await remove_timeout("U1")\n', budget=admin_budget(), actor=actor
+        'await remove_timeout("U1")\n', budget=admin_budget("message"), actor=actor
     )
     assert result.outcome == "ok", result.error
     assert actor.calls == [("remove_timeout", "U1")]
@@ -712,7 +712,7 @@ async def test_admin_list_threads_foreign_channel_in_guild_allowed():
         'await send_message(f"{len(threads)}", "OTHER")\n'
     )
     result, emitter, _ = await _run(
-        script, budget=admin_budget(), actor=_FakeActor(), emitter=emitter
+        script, budget=admin_budget("message"), actor=_FakeActor(), emitter=emitter
     )
     assert result.outcome == "ok", result.error
     assert result.usage["discord_reads"] == 1
@@ -728,7 +728,7 @@ async def test_admin_list_threads_foreign_guild_channel_denied():
     )
     result, emitter, _ = await _run(
         'await list_threads("OTHER")\n',
-        budget=admin_budget(), actor=_FakeActor(), emitter=emitter,
+        budget=admin_budget("message"), actor=_FakeActor(), emitter=emitter,
     )
     assert result.outcome == "cap_exceeded"
     assert result.cap == "out_of_scope_channel"
@@ -741,7 +741,7 @@ async def test_admin_list_threads_out_of_channel_scope_denied():
     emitter = _FakeEmitter(threads_by_channel={"OTHER": [{"thread_id": "TX"}]})
     result, emitter, _ = await _run(
         'await list_threads("OTHER")\n',
-        budget=admin_budget(), actor=_FakeActor(), emitter=emitter,
+        budget=admin_budget("message"), actor=_FakeActor(), emitter=emitter,
         channel_ids=["C2", "C3"],
     )
     assert result.outcome == "cap_exceeded"
@@ -754,7 +754,7 @@ async def test_admin_list_threads_in_channel_scope_allowed():
     emitter = _FakeEmitter(threads_by_channel={"C2": [{"thread_id": "TX"}]})
     result, emitter, _ = await _run(
         'threads = await list_threads("C2")\nawait send_message(f"{len(threads)}", "C2")\n',
-        budget=admin_budget(), actor=_FakeActor(), emitter=emitter,
+        budget=admin_budget("message"), actor=_FakeActor(), emitter=emitter,
         channel_ids=["C2", "C3"],
     )
     assert result.outcome == "ok", result.error
@@ -767,7 +767,7 @@ async def test_admin_close_thread_spends_thread_op_and_guild_window():
     actor = _FakeActor()
     result, _, limiter = await _run(
         'ok = await close_thread("T1")\nawait send_message(f"{ok}")\n',
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=actor,
     )
     assert result.outcome == "ok", result.error
@@ -779,7 +779,7 @@ async def test_admin_close_thread_spends_thread_op_and_guild_window():
 async def test_admin_lock_reopen_thread_metered():
     actor = _FakeActor()
     script = 'await lock_thread("T1")\nawait reopen_thread("T2")\n'
-    result, _, _ = await _run(script, budget=admin_budget(), actor=actor)
+    result, _, _ = await _run(script, budget=admin_budget("message"), actor=actor)
     assert result.outcome == "ok", result.error
     assert ("lock", "T1") in actor.calls and ("reopen", "T2") in actor.calls
     assert result.usage["thread_ops"] == 2
@@ -800,7 +800,7 @@ async def test_admin_thread_op_guild_window_denied_fails_loud():
     actor = _FakeActor()
     result, _, _ = await _run(
         'await close_thread("T1")\n',
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=actor,
         limiter=_StubLimiter(allow=False),
     )
@@ -816,7 +816,7 @@ async def test_admin_delete_gone_thread_returns_false_without_error():
         'await send_message("noop" if gone is False else "deleted")\n'
     )
     result, emitter, _ = await _run(
-        script, budget=admin_budget(), actor=actor, emitter=None
+        script, budget=admin_budget("message"), actor=actor, emitter=None
     )
     assert result.outcome == "ok", result.error
     assert emitter.messages[0][1] == "noop"
@@ -842,7 +842,7 @@ async def test_admin_send_message_explicit_target_gone_returns_false():
         'await send_message("noop" if ok is False else "sent")\n'
     )
     result, emitter, _ = await _run(
-        script, budget=admin_budget(), actor=actor, emitter=emitter
+        script, budget=admin_budget("message"), actor=actor, emitter=emitter
     )
     assert result.outcome == "ok", result.error
     # The explicit-target attempt requested tolerance; the follow-up home send did not.
@@ -860,7 +860,7 @@ async def test_admin_send_message_explicit_target_spends_budget_on_false_path():
     limiter = _StubLimiter()
     result, _, limiter = await _run(
         'await send_message("x", "POST1")\n',
-        budget=admin_budget(), actor=actor, emitter=emitter, limiter=limiter,
+        budget=admin_budget("message"), actor=actor, emitter=emitter, limiter=limiter,
     )
     assert result.outcome == "ok", result.error
     assert result.usage["messages_sent"] == 1
@@ -891,7 +891,7 @@ async def test_relay_reopen_then_send_into_archived_post_is_metered():
         'await send_message("relayed reply", "POST1")\n'
     )
     result, emitter, limiter = await _run(
-        script, budget=admin_budget(), actor=actor, emitter=emitter
+        script, budget=admin_budget("message"), actor=actor, emitter=emitter
     )
     assert result.outcome == "ok", result.error
     assert ("reopen", "POST1") in actor.calls
@@ -934,7 +934,7 @@ async def test_edit_message_admin_edits_bot_message_default_channel():
     actor = _FakeActor()
     result, emitter, _ = await _run(
         'await edit_message("M9", "updated rules")\n',
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=actor,
     )
     assert result.outcome == "ok", result.error
@@ -946,7 +946,7 @@ async def test_edit_message_targets_explicit_channel():
     actor = _FakeActor()
     result, emitter, _ = await _run(
         'await edit_message("M9", "text", "C2")\n',
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=actor,
     )
     assert result.outcome == "ok", result.error
@@ -956,7 +956,7 @@ async def test_edit_message_targets_explicit_channel():
 async def test_edit_message_spends_message_budget_and_breaches_at_sixth():
     actor = _FakeActor()
     script = "for i in range(6):\n    await edit_message('M9', str(i))\n"
-    result, emitter, _ = await _run(script, budget=admin_budget(), actor=actor)
+    result, emitter, _ = await _run(script, budget=admin_budget("message"), actor=actor)
     assert result.outcome == "cap_exceeded"
     assert result.cap == "messages"
     # Admin cap is 5: five edits went out before the sixth breached.
@@ -968,7 +968,7 @@ async def test_edit_message_does_not_hit_channel_message_window():
     limiter = _StubLimiter()
     result, emitter, limiter = await _run(
         'await edit_message("M9", "a")\nawait edit_message("M9", "b")\n',
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=actor,
         limiter=limiter,
     )
@@ -994,7 +994,7 @@ async def test_rename_channel_admin_spends_mod_action_and_renames():
     # In-scope via channel_ids so the scope check resolves without a guild fetch.
     result, emitter, limiter = await _run(
         'await rename_channel("C1", "📊Members: 1.2k")\n',
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=actor,
         limiter=limiter,
         channel_ids=["C1"],
@@ -1013,7 +1013,7 @@ async def test_rename_channel_out_of_scope_raises():
     actor = _FakeActor()
     result, emitter, _ = await _run(
         'await rename_channel("OTHER", "x")\n',
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=actor,
         channel_ids=["C1", "C2"],
     )
@@ -1028,7 +1028,7 @@ async def test_rename_channel_guild_wide_verifies_guild_ownership():
     emitter = _FakeEmitter(guild_by_channel={"OTHER": "OTHER_GUILD"})
     result, emitter, _ = await _run(
         'await rename_channel("OTHER", "x")\n',
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=_FakeActor(),
         emitter=emitter,
     )
@@ -1042,7 +1042,7 @@ async def test_rename_channel_third_in_window_raises_channel_renames_cap():
     limiter = _CountingLimiter()
     script = "for i in range(3):\n    await rename_channel('C1', str(i))\n"
     result, emitter, _ = await _run(
-        script, budget=admin_budget(), actor=actor, limiter=limiter,
+        script, budget=admin_budget("message"), actor=actor, limiter=limiter,
         channel_ids=["C1"],
     )
     assert result.outcome == "cap_exceeded"
@@ -1068,7 +1068,7 @@ async def test_role_functions_present_with_actor():
     actor = _FakeActor()
     script = 'ok = await add_role(context["author_id"], "R1")\n'
     result, _, _ = await _run(
-        script, budget=admin_budget(), actor=actor, allowed_role_ids=["R1"]
+        script, budget=admin_budget("message"), actor=actor, allowed_role_ids=["R1"]
     )
     assert result.outcome == "ok", result.error
     assert ("add_role", "U1", "R1", None) in actor.calls
@@ -1080,7 +1080,7 @@ async def test_add_role_denied_when_role_not_in_allowlist():
     limiter = _StubLimiter()
     script = 'await add_role(context["author_id"], "R9")\n'
     result, _, _ = await _run(
-        script, budget=admin_budget(), actor=actor, limiter=limiter,
+        script, budget=admin_budget("message"), actor=actor, limiter=limiter,
         allowed_role_ids=["R1"],
     )
     assert result.outcome == "cap_exceeded"
@@ -1094,7 +1094,7 @@ async def test_add_role_denied_when_allowlist_empty():
     actor = _FakeActor()
     script = 'await add_role(context["author_id"], "R1")\n'
     result, _, _ = await _run(
-        script, budget=admin_budget(), actor=actor, allowed_role_ids=[],
+        script, budget=admin_budget("message"), actor=actor, allowed_role_ids=[],
     )
     assert result.outcome == "cap_exceeded"
     assert result.cap == "role_not_allowed"
@@ -1106,7 +1106,7 @@ async def test_add_role_allowed_role_spends_budget_and_window_and_calls_actor():
     limiter = _StubLimiter()
     script = 'await add_role(context["author_id"], "R1", reason="onboard")\n'
     result, _, _ = await _run(
-        script, budget=admin_budget(), actor=actor, limiter=limiter,
+        script, budget=admin_budget("message"), actor=actor, limiter=limiter,
         allowed_role_ids=["R1"],
     )
     assert result.outcome == "ok", result.error
@@ -1120,7 +1120,7 @@ async def test_add_role_guild_window_breach_mid_fire_caps():
     limiter = _StubLimiter(allow=False)
     script = 'await add_role(context["author_id"], "R1")\n'
     result, _, _ = await _run(
-        script, budget=admin_budget(), actor=actor, limiter=limiter,
+        script, budget=admin_budget("message"), actor=actor, limiter=limiter,
         allowed_role_ids=["R1"],
     )
     assert result.outcome == "cap_exceeded"
@@ -1135,7 +1135,7 @@ async def test_add_role_member_gone_returns_false_outcome_ok():
         'await send_message("added" if ok else "member gone", "MODCHAT")\n'
     )
     result, emitter, _ = await _run(
-        script, budget=admin_budget(), actor=actor, allowed_role_ids=["R1"],
+        script, budget=admin_budget("message"), actor=actor, allowed_role_ids=["R1"],
     )
     assert result.outcome == "ok", result.error
     assert ("MODCHAT", "member gone") in emitter.messages
@@ -1148,7 +1148,7 @@ async def test_remove_role_member_gone_returns_false():
         'await send_message("removed" if ok else "gone", "MODCHAT")\n'
     )
     result, emitter, _ = await _run(
-        script, budget=admin_budget(), actor=actor, allowed_role_ids=["R1"],
+        script, budget=admin_budget("message"), actor=actor, allowed_role_ids=["R1"],
     )
     assert result.outcome == "ok", result.error
     assert ("MODCHAT", "gone") in emitter.messages
@@ -1169,7 +1169,7 @@ async def test_add_role_budget_cap_breach():
 async def test_ban_user_delete_message_seconds_passthrough():
     actor = _FakeActor()
     script = 'await ban_user(context["author_id"], "bot", 3600)\n'
-    result, _, _ = await _run(script, budget=admin_budget(), actor=actor)
+    result, _, _ = await _run(script, budget=admin_budget("message"), actor=actor)
     assert result.outcome == "ok", result.error
     assert ("ban", "U1", "bot", 3600) in actor.calls
 
@@ -1307,7 +1307,7 @@ async def test_schedule_timer_available_to_admin_tier():
     recorder = _TimerRecorder()
     result, _, _ = await _run(
         'await schedule_timer(86400, {"user_id": "U9"})\n',
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=_FakeActor(),
         timer_scheduler=recorder,
         handler_id="H2",
@@ -1346,7 +1346,7 @@ async def test_send_dm_present_for_admin():
     script = 'ok = await send_dm("U9", "hello")\n'
     emitter = _FakeEmitter()
     result, emitter, _ = await _run(
-        script, budget=admin_budget(), actor=_FakeActor(), emitter=emitter
+        script, budget=admin_budget("message"), actor=_FakeActor(), emitter=emitter
     )
     assert result.outcome == "ok"
     assert emitter.dm_sends == [("U9", "hello")]
@@ -1357,7 +1357,7 @@ async def test_send_dm_spends_message_pool_and_hits_both_windows():
     limiter = _StubLimiter()          # the global per-minute window
     dm_user_limiter = _StubLimiter()  # the per-recipient hour window
     result, _, _ = await _run(
-        script, budget=admin_budget(), actor=_FakeActor(),
+        script, budget=admin_budget("message"), actor=_FakeActor(),
         limiter=limiter, dm_user_limiter=dm_user_limiter,
     )
     assert result.outcome == "ok"
@@ -1421,7 +1421,7 @@ async def test_send_dm_returns_false_does_not_raise():
     emitter = _FakeEmitter()
     emitter.dm_result = False
     result, emitter, _ = await _run(
-        script, budget=admin_budget(), actor=_FakeActor(), emitter=emitter
+        script, budget=admin_budget("message"), actor=_FakeActor(), emitter=emitter
     )
     assert result.outcome == "ok"
     assert result.cap is None
@@ -1436,7 +1436,7 @@ async def test_delete_webhook_spends_mod_action_and_present_only_for_admin():
     actor = _FakeActor()
     script = "r = await delete_webhook('https://discord.com/api/webhooks/1/tok')\n"
     result, _, _ = await _run(
-        script, budget=admin_budget(), actor=actor
+        script, budget=admin_budget("message"), actor=actor
     )
     assert result.outcome == "ok"
     assert ("delete_webhook", "https://discord.com/api/webhooks/1/tok") in actor.calls
@@ -1462,7 +1462,7 @@ async def test_read_functions_admin_only_and_spend_lookup():
         "c = await search_guild_members('ali', 3)\n"
     )
     result, _, _ = await _run(
-        script, budget=admin_budget(), actor=actor, mod_action_reader=reader
+        script, budget=admin_budget("message"), actor=actor, mod_action_reader=reader
     )
     assert result.outcome == "ok"
     # One lookup spent per read call.
@@ -1518,7 +1518,7 @@ async def test_list_mod_actions_passes_through_channel_and_trigger_message_ids()
         "await send_message(str(actions[1]['channel_id']))\n"
     )
     result, emitter, _ = await _run(
-        script, budget=admin_budget(), actor=actor, mod_action_reader=reader
+        script, budget=admin_budget("message"), actor=actor, mod_action_reader=reader
     )
     assert result.outcome == "ok"
     # guild id is bound host-side by the reader; the script controls user + limit.
@@ -1542,7 +1542,7 @@ async def test_list_mod_actions_clamps_limit_host_side():
     for requested, expected in ((999999999, 50), (-1, 0)):
         result, _, _ = await _run(
             f"await list_mod_actions('U1', {requested})\n",
-            budget=admin_budget(),
+            budget=admin_budget("message"),
             actor=actor,
             mod_action_reader=reader,
         )
@@ -1572,7 +1572,7 @@ async def test_get_role_members_returns_shape_and_spends_discord_read():
         'await send_message(f"{len(members)}:{members[0]['"'"'member_id'"'"']}")\n'
     )
     result, emitter, _ = await _run(
-        script, budget=admin_budget(), actor=_FakeActor(), emitter=emitter
+        script, budget=admin_budget("message"), actor=_FakeActor(), emitter=emitter
     )
     assert result.outcome == "ok", result.error
     assert emitter.role_member_calls == ["R1"]
@@ -1632,7 +1632,7 @@ async def test_warn_user_posts_notice_dms_and_records():
     )
     result, emitter, _ = await _run(
         script,
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=_FakeActor(),
         mod_action_recorder=_recorder(calls, warn_count=3),
     )
@@ -1671,7 +1671,7 @@ async def test_warn_user_rejects_out_of_scope_channel():
     calls = []
     result, emitter, _ = await _run(
         "await warn_user('U9', 'r', 'C-OTHER')\n",
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=_FakeActor(),
         channel_ids=["C1"],
         mod_action_recorder=_recorder(calls),
@@ -1686,7 +1686,7 @@ async def test_warn_user_explicit_in_scope_channel_is_used_for_notice_and_row():
     calls = []
     result, emitter, _ = await _run(
         "await warn_user('U9', 'r', 'C2')\n",
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=_FakeActor(),
         channel_ids=["C1", "C2"],
         mod_action_recorder=_recorder(calls),
@@ -1707,7 +1707,7 @@ async def test_warn_user_closed_dms_reported_not_errored():
     )
     result, emitter, _ = await _run(
         script,
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=_FakeActor(),
         emitter=emitter,
         mod_action_recorder=_recorder(calls),
@@ -1721,7 +1721,7 @@ async def test_warn_user_dm_false_skips_the_dm_entirely():
     calls = []
     result, emitter, _ = await _run(
         "await warn_user('U9', 'r', None, False)\n",
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=_FakeActor(),
         mod_action_recorder=_recorder(calls),
     )
@@ -1775,7 +1775,7 @@ async def test_list_rules_returns_rows_and_spends_a_lookup():
         "await send_message(f\"{len(rules)}:{rules[1]['title']}\")\n"
     )
     result, emitter, _ = await _run(
-        script, budget=admin_budget(), actor=_FakeActor(), rules_reader=reader
+        script, budget=admin_budget("message"), actor=_FakeActor(), rules_reader=reader
     )
     assert result.outcome == "ok", result.error
     assert emitter.messages[0][1] == "2:No spam"
@@ -1791,7 +1791,7 @@ async def test_list_rules_on_guild_with_no_rules_is_an_empty_list():
         "await send_message(str(len(rules)))\n"
     )
     result, emitter, _ = await _run(
-        script, budget=admin_budget(), actor=_FakeActor(), rules_reader=reader
+        script, budget=admin_budget("message"), actor=_FakeActor(), rules_reader=reader
     )
     assert result.outcome == "ok", result.error
     assert emitter.messages[0][1] == "0"

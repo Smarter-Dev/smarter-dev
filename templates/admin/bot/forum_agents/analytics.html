@@ -56,12 +56,12 @@
                 {% if recent_responses %}
                 <table class="sk-admin-table">
                     <thead>
-                        <tr><th>Post</th><th>Author</th><th>Confidence</th><th>Responded</th><th>Tokens</th><th>When</th><th></th></tr>
+                        <tr><th>Thread</th><th>Author</th><th>Confidence</th><th>Responded</th><th>Tokens</th><th>When</th><th></th></tr>
                     </thead>
                     <tbody>
                         {% for response in recent_responses %}
                         <tr>
-                            <td>{{ response.post_title[:50] }}{% if response.post_title|length > 50 %}&hellip;{% endif %}</td>
+                            <td><a href="https://discord.com/channels/{{ guild_id }}/{{ response.thread_id }}" target="_blank" rel="noopener">{{ response.thread_id }}</a></td>
                             <td>{{ response.author_display_name }}</td>
                             <td>{% if response.confidence_score is not none %}{{ (response.confidence_score * 100)|int }}%{% else %}N/A{% endif %}</td>
                             <td>{{ 'Yes' if response.responded else 'No' }}</td>
@@ -91,7 +91,7 @@ function viewResponseDetails(responseId) {
             }
             const lines = [
                 'Agent: ' + data.agent_name,
-                'Post: ' + data.post_title,
+                'Thread: ' + data.thread_id,
                 'Author: ' + data.author_display_name,
                 'Confidence: ' + (data.confidence_score !== null ? Math.round(data.confidence_score * 100) + '%' : 'N/A'),
                 'Responded: ' + (data.responded ? 'Yes' : 'No'),

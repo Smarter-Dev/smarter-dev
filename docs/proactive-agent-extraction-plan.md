@@ -187,6 +187,32 @@ proactive:v1:guilds-with-wakes
 The exact prefix may change during implementation, but the guild hash tag and
 schema version are required.
 
+### Retention
+
+Envelopes carry verbatim Discord message text. The 48-hour content retention
+window (`CONTENT_RETENTION_WINDOW` and `CONTENT_RETENTION_MILLISECONDS` in
+`smarter_dev/shared/message_content.py`) bounds the keys that hold them as
+follows; the bound is per key, and two keys hold envelopes for longer than 48
+hours from the write:
+
+- `wake` and `proactive:v1:shadow` hold no entry written more than 48 hours
+  ago. Each is trimmed exactly at the cutoff (`XTRIM MINID`, not approximate:
+  approximate trimming only drops whole macro nodes and would never touch a
+  quiet stream) on every publish, and again on the bot's 15-minute passive
+  tick for every guild the bot sees plus every guild `guilds-with-wakes`
+  still names. The worker may remove guilds from that index, and a member of
+  it that is not a guild snowflake is skipped with a warning; retention does
+  not depend on the index being intact.
+- `batch:<wake_id>` and its `:dropped` counter expire 48 hours after the
+  claim, not after the write. A wake that is never acknowledged cannot keep
+  its batch forever, but an envelope claimed late can outlive its own write
+  cutoff by up to one more window.
+- `pending` is bounded by count only (`PENDING_LIMIT`) and is drained by the
+  next wake. This is the known exception: a guild that never wakes again keeps
+  up to that many verbatim envelopes with no age bound.
+- `ready` and `guilds-with-wakes` carry guild ids only and are never trimmed
+  by age.
+
 ### Notification envelope
 
 Both repositories validate the same JSON Schema:

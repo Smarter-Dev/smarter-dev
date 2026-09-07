@@ -20,6 +20,9 @@ from uuid import uuid4
 
 import pytest
 from litestar.testing import TestClient
+from sqlalchemy.exc import IntegrityError
+
+from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 
 _AGENT_ID = "11111111-1111-1111-1111-111111111111"
 
@@ -472,3 +475,210 @@ def test_put_user_forum_subscription_db_failure_500(
     assert response.status_code == 500
     assert response.json()["detail"] == "Failed to create or update user subscription"
     session_mock.rollback.assert_awaited_once()
+
+
+# --------------------------------------------------------------------------- #
+# Message-content redaction (Discord message-content-intent policy)
+# --------------------------------------------------------------------------- #
+
+
+def _recorded_response_row(
+    forum_client: TestClient,
+    forum_agent_ops_mock: Mock,
+    session_mock: AsyncMock,
+    guild_id: str,
+    **over,
+):
+    """POST a forum response and return the row the route handed the session."""
+    forum_agent_ops_mock.get_agent.return_value = _agent(guild_id)
+    body = {
+        "channel_id": "222222222222222222",
+        "thread_id": "333333333333333333",
+        "post_title": "Bot crashes on startup",
+        "post_content": "here is my whole main.py and the traceback",
+        "author_display_name": "Alice",
+        "post_tags": ["python", "help"],
+        "attachments": [
+            "https://cdn.discordapp.com/attachments/1/2/traceback.txt",
+        ],
+        "decision_reason": "question matches the agent's topic",
+        "confidence_score": 0.82,
+        "response_content": "check your event loop setup",
+        "tokens_used": 10,
+        "response_time_ms": 100,
+        "responded": True,
+    }
+    body.update(over)
+
+    response = forum_client.post(
+        f"/api/guilds/{guild_id}/forum-agents/{_AGENT_ID}/responses", json=body
+    )
+    assert response.status_code == 200
+    return session_mock.add.call_args.args[0]
+
+
+def test_record_agent_response_stores_placeholder_post_content(
+    forum_client: TestClient,
+    forum_agent_ops_mock: Mock,
+    session_mock: AsyncMock,
+    guild_id: str,
+):
+    row = _recorded_response_row(
+        forum_client, forum_agent_ops_mock, session_mock, guild_id
+    )
+    assert row.post_content == MESSAGE_CONTENT_PLACEHOLDER
+
+
+def test_record_agent_response_empties_attachments(
+    forum_client: TestClient,
+    forum_agent_ops_mock: Mock,
+    session_mock: AsyncMock,
+    guild_id: str,
+):
+    row = _recorded_response_row(
+        forum_client, forum_agent_ops_mock, session_mock, guild_id
+    )
+    assert row.attachments == []
+
+
+def test_record_agent_response_stores_placeholder_post_title(
+    forum_client: TestClient,
+    forum_agent_ops_mock: Mock,
+    session_mock: AsyncMock,
+    guild_id: str,
+):
+    row = _recorded_response_row(
+        forum_client, forum_agent_ops_mock, session_mock, guild_id
+    )
+    assert row.post_title == MESSAGE_CONTENT_PLACEHOLDER
+
+
+def test_record_agent_response_empty_post_title_stays_empty(
+    forum_client: TestClient,
+    forum_agent_ops_mock: Mock,
+    session_mock: AsyncMock,
+    guild_id: str,
+):
+    row = _recorded_response_row(
+        forum_client, forum_agent_ops_mock, session_mock, guild_id, post_title=""
+    )
+    assert row.post_title == ""
+
+
+def test_record_agent_response_keeps_everything_the_agent_decided(
+    forum_client: TestClient,
+    forum_agent_ops_mock: Mock,
+    session_mock: AsyncMock,
+    guild_id: str,
+):
+    row = _recorded_response_row(
+        forum_client, forum_agent_ops_mock, session_mock, guild_id
+    )
+    assert row.response_content == "check your event loop setup"
+    assert row.decision_reason == "question matches the agent's topic"
+    assert row.post_tags == ["python", "help"]
+    assert row.author_display_name == "Alice"
+    assert row.channel_id == "222222222222222222"
+    assert row.thread_id == "333333333333333333"
+    assert row.confidence_score == 0.82
+    assert row.tokens_used == 10
+    assert row.response_time_ms == 100
+    assert row.responded is True
+
+
+def test_record_agent_response_empty_post_content_stays_empty(
+    forum_client: TestClient,
+    forum_agent_ops_mock: Mock,
+    session_mock: AsyncMock,
+    guild_id: str,
+):
+    row = _recorded_response_row(
+        forum_client, forum_agent_ops_mock, session_mock, guild_id, post_content=""
+    )
+    assert row.post_content == ""
+
+
+def test_record_agent_response_absent_post_text_stays_empty(
+    forum_client: TestClient,
+    forum_agent_ops_mock: Mock,
+    session_mock: AsyncMock,
+    guild_id: str,
+):
+    forum_agent_ops_mock.get_agent.return_value = _agent(guild_id)
+
+    response = forum_client.post(
+        f"/api/guilds/{guild_id}/forum-agents/{_AGENT_ID}/responses",
+        json={"response_content": "answer"},
+    )
+
+    assert response.status_code == 200
+    row = session_mock.add.call_args.args[0]
+    assert row.post_title == ""
+    assert row.post_content == ""
+    assert row.attachments == []
+
+
+def test_record_agent_response_null_post_text_stores_the_empty_string(
+    forum_client: TestClient,
+    forum_agent_ops_mock: Mock,
+    session_mock: AsyncMock,
+    guild_id: str,
+):
+    # An image-only or embed-only starter post has no text, and the bot sends
+    # that through as null; both columns are not-null, so a null reaching the
+    # insert would lose the audit row to a 500.
+    row = _recorded_response_row(
+        forum_client,
+        forum_agent_ops_mock,
+        session_mock,
+        guild_id,
+        post_title=None,
+        post_content=None,
+    )
+    assert row.post_title == ""
+    assert row.post_content == ""
+
+
+def test_record_agent_response_db_failure_500_rolls_back(
+    forum_client: TestClient,
+    forum_agent_ops_mock: Mock,
+    session_mock: AsyncMock,
+    guild_id: str,
+):
+    forum_agent_ops_mock.get_agent.return_value = _agent(guild_id)
+    session_mock.commit = AsyncMock(
+        side_effect=IntegrityError(
+            "INSERT INTO forum_agent_responses",
+            {},
+            Exception("NOT NULL constraint failed: post_title"),
+        )
+    )
+
+    response = forum_client.post(
+        f"/api/guilds/{guild_id}/forum-agents/{_AGENT_ID}/responses",
+        json={"post_title": "t", "post_content": "c", "response_content": "answer"},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"].startswith("Failed to record agent response")
+    session_mock.rollback.assert_awaited_once()
+
+
+def test_record_agent_response_non_database_failure_propagates(
+    forum_client: TestClient,
+    forum_agent_ops_mock: Mock,
+    session_mock: AsyncMock,
+    guild_id: str,
+):
+    forum_agent_ops_mock.get_agent.side_effect = RuntimeError("not a database problem")
+
+    response = forum_client.post(
+        f"/api/guilds/{guild_id}/forum-agents/{_AGENT_ID}/responses",
+        json={"post_title": "t", "post_content": "c", "response_content": "answer"},
+    )
+
+    # Litestar's own handler answers an unhandled exception; the route must not
+    # dress a programming error up as a database failure or roll back for it.
+    assert response.status_code == 500
+    assert "Failed to record agent response" not in response.text
+    session_mock.rollback.assert_not_awaited()

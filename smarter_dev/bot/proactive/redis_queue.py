@@ -1,16 +1,36 @@
-"""Redis producer primitives for guild-scoped proactive notifications."""
+"""Redis producer primitives for guild-scoped proactive notifications.
+
+Envelopes carry verbatim Discord message text, so the keys that hold them are
+bounded by the content retention window where a bound is possible. The wake
+and shadow streams hold no entry written more than the window ago: each is
+trimmed exactly at the cutoff (approximate trimming skips a quiet stream whose
+entries all sit in the open macro node) on every publish and again by
+``trim_expired_envelopes`` on the bot's passive tick. A claimed batch expires
+one window after the claim, not after the write, so its envelopes can outlive
+their own write cutoff by up to one more window. The pending list is bounded
+by count only and is the known exception; see ``publish``.
+"""
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import UTC
+from datetime import datetime
 
 from smarter_dev.bot.proactive.contracts import NotificationEnvelope
+from smarter_dev.shared.message_content import CONTENT_RETENTION_MILLISECONDS
+from smarter_dev.shared.message_content import oldest_retained_stream_id
+
+logger = logging.getLogger(__name__)
 
 KEY_PREFIX = "proactive:v1"
 READY_GUILDS_KEY = f"{KEY_PREFIX}:guilds-with-wakes"
 READY_STREAM_KEY = f"{KEY_PREFIX}:ready"
 SHADOW_STREAM_KEY = f"{KEY_PREFIX}:shadow"
 PENDING_LIMIT = 20
+SHADOW_STREAM_MAX_ENTRIES = 10_000
 WAKE_PAYLOAD_FIELD = "payload"
 
 _PUSH_PENDING_LUA = """
@@ -28,10 +48,11 @@ _CLAIM_PENDING_LUA = """
 if redis.call('EXISTS', KEYS[2]) == 0 then
   if redis.call('EXISTS', KEYS[1]) == 1 then
     redis.call('RENAME', KEYS[1], KEYS[2])
+    redis.call('PEXPIRE', KEYS[2], ARGV[1])
   end
   local dropped = redis.call('GET', KEYS[3])
   if dropped then
-    redis.call('SET', KEYS[4], dropped)
+    redis.call('SET', KEYS[4], dropped, 'PX', ARGV[1])
     redis.call('DEL', KEYS[3])
   end
 end
@@ -42,8 +63,12 @@ return values
 """
 
 
+def _is_snowflake(guild_id: str) -> bool:
+    return guild_id.isdigit() and len(guild_id) <= 20
+
+
 def _guild_tag(guild_id: str) -> str:
-    if not guild_id.isdigit() or len(guild_id) > 20:
+    if not _is_snowflake(guild_id):
         raise ValueError("guild_id must be a Discord snowflake")
     return f"{{guild:{guild_id}}}"
 
@@ -93,6 +118,12 @@ class RedisNotificationQueue:
         await self._redis.set(ownership_key(guild_id), owner)
 
     async def publish(self, envelope: NotificationEnvelope) -> str | None:
+        """Queue a non-waking envelope, or wake the guild with a bounded stream.
+
+        The pending list a non-waking envelope enters is capped by count, not
+        age: it is drained by the next wake, and a guild that never wakes
+        again keeps up to ``pending_limit`` envelopes until it does.
+        """
         payload = envelope.model_dump_json()
         if not envelope.wakes:
             await self._redis.eval(
@@ -109,6 +140,7 @@ class RedisNotificationQueue:
             pipeline.xadd(
                 wake_stream_key(envelope.guild_id),
                 {WAKE_PAYLOAD_FIELD: payload},
+                **_exact_retention_age_bound(),
             )
             pipeline.sadd(READY_GUILDS_KEY, envelope.guild_id)
             pipeline.xadd(
@@ -120,18 +152,50 @@ class RedisNotificationQueue:
 
     async def publish_shadow(self, envelope: NotificationEnvelope) -> str:
         """Record a canary envelope where production workers cannot consume it."""
-        stream_id = await self._redis.xadd(
-            SHADOW_STREAM_KEY,
-            {
-                "guild_id": envelope.guild_id,
-                WAKE_PAYLOAD_FIELD: envelope.model_dump_json(),
-            },
-            maxlen=10_000,
-            approximate=True,
-        )
+        async with self._redis.pipeline(transaction=True) as pipeline:
+            pipeline.xadd(
+                SHADOW_STREAM_KEY,
+                {
+                    "guild_id": envelope.guild_id,
+                    WAKE_PAYLOAD_FIELD: envelope.model_dump_json(),
+                },
+                maxlen=SHADOW_STREAM_MAX_ENTRIES,
+                approximate=True,
+            )
+            pipeline.xtrim(SHADOW_STREAM_KEY, **_exact_retention_age_bound())
+            stream_id, _ = await pipeline.execute()
         return _decode(stream_id)
 
+    async def trim_expired_envelopes(self, guild_ids: Iterable[str]) -> int:
+        """Drop past-window envelopes from every stream no publish still reaches.
+
+        A publish only bounds the stream it writes, so a guild whose last wake
+        was its final one, and the shadow stream after canary mode ends, keep
+        their envelopes until this runs. Visits the wake stream of every guild
+        in ``guild_ids`` (the guilds the caller can see) and of every guild the
+        ready index still names, so retention does not depend on the worker
+        leaving that index untouched. The index is shared with the external
+        worker, so a member that is not a snowflake is skipped with a warning
+        rather than aborting the trim of every well-formed guild. Returns the
+        number of envelopes dropped.
+        """
+        age_bound = _exact_retention_age_bound()
+        indexed_guild_ids = {
+            _decode(guild_id)
+            for guild_id in await self._redis.smembers(READY_GUILDS_KEY)
+        }
+        stream_guild_ids = sorted(
+            {*guild_ids, *_well_formed_guild_ids(indexed_guild_ids)}
+        )
+        async with self._redis.pipeline(transaction=False) as pipeline:
+            for guild_id in stream_guild_ids:
+                pipeline.xtrim(wake_stream_key(guild_id), **age_bound)
+            pipeline.xtrim(SHADOW_STREAM_KEY, **age_bound)
+            return sum(await pipeline.execute())
+
     async def claim_pending(self, guild_id: str, wake_id: str) -> ClaimedPending:
+        """Move the pending list into a batch that a retry of ``wake_id`` reads
+        again and that expires with the retention window if never acknowledged."""
         raw = await self._redis.eval(
             _CLAIM_PENDING_LUA,
             4,
@@ -139,6 +203,7 @@ class RedisNotificationQueue:
             batch_key(guild_id, wake_id),
             pending_dropped_key(guild_id),
             batch_dropped_key(guild_id, wake_id),
+            CONTENT_RETENTION_MILLISECONDS,
         )
         dropped = int(_decode(raw[0]))
         notifications = tuple(
@@ -152,6 +217,27 @@ class RedisNotificationQueue:
             batch_key(guild_id, wake_id),
             batch_dropped_key(guild_id, wake_id),
         )
+
+
+def _exact_retention_age_bound() -> dict[str, object]:
+    """Approximate trimming only drops whole macro nodes, so it spares a quiet
+    stream whose entries all sit in the open head node."""
+    return {
+        "minid": oldest_retained_stream_id(datetime.now(UTC)),
+        "approximate": False,
+    }
+
+
+def _well_formed_guild_ids(indexed_guild_ids: set[str]) -> set[str]:
+    corrupt_members = {
+        guild_id for guild_id in indexed_guild_ids if not _is_snowflake(guild_id)
+    }
+    for member in sorted(corrupt_members):
+        logger.warning(
+            "proactive ready index member is not a guild snowflake, skipped: %r",
+            member,
+        )
+    return indexed_guild_ids - corrupt_members
 
 
 def _decode(value) -> str:

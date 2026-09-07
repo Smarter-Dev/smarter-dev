@@ -45,7 +45,7 @@ still hide an unbounded memory key. Walk ALL categories even after finding a fai
    unreviewable destructive action; fail this and say so. An unconditional emit on `member_join`
    (raid frequency) is spam here unless the destination is explicitly a join-log. Role grants fit
    the same test: an `add_role`/`remove_role` must be CONDITIONAL on trigger context (a promotion
-   gated on rules acceptance, a flag gated on a command), its role id must be a STRING-LITERAL
+   gated on rules acceptance, a temporary role gated on a moderator's reaction), its role id must be a STRING-LITERAL
    constant that also appears in `settings["allowed_role_ids"]`, and it must not run in an
    unbounded loop. Reject an unconditional role grant on `member_join`, a role id that is a
    variable/subscript/f-string, or a role literal missing from `allowed_role_ids` (the grant dies

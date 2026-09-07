@@ -3,64 +3,169 @@
 What the bot stores from Discord, for how long, and why. This is the reference
 behind the privileged-intent justification, so it should describe the system as
 it actually behaves — if the code changes, change this file in the same commit.
+`tests/web/test_retention.py` pins the numbers below against the constants they
+come from.
 
 ## The rule
 
-**Message content taken passively from Discord is deleted after 48 hours.**
+**Verbatim Discord message text is written to durable storage only as the
+placeholder `[message content]`.**
 
-"Passively" is the important word. Anything a user deliberately submits to us —
-typed into one of our modals, passed as a slash-command argument — is a normal
-user submission with its own lifecycle. Anything the bot read off a channel
-because it holds the message-content intent is transient by default, and gets
-scrubbed on a fixed 48-hour window whether or not anyone asked us to.
+Redaction happens at write time, in the web tier, at the moment the row is
+built — not later, on a timer. Nothing needs to expire for the guarantee to
+hold, and a database dump taken one second after a message was sent contains
+the placeholder, not the message. Text that was empty stays empty: a
+placeholder is never invented where nobody wrote anything.
+
+Two things are deliberately excluded from the rule:
+
+- **What a member deliberately submitted to us** — typed into one of our
+  modals, or passed as a slash-command argument — is a normal user submission
+  with its own lifecycle, not something we read off a channel because we hold
+  the message-content intent.
+- **The AI agents' own working history**, which cannot answer a conversation it
+  cannot see. It lives in Redis, apart from one crash-recovery copy of the
+  proactive agent's history in `proactive_agent_histories`.
+
+The next section is the one list of every place verbatim text survives — the
+two histories, the Redis hand-offs that feed the proactive agent, and the
+two database columns no write-time rule can cover — and what bounds each of
+them.
 
 We keep the surrounding *row*: timestamps, token counts, cost, model name, the
 decision the agent reached, the moderation action taken. That is what pays for
 the intent — it is how we monitor and prove out abuse of the AI integrations,
 and how we track spend. None of it contains anyone's words.
 
-## Why we hold message content at all
+Moderation auditing of what was actually said does not use these rows. It uses
+the audit log the bot posts to the guild's activity channel, which is the
+guild's own record in the guild's own space.
+
+## Why we read messages at all
 
 Every one of these features requires the model to see what people wrote:
 
 | Feature | Why it reads messages |
 | --- | --- |
 | Chat agent | Answers questions in-channel; needs the conversation to answer. |
+| Proactive agent | Watches a channel and decides whether it has something worth saying. |
 | Help agent (`/help`) | Answers a question using the surrounding channel context. |
 | AI moderation | Triages a reported/flagged incident from what was actually said. |
 | Forum agent | Evaluates a new forum post and decides whether to answer it. |
 | Channel handlers | User-authored automations that react to messages. |
 
-And the reason any of it lands in the database rather than staying in memory:
-an operator has to be able to see *why* the AI did what it did — to answer an
-abuse report, to debug a bad or harmful answer, and to attribute cost. Forty-eight
-hours is the window where that is still actionable.
+The audit row an agent leaves behind is a separate question from the text it
+needed in the moment. An operator has to be able to see *why* the AI did what
+it did — to answer an abuse report, to debug a bad or harmful answer, to
+attribute cost — and the ids, counts, decisions and the agent's own output do
+all of that without the row holding anybody's words.
 
-## What gets scrubbed
+## Where verbatim message text still exists, and for how long
 
-`smarter_dev/web/retention.py` is the single authority. Each table carries a
-`content_purged_at` marker, stamped when its text is nulled out.
+| Where | What it holds | Bound |
+| --- | --- | --- |
+| Chat agent working history (`smarter_dev/bot/services/chat_memory.py`, Redis) | The conversation the chat agent is currently in. | 2-hour key TTL, refreshed on write — that TTL is the bound. Compaction (`chat_compaction.py`) folds everything older than roughly the last 20,000 characters into a summary, keeping more when a single turn is larger than that, and the history grows again until the next fold. |
+| Proactive agent history (`smarter_dev/bot/proactive/history_store.py`, Redis, with a recovery copy in `proactive_agent_histories`) | The running history the proactive agent reasons over. | Size, not age: no key TTL and no sweep. Compaction fires only once the history passes 100,000 estimated tokens, and then keeps at most the trailing 8 messages verbatim, summarising the rest. |
+| Proactive wake stream, one per guild (Redis) | The notification envelope that woke a guild, message text included. | Trimmed to 48 hours by stream id on every publish, and again on the passive tick for guilds that stopped publishing. |
+| Proactive shadow stream (Redis) | The same envelopes, copied where canary workers can read them. | The same 48-hour trim, plus a 10,000-entry cap. |
+| A claimed proactive batch (Redis) | Envelopes handed to a wake that has not acknowledged them. | Expires 48 hours after the claim, not after the write, so a claimed envelope can outlive its own write cutoff by up to one more window. |
+| Proactive pending list, one per guild (Redis) | Non-waking envelopes queued for the next wake, message text included. | No age bound: capped at 20 envelopes by count and drained by the next wake, so a guild that never wakes again holds them until it does. |
+| `chat_agent_errors.provider_body` (Postgres) | A provider error body, which can echo the request prompt — and so a member's text — back at us. | Stored as sent, because no write-time rule can tell which bodies quote a member; cleared by the hourly sweep at 48 hours. |
+| `handler_runs.error` (Postgres) | A script's own exception message, which can quote the message the script was reacting to. | Stored as sent, because no write-time rule can tell which errors quote a member; cleared by the hourly sweep at 48 hours on `error` and `cap_exceeded` rows. |
+| Handler fire jobs in the Skrift worker queue (`worker_queue`, state store and event log, all Postgres per `app.yaml`) | The fire payload a handler job carries, which is the verbatim `trigger_context` the script runs against. | Skrift's worker retention, not ours: a finished job's state is pruned after `terminal_job_state_ttl` (7 days by default), archive snapshots after 30 days and archived events after 90. This is the one place verbatim text outlives the 48-hour window; shortening it means setting `workers.retention` in `app.yaml`, which bounds every worker job, not only handler fires. |
+
+The two agent histories are the "chat bot history" the policy carves out: they
+are the bot's short-term working memory, they are not queryable by an operator,
+and they are not in the database except as the proactive agent's crash-recovery
+copy. The two proactive streams, the claimed batch and the pending list are
+Redis hand-offs between the bot and the proactive worker; the claimed batch is
+the one *bounded* key whose window runs from the claim rather than from the
+write.
+
+Two places have no age bound at all, stated plainly. The proactive agent's
+history has no clock, so a guild that never talks enough to trigger compaction
+keeps every verbatim message it has read, in Redis and in its
+`proactive_agent_histories` row, for as long as the channel stays enabled. And
+the proactive pending list is only ever drained by a wake, so a guild that
+never wakes again keeps whatever was queued for it.
+
+## What the write path stores
+
+Every column below would otherwise hold message text. The web tier is the only
+place these rows are built, and `smarter_dev/shared/message_content.py` is the
+only thing that decides what may go in them.
+
+| Table | Written as the placeholder | Written as sent |
+| --- | --- | --- |
+| `chat_agent_turns` | every field of a triggering message except its ids, reply pointers, reactions, flags and timestamp; every part of the model transcript the model did not itself author, stripped down to its kind, tool name, call id, tool kind, outcome and timestamp | `agent_output`, the model's own reply text and reasoning parts, tool names and call arguments, tokens, cost, model, timing. Reasoning can restate what a member said, so the transcript is derived text the sweep clears at 48 hours (below) rather than something write-time redaction can keep out |
+| `chat_agent_compaction_events` | the compacted original content | the compaction `summary` and all char counts |
+| `help_conversations` | every scraped context message, whatever the interaction type; `user_question` for every interaction type except a slash command (today: mention and streak reply) | `user_question` when the member typed it as a slash-command argument, plus `bot_response`, tokens, latency |
+| `forum_agent_responses` | the post title, the post body, and the attachment list (emptied) | tags, confidence, `decision_reason`, `response_content`, responded flag |
+| `handler_runs` | every message-bearing key of `trigger_context`, including any future key following the `*_content` convention, plus a timer re-fire's `payload`, whose keys a handler script chose rather than the host, so the whole value is emptied | trigger type, ids, flags, counters, role lists, outcome |
+
+`help_conversations` redacts context for slash commands too: `/tldr` is a slash
+command whose context is a verbatim channel scrape. Only `user_question` is
+conditional, because a question typed as a command argument is a submission to
+us rather than a message we read.
+
+`handler_runs` stores a redacted context but hands the script the real one. The
+handler still runs against what the member actually wrote; only the permanent
+audit row is redacted.
+
+## What the sweep still clears
+
+`smarter_dev/web/retention.py` runs hourly and blanks text on rows older than
+48 hours, stamping `content_purged_at`. Its remaining job is text the AI wrote
+about what it read — a summary quotes nobody but describes everything — plus
+back-filling rows written before write-time redaction landed.
 
 | Table | Cleared after 48h | Kept |
 | --- | --- | --- |
-| `help_conversations` | question, answer, channel context | ids, interaction type, tokens, latency |
-| `chat_agent_turns` | triggering messages, agent output, model transcript | tokens, cost, model, reasoning level, timing |
-| `chat_agent_engagements` | running topic and notes | activation ids, aggregate tokens/cost |
-| `chat_agent_compaction_events` | original content, summary | char counts, summariser cost |
-| `chat_agent_errors` | provider error body (can echo the prompt) | error type, traceback, status code |
-| `forum_agent_responses` | post title/content/attachments, decision reason, reply | confidence, tokens, responded flag |
-| `moderation_actions` | AI context summary | action, target, moderator, reason, duration, timestamp |
-| `handler_runs` | message text inside `trigger_context` | trigger type, ids, flags, all counters |
+| `help_conversations` | `bot_response`, plus the already-redacted question and context | ids, interaction type, tokens, latency |
+| `chat_agent_turns` | `agent_output` (the reply plus the agent's running topic and notes), plus the already-redacted triggering messages and transcript delta | tokens, cost, model, reasoning level, timing |
+| `chat_agent_engagements` | the denormalised running topic and notes | activation ids, aggregate tokens/cost |
+| `chat_agent_compaction_events` | the compaction `summary` | char counts, summariser cost |
+| `chat_agent_errors` | `provider_body` — a provider error can echo the prompt back, and no write-time rule can tell when it does | error type, traceback, status code |
+| `forum_agent_responses` | `decision_reason`, `response_content`, plus the already-redacted title and body | confidence, tokens, responded flag |
+| `moderation_actions` | `ai_context_summary` | action, target, moderator, reason, duration, timestamp |
+| `handler_runs` | the script's error message on `error` and `cap_exceeded` rows | trigger type, ids, flags, outcome, all counters |
 
-`handler_runs` keeps the non-content parts of its trigger context — which
-trigger fired, in which channel, for whom — and drops every key that carries
-message text, including any future key following the `*_content` convention.
+A script that trips over the message it is reacting to puts that text into its
+exception message, and nothing at write time can tell which errors quote a
+member — so `handler_runs.error` is treated like every other derived text the
+sweep owns. The `outcome` column still says the fire failed, so an old failure
+stays visible as a failure. The explanations on `skipped` and `rearmed` rows are
+written by the bot itself, never by a script, so they stay.
 
 Moderation keeps everything except the AI's retelling of the exchange. An
 action's `reason` — whether a moderator typed it or the triage agent wrote it —
 is the justification for something *we* did, and it is already published
 elsewhere: DM'd to the target and posted to the mod log. The action record never
 expires, because it is about what we did, not about what anyone said.
+
+## Prefix commands
+
+Text prefix commands are prohibited, so the bot ships no handler that reacts
+to a member typing a `!command`. A bot that has to read every message to notice
+`!ping` cannot justify the message-content intent, and the same behaviour
+belongs on a slash command, a reaction, or the chat agent.
+
+Two bundled extensions changed to make that true. The `sus` extension was
+nothing but the `!sus` and `!list_sus` commands, so it was deleted outright.
+`disboard-bumping` lost its `!bumpers` / `!bumps` handler and kept its bump
+tracker, which reacts to the Disboard bot's confirmation embed rather than to
+anything a person typed.
+
+The rule is enforced where scripts are produced, not just documented:
+`smarter_dev/web/handler_lint.py` rejects a script that branches on a message's
+leading command word, and it runs on every AI-authored script before that script
+is offered for approval (`smarter_dev/bot/agents/handler_authoring.py`) and on
+every bundled extension script as it is rendered
+(`smarter_dev/extensions/rendering.py`). Every handler-authoring prompt carries
+the same rule in prose. The write endpoints themselves do not re-run the lint,
+so a script pushed straight into the API by an operator is held to the rule by
+review rather than by code. Matching a keyword anywhere in a message stays
+allowed — that is a keyword watch, not a command.
 
 ## What is out of scope, and why
 
@@ -70,6 +175,8 @@ expires, because it is about what we did, not about what anyone said.
   the result is a user-facing artifact with its own lifecycle.
 - `agent_conversations` / `agent_messages` — the website's own agent chat, not
   Discord.
+- `proactive_agent_histories` — the proactive agent's own working history,
+  bounded as described above; it is not an operator-facing audit trail.
 - The chat agent's own memory. Three tables, exempt for two different reasons:
 
   | Table | What it holds | Why it is exempt |
@@ -87,6 +194,9 @@ expires, because it is about what we did, not about what anyone said.
 - Identity fields everywhere: user ids, usernames, display names, snowflakes.
   These come from the members intent, not the message-content intent, and an
   abuse record is worthless without knowing who it concerns.
+- Logs. Log lines name message ids, author ids and character counts, never
+  message text, so the log stream is not a second copy of the thing this
+  document is about.
 - In-memory only, never written down: the spam engine's message buffer, the
   message gate, and the chat agent's live context window. These die with the
   process.
@@ -97,8 +207,9 @@ expires, because it is about what we did, not about what anyone said.
 true worst case is 48–49 hours rather than the 48–72 a daily job would give. The
 sweep is idempotent (a stamped row is skipped) and commits per table, so a run
 that dies partway through keeps the tables it finished and the next hourly run
-picks up the rest. The very first run after deploy scrubs everything that
-predates the sweep, so expect it to take substantially longer than steady state.
+picks up the rest. The first run after this change scrubs everything that
+predates write-time redaction, so expect it to take substantially longer than
+steady state.
 
 Run it by hand against the current environment with:
 
@@ -108,6 +219,10 @@ uv run python scripts/retention_sweep.py
 
 Operators can also hard-delete emptied help-conversation rows outright from
 `/admin/help-conversations/cleanup`; the sweep only blanks the text.
+
+The proactive Redis streams are not swept by that job. They are trimmed by the
+bot itself: on every publish, and on the passive ticker for the guilds that
+stopped publishing.
 
 ## Agent web-search previews
 

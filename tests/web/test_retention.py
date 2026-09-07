@@ -2,12 +2,25 @@
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+
+from smarter_dev.bot.agents.chat_compaction import KEEP_RECENT_CHARS
+from smarter_dev.bot.proactive.agent import (
+    COMPACTION_KEEP_MESSAGES,
+    HISTORY_TOKEN_LIMIT,
+)
+from smarter_dev.bot.proactive.redis_queue import (
+    PENDING_LIMIT,
+    SHADOW_STREAM_MAX_ENTRIES,
+)
+from smarter_dev.bot.services.chat_memory import HISTORY_TTL_SECONDS
 
 from smarter_dev.web.models import (
     CONTENT_RETENTION_WINDOW,
@@ -25,11 +38,10 @@ from smarter_dev.web.models import (
     ModerationAction,
     ChannelHandler,
 )
-from smarter_dev.web.retention import (
-    SCRUBBERS,
-    run_retention_sweep,
-    strip_trigger_content,
-)
+from smarter_dev.shared import message_content
+from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
+from smarter_dev.web import retention
+from smarter_dev.web.retention import SCRUBBERS, run_retention_sweep
 
 NOW = datetime(2026, 7, 26, 12, 0, tzinfo=UTC)
 STALE = NOW - CONTENT_RETENTION_WINDOW - timedelta(minutes=1)
@@ -349,69 +361,6 @@ class TestModerationActions:
         assert action.reason == "timed out for repeatedly posting scam links"
 
 
-class TestStripTriggerContent:
-    def test_drops_message_text(self):
-        stripped = strip_trigger_content(
-            {
-                "trigger_type": "message",
-                "message_content": "what someone said",
-                "message_id": "444",
-                "author_id": "333",
-                "author_is_bot": False,
-            }
-        )
-        assert stripped == {
-            "trigger_type": "message",
-            "message_id": "444",
-            "author_id": "333",
-            "author_is_bot": False,
-        }
-
-    def test_drops_edit_before_and_after(self):
-        stripped = strip_trigger_content(
-            {
-                "trigger_type": "message_edit",
-                "message_content": "after",
-                "old_content": "before",
-                "author_id": "333",
-            }
-        )
-        assert stripped == {"trigger_type": "message_edit", "author_id": "333"}
-
-    def test_drops_dm_content_attachments_and_thread_titles(self):
-        stripped = strip_trigger_content(
-            {
-                "trigger_type": "dm_message",
-                "content": "a DM",
-                "attachment_urls": [{"url": "https://cdn", "filename": "x.png"}],
-                "attachments": [{"filename": "y.png"}],
-                "embeds": [{"title": "quoted thing"}],
-                "thread_name": "a title someone typed",
-                "starter_message_content": "the opening post",
-                "dm_channel_id": "555",
-            }
-        )
-        assert stripped == {"trigger_type": "dm_message", "dm_channel_id": "555"}
-
-    def test_drops_unknown_keys_following_the_content_convention(self):
-        # A trigger type added later gets covered without touching this module.
-        stripped = strip_trigger_content(
-            {"trigger_type": "future", "poll_answer_content": "text", "poll_id": "1"}
-        )
-        assert stripped == {"trigger_type": "future", "poll_id": "1"}
-
-    def test_keeps_ids_flags_and_role_lists(self):
-        context = {
-            "trigger_type": "member_join",
-            "member_id": "333",
-            "guild_id": "111",
-            "role_ids": ["1", "2"],
-            "has_custom_avatar": True,
-            "guild_member_count": 42,
-        }
-        assert strip_trigger_content(context) == context
-
-
 class TestHandlerRuns:
     async def _run(self, session, fired_at: datetime, context: dict) -> HandlerRun:
         handler = ChannelHandler(
@@ -438,7 +387,7 @@ class TestHandlerRuns:
         await session.flush()
         return run
 
-    async def test_strips_content_from_trigger_context(self, db_session):
+    async def test_redacts_content_in_trigger_context(self, db_session):
         await self._run(
             db_session,
             STALE,
@@ -454,6 +403,7 @@ class TestHandlerRuns:
         run = (await db_session.execute(select(HandlerRun))).scalar_one()
         assert run.trigger_context == {
             "trigger_type": "message",
+            "message_content": MESSAGE_CONTENT_PLACEHOLDER,
             "author_id": "333",
         }
         assert purged_at(run.content_purged_at) == NOW
@@ -469,6 +419,62 @@ class TestHandlerRuns:
         run = (await db_session.execute(select(HandlerRun))).scalar_one()
         assert run.trigger_context == context
         assert run.content_purged_at is None
+
+    async def test_clears_the_script_error_message(self, db_session):
+        # A script that trips over the message it is reacting to puts that text
+        # into its exception message, which lands in `error` — derived text the
+        # sweep owns, exactly like an agent's output.
+        run = await self._run(db_session, STALE, {"trigger_type": "message"})
+        run.outcome = "error"
+        run.error = "runtime: ValueError: what someone said"
+        await db_session.flush()
+
+        await run_retention_sweep(db_session, now=NOW)
+
+        run = (await db_session.execute(select(HandlerRun))).scalar_one()
+        assert run.error is None
+        # The row still says the fire failed, and how much it spent doing it.
+        assert run.outcome == "error"
+        assert run.messages_sent == 1
+
+    @pytest.mark.parametrize("outcome", ["error", "cap_exceeded"])
+    async def test_clears_every_script_authored_error(self, db_session, outcome):
+        run = await self._run(db_session, STALE, {"trigger_type": "message"})
+        run.outcome = outcome
+        run.error = "runtime: ValueError: what someone said"
+        await db_session.flush()
+
+        await run_retention_sweep(db_session, now=NOW)
+
+        run = (await db_session.execute(select(HandlerRun))).scalar_one()
+        assert run.error is None
+
+    @pytest.mark.parametrize("outcome", ["rearmed", "skipped"])
+    async def test_keeps_a_host_authored_explanation(self, db_session, outcome):
+        # The sweep's re-arm note and the skipped-retry note are written by us,
+        # never by a script, so they cannot quote a member. Clearing them would
+        # lose the only record of why a chain stalled, for no retention gain.
+        explanation = "schedule chain had stopped firing; re-armed"
+        run = await self._run(db_session, STALE, {"trigger_type": "sweep"})
+        run.outcome = outcome
+        run.error = explanation
+        await db_session.flush()
+
+        await run_retention_sweep(db_session, now=NOW)
+
+        run = (await db_session.execute(select(HandlerRun))).scalar_one()
+        assert run.error == explanation
+        assert purged_at(run.content_purged_at) == NOW
+
+    async def test_leaves_a_fresh_error_readable(self, db_session):
+        run = await self._run(db_session, FRESH, {"trigger_type": "message"})
+        run.error = "runtime: ValueError: what someone said"
+        await db_session.flush()
+
+        await run_retention_sweep(db_session, now=NOW)
+
+        run = (await db_session.execute(select(HandlerRun))).scalar_one()
+        assert run.error == "runtime: ValueError: what someone said"
 
     async def test_handles_an_empty_context(self, db_session):
         await self._run(db_session, STALE, {})
@@ -578,3 +584,377 @@ class TestSweepBehaviour:
         result = await run_retention_sweep(db_session, now=NOW)
         assert result.total == 0
         assert "nothing due" in str(result)
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+RETENTION_DOC = REPO_ROOT / "docs" / "data-retention.md"
+EXTENSION_CATALOG = REPO_ROOT / "smarter_dev" / "extensions" / "catalog"
+
+CHAT_MEMORY_TABLES = (
+    "chat_agent_guild_memory",
+    "chat_agent_memory_revisions",
+    "chat_agent_memory_notes",
+)
+DERIVED_TEXT_COLUMNS = (
+    "agent_output",
+    "summary",
+    "ai_context_summary",
+    "provider_body",
+    "bot_response",
+    "response_content",
+    "decision_reason",
+)
+RETENTION_WINDOW_HOURS = int(CONTENT_RETENTION_WINDOW.total_seconds() // 3600)
+
+
+HANDLER_LINT_MODULE = REPO_ROOT / "smarter_dev" / "web" / "handler_lint.py"
+
+
+def states_hours(text: str, hours: int) -> bool:
+    """Whether ``text`` states a duration of ``hours`` in either spelling.
+
+    The number has to stand on its own: a doc that says "48 hours" does not
+    thereby state 8 hours, so a constant that shrinks to a tail of a number
+    already in the prose still fails its pin.
+    """
+    return re.search(rf"\b{hours}[ -]hours?\b", text) is not None
+
+
+def table_row(doc: str, prefix: str) -> str:
+    """The markdown table row of ``doc`` starting with ``prefix``."""
+    row = next((line for line in doc.splitlines() if line.startswith(prefix)), None)
+    assert row is not None, f"no table row starts with {prefix!r}"
+    return row
+
+
+def table_cells(row: str) -> list[str]:
+    return [cell.strip() for cell in row.strip().strip("|").split("|")]
+
+
+def paragraph_containing(doc: str, needle: str) -> str:
+    block = next((block for block in doc.split("\n\n") if needle in block), None)
+    assert block is not None, f"no paragraph contains {needle!r}"
+    return block
+
+
+def section(doc: str, heading: str) -> str:
+    parts = doc.split(heading, 1)
+    assert len(parts) == 2, f"no section headed {heading!r}"
+    return parts[1].split("\n## ", 1)[0]
+
+
+def modules_running_the_handler_lint() -> set[str]:
+    """Repo-relative paths of the modules that call ``lint_script``."""
+    return {
+        path.relative_to(REPO_ROOT).as_posix()
+        for path in (REPO_ROOT / "smarter_dev").rglob("*.py")
+        if path != HANDLER_LINT_MODULE and "lint_script(" in path.read_text()
+    }
+
+
+@pytest.fixture(scope="module")
+def retention_doc() -> str:
+    return RETENTION_DOC.read_text()
+
+
+@pytest.fixture(scope="module")
+def module_docstring() -> str:
+    return retention.__doc__ or ""
+
+
+@pytest.fixture(scope="module")
+def primitive_docstring() -> str:
+    return message_content.__doc__ or ""
+
+
+class TestDocumentedBehaviour:
+    """The doc and the module docstring are the privileged-intent justification.
+
+    Every assertion here reads its expected value out of the code, so a
+    constant that moves without the prose moving with it fails the suite.
+    """
+
+    def test_documents_every_scrubbed_table(self, retention_doc):
+        for table in SCRUBBERS:
+            assert f"`{table}`" in retention_doc
+
+    def test_documents_the_derived_text_the_sweep_still_owns(self, retention_doc):
+        for column in DERIVED_TEXT_COLUMNS:
+            assert f"`{column}`" in retention_doc
+
+    def test_documents_the_tables_that_keep_their_text(self, retention_doc):
+        for table in (*CHAT_MEMORY_TABLES, "proactive_agent_histories"):
+            assert f"`{table}`" in retention_doc
+
+    def test_states_the_placeholder_written_in_place_of_message_text(
+        self, retention_doc
+    ):
+        assert MESSAGE_CONTENT_PLACEHOLDER in retention_doc
+        assert "write time" in retention_doc
+
+    def test_states_the_retention_window(self, retention_doc):
+        assert states_hours(retention_doc, RETENTION_WINDOW_HOURS)
+
+    def test_states_how_long_chat_working_history_keeps_verbatim_text(
+        self, retention_doc
+    ):
+        chat_history_row = table_row(retention_doc, "| Chat agent working history")
+        assert states_hours(chat_history_row, HISTORY_TTL_SECONDS // 3600)
+        assert f"{KEEP_RECENT_CHARS:,}" in chat_history_row
+
+    def test_states_that_the_chat_verbatim_tail_is_a_floor(self, retention_doc):
+        """``KEEP_RECENT_CHARS`` is what is never folded, not a ceiling on the tail."""
+        _, _, bound = table_cells(
+            table_row(retention_doc, "| Chat agent working history")
+        )
+        assert "at most" not in bound
+        assert "TTL is the bound" in bound
+
+    def test_states_how_much_proactive_history_stays_verbatim(self, retention_doc):
+        history_row = table_row(retention_doc, "| Proactive agent history")
+        assert f"{COMPACTION_KEEP_MESSAGES} messages" in history_row
+
+    def test_states_when_proactive_compaction_fires(self, retention_doc):
+        """The trailing tail only bounds a history that compacted at all."""
+        history_row = table_row(retention_doc, "| Proactive agent history")
+        assert f"{HISTORY_TOKEN_LIMIT:,}" in history_row
+        assert "no key TTL" in history_row
+
+    def test_counts_the_proactive_history_among_the_places_with_no_age_bound(
+        self, retention_doc
+    ):
+        """The pending list is a named gap, not the only one."""
+        gaps = paragraph_containing(retention_doc, "Two places have no age bound")
+        assert "history" in gaps
+        assert "pending" in gaps
+
+    def test_states_each_proactive_bound_in_one_place(self, retention_doc):
+        """The table owns every bound; prose that restates one can drift from it."""
+        assert retention_doc.count("no key TTL") == 1
+        assert retention_doc.count("after the claim") == 1
+        out_of_scope = section(retention_doc, "## What is out of scope, and why")
+        assert "compaction" not in out_of_scope
+
+    def test_the_rule_names_the_durable_copy_of_the_proactive_history(
+        self, retention_doc
+    ):
+        """The carve-out cannot claim working history is Redis-only."""
+        rule = section(retention_doc, "## The rule")
+        assert "`proactive_agent_histories`" in rule
+
+    def test_the_rule_leaves_the_enumeration_of_verbatim_text_to_the_table(
+        self, retention_doc
+    ):
+        """The streams and ``provider_body`` are not working history."""
+        rule = section(retention_doc, "## The rule")
+        assert "only place" not in rule
+
+    def test_lists_the_provider_error_body_among_the_verbatim_survivors(
+        self, retention_doc
+    ):
+        """``provider_body`` is stored as sent for a whole window; the doc must say so."""
+        survivors = section(
+            retention_doc, "## Where verbatim message text still exists"
+        )
+        where, _, bound = table_cells(table_row(survivors, "| `chat_agent_errors"))
+        assert "provider_body" in where
+        assert states_hours(bound, RETENTION_WINDOW_HOURS)
+
+    def test_lists_the_handler_error_among_the_verbatim_survivors(
+        self, retention_doc
+    ):
+        """A script's error can quote the message it tripped on; the doc must say so."""
+        survivors = section(
+            retention_doc, "## Where verbatim message text still exists"
+        )
+        where, _, bound = table_cells(table_row(survivors, "| `handler_runs.error`"))
+        assert "handler_runs.error" in where
+        assert states_hours(bound, RETENTION_WINDOW_HOURS)
+
+    def test_the_rule_counts_both_columns_no_write_time_rule_covers(
+        self, retention_doc
+    ):
+        rule = section(retention_doc, "## The rule")
+        assert "two database columns" in rule
+        assert "single database column" not in rule
+
+    def test_the_chat_turn_write_row_names_everything_the_keep_list_keeps(
+        self, retention_doc
+    ):
+        """Claiming to store less than the code stores is the wrong direction of error."""
+        _, placeholdered, _ = table_cells(
+            table_row(retention_doc, "| `chat_agent_turns` |")
+        )
+        assert "timestamp" in placeholdered
+        assert "tool kind" in placeholdered
+        assert "outcome" in placeholdered
+
+    def test_the_chat_turn_write_row_describes_the_keep_list(self, retention_doc):
+        """The row must describe what is kept, not a closed list of what is not."""
+        _, placeholdered, _ = table_cells(
+            table_row(retention_doc, "| `chat_agent_turns` |")
+        )
+        assert "except" in placeholdered
+        assert "user-prompt" not in placeholdered
+        assert "tool-return" not in placeholdered
+
+    def test_the_chat_turn_write_row_states_that_model_reasoning_is_kept(
+        self, retention_doc
+    ):
+        """Reasoning can quote a member; the doc must say so and say for how long."""
+        *_, as_sent = table_cells(table_row(retention_doc, "| `chat_agent_turns` |"))
+        assert "reasoning" in as_sent
+        assert states_hours(as_sent, RETENTION_WINDOW_HOURS)
+
+    def test_the_help_conversation_write_row_describes_the_keep_list(
+        self, retention_doc
+    ):
+        """Only a slash-command question is kept; every other type is redacted."""
+        _, placeholdered, as_sent = table_cells(
+            table_row(retention_doc, "| `help_conversations` |")
+        )
+        assert "except" in placeholdered
+        assert "slash-command" in as_sent
+
+    def test_states_that_the_proactive_streams_are_trimmed_by_age(self, retention_doc):
+        assert "wake stream" in retention_doc
+        assert "shadow stream" in retention_doc
+
+    def test_states_the_shadow_stream_cap(self, retention_doc):
+        assert f"{SHADOW_STREAM_MAX_ENTRIES:,}-entry" in retention_doc
+
+    def test_states_the_pending_list_cap(self, retention_doc):
+        """The survivors table owns the cap; nothing else in the doc restates it."""
+        _, _, bound = table_cells(
+            table_row(retention_doc, "| Proactive pending list")
+        )
+        assert f"{PENDING_LIMIT} envelopes" in bound
+        assert "No age bound" in bound
+        assert retention_doc.count(f"{PENDING_LIMIT} envelopes") == 1
+
+    def test_states_that_a_claimed_batch_is_bounded_from_its_claim(
+        self, retention_doc
+    ):
+        claimed_batch_row = table_row(retention_doc, "| A claimed proactive")
+        assert "after the claim" in claimed_batch_row
+        assert states_hours(claimed_batch_row, RETENTION_WINDOW_HOURS)
+
+    def test_states_that_a_handler_run_stores_no_timer_payload(self, retention_doc):
+        handler_run_row = table_row(retention_doc, "| `handler_runs` |")
+        assert "`payload`" in handler_run_row
+
+    def test_names_every_module_that_runs_the_handler_lint(self, retention_doc):
+        lint_modules = modules_running_the_handler_lint()
+        assert lint_modules, (
+            "the doc claims the lint runs where scripts are produced; "
+            "no module calls lint_script"
+        )
+        for module in lint_modules:
+            assert module in retention_doc
+
+    def test_states_that_moderation_auditing_uses_the_activity_audit_log(
+        self, retention_doc
+    ):
+        assert "activity channel" in retention_doc
+        assert "audit log" in retention_doc
+
+    def test_states_that_prefix_commands_are_prohibited(self, retention_doc):
+        assert "prefix command" in retention_doc
+        assert "prohibited" in retention_doc
+
+    def test_names_the_extensions_the_prohibition_removed(self, retention_doc):
+        assert "`!sus`" in retention_doc
+        assert "`disboard-bumping`" in retention_doc
+
+    def test_the_named_removals_match_the_shipped_catalog(self):
+        assert not (EXTENSION_CATALOG / "sus").exists()
+        assert (EXTENSION_CATALOG / "disboard_bumping").exists()
+        assert not (EXTENSION_CATALOG / "disboard_bumping" / "bump_commands.monty").exists()
+
+    def test_module_docstring_states_the_write_time_placeholder(
+        self, module_docstring
+    ):
+        assert MESSAGE_CONTENT_PLACEHOLDER in module_docstring
+        assert "write time" in module_docstring
+
+    def test_module_docstring_names_the_derived_text_the_sweep_owns(
+        self, module_docstring
+    ):
+        for column in DERIVED_TEXT_COLUMNS:
+            assert f"``{column}``" in module_docstring
+
+    def test_module_docstring_keeps_the_memory_exemption(self, module_docstring):
+        for table in CHAT_MEMORY_TABLES:
+            assert f"``{table}``" in module_docstring
+
+    def test_module_docstring_states_the_retention_window(self, module_docstring):
+        assert states_hours(module_docstring, RETENTION_WINDOW_HOURS)
+
+    def test_module_docstring_names_both_columns_no_write_time_rule_covers(
+        self, module_docstring
+    ):
+        assert "``chat_agent_errors.provider_body``" in module_docstring
+        assert "``handler_runs.error``" in module_docstring
+        assert "one column" not in module_docstring
+
+    def test_module_docstring_leaves_the_history_bounds_to_the_doc(
+        self, module_docstring
+    ):
+        assert "docs/data-retention.md" in module_docstring
+        assert not states_hours(module_docstring, HISTORY_TTL_SECONDS // 3600)
+        assert f"{KEEP_RECENT_CHARS:,}" not in module_docstring
+        assert "no key TTL" not in module_docstring
+        assert f"{HISTORY_TOKEN_LIMIT:,}" not in module_docstring
+        assert f"{COMPACTION_KEEP_MESSAGES} messages" not in module_docstring
+
+    def test_primitive_docstring_leaves_the_verbatim_survivors_to_the_doc(
+        self, primitive_docstring
+    ):
+        """One owner per bound: the primitive names none and points at the doc."""
+        assert "docs/data-retention.md" in primitive_docstring
+        assert "exactly two places" not in primitive_docstring
+        assert not states_hours(primitive_docstring, HISTORY_TTL_SECONDS // 3600)
+        assert f"{KEEP_RECENT_CHARS:,}" not in primitive_docstring
+        assert f"{COMPACTION_KEEP_MESSAGES} messages" not in primitive_docstring
+
+
+class TestMarkdownHelpers:
+    """A renamed row, paragraph or heading must be named, not raise a bare error."""
+
+    def test_table_row_returns_the_first_row_with_the_prefix(self):
+        doc = "| a | 1 |\n| b | 2 |\n| b | 3 |"
+        assert table_row(doc, "| b") == "| b | 2 |"
+
+    def test_table_row_names_the_missing_prefix(self):
+        with pytest.raises(AssertionError, match=re.escape("'| missing'")):
+            table_row("| a | 1 |", "| missing")
+
+    def test_paragraph_containing_returns_the_first_block_with_the_needle(self):
+        doc = "first block\n\nsecond block with needle\n\nthird needle block"
+        assert paragraph_containing(doc, "needle") == "second block with needle"
+
+    def test_paragraph_containing_names_the_missing_needle(self):
+        with pytest.raises(AssertionError, match=re.escape("'missing needle'")):
+            paragraph_containing("one\n\ntwo", "missing needle")
+
+    def test_section_returns_the_text_up_to_the_next_heading(self):
+        doc = "intro\n## First\nbody\n## Second\nother"
+        assert section(doc, "## First") == "\nbody"
+
+    def test_section_names_the_missing_heading(self):
+        with pytest.raises(AssertionError, match=re.escape("'## Missing'")):
+            section("## First\nbody", "## Missing")
+
+
+class TestStatesHours:
+    """The pin itself: a number only counts when it stands on its own."""
+
+    def test_matches_either_spelling(self):
+        assert states_hours("refreshed on a 2-hour TTL", 2)
+        assert states_hours("trimmed after 48 hours", 48)
+
+    def test_rejects_a_number_that_only_ends_the_stated_one(self):
+        assert not states_hours("trimmed after 48 hours", 8)
+
+    def test_rejects_a_number_that_only_starts_the_stated_one(self):
+        assert not states_hours("held for 480 hours", 48)

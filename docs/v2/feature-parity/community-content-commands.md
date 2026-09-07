@@ -6,6 +6,8 @@
 
 **Implementation target:** the agentic handler system (`smarter_dev/web/handler_runtime.py` and friends), per the "lean hard on handlers" direction.
 
+> **Retired 2026-09 — prefix commands are prohibited.** Discord's message-content-intent policy rules out bot behaviour triggered by a member's message text, so the `!rule` / `!update-rules` / `!formatting` command surface this whole plan is built around is retired and cannot be built: `handler_lint.check_static` rejects any script that branches on a message's leading command word. Nothing was authored, so no guild loses anything. The rules half already has a non-text surface: an admin authors the guild's rules as one markdown document in the admin site (`guild_rules_configs`), and the bot-core `/rule` slash command cites them (`smarter_dev/bot/plugins/rules.py`), which is also where a rules lookup belongs if one is ever wanted. Anything else this plan promised has to arrive as a slash command or a request to the chat agent. The sketches in §4.1 and §4.2 are kept as a record of the original plan and marked retired where they sit. The disposition analysis and the §3 extensions (`edit_message`, `author_role_ids`, default mention suppression) stand.
+
 ## 1. Overview
 
 This group covers the legacy bot's two read-mostly curated-content command suites:
@@ -34,9 +36,10 @@ admin handlers can already `send_message(content, channel_id=...)` cross-channel
 `delete_message`. No scoping extension is needed — the anywhere-invocable commands are
 authored as guild-wide admin handlers.
 
-### Invocation style decision
+### Invocation style decision — **RETIRED**
 
-We keep the bang-command style (`!rule`, `!formatting`) rather than re-imagining
+**RETIRED — see the note at the top; kept as a record of the original reasoning.**
+The plan kept the bang-command style (`!rule`, `!formatting`) rather than re-imagining
 these as slash commands. Handlers match raw message content, so a prefix guard at the top
 of the script is the natural handler idiom, costs nothing, and preserves user muscle
 memory from the legacy server. What we do NOT port verbatim: channel-by-name lookups,
@@ -193,12 +196,16 @@ than from its own memory/`send_message` returns) should fail `actions_appropriat
 
 ## 4. Per-feature plans
 
-Both command handlers are **guild-wide admin handlers** (`channel_ids=[]`), created
-through the existing admin authoring flow (dual-judge pipeline). They coexist under the
+Both command handlers were to be **guild-wide admin handlers** (`channel_ids=[]`), created
+through the existing admin authoring flow (dual-judge pipeline), coexisting under the
 `MAX_ADMIN_HANDLERS_PER_GUILD = 20` cap (this group uses 2). Each script's first lines
-are a cheap prefix guard, since a guild-wide message handler runs on every human message.
+were a cheap prefix guard, since a guild-wide message handler runs on every human
+message — which is exactly what is now prohibited (see the note at the top), so both
+handlers below are retired.
 
 ### 4.1 Rules — one handler: `server-rules` (message trigger, guild-wide)
+
+**RETIRED — see the note at the top; kept as a record of the original plan.** Both of this handler's branches are message-text commands, so it cannot be installed as sketched.
 
 One handler owns the rules dataset and serves both `!rule` (everyone) and
 `!update-rules` (staff-gated). A single handler is deliberate: the dataset must not be
@@ -316,6 +323,8 @@ Notes on deliberate legacy deviations:
 
 ### 4.2 Code formatting — one handler: `code-formatting-help` (message trigger, guild-wide)
 
+**RETIRED — see the note at the top; kept as a record of the original plan.** The whole handler is a `!formatting` / `!format` / `!code` command guard, so it cannot be installed as sketched.
+
 Static-reply handler; the only logic is alias matching and language sanitization.
 
 ```python
@@ -351,9 +360,9 @@ chosen for legacy parity (see open question 3).
 
 The entire `!resources` suite (capabilities 12–20) is dropped — see the disposition
 table. No handler is authored, no extension was needed, and nothing else in this plan
-depended on it. If a curated-links command is ever wanted again, it is a plain
-handler-today authoring exercise (catalog literal + prefix guard), with the one caveat
-that the catalog must be curated to fit the 8 KB script cap.
+depended on it. If a curated-links surface is ever wanted again it cannot be a
+prefix guard (see the note at the top) — it has to be a slash command or a chat-agent
+request, with the same caveat that a script-held catalog must fit the 8 KB cap.
 
 ## 5. Implementation order & TDD notes
 

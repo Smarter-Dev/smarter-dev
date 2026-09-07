@@ -19,12 +19,13 @@ from smarter_dev.extensions.registry import (
     get_registry,
     load_registry,
 )
-from smarter_dev.extensions.rendering import render_bundle
+from smarter_dev.extensions.rendering import RenderError, render_bundle
 from smarter_dev.extensions.schema import (
     ConfigField,
     ExtensionManifest,
     HandlerTemplate,
 )
+from smarter_dev.web.handler_lint import lint_script
 
 
 # -- shipped catalog (the real fail-fast gate) ---------------------------------
@@ -47,6 +48,21 @@ def test_all_shipped_examples_render_and_lint_clean():
             ext.manifest, ext.manifest.example_config, ext.scripts
         )
         assert len(bundle) == len(ext.manifest.handlers)
+
+
+def test_no_shipped_script_implements_a_text_prefix_command():
+    """Prefix commands are prohibited under Discord's message-content-intent
+    policy. The rule is owned by ``handler_lint.check_static`` (the gate every
+    stored script passes through); this pins that the shipped catalog, rendered
+    with its example config, clears it.
+    """
+    offenders = [
+        f"{ext.manifest.slug}/{item.key}: {reason}"
+        for ext in load_registry().all()
+        for item in render_bundle(ext.manifest, ext.manifest.example_config, ext.scripts)
+        if (reason := lint_script(item.script)) is not None
+    ]
+    assert offenders == []
 
 
 def test_registry_get_unknown_slug_raises():
@@ -277,3 +293,13 @@ def test_schedule_handler_without_timing_key_rejected():
                 )
             ]
         )
+
+
+def test_render_bundle_rejects_a_prefix_command_script():
+    """The lint gate that guards LLM-authored scripts guards catalog scripts too."""
+    script = (
+        'if context["message_content"].strip() == "!ping":\n'
+        '    await send_message("pong")\n'
+    )
+    with pytest.raises(RenderError, match="prefix commands are prohibited"):
+        render_bundle(_valid_manifest(), _valid_manifest().example_config, {"h1": script})

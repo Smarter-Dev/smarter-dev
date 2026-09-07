@@ -3,11 +3,11 @@
 A recurring schedule has no scheduler behind it. It exists at runtime as a
 single in-flight worker job, and the ONLY thing that enqueues the next
 occurrence is the successful completion of the current one
-(``handlers_jobs._reschedule``). That makes the chain a linked list with no head
-pointer: break one link — a dead-lettered job, an evicted pod, a deploy that
-makes every fire raise — and the schedule stops forever, silently, even though
-the handler row is still ``enabled`` and still carries everything needed to
-compute the next fire.
+(``handler_recurrence.RecurringFireChain``). That makes the chain a linked list
+with no head pointer: break one link — a dead-lettered job, an evicted pod, a
+deploy that makes every fire raise — and the schedule stops forever, silently,
+even though the handler row is still ``enabled`` and still carries everything
+needed to compute the next fire.
 
 This module supplies the missing head pointer. The handler row is the source of
 truth; the queued job is only a cache of the next occurrence. A sweep asks one
@@ -27,13 +27,16 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from uuid import UUID, uuid4
+from uuid import UUID
 
+from skrift.workers import get_handle
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
+from smarter_dev.web.handler_run_audit import record_rearmed_run
 from smarter_dev.web.handler_schedule import ScheduleError, next_fire_at
-from smarter_dev.web.models import AdminHandler, ChannelHandler, HandlerRun
+from smarter_dev.web.models import HandlerRun
 
 logger = logging.getLogger(__name__)
 
@@ -139,42 +142,18 @@ async def _last_fire_times(
 async def find_stalled_chains(
     session: AsyncSession, now: datetime | None = None
 ) -> list[StalledChain]:
-    """Every enabled recurring schedule (both tiers) that has stopped firing."""
+    """Every enabled recurring schedule (every tier) that has stopped firing."""
     now = now or datetime.now(timezone.utc)
 
-    channel_rows = list(
-        (
-            await session.execute(
-                select(ChannelHandler).where(
-                    ChannelHandler.enabled.is_(True),
-                    ChannelHandler.trigger_type == "schedule",
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    admin_rows = list(
-        (
-            await session.execute(
-                select(AdminHandler).where(
-                    AdminHandler.enabled.is_(True),
-                    AdminHandler.trigger_type == "schedule",
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
+    scheduled: list[tuple[object, str]] = []
+    for kind, tier_chain in RECURRING_CHAINS.items():
+        for record in await tier_chain.load_enabled_schedule_handlers(session):
+            scheduled.append((record, kind))
 
-    last_fired = await _last_fire_times(
-        session, [r.id for r in channel_rows] + [r.id for r in admin_rows]
-    )
+    last_fired = await _last_fire_times(session, [record.id for record, _ in scheduled])
 
     stalled: list[StalledChain] = []
-    for record, kind in [(r, "standard") for r in channel_rows] + [
-        (r, "admin") for r in admin_rows
-    ]:
+    for record, kind in scheduled:
         settings = dict(record.settings or {})
         overdue = is_stalled(
             settings, last_fired.get(record.id), record.created_at, now
@@ -206,15 +185,10 @@ async def rearm_chain(
     already, but if it somehow isn't, letting it run would leave two live chains
     for one handler — the one outcome worse than a stalled schedule.
     """
-    # Imported lazily: this module is imported by the admin web tier to render
-    # schedule health, which must not pull the worker submit path.
-    from skrift.workers import get_handle
-    from skrift.workers import submit as worker_submit
-
     now = now or datetime.now(timezone.utc)
-    model = ChannelHandler if chain.kind == "standard" else AdminHandler
-    record = await session.get(model, chain.handler_id)
-    if record is None or not record.enabled:
+    tier_chain = RECURRING_CHAINS[chain.kind]
+    record = await tier_chain.load_enabled_handler(session, chain.handler_id)
+    if record is None:
         return None
 
     try:
@@ -231,40 +205,15 @@ async def rearm_chain(
         except Exception:  # noqa: BLE001 — best-effort; it is normally long dead
             logger.debug("stale job %s not cancellable", record.scheduled_job_id)
 
-    if chain.kind == "standard":
-        from smarter_dev.web.handlers_jobs import HandlerFirePayload
-
-        job_payload = HandlerFirePayload(
-            handler_id=str(chain.handler_id),
-            trigger_context={"trigger_type": "schedule"},
-        )
-    else:
-        from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
-
-        job_payload = AdminHandlerFirePayload(
-            admin_handler_id=str(chain.handler_id),
-            channel_id="",
-            trigger_context={"trigger_type": "schedule"},
-        )
-
-    job_id = uuid4().hex
-    await worker_submit(job_payload, scheduled_for=nxt, job_id=job_id)
-    record.scheduled_job_id = job_id
-
-    session.add(
-        HandlerRun(
-            handler_id=chain.handler_id,
-            handler_kind=chain.kind,
-            trigger_context={"trigger_type": "sweep"},
-            outcome="rearmed",
-            error=(
-                f"schedule chain had stopped firing (last fire "
-                f"{chain.last_fired_at.isoformat() if chain.last_fired_at else 'never'}, "
-                f"overdue by {chain.overdue_by}); re-armed for {nxt.isoformat()}"
-            ),
-            fired_at=now,
-            finished_at=now,
-        )
+    await tier_chain.arm_occurrence(record, nxt)
+    record_rearmed_run(
+        session,
+        handler_id=chain.handler_id,
+        handler_kind=chain.kind,
+        last_fired_at=chain.last_fired_at,
+        overdue_by=chain.overdue_by,
+        next_occurrence=nxt,
+        now=now,
     )
     return nxt
 

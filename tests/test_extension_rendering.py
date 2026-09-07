@@ -16,6 +16,7 @@ from smarter_dev.extensions.rendering import render_bundle
 from smarter_dev.extensions.rendering import render_script
 from smarter_dev.extensions.rendering import render_settings
 from smarter_dev.extensions.rendering import validate_config_values
+from smarter_dev.extensions.rendering import validate_stored_config
 from smarter_dev.extensions.schema import ConfigField
 from smarter_dev.extensions.schema import ExtensionManifest
 from smarter_dev.extensions.schema import HandlerTemplate
@@ -112,6 +113,29 @@ def test_unknown_key_raises():
         validate_config_values(
             manifest, {"chan": "123456789012345678", "surprise": "x"}
         )
+
+
+def test_stored_config_drops_a_field_the_schema_no_longer_declares():
+    manifest = _manifest(
+        [ConfigField(name="chan", type="channel_id", label="Chan")],
+        [_message_handler()],
+    )
+    cleaned = validate_stored_config(
+        manifest, {"chan": "123456789012345678", "retired": "x"}
+    )
+    assert cleaned == {"chan": "123456789012345678"}
+
+
+def test_stored_config_still_raises_for_a_newly_required_field():
+    manifest = _manifest(
+        [
+            ConfigField(name="chan", type="channel_id", label="Chan"),
+            ConfigField(name="newthing", type="string", label="N"),
+        ],
+        [_message_handler()],
+    )
+    with pytest.raises(RenderError, match="missing required config field"):
+        validate_stored_config(manifest, {"chan": "123456789012345678"})
 
 
 def test_int_field_coerces_numeric_string_and_rejects_bool():

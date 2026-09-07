@@ -1,18 +1,34 @@
-"""Scheduled scrubbing of Discord-sourced message content.
+"""Scheduled scrubbing of the text our AI features derived from Discord.
 
-The bot reads Discord messages under the privileged message-content intent to
-run its AI features — the chat agent, the help agent, AI moderation, the forum
-agent and channel handlers. Running those features means the message text
-lands in our database for a while: to render an operator audit trail, to debug
-a bad answer, to prove out an abuse report.
+Verbatim Discord message text does not reach these tables. Every row that
+would otherwise carry it is written with the placeholder
+:data:`~smarter_dev.shared.message_content.MESSAGE_CONTENT_PLACEHOLDER`
+(``[message content]``) at write time, in the web tier, at the moment the row
+is built — see ``docs/data-retention.md`` for the per-table list. Verbatim text
+survives in the agents' own working history — the chat agent's Redis history
+and the proactive agent's history, with a recovery copy in
+``proactive_agent_histories`` — and in two columns no write-time rule can
+cover, ``chat_agent_errors.provider_body`` and ``handler_runs.error``, which
+this sweep clears. What bounds each of those, and what does not, is
+``docs/data-retention.md``'s to state; this docstring does not repeat it. The proactive Redis streams that carry
+notification envelopes are trimmed to the same
+:data:`~smarter_dev.shared.message_content.CONTENT_RETENTION_WINDOW` (48 hours)
+by the bot, not by this sweep.
 
-None of that needs to be permanent, and none of it was *submitted* to us in the
-way a modal entry is. So every table that captures message text passively is
-swept on a fixed :data:`~smarter_dev.web.models.CONTENT_RETENTION_WINDOW`
-(48 hours): the human text is nulled out and the row is stamped
-``content_purged_at``. The row itself stays — timestamps, token counts, cost,
-model name, the decision the agent took — so cost dashboards and abuse
-monitoring keep their long history without keeping anyone's words.
+What this sweep owns is the other half: text an AI *wrote* about what it read.
+A summary quotes nobody and describes everything, so it gets the same 48-hour
+window message text used to get — ``agent_output``, the compaction ``summary``,
+``ai_context_summary``, ``provider_body``, ``bot_response``,
+``response_content``, ``decision_reason``, and a handler script's own error
+message. The sweep is also the back-fill path for rows written before write-time
+redaction landed, which is why it still nulls the columns the write path now
+placeholders. Each scrubbed row is stamped ``content_purged_at``; the row
+itself stays — timestamps, token counts, cost, model name, the decision the
+agent took — so cost dashboards and abuse monitoring keep their long history
+without keeping anyone's words.
+
+Moderation auditing of what was actually said uses the audit log the bot posts
+to the guild's activity channel, not these rows.
 
 What is deliberately *not* swept here:
 
@@ -22,6 +38,8 @@ What is deliberately *not* swept here:
   not Discord.
 - ``research_sessions`` — the ``/scan`` query is an explicit command argument
   and the results are a user-facing artifact with its own lifecycle.
+- ``proactive_agent_histories`` — the proactive agent's working history, bounded
+  as ``docs/data-retention.md`` describes.
 - Identity fields (user ids, usernames, display names) and Discord snowflakes.
   Those come from the members intent, not the message-content intent, and the
   audit trail is worthless without knowing who an action was about.
@@ -50,9 +68,10 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import case, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.shared.message_content import redact_trigger_context
 from smarter_dev.web.models import (
     CONTENT_RETENTION_WINDOW,
     ChatAgentCompactionEvent,
@@ -265,45 +284,27 @@ async def scrub_moderation_actions(
     )
 
 
-# Keys inside handler_runs.trigger_context that carry message text. Anything
-# ending in ``_content`` is dropped as well, so a new trigger type that follows
-# the existing naming convention is covered the day it ships rather than the
-# day someone remembers to update this list.
-_HANDLER_CONTENT_KEYS = frozenset(
-    {
-        "content",
-        "message_content",
-        "old_content",
-        "starter_message_content",
-        "attachments",
-        "attachment_urls",
-        "embeds",
-        "thread_name",
-    }
-)
-
-
-def strip_trigger_content(context: dict) -> dict:
-    """Return ``context`` without the keys that carry Discord message text.
-
-    Ids, flags, counts, role lists and timestamps stay: a handler run's audit
-    row still shows which trigger fired, in which channel, for whom.
-    """
-    return {
-        key: value
-        for key, value in context.items()
-        if key not in _HANDLER_CONTENT_KEYS and not key.endswith("_content")
-    }
+_SCRIPT_AUTHORED_ERROR_OUTCOMES = ("error", "cap_exceeded")
 
 
 async def scrub_handler_runs(
     session: AsyncSession, cutoff: datetime, now: datetime
 ) -> int:
-    """Strip message text out of every due handler run's trigger context.
+    """Redact message text out of every due handler run's trigger context.
 
     Streams in batches: ``trigger_context`` is a JSON blob whose content keys
-    have to be removed key-by-key, so this is a read-modify-write rather than a
-    single UPDATE.
+    have to be rewritten key-by-key, so this is a read-modify-write rather than
+    a single UPDATE. Rows written since the write-time redaction landed already
+    hold placeholders; re-redacting them is a no-op.
+
+    ``error`` is cleared with it when a script wrote it. A script that trips
+    over the message it is reacting to puts that text into its exception
+    message, and nothing at write time can tell which errors quote a member —
+    so it is treated like every other derived text the sweep owns. The
+    host-authored explanations on ``skipped`` and ``rearmed`` rows name no
+    member and stay: they are the only record of why a chain stalled. The
+    outcome and every counter stay too, so a long-dead failure is still visible
+    as a failure.
     """
     scrubbed = 0
     while True:
@@ -324,7 +325,11 @@ async def scrub_handler_runs(
                 update(HandlerRun)
                 .where(HandlerRun.id == run_id)
                 .values(
-                    trigger_context=strip_trigger_content(context or {}),
+                    trigger_context=redact_trigger_context(context or {}),
+                    error=case(
+                        (HandlerRun.outcome.in_(_SCRIPT_AUTHORED_ERROR_OUTCOMES), None),
+                        else_=HandlerRun.error,
+                    ),
                     content_purged_at=now,
                 )
             )

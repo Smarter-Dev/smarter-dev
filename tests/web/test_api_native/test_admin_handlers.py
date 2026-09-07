@@ -24,6 +24,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from smarter_dev.shared.database import Base
+from smarter_dev.web import handler_recurrence
 from smarter_dev.web.api_native import admin_handlers as admin_handlers_module
 from smarter_dev.web.api_native.admin_handlers import AdminHandlerController
 
@@ -62,7 +63,7 @@ def submitted(monkeypatch) -> list[tuple]:
         captured.append((payload, kwargs))
 
     _StubJobHandle.cancelled = []
-    monkeypatch.setattr(admin_handlers_module, "worker_submit", _submit)
+    monkeypatch.setattr(handler_recurrence, "worker_submit", _submit)
     monkeypatch.setattr(admin_handlers_module, "get_handle", _StubJobHandle)
     return captured
 
