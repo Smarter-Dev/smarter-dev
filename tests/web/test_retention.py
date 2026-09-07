@@ -38,6 +38,7 @@ from smarter_dev.web.models import (
     ModerationAction,
     ChannelHandler,
 )
+from smarter_dev.shared import message_content
 from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 from smarter_dev.web import retention
 from smarter_dev.web.retention import SCRUBBERS, run_retention_sweep
@@ -631,12 +632,15 @@ def table_cells(row: str) -> list[str]:
 
 
 def paragraph_containing(doc: str, needle: str) -> str:
-    return next(block for block in doc.split("\n\n") if needle in block)
+    block = next((block for block in doc.split("\n\n") if needle in block), None)
+    assert block is not None, f"no paragraph contains {needle!r}"
+    return block
 
 
 def section(doc: str, heading: str) -> str:
-    after_heading = doc.split(heading, 1)[1]
-    return after_heading.split("\n## ", 1)[0]
+    parts = doc.split(heading, 1)
+    assert len(parts) == 2, f"no section headed {heading!r}"
+    return parts[1].split("\n## ", 1)[0]
 
 
 def modules_running_the_handler_lint() -> set[str]:
@@ -656,6 +660,11 @@ def retention_doc() -> str:
 @pytest.fixture(scope="module")
 def module_docstring() -> str:
     return retention.__doc__ or ""
+
+
+@pytest.fixture(scope="module")
+def primitive_docstring() -> str:
+    return message_content.__doc__ or ""
 
 
 class TestDocumentedBehaviour:
@@ -693,6 +702,14 @@ class TestDocumentedBehaviour:
         assert states_hours(chat_history_row, HISTORY_TTL_SECONDS // 3600)
         assert f"{KEEP_RECENT_CHARS:,}" in chat_history_row
 
+    def test_states_that_the_chat_verbatim_tail_is_a_floor(self, retention_doc):
+        """``KEEP_RECENT_CHARS`` is what is never folded, not a ceiling on the tail."""
+        _, _, bound = table_cells(
+            table_row(retention_doc, "| Chat agent working history")
+        )
+        assert "at most" not in bound
+        assert "TTL is the bound" in bound
+
     def test_states_how_much_proactive_history_stays_verbatim(self, retention_doc):
         history_row = table_row(retention_doc, "| Proactive agent history")
         assert f"{COMPACTION_KEEP_MESSAGES} messages" in history_row
@@ -707,9 +724,9 @@ class TestDocumentedBehaviour:
         self, retention_doc
     ):
         """The pending list is a named gap, not the only one."""
-        gaps = paragraph_containing(retention_doc, f"{PENDING_LIMIT} envelopes")
-        assert "Two places" in gaps
+        gaps = paragraph_containing(retention_doc, "Two places have no age bound")
         assert "history" in gaps
+        assert "pending" in gaps
 
     def test_states_each_proactive_bound_in_one_place(self, retention_doc):
         """The table owns every bound; prose that restates one can drift from it."""
@@ -742,6 +759,35 @@ class TestDocumentedBehaviour:
         where, _, bound = table_cells(table_row(survivors, "| `chat_agent_errors"))
         assert "provider_body" in where
         assert states_hours(bound, RETENTION_WINDOW_HOURS)
+
+    def test_lists_the_handler_error_among_the_verbatim_survivors(
+        self, retention_doc
+    ):
+        """A script's error can quote the message it tripped on; the doc must say so."""
+        survivors = section(
+            retention_doc, "## Where verbatim message text still exists"
+        )
+        where, _, bound = table_cells(table_row(survivors, "| `handler_runs.error`"))
+        assert "handler_runs.error" in where
+        assert states_hours(bound, RETENTION_WINDOW_HOURS)
+
+    def test_the_rule_counts_both_columns_no_write_time_rule_covers(
+        self, retention_doc
+    ):
+        rule = section(retention_doc, "## The rule")
+        assert "two database columns" in rule
+        assert "single database column" not in rule
+
+    def test_the_chat_turn_write_row_names_everything_the_keep_list_keeps(
+        self, retention_doc
+    ):
+        """Claiming to store less than the code stores is the wrong direction of error."""
+        _, placeholdered, _ = table_cells(
+            table_row(retention_doc, "| `chat_agent_turns` |")
+        )
+        assert "timestamp" in placeholdered
+        assert "tool kind" in placeholdered
+        assert "outcome" in placeholdered
 
     def test_the_chat_turn_write_row_describes_the_keep_list(self, retention_doc):
         """The row must describe what is kept, not a closed list of what is not."""
@@ -778,7 +824,13 @@ class TestDocumentedBehaviour:
         assert f"{SHADOW_STREAM_MAX_ENTRIES:,}-entry" in retention_doc
 
     def test_states_the_pending_list_cap(self, retention_doc):
-        assert f"{PENDING_LIMIT} envelopes" in retention_doc
+        """The survivors table owns the cap; nothing else in the doc restates it."""
+        _, _, bound = table_cells(
+            table_row(retention_doc, "| Proactive pending list")
+        )
+        assert f"{PENDING_LIMIT} envelopes" in bound
+        assert "No age bound" in bound
+        assert retention_doc.count(f"{PENDING_LIMIT} envelopes") == 1
 
     def test_states_that_a_claimed_batch_is_bounded_from_its_claim(
         self, retention_doc
@@ -838,6 +890,13 @@ class TestDocumentedBehaviour:
     def test_module_docstring_states_the_retention_window(self, module_docstring):
         assert states_hours(module_docstring, RETENTION_WINDOW_HOURS)
 
+    def test_module_docstring_names_both_columns_no_write_time_rule_covers(
+        self, module_docstring
+    ):
+        assert "``chat_agent_errors.provider_body``" in module_docstring
+        assert "``handler_runs.error``" in module_docstring
+        assert "one column" not in module_docstring
+
     def test_module_docstring_leaves_the_history_bounds_to_the_doc(
         self, module_docstring
     ):
@@ -845,19 +904,46 @@ class TestDocumentedBehaviour:
         assert not states_hours(module_docstring, HISTORY_TTL_SECONDS // 3600)
         assert f"{KEEP_RECENT_CHARS:,}" not in module_docstring
         assert "no key TTL" not in module_docstring
-        assert "size" not in module_docstring
+        assert f"{HISTORY_TOKEN_LIMIT:,}" not in module_docstring
+        assert f"{COMPACTION_KEEP_MESSAGES} messages" not in module_docstring
+
+    def test_primitive_docstring_leaves_the_verbatim_survivors_to_the_doc(
+        self, primitive_docstring
+    ):
+        """One owner per bound: the primitive names none and points at the doc."""
+        assert "docs/data-retention.md" in primitive_docstring
+        assert "exactly two places" not in primitive_docstring
+        assert not states_hours(primitive_docstring, HISTORY_TTL_SECONDS // 3600)
+        assert f"{KEEP_RECENT_CHARS:,}" not in primitive_docstring
+        assert f"{COMPACTION_KEEP_MESSAGES} messages" not in primitive_docstring
 
 
-class TestTableRow:
-    """A renamed row must name the missing prefix, not raise a bare StopIteration."""
+class TestMarkdownHelpers:
+    """A renamed row, paragraph or heading must be named, not raise a bare error."""
 
-    def test_returns_the_first_row_with_the_prefix(self):
+    def test_table_row_returns_the_first_row_with_the_prefix(self):
         doc = "| a | 1 |\n| b | 2 |\n| b | 3 |"
         assert table_row(doc, "| b") == "| b | 2 |"
 
-    def test_names_the_missing_prefix(self):
-        with pytest.raises(AssertionError, match="'| missing'"):
+    def test_table_row_names_the_missing_prefix(self):
+        with pytest.raises(AssertionError, match=re.escape("'| missing'")):
             table_row("| a | 1 |", "| missing")
+
+    def test_paragraph_containing_returns_the_first_block_with_the_needle(self):
+        doc = "first block\n\nsecond block with needle\n\nthird needle block"
+        assert paragraph_containing(doc, "needle") == "second block with needle"
+
+    def test_paragraph_containing_names_the_missing_needle(self):
+        with pytest.raises(AssertionError, match=re.escape("'missing needle'")):
+            paragraph_containing("one\n\ntwo", "missing needle")
+
+    def test_section_returns_the_text_up_to_the_next_heading(self):
+        doc = "intro\n## First\nbody\n## Second\nother"
+        assert section(doc, "## First") == "\nbody"
+
+    def test_section_names_the_missing_heading(self):
+        with pytest.raises(AssertionError, match=re.escape("'## Missing'")):
+            section("## First\nbody", "## Missing")
 
 
 class TestStatesHours:

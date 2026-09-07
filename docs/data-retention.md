@@ -28,8 +28,9 @@ Two things are deliberately excluded from the rule:
   proactive agent's history in `proactive_agent_histories`.
 
 The next section is the one list of every place verbatim text survives — the
-two histories, the Redis hand-offs that feed the proactive agent, and the single
-database column no write-time rule can cover — and what bounds each of them.
+two histories, the Redis hand-offs that feed the proactive agent, and the
+two database columns no write-time rule can cover — and what bounds each of
+them.
 
 We keep the surrounding *row*: timestamps, token counts, cost, model name, the
 decision the agent reached, the moderation action taken. That is what pays for
@@ -63,28 +64,29 @@ all of that without the row holding anybody's words.
 
 | Where | What it holds | Bound |
 | --- | --- | --- |
-| Chat agent working history (`smarter_dev/bot/services/chat_memory.py`, Redis) | The conversation the chat agent is currently in. | 2-hour key TTL, refreshed on write. Compaction (`chat_compaction.py`) summarises everything older and keeps at most a 20,000-character verbatim tail. |
+| Chat agent working history (`smarter_dev/bot/services/chat_memory.py`, Redis) | The conversation the chat agent is currently in. | 2-hour key TTL, refreshed on write — that TTL is the bound. Compaction (`chat_compaction.py`) folds everything older than roughly the last 20,000 characters into a summary, keeping more when a single turn is larger than that, and the history grows again until the next fold. |
 | Proactive agent history (`smarter_dev/bot/proactive/history_store.py`, Redis, with a recovery copy in `proactive_agent_histories`) | The running history the proactive agent reasons over. | Size, not age: no key TTL and no sweep. Compaction fires only once the history passes 100,000 estimated tokens, and then keeps at most the trailing 8 messages verbatim, summarising the rest. |
 | Proactive wake stream, one per guild (Redis) | The notification envelope that woke a guild, message text included. | Trimmed to 48 hours by stream id on every publish, and again on the passive tick for guilds that stopped publishing. |
 | Proactive shadow stream (Redis) | The same envelopes, copied where canary workers can read them. | The same 48-hour trim, plus a 10,000-entry cap. |
 | A claimed proactive batch (Redis) | Envelopes handed to a wake that has not acknowledged them. | Expires 48 hours after the claim, not after the write, so a claimed envelope can outlive its own write cutoff by up to one more window. |
+| Proactive pending list, one per guild (Redis) | Non-waking envelopes queued for the next wake, message text included. | No age bound: capped at 20 envelopes by count and drained by the next wake, so a guild that never wakes again holds them until it does. |
 | `chat_agent_errors.provider_body` (Postgres) | A provider error body, which can echo the request prompt — and so a member's text — back at us. | Stored as sent, because no write-time rule can tell which bodies quote a member; cleared by the hourly sweep at 48 hours. |
+| `handler_runs.error` (Postgres) | A script's own exception message, which can quote the message the script was reacting to. | Stored as sent, because no write-time rule can tell which errors quote a member; cleared by the hourly sweep at 48 hours on `error` and `cap_exceeded` rows. |
 
 The two agent histories are the "chat bot history" the policy carves out: they
 are the bot's short-term working memory, they are not queryable by an operator,
 and they are not in the database except as the proactive agent's crash-recovery
-copy. The two proactive streams and the claimed batch are Redis hand-offs
-between the bot and the proactive worker; the claimed batch is the one
-*bounded* key whose window runs from the claim rather than from the write.
+copy. The two proactive streams, the claimed batch and the pending list are
+Redis hand-offs between the bot and the proactive worker; the claimed batch is
+the one *bounded* key whose window runs from the claim rather than from the
+write.
 
 Two places have no age bound at all, stated plainly. The proactive agent's
 history has no clock, so a guild that never talks enough to trigger compaction
 keeps every verbatim message it has read, in Redis and in its
 `proactive_agent_histories` row, for as long as the channel stays enabled. And
-the proactive *pending* list (a non-waking envelope queued for the
-next wake) is capped at 20 envelopes by count, not by age; it is drained by the
-next wake, so a guild that never wakes again can hold up to 20 verbatim
-envelopes until it does.
+the proactive pending list is only ever drained by a wake, so a guild that
+never wakes again keeps whatever was queued for it.
 
 ## What the write path stores
 
@@ -94,7 +96,7 @@ only thing that decides what may go in them.
 
 | Table | Written as the placeholder | Written as sent |
 | --- | --- | --- |
-| `chat_agent_turns` | every field of a triggering message except its ids, reply pointers, reactions and flags; every part of the model transcript the model did not itself author, stripped down to its kind, tool name, call id and timestamp | `agent_output`, the model's own reply text and reasoning parts, tool names and call arguments, tokens, cost, model, timing. Reasoning can restate what a member said, so the transcript is derived text the sweep clears at 48 hours (below) rather than something write-time redaction can keep out |
+| `chat_agent_turns` | every field of a triggering message except its ids, reply pointers, reactions, flags and timestamp; every part of the model transcript the model did not itself author, stripped down to its kind, tool name, call id, tool kind, outcome and timestamp | `agent_output`, the model's own reply text and reasoning parts, tool names and call arguments, tokens, cost, model, timing. Reasoning can restate what a member said, so the transcript is derived text the sweep clears at 48 hours (below) rather than something write-time redaction can keep out |
 | `chat_agent_compaction_events` | the compacted original content | the compaction `summary` and all char counts |
 | `help_conversations` | every scraped context message, whatever the interaction type; `user_question` for every interaction type except a slash command (today: mention and streak reply) | `user_question` when the member typed it as a slash-command argument, plus `bot_response`, tokens, latency |
 | `forum_agent_responses` | the post title, the post body, and the attachment list (emptied) | tags, confidence, `decision_reason`, `response_content`, responded flag |
