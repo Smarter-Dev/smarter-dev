@@ -620,13 +620,8 @@ async def test_list_leaves_orphaned_installs_empty_for_a_catalog_slug(db_session
     assert response.context["orphaned_installs"] == []
 
 
-@pytest.mark.parametrize(
-    ("enabled", "expected_pill"), [(True, "Enabled"), (False, "Disabled")]
-)
-def test_list_template_offers_only_uninstall_for_an_orphaned_install(
-    enabled, expected_pill
-):
-    html = render_admin_template(
+def _render_orphan_list(enabled: bool) -> str:
+    return render_admin_template(
         "admin/bot/extensions/list.html",
         guild=SimpleNamespace(id=_GUILD, name="Alpha Guild"),
         guild_id=_GUILD,
@@ -641,10 +636,27 @@ def test_list_template_offers_only_uninstall_for_an_orphaned_install(
         flash_messages=[],
     )
 
+
+def test_list_template_lets_an_enabled_orphaned_install_be_disabled_or_uninstalled():
+    """Stopping a removed extension's handlers must not require destroying them."""
+    html = _render_orphan_list(enabled=True)
+
     base = f"/admin/bot/guilds/{_GUILD}/extensions/{_RETIRED_SLUG}"
     assert _RETIRED_SLUG in html
+    assert ">Enabled</span>" in html
+    assert f'action="{base}/disable"' in html
     assert f'action="{base}/uninstall"' in html
-    assert f">{expected_pill}</span>" in html
+    for absent in ("configure", "update", "enable", "install"):
+        assert f"{base}/{absent}" not in html
+
+
+def test_list_template_offers_a_disabled_orphaned_install_only_uninstall():
+    """Nothing re-enables an extension the catalog can no longer validate."""
+    html = _render_orphan_list(enabled=False)
+
+    base = f"/admin/bot/guilds/{_GUILD}/extensions/{_RETIRED_SLUG}"
+    assert ">Disabled</span>" in html
+    assert f'action="{base}/uninstall"' in html
     for absent in ("configure", "update", "enable", "disable", "install"):
         assert f"{base}/{absent}" not in html
 

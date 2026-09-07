@@ -1,5 +1,5 @@
 {% extends "admin/base.html" %}
-{% from "admin/bot/extensions/_install_controls.html" import enablement_pill, uninstall_form %}
+{% from "admin/bot/extensions/_install_controls.html" import enablement_pill, disable_form, uninstall_form %}
 
 {% block title %}Extensions - {{ guild.name }} - {{ site_name() }}{% endblock %}
 
@@ -65,9 +65,7 @@
                                 </form>
                                 {% endif %}
                                 {% if install.enabled %}
-                                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/disable" style="display:inline;">
-                                    <button type="submit" class="sk-btn-outline sk-btn-small">Disable</button>
-                                </form>
+                                {{ disable_form(guild.id, manifest.slug) }}
                                 {% else %}
                                 <form method="post" action="/admin/bot/guilds/{{ guild.id }}/extensions/{{ manifest.slug }}/enable" style="display:inline;">
                                     <button type="submit" class="sk-btn-outline sk-btn-small">Enable</button>
@@ -105,7 +103,10 @@
                                     <span class="sk-pill sk-pill-draft">v{{ install.installed_version }}</span>
                                     {{ enablement_pill(install) }}
                                 </div>
-                                {{ uninstall_form(guild.id, install.extension_slug) }}
+                                <div style="white-space:nowrap;">
+                                    {% if install.enabled %}{{ disable_form(guild.id, install.extension_slug) }}{% endif %}
+                                    {{ uninstall_form(guild.id, install.extension_slug) }}
+                                </div>
                             </div>
                         </div>
                     </div>
