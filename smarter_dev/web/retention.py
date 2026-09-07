@@ -7,8 +7,9 @@ would otherwise carry it is written with the placeholder
 is built — see ``docs/data-retention.md`` for the per-table list. Verbatim text
 survives only in the agents' own working history: the chat agent's Redis
 history, bounded by its key TTL and by a verbatim tail after compaction, and
-the proactive agent's history, bounded by a trailing-message tail after
-compaction, with a recovery copy in ``proactive_agent_histories``. Both bounds
+the proactive agent's history, bounded by size rather than by a clock — no key
+TTL, a trailing-message tail once compaction fires, and nothing expiring until
+it does — with a recovery copy in ``proactive_agent_histories``. Those bounds
 are numbers ``docs/data-retention.md`` owns; this docstring does not repeat
 them. The proactive Redis streams that carry notification envelopes are trimmed
 to the same
@@ -39,7 +40,7 @@ What is deliberately *not* swept here:
 - ``research_sessions`` — the ``/scan`` query is an explicit command argument
   and the results are a user-facing artifact with its own lifecycle.
 - ``proactive_agent_histories`` — the proactive agent's working history, bounded
-  by its own compaction rather than by a clock.
+  by its own size-triggered compaction rather than by a clock.
 - Identity fields (user ids, usernames, display names) and Discord snowflakes.
   Those come from the members intent, not the message-content intent, and the
   audit trail is worthless without knowing who an action was about.
