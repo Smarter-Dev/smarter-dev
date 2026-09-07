@@ -176,6 +176,45 @@ async def extract_reply_context(message: hikari.Message, bot: hikari.GatewayBot)
     return None, None, content
 
 
+def _describe_attachments(message: hikari.Message) -> str:
+    """Name each attachment by filename, falling back to the last url segment."""
+    names = []
+    for attachment in message.attachments:
+        if getattr(attachment, "filename", None):
+            names.append(f"📎 {attachment.filename}")
+        elif getattr(attachment, "url", None):
+            names.append(f"📎 {attachment.url.rsplit('/', 1)[-1].split('?')[0]}")
+    return " ".join(names)
+
+
+def _build_discord_message(
+    message: hikari.Message,
+    content: str,
+    replied_author: str | None,
+    replied_content: str | None,
+    channel_info: dict,
+    author_roles: list[str],
+) -> DiscordMessage:
+    is_original_poster = (
+        channel_info.get("is_forum_thread", False)
+        and channel_info.get("original_poster_id") == message.author.id
+    )
+    return DiscordMessage(
+        author=message.author.display_name or message.author.username,
+        author_id=str(message.author.id),
+        message_id=str(message.id),
+        timestamp=message.created_at.replace(tzinfo=UTC),
+        content=content,
+        replied_to_author=replied_author,
+        replied_to_content=replied_content,
+        channel_name=channel_info.get("channel_name"),
+        channel_description=channel_info.get("channel_description"),
+        channel_type=channel_info.get("channel_type"),
+        author_roles=author_roles,
+        is_original_poster=is_original_poster,
+    )
+
+
 async def gather_message_context(
     bot: hikari.GatewayBot,
     channel_id: int,
@@ -195,22 +234,17 @@ async def gather_message_context(
 
     Returns:
         List[DiscordMessage]: Recent messages for context, in chronological order
+
+    Raises:
+        RuntimeError: Discord refused or failed the fetch; the channel is named
+            and the hikari error is chained. Any other exception propagates as is.
     """
     try:
-        messages = []
-
-        # Fetch channel information for context
         channel_info = await fetch_channel_info(bot, channel_id)
-
-        # Get guild roles from cache if we have guild context
-        guild_roles = {}
-        if guild_id:
-            guild_roles = await bot_cache.get_guild_roles(bot, guild_id)
-
-        # When filtering short messages, we need to fetch more to ensure we get enough
-        # Otherwise fetch exactly what we need since we include all messages
+        guild_roles = await bot_cache.get_guild_roles(bot, guild_id) if guild_id else {}
         max_fetch = limit * 2 if skip_short_messages else limit
 
+        newest_first: list[DiscordMessage] = []
         skipped_count = 0
         processed_count = 0
 
@@ -223,80 +257,35 @@ async def gather_message_context(
                 logger.debug(f"Skipped short message {message.id} ({content_length} chars)")
                 continue
 
-            # Extract reply context separately
             replied_author, replied_content, content = await extract_reply_context(message, bot)
-
-            # Add attachment information for context
-            if message.attachments:
-                attachment_info = []
-                for attachment in message.attachments:
-                    # Include filename and media type info
-                    if hasattr(attachment, "filename") and attachment.filename:
-                        attachment_info.append(f"📎 {attachment.filename}")
-                    elif hasattr(attachment, "url") and attachment.url:
-                        # Extract filename from URL if no filename attribute
-                        url_parts = attachment.url.split("/")
-                        if url_parts:
-                            attachment_info.append(f"📎 {url_parts[-1].split('?')[0]}")
-
-                if attachment_info:
-                    content = f"{content} {' '.join(attachment_info)}".strip()
-
-            # Resolve Discord mentions to readable usernames (after reply formatting)
+            attachment_names = _describe_attachments(message)
+            if attachment_names:
+                content = f"{content} {attachment_names}".strip()
             content = await resolve_mentions(content, bot, guild_id)
 
-            # Get user roles if we have guild context
             author_roles = []
             if guild_id and not message.author.is_bot:
                 author_roles = await fetch_user_roles(bot, guild_id, message.author.id, guild_roles)
 
-            # Check if this user is the original poster in a forum thread
-            is_original_poster = (
-                channel_info.get("is_forum_thread", False) and
-                channel_info.get("original_poster_id") == message.author.id
+            newest_first.append(
+                _build_discord_message(
+                    message, content, replied_author, replied_content, channel_info, author_roles
+                )
             )
-
-            # Convert to our message format
-            discord_msg = DiscordMessage(
-                author=message.author.display_name or message.author.username,
-                author_id=str(message.author.id),  # Include author ID for bot detection
-                message_id=str(message.id),
-                timestamp=message.created_at.replace(tzinfo=UTC),
-                content=content,
-                replied_to_author=replied_author,
-                replied_to_content=replied_content,
-                # Channel context
-                channel_name=channel_info.get("channel_name"),
-                channel_description=channel_info.get("channel_description"),
-                channel_type=channel_info.get("channel_type"),
-                # User roles (excluding bots)
-                author_roles=author_roles,
-                # Forum context
-                is_original_poster=is_original_poster
-            )
-            messages.append(discord_msg)
-
-            # Stop when we have enough messages
-            if len(messages) >= limit:
+            if len(newest_first) >= limit:
                 break
+    except hikari.HikariError as discord_error:
+        raise RuntimeError(
+            f"Failed to gather context for channel {channel_id}"
+        ) from discord_error
 
-        # Messages are collected newest-first, but we want to return them
-        # in chronological order (oldest-first) for better summarization context
-        reversed_messages = list(reversed(messages))
+    chronological = list(reversed(newest_first))
 
-        # Log for debugging - show filtering results and selected messages
-        logger.info(f"Message gathering results: processed {processed_count} messages, skipped {skipped_count}, selected {len(reversed_messages)}")
+    logger.info(f"Message gathering results: processed {processed_count} messages, skipped {skipped_count}, selected {len(chronological)}")
+    for position, msg in enumerate(chronological, start=1):
+        logger.debug(f"  {position}. message {msg.message_id} from author {msg.author_id} ({len(msg.content)} chars) ({msg.timestamp.strftime('%H:%M:%S')})")
 
-        if reversed_messages:
-            logger.debug(f"Selected {len(reversed_messages)} messages for context:")
-            for i, msg in enumerate(reversed_messages):
-                logger.debug(f"  {i+1}. message {msg.message_id} from author {msg.author_id} ({len(msg.content)} chars) ({msg.timestamp.strftime('%H:%M:%S')})")
-
-        return reversed_messages
-
-    except Exception as e:
-        logger.warning(f"Failed to gather message context: {e}")
-        return []
+    return chronological
 
 
 class ConversationContextBuilder:
@@ -413,7 +402,10 @@ class ConversationContextBuilder:
         fetch_limit: int,
         after: int | None = None
     ) -> AsyncIterator[hikari.Message]:
-        """Yield newest-first channel messages worth putting in context.
+        """Yield channel messages worth putting in context, in paginator order.
+
+        hikari pages newest-first by default and oldest-first when ``after`` is
+        given, and this generator keeps whichever order it is handed.
 
         Every fetched message is cached for reply-thread completion, including
         the bot's own '-#' tool usage notes, which are cached and then skipped.
@@ -468,14 +460,12 @@ class ConversationContextBuilder:
         Returns:
             List of messages in chronological order
         """
-        messages = [
+        return [
             message
             async for message in self._iter_context_messages(
                 channel_id, fetch_limit=limit, after=since_message_id
             )
         ]
-
-        return list(reversed(messages))
 
     async def _complete_reply_threads(self, messages: list[hikari.Message]) -> list[hikari.Message]:
         """Recursively fetch any replied-to messages not in the current list."""

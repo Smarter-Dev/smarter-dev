@@ -16,6 +16,7 @@ from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
+import hikari
 import pytest
 
 from smarter_dev.bot.client import extract_forum_post_data
@@ -72,6 +73,26 @@ def _bot_returning(messages: list[SimpleNamespace], bot_user_id: int = 9999) -> 
     bot.rest = _rest_returning(messages)
     bot.get_me = MagicMock(return_value=SimpleNamespace(id=bot_user_id))
     return bot
+
+
+def _attachment_only_message() -> SimpleNamespace:
+    message = _fake_message(77777, None)
+    message.attachments = [SimpleNamespace(filename="photo.png")]
+    return message
+
+
+def _tagging_agent() -> dict:
+    return {
+        "id": "agent-1",
+        "name": "Agent",
+        "guild_id": "777",
+        "monitored_forums": ["123"],
+        "system_prompt": "prompt",
+        "response_threshold": 0.7,
+        "max_responses_per_hour": 5,
+        "enable_responses": True,
+        "enable_user_tagging": True,
+    }
 
 
 @pytest.fixture
@@ -263,10 +284,15 @@ class TestForumAgentServiceLogs:
         assert MEMBER_TEXT not in logged
         assert f"{len(MEMBER_TEXT)} chars" in logged
 
-    async def test_record_response_survives_a_post_with_no_text(self, caplog, service):
+    async def test_record_response_logs_zero_chars_for_an_attachment_only_post(
+        self, caplog, service
+    ):
         agent = {"id": "agent-1", "name": "Agent", "guild_id": "777"}
-        post = self._post()
-        post.content = None
+        post = await extract_forum_post_data(
+            MagicMock(),
+            SimpleNamespace(name="A post title", id=456, parent_id=123),
+            _attachment_only_message(),
+        )
 
         with caplog.at_level(
             logging.DEBUG, logger="smarter_dev.bot.services.forum_agent_service"
@@ -276,6 +302,43 @@ class TestForumAgentServiceLogs:
             )
 
         assert "Post content: 0 chars" in _logged_text(caplog)
+
+    async def test_attachment_only_post_reaches_the_combined_evaluator(
+        self, caplog, service
+    ):
+        agent = _tagging_agent()
+        post = await extract_forum_post_data(
+            MagicMock(),
+            SimpleNamespace(name="A post title", id=456, parent_id=123),
+            _attachment_only_message(),
+        )
+        evaluation = SimpleNamespace(
+            decision="reasoned", confidence=0.1, response="", matching_topics=[]
+        )
+
+        async def evaluate(**kwargs):
+            return evaluation
+
+        with caplog.at_level(
+            logging.DEBUG, logger="smarter_dev.bot.services.forum_agent_service"
+        ), patch.object(
+            service, "load_guild_agents", new=AsyncMock(return_value=[agent])
+        ), patch.object(
+            service, "check_rate_limit", new=AsyncMock(return_value=True)
+        ), patch.object(
+            service, "record_response", new=AsyncMock(return_value="recorded-id")
+        ), patch.object(
+            service, "get_notification_topics", new=AsyncMock(return_value=["topic"])
+        ), patch("smarter_dev.bot.agents.forum_agent.dspy") as fake_dspy:
+            fake_dspy.context.return_value.__enter__ = MagicMock(return_value=None)
+            fake_dspy.context.return_value.__exit__ = MagicMock(return_value=None)
+            fake_dspy.asyncify.return_value = evaluate
+            responses, _ = await service.process_forum_post_with_tagging(
+                "777", post, user_subscriptions=[]
+            )
+
+        assert "Error processing post with agent" not in _logged_text(caplog)
+        assert [response["decision_reason"] for response in responses] == ["reasoned"]
 
     async def test_classification_debug_omits_post_content(self, caplog, service):
         agent = {
@@ -357,6 +420,65 @@ class TestForumAgentServiceLogs:
         }
         assert classification_levels == {logging.DEBUG}
 
+    async def test_no_debug_notifications_line_is_logged_as_an_error(
+        self, caplog, service
+    ):
+        evaluator = MagicMock()
+        evaluator.evaluate_post_combined = AsyncMock(
+            return_value=("reasoned", 0.9, "an answer", ["topic"], 10)
+        )
+        subscriptions = [
+            {
+                "user_id": "1",
+                "username": "subscribed",
+                "subscribed_topics": ["topic"],
+                "notification_hours": -1,
+                "updated_at": "2026-01-01T00:00:00Z",
+            },
+            {
+                "user_id": "2",
+                "username": "expired",
+                "subscribed_topics": ["topic"],
+                "notification_hours": 1,
+                "updated_at": "2026-01-01T00:00:00Z",
+            },
+            {
+                "user_id": "3",
+                "username": "other-topic",
+                "subscribed_topics": ["elsewhere"],
+                "notification_hours": -1,
+                "updated_at": "2026-01-01T00:00:00Z",
+            },
+        ]
+
+        with caplog.at_level(
+            logging.DEBUG, logger="smarter_dev.bot.services.forum_agent_service"
+        ), patch.object(
+            service, "load_guild_agents", new=AsyncMock(return_value=[_tagging_agent()])
+        ), patch.object(
+            service, "check_rate_limit", new=AsyncMock(return_value=True)
+        ), patch.object(
+            service, "record_response", new=AsyncMock(return_value="recorded-id")
+        ), patch.object(
+            service, "get_notification_topics", new=AsyncMock(return_value=["topic"])
+        ), patch(
+            "smarter_dev.bot.agents.forum_agent.ForumMonitorAgent",
+            return_value=evaluator,
+        ):
+            await service.process_forum_post_with_tagging(
+                "777", self._post(), user_subscriptions=subscriptions
+            )
+
+        debug_notification_records = [
+            record
+            for record in caplog.records
+            if record.getMessage().startswith("DEBUG NOTIFICATIONS:")
+        ]
+        assert len(debug_notification_records) >= 8
+        assert {record.levelno for record in debug_notification_records} == {
+            logging.DEBUG
+        }
+
 
 class TestForumExtractLogs:
     """Forum post extraction logs a length, never the post body."""
@@ -386,7 +508,7 @@ class TestForumExtractLogs:
                 MagicMock(), self._thread(), self._initial_message(None)
             )
 
-        assert extracted.content is None
+        assert extracted.content == ""
         assert "0 chars" in _logged_text(caplog)
 
     async def test_thread_create_survives_a_post_with_no_text(self, caplog):
@@ -444,6 +566,55 @@ class TestGatherMessageContextHandlesTextlessMessages:
 
         assert [message.message_id for message in gathered] == ["22222"]
         assert "88888 (0 chars)" in _logged_text(caplog)
+
+
+class TestGatherMessageContextFailsFast:
+    """Only Discord errors are wrapped; programming errors propagate untouched."""
+
+    async def test_discord_error_is_reraised_with_the_channel_named(
+        self, message_context_cache
+    ):
+        bot = _bot_returning([])
+        bot.rest.fetch_messages.return_value.limit = MagicMock(
+            side_effect=hikari.HikariError("missing access")
+        )
+
+        with pytest.raises(RuntimeError, match="channel 1234") as raised:
+            await gather_message_context(bot, channel_id=1234, limit=5)
+
+        assert isinstance(raised.value.__cause__, hikari.HikariError)
+
+    async def test_programming_error_mid_loop_propagates(
+        self, caplog, message_context_cache
+    ):
+        bot = _bot_returning([_fake_message(22222, MEMBER_TEXT)])
+
+        with caplog.at_level(logging.DEBUG, logger="smarter_dev.bot.utils.messages"), patch(
+            "smarter_dev.bot.utils.messages.resolve_mentions",
+            new=AsyncMock(side_effect=TypeError("broken")),
+        ), pytest.raises(TypeError, match="broken"):
+            await gather_message_context(bot, channel_id=1, limit=5)
+
+        assert "Failed to gather message context" not in _logged_text(caplog)
+
+
+class TestGatherMessageContextAttachments:
+    """Attachments are described by filename, or by the url's last segment."""
+
+    async def test_attachment_names_are_appended_to_the_content(
+        self, message_context_cache
+    ):
+        message = _fake_message(22222, MEMBER_TEXT)
+        message.attachments = [
+            SimpleNamespace(filename="diagram.png", url="https://cdn/x/diagram.png"),
+            SimpleNamespace(filename="", url="https://cdn/x/notes.txt?ex=1"),
+        ]
+
+        gathered = await gather_message_context(
+            _bot_returning([message]), channel_id=1, limit=5
+        )
+
+        assert gathered[0].content == f"{MEMBER_TEXT} 📎 diagram.png 📎 notes.txt"
 
 
 class TestBotToolUsagePredicate:
@@ -510,7 +681,8 @@ class TestConversationContextBuilderFetching:
         )
         newer = _fake_message(30003, MEMBER_TEXT)
         older = _fake_message(20002, MEMBER_TEXT)
-        bot = _bot_returning([newer, tool_message, older])
+        oldest_first_as_hikari_yields_for_after = [older, tool_message, newer]
+        bot = _bot_returning(oldest_first_as_hikari_yields_for_after)
         builder = ConversationContextBuilder(bot)
 
         kept = await builder._fetch_messages_since(
