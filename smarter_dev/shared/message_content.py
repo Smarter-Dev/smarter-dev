@@ -6,10 +6,11 @@ what people say. So every durable row that would carry message text carries
 construction rather than scrubbed later. Empty text stays empty and absent
 text stays absent: a placeholder is never invented where nobody said anything.
 
-Verbatim text survives in exactly two places, both of which the policy allows
-and neither of which this module touches: the chat agent's Redis working
-history (2h TTL, verbatim tail after compaction) and the proactive agent's
-history (compaction tail). Moderators auditing what was actually said use the
+Verbatim text does survive outside this module — in the agents' own working
+history and in the Redis hand-offs that feed the proactive agent, none of
+which this module touches. ``docs/data-retention.md`` is the one list of those
+places and of what bounds each; this docstring states no number so it cannot
+drift from that list. Moderators auditing what was actually said use the
 activity-channel audit log.
 
 Both tiers import this: the web tier redacts the rows it stores, the bot tier
@@ -155,9 +156,10 @@ def redact_text(text: str | None) -> str | None:
 def redact_chat_agent_messages(messages: list[dict] | None) -> list[dict]:
     """Redact serialised chat-agent messages, the shape of a turn's triggers.
 
-    Keeps the ids, reply pointers, reactions and flags the conversation detail
-    view renders around the message body and nothing else, so a field added
-    upstream carries a placeholder rather than what somebody said.
+    Keeps the ids, reply pointers, reactions, flags and timestamp the
+    conversation detail view renders around the message body and nothing else,
+    so a field added upstream carries a placeholder rather than what somebody
+    said.
     """
     return [
         _redact_mapping(message, _is_redacted_chat_key)

@@ -7,10 +7,10 @@ would otherwise carry it is written with the placeholder
 is built — see ``docs/data-retention.md`` for the per-table list. Verbatim text
 survives in the agents' own working history — the chat agent's Redis history
 and the proactive agent's history, with a recovery copy in
-``proactive_agent_histories`` — and in one column no write-time rule can cover,
-``chat_agent_errors.provider_body``, which this sweep clears. What bounds each
-of those, and what does not, is ``docs/data-retention.md``'s to state; this
-docstring does not repeat it. The proactive Redis streams that carry
+``proactive_agent_histories`` — and in two columns no write-time rule can
+cover, ``chat_agent_errors.provider_body`` and ``handler_runs.error``, which
+this sweep clears. What bounds each of those, and what does not, is
+``docs/data-retention.md``'s to state; this docstring does not repeat it. The proactive Redis streams that carry
 notification envelopes are trimmed to the same
 :data:`~smarter_dev.shared.message_content.CONTENT_RETENTION_WINDOW` (48 hours)
 by the bot, not by this sweep.
