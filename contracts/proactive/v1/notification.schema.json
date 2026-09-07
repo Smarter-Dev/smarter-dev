@@ -38,7 +38,7 @@
         "channel_enabled"
       ]
     },
-    "created_at": {"type": "string", "format": "date-time"},
+    "created_at": {"type": "string", "format": "date-time", "description": "Notification event time in ISO 8601 UTC (Z). For mentions and replies this is the message sent time. The newest notification provides an approximate current-time reference; delivery may be delayed."},
     "body": {"type": "string"},
     "message_ids": {
       "type": "array",
