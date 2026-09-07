@@ -821,9 +821,7 @@ async def extract_forum_post_data(
             ]
 
         # Debug extracted data
-        logger.debug(
-            f"FORUM EXTRACT DEBUG: Content: '{content[:100]}...' ({len(content)} chars)"
-        )
+        logger.debug(f"FORUM EXTRACT DEBUG: Content: {len(content or '')} chars")
         logger.debug(f"FORUM EXTRACT DEBUG: Author: '{author_name}'")
         logger.debug(f"FORUM EXTRACT DEBUG: Attachments: {len(attachments)}")
     else:
@@ -1046,7 +1044,7 @@ async def handle_forum_thread_create(bot: lightbulb.BotApp, event) -> None:
                 # Get the last message (oldest, which should be the initial forum post)
                 initial_message = messages[-1]
                 logger.debug(
-                    f"FORUM DEBUG: Initial message found - Author: {getattr(initial_message.author, 'display_name', 'Unknown')}, Content length: {len(getattr(initial_message, 'content', ''))}"
+                    f"FORUM DEBUG: Initial message found - Author: {getattr(initial_message.author, 'display_name', 'Unknown')}, Content length: {len(getattr(initial_message, 'content', '') or '')}"
                 )
             else:
                 logger.warning(

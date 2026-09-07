@@ -195,7 +195,7 @@ class ForumAgentService(BaseService):
             # Debug logging for API data
             logger.debug(f"FORUM API DEBUG - Recording response for agent {agent.get('name', 'Unknown')}")
             logger.debug(f"FORUM API DEBUG - Post title: '{response_data['post_title']}'")
-            logger.debug(f"FORUM API DEBUG - Post content: {len(response_data['post_content'])} chars")
+            logger.debug(f"FORUM API DEBUG - Post content: {len(response_data['post_content'] or '')} chars")
             logger.debug(f"FORUM API DEBUG - Author: '{response_data['author_display_name']}'")
             logger.debug(f"FORUM API DEBUG - Tokens used: {response_data['tokens_used']}")
             logger.debug(f"FORUM API DEBUG - Decision: '{decision_reason[:100]}...'")
