@@ -195,7 +195,7 @@ class ForumAgentService(BaseService):
             # Debug logging for API data
             logger.debug(f"FORUM API DEBUG - Recording response for agent {agent.get('name', 'Unknown')}")
             logger.debug(f"FORUM API DEBUG - Post title: '{response_data['post_title']}'")
-            logger.debug(f"FORUM API DEBUG - Post content: '{response_data['post_content'][:100]}...' ({len(response_data['post_content'])} chars)")
+            logger.debug(f"FORUM API DEBUG - Post content: {len(response_data['post_content'])} chars")
             logger.debug(f"FORUM API DEBUG - Author: '{response_data['author_display_name']}'")
             logger.debug(f"FORUM API DEBUG - Tokens used: {response_data['tokens_used']}")
             logger.debug(f"FORUM API DEBUG - Decision: '{decision_reason[:100]}...'")
@@ -495,8 +495,8 @@ class ForumAgentService(BaseService):
                         should_respond = bool(confidence >= threshold and response_content.strip())
 
                     # Collect matching topics for user notifications
-                    logger.error(f"DEBUG NOTIFICATIONS: Agent {agent_data.get('name', 'unknown')} operation_mode={operation_mode}, matching_topics={matching_topics}")
-                    logger.error(f"DEBUG NOTIFICATIONS: Post content for classification: title='{getattr(post, 'title', '')}', content='{getattr(post, 'content', '')}', author='{getattr(post, 'author_display_name', 'Unknown')}'")
+                    logger.debug(f"DEBUG NOTIFICATIONS: Agent {agent_data.get('name', 'unknown')} operation_mode={operation_mode}, matching_topics={matching_topics}")
+                    logger.debug(f"DEBUG NOTIFICATIONS: Post for classification: title='{getattr(post, 'title', '')}', content={len(getattr(post, 'content', '') or '')} chars, author='{getattr(post, 'author_display_name', 'Unknown')}'")
                     if matching_topics:
                         all_matching_topics.update(matching_topics)
 
