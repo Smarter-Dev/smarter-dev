@@ -91,7 +91,9 @@
                 <p class="sk-text-muted">
                     These extensions were removed from the catalog, so there is no
                     longer anything to configure or update them against. Their
-                    handlers keep running until you uninstall them.
+                    handlers keep running until you disable or uninstall them.
+                    Disabling stops them without deleting their handler memory;
+                    uninstalling removes the rows for good.
                 </p>
                 <div style="display:flex; flex-direction:column; gap:1rem;">
                     {% for install in orphaned_installs %}
