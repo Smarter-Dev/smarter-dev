@@ -12,7 +12,10 @@ import pytest
 from sqlalchemy import select
 
 from smarter_dev.bot.agents.chat_compaction import KEEP_RECENT_CHARS
-from smarter_dev.bot.proactive.agent import COMPACTION_KEEP_MESSAGES
+from smarter_dev.bot.proactive.agent import (
+    COMPACTION_KEEP_MESSAGES,
+    HISTORY_TOKEN_LIMIT,
+)
 from smarter_dev.bot.proactive.redis_queue import (
     PENDING_LIMIT,
     SHADOW_STREAM_MAX_ENTRIES,
@@ -673,6 +676,48 @@ class TestDocumentedBehaviour:
     def test_states_how_much_proactive_history_stays_verbatim(self, retention_doc):
         assert f"{COMPACTION_KEEP_MESSAGES} messages" in retention_doc
 
+    def test_states_when_proactive_compaction_fires(self, retention_doc):
+        """The trailing tail only bounds a history that compacted at all."""
+        history_row = self._table_row(retention_doc, "| Proactive agent history")
+        assert f"{HISTORY_TOKEN_LIMIT:,}" in history_row
+        assert "no key TTL" in history_row
+
+    def test_counts_the_proactive_history_among_the_places_with_no_age_bound(
+        self, retention_doc
+    ):
+        """The pending list is a named gap, not the only one."""
+        gaps = self._paragraph_containing(retention_doc, f"{PENDING_LIMIT} envelopes")
+        assert "Two places" in gaps
+        assert "history" in gaps
+
+    def test_the_rule_names_the_durable_copy_of_the_proactive_history(
+        self, retention_doc
+    ):
+        """The carve-out cannot claim working history is Redis-only."""
+        rule = self._section(retention_doc, "## The rule")
+        assert "`proactive_agent_histories`" in rule
+
+    def test_the_chat_turn_write_row_describes_the_keep_list(self, retention_doc):
+        """The row must describe what is kept, not a closed list of what is not."""
+        _, placeholdered, _ = self._table_cells(
+            self._table_row(retention_doc, "| `chat_agent_turns` |")
+        )
+        assert "except" in placeholdered
+        assert "user-prompt" not in placeholdered
+        assert "tool-return" not in placeholdered
+
+    def test_the_chat_turn_write_row_states_that_model_reasoning_is_kept(
+        self, retention_doc
+    ):
+        """Reasoning can quote a member; the doc must say so and say for how long."""
+        *_, as_sent = self._table_cells(
+            self._table_row(retention_doc, "| `chat_agent_turns` |")
+        )
+        assert "reasoning" in as_sent
+        assert states_hours(
+            as_sent, int(CONTENT_RETENTION_WINDOW.total_seconds() // 3600)
+        )
+
     def test_states_that_the_proactive_streams_are_trimmed_by_age(self, retention_doc):
         assert "wake stream" in retention_doc
         assert "shadow stream" in retention_doc
@@ -698,12 +743,30 @@ class TestDocumentedBehaviour:
         assert "`payload`" in handler_run_row
 
     def test_names_every_module_that_runs_the_handler_lint(self, retention_doc):
-        for module in modules_running_the_handler_lint():
+        lint_modules = modules_running_the_handler_lint()
+        assert lint_modules, (
+            "the doc claims the lint runs where scripts are produced; "
+            "no module calls lint_script"
+        )
+        for module in lint_modules:
             assert module in retention_doc
 
     @staticmethod
     def _table_row(doc: str, prefix: str) -> str:
         return next(line for line in doc.splitlines() if line.startswith(prefix))
+
+    @staticmethod
+    def _table_cells(row: str) -> list[str]:
+        return [cell.strip() for cell in row.strip().strip("|").split("|")]
+
+    @staticmethod
+    def _paragraph_containing(doc: str, needle: str) -> str:
+        return next(block for block in doc.split("\n\n") if needle in block)
+
+    @staticmethod
+    def _section(doc: str, heading: str) -> str:
+        after_heading = doc.split(heading, 1)[1]
+        return after_heading.split("\n## ", 1)[0]
 
     def test_states_that_moderation_auditing_uses_the_activity_audit_log(
         self, retention_doc
