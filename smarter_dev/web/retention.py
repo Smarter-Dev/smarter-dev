@@ -5,14 +5,13 @@ would otherwise carry it is written with the placeholder
 :data:`~smarter_dev.shared.message_content.MESSAGE_CONTENT_PLACEHOLDER`
 (``[message content]``) at write time, in the web tier, at the moment the row
 is built — see ``docs/data-retention.md`` for the per-table list. Verbatim text
-survives only in the agents' own working history: the chat agent's Redis
-history, bounded by its key TTL and by a verbatim tail after compaction, and
-the proactive agent's history, bounded by size rather than by a clock — no key
-TTL, a trailing-message tail once compaction fires, and nothing expiring until
-it does — with a recovery copy in ``proactive_agent_histories``. Those bounds
-are numbers ``docs/data-retention.md`` owns; this docstring does not repeat
-them. The proactive Redis streams that carry notification envelopes are trimmed
-to the same
+survives in the agents' own working history — the chat agent's Redis history
+and the proactive agent's history, with a recovery copy in
+``proactive_agent_histories`` — and in one column no write-time rule can cover,
+``chat_agent_errors.provider_body``, which this sweep clears. What bounds each
+of those, and what does not, is ``docs/data-retention.md``'s to state; this
+docstring does not repeat it. The proactive Redis streams that carry
+notification envelopes are trimmed to the same
 :data:`~smarter_dev.shared.message_content.CONTENT_RETENTION_WINDOW` (48 hours)
 by the bot, not by this sweep.
 
@@ -40,7 +39,7 @@ What is deliberately *not* swept here:
 - ``research_sessions`` — the ``/scan`` query is an explicit command argument
   and the results are a user-facing artifact with its own lifecycle.
 - ``proactive_agent_histories`` — the proactive agent's working history, bounded
-  by its own size-triggered compaction rather than by a clock.
+  as ``docs/data-retention.md`` describes.
 - Identity fields (user ids, usernames, display names) and Discord snowflakes.
   Those come from the members intent, not the message-content intent, and the
   audit trail is worthless without knowing who an action was about.
