@@ -42,8 +42,8 @@ $0.75/$3.75 per M as 3.6 and 3.7 Flash, and the tier is what the Chat UI shows
 before a user picks.
 
 Revision ID: f3b8d1c6a4e9
-Revises: e2a6b9c4d7f1
-Create Date: 2026-09-03 12:00:00.000000
+Revises: a4c7e2f9b6d3
+Create Date: 2026-09-08 12:00:00.000000
 
 """
 from typing import Sequence, Union
@@ -53,7 +53,7 @@ import sqlalchemy as sa
 
 
 revision: str = "f3b8d1c6a4e9"
-down_revision: Union[str, None] = "e2a6b9c4d7f1"
+down_revision: Union[str, None] = "a4c7e2f9b6d3"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

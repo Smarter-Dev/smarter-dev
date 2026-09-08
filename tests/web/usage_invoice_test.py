@@ -199,6 +199,7 @@ async def test_multi_source_aggregation_with_mixed_reasoning(db_session):
         summarizer_tokens_input=200,
         summarizer_tokens_output=50,
         summarizer_cost_usd=Decimal("0.001000"),
+        created_at=_at(5),
     )
     research = ResearchSession(
         query="q",
@@ -308,6 +309,7 @@ async def test_chat_and_compaction_cache_tokens_sum_with_null_coalesce(db_sessio
         summarizer_cache_read_tokens=1500,
         summarizer_cache_write_tokens=25,
         summarizer_cost_usd=Decimal("0.001000"),
+        created_at=_at(5),
     )
     compaction_null_cache = ChatAgentCompactionEvent(
         turn=turn_null_cache,
@@ -324,6 +326,7 @@ async def test_chat_and_compaction_cache_tokens_sum_with_null_coalesce(db_sessio
         summarizer_cache_read_tokens=None,
         summarizer_cache_write_tokens=None,
         summarizer_cost_usd=Decimal("0.000500"),
+        created_at=_at(5),
     )
     db_session.add_all(
         [
