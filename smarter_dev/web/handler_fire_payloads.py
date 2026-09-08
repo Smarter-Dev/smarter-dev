@@ -4,6 +4,10 @@ Everything that enqueues a fire needs these and nothing else: event dispatch,
 the stalled-schedule sweep, a script-armed timer, the recurring chain. They live
 apart from the fire jobs so those callers can import a payload without pulling
 in the job module and whatever it imports.
+
+Importing a payload registers nothing: ``submit()`` resolves a payload to its
+job only once the job module has been imported, which every submitting process
+does at its entry point via ``worker_imports.import_worker_job_modules``.
 """
 
 from __future__ import annotations
