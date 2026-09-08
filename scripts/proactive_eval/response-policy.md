@@ -17,7 +17,7 @@ It sees the new messages plus the trailing 30 messages of context, and the
 current watch instructions — nothing else, and it remembers nothing between
 calls.
 
-**Agent** (Gemini 3.7 Flash by default). Woken by the watcher or by direct
+**Agent** (Gemini 3.8 Flash by default). Woken by the watcher or by direct
 engagement. Reads its notifications, optionally pulls more context with its
 tools, and either acts or deliberately stays silent. Its conversation
 history persists across wakes.

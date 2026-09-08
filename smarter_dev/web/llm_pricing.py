@@ -92,9 +92,10 @@ _patch_provider(
     ),
 )
 
-# Gemini 3.6 and 3.7 Flash — not yet in genai-prices. Both carry the SAME
-# promotional rate, $0.75/$3.75/$0.075, through 2026-12-31; on 2027-01-01 both
-# revert to $1.50/$7.50/$0.15. Read from the live pricing page on 2026-08-13.
+# Gemini 3.6, 3.7 and 3.8 Flash — not yet in genai-prices. All three carry the
+# SAME promotional rate, $0.75/$3.75/$0.075, through 2026-12-31; on 2027-01-01
+# all three revert to $1.50/$7.50/$0.15. Read from the live pricing page on
+# 2026-08-13, and confirmed unchanged for 3.8 Flash on 2026-09-03.
 #
 # The $1.50/$7.50 recorded here until now was NOT wrong — it was Google's rate
 # until they announced this 50% promotion on 2026-08-13, part of a broader round
@@ -105,7 +106,8 @@ _patch_provider(
 # 2027-01-01 is a scheduled edit, not a surprise — revisit both entries then.
 #
 # NOTE the match ordering trap: "gemini-3.7-flash" must not be matched by a
-# broader prefix, so keep each id exact-versioned as below.
+# broader prefix, so keep each id exact-versioned as below. The reversion on
+# 2027-01-01 is one edit per entry — 3.8 Flash is the third.
 _patch_provider(
     "google",
     types.ModelInfo(
@@ -123,6 +125,18 @@ _patch_provider(
     types.ModelInfo(
         id="gemini-3.7-flash",
         match=types.ClauseStartsWith(starts_with="gemini-3.7-flash"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("0.75"),
+            output_mtok=Decimal("3.75"),
+            cache_read_mtok=Decimal("0.075"),
+        ),
+    ),
+)
+_patch_provider(
+    "google",
+    types.ModelInfo(
+        id="gemini-3.8-flash",
+        match=types.ClauseStartsWith(starts_with="gemini-3.8-flash"),
         prices=types.ModelPrice(
             input_mtok=Decimal("0.75"),
             output_mtok=Decimal("3.75"),

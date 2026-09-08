@@ -15,6 +15,7 @@ def test_litellm_proxy_uses_the_available_model_aliases(monkeypatch) -> None:
     expected = {
         "z-ai/glm-5.3-flash": "glm-5.3-flash",
         "gemini-3.7-flash": "gemini/gemini-3.7-flash",
+        "gemini-3.8-flash": "gemini/gemini-3.8-flash",
     }
     for requested, proxied in expected.items():
         model = build_twopass_model(requested)
