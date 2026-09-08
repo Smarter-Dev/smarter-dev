@@ -16,6 +16,12 @@ install_exception_handlers()
 
 from skrift.asgi import app as skrift_app  # noqa: E402
 
+from smarter_dev.web.worker_imports import import_worker_job_modules  # noqa: E402
+
+# The ASGI app only submits worker jobs; registering them is otherwise left to
+# whatever the controllers happen to import.
+import_worker_job_modules()
+
 
 class PrivateStorageGuard:
     """Keep named private stores out of Skrift's public storage middleware."""
