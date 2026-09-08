@@ -237,7 +237,6 @@ MODEL_FAMILIES: tuple[str, ...] = (
     "MiniMax",
     "Gemini",
     "GPT",
-    "Claude",
     "Grok",
 )
 
@@ -256,7 +255,6 @@ MODEL_VENDORS: dict[str, str] = {
     "MiniMax": "MiniMax",
     "Gemini": "Google",
     "GPT": "OpenAI",
-    "Claude": "Anthropic",
     "Grok": "xAI",
 }
 
@@ -285,22 +283,12 @@ _GEMINI_THINKING = (
     ReasoningLevel.HIGH,
 )
 _OPEN_EFFORT = (ReasoningLevel.LOW, ReasoningLevel.MEDIUM, ReasoningLevel.HIGH)
-# Claude Sonnet 5 exposes the full effort ladder (thinking is adaptive by
-# default and effort tunes its depth); Haiku 4.5 has no effort knob at all.
-_CLAUDE_EFFORT = (
-    ReasoningLevel.LOW,
-    ReasoningLevel.MEDIUM,
-    ReasoningLevel.HIGH,
-    ReasoningLevel.XHIGH,
-    ReasoningLevel.MAX,
-)
 
 
 # Curated catalog. Kept <= 24 entries so the whole set fits in one Discord
 # string-select (25-option limit, leaving room for a "server default" sentinel).
-# Gemini -> Google, GPT -> OpenAI, Claude -> Anthropic, Grok -> OpenRouter,
-# and the open weights -> Digital Ocean / OpenCode Zen / OpenRouter, all
-# OpenAI-compatible. Model ids reflect the latest releases as of mid-2026
+# Gemini -> Google, GPT -> OpenAI, Grok -> OpenRouter, and the open weights ->
+# Digital Ocean / OpenCode Zen / OpenRouter, all OpenAI-compatible. Model ids reflect the latest releases as of mid-2026
 # (verified against provider model listings); they are wire ids and can be
 # re-verified without a migration.
 MODEL_CATALOG: tuple[CatalogModel, ...] = (
@@ -488,6 +476,27 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         reasoning_levels=_GEMINI_THINKING,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
+    # Gemini 3.8 Flash joined on 2026-09-03 when it became the proactive
+    # agent's model. It is in the catalog for the usage ledger's benefit as much
+    # as the picker's: ``_normalized_model_identity`` resolves a wire id through
+    # this catalog, so an absent entry files the proactive agent's whole spend
+    # under provider "unknown" in the invoice breakdown. Same promotional
+    # $0.75/$3.75 per M as 3.6 and 3.7 Flash, so it costs a channel no more than
+    # the 3.7 Flash sitting above it. Slots came free from the retired Claude
+    # family rather than from another Gemini.
+    CatalogModel(
+        key="gemini-3-8-flash",
+        label="Gemini 3.8 Flash",
+        family="Gemini",
+        provider=ModelProvider.GOOGLE,
+        model_id="gemini-3.8-flash",
+        supports_vision=True,
+        # Same envelope as 3.7 Flash: 1M in, 64K out.
+        context_window=1_048_576,
+        max_output_tokens=65_536,
+        reasoning_levels=_GEMINI_THINKING,
+        default_reasoning=ReasoningLevel.MEDIUM,
+    ),
     # Gemini 3.1 Flash Lite left the catalog on 2026-08-13, superseded by 3.5
     # Flash Lite in the same class (3.6 Flash is a different class, not a
     # replacement), freeing the last slot for DeepSeek V4 Pro. The wire id is
@@ -602,35 +611,12 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         reasoning_levels=_OPENAI_56,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
-    # --- Claude via Anthropic ---
-    CatalogModel(
-        key="claude-opus-5",
-        label="Claude Opus 5",
-        family="Claude",
-        provider=ModelProvider.ANTHROPIC,
-        model_id="claude-opus-5",
-        supports_vision=True,
-        reasoning_levels=_CLAUDE_EFFORT,
-        default_reasoning=ReasoningLevel.HIGH,
-    ),
-    CatalogModel(
-        key="claude-haiku-4-5",
-        label="Claude Haiku 4.5",
-        family="Claude",
-        provider=ModelProvider.ANTHROPIC,
-        model_id="claude-haiku-4-5",
-        supports_vision=True,
-    ),
-    CatalogModel(
-        key="claude-sonnet-5",
-        label="Claude Sonnet 5",
-        family="Claude",
-        provider=ModelProvider.ANTHROPIC,
-        model_id="claude-sonnet-5",
-        supports_vision=True,
-        reasoning_levels=_CLAUDE_EFFORT,
-        default_reasoning=ReasoningLevel.HIGH,
-    ),
+    # The whole Claude family left on 2026-09-03: nobody on the server talked
+    # to it, and three of the 24 select slots were being held for models with no
+    # traffic. ``ModelProvider.ANTHROPIC`` and the router's Anthropic branch
+    # stay — they remain the vocabulary for the provider key on settled usage
+    # rows — as do the Claude price patches in llm_pricing, which those rows
+    # price against.
     # --- Qwen3.8 via OpenRouter ---
     # The 2.4T A95B weights are NOT on our Digital Ocean account — GET
     # /v1/models lists qwen3.8-max but no A95B, and an unknown DO id 403s — so
