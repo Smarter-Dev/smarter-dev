@@ -44,13 +44,23 @@ def test_provider_key_resolves_flat_wire_ids_via_catalog():
     # model catalog says which provider serves each one.
     assert provider_key_from_model_name("gemini-3.1-flash-lite") == "google"
     assert provider_key_from_model_name("gpt-5.4") == "openai"
-    assert provider_key_from_model_name("claude-sonnet-5") == "anthropic"
     assert provider_key_from_model_name("kimi-k2.6") == "digitalocean"
     # Luna on the OpenRouter route (2026-08-06); its wire id contains a
     # slash but no colon, so it resolves as a flat id, not a prefix.
     assert provider_key_from_model_name("openai/gpt-5.6-luna") == "openrouter"
     # Rows written before the move carry the direct-OpenAI flat id.
     assert provider_key_from_model_name("gpt-5.6-luna") == "openai"
+
+
+def test_retired_claude_wire_ids_keep_their_provider():
+    # The Claude family left the catalog on 2026-09-03, so these no longer
+    # resolve through MODEL_CATALOG. Settled usage rows still carry the wire
+    # ids and still price against llm_pricing's Claude patches; without the
+    # explicit mappings their spend would drop out of the per-provider invoice
+    # breakdown into "Unknown".
+    assert provider_key_from_model_name("claude-opus-5") == "anthropic"
+    assert provider_key_from_model_name("claude-sonnet-5") == "anthropic"
+    assert provider_key_from_model_name("claude-haiku-4-5") == "anthropic"
 
 
 def test_provider_key_unknown_for_uncatalogued_names_and_unknown_prefix():
@@ -189,6 +199,7 @@ async def test_multi_source_aggregation_with_mixed_reasoning(db_session):
         summarizer_tokens_input=200,
         summarizer_tokens_output=50,
         summarizer_cost_usd=Decimal("0.001000"),
+        created_at=_at(5),
     )
     research = ResearchSession(
         query="q",
@@ -298,6 +309,7 @@ async def test_chat_and_compaction_cache_tokens_sum_with_null_coalesce(db_sessio
         summarizer_cache_read_tokens=1500,
         summarizer_cache_write_tokens=25,
         summarizer_cost_usd=Decimal("0.001000"),
+        created_at=_at(5),
     )
     compaction_null_cache = ChatAgentCompactionEvent(
         turn=turn_null_cache,
@@ -314,6 +326,7 @@ async def test_chat_and_compaction_cache_tokens_sum_with_null_coalesce(db_sessio
         summarizer_cache_read_tokens=None,
         summarizer_cache_write_tokens=None,
         summarizer_cost_usd=Decimal("0.000500"),
+        created_at=_at(5),
     )
     db_session.add_all(
         [

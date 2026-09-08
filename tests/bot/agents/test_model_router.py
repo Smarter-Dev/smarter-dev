@@ -24,8 +24,35 @@ _DO_MODEL = get_model("qwen3-5-397b")
 _DO_REASONING_MODEL = get_model("qwen3-5-397b")
 _GOOGLE_MODEL = get_model("gemini-3-5-flash-lite")
 _OPENAI_MODEL = get_model("gpt-5-4")
-_ANTHROPIC_MODEL = get_model("claude-sonnet-5")
-_ANTHROPIC_NO_REASONING_MODEL = get_model("claude-haiku-4-5")
+# Claude left the catalog on 2026-09-03, but ``build_model_for`` and
+# ``model_settings_for`` still carry an Anthropic branch — the provider stays
+# part of the routing vocabulary, and a future Claude entry must not have to
+# rediscover it. Built here rather than looked up so the branch keeps its
+# coverage without a catalog entry to back it.
+_ANTHROPIC_MODEL = CatalogModel(
+    key="claude-sonnet-5",
+    label="Claude Sonnet 5",
+    family="Claude",
+    provider=ModelProvider.ANTHROPIC,
+    model_id="claude-sonnet-5",
+    supports_vision=True,
+    reasoning_levels=(
+        ReasoningLevel.LOW,
+        ReasoningLevel.MEDIUM,
+        ReasoningLevel.HIGH,
+        ReasoningLevel.XHIGH,
+        ReasoningLevel.MAX,
+    ),
+    default_reasoning=ReasoningLevel.HIGH,
+)
+_ANTHROPIC_NO_REASONING_MODEL = CatalogModel(
+    key="claude-haiku-4-5",
+    label="Claude Haiku 4.5",
+    family="Claude",
+    provider=ModelProvider.ANTHROPIC,
+    model_id="claude-haiku-4-5",
+    supports_vision=True,
+)
 _OPENCODE_ZEN_MODEL = get_model("kimi-k3")
 _OPENROUTER_MODEL = get_model("qwen3-8-2-4t")
 _OPENROUTER_REASONING_MODEL = get_model("grok-4-6")

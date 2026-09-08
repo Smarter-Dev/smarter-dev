@@ -32,6 +32,10 @@ CUSTOM_PRICES: dict[str, dict[str, tuple[str, str, str, str | None, str | None]]
         # Gemini 3.7 Flash — rate from smarter_dev/web/llm_pricing.py (what
         # prod bills with). $0.75 in / $3.75 out / $0.075 cached-read.
         "gemini-3.7-flash": ("Gemini 3.7 Flash", "0.75", "3.75", "0.075", None),
+        # Gemini 3.8 Flash — same promotional tier as 3.7 Flash, rate from
+        # smarter_dev/web/llm_pricing.py (what prod bills with).
+        # $0.75 in / $3.75 out / $0.075 cached-read.
+        "gemini-3.8-flash": ("Gemini 3.8 Flash", "0.75", "3.75", "0.075", None),
         # Gemini 3.1 Flash Lite — GA 2026-05-07. $0.25 in / $1.50 out.
         # https://devtk.ai/en/models/gemini-3-1-flash-lite/
         "gemini-3.1-flash-lite": ("Gemini 3.1 Flash Lite", "0.25", "1.5", None, None),
