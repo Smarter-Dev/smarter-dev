@@ -234,14 +234,13 @@ workers:
     state_store: skrift.workers.sqlalchemy:SQLAlchemyStateStore
     queue: skrift.workers.sqlalchemy:SQLAlchemyQueue
     event_log: skrift.workers.sqlalchemy:SQLAlchemyEventLog
-  # Handler modules imported by BOTH tiers: `skrift workers run` imports
-  # them to register the @handlers it executes; the web tier and the sweep
-  # script import them through smarter_dev.web.worker_imports so submit()
-  # can resolve each payload to its job type (Skrift's ASGI app does not
-  # read this list itself). (Until the Skrift
-  # lazy-Agent change lands — ZechCodes/Skrift#155 — importing these still
-  # pulls pydantic-ai into the web pods; execution, however, is now fully
-  # off the web tier.)
+  # Modules `skrift workers run` imports to register the @handlers it
+  # executes. Skrift's ASGI app does not read this list: the web tier and
+  # the sweep script import ONLY the two handler fire jobs, through
+  # smarter_dev.web.worker_imports, so submit() can resolve those payloads;
+  # importing the rest costs ~100 MiB the web pod's limit cannot absorb
+  # (they pull in pydantic-ai and the agent graphs until the Skrift
+  # lazy-Agent change lands — ZechCodes/Skrift#155).
   imports:
     - smarter_dev.shared.worker_observability
     - smarter_dev.web.resources_agent

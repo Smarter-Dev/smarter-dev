@@ -7,7 +7,7 @@ in the job module and whatever it imports.
 
 Importing a payload registers nothing: ``submit()`` resolves a payload to its
 job only once the job module has been imported, which every submitting process
-does at its entry point via ``worker_imports.import_worker_job_modules``.
+does at its entry point via ``worker_imports.register_handler_fire_jobs``.
 """
 
 from __future__ import annotations
