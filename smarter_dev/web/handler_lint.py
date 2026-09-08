@@ -66,6 +66,22 @@ _ROLE_ID_LITERAL = re.compile(
     r"\b(?:add_role|remove_role)\s*\(\s*[^,()]+,\s*(?P<second>['\"]?)"
 )
 
+# A text prefix command keys behaviour to the LEADING word of a member's message
+# — prohibited under Discord's message-content-intent policy, and the
+# machine-checked twin of ``handler_authoring.PREFIX_COMMAND_RULE``. A command
+# word is a quoted literal opening with a bot prefix and a letter ("!ping",
+# "?help"), or the bare prefix itself (a startswith("!") guard is the command
+# router); the branch is that word in a startswith test, either side of an
+# (in)equality, or inside a membership tuple/list. A word ANYWHERE in the body
+# (`"?help" in text`) is a keyword watch, not a command, and is left alone.
+_COMMAND_WORD = r"""["'][!?](?:[A-Za-z][^"'\n]{0,23})?["']"""
+_PREFIX_COMMAND_BRANCH = re.compile(
+    rf"""startswith\(\s*{_COMMAND_WORD}"""
+    rf"""|[!=]=\s*{_COMMAND_WORD}"""
+    rf"""|{_COMMAND_WORD}\s*[!=]="""
+    rf"""|\bin\s*[\(\[][^)\]]*{_COMMAND_WORD}"""
+)
+
 
 def _string_literals(script: str) -> list[str]:
     out: list[str] = []
@@ -101,6 +117,12 @@ def check_static(script: str) -> str | None:
                 "script calls add_role/remove_role with a non-literal role id "
                 "(the role id must be a string literal)"
             )
+
+    if _PREFIX_COMMAND_BRANCH.search(script):
+        return (
+            "script branches on a message's leading command word "
+            "(text prefix commands are prohibited)"
+        )
 
     for literal in _string_literals(script):
         compact = literal.strip()

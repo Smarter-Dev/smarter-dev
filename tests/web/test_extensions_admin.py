@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import ANY
 from unittest.mock import AsyncMock
 from unittest.mock import Mock
 from unittest.mock import patch
@@ -25,6 +26,7 @@ from smarter_dev.web.extension_installs import get_install
 from smarter_dev.web.extension_installs import list_installs
 from smarter_dev.web.models import AdminHandler
 from smarter_dev.web.models import ExtensionInstall
+from tests.web.admin_template_rendering import render_admin_template
 
 _GUILD = "111111111111111111"
 _SLUG = "dm-forum-relay"
@@ -568,3 +570,177 @@ async def test_administrator_permission_denies_non_admin_and_allows_admin():
 
     assert await guard.check(non_admin) is False
     assert await guard.check(admin) is True
+
+
+# --- controller + template: an install whose slug left the catalog ------------
+
+_RETIRED_SLUG = "retired-prefix-commands"
+
+
+async def _seed_orphaned_install(db_session):
+    """An install of a slug the catalog no longer ships (a deleted extension).
+
+    Its handler row outlives the manifest too, and is what keeps firing on
+    member text until an operator disables or uninstalls the extension.
+    """
+    install = ExtensionInstall(
+        guild_id=_GUILD,
+        extension_slug=_RETIRED_SLUG,
+        installed_version=1,
+        config={},
+        enabled=True,
+        installed_by="admin@example.com",
+    )
+    db_session.add(install)
+    await db_session.flush()
+    db_session.add(
+        AdminHandler(
+            guild_id=_GUILD,
+            name="retired-command",
+            trigger_type="message",
+            description="a handler the catalog no longer ships",
+            script="pass",
+            created_by_admin="admin",
+            enabled=True,
+            extension_install_id=install.id,
+            extension_handler_key="retired-command",
+        )
+    )
+    await db_session.commit()
+    await db_session.refresh(install)
+    return install
+
+
+async def _orphaned_handler_rows(db_session, install_id) -> list:
+    return list(
+        await db_session.execute(
+            AdminHandler.__table__.select().where(
+                AdminHandler.extension_install_id == install_id
+            )
+        )
+    )
+
+
+async def _render_list(db_session):
+    with patch(
+        f"{_MODULE}.get_admin_context", new=AsyncMock(return_value=_ctx())
+    ), patch(
+        f"{_CAMPAIGNS_MODULE}.get_admin_discord_client", return_value=_admin_client()
+    ), patch(f"{_MODULE}.get_flash_messages", return_value=[]):
+        return await ExtensionsAdminController.extensions_list.fn(
+            None, request=object(), db_session=db_session, guild_id=_GUILD
+        )
+
+
+async def test_list_separates_an_install_whose_slug_left_the_catalog(db_session):
+    await _seed_orphaned_install(db_session)
+    response = await _render_list(db_session)
+
+    orphaned = response.context["orphaned_installs"]
+    assert [install.extension_slug for install in orphaned] == [_RETIRED_SLUG]
+    assert _RETIRED_SLUG not in [
+        ext.manifest.slug for ext in response.context["extensions"]
+    ]
+
+
+async def test_list_leaves_orphaned_installs_empty_for_a_catalog_slug(db_session):
+    await _seed_install(db_session)
+    response = await _render_list(db_session)
+    assert response.context["orphaned_installs"] == []
+
+
+def _render_orphan_list(enabled: bool) -> str:
+    return render_admin_template(
+        "admin/bot/extensions/list.html",
+        guild=SimpleNamespace(id=_GUILD, name="Alpha Guild"),
+        guild_id=_GUILD,
+        extensions=[],
+        installs_by_slug={},
+        orphaned_installs=[
+            SimpleNamespace(
+                extension_slug=_RETIRED_SLUG, enabled=enabled, installed_version=1
+            )
+        ],
+        active_page="extensions",
+        flash_messages=[],
+    )
+
+
+def test_list_template_lets_an_enabled_orphaned_install_be_disabled_or_uninstalled():
+    """Stopping a removed extension's handlers must not require destroying them."""
+    html = _render_orphan_list(enabled=True)
+
+    base = f"/admin/bot/guilds/{_GUILD}/extensions/{_RETIRED_SLUG}"
+    assert _RETIRED_SLUG in html
+    assert ">Enabled</span>" in html
+    assert "keep running until you disable or uninstall them" in html
+    assert f'action="{base}/disable"' in html
+    assert f'action="{base}/uninstall"' in html
+    for absent in ("configure", "update", "enable", "install"):
+        assert f"{base}/{absent}" not in html
+
+
+def test_list_template_offers_a_disabled_orphaned_install_only_uninstall():
+    """Nothing re-enables an extension the catalog can no longer validate."""
+    html = _render_orphan_list(enabled=False)
+
+    base = f"/admin/bot/guilds/{_GUILD}/extensions/{_RETIRED_SLUG}"
+    assert ">Disabled</span>" in html
+    assert f'action="{base}/uninstall"' in html
+    for absent in ("configure", "update", "enable", "disable", "install"):
+        assert f"{base}/{absent}" not in html
+
+
+def test_list_template_omits_the_orphan_section_when_there_are_none():
+    html = render_admin_template(
+        "admin/bot/extensions/list.html",
+        guild=SimpleNamespace(id=_GUILD, name="Alpha Guild"),
+        guild_id=_GUILD,
+        extensions=[],
+        installs_by_slug={},
+        orphaned_installs=[],
+        active_page="extensions",
+        flash_messages=[],
+    )
+    assert "no longer in the catalog" not in html.lower()
+
+
+async def test_uninstall_removes_an_install_whose_slug_left_the_catalog(db_session):
+    install = await _seed_orphaned_install(db_session)
+
+    flash_success = Mock()
+    with patch(f"{_MODULE}.flash_success", flash_success):
+        response = await ExtensionsAdminController.extension_uninstall.fn(
+            None,
+            request=object(),
+            db_session=db_session,
+            guild_id=_GUILD,
+            slug=_RETIRED_SLUG,
+        )
+
+    assert response.status_code in (302, 303, 307)
+    flash_success.assert_called_once()
+    assert await get_install(db_session, _GUILD, _RETIRED_SLUG) is None
+    assert await _orphaned_handler_rows(db_session, install.id) == []
+
+
+async def test_disable_stops_an_install_whose_slug_left_the_catalog(db_session):
+    """The orphan panel's Disable form must work without a manifest to look up."""
+    install = await _seed_orphaned_install(db_session)
+
+    flash_success = Mock()
+    with patch(f"{_MODULE}.flash_success", flash_success):
+        response = await ExtensionsAdminController.extension_disable.fn(
+            None,
+            request=object(),
+            db_session=db_session,
+            guild_id=_GUILD,
+            slug=_RETIRED_SLUG,
+        )
+
+    assert response.status_code in (302, 303, 307)
+    flash_success.assert_called_once_with(ANY, "Extension disabled.")
+    reloaded = await get_install(db_session, _GUILD, _RETIRED_SLUG)
+    assert reloaded.enabled is False
+    rows = await _orphaned_handler_rows(db_session, install.id)
+    assert rows and all(row.enabled is False for row in rows)

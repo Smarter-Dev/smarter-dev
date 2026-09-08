@@ -7,6 +7,10 @@ every other side effect in the runtime works. Keeping the host as the owner mean
 a sandbox mutation can never corrupt host state — the script only changes memory
 by asking, and only ``set``/``delete`` persist.
 
+Saving is here too — :func:`persist_handler_memory` writes a fire's snapshot
+back onto its handler row — so the load/save pair a fire brackets its script
+with has one owner across both tiers.
+
 Two rails: values must be JSON-serializable (it lands in a JSON column) and the
 whole blob is size-capped. A size breach raises :class:`CapExceeded` so it flows
 through the runtime's normal cap path; a non-serializable value is an author bug,
@@ -17,6 +21,9 @@ from __future__ import annotations
 
 import copy
 import json
+from uuid import UUID
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.handler_budget import CapExceeded
 
@@ -84,3 +91,24 @@ class HandlerMemory:
     def snapshot(self) -> dict:
         """The current state, for persisting back to the handler row."""
         return copy.deepcopy(self._data)
+
+
+async def persist_handler_memory(
+    session: AsyncSession,
+    handler_model: type,
+    handler_id: UUID,
+    memory: dict,
+    *,
+    changed: bool,
+) -> None:
+    """Save a fire's memory back onto its handler row, if the fire changed it.
+
+    A fire that never touched memory — the common message-handler path — costs
+    nothing here: no row is loaded and no UPDATE is emitted. A handler deleted
+    mid-fire simply has nowhere to save to.
+    """
+    if not changed:
+        return
+    record = await session.get(handler_model, handler_id)
+    if record is not None:
+        record.memory = memory

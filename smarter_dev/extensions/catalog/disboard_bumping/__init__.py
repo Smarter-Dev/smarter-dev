@@ -1,7 +1,6 @@
 """Disboard bumping extension.
 
-Two admin handlers over one shared config, ported from the legacy
-``DisboardBumpReminderExtension`` per
+One admin handler, ported from the legacy ``DisboardBumpReminderExtension`` per
 ``docs/v2/feature-parity/engagement-loops-and-server-stats.md`` §4.
 
 - ``bump-tracker`` (message trigger, scoped to the bump channel,
@@ -11,11 +10,13 @@ Two admin handlers over one shared config, ported from the legacy
   bump ledger, rotates the Bump King crown role, keeps the channel clean, and
   arms a one-shot 2-hour reminder with ``schedule_timer`` (whose timer re-fire
   the same handler serves via its ``trigger_type == "timer"`` branch).
-- ``bump-commands`` (message trigger, in a general/bot-commands channel):
-  ``!bumpers`` and ``!bumps`` read the shared ledger and reply with the
-  leaderboard / recent-bump list.
 
-The two rows cross state through the guild-shared memory store
+The tracker never reads a member's message text: it acts on the Disboard bot's
+confirmation embed, and deletes anything else in the channel. The legacy
+leaderboard/recent-bump text commands are not ported — prefix commands are
+prohibited under Discord's message-content-intent policy.
+
+The row carries its state in the guild-shared memory store
 (``guild_memory_*``), keyed under a ``disboard_`` namespace. The legacy
 online-count family and the startup channel-history scan are dropped per the
 disposition table; the reminder is folded into the tracker via ``schedule_timer``
@@ -33,10 +34,9 @@ MANIFEST = ExtensionManifest(
     title="Disboard Bumping",
     summary=(
         "Tracks confirmed Disboard /bump commands, crowns the top bumper with a "
-        "Bump King role, reminds the server every 2 hours, and answers !bumpers "
-        "/ !bumps."
+        "Bump King role, and reminds the server every 2 hours."
     ),
-    version=2,
+    version=3,
     config=[
         ConfigField(
             name="bump_channel_id",
@@ -65,15 +65,6 @@ MANIFEST = ExtensionManifest(
             help="Where new Bump King announcements are posted.",
         ),
         ConfigField(
-            name="commands_channel_id",
-            type="channel_id",
-            label="Bump commands channel",
-            help=(
-                "Where members run !bumpers / !bumps. Must NOT be the bump "
-                "channel, where the tracker would delete the command."
-            ),
-        ),
-        ConfigField(
             name="reminder_ping_role_id",
             type="role_id",
             label="Reminder ping role",
@@ -99,23 +90,10 @@ MANIFEST = ExtensionManifest(
             },
             channel_scope=["bump_channel_id"],
         ),
-        HandlerTemplate(
-            key="bump-commands",
-            name="disboard-bump-commands",
-            trigger_type="message",
-            description=(
-                "Replies to !bumpers and !bumps with the 7-day bump leaderboard "
-                "and the recent-bump list"
-            ),
-            script_file="bump_commands.monty",
-            settings={},
-            channel_scope=["commands_channel_id"],
-        ),
     ],
     example_config={
         "bump_channel_id": "111111111111111111",
         "bump_king_role_id": "222222222222222222",
-        "commands_channel_id": "333333333333333333",
         "reminder_ping_role_id": "444444444444444444",
         "bump_king_announcement_channel_id": "555555555555555555",
     },

@@ -11,20 +11,34 @@ late-but-alive chain" side.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
+import smarter_dev.web.handler_recurrence as handler_recurrence
+import smarter_dev.web.handler_sweep as handler_sweep
+from smarter_dev.web.handler_fire_payloads import AdminHandlerFirePayload
+from smarter_dev.web.handler_fire_payloads import HandlerFirePayload
 from smarter_dev.web.handler_sweep import (
     DAILY_PERIOD_SECONDS,
     MIN_GRACE_SECONDS,
     STALE_PERIOD_MULTIPLIER,
+    StalledChain,
+    find_stalled_chains,
     grace_seconds,
     is_stalled,
+    rearm_chain,
     schedule_period_seconds,
 )
+from smarter_dev.web.models import AdminHandler, ChannelHandler, HandlerRun
 
 NOW = datetime(2026, 8, 3, 12, 0, tzinfo=timezone.utc)
 CREATED = NOW - timedelta(days=30)
+# The SQLite test engine round-trips every column as offset-naive, where
+# Postgres hands back timestamptz; the sweep compares like with like.
+SQLITE_NAIVE_NOW = NOW.replace(tzinfo=None)
 
 # The real Discord.me reminder that died on 2026-07-30.
 SIX_HOURLY = {"start_at": "2026-07-25T17:59:30Z", "interval_seconds": 21600}
@@ -128,3 +142,231 @@ def test_overdue_is_measured_against_the_expected_fire():
 @pytest.mark.parametrize("hours", [0, 1, 6, 11])
 def test_no_false_positives_across_the_healthy_range(hours):
     assert is_stalled(SIX_HOURLY, NOW - timedelta(hours=hours), CREATED, NOW) is None
+
+
+# -- finding stalled chains asks every tier's chain for its schedules ---------
+
+
+async def _seed_run(engine, handler_id, kind: str, outcome: str, fired_at: datetime):
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        session.add(
+            HandlerRun(
+                handler_id=handler_id,
+                handler_kind=kind,
+                trigger_context={"trigger_type": "schedule"},
+                outcome=outcome,
+                fired_at=fired_at,
+                finished_at=fired_at,
+            )
+        )
+        await session.commit()
+
+
+def _channel_handler_fields(**overrides) -> dict:
+    fields = {
+        "id": uuid4(),
+        "guild_id": "G1",
+        "channel_id": "C1",
+        "name": "six-hourly",
+        "trigger_type": "schedule",
+        "settings": SIX_HOURLY,
+        "description": "d",
+        "script": "pass\n",
+        "created_by": "U1",
+        "created_at": CREATED,
+    }
+    return {**fields, **overrides}
+
+
+def _admin_handler_fields(**overrides) -> dict:
+    fields = {
+        "id": uuid4(),
+        "guild_id": "G1",
+        "name": "six-hourly-admin",
+        "trigger_type": "schedule",
+        "settings": SIX_HOURLY,
+        "channel_ids": [],
+        "description": "d",
+        "script": "pass\n",
+        "created_by_admin": "A1",
+        "created_at": CREATED,
+    }
+    return {**fields, **overrides}
+
+
+async def test_find_stalled_chains_covers_both_tiers_and_only_dead_schedules(
+    test_engine,
+):
+    dead_standard = await _seed(test_engine, ChannelHandler, **_channel_handler_fields())
+    dead_admin = await _seed(test_engine, AdminHandler, **_admin_handler_fields())
+    alive = await _seed(
+        test_engine, ChannelHandler, **_channel_handler_fields(name="alive")
+    )
+    await _seed(
+        test_engine, ChannelHandler, **_channel_handler_fields(name="off", enabled=False)
+    )
+    await _seed(
+        test_engine,
+        ChannelHandler,
+        **_channel_handler_fields(name="on-message", trigger_type="message", settings={}),
+    )
+    await _seed_run(test_engine, alive.id, "standard", "ok", NOW - timedelta(minutes=5))
+    # The sweep's own re-arm rows never count as a fire, or a chain it healed
+    # once would look alive forever.
+    await _seed_run(
+        test_engine, dead_standard.id, "standard", "rearmed", NOW - timedelta(minutes=1)
+    )
+
+    async with async_sessionmaker(test_engine, expire_on_commit=False)() as session:
+        stalled = await find_stalled_chains(session, SQLITE_NAIVE_NOW)
+
+    assert {(chain.handler_id, chain.kind) for chain in stalled} == {
+        (dead_standard.id, "standard"),
+        (dead_admin.id, "admin"),
+    }
+    by_id = {chain.handler_id: chain for chain in stalled}
+    assert by_id[dead_standard.id].settings == SIX_HOURLY
+    assert by_id[dead_standard.id].last_fired_at is None
+    assert by_id[dead_admin.id].name == "six-hourly-admin"
+
+
+# -- re-arming goes through the tier's chain and the audit owner --------------
+
+
+class _Handle:
+    cancelled: list[str] = []
+
+    def __init__(self, job_id: str):
+        self._job_id = job_id
+
+    async def cancel(self):
+        _Handle.cancelled.append(self._job_id)
+
+
+def _patch_rearm(monkeypatch) -> list:
+    submits: list = []
+
+    async def fake_submit(payload, scheduled_for=None, job_id=None):
+        submits.append((payload, scheduled_for, job_id))
+
+    monkeypatch.setattr(handler_recurrence, "worker_submit", fake_submit)
+    monkeypatch.setattr(handler_sweep, "get_handle", _Handle)
+    _Handle.cancelled = []
+    return submits
+
+
+async def _seed(engine, model, **fields) -> object:
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        record = model(**fields)
+        session.add(record)
+        await session.commit()
+        return record
+
+
+def _stalled(record, kind: str) -> StalledChain:
+    return StalledChain(
+        handler_id=record.id,
+        kind=kind,
+        name=record.name,
+        settings=SIX_HOURLY,
+        last_fired_at=NOW - timedelta(days=4),
+        overdue_by=timedelta(days=3, hours=18),
+    )
+
+
+async def _rearm(engine, chain: StalledChain):
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        next_occurrence = await rearm_chain(session, chain, NOW)
+        await session.commit()
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        runs = list(
+            await session.scalars(
+                select(HandlerRun).where(HandlerRun.handler_id == chain.handler_id)
+            )
+        )
+    return next_occurrence, runs
+
+
+async def test_a_stalled_standard_chain_is_re_armed_through_its_tier_chain(
+    monkeypatch, test_engine
+):
+    submits = _patch_rearm(monkeypatch)
+    record = await _seed(
+        test_engine,
+        ChannelHandler,
+        id=uuid4(),
+        guild_id="G1",
+        channel_id="C1",
+        name="six-hourly",
+        trigger_type="schedule",
+        settings=SIX_HOURLY,
+        description="d",
+        script="pass\n",
+        created_by="U1",
+        scheduled_job_id="dead-job",
+    )
+
+    next_occurrence, runs = await _rearm(test_engine, _stalled(record, "standard"))
+
+    payload, scheduled_for, job_id = submits[0]
+    assert isinstance(payload, HandlerFirePayload)
+    assert payload.handler_id == str(record.id)
+    assert payload.trigger_context == {"trigger_type": "schedule"}
+    assert scheduled_for == next_occurrence
+    assert _Handle.cancelled == ["dead-job"]
+    async with async_sessionmaker(test_engine, expire_on_commit=False)() as session:
+        assert (await session.get(ChannelHandler, record.id)).scheduled_job_id == job_id
+    assert len(runs) == 1
+    assert runs[0].outcome == "rearmed"
+    assert runs[0].handler_kind == "standard"
+    assert runs[0].trigger_context == {"trigger_type": "sweep"}
+    assert "re-armed for " + next_occurrence.isoformat() in runs[0].error
+
+
+async def test_a_stalled_admin_chain_is_re_armed_with_the_admin_payload(
+    monkeypatch, test_engine
+):
+    submits = _patch_rearm(monkeypatch)
+    record = await _seed(
+        test_engine,
+        AdminHandler,
+        id=uuid4(),
+        guild_id="G1",
+        name="six-hourly-admin",
+        trigger_type="schedule",
+        settings=SIX_HOURLY,
+        channel_ids=[],
+        description="d",
+        script="pass\n",
+        created_by_admin="A1",
+    )
+
+    _, runs = await _rearm(test_engine, _stalled(record, "admin"))
+
+    payload, _, _ = submits[0]
+    assert isinstance(payload, AdminHandlerFirePayload)
+    assert payload.admin_handler_id == str(record.id)
+    assert _Handle.cancelled == []
+    assert runs[0].handler_kind == "admin"
+
+
+async def test_a_disabled_handler_is_not_re_armed(monkeypatch, test_engine):
+    submits = _patch_rearm(monkeypatch)
+    record = await _seed(
+        test_engine,
+        ChannelHandler,
+        id=uuid4(),
+        guild_id="G1",
+        channel_id="C1",
+        name="off",
+        trigger_type="schedule",
+        settings=SIX_HOURLY,
+        description="d",
+        script="pass\n",
+        created_by="U1",
+        enabled=False,
+    )
+    next_occurrence, runs = await _rearm(test_engine, _stalled(record, "standard"))
+    assert next_occurrence is None
+    assert submits == []
+    assert runs == []

@@ -35,6 +35,7 @@ from uuid import uuid4
 import hikari
 import lightbulb
 from pydantic_ai.messages import ModelMessagesTypeAdapter
+from redis.exceptions import RedisError
 
 from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
 from smarter_dev.bot.agents.response_fitting import fit_writer_message
@@ -89,6 +90,8 @@ MODERATOR_DENIAL_MESSAGE = (
 # How long a channel stays in active ingest (fast 15s/60s debounce) after a
 # member engages the bot; outside it, messages wait for the 15-min sweep.
 ACTIVE_WINDOW_SECONDS = 600
+# Review messages buffered during startup promptly, then use the normal cadence.
+FIRST_PASSIVE_SWEEP_SECONDS = 120
 # How often the guild/channel memory bundle is re-read and injected into the
 # agent's brief; the refresh runs lazily on the next wake after expiry.
 MEMORY_REFRESH_SECONDS = 3600
@@ -739,6 +742,15 @@ async def _run_producer(state: ChannelProducerState, *, passive: bool = False) -
         )
     if new_messages:
         state.last_reviewed_message_id = new_messages[-1].id
+        # External wakes are durable in Redis by this point; their consumer
+        # never executes the embedded consumer's cursor persistence below.
+        if run.execution_mode_for(state.guild_id) == EXTERNAL_EXECUTION_MODE:
+            store = run.history_store()
+            if store is not None:
+                await store.write_cursor(
+                    int(state.channel_id), guild_id=state.guild_id,
+                    last_message_id=state.last_reviewed_message_id,
+                )
     state.last_wake_at = time.monotonic()
     logger.info(
         "proactive producer channel=%s reviewed=%d passive=%s wake=%s",
@@ -1296,13 +1308,32 @@ async def _passive_sweep(run: ProactiveRuntime) -> None:
             logger.exception("passive sweep failed channel=%s", state.channel_id)
 
 
+async def _sweep_expired_envelopes(run: ProactiveRuntime) -> None:
+    """Bound the envelope streams of guilds no recent publish has trimmed."""
+    queue = run.redis_notification_queue()
+    if queue is None:
+        return
+    connected_guild_ids = [
+        str(guild_id) for guild_id in run.bot.cache.get_guilds_view()
+    ]
+    try:
+        dropped = await queue.trim_expired_envelopes(connected_guild_ids)
+    except RedisError:
+        logger.exception("proactive envelope retention trim failed")
+        return
+    logger.info("proactive envelope retention trim dropped=%d", dropped)
+
+
 async def _passive_ticker() -> None:
+    delay = FIRST_PASSIVE_SWEEP_SECONDS
     while True:
-        await asyncio.sleep(PASSIVE_SECONDS)
+        await asyncio.sleep(delay)
         run = runtime
         if run is None:
             return
         await _passive_sweep(run)
+        await _sweep_expired_envelopes(run)
+        delay = PASSIVE_SECONDS
 
 
 async def _fetch_missed(
@@ -1347,20 +1378,45 @@ async def _recover_channels(run: ProactiveRuntime) -> None:
     store = run.history_store()
     if store is None:
         return
+    cursors = {}
     for channel_id in await store.cursor_channel_ids():
+        cursor = await store.read_cursor(channel_id)
+        if cursor:
+            cursors[channel_id] = cursor
+    guild_ids = {
+        *(str(guild_id) for guild_id in run.bot.cache.get_guilds_view()),
+        *(cursor["guild_id"] for cursor in cursors.values()),
+    }
+    # A channel may never have had an embedded consumer (and hence a cursor).
+    # Discover it from settings and use the existing bounded catch-up window.
+    fallback_id = str(hikari.Snowflake.from_datetime(
+        datetime.now(UTC) - timedelta(seconds=CATCHUP_MAX_AGE_SECONDS)
+    ))
+    for guild_id in guild_ids:
+        while True:
+            service = run.settings_service()
+            if service is not None:
+                try:
+                    enabled = await service.list_enabled_channels(guild_id)
+                    break
+                except APIError:
+                    logger.warning("proactive recovery channel discovery unavailable guild=%s", guild_id)
+            await asyncio.sleep(SETTINGS_RETRY_BACKOFF_SECONDS)
+        for row in enabled:
+            cursors.setdefault(int(row.channel_id), {
+                "guild_id": guild_id, "last_message_id": fallback_id,
+            })
+    for channel_id, cursor in cursors.items():
         try:
-            cursor = await store.read_cursor(channel_id)
-            if not cursor:
-                continue
             settings = await _recovery_channel_settings(
                 run, cursor["guild_id"], channel_id
             )
             if not settings.enabled:
                 continue
+            state = run.state_for(int(cursor["guild_id"]), channel_id)
             missed = await _fetch_missed(run.bot, channel_id, cursor["last_message_id"])
             if not missed:
                 continue
-            state = run.state_for(int(cursor["guild_id"]), channel_id)
             state.buffer.extend(missed)
             state.first_at = state.last_at = time.monotonic()
             await run.enqueue_notification(

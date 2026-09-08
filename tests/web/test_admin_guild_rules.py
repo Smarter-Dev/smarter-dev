@@ -7,17 +7,12 @@ loader, both handlers, the template and the auth wiring.
 from __future__ import annotations
 
 from contextlib import contextmanager
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import Mock
 from unittest.mock import patch
 
 import pytest
-from jinja2 import ChoiceLoader
-from jinja2 import DictLoader
-from jinja2 import Environment
-from jinja2 import FileSystemLoader
 from skrift.auth.guards import Permission
 from skrift.auth.guards import auth_guard
 
@@ -30,11 +25,12 @@ from smarter_dev.web.discord_admin_client import DiscordGuildDetail
 from smarter_dev.web.discord_admin_client import GuildNotFoundError
 from smarter_dev.web.guild_rules import parse_guild_rules
 from smarter_dev.web.models import GuildRulesConfig
+from tests.web.admin_template_rendering import admin_template_source
+from tests.web.admin_template_rendering import render_admin_template
 
 _GUILD = "111111111111111111"
 _MODULE = "smarter_dev.web.bot_admin.guild_configs"
 _SQUADS_MODULE = "smarter_dev.web.bot_admin.squads"
-_TEMPLATES_DIR = Path(__file__).parents[2] / "templates"
 
 _RULES = "## No self-promotion\nKeep links in #showcase.\n\n## Be kind\nAlways.\n"
 
@@ -280,22 +276,8 @@ async def test_rules_post_clearing_the_textarea_saves_empty_without_warning(
 
 
 def _render_rules_template(config, parsed_rules) -> str:
-    stub_base = (
-        "{% block title %}{% endblock %}{% block admin_content %}{% endblock %}"
-    )
-    environment = Environment(
-        loader=ChoiceLoader(
-            [
-                DictLoader({"admin/base.html": stub_base}),
-                FileSystemLoader(_TEMPLATES_DIR),
-            ]
-        ),
-        autoescape=True,
-    )
-    environment.globals["site_name"] = lambda: "Smarter Dev"
-    return environment.get_template(
-        "admin/bot/guild_configs/guild_rules.html"
-    ).render(
+    return render_admin_template(
+        "admin/bot/guild_configs/guild_rules.html",
         guild=_guild_detail(),
         config=config,
         parsed_rules=parsed_rules,
@@ -341,7 +323,7 @@ def test_rules_template_survives_an_empty_document():
 
 
 def test_sidebar_links_the_guild_rules_page():
-    sidebar = (_TEMPLATES_DIR / "admin" / "bot" / "_sidebar.html").read_text()
+    sidebar = admin_template_source("admin/bot/_sidebar.html")
 
     assert "/rules" in sidebar
     assert "active_page == 'guild_rules'" in sidebar

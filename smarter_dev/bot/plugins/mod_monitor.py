@@ -95,7 +95,8 @@ async def on_message_create(event: hikari.GuildMessageCreateEvent) -> None:
 
     logger.info(
         f"Moderation trigger in guild {guild_id}, channel {event.channel_id} "
-        f"by {event.message.author.username}: {event.message.content[:80]}..."
+        f"by author {event.message.author.id}: message {event.message.id} "
+        f"({len(event.message.content or '')} chars)"
     )
 
     # Run moderation in background to not block the event loop

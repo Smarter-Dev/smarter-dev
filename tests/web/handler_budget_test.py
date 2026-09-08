@@ -9,6 +9,8 @@ import pytest
 from smarter_dev.web.handler_budget import (
     ADMIN_MAX_DISCORD_READS,
     ADMIN_MAX_LOOKUPS,
+    ADMIN_MAX_MESSAGES,
+    ADMIN_MAX_MOD_ACTIONS,
     ADMIN_MAX_ROLE_CHANGES,
     ADMIN_MAX_THREAD_OPS,
     ADMIN_MAX_TIMERS,
@@ -132,7 +134,7 @@ def test_default_discord_reads_budget():
 def test_admin_budget_raises_thread_and_read_ceilings():
     assert ADMIN_MAX_DISCORD_READS == 5
     assert ADMIN_MAX_THREAD_OPS == 10
-    budget = admin_budget()
+    budget = admin_budget("message")
     for _ in range(ADMIN_MAX_THREAD_OPS):
         budget.spend_thread_op()
     with pytest.raises(CapExceeded) as exc:
@@ -145,7 +147,7 @@ def test_admin_budget_raises_thread_and_read_ceilings():
 
 
 def test_new_counters_appear_in_usage_after_spend():
-    budget = admin_budget()
+    budget = admin_budget("message")
     budget.spend_discord_read()
     budget.spend_thread_op()
     usage = budget.usage()
@@ -154,7 +156,7 @@ def test_new_counters_appear_in_usage_after_spend():
 
 
 def test_thread_op_checks_deadline_first():
-    budget = admin_budget()
+    budget = admin_budget("message")
     budget.wall_clock_seconds = 0.0
     budget.started_at = time.monotonic() - 1.0
     with pytest.raises(CapExceeded) as exc:
@@ -184,7 +186,7 @@ def test_default_budget_role_changes_cap_is_zero_raises_immediately():
 
 def test_admin_budget_sets_role_changes_cap():
     assert ADMIN_MAX_ROLE_CHANGES == 10
-    budget = admin_budget()
+    budget = admin_budget("message")
     assert budget.max_role_changes == ADMIN_MAX_ROLE_CHANGES
     for _ in range(ADMIN_MAX_ROLE_CHANGES):
         budget.spend_role_change()
@@ -194,13 +196,13 @@ def test_admin_budget_sets_role_changes_cap():
 
 
 def test_usage_includes_role_changes():
-    budget = admin_budget()
+    budget = admin_budget("message")
     budget.spend_role_change()
     assert budget.usage()["role_changes"] == 1
 
 
 def test_role_change_checks_deadline_first():
-    budget = admin_budget()
+    budget = admin_budget("message")
     budget.wall_clock_seconds = 0.0
     budget.started_at = time.monotonic() - 1.0
     with pytest.raises(CapExceeded) as exc:
@@ -225,7 +227,7 @@ def test_spend_timer_default_cap():
 
 def test_admin_budget_allows_five_timers():
     assert ADMIN_MAX_TIMERS == 5
-    budget = admin_budget()
+    budget = admin_budget("message")
     assert budget.max_timers == ADMIN_MAX_TIMERS
     for _ in range(ADMIN_MAX_TIMERS):
         budget.spend_timer()
@@ -271,7 +273,7 @@ def test_usage_includes_lookups():
 def test_admin_budget_grants_lookups_default_denies():
     assert ADMIN_MAX_LOOKUPS == 10
     assert DEFAULT_MAX_LOOKUPS == 0
-    assert admin_budget().max_lookups == ADMIN_MAX_LOOKUPS
+    assert admin_budget("message").max_lookups == ADMIN_MAX_LOOKUPS
     assert HandlerBudget().max_lookups == 0
 
 
@@ -282,3 +284,31 @@ def test_lookup_checks_deadline_first():
     with pytest.raises(CapExceeded) as exc:
         budget.spend_lookup()
     assert exc.value.cap == "wall_clock"
+
+
+# -- the mod_action loop rail (§3.5) -------------------------------------------
+
+
+def test_a_mod_action_triggered_admin_handler_gets_no_mod_actions():
+    # A handler triggered BY a moderation action formats that action for the mod
+    # log. If it could ban, its own action would write the audit row that
+    # re-fires it, so the rail forces the pool to zero rather than trusting depth.
+    budget = admin_budget("mod_action")
+    assert budget.max_mod_actions == 0
+    with pytest.raises(CapExceeded) as exc:
+        budget.spend_mod_action()
+    assert exc.value.cap == "mod_actions"
+
+
+def test_the_trigger_type_is_not_optional():
+    # Omitting it would silently hand a mod_action fire the full pool.
+    with pytest.raises(TypeError):
+        admin_budget()  # type: ignore[call-arg]
+
+
+def test_every_other_trigger_keeps_the_admin_mod_action_pool():
+    assert admin_budget("message").max_mod_actions == ADMIN_MAX_MOD_ACTIONS
+    assert admin_budget("member_join").max_mod_actions == ADMIN_MAX_MOD_ACTIONS
+    # The clamp is the only difference: the rest of the admin budget is intact.
+    assert admin_budget("mod_action").max_messages == ADMIN_MAX_MESSAGES
+    assert admin_budget("mod_action").max_role_changes == ADMIN_MAX_ROLE_CHANGES

@@ -24,10 +24,12 @@ import pytest
 from litestar.di import Provide
 from litestar.plugins.pydantic import PydanticPlugin
 from litestar.testing import TestClient, create_test_client
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from smarter_dev.shared.database import Base
+from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 from smarter_dev.web.api_native import admin as admin_module
 from smarter_dev.web.api_native.admin import AdminController
 
@@ -118,7 +120,7 @@ def test_create_and_get_conversation(client):
     assert detail.status_code == 200
     data = detail.json()
     assert data["id"] == conversation_id
-    assert data["user_question"] == "how do bytes work?"
+    assert data["user_question"] == MESSAGE_CONTENT_PLACEHOLDER
     assert data["bot_response"] == "very well, thanks"
     assert data["tokens_used"] == 42
     assert data["is_resolved"] is False
@@ -151,17 +153,6 @@ def test_list_conversations_filters_by_guild(client):
     filtered = client.get("/api/admin/conversations", params={"guild_id": "G2"})
     assert filtered.json()["total"] == 1
     assert filtered.json()["items"][0]["guild_id"] == "G2"
-
-
-def test_list_conversations_search(client):
-    client.post(
-        "/api/admin/conversations",
-        json=_conversation_body(user_question="how do SQUADS work?"),
-    )
-    client.post("/api/admin/conversations", json=_conversation_body())
-
-    found = client.get("/api/admin/conversations", params={"search": "squads"})
-    assert found.json()["total"] == 1
 
 
 def test_conversation_stats_is_reachable_and_counts(client):
@@ -223,3 +214,161 @@ def test_admin_conversations_non_sk_bearer_rejected(guarded_client):
         headers={"Authorization": "Bearer not-a-skrift-key"},
     )
     assert response.status_code == 401
+
+
+# --------------------------------------------------------------------------- #
+# Message-content redaction (Discord message-content-intent policy)
+# --------------------------------------------------------------------------- #
+
+
+def _context_messages() -> list[dict]:
+    """The shape ``plugins/help.py`` and ``plugins/llm.py`` send."""
+    return [
+        {
+            "author": "alice",
+            "timestamp": "2026-09-01T12:00:00+00:00",
+            "content": "my bot keeps crashing on startup",
+        },
+        {
+            "author": "bob",
+            "timestamp": "2026-09-01T12:00:05+00:00",
+            "content": "paste the traceback",
+        },
+    ]
+
+
+def _created_conversation(client, **over) -> dict:
+    created = client.post("/api/admin/conversations", json=_conversation_body(**over))
+    assert created.status_code == 201
+    detail = client.get(f"/api/admin/conversations/{created.json()['id']}")
+    assert detail.status_code == 200
+    return detail.json()
+
+
+def test_mention_question_is_stored_as_placeholder(client):
+    stored = _created_conversation(
+        client,
+        interaction_type="mention",
+        user_question="hey bot, why is my deploy failing?",
+    )
+    assert stored["user_question"] == MESSAGE_CONTENT_PLACEHOLDER
+    assert stored["bot_response"] == "very well, thanks"
+
+
+def test_slash_command_question_is_stored_verbatim(client):
+    stored = _created_conversation(
+        client,
+        interaction_type="slash_command",
+        user_question="how do bytes work?",
+    )
+    assert stored["user_question"] == "how do bytes work?"
+
+
+def test_streak_celebration_question_is_stored_as_placeholder(client):
+    stored = _created_conversation(
+        client,
+        interaction_type="streak_celebration",
+        user_question="gm everyone, day 30",
+    )
+    assert stored["user_question"] == MESSAGE_CONTENT_PLACEHOLDER
+
+
+@pytest.mark.parametrize(
+    "interaction_type", ["mention", "slash_command", "streak_celebration"]
+)
+def test_context_messages_are_redacted_for_every_interaction_type(
+    client, interaction_type
+):
+    stored = _created_conversation(
+        client,
+        interaction_type=interaction_type,
+        context_messages=_context_messages(),
+    )
+    assert [message["content"] for message in stored["context_messages"]] == [
+        MESSAGE_CONTENT_PLACEHOLDER,
+        MESSAGE_CONTENT_PLACEHOLDER,
+    ]
+
+
+def test_context_message_author_and_timestamp_survive(client):
+    stored = _created_conversation(
+        client, context_messages=_context_messages()
+    )
+    assert [
+        (message["author"], message["timestamp"])
+        for message in stored["context_messages"]
+    ] == [
+        ("alice", "2026-09-01T12:00:00+00:00"),
+        ("bob", "2026-09-01T12:00:05+00:00"),
+    ]
+
+
+def test_empty_question_stays_empty(client):
+    stored = _created_conversation(
+        client, interaction_type="mention", user_question=""
+    )
+    assert stored["user_question"] == ""
+
+
+def test_absent_context_messages_store_an_empty_list(client):
+    stored = _created_conversation(client, interaction_type="mention")
+    assert stored["context_messages"] == []
+
+
+def test_search_matches_a_slash_command_question_not_a_mention(client):
+    client.post(
+        "/api/admin/conversations",
+        json=_conversation_body(
+            interaction_type="slash_command", user_question="how do SQUADS work?"
+        ),
+    )
+    client.post(
+        "/api/admin/conversations",
+        json=_conversation_body(
+            interaction_type="mention", user_question="how do SQUADS work?"
+        ),
+    )
+
+    found = client.get("/api/admin/conversations", params={"search": "squads"})
+    assert found.json()["total"] == 1
+    assert found.json()["items"][0]["interaction_type"] == "slash_command"
+
+
+def test_create_conversation_db_failure_500_rolls_back(client, db_session, monkeypatch):
+    monkeypatch.setattr(
+        db_session,
+        "commit",
+        AsyncMock(
+            side_effect=IntegrityError(
+                "INSERT INTO help_conversations",
+                {},
+                Exception("NOT NULL constraint failed: user_question"),
+            )
+        ),
+    )
+    monkeypatch.setattr(db_session, "rollback", AsyncMock())
+
+    response = client.post("/api/admin/conversations", json=_conversation_body())
+
+    assert response.status_code == 500
+    assert response.json()["detail"].startswith("Failed to create conversation record")
+    db_session.rollback.assert_awaited_once()
+
+
+def test_create_conversation_non_database_failure_propagates(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setattr(db_session, "rollback", AsyncMock())
+    monkeypatch.setattr(
+        admin_module,
+        "get_security_logger",
+        Mock(side_effect=RuntimeError("not a database problem")),
+    )
+
+    response = client.post("/api/admin/conversations", json=_conversation_body())
+
+    # Litestar's own handler answers an unhandled exception; the route must not
+    # dress a programming error up as a database failure or roll back for it.
+    assert response.status_code == 500
+    assert "Failed to create conversation record" not in response.text
+    db_session.rollback.assert_not_awaited()

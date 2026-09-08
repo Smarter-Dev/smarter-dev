@@ -246,8 +246,7 @@ def format_response_details(
     return {
         "id": str(response.id),
         "agent_name": agent.name,
-        "post_title": response.post_title or "Untitled",
-        "post_content": response.post_content or "",
+        "thread_id": response.thread_id,
         "author_display_name": response.author_display_name or "Unknown",
         "post_tags": response.post_tags or [],
         "confidence_score": response.confidence_score,
