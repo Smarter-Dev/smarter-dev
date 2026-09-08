@@ -15,8 +15,10 @@ from uuid import uuid4
 from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import Field
+from pydantic import field_validator
 
 from smarter_dev.bot.proactive.notifications import Notification
+from smarter_dev.bot.proactive.timestamps import as_utc
 
 NotificationKind = Literal[
     "mention",
@@ -57,6 +59,11 @@ class NotificationEnvelope(BaseModel):
     passive: bool = False
     watcher_usage: dict[str, TokenUsage] = Field(default_factory=dict)
     trace_id: UUID = Field(default_factory=uuid4)
+
+    @field_validator("created_at")
+    @classmethod
+    def normalize_created_at(cls, value: datetime) -> datetime:
+        return as_utc(value)
 
     @classmethod
     def from_notification(

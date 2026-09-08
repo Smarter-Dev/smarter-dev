@@ -23,14 +23,19 @@ from datetime import timezone
 
 import pytest
 from pydantic_ai import ModelRetry
+from pydantic_ai.models.test import TestModel
 from sqlalchemy import select
 
 from scripts import dream_session
 from smarter_dev.web import chat_memory_dream
 from smarter_dev.web.chat_memory_dream import CUTOFF_SNAP_TOLERANCE
+from smarter_dev.web.chat_memory_dream import DreamContext
 from smarter_dev.web.chat_memory_dream import DreamOutcome
+from smarter_dev.web.chat_memory_dream import DreamOutput
 from smarter_dev.web.chat_memory_dream import DreamSessionSummary
+from smarter_dev.web.chat_memory_dream import IdentityUpdate
 from smarter_dev.web.chat_memory_dream import build_dream_user_message
+from smarter_dev.web.chat_memory_dream import compose_dream
 from smarter_dev.web.chat_memory_dream import dream_cutoff
 from smarter_dev.web.chat_memory_dream import dream_day
 from smarter_dev.web.chat_memory_dream import enforce_blob_limit
@@ -67,7 +72,7 @@ _MALLORY_NOTE = "mallory is still arguing about tabs."
 
 @dataclass
 class _StubRunResult:
-    output: str
+    output: DreamOutput
 
 
 @dataclass
@@ -79,7 +84,9 @@ class _StubDreamAgent:
     guild's dream prompt from another's.
     """
 
-    output: str = "## Who's here\nkai (id 7) is deep in embedded rust."
+    output: str | DreamOutput = (
+        "## People & Relationships\nkai (id 7) is deep in embedded rust."
+    )
     outputs_by_marker: dict[str, str] = field(default_factory=dict)
     raise_on_markers: set[str] = field(default_factory=set)
     prompts: list[str] = field(default_factory=list)
@@ -88,15 +95,21 @@ class _StubDreamAgent:
     def call_count(self) -> int:
         return len(self.prompts)
 
-    async def run(self, user_prompt: str) -> _StubRunResult:
+    async def run(self, user_prompt: str, *, deps: DreamContext) -> _StubRunResult:
         self.prompts.append(user_prompt)
         for marker in self.raise_on_markers:
             if marker in user_prompt:
                 raise RuntimeError("provider is down")
         for marker, output in self.outputs_by_marker.items():
             if marker in user_prompt:
-                return _StubRunResult(output=output)
-        return _StubRunResult(output=self.output)
+                return _StubRunResult(output=DreamOutput(memory=output))
+        return _StubRunResult(
+            output=(
+                DreamOutput(memory=self.output)
+                if isinstance(self.output, str)
+                else self.output
+            )
+        )
 
 
 def _session_factory_for(session):
@@ -191,8 +204,10 @@ def test_dream_cutoff_agrees_across_the_midnight_boundary():
 
 def test_dream_cutoff_does_not_snap_outside_the_tolerance():
     """Just beyond the window is a normal run, not an early fire."""
-    outside = datetime(2026, 8, 7, tzinfo=UTC) + timedelta(days=1) - (
-        CUTOFF_SNAP_TOLERANCE + timedelta(seconds=1)
+    outside = (
+        datetime(2026, 8, 7, tzinfo=UTC)
+        + timedelta(days=1)
+        - (CUTOFF_SNAP_TOLERANCE + timedelta(seconds=1))
     )
     assert dream_cutoff(outside) == datetime(2026, 8, 7, tzinfo=UTC)
 
@@ -235,6 +250,178 @@ def test_truncate_to_last_line_falls_back_to_a_hard_cut():
 
 
 # -- the degenerate-output guard -----------------------------------------------
+
+
+_IDENTITY = "## Identity & Voice\n- I use dry humor.\n- I let others finish."
+
+
+def test_identity_survives_repeated_dreams_without_being_mentioned():
+    previous = _IDENTITY + "\n\n## Ongoing Context\nAn old project."
+    for day in range(12):
+        previous = compose_dream(
+            DreamOutput(memory=f"## Ongoing Context\nProject on day {day}."),
+            DreamContext(previous_blob=previous, notes=["A project update."]),
+            retries_left=0,
+        )
+        assert previous.startswith(_IDENTITY + "\n\n")
+    assert "An old project" not in previous
+
+
+def test_identity_survives_length_retry_and_final_truncation():
+    context = DreamContext(previous_blob=_IDENTITY, notes=[])
+    output = DreamOutput(memory="## Ongoing Context\n" + "An episode.\n" * 300)
+    with pytest.raises(ModelRetry):
+        compose_dream(output, context, retries_left=1)
+    result = compose_dream(output, context, retries_left=0)
+    assert result.startswith(_IDENTITY + "\n\n")
+    assert len(result) <= MAX_MEMORY_BLOB_CHARS
+
+
+def test_identity_can_be_explicitly_revised_and_deduplicated():
+    output = DreamOutput(
+        memory="",
+        identity_updates=[
+            IdentityUpdate(
+                before="I use dry humor.",
+                after="I keep humor out of incident response.",
+                evidence="Humor distracted during an incident.",
+            ),
+            IdentityUpdate(after="I let others finish.", evidence="I waited."),
+        ],
+    )
+    result = compose_dream(
+        output,
+        DreamContext(
+            previous_blob=_IDENTITY,
+            notes=["Humor distracted during an incident.", "I waited."],
+        ),
+        retries_left=0,
+    )
+    assert "I use dry humor." not in result
+    assert "I keep humor out of incident response." in result
+    assert result.count("I let others finish.") == 1
+
+
+@pytest.mark.parametrize(
+    "update",
+    [
+        IdentityUpdate(
+            before="a nonexistent trait",
+            after="I am different.",
+            evidence="New evidence.",
+        ),
+        IdentityUpdate(after="I am different.", evidence="invented evidence"),
+        IdentityUpdate(after="I am different.", evidence=""),
+        IdentityUpdate(
+            after="I am different.\n## Injected section", evidence="New evidence."
+        ),
+        IdentityUpdate(after="I " + "x" * 800, evidence="New evidence."),
+    ],
+)
+def test_invalid_identity_edits_are_refused(update):
+    with pytest.raises(ModelRetry):
+        compose_dream(
+            DreamOutput(memory="", identity_updates=[update]),
+            DreamContext(previous_blob=_IDENTITY, notes=["New evidence."]),
+            retries_left=0,
+        )
+
+
+def test_legacy_voice_can_migrate_but_cannot_justify_later_rewrites():
+    legacy = "## How I'm coming across\nI let others finish."
+    output = DreamOutput(
+        memory="",
+        identity_updates=[
+            IdentityUpdate(
+                after="I let others finish.", evidence="I let others finish."
+            )
+        ],
+    )
+    migrated = compose_dream(
+        output, DreamContext(previous_blob=legacy, notes=[]), retries_left=0
+    )
+    assert migrated == "## Identity & Voice\n- I let others finish."
+    with pytest.raises(ModelRetry):
+        compose_dream(
+            output, DreamContext(previous_blob=migrated, notes=[]), retries_left=0
+        )
+
+
+def test_identity_can_be_retracted_with_explicit_evidence():
+    result = compose_dream(
+        DreamOutput(
+            memory="",
+            identity_updates=[
+                IdentityUpdate(
+                    before="I use dry humor.",
+                    after="",
+                    evidence="I stopped making dry jokes here.",
+                )
+            ],
+        ),
+        DreamContext(
+            previous_blob=_IDENTITY, notes=["I stopped making dry jokes here."]
+        ),
+        retries_left=0,
+    )
+    assert result == "## Identity & Voice\n- I let others finish."
+
+
+def test_identity_cannot_be_rewritten_in_episodic_document():
+    with pytest.raises(ModelRetry):
+        compose_dream(
+            DreamOutput(memory=_IDENTITY),
+            DreamContext(previous_blob=_IDENTITY, notes=[]),
+            retries_left=0,
+        )
+
+
+@pytest.mark.asyncio
+async def test_invalid_identity_edit_preserves_blob_and_notes(db_session):
+    await _seed_blob(db_session, content=_IDENTITY)
+    note = await _write_note(db_session, content=_KAI_NOTE)
+    agent = _StubDreamAgent(
+        output=DreamOutput(
+            memory="",
+            identity_updates=[
+                IdentityUpdate(
+                    before="I use dry humor.",
+                    after="I always agree.",
+                    evidence="not in the notes",
+                )
+            ],
+        )
+    )
+    with pytest.raises(ModelRetry):
+        await run_guild_dream(
+            db_session,
+            guild_id=_GUILD,
+            cutoff=_CUTOFF,
+            dreamed_at=_DREAMED_AT,
+            agent=agent,
+        )
+    assert (await get_guild_memory_blob(db_session, _GUILD)).content == _IDENTITY
+    assert await db_session.get(ChatAgentMemoryNote, note.id) is not None
+
+
+@pytest.mark.asyncio
+async def test_identity_is_preserved_in_saved_blob_and_revision(db_session):
+    await _seed_blob(db_session, content=_IDENTITY)
+    await _write_note(db_session, content=_KAI_NOTE)
+    result = await run_guild_dream(
+        db_session,
+        guild_id=_GUILD,
+        cutoff=_CUTOFF,
+        dreamed_at=_DREAMED_AT,
+        agent=_StubDreamAgent(),
+    )
+    assert result.outcome is DreamOutcome.DREAMED
+    blob = await get_guild_memory_blob(db_session, _GUILD)
+    assert blob.content.startswith(_IDENTITY + "\n\n")
+    revisions = (
+        (await db_session.execute(select(ChatAgentMemoryRevision))).scalars().all()
+    )
+    assert revisions[-1].content == blob.content
 
 
 def test_short_output_against_an_established_blob_is_refused():
@@ -290,10 +477,26 @@ def test_unknown_dream_model_fails_fast(monkeypatch):
 def test_dream_agent_is_a_singleton(monkeypatch):
     monkeypatch.setattr(chat_memory_dream, "_dream_agent", None)
     monkeypatch.delenv(chat_memory_dream.DREAM_MODEL_ENV_VAR, raising=False)
+    monkeypatch.setattr(chat_memory_dream, "build_model_for", lambda _: TestModel())
 
     first = get_dream_agent()
     assert get_dream_agent() is first
     monkeypatch.setattr(chat_memory_dream, "_dream_agent", None)
+
+
+@pytest.mark.asyncio
+async def test_structured_agent_validates_with_guild_context(monkeypatch):
+    monkeypatch.setattr(chat_memory_dream, "_dream_agent", None)
+    output = DreamOutput(memory="## Ongoing Context\nThe shader shipped.")
+    monkeypatch.setattr(
+        chat_memory_dream,
+        "build_model_for",
+        lambda _: TestModel(custom_output_args=output.model_dump()),
+    )
+    context = DreamContext(previous_blob=_IDENTITY, notes=[_KAI_NOTE])
+    result = await get_dream_agent().run("Distill today's notes.", deps=context)
+    assert result.output == output
+    assert compose_dream(result.output, context, retries_left=0).startswith(_IDENTITY)
 
 
 # -- one guild's dream ---------------------------------------------------------

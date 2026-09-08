@@ -1,4 +1,4 @@
-"""Time-trigger scheduling for handlers (pure, testable functions).
+"""When a time-triggered handler fires next (pure functions).
 
 Timers fire once; schedules recur. To keep a toy simple and dependency-free we
 support a small, explicit settings vocabulary rather than full cron:
@@ -8,8 +8,10 @@ support a small, explicit settings vocabulary rather than full cron:
   optionally with ``{"start_at": "<ISO-8601 UTC>"}``
 
 The chatbot passes timing in ``settings`` for time triggers; the author/runtime
-translate it through here. All functions take ``now`` explicitly so they can be
-tested deterministically.
+translate it through here. Every computation takes ``now`` explicitly so it can
+be tested deterministically. Enqueueing the computed occurrence is
+``handler_recurrence``'s job, so this module stays importable from the bot tier
+without the worker stack.
 """
 
 from __future__ import annotations
@@ -204,3 +206,4 @@ def next_fire_at(settings: dict, now: datetime) -> datetime | None:
     if "daily_time" in settings:
         return _daily_next(settings["daily_time"], now, start_at)
     return None
+

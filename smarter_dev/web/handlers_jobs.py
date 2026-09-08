@@ -5,21 +5,21 @@ this job loads the handler, runs its script under all the rails, writes a durabl
 :class:`~smarter_dev.web.models.HandlerRun`, and — for recurring schedules —
 enqueues the next occurrence.
 
-Kept import-clean of pydantic-ai and Monty at module load (they are imported
-lazily inside the job) so the web tier can import ``HandlerFirePayload`` to
-dispatch jobs without pulling in the inference stack — the same discipline as
-``resources_jobs``.
+pydantic-ai and Monty are imported lazily inside the job, never at module
+load. ``app.yaml`` lists this module under the worker ``imports`` block so the
+web tier imports it to register the job type, and only the agent-worker should
+pay for the inference stack — the same discipline as ``resources_jobs``. The
+payload itself lives in ``handler_fire_payloads``; dispatch, the recurring
+chain and the timer scheduler import it from there.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from uuid import UUID, uuid4
+from copy import deepcopy
+from uuid import UUID
 
-from pydantic import BaseModel
 from skrift.workers import RetryPolicy, WorkerContext, handler
-from skrift.workers import submit as worker_submit
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import get_db_session_context
@@ -32,24 +32,21 @@ from smarter_dev.web.handler_caps import (
     claim_fire_attempt,
 )
 from smarter_dev.web.handler_emitter import DiscordEmitter
+from smarter_dev.web.handler_fire_payloads import HandlerFirePayload
+from smarter_dev.web.handler_memory import persist_handler_memory
 from smarter_dev.web.handler_notify import notify_handler_error
-from smarter_dev.web.handler_schedule import next_fire_at
-from smarter_dev.web.models import ChannelHandler, HandlerRun
+from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
+from smarter_dev.web.handler_run_audit import record_completed_run, record_skipped_run
+from smarter_dev.web.handler_script_services import HandlerTimerScheduler
+from smarter_dev.web.models import ChannelHandler
+
+__all__ = ["HandlerFirePayload", "run_handler_fire"]
 
 logger = logging.getLogger(__name__)
 
+HANDLER_KIND = "standard"
 
-class HandlerFirePayload(BaseModel):
-    """Job payload for one handler firing."""
-
-    handler_id: str
-    trigger_context: dict = {}
-    # How many handler fires deep this fire is (0 = caused by a gateway event).
-    # An explicit FIELD, never a trigger_context key: context goes to the sandbox
-    # verbatim, so a depth in there would be script-readable and script-forgeable.
-    # Defaulted so an omitted field means "chain root", not a crash — schedule
-    # re-arms and any older enqueued job read as roots, which is what they are.
-    chain_depth: int = 0
+_recurring_chain = RECURRING_CHAINS[HANDLER_KIND]
 
 
 @handler(
@@ -72,6 +69,9 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
         return {"status": "disabled"}
 
     handler_id = UUID(payload.handler_id)
+    # Snapshot: the script is handed this same dict and may write into it.
+    # What may be KEPT of it is handler_run_audit's call, not this job's.
+    trigger_context_at_fire = deepcopy(payload.trigger_context)
     async with get_db_session_context() as session:
         record = await session.get(ChannelHandler, handler_id)
         if record is None or not record.enabled:
@@ -94,29 +94,15 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
     emitter = DiscordEmitter(bot_token=settings.discord_bot_token, guild_id=guild_id)
     redis = get_redis_client()
     limiter = WindowedLimiter(redis=redis)
-    # schedule_timer arms a durable one-shot re-fire of THIS handler. The closure
-    # owns the payload class + handler_id, keeping the runtime import-clean; the
-    # timer limiter is a separate 3600s window (self.limiter is fixed at 60s).
+    # The timer limiter is a separate 3600s window (self.limiter is fixed at 60s).
     timer_limiter = WindowedLimiter(
         redis=redis, window_seconds=TIMER_ARMING_WINDOW_SECONDS
     )
-
-    async def schedule_timer(fire_at: datetime, refire_context: dict) -> None:
-        await worker_submit(
-            HandlerFirePayload(
-                handler_id=str(handler_id),
-                trigger_context=refire_context,
-                # A timer re-fire is caused BY this fire, so it descends one
-                # generation. The re-fire itself is still enqueued (the depth
-                # check lives at the dispatch choke point, and the arming window
-                # is what bounds a self-deferring handler); carrying the depth is
-                # what makes anything that re-fire DISPATCHES get refused once
-                # the chain has run past MAX_CHAIN_DEPTH.
-                chain_depth=payload.chain_depth + 1,
-            ),
-            scheduled_for=fire_at,
-            job_id=uuid4().hex,
-        )
+    timer_scheduler = HandlerTimerScheduler(
+        chain=_recurring_chain,
+        handler_id=str(handler_id),
+        chain_depth=payload.chain_depth,
+    )
 
     # At-most-once side effects across retries. Claimed as late as possible —
     # everything above (the lazy import, the record load, emitter setup) is
@@ -128,9 +114,20 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
             "the script; skipping execution so emits aren't duplicated",
             context.job.id,
         )
-        await _record_skipped_run(handler_id, payload.trigger_context)
-        if _is_schedule_fire(trigger_type, payload.trigger_context):
-            await _reschedule(handler_id, handler_settings)
+        async with get_db_session_context() as session:
+            record_skipped_run(
+                session,
+                handler_id=handler_id,
+                handler_kind=HANDLER_KIND,
+                trigger_context=trigger_context_at_fire,
+            )
+            await session.commit()
+        await _recurring_chain.rearm_after_fire(
+            handler_id=handler_id,
+            trigger_type=trigger_type,
+            trigger_context=payload.trigger_context,
+            handler_settings=handler_settings,
+        )
         return {"status": "skipped"}
 
     result = await run_handler_script(
@@ -142,38 +139,27 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
         limiter=limiter,
         agent_runner=run_gathering_agent,
         handler_id=str(handler_id),
-        timer_scheduler=schedule_timer,
+        timer_scheduler=timer_scheduler.schedule_timer,
         timer_limiter=timer_limiter,
         budget=budget,
         memory=memory,
     )
 
     async with get_db_session_context() as session:
-        session.add(
-            HandlerRun(
-                handler_id=handler_id,
-                trigger_context=payload.trigger_context,
-                outcome=result.outcome,
-                cap=result.cap,
-                error=result.error,
-                messages_sent=result.usage["messages_sent"],
-                web_searches=result.usage["web_searches"],
-                web_reads=result.usage["web_reads"],
-                agent_calls=result.usage["agent_calls"],
-                discord_reads=result.usage.get("discord_reads", 0),
-                thread_ops=result.usage.get("thread_ops", 0),
-                role_changes=result.usage.get("role_changes", 0),
-                timers_scheduled=result.usage.get("timers_scheduled", 0),
-                duration_ms=result.duration_ms,
-                finished_at=datetime.now(timezone.utc),
-            )
+        record_completed_run(
+            session,
+            handler_id=handler_id,
+            handler_kind=HANDLER_KIND,
+            trigger_context=trigger_context_at_fire,
+            result=result,
         )
-        # Persist memory only when the script changed it (the common message-handler
-        # path leaves it untouched and skips the write).
-        if result.memory_changed:
-            record = await session.get(ChannelHandler, handler_id)
-            if record is not None:
-                record.memory = result.memory
+        await persist_handler_memory(
+            session,
+            ChannelHandler,
+            handler_id,
+            result.memory,
+            changed=result.memory_changed,
+        )
         await session.commit()
 
     # On an error (not a cap breach), tell the channel so it can be fixed.
@@ -188,58 +174,11 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
             error=result.error,
         )
 
-    if _is_schedule_fire(trigger_type, payload.trigger_context):
-        await _reschedule(handler_id, handler_settings)
+    await _recurring_chain.rearm_after_fire(
+        handler_id=handler_id,
+        trigger_type=trigger_type,
+        trigger_context=payload.trigger_context,
+        handler_settings=handler_settings,
+    )
 
     return {"status": result.outcome, "cap": result.cap}
-
-
-def _is_schedule_fire(trigger_type: str, trigger_context: dict) -> bool:
-    """Whether this fire is the one that owns re-arming the recurring chain.
-
-    Only a genuine scheduled fire re-arms. A schedule handler that self-arms a
-    schedule_timer re-fires with trigger_type "timer" in its context; that
-    re-fire must NOT re-enter ``_reschedule`` or it forks a duplicate perpetual
-    chain and clobbers scheduled_job_id (orphaning the original chain's job so
-    disable/update can no longer cancel it).
-    """
-    return trigger_type == "schedule" and trigger_context.get("trigger_type") != "timer"
-
-
-async def _record_skipped_run(handler_id: UUID, trigger_context: dict) -> None:
-    """Audit a retry that declined to re-run an already-started script."""
-    async with get_db_session_context() as session:
-        session.add(
-            HandlerRun(
-                handler_id=handler_id,
-                trigger_context=trigger_context,
-                outcome="skipped",
-                error=(
-                    "retry of a fire whose script had already started; skipped to "
-                    "avoid duplicate side effects"
-                ),
-                finished_at=datetime.now(timezone.utc),
-            )
-        )
-        await session.commit()
-
-
-async def _reschedule(handler_id: UUID, handler_settings: dict) -> None:
-    """Enqueue the next occurrence of a recurring schedule, if still enabled."""
-    nxt = next_fire_at(handler_settings, datetime.now(timezone.utc))
-    if nxt is None:
-        return
-    job_id = uuid4().hex
-    await worker_submit(
-        HandlerFirePayload(
-            handler_id=str(handler_id),
-            trigger_context={"trigger_type": "schedule"},
-        ),
-        scheduled_for=nxt,
-        job_id=job_id,
-    )
-    async with get_db_session_context() as session:
-        record = await session.get(ChannelHandler, handler_id)
-        if record is not None and record.enabled:
-            record.scheduled_job_id = job_id
-            await session.commit()

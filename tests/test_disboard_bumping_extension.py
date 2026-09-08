@@ -7,8 +7,12 @@ Two layers, per the house test plan:
    role-grant allowlist closure and channel scope asserted.
 2. Behavior — each rendered script is executed through ``run_handler_script``
    with a stubbed emitter/actor (the offline runtime-harness pattern) to prove the
-   detector, cleanliness, king rotation + tie-break, the schedule_timer reminder
-   re-fire, and the !bumpers / !bumps command paths.
+   detector, cleanliness, king rotation + tie-break, and the schedule_timer
+   reminder re-fire.
+
+The bundle deliberately carries no command surface: prefix commands are
+prohibited, so the tracker reacts to the Disboard bot's confirmation embed and
+never to a member's message text.
 
 Only this extension's own manifest/scripts are imported and exercised directly —
 the whole-catalog registry scan is left to the final verifier (siblings are
@@ -24,6 +28,7 @@ from pathlib import Path
 
 import pytest
 
+from smarter_dev.extensions.catalog import disboard_bumping
 from smarter_dev.extensions.catalog.disboard_bumping import MANIFEST
 from smarter_dev.extensions.rendering import RenderError
 from smarter_dev.extensions.rendering import extract_granted_role_literals
@@ -35,7 +40,6 @@ from smarter_dev.web.handler_runtime import run_handler_script
 _DISBOARD_ID = "302050872383242240"
 _BUMP_CHANNEL = "111111111111111111"
 _CROWN_ROLE = "222222222222222222"
-_COMMANDS_CHANNEL = "333333333333333333"
 _PING_ROLE = "444444444444444444"
 _ANNOUNCEMENT_CHANNEL = "555555555555555555"
 
@@ -137,7 +141,7 @@ async def _run_tracker(context, *, guild_memory=None, config=None, ping=True):
         guild_id="G1",
         emitter=emitter,
         limiter=_Limiter(),
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=actor,
         channel_ids=rendered.channel_ids,
         allowed_role_ids=rendered.settings.get("allowed_role_ids", []),
@@ -148,30 +152,12 @@ async def _run_tracker(context, *, guild_memory=None, config=None, ping=True):
     return result, emitter, actor, timer
 
 
-async def _run_commands(text, *, guild_memory=None):
-    rendered = _rendered()["bump-commands"]
-    emitter = _Emitter()
-    result = await run_handler_script(
-        rendered.script,
-        {"trigger_type": "message", "message_content": text, "author_id": "U9"},
-        channel_id=_COMMANDS_CHANNEL,
-        guild_id="G1",
-        emitter=emitter,
-        limiter=_Limiter(),
-        budget=admin_budget(),
-        actor=_Actor(),
-        channel_ids=rendered.channel_ids,
-        guild_memory=dict(guild_memory or {}),
-    )
-    return result, emitter
-
-
 # -- layer 1: rendering + lint -------------------------------------------------
 
 
 def test_manifest_renders_and_every_script_lints_clean():
     rendered = _rendered()
-    assert set(rendered) == {"bump-tracker", "bump-commands"}
+    assert set(rendered) == {"bump-tracker"}
     for item in rendered.values():
         assert lint_script(item.script) is None
 
@@ -186,10 +172,18 @@ def test_tracker_channel_scope_and_bot_optin_and_allowlist():
     assert tracker.settings["allowed_role_ids"] == [_CROWN_ROLE]
 
 
-def test_commands_scoped_off_the_bump_channel():
-    commands = _rendered()["bump-commands"]
-    assert commands.channel_ids == [_COMMANDS_CHANNEL]
-    assert commands.channel_ids != [_BUMP_CHANNEL]
+def test_bundle_carries_no_command_surface():
+    """Prefix commands are prohibited, so the tracker is the whole bundle and no
+    config field, example value, or prose invites a command channel."""
+    assert [handler.key for handler in MANIFEST.handlers] == ["bump-tracker"]
+    assert "commands_channel_id" not in {field.name for field in MANIFEST.config}
+    assert "commands_channel_id" not in MANIFEST.example_config
+    prose = " ".join(
+        [MANIFEST.summary, disboard_bumping.__doc__]
+        + [handler.description for handler in MANIFEST.handlers]
+    )
+    assert "!bumpers" not in prose
+    assert "!bumps" not in prose
 
 
 def test_reminder_ping_role_is_required_and_typed():
@@ -427,54 +421,3 @@ async def test_full_cycle_bump_then_reminder_then_superseding_bump():
     assert state["disboard_reminded"] is False
     assert state["disboard_last_bump_at"] >= first_bump_at
     assert len(timer3.calls) == 1
-
-
-# -- layer 2: command surface --------------------------------------------------
-
-
-async def test_bumpers_leaderboard_ranks_recent_counts():
-    now = int(time.time())
-    ledger = [
-        ["AAA", now - 10],
-        ["AAA", now - 20],
-        ["AAA", now - 30],
-        ["BBB", now - 40],
-        ["BBB", now - 50],
-        ["CCC", now - 60],
-    ]
-    result, emitter = await _run_commands(
-        "!bumpers", guild_memory={"disboard_bumps": ledger}
-    )
-    assert result.outcome == "ok", result.error
-    assert len(emitter.messages) == 1
-    body = emitter.messages[0][1]
-    assert "Top bumpers" in body
-    assert "🥇 <@AAA> — 3 bumps" in body
-    assert "🥈 <@BBB> — 2 bumps" in body
-    assert "🥉 <@CCC> — 1 bumps" in body
-
-
-async def test_bumps_lists_recent_with_timestamp_markup():
-    now = int(time.time())
-    ledger = [["AAA", now - 10], ["BBB", now - 20]]
-    result, emitter = await _run_commands(
-        "!bumps", guild_memory={"disboard_bumps": ledger}
-    )
-    assert result.outcome == "ok", result.error
-    body = emitter.messages[0][1]
-    assert f"<@AAA> — <t:{now - 10}:R>" in body
-    assert "Recent bumps" in body
-
-
-async def test_commands_report_empty_ledger():
-    result, emitter = await _run_commands("!bumpers", guild_memory={})
-    assert result.outcome == "ok", result.error
-    assert emitter.messages[0][1] == "No bumps recorded in the last 7 days."
-
-
-async def test_non_command_message_is_ignored():
-    result, emitter = await _run_commands(
-        "just chatting", guild_memory={"disboard_bumps": [["AAA", int(time.time())]]}
-    )
-    assert result.outcome == "ok", result.error
-    assert emitter.messages == []

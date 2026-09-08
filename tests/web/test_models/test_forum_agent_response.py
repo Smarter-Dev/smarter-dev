@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+from uuid import UUID, uuid4
+
 import pytest
-from uuid import UUID
-from datetime import datetime, timezone
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from smarter_dev.shared.database import Base
+from smarter_dev.shared.message_content import redact_forum_post
+from smarter_dev.web.models import ForumAgent
+from smarter_dev.web.models import ForumAgentResponse
 
 
 class TestForumAgentResponse:
@@ -16,15 +21,10 @@ class TestForumAgentResponse:
     
     async def test_forum_agent_response_model_exists(self):
         """Test that ForumAgentResponse model can be imported."""
-        try:
-            from smarter_dev.web.models import ForumAgentResponse
-            assert ForumAgentResponse is not None
-        except ImportError:
-            pytest.fail("ForumAgentResponse model does not exist")
+        assert ForumAgentResponse is not None
     
     async def test_forum_agent_response_has_uuid_primary_key(self):
         """Test that ForumAgentResponse has UUID primary key."""
-        from smarter_dev.web.models import ForumAgentResponse
         
         pk_columns = [col.name for col in ForumAgentResponse.__table__.primary_key.columns]
         assert "id" in pk_columns
@@ -32,7 +32,6 @@ class TestForumAgentResponse:
     
     async def test_forum_agent_response_required_fields(self):
         """Test that ForumAgentResponse has all required fields."""
-        from smarter_dev.web.models import ForumAgentResponse
         
         required_fields = [
             "id", "agent_id", "guild_id", "channel_id", "thread_id",
@@ -47,10 +46,6 @@ class TestForumAgentResponse:
     
     async def test_forum_agent_response_creation_and_retrieval(self, test_engine):
         """Test creating and retrieving ForumAgentResponse records."""
-        from sqlalchemy.ext.asyncio import async_sessionmaker
-        from smarter_dev.shared.database import Base
-        from smarter_dev.web.models import ForumAgent, ForumAgentResponse
-        from uuid import uuid4
         
         async with test_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -112,15 +107,11 @@ class TestForumAgentResponse:
     
     async def test_forum_agent_response_table_name(self):
         """Test that ForumAgentResponse has correct table name."""
-        from smarter_dev.web.models import ForumAgentResponse
         
         assert ForumAgentResponse.__tablename__ == "forum_agent_responses"
     
     async def test_forum_agent_response_default_values(self, test_engine):
         """Test that ForumAgentResponse has correct default values."""
-        from sqlalchemy.ext.asyncio import async_sessionmaker
-        from smarter_dev.shared.database import Base
-        from smarter_dev.web.models import ForumAgent, ForumAgentResponse
         
         async with test_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -166,10 +157,6 @@ class TestForumAgentResponse:
     
     async def test_forum_agent_response_foreign_key_constraint(self, test_engine):
         """Test that agent_id foreign key constraint is enforced."""
-        from sqlalchemy.ext.asyncio import async_sessionmaker
-        from smarter_dev.shared.database import Base
-        from smarter_dev.web.models import ForumAgentResponse
-        from uuid import uuid4
         
         async with test_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -198,10 +185,6 @@ class TestForumAgentResponse:
     
     async def test_forum_agent_response_cascade_delete(self, test_engine):
         """Test that responses are deleted when agent is deleted."""
-        from sqlalchemy.ext.asyncio import async_sessionmaker
-        from sqlalchemy import select
-        from smarter_dev.shared.database import Base
-        from smarter_dev.web.models import ForumAgent, ForumAgentResponse
         
         async with test_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -253,9 +236,6 @@ class TestForumAgentResponse:
     
     async def test_forum_agent_response_json_fields_serialization(self, test_engine):
         """Test that JSON fields properly serialize and deserialize."""
-        from sqlalchemy.ext.asyncio import async_sessionmaker
-        from smarter_dev.shared.database import Base
-        from smarter_dev.web.models import ForumAgent, ForumAgentResponse
         
         async with test_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -307,9 +287,6 @@ class TestForumAgentResponse:
     
     async def test_forum_agent_response_confidence_score_validation(self, test_engine):
         """Test that confidence_score validation is enforced."""
-        from sqlalchemy.ext.asyncio import async_sessionmaker
-        from smarter_dev.shared.database import Base
-        from smarter_dev.web.models import ForumAgent, ForumAgentResponse
         
         async with test_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -349,9 +326,6 @@ class TestForumAgentResponse:
     
     async def test_forum_agent_response_responded_at_auto_set(self, test_engine):
         """Test that responded_at is automatically set when responded=True at creation time."""
-        from sqlalchemy.ext.asyncio import async_sessionmaker
-        from smarter_dev.shared.database import Base
-        from smarter_dev.web.models import ForumAgent, ForumAgentResponse
 
         async with test_engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
@@ -417,3 +391,42 @@ class TestForumAgentResponse:
             assert response_yes.responded is True
             assert response_yes.responded_at is not None
             assert isinstance(response_yes.responded_at, datetime)
+
+    async def test_a_redacted_textless_post_satisfies_the_not_null_columns(
+        self, test_engine
+    ):
+        """A starter post with no text still stores, so the audit row survives."""
+        async with test_engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        session_maker = async_sessionmaker(test_engine, expire_on_commit=False)
+        async with session_maker() as session:
+            agent = ForumAgent(
+                guild_id="forum_guild_123",
+                name="Test Agent",
+                system_prompt="Test prompt",
+                created_by="test_admin",
+            )
+            session.add(agent)
+            await session.commit()
+            await session.refresh(agent)
+
+            response = ForumAgentResponse(
+                agent_id=agent.id,
+                guild_id="forum_guild_123",
+                channel_id="123456789",
+                thread_id="987654321",
+                author_display_name="TestUser",
+                decision_reason="Test decision",
+                confidence_score=0.5,
+                tokens_used=100,
+                response_time_ms=1000,
+                **redact_forum_post({"post_title": None, "post_content": None}),
+            )
+            session.add(response)
+            await session.commit()
+            await session.refresh(response)
+
+            assert response.post_title == ""
+            assert response.post_content == ""
+            assert response.attachments == []

@@ -109,7 +109,7 @@ async def _fire(context, *, gone=None, allowed=None, delay_config=None):
         guild_id="G1",
         emitter=_FakeEmitter(),
         limiter=_StubLimiter(),
-        budget=admin_budget(),
+        budget=admin_budget("message"),
         actor=actor,
         allowed_role_ids=allowed or handler.settings["allowed_role_ids"],
         timer_scheduler=recorder,
