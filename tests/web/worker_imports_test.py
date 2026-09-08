@@ -41,21 +41,29 @@ def test_both_configs_list_the_fire_job_modules():
             assert module in listed, f"{config_name} does not list {module}"
 
 
-def test_importing_the_listed_modules_registers_both_fire_payloads():
+def test_registering_the_fire_jobs_resolves_both_payloads_and_nothing_more():
     """Run in a fresh interpreter: the registry is process-global, so an
     in-process check would pass on the strength of whatever another test
     imported first."""
     script = textwrap.dedent(
         """
+        import sys
+
         from skrift.workers.registry import registry
 
         from smarter_dev.web.handler_fire_payloads import AdminHandlerFirePayload
         from smarter_dev.web.handler_fire_payloads import HandlerFirePayload
-        from smarter_dev.web.worker_imports import import_worker_job_modules
+        from smarter_dev.web.worker_imports import register_handler_fire_jobs
 
-        imported = import_worker_job_modules()
-        assert "smarter_dev.web.handlers_jobs" in imported, imported
-        assert "smarter_dev.web.admin_handlers_jobs" in imported, imported
+        registered = register_handler_fire_jobs()
+        assert set(registered) == {
+            "smarter_dev.web.handlers_jobs",
+            "smarter_dev.web.admin_handlers_jobs",
+        }, registered
+        # The rest of workers.imports stays out of a submit-only process: the
+        # agent job modules cost ~100 MiB the web pod's limit cannot absorb.
+        assert "smarter_dev.web.chat.jobs" not in sys.modules
+        assert "smarter_dev.web.blogging_agent.pipeline" not in sys.modules
         standard = registry.job_type_for_payload(HandlerFirePayload(handler_id="h"))
         admin = registry.job_type_for_payload(
             AdminHandlerFirePayload(admin_handler_id="a")
@@ -82,7 +90,7 @@ def test_importing_the_listed_modules_registers_both_fire_payloads():
     assert result.stdout.strip() == "handlers.fire admin_handlers.fire"
 
 
-def test_every_submit_only_entry_point_imports_the_job_modules():
+def test_every_submit_only_entry_point_registers_the_fire_jobs():
     for entry_point in SUBMIT_ONLY_ENTRY_POINTS:
         source = entry_point.read_text()
-        assert "import_worker_job_modules()" in source, entry_point
+        assert "register_handler_fire_jobs()" in source, entry_point

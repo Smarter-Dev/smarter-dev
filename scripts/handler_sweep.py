@@ -26,7 +26,7 @@ from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.database import get_session_maker
 from smarter_dev.web.handler_sweep import find_stalled_chains
 from smarter_dev.web.handler_sweep import sweep_schedule_chains
-from smarter_dev.web.worker_imports import import_worker_job_modules
+from smarter_dev.web.worker_imports import register_handler_fire_jobs
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -46,9 +46,8 @@ def _configure_worker_runtime() -> None:
 
     ``out_of_process`` configures the runtime WITHOUT starting a consumer pool —
     this script only ever submits, it never executes a job. Submitting still
-    needs every job module imported, so ``submit()`` can resolve a payload to
-    its job type; ``skrift workers run`` does that from ``workers.imports`` and
-    this script does the same.
+    needs the fire job modules imported, so ``submit()`` can resolve a payload
+    to its job type; ``skrift workers run`` gets that from ``workers.imports``.
     """
     from skrift.config import get_settings as get_skrift_settings
     from skrift.workers import configure_workers
@@ -65,7 +64,7 @@ def _configure_worker_runtime() -> None:
         settings=skrift_settings,
         session_maker=get_session_maker(),
     )
-    import_worker_job_modules()
+    register_handler_fire_jobs()
 
 
 async def main(dry_run: bool) -> int:
