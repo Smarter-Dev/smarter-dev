@@ -1,0 +1,104 @@
+<div id="qubit-color-flight-board">
+  <style>
+    #qubit-color-flight-board { color:var(--foreground); }
+    #qubit-color-flight-board .shots { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px 18px; }
+    #qubit-color-flight-board .shot-head { display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap; margin-bottom:8px; }
+    #qubit-color-flight-board h3 { margin:0; font-weight:500; }
+    #qubit-color-flight-board .shot-time { color:var(--muted-foreground); }
+    #qubit-color-flight-board .film-frame { display:block; width:100%; height:auto; aspect-ratio:16/9; }
+    #qubit-color-flight-board .shot-notes { display:grid; gap:4px; margin-top:8px; }
+    #qubit-color-flight-board .cue { color:var(--muted-foreground); }
+    @media (max-width:540px) { #qubit-color-flight-board .shots { grid-template-columns:1fr; } }
+  </style>
+  <div class="shots">
+    <section aria-labelledby="flight-shot-1">
+      <div class="shot-head"><h3 id="flight-shot-1">01 · First signal</h3><span class="shot-time text-small">0–2 s</span></div>
+      <svg class="film-frame" data-shot="0" viewBox="0 0 400 225" role="img" aria-label="A small closed cyan shell flashes across a dark frame, leaving a long light trail."></svg>
+      <div class="shot-notes"><span>Cyan fly-by · left to right</span><span class="cue text-small">Sound: approaching air → close pass</span></div>
+    </section>
+    <section aria-labelledby="flight-shot-2">
+      <div class="shot-head"><h3 id="flight-shot-2">02 · Not alone</h3><span class="shot-time text-small">2–4.5 s</span></div>
+      <svg class="film-frame" data-shot="1" viewBox="0 0 400 225" role="img" aria-label="Mint, lavender, gold and cyan closed shells enter on different flight paths and at different depths."></svg>
+      <div class="shot-notes"><span>More colors · different depths</span><span class="cue text-small">Sound: related tones join the same motif</span></div>
+    </section>
+    <section aria-labelledby="flight-shot-3">
+      <div class="shot-head"><h3 id="flight-shot-3">03 · A little mischief</h3><span class="shot-time text-small">4.5–7 s</span></div>
+      <svg class="film-frame" data-shot="2" viewBox="0 0 400 225" role="img" aria-label="Colored shells weave around each other, with cyan and pink trails crossing in a playful near miss. No collision."></svg>
+      <div class="shot-notes"><span>Weaving paths · one playful near miss</span><span class="cue text-small">Sound: crossing passes create the rhythm</span></div>
+    </section>
+    <section aria-labelledby="flight-shot-4">
+      <div class="shot-head"><h3 id="flight-shot-4">04 · The rush</h3><span class="shot-time text-small">7–9 s</span></div>
+      <svg class="film-frame" data-shot="3" viewBox="0 0 400 225" role="img" aria-label="The camera travels with a small pack of colored shells. Their trails stretch behind them as they accelerate past the viewer."></svg>
+      <div class="shot-notes"><span>Camera joins the flight · trails stretch</span><span class="cue text-small">Sound: the passes merge into one rising sweep</span></div>
+    </section>
+    <section aria-labelledby="flight-shot-5">
+      <div class="shot-head"><h3 id="flight-shot-5">05 · One stays</h3><span class="shot-time text-small">9–11 s</span></div>
+      <svg class="film-frame" data-shot="4" viewBox="0 0 400 225" role="img" aria-label="One closed cyan shell stops in the foreground and tilts toward the viewer. The other colored trails vanish beyond the frame. The face remains hidden."></svg>
+      <div class="shot-notes"><span>Cyan stops · a curious tilt · shell stays closed</span><span class="cue text-small">Sound: cut to silence → one quiet breath</span></div>
+    </section>
+    <section aria-labelledby="flight-shot-6">
+      <div class="shot-head"><h3 id="flight-shot-6">06 · Leave the question</h3><span class="shot-time text-small">11–14 s</span></div>
+      <svg class="film-frame" data-shot="5" viewBox="0 0 400 225" role="img" aria-label="End card: Something bright is coming. Smarter Dev Discord. No name, face or release date is revealed."></svg>
+      <div class="shot-notes"><span>One end card · no name or face reveal</span><span class="cue text-small">Sound: a soft tail from the same motif—not a new jingle</span></div>
+    </section>
+  </div>
+  <script>
+    (() => {
+      const root = document.getElementById('qubit-color-flight-board');
+      // Fixed colors below depict the proposed film, not the surrounding UI.
+      const C = { cyan:'#00dcef', mint:'#48efb2', violet:'#b988ff', pink:'#ff83b6', gold:'#ffd658' };
+      const frames = root.querySelectorAll('[data-shot]');
+      const defs = n => `<defs>
+        <radialGradient id="bg-${n}" cx="57%" cy="54%" r="70%"><stop stop-color="#091b28"/><stop offset="1" stop-color="#020609"/></radialGradient>
+        <radialGradient id="metal-${n}" cx="28%" cy="20%" r="85%"><stop stop-color="#354d5b"/><stop offset=".48" stop-color="#152531"/><stop offset="1" stop-color="#060c12"/></radialGradient>
+        <filter id="bloom-${n}" x="-80%" y="-80%" width="260%" height="260%"><feGaussianBlur stdDeviation="3"/></filter>
+        <filter id="wide-${n}" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="7"/></filter>
+      </defs>`;
+      function trail(n, path, color, width=2, opacity=.9) {
+        return `<g fill="none" stroke="${color}" stroke-linecap="round">
+          <path d="${path}" stroke-width="${width*5}" opacity="${opacity*.17}" filter="url(#bloom-${n})"/>
+          <path d="${path}" stroke-width="${width}" opacity="${opacity}"/>
+          <path d="${path}" stroke-width="${width*.3}" stroke="#d7fbff" opacity="${opacity*.6}"/>
+        </g>`;
+      }
+      function orb(n, x, y, r, color, rotation=0) {
+        return `<g transform="translate(${x} ${y}) rotate(${rotation}) scale(${r/30})">
+          <circle r="33" fill="${color}" opacity=".13" filter="url(#wide-${n})"/>
+          <circle r="30" fill="url(#metal-${n})" stroke="${color}" stroke-opacity=".36" stroke-width=".65"/>
+          <path d="M -29 -6 Q -15 -4 0 2 Q 10 -9 18 -24 M 0 2 Q 8 14 16 25" fill="none" stroke="${color}" stroke-width="3" opacity=".5" filter="url(#bloom-${n})"/>
+          <path d="M -29 -6 Q -15 -4 0 2 Q 10 -9 18 -24 M 0 2 Q 8 14 16 25" fill="none" stroke="${color}" stroke-width="1.35"/>
+          <path d="M -21 -19 Q -9 -29 8 -26" fill="none" stroke="#a3c8d5" stroke-width="1" opacity=".2"/>
+        </g>`;
+      }
+      const scenes = [
+        n => trail(n,'M -35 148 C 64 148 170 112 308 104',C.cyan,2.5)+orb(n,312,104,15,C.cyan,-17),
+        n => trail(n,'M -15 179 Q 135 192 284 147',C.cyan,2)+orb(n,293,144,26,C.cyan,8)
+          +trail(n,'M 16 27 Q 116 60 211 60',C.violet,1.3,.65)+orb(n,220,60,11,C.violet,-20)
+          +trail(n,'M 433 89 Q 338 75 287 89',C.mint,1.7)+orb(n,279,91,17,C.mint,50)
+          +trail(n,'M 102 235 Q 112 157 161 107',C.gold,1,.65)+orb(n,165,101,9,C.gold,75),
+        n => trail(n,'M -30 151 C 96 224 67 31 229 89 S 362 170 438 37',C.cyan,2.3)
+          +trail(n,'M -33 17 C 136 50 134 181 260 131 S 365 27 435 92',C.pink,2)
+          +trail(n,'M 423 191 C 313 247 229 156 146 157 S 60 163 10 105',C.gold,1.5,.8)
+          +orb(n,267,103,26,C.cyan,30)+orb(n,218,142,17,C.pink,-27)+orb(n,106,155,12,C.gold,-15)
+          +orb(n,358,62,7,C.mint,0),
+        n => trail(n,'M -60 251 Q 73 187 189 113',C.cyan,4)+orb(n,201,105,31,C.cyan,40)
+          +trail(n,'M 95 266 Q 200 173 264 88',C.violet,2.5)+orb(n,277,77,19,C.violet,35)
+          +trail(n,'M 447 234 Q 344 139 327 87',C.mint,2.7)+orb(n,319,73,25,C.mint,-15)
+          +trail(n,'M -35 58 Q 79 71 255 58',C.gold,1.2,.75)+orb(n,267,57,10,C.gold,10)
+          +trail(n,'M 397 211 Q 351 121 350 41',C.pink,1.6,.8)+orb(n,348,32,12,C.pink,-25),
+        n => trail(n,'M 39 28 Q 14 25 -20 6',C.violet,1,.35)
+          +trail(n,'M 346 43 Q 376 32 425 27',C.mint,1,.4)
+          +trail(n,'M 317 203 Q 367 211 424 194',C.pink,1,.25)
+          +trail(n,'M 82 196 Q 119 188 135 163',C.cyan,1,.17)
+          +orb(n,209,119,47,C.cyan,-13),
+        n => `<text x="200" y="90" fill="#d9edef" text-anchor="middle" font-family="Arial,sans-serif" font-size="25">Something bright</text>
+          <text x="200" y="123" fill="#d9edef" text-anchor="middle" font-family="Arial,sans-serif" font-size="25">is coming.</text>
+          <path d="M 178 147 H 222" stroke="${C.cyan}" stroke-width="1.5"/>
+          <text x="200" y="179" fill="#7cb6bf" text-anchor="middle" font-family="Arial,sans-serif" font-size="16" letter-spacing="1.2">SMARTER DEV DISCORD</text>`
+      ];
+      frames.forEach((frame,n) => {
+        frame.innerHTML = defs(n)+`<rect width="400" height="225" fill="url(#bg-${n})"/>`+scenes[n](n);
+      });
+    })();
+  </script>
+</div>

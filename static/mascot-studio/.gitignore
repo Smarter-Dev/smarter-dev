@@ -1,0 +1,12 @@
+node_modules/
+dist/
+renders/*.blend1
+trailer/output/frames/
+trailer/output/*.blend1
+trailer/output/color-flight/frames/
+trailer/output/color-flight/*.blend1
+
+# Preserve recovered deliverables despite the repository-wide video ignore rules.
+!recovered-exports/*.webm
+!trailer/output/smarter-dev-teaser.mp4
+!trailer/output/color-flight/smarter-dev-color-flight-teaser.mp4

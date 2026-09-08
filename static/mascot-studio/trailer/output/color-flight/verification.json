@@ -1,0 +1,16 @@
+{
+  "audioChannels" : 2,
+  "audioPeakDBFS" : -3.1534504588610694,
+  "audioRMSDBFS" : -22.279829386577834,
+  "audioSampleRate" : 48000,
+  "bytes" : 846356,
+  "decodedVideoFrames" : 336,
+  "differentDecodedFrames" : 6,
+  "file" : "smarter-dev-color-flight-teaser.mp4",
+  "fps" : 24,
+  "height" : 720,
+  "pausePeakDBFS" : -180,
+  "seconds" : 14,
+  "videoBitrate" : 301347.4375,
+  "width" : 1280
+}

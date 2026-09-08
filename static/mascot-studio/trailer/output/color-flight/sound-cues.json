@@ -1,0 +1,111 @@
+{
+  "seconds": 14,
+  "sampleRate": 48000,
+  "channels": 2,
+  "peakDBFS": -3.478503945983471,
+  "rmsDBFS": -22.200366333421975,
+  "intentionalSilence": [
+    9.42,
+    9.9
+  ],
+  "flightCues": [
+    {
+      "event": "First signal",
+      "start": 0.22,
+      "end": 1.8,
+      "color": "cyan",
+      "peak_motion_time": 1.1315
+    },
+    {
+      "event": "Violet answer",
+      "start": 1.94,
+      "end": 4.3,
+      "color": "violet",
+      "peak_motion_time": 3.1733125
+    },
+    {
+      "event": "Mint crossing",
+      "start": 2.2,
+      "end": 4.54,
+      "color": "mint",
+      "peak_motion_time": 3.4631875
+    },
+    {
+      "event": "Gold ascent",
+      "start": 2.65,
+      "end": 4.85,
+      "color": "gold",
+      "peak_motion_time": 3.846604166666667
+    },
+    {
+      "event": "Cyan return",
+      "start": 2.95,
+      "end": 4.7,
+      "color": "cyan",
+      "peak_motion_time": 3.906041666666667
+    },
+    {
+      "event": "Cyan weave",
+      "start": 4.42,
+      "end": 7.12,
+      "color": "cyan",
+      "peak_motion_time": 5.983104166666666
+    },
+    {
+      "event": "Pink mischief",
+      "start": 4.54,
+      "end": 7.1,
+      "color": "pink",
+      "peak_motion_time": 5.9506041666666665
+    },
+    {
+      "event": "Gold loop",
+      "start": 4.83,
+      "end": 7.25,
+      "color": "gold",
+      "peak_motion_time": 6.050625
+    },
+    {
+      "event": "Mint dart",
+      "start": 5.08,
+      "end": 6.83,
+      "color": "mint",
+      "peak_motion_time": 6.087479166666666
+    },
+    {
+      "event": "Rush violet",
+      "start": 6.98,
+      "end": 8.89,
+      "color": "violet",
+      "peak_motion_time": 8.325041666666667
+    },
+    {
+      "event": "Rush gold",
+      "start": 7.02,
+      "end": 8.72,
+      "color": "gold",
+      "peak_motion_time": 8.235833333333334
+    },
+    {
+      "event": "Rush pink",
+      "start": 7.12,
+      "end": 8.92,
+      "color": "pink",
+      "peak_motion_time": 8.391354166666666
+    },
+    {
+      "event": "Rush mint",
+      "start": 7.21,
+      "end": 8.99,
+      "color": "mint",
+      "peak_motion_time": 8.474104166666667
+    },
+    {
+      "event": "One stays",
+      "start": 7.14,
+      "end": 9.35,
+      "color": "cyan",
+      "peak_motion_time": 8.2613125
+    }
+  ]
+}
