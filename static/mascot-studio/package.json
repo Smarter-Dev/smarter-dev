@@ -1,0 +1,1 @@
+{"name":"smarter-mascot-studio","private":true,"type":"module","scripts":{"dev":"vite --host 127.0.0.1","build":"vite build --base=./","assets":"node export-model.mjs","test":"node verify.mjs"},"dependencies":{"three":"0.180.0"},"devDependencies":{"vite":"6.4.3","gltf-validator":"2.0.0-dev.3.10"}}

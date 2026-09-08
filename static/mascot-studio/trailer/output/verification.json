@@ -1,0 +1,16 @@
+{
+  "audioChannels" : 2,
+  "audioPeakDBFS" : -4.6835035504528548,
+  "audioRMSDBFS" : -22.474527262651549,
+  "audioSampleRate" : 48000,
+  "bytes" : 678928,
+  "decodedVideoFrames" : 288,
+  "differentDecodedFrames" : 4,
+  "file" : "smarter-dev-teaser.mp4",
+  "fps" : 24,
+  "height" : 720,
+  "pausePeakDBFS" : -9.12811795593338,
+  "seconds" : 12,
+  "videoBitrate" : 254280,
+  "width" : 1280
+}
