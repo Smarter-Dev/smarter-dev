@@ -141,6 +141,50 @@ async def claim_fire_attempt(redis, job_id: str) -> bool:
     return bool(claimed)
 
 
+# Script-facing at-most-once claim (the ``claim`` external function).
+#
+# ``claim_fire_attempt`` above makes ONE job's retries at-most-once. This is the
+# same primitive aimed at a different race: two CONCURRENT fires of the SAME
+# handler. A user posting the same scam in two channels fires an admin handler
+# twice at once (worker concurrency is 8), and the per-handler ``memory_*`` store
+# cannot dedupe them — it is loaded at fire start and persisted at fire end, so
+# both fires read the pre-fire snapshot, both decide "not actioned yet", and the
+# member gets warned and DMed twice. A script instead asks for a key with
+# ``claim("actioned:" + author_id, 86400)``: SET NX EX makes exactly one of the
+# racing fires get True, and the loser skips the action.
+#
+# The key is namespaced by handler id host-side (the script only ever passes the
+# raw suffix), so two handlers using the same obvious key name cannot collide or
+# silently suppress each other's actions.
+CLAIM_KEY_MAX_LEN = 128
+CLAIM_TTL_MIN_SECONDS = 1
+CLAIM_TTL_MAX_SECONDS = 30 * 86400
+# Per-fire ceiling on ``claim`` calls, in the shape of the ``max_timers`` per-fire
+# counter: a claim is cheap (one Redis round trip, no Discord spend), but an
+# unbounded loop of them is still a script writing unbounded keys into Redis.
+MAX_CLAIMS_PER_FIRE = 10
+
+
+def handler_claim_key(handler_id: str, key: str) -> str:
+    return f"hclaim:{handler_id}:{key}"
+
+
+async def claim_handler_key(
+    redis, handler_id: str, key: str, ttl_seconds: int
+) -> bool:
+    """Claim ``key`` for ``handler_id`` for ``ttl_seconds``; False if already held.
+
+    ``SET key 1 EX ttl NX`` — the first caller inside the TTL wins (True) and
+    every later caller, including a fire running concurrently in another worker,
+    gets False. This is the only dedupe primitive that holds ACROSS concurrent
+    fires; ``memory_*`` cannot (read at fire start, written at fire end).
+    """
+    claimed = await redis.set(
+        handler_claim_key(handler_id, key), "1", ex=int(ttl_seconds), nx=True
+    )
+    return bool(claimed)
+
+
 def channel_message_key(channel_id: str) -> str:
     return f"hcap:chanmsg:{channel_id}"
 

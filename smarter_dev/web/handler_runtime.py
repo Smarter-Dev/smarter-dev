@@ -38,6 +38,18 @@ Script-facing surface (Monty external functions):
   failing the fire), ``payload`` must be JSON-serializable and ≤4 KB, and each
   fire may arm at most ``max_timers`` (2 standard / 5 admin), with a per-handler
   30/hour arming window across fires.
+- ``claim(key, ttl_seconds)`` -> bool — atomically claim ``key`` for this handler
+  for ``ttl_seconds`` (both tiers; spends nothing on Discord). The FIRST caller
+  inside the TTL gets True and every later one gets False, ACROSS CONCURRENT
+  FIRES — which is the whole point, and the one thing ``memory_*`` cannot do
+  (memory is read at fire start and written at fire end, so two fires racing the
+  same author both read "not actioned yet" and both act). A script gates a
+  per-user/per-message side effect on it: ``if await claim("actioned:" + author_id,
+  86400): await warn_user(...)``. ``key`` must be a non-empty str ≤128 chars and
+  ``ttl_seconds`` an int in ``[1, 30*86400]`` (out of bounds raises, failing the
+  fire, like ``schedule_timer``'s delay); at most 10 claims per fire
+  (``CapExceeded("claims_per_fire")``). The key is namespaced by handler id
+  host-side, so handlers can't collide on a shared key name.
 
 Admin handlers (``actor`` set) additionally get ``edit_message(message_id,
 content, channel_id=None)`` -> message id (edits a bot-authored message in place,
@@ -117,6 +129,9 @@ import pydantic_monty as monty
 from smarter_dev.web.handler_budget import CapExceeded, HandlerBudget
 from smarter_dev.web.handler_caps import (
     CHANNEL_MESSAGES_PER_MIN,
+    CLAIM_KEY_MAX_LEN,
+    CLAIM_TTL_MAX_SECONDS,
+    CLAIM_TTL_MIN_SECONDS,
     DM_USER_WINDOW_SECONDS,
     DMS_PER_USER_PER_HOUR,
     GLOBAL_AGENT_CALLS_PER_MIN,
@@ -124,6 +139,7 @@ from smarter_dev.web.handler_caps import (
     GUILD_ROLE_CHANGES_PER_MIN,
     GUILD_THREAD_OPS_PER_MIN,
     HANDLER_TIMERS_PER_HOUR,
+    MAX_CLAIMS_PER_FIRE,
     RENAME_WINDOW_SECONDS,
     TIMER_ARMING_WINDOW_SECONDS,
     RENAMES_PER_WINDOW,
@@ -186,6 +202,14 @@ ModActionRecorder = Callable[[str, str, str], Awaitable[int]]
 RulesReader = Callable[[], Awaitable[list[dict[str, Any]]]]
 
 
+# An async function (key, ttl_seconds) -> bool implementing SET NX EX for THIS
+# handler: True for the first caller inside the TTL, False for every later one.
+# Injected by the fire job, which binds the Redis client and the handler id
+# host-side (so the raw key a script passes is namespaced and can never reach
+# another handler's claims) — the same injection discipline as TimerScheduler.
+Claimer = Callable[[str, int], Awaitable[bool]]
+
+
 async def _no_agent(prompt: str, has_tools: bool, budget: HandlerBudget) -> str:
     raise RuntimeError("no agent runner configured for this handler execution")
 
@@ -204,6 +228,10 @@ async def _no_mod_action_recorder(user_id: str, reason: str, channel_id: str) ->
 
 async def _no_rules_reader() -> list[dict[str, Any]]:
     raise RuntimeError("no rules reader configured for this handler execution")
+
+
+async def _no_claimer(key: str, ttl_seconds: int) -> bool:
+    raise RuntimeError("no claimer configured for this handler execution")
 
 
 def _clock_os(
@@ -297,6 +325,11 @@ class HandlerExecution:
     # Durable one-shot re-fire enqueuer for schedule_timer, injected by the fire
     # job (default _no_timer raises loud if schedule_timer is called unwired).
     timer_scheduler: TimerScheduler = _no_timer
+    # Redis-backed SET NX EX claim for the ``claim`` function, injected by the
+    # fire job with the handler id bound host-side. Both tiers; the raising
+    # default makes an unwired call fail loudly rather than silently return a
+    # value that would let a duplicate action through.
+    claimer: Claimer = _no_claimer
     # Separate 3600s-window limiter for the timer-arming rate cap; self.limiter is
     # fixed at 60s. Falls back to self.limiter (with a per-call window override) in
     # run_handler_script when the fire job doesn't inject a dedicated one.
@@ -328,6 +361,12 @@ class HandlerExecution:
     # exception that crosses out of an external function (losing its type), so
     # we record the real CapExceeded on the host side before re-raising.
     breach: CapExceeded | None = None
+    # Claims this fire has made, against MAX_CLAIMS_PER_FIRE. A per-fire counter
+    # in the shape of the budget's max_timers, but kept on the execution rather
+    # than in HandlerBudget: a claim costs nothing on Discord and nothing durable,
+    # so it needs no HandlerRun column (and no migration) — only a hard stop on a
+    # script looping claims without bound.
+    claims_made: int = 0
     # Per-execution cache of a thread's parent channel id, so the send_message
     # home-thread relaxation verifies each target once per fire. This is a host
     # rail (one cached fetch), NOT metered against discord_reads.
@@ -352,6 +391,10 @@ class HandlerExecution:
             # Available to BOTH tiers: a standard message/schedule/timer handler
             # can legitimately self-defer (E3).
             "schedule_timer": self._guard(self._schedule_timer),
+            # Both tiers: an at-most-once claim spends nothing on Discord, and a
+            # standard handler races itself across concurrent fires exactly as an
+            # admin one does.
+            "claim": self._guard(self._claim),
         }
         # Randomness as flat globals (Monty can't `import random`); pure compute.
         funcs.update(_random_functions())
@@ -1013,6 +1056,45 @@ class HandlerExecution:
         await self.timer_scheduler(fire_at, refire_context)
         return True
 
+    # -- atomic at-most-once claim (both tiers; no Discord spend) --
+
+    async def _claim(self, key: str, ttl_seconds: int) -> bool:
+        """Claim ``key`` for this handler for ``ttl_seconds``; True only once.
+
+        The ONLY way a script can make something happen at most once across
+        CONCURRENT fires: ``memory_*`` is loaded at fire start and persisted at
+        fire end, so two fires of the same handler racing on the same author both
+        read the same pre-fire snapshot and both act. This is SET NX EX on a
+        handler-namespaced key, so exactly one of them gets True.
+
+        Ordering follows ``_schedule_timer``: (1) argument validation — a bad key
+        or ttl is an author bug, rejected not clamped, so it raises and the fire
+        ERRORS; (2) the per-fire count -> ``CapExceeded("claims_per_fire")``;
+        (3) the injected claimer, which namespaces the key by handler id
+        host-side. Nothing on Discord is spent either way.
+        """
+        if not isinstance(key, str) or not key:
+            raise ValueError("claim key must be a non-empty string")
+        if len(key) > CLAIM_KEY_MAX_LEN:
+            raise ValueError(
+                f"claim key must be at most {CLAIM_KEY_MAX_LEN} characters"
+            )
+        # bool is an int subclass, and claim(key, True) is a typo, not a 1s TTL.
+        if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int):
+            raise ValueError("claim ttl_seconds must be an integer number of seconds")
+        if not CLAIM_TTL_MIN_SECONDS <= ttl_seconds <= CLAIM_TTL_MAX_SECONDS:
+            raise ValueError(
+                f"claim ttl_seconds must be between {CLAIM_TTL_MIN_SECONDS} and "
+                f"{CLAIM_TTL_MAX_SECONDS} seconds"
+            )
+        if self.claims_made >= MAX_CLAIMS_PER_FIRE:
+            raise CapExceeded(
+                "claims_per_fire",
+                f"handler hit its {MAX_CLAIMS_PER_FIRE}-claim per-fire cap",
+            )
+        self.claims_made += 1
+        return bool(await self.claimer(key, ttl_seconds))
+
     # -- persistent per-handler memory (survives across fires) --
 
     async def _memory_get(self, key: str, default: Any = None) -> Any:
@@ -1056,6 +1138,7 @@ async def run_handler_script(
     rules_reader: RulesReader = _no_rules_reader,
     handler_id: str = "",
     timer_scheduler: TimerScheduler = _no_timer,
+    claimer: Claimer = _no_claimer,
     timer_limiter: WindowedLimiter | None = None,
     dm_user_limiter: WindowedLimiter | None = None,
     budget: HandlerBudget | None = None,
@@ -1095,6 +1178,7 @@ async def run_handler_script(
         rules_reader=rules_reader,
         handler_id=handler_id,
         timer_scheduler=timer_scheduler,
+        claimer=claimer,
         timer_limiter=timer_limiter or limiter,
         dm_user_limiter=dm_user_limiter or limiter,
         actor=actor,

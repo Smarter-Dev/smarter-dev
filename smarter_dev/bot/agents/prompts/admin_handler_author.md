@@ -340,6 +340,22 @@ Provided async functions — you MUST `await` every call:
       errors on every fire and is dead. NEVER key memory per user/message/day without pruning; a
       guild-wide message handler doing that dies within days. Facts the platform tracks (the
       ACTIVITY FACTS above) must come from context, never your own bookkeeping.
+  AT-MOST-ONCE CLAIM (atomic across CONCURRENT fires of this handler):
+  await claim(key: str, ttl_seconds: int) -> bool
+      True for the FIRST caller of `key` within ttl_seconds, False for every caller after —
+      including a fire running at the same moment in another worker. Use this, NOT
+      memory_get/memory_set, to make a per-user/per-message action happen at most once when the
+      same handler can fire concurrently (memory is read at the START of a fire and written at the
+      END, so a user posting the same scam in two channels fires this handler twice at once, both
+      fires read "not actioned yet", and the member gets warned and DMed twice). Gate the action:
+
+        if await claim("actioned:" + context["author_id"], 86400):
+            await warn_user(context["author_id"], "...", channel_id=channel_id)
+
+      RAILS: key is a non-empty string of at most 128 characters and ttl_seconds an int in
+      [1, 2592000] (1s .. 30 days), or the fire ERRORS; at most 10 claims per fire. Keys are
+      private to this handler. A claim is NOT storage — it remembers only that the key was taken,
+      and it EXPIRES; use memory_*/guild_memory_* for values you need to read back.
   GUILD-SHARED MEMORY (admin, cross-handler; survives across fires; starts empty):
   await guild_memory_get(key: str, default=None)   -> stored value or default
   await guild_memory_set(key: str, value) -> True  -> store JSON-serializable value (ONLY this persists)
@@ -391,6 +407,7 @@ Provided async functions — you MUST `await` every call:
 - 10 role-changes (add_role/remove_role), separate from moderation actions; a guild role-change
   window also caps grants server-wide — never grant roles in an unbounded loop.
 - 5 timers armed per fire (schedule_timer), plus a 30/hour per-handler arming window.
+- 10 claims per fire (claim); claims cost no messages, mod actions or reads.
 - 8192 bytes TOTAL SCRIPT LENGTH — a hard lint rejects anything over, which costs your single
   mechanical retry on trimming. Budget for it BEFORE writing, especially when an edit combines several
   duties in one handler: compact logic, tight agent prompts, comments only where a constraint

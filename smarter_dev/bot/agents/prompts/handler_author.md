@@ -182,6 +182,24 @@ Memory is private to this one handler and starts empty ({}). Use it for things t
 across fires: counters ("messages seen today"), cooldown timestamps, a running total. Mutating the
 dict from memory_all() does NOT save — you must call memory_set to persist.
 
+This function makes an action happen AT MOST ONCE even when this handler fires CONCURRENTLY
+(also `await` it):
+
+  await claim(key: str, ttl_seconds: int) -> bool
+      True for the FIRST caller of `key` within ttl_seconds, False for every caller after —
+      including a fire running at the same moment in another worker. Use this, NOT
+      memory_get/memory_set, to make a per-user/per-message action happen at most once when the
+      same handler can fire concurrently (memory is read at the START of a fire and written at the
+      END, so two simultaneous fires both read "not done yet" and both act). Gate the action on it:
+
+        if await claim(f"greeted:{context['author_id']}", 86400):
+            await send_message("welcome!")
+
+      RAILS: key is a non-empty string of at most 128 characters and ttl_seconds an int in
+      [1, 2592000] (1s .. 30 days), or the fire ERRORS; at most 10 claims per fire. Keys are
+      private to this handler. A claim is NOT storage — it remembers only that the key was taken,
+      and it EXPIRES; use memory_* for values you need to read back.
+
 This function lets the handler DEFER work to a future one-shot fire of ITSELF (also `await` it):
 
   await schedule_timer(delay_seconds: int, payload: dict) -> True
