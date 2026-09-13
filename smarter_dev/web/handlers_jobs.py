@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 from copy import deepcopy
+from functools import partial
 from uuid import UUID
 
 from skrift.workers import RetryPolicy, WorkerContext, handler
@@ -30,6 +31,7 @@ from smarter_dev.web.handler_caps import (
     TIMER_ARMING_WINDOW_SECONDS,
     WindowedLimiter,
     claim_fire_attempt,
+    claim_handler_key,
 )
 from smarter_dev.web.handler_emitter import DiscordEmitter
 from smarter_dev.web.handler_fire_payloads import HandlerFirePayload
@@ -91,8 +93,10 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
     budget = HandlerBudget()
     # The emitter carries the fire's guild so list_threads() can hit the
     # guild-scoped active-threads endpoint; without it the URL is malformed.
-    emitter = DiscordEmitter(bot_token=settings.discord_bot_token, guild_id=guild_id)
     redis = get_redis_client()
+    emitter = DiscordEmitter(
+        bot_token=settings.discord_bot_token, guild_id=guild_id, redis=redis
+    )
     limiter = WindowedLimiter(redis=redis)
     # The timer limiter is a separate 3600s window (self.limiter is fixed at 60s).
     timer_limiter = WindowedLimiter(
@@ -130,6 +134,12 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
         )
         return {"status": "skipped"}
 
+    # The script-facing `claim(key, ttl)`: SET NX EX with the handler id bound
+    # host-side, so a raw script key is namespaced per handler and one handler's
+    # claims can never suppress another's. This is what dedupes CONCURRENT fires
+    # (memory_* can't — it's read at fire start and written at fire end).
+    claimer = partial(claim_handler_key, redis, str(handler_id))
+
     result = await run_handler_script(
         script,
         payload.trigger_context,
@@ -140,6 +150,7 @@ async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) 
         agent_runner=run_gathering_agent,
         handler_id=str(handler_id),
         timer_scheduler=timer_scheduler.schedule_timer,
+        claimer=claimer,
         timer_limiter=timer_limiter,
         budget=budget,
         memory=memory,

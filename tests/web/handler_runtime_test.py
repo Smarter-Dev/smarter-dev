@@ -184,7 +184,7 @@ async def _run(
     script, *, budget=None, emitter=None, limiter=None, agent_runner=None,
     actor=None, channel_ids=None, allowed_role_ids=None,
     timer_scheduler=None, timer_limiter=None, dm_user_limiter=None, handler_id=None,
-    mod_action_reader=None, mod_action_recorder=None, rules_reader=None,
+    mod_action_reader=None, mod_action_recorder=None, rules_reader=None, claimer=None,
 ):
     emitter = emitter or _FakeEmitter()
     limiter = limiter or _StubLimiter()
@@ -207,6 +207,8 @@ async def _run(
         kwargs["allowed_role_ids"] = allowed_role_ids
     if timer_scheduler is not None:
         kwargs["timer_scheduler"] = timer_scheduler
+    if claimer is not None:
+        kwargs["claimer"] = claimer
     if timer_limiter is not None:
         kwargs["timer_limiter"] = timer_limiter
     if handler_id is not None:
@@ -1815,3 +1817,171 @@ async def test_list_rules_not_available_to_standard_handler():
     result, _, _ = await _run("await list_rules()\n")
     assert result.outcome == "error"
     assert "list_rules" in result.error
+
+
+
+# ---------------------------------------------------------------------------
+# claim — atomic at-most-once ACROSS CONCURRENT FIRES (both tiers)
+#
+# The production incident this exists for: a user posted the same scam in two
+# channels, the admin handler fired twice at once, and both fires read the
+# pre-fire memory snapshot, both saw "not actioned yet", and the member was
+# warned and DMed twice. memory_* structurally cannot dedupe that (loaded at fire
+# start, persisted at fire end); a SET NX EX claim can.
+
+from smarter_dev.web.handler_caps import (  # noqa: E402
+    CLAIM_KEY_MAX_LEN,
+    CLAIM_TTL_MAX_SECONDS,
+    MAX_CLAIMS_PER_FIRE,
+)
+
+
+@dataclass
+class _FakeClaimer:
+    """SET NX EX over a dict; stands in for the fire job's Redis-bound closure.
+
+    Shared between "fires" by reusing one instance, which is how a test models
+    two concurrent fires of the same handler racing the same key.
+    """
+
+    held: set = field(default_factory=set)
+    calls: list = field(default_factory=list)
+
+    async def __call__(self, key, ttl_seconds):
+        self.calls.append((key, ttl_seconds))
+        if key in self.held:
+            return False
+        self.held.add(key)
+        return True
+
+
+async def test_claim_is_true_once_then_false_for_the_same_key():
+    claimer = _FakeClaimer()
+    script = (
+        'first = await claim("actioned:U1", 86400)\n'
+        'second = await claim("actioned:U1", 86400)\n'
+        'await send_message(f"{first} {second}")\n'
+    )
+    result, emitter, _ = await _run(script, claimer=claimer)
+    assert result.outcome == "ok", result.error
+    assert emitter.messages[0][1] == "True False"
+    assert claimer.calls == [("actioned:U1", 86400), ("actioned:U1", 86400)]
+
+
+async def test_a_concurrent_second_fire_loses_the_claim():
+    """The incident, end to end: two fires, one shared claimer, one action."""
+    claimer = _FakeClaimer()
+    script = (
+        'if await claim("actioned:" + context["author_id"], 86400):\n'
+        '    await send_message("warned")\n'
+    )
+    first, emitter_a, _ = await _run(script, claimer=claimer)
+    second, emitter_b, _ = await _run(script, claimer=claimer)
+    assert (first.outcome, second.outcome) == ("ok", "ok")
+    assert [c for _, c in emitter_a.messages] == ["warned"]
+    assert emitter_b.messages == []  # the loser skips the action entirely
+
+
+async def test_claim_key_is_passed_raw_for_the_host_to_namespace():
+    """The script never sees the handler prefix: namespacing is host-side."""
+    claimer = _FakeClaimer()
+    await _run('await claim("k1", 60)\n', claimer=claimer, handler_id="H1")
+    assert claimer.calls == [("k1", 60)]
+
+
+async def test_claim_available_to_the_standard_tier():
+    claimer = _FakeClaimer()
+    result, emitter, _ = await _run(
+        'await send_message(str(await claim("k", 60)))\n', claimer=claimer
+    )
+    assert result.outcome == "ok", result.error  # no actor: standard handler
+    assert emitter.messages[0][1] == "True"
+
+
+async def test_claim_available_to_the_admin_tier():
+    claimer = _FakeClaimer()
+    result, _, _ = await _run(
+        'await claim("k", 60)\n',
+        claimer=claimer,
+        budget=admin_budget("message"),
+        actor=_FakeActor(),
+    )
+    assert result.outcome == "ok", result.error
+
+
+async def test_claim_spends_no_budget():
+    claimer = _FakeClaimer()
+    result, _, _ = await _run('await claim("k", 60)\n', claimer=claimer)
+    assert result.outcome == "ok", result.error
+    assert all(v == 0 for v in result.usage.values())
+
+
+async def test_claim_empty_key_errors_the_fire():
+    claimer = _FakeClaimer()
+    result, _, _ = await _run('await claim("", 60)\n', claimer=claimer)
+    assert result.outcome == "error"
+    assert claimer.calls == []
+
+
+async def test_claim_overlong_key_errors_the_fire():
+    claimer = _FakeClaimer()
+    script = f'await claim("k" * {CLAIM_KEY_MAX_LEN + 1}, 60)\n'
+    result, _, _ = await _run(script, claimer=claimer)
+    assert result.outcome == "error"
+    assert claimer.calls == []
+
+
+async def test_claim_max_length_key_is_accepted():
+    claimer = _FakeClaimer()
+    script = f'await claim("k" * {CLAIM_KEY_MAX_LEN}, 60)\n'
+    result, _, _ = await _run(script, claimer=claimer)
+    assert result.outcome == "ok", result.error
+
+
+async def test_claim_non_string_key_errors_the_fire():
+    claimer = _FakeClaimer()
+    result, _, _ = await _run("await claim(123, 60)\n", claimer=claimer)
+    assert result.outcome == "error"
+    assert claimer.calls == []
+
+
+async def test_claim_zero_ttl_errors_the_fire():
+    claimer = _FakeClaimer()
+    result, _, _ = await _run('await claim("k", 0)\n', claimer=claimer)
+    assert result.outcome == "error"
+    assert claimer.calls == []
+
+
+async def test_claim_ttl_above_max_errors_the_fire():
+    claimer = _FakeClaimer()
+    script = f'await claim("k", {CLAIM_TTL_MAX_SECONDS + 1})\n'
+    result, _, _ = await _run(script, claimer=claimer)
+    assert result.outcome == "error"
+    assert claimer.calls == []
+
+
+async def test_claim_non_integer_ttl_errors_the_fire():
+    claimer = _FakeClaimer()
+    result, _, _ = await _run('await claim("k", 60.5)\n', claimer=claimer)
+    assert result.outcome == "error"
+    assert claimer.calls == []
+
+
+async def test_claim_per_fire_cap_breaches_on_the_eleventh():
+    claimer = _FakeClaimer()
+    script = (
+        f"for i in range({MAX_CLAIMS_PER_FIRE + 1}):\n"
+        '    await claim("k" + str(i), 60)\n'
+    )
+    result, _, _ = await _run(script, claimer=claimer)
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "claims_per_fire"
+    # The first ten went through; the eleventh never reached the claimer.
+    assert len(claimer.calls) == MAX_CLAIMS_PER_FIRE
+
+
+async def test_claim_not_configured_errors_loudly():
+    # Default _no_claimer: the function exists but an unwired call must fail,
+    # never silently return a value that lets a duplicate action through.
+    result, _, _ = await _run('await claim("k", 60)\n')
+    assert result.outcome == "error"

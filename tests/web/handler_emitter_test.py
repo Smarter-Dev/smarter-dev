@@ -10,9 +10,12 @@ import pytest
 
 from smarter_dev.web import handler_emitter
 from smarter_dev.web.handler_emitter import (
+    DM_CHANNEL_CACHE_TTL_SECONDS,
+    DM_OPEN_RETRY_DELAY_SECONDS,
     DiscordEmitError,
     DiscordEmitter,
     _snowflake_created_at,
+    dm_channel_cache_key,
 )
 
 
@@ -637,6 +640,175 @@ async def test_send_dm_caches_dm_channel_per_fire():
     posts = [r for r in requests if r.url.path.endswith("/channels/DM1/messages")]
     assert len(opens) == 1
     assert len(posts) == 2
+
+
+# -- the DM channel cache lives bot-wide in Redis, not just per fire --------
+
+
+class _FakeRedis:
+    """Just enough Redis to model the GET/SET the DM-channel cache does."""
+
+    def __init__(self, store: dict[str, str] | None = None) -> None:
+        self.store: dict[str, str] = dict(store or {})
+        self.set_calls: list[dict] = []
+
+    async def get(self, key):
+        return self.store.get(key)
+
+    async def set(self, key, value, ex=None):
+        self.set_calls.append({"key": key, "value": value, "ex": ex})
+        self.store[key] = value
+        return True
+
+
+def _cached_emitter(handle, redis) -> DiscordEmitter:
+    """A routed emitter backed by a (fake) bot-wide DM-channel cache."""
+    return DiscordEmitter(
+        bot_token="t",
+        guild_id="G1",
+        redis=redis,
+        transport=httpx.MockTransport(handle),
+    )
+
+
+async def test_send_dm_uses_the_cached_dm_channel_without_opening():
+    """The whole point: a cached id means Discord's open-DM rail is never hit."""
+    requests: list[httpx.Request] = []
+    redis = _FakeRedis({dm_channel_cache_key("U9"): "DM1"})
+
+    message_id = await _cached_emitter(_dm_handler(requests), redis).send_dm(
+        "U9", "hey"
+    )
+
+    assert message_id == "M7"
+    assert [r.url.path for r in requests] == ["/api/v10/channels/DM1/messages"]
+
+
+async def test_a_first_open_is_cached_bot_wide_for_later_fires():
+    requests: list[httpx.Request] = []
+    redis = _FakeRedis()
+
+    await _cached_emitter(_dm_handler(requests), redis).send_dm("U9", "first")
+
+    assert redis.set_calls == [
+        {
+            "key": dm_channel_cache_key("U9"),
+            "value": "DM1",
+            "ex": DM_CHANNEL_CACHE_TTL_SECONDS,
+        }
+    ]
+    # A *different* emitter (i.e. the next fire) reuses it: no second open.
+    await _cached_emitter(_dm_handler(requests), redis).send_dm("U9", "second")
+    opens = [r for r in requests if r.url.path.endswith("/users/@me/channels")]
+    assert len(opens) == 1
+
+
+async def test_redis_values_are_decoded_when_the_client_returns_bytes():
+    requests: list[httpx.Request] = []
+    redis = _FakeRedis({dm_channel_cache_key("U9"): b"DM1"})
+
+    message_id = await _cached_emitter(_dm_handler(requests), redis).send_dm(
+        "U9", "hey"
+    )
+
+    assert message_id == "M7"
+    assert requests[0].url.path.endswith("/channels/DM1/messages")
+
+
+# -- 40003: Discord throttling DM opens is transient, never a failed fire ---
+
+_DM_TOO_FAST = '{"message": "You are opening direct messages too fast.", "code": 40003}'
+
+
+def _throttled_dm_handler(requests: list[httpx.Request], *, throttled_opens: int):
+    """Route send_dm with the first ``throttled_opens`` channel-opens 40003'd."""
+    opens = 0
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        nonlocal opens
+        requests.append(request)
+        if request.url.path.endswith("/users/@me/channels"):
+            opens += 1
+            if opens <= throttled_opens:
+                return httpx.Response(400, text=_DM_TOO_FAST)
+            return httpx.Response(200, text='{"id": "DM1"}')
+        return httpx.Response(200, text='{"id": "M7"}')
+
+    return handle
+
+
+@pytest.fixture
+def slept(monkeypatch) -> list[float]:
+    """Captures the retry wait instead of really sleeping."""
+    waits: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        waits.append(seconds)
+
+    monkeypatch.setattr(handler_emitter, "_sleep", fake_sleep)
+    return waits
+
+
+async def test_a_throttled_dm_open_is_retried_once_and_succeeds(slept):
+    requests: list[httpx.Request] = []
+
+    message_id = await _routed_emitter(
+        _throttled_dm_handler(requests, throttled_opens=1)
+    ).send_dm("U9", "hey")
+
+    assert message_id == "M7"
+    assert slept == [DM_OPEN_RETRY_DELAY_SECONDS]
+    opens = [r for r in requests if r.url.path.endswith("/users/@me/channels")]
+    assert len(opens) == 2
+
+
+async def test_a_throttled_open_reuses_the_id_a_concurrent_fire_cached(monkeypatch):
+    """The racing fire that won the open stores the id; the loser picks it up
+    after the wait instead of asking Discord again."""
+    requests: list[httpx.Request] = []
+    redis = _FakeRedis()
+
+    async def other_fire_wins_during_sleep(seconds: float) -> None:
+        redis.store[dm_channel_cache_key("U9")] = "DM1"
+
+    monkeypatch.setattr(handler_emitter, "_sleep", other_fire_wins_during_sleep)
+
+    message_id = await _cached_emitter(
+        _throttled_dm_handler(requests, throttled_opens=5), redis
+    ).send_dm("U9", "hey")
+
+    assert message_id == "M7"
+    opens = [r for r in requests if r.url.path.endswith("/users/@me/channels")]
+    assert len(opens) == 1
+    assert requests[-1].url.path == "/api/v10/channels/DM1/messages"
+
+
+async def test_a_twice_throttled_dm_open_is_an_undelivered_dm_not_an_error(slept):
+    """Best-effort contract: the fire must survive losing a DM-open race."""
+    requests: list[httpx.Request] = []
+
+    result = await _routed_emitter(
+        _throttled_dm_handler(requests, throttled_opens=2)
+    ).send_dm("U9", "hey")
+
+    assert result is False
+    opens = [r for r in requests if r.url.path.endswith("/users/@me/channels")]
+    assert len(opens) == 2
+
+
+async def test_a_400_that_is_not_the_dm_throttle_still_raises(slept):
+    requests: list[httpx.Request] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        body = '{"message": "Invalid Form Body", "code": 50035}'
+        return httpx.Response(400, text=body)
+
+    with pytest.raises(DiscordEmitError):
+        await _routed_emitter(handle).send_dm("U9", "hey")
+
+    assert len(requests) == 1
+    assert slept == []
 
 
 async def test_send_dm_returns_false_on_403_dms_closed():

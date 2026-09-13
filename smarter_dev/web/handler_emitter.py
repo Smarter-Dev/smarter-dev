@@ -13,9 +13,11 @@ reaction, rename a channel. Request plumbing lives in
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Any
 from typing import ClassVar
 from urllib.parse import quote
 
@@ -36,6 +38,33 @@ _CHANNEL_NAME_MAX = 100
 # output is often a list of links (e.g. a news digest); without this each URL
 # explodes into a large preview card, flooding the channel.
 _SUPPRESS_EMBEDS = 1 << 2
+
+# A user's DM channel id never changes, so the open is cached bot-wide (below)
+# for a week rather than re-paid per fire.
+DM_CHANNEL_CACHE_TTL_SECONDS = 7 * 24 * 60 * 60
+# Discord's "You are opening direct messages too fast." rail: a transient
+# throttle on the open, not a closed door.
+_DM_OPEN_THROTTLED_CODE = 40003
+# How long to wait before the single retry of a throttled DM-channel open.
+DM_OPEN_RETRY_DELAY_SECONDS = 1.0
+
+# Module-level indirection so tests can swap in a recorder and never sleep.
+_sleep = asyncio.sleep
+
+
+def dm_channel_cache_key(user_id: str) -> str:
+    """Redis key holding a user's opened DM channel id."""
+    return f"hdm:chan:{user_id}"
+
+
+def _decoded(value: Any) -> str:
+    """A Redis value as text; clients hand back bytes or str by config."""
+    return value.decode() if isinstance(value, bytes) else str(value)
+
+
+def _is_dm_open_throttle(error: DiscordRestError) -> bool:
+    """True for Discord's transient "opening DMs too fast" 400 (code 40003)."""
+    return error.status_code == 400 and error.error_code == _DM_OPEN_THROTTLED_CODE
 
 
 def _allowed_mentions(ping_role_id: str | None = None) -> dict:
@@ -137,9 +166,14 @@ class DiscordEmitter(DiscordBotClient):
     # reactions keep constructing with ``bot_token`` alone; ``list_threads``
     # requires the runtime to pass the real guild id.
     guild_id: str = ""
+    # Optional redis.asyncio client backing the bot-wide DM-channel cache (see
+    # ``_resolve_dm_channel``). Defaulted to None so message-only constructions
+    # (scripts/announce.py, tests) keep working with no cache at all.
+    redis: Any | None = None
     # Per-fire cache of user_id -> opened DM channel id, so repeated relay
     # replies to one user (send_dm) open the channel once. One emitter is built
-    # per fire in admin_handlers_jobs, so this is naturally fire-scoped.
+    # per fire in admin_handlers_jobs, so this is naturally fire-scoped; the
+    # Redis layer below spans fires.
     _dm_channel_cache: dict[str, str] = field(default_factory=dict)
 
     user_agent: ClassVar[str] = "SmarterDev-Handlers/1.0"
@@ -189,13 +223,19 @@ class DiscordEmitter(DiscordBotClient):
         """DM a user; return the new message id, or ``False`` on a closed door.
 
         Resolves (opening if needed) the user's DM channel via
-        ``POST /users/@me/channels`` — cached per fire so repeated relay replies
-        to one user pay a single channel-open — then posts with the same
-        truncation, embed suppression, and mention rail as ``create_message``.
+        ``POST /users/@me/channels`` — cached per fire and, when this emitter
+        has a ``redis``, bot-wide (see ``_resolve_dm_channel``) — then posts
+        with the same truncation, embed suppression, and mention rail as
+        ``create_message``.
 
-        Returns ``False`` on 403 (DMs closed / no mutual guild) or 404 (unknown
-        user): these are *expected* outcomes the relay script branches to ❌ on,
-        not infrastructure failures. Everything else raises (fail fast).
+        Returns ``False`` on 403 (DMs closed / no mutual guild), 404 (unknown
+        user), or a DM-channel open that Discord throttled twice (code 40003,
+        retried once by ``_open_dm_channel``): these are *expected* outcomes
+        the relay script branches to ❌ on, not infrastructure failures. A DM is
+        best-effort by contract, and a throttled open means concurrent fires
+        raced for the same user — the sending fire must not fail for it, least
+        of all after its public side effects already landed. Everything else,
+        including any other 400, raises (fail fast).
         """
         try:
             channel_id = await self._resolve_dm_channel(user_id)
@@ -208,7 +248,7 @@ class DiscordEmitter(DiscordBotClient):
                 "POST", f"/channels/{channel_id}/messages", json=payload
             )
         except DiscordEmitError as error:
-            if error.status_code in (403, 404):
+            if error.status_code in (403, 404) or _is_dm_open_throttle(error):
                 return False
             raise
         # The purpose of the DM, never its body: the bot may recall that it wrote
@@ -241,16 +281,67 @@ class DiscordEmitter(DiscordBotClient):
         )
 
     async def _resolve_dm_channel(self, user_id: str) -> str:
-        """The user's DM channel id, opening + caching it once per fire."""
+        """The user's DM channel id: per-fire dict, then Redis, then an open.
+
+        The Redis layer is bot-wide on purpose. A DM channel id is stable per
+        user forever, yet a per-fire-only cache re-opens it on every single
+        fire — which is what tripped Discord's open-DM throttle (400 / code
+        40003) when two fires of one handler DM'd the same user ~100 ms apart.
+        Caching the id across fires for :data:`DM_CHANNEL_CACHE_TTL_SECONDS`
+        means the second fire never issues the open at all. With ``redis``
+        unset this behaves exactly as before: per-fire caching only.
+        """
         cached = self._dm_channel_cache.get(user_id)
         if cached is not None:
             return cached
+        stored = await self._stored_dm_channel(user_id)
+        if stored is not None:
+            self._dm_channel_cache[user_id] = stored
+            return stored
+        channel_id = await self._open_dm_channel(user_id)
+        if self.redis is not None:
+            await self.redis.set(
+                dm_channel_cache_key(user_id),
+                channel_id,
+                ex=DM_CHANNEL_CACHE_TTL_SECONDS,
+            )
+        self._dm_channel_cache[user_id] = channel_id
+        return channel_id
+
+    async def _stored_dm_channel(self, user_id: str) -> str | None:
+        """The bot-wide cached DM channel id, or ``None`` without one/redis."""
+        if self.redis is None:
+            return None
+        stored = await self.redis.get(dm_channel_cache_key(user_id))
+        return _decoded(stored) if stored else None
+
+    async def _open_dm_channel(self, user_id: str) -> str:
+        """Open the user's DM channel, riding out one throttle refusal.
+
+        Code 40003 is Discord rate-limiting DM opens rather than refusing this
+        user, so it is retried exactly once after
+        :data:`DM_OPEN_RETRY_DELAY_SECONDS`. A throttle almost always means a
+        concurrent fire is opening the same channel, so the bot-wide cache is
+        re-checked after the wait: if that fire has since stored the id, the
+        retry never touches Discord. A second 40003 propagates and ``send_dm``
+        turns it into a best-effort ``False``.
+        """
+        try:
+            return await self._post_dm_open(user_id)
+        except DiscordEmitError as error:
+            if not _is_dm_open_throttle(error):
+                raise
+        await _sleep(DM_OPEN_RETRY_DELAY_SECONDS)
+        stored = await self._stored_dm_channel(user_id)
+        if stored is not None:
+            return stored
+        return await self._post_dm_open(user_id)
+
+    async def _post_dm_open(self, user_id: str) -> str:
         response = await self._request(
             "POST", "/users/@me/channels", json={"recipient_id": user_id}
         )
-        channel_id = str(response.json().get("id", ""))
-        self._dm_channel_cache[user_id] = channel_id
-        return channel_id
+        return str(response.json().get("id", ""))
 
     async def edit_message(
         self, channel_id: str, message_id: str, content: str
