@@ -23,6 +23,7 @@ from pathlib import Path
 
 from pydantic_ai import Agent
 from pydantic_ai import PromptedOutput
+from pydantic_ai.capabilities import ProcessHistory
 from pydantic_ai.models import Model
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.models.google import GoogleModelSettings
@@ -199,7 +200,10 @@ def get_chat_agent(
                 budgeted_toolset(chat_tool_functions() + handler_tool_functions())
             ],
             model_settings=_model_settings_for(resolved_id, reasoning_level),
-            history_processors=[compact_history, tool_budget_notice],
+            capabilities=[
+                ProcessHistory(compact_history),
+                ProcessHistory(tool_budget_notice),
+            ],
         )
         _chat_agents[cache_key] = agent
     return agent
@@ -238,7 +242,10 @@ def get_worker_agent(
                 budgeted_toolset(chat_tool_functions() + handler_tool_functions())
             ],
             model_settings=_model_settings_for(resolved_id, reasoning_level),
-            history_processors=[compact_history, tool_budget_notice],
+            capabilities=[
+                ProcessHistory(compact_history),
+                ProcessHistory(tool_budget_notice),
+            ],
         )
         _worker_agents[cache_key] = agent
     return agent

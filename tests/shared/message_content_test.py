@@ -373,13 +373,17 @@ class TestRedactModelMessageParts:
         # carrying what a member said or being model-authored. A new kind
         # must fail here and force that decision.
         assert part_kinds_of(ModelRequestPart) == {
+            "capability-load-return",
             "system-prompt",
+            "speech",
+            "tool-availability-delta",
             "user-prompt",
             "tool-return",
             "tool-search-return",
             "retry-prompt",
         }
         assert part_kinds_of(ModelResponsePart) == {
+            "capability-load-call",
             "text",
             "thinking",
             "tool-call",
@@ -390,6 +394,7 @@ class TestRedactModelMessageParts:
             "builtin-tool-search-return",
             "compaction",
             "file",
+            "speech",
         }
 
 

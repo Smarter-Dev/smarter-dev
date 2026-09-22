@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -192,6 +194,26 @@ def test_twopass_models_are_priceable_at_list_price():
         "deepseek/deepseek-v4-flash", 1_000_000, 1_000_000, 0
     )
     assert deepseek == pytest.approx(0.26)  # $0.0867 + $0.1733
+
+
+def test_typesafe_cost_uses_explicit_account_rate(monkeypatch):
+    from scripts.proactive_eval import simulate
+
+    monkeypatch.setenv("TYPESAFE_INPUT_PRICE_PER_MILLION_USD", "0.2")
+    monkeypatch.setenv("TYPESAFE_OUTPUT_PRICE_PER_MILLION_USD", "0.8")
+
+    assert simulate._usage_cost("typesafe:jev-1.13.0", 1_000_000, 500_000, 0) == 0.6
+
+
+def test_typesafe_cost_uses_public_list_price_by_default(monkeypatch):
+    from scripts.proactive_eval import simulate
+
+    monkeypatch.delenv("TYPESAFE_INPUT_PRICE_PER_MILLION_USD", raising=False)
+    monkeypatch.delenv("TYPESAFE_OUTPUT_PRICE_PER_MILLION_USD", raising=False)
+
+    assert simulate._usage_cost(
+        "typesafe:jev-latest", 1_000_000, 1_000_000, 0
+    ) == pytest.approx(0.042)
 
 
 def test_kimi_routes_via_openrouter_without_zen_key(monkeypatch):

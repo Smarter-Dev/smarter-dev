@@ -305,6 +305,6 @@ async def test_agent_consumer_rejects_skim_usage_without_watcher_model_id():
     try:
         await consumer.consume(_context())
     except ValueError as error:
-        assert str(error) == "watcher_model_id is required to attribute skim usage"
+        assert str(error) == "skim_model_id is required to attribute skim usage"
     else:
         raise AssertionError("skim usage without watcher_model_id must fail")
