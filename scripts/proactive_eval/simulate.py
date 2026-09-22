@@ -20,12 +20,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
 
 from dotenv import load_dotenv
-from genai_prices import Usage, calc_price
+from genai_prices import Usage
+from genai_prices import calc_price
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -36,40 +38,37 @@ load_dotenv(REPO_ROOT / ".env")
 
 import eval_prices  # noqa: E402  — prices for models newer than the snapshot
 
-from scripts.proactive_eval.adapters import (  # noqa: E402
-    BaselineAdapter,
-    SilentAdapter,
-)
-from scripts.proactive_eval.simulation import (  # noqa: E402
-    ActivationResult,
-    FixtureMessage,
-    format_cost_summary,
-    run_simulation,
-)
-from scripts.proactive_eval.twopass.adapter import TwoPassAdapter  # noqa: E402
-from scripts.proactive_eval.twopass.agent import (  # noqa: E402
-    OPERATING_POLICY_BRIEF,
-    KimiAgentRunner,
-    build_agent_system_prompt,
-    build_kimi_agent,
-)
-from scripts.proactive_eval.twopass.environment import InstructionStore  # noqa: E402
-from scripts.proactive_eval.twopass.models import (  # noqa: E402
-    build_twopass_model,
-    ensure_openrouter_key_alias,
-    resolve_agent_model_id,
-)
-from scripts.proactive_eval.twopass.watcher import SkimRunner, WatcherRunner  # noqa: E402
+from scripts.proactive_eval.adapters import BaselineAdapter  # noqa: E402
+from scripts.proactive_eval.adapters import SilentAdapter  # noqa: E402
 from scripts.proactive_eval.replay_tools import replay_parity_tools  # noqa: E402
+from scripts.proactive_eval.simulation import ActivationResult  # noqa: E402
+from scripts.proactive_eval.simulation import FixtureMessage  # noqa: E402
+from scripts.proactive_eval.simulation import format_cost_summary  # noqa: E402
+from scripts.proactive_eval.simulation import run_simulation  # noqa: E402
+from scripts.proactive_eval.twopass.adapter import TwoPassAdapter  # noqa: E402
+from scripts.proactive_eval.twopass.agent import OPERATING_POLICY_BRIEF  # noqa: E402
+from scripts.proactive_eval.twopass.agent import KimiAgentRunner  # noqa: E402
+from scripts.proactive_eval.twopass.agent import build_agent_system_prompt  # noqa: E402
+from scripts.proactive_eval.twopass.agent import build_kimi_agent  # noqa: E402
+from scripts.proactive_eval.twopass.environment import InstructionStore  # noqa: E402
+from scripts.proactive_eval.twopass.models import build_twopass_model  # noqa: E402
+from scripts.proactive_eval.twopass.models import build_watcher_runner  # noqa: E402
+from scripts.proactive_eval.twopass.models import (  # noqa: E402
+    ensure_openrouter_key_alias,
+)
+from scripts.proactive_eval.twopass.models import resolve_agent_model_id  # noqa: E402
+from scripts.proactive_eval.twopass.watcher import SkimRunner  # noqa: E402
 from scripts.proactive_eval.twopass.windows import two_pass_windows  # noqa: E402
 from smarter_dev.bot.proactive.parity import ProactiveDeps  # noqa: E402
-from smarter_dev.shared.model_catalog import MODEL_CATALOG, ModelProvider  # noqa: E402
+from smarter_dev.shared.model_catalog import MODEL_CATALOG  # noqa: E402
+from smarter_dev.shared.model_catalog import ModelProvider  # noqa: E402
 
 eval_prices.install()
 
 DEFAULT_BASELINE_MODEL = "gemini-3.5-flash-lite"
 DEFAULT_TWOPASS_AGENT_MODEL = "kimi-k3"
 DEFAULT_TWOPASS_WATCHER_MODEL = "deepseek/deepseek-v4-flash"
+DEFAULT_TWOPASS_SKIM_MODEL = DEFAULT_TWOPASS_WATCHER_MODEL
 
 RUNS_DIR = Path(__file__).resolve().parent / "data" / "runs"
 
@@ -98,6 +97,14 @@ def _usage_cost(
     """List-price USD for one model's usage; zero usage skips the lookup."""
     if not (input_tokens or output_tokens or cache_read_tokens):
         return 0.0
+    if model_id.startswith("typesafe:"):
+        # Published Jev list price as of 2026-09-15. Environment overrides
+        # preserve exact accounting for accounts with contracted rates.
+        input_rate = os.getenv("TYPESAFE_INPUT_PRICE_PER_MILLION_USD", "0.042")
+        output_rate = os.getenv("TYPESAFE_OUTPUT_PRICE_PER_MILLION_USD", "0.0")
+        return (
+            input_tokens * float(input_rate) + output_tokens * float(output_rate)
+        ) / 1_000_000
     priced = calc_price(
         Usage(
             input_tokens=input_tokens,
@@ -188,9 +195,10 @@ def _build_twopass_adapter(
         args.model or DEFAULT_TWOPASS_AGENT_MODEL
     )
     watcher_model_id = args.watcher_model
+    skim_model_id = args.skim_model
     if bot_display_name is None:
         bot_display_name = _bot_display_name(messages, meta["bot_user_id"])
-    skim = SkimRunner(build_twopass_model(watcher_model_id))
+    skim = SkimRunner(build_twopass_model(skim_model_id))
 
     async def compaction_summarize(messages) -> str:
         # Compaction is rare (~100k tokens of agent history); its skim cost
@@ -225,7 +233,7 @@ def _build_twopass_adapter(
             **kwargs,
         )
     adapter = TwoPassAdapter(
-        watcher=WatcherRunner(build_twopass_model(watcher_model_id)),
+        watcher=build_watcher_runner(watcher_model_id),
         agent_runner=KimiAgentRunner(
             agent=kimi_agent, summarize=compaction_summarize
         ),
@@ -234,6 +242,7 @@ def _build_twopass_adapter(
         # call, so brevity is watcher cost.
         instruction_store=InstructionStore(seed=OPERATING_POLICY_BRIEF),
         watcher_model_id=watcher_model_id,
+        skim_model_id=skim_model_id,
         agent_model_id=agent_model_id,
         bot_display_name=bot_display_name,
         deps_factory=replay_deps_factory,
@@ -314,6 +323,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="baseline",
     )
     parser.add_argument("--watcher-model", default=DEFAULT_TWOPASS_WATCHER_MODEL)
+    parser.add_argument("--skim-model", default=DEFAULT_TWOPASS_SKIM_MODEL)
     parser.add_argument("--history-size", type=int, default=60)
     parser.add_argument("--out", type=Path, default=None)
     return parser

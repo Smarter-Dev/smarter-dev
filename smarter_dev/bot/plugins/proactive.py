@@ -54,6 +54,7 @@ from smarter_dev.bot.proactive.environment import ChannelEnvironment
 from smarter_dev.bot.proactive.environment import InstructionStore
 from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
 from smarter_dev.bot.proactive.models import build_twopass_model
+from smarter_dev.bot.proactive.models import build_watcher_runner
 from smarter_dev.bot.proactive.models import ensure_openrouter_key_alias
 from smarter_dev.bot.proactive.models import resolve_agent_model_id
 from smarter_dev.bot.proactive.notifications import Notification
@@ -71,6 +72,7 @@ from smarter_dev.bot.proactive.parity import build_proactive_agent
 from smarter_dev.bot.proactive.redis_queue import RedisNotificationQueue
 from smarter_dev.bot.proactive.types import ActivationContext
 from smarter_dev.bot.proactive.types import ChannelMessage
+from smarter_dev.bot.proactive.watcher import JevWatcherRunner
 from smarter_dev.bot.proactive.watcher import SkimRunner
 from smarter_dev.bot.proactive.watcher import WatcherRunner
 from smarter_dev.bot.proactive.windows import MAX_WAIT_SECONDS
@@ -101,8 +103,10 @@ CATCHUP_MAX_AGE_SECONDS = 3600
 CATCHUP_MAX_MESSAGES = 50
 AGENT_MODEL_ENV_VAR = "PROACTIVE_AGENT_MODEL"
 WATCHER_MODEL_ENV_VAR = "PROACTIVE_WATCHER_MODEL"
+SKIM_MODEL_ENV_VAR = "PROACTIVE_SKIM_MODEL"
 DEFAULT_AGENT_MODEL = "gemini-3.8-flash"
 DEFAULT_WATCHER_MODEL = "z-ai/glm-5.3-flash"
+DEFAULT_SKIM_MODEL = DEFAULT_WATCHER_MODEL
 HISTORY_FETCH_LIMIT = 60
 # Cap on one compaction-summarize LLM call; past it the wake falls back to
 # the agent model, then to truncation. A hung summarize blocks the guild's
@@ -362,7 +366,7 @@ class ProactiveRuntime:
             )
         self.channel_states: dict[int, ChannelProducerState] = {}
         self.guild_states: dict[int, GuildAgentState] = {}
-        self._watcher: WatcherRunner | None = None
+        self._watcher: WatcherRunner | JevWatcherRunner | None = None
         self._skim: SkimRunner | None = None
         self._agent_model_id: str | None = None
         self._history_store: ProactiveHistoryStore | None = None
@@ -411,14 +415,26 @@ class ProactiveRuntime:
             )
         return self._agent_model_id
 
-    def watcher(self) -> WatcherRunner:
+    @property
+    def skim_model_id(self) -> str:
+        return os.getenv(SKIM_MODEL_ENV_VAR, DEFAULT_SKIM_MODEL)
+
+    def watcher(self) -> WatcherRunner | JevWatcherRunner:
         if self._watcher is None:
-            self._watcher = WatcherRunner(build_twopass_model(self.watcher_model_id))
+            fallback_model_id = (
+                self.skim_model_id
+                if self.watcher_model_id.startswith("typesafe:")
+                else None
+            )
+            self._watcher = build_watcher_runner(
+                self.watcher_model_id,
+                fallback_model_id=fallback_model_id,
+            )
         return self._watcher
 
     def skim(self) -> SkimRunner:
         if self._skim is None:
-            self._skim = SkimRunner(build_twopass_model(self.watcher_model_id))
+            self._skim = SkimRunner(build_twopass_model(self.skim_model_id))
         return self._skim
 
     def settings_service(self) -> ProactiveSettingsService | None:
@@ -886,6 +902,7 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
         agent_model_id=run.agent_model_id,
         notification_queue=state.queue,
         watcher_model_id=run.watcher_model_id,
+        skim_model_id=run.skim_model_id,
         deps_factory=deps_factory,
         brief_preamble=brief_preamble,
         instruction_stores=instruction_stores,

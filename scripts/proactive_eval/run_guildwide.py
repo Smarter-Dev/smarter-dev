@@ -26,7 +26,8 @@ import argparse
 import asyncio
 import json
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from dataclasses import field
 from datetime import datetime
 from pathlib import Path
 
@@ -44,33 +45,26 @@ import eval_prices  # noqa: E402
 from scripts.proactive_eval.replay_tools import replay_parity_tools  # noqa: E402
 from scripts.proactive_eval.simulate import model_cost_calculator  # noqa: E402
 from scripts.proactive_eval.simulation import build_cost_summary  # noqa: E402
-from smarter_dev.bot.proactive.adapter import (  # noqa: E402
-    AgentConsumer,
-    WatcherProducer,
-)
+from smarter_dev.bot.proactive.adapter import AgentConsumer  # noqa: E402
+from smarter_dev.bot.proactive.adapter import WatcherProducer  # noqa: E402
+from smarter_dev.bot.proactive.agent import OPERATING_POLICY_BRIEF  # noqa: E402
+from smarter_dev.bot.proactive.agent import KimiAgentRunner  # noqa: E402
 from smarter_dev.bot.proactive.agent import (  # noqa: E402
-    OPERATING_POLICY_BRIEF,
-    KimiAgentRunner,
     build_guild_agent_system_prompt,
-    build_kimi_agent,
 )
-from smarter_dev.bot.proactive.environment import (  # noqa: E402
-    ChannelEnvironment,
-    InstructionStore,
-)
-from smarter_dev.bot.proactive.models import (  # noqa: E402
-    build_twopass_model,
-    ensure_openrouter_key_alias,
-    resolve_agent_model_id,
-)
+from smarter_dev.bot.proactive.agent import build_kimi_agent  # noqa: E402
+from smarter_dev.bot.proactive.environment import ChannelEnvironment  # noqa: E402
+from smarter_dev.bot.proactive.environment import InstructionStore  # noqa: E402
+from smarter_dev.bot.proactive.models import build_twopass_model  # noqa: E402
+from smarter_dev.bot.proactive.models import build_watcher_runner  # noqa: E402
+from smarter_dev.bot.proactive.models import ensure_openrouter_key_alias  # noqa: E402
+from smarter_dev.bot.proactive.models import resolve_agent_model_id  # noqa: E402
 from smarter_dev.bot.proactive.notifications import NotificationQueue  # noqa: E402
 from smarter_dev.bot.proactive.parity import ProactiveDeps  # noqa: E402
-from smarter_dev.bot.proactive.types import (  # noqa: E402
-    ActivationContext,
-    FixtureMessage,
-    injected_response_message,
-)
-from smarter_dev.bot.proactive.watcher import SkimRunner, WatcherRunner  # noqa: E402
+from smarter_dev.bot.proactive.types import ActivationContext  # noqa: E402
+from smarter_dev.bot.proactive.types import FixtureMessage  # noqa: E402
+from smarter_dev.bot.proactive.types import injected_response_message  # noqa: E402
+from smarter_dev.bot.proactive.watcher import SkimRunner  # noqa: E402
 from smarter_dev.bot.proactive.windows import two_pass_windows  # noqa: E402
 
 eval_prices.install()
@@ -79,6 +73,7 @@ DATA_DIR = Path(__file__).resolve().parent / "data"
 RUNS_DIR = DATA_DIR / "runs"
 DEFAULT_AGENT_MODEL = "gemini-3.8-flash"
 DEFAULT_WATCHER_MODEL = "z-ai/glm-5.3-flash"
+DEFAULT_SKIM_MODEL = DEFAULT_WATCHER_MODEL
 
 
 @dataclass
@@ -128,8 +123,9 @@ async def run_guildwide(args: argparse.Namespace) -> None:
     ensure_openrouter_key_alias()
     agent_model_id = resolve_agent_model_id(args.model)
     watcher_model_id = args.watcher_model
-    watcher = WatcherRunner(build_twopass_model(watcher_model_id))
-    skim = SkimRunner(build_twopass_model(watcher_model_id))
+    skim_model_id = args.skim_model
+    watcher = build_watcher_runner(watcher_model_id)
+    skim = SkimRunner(build_twopass_model(skim_model_id))
     guild_queue = NotificationQueue()
 
     metas = []
@@ -272,6 +268,7 @@ async def run_guildwide(args: argparse.Namespace) -> None:
                 agent_model_id=agent_model_id,
                 notification_queue=guild_queue,
                 watcher_model_id=watcher_model_id,
+                skim_model_id=skim_model_id,
                 deps_factory=replay_deps_factory,
                 instruction_stores=instruction_stores,
                 enabled_channels=enabled_channels,
@@ -425,6 +422,9 @@ async def run_guildwide(args: argparse.Namespace) -> None:
         "fixture": [_fixture_ref(c.fixture_path) for c in channels],
         "adapter": "guildwide",
         "model_id": model_id,
+        "agent_model_id": agent_model_id,
+        "watcher_model_id": watcher_model_id,
+        "skim_model_id": skim_model_id,
         "cadence_seconds": 0,
         "history_size": args.history_size,
         "started_at": started_at.isoformat(),
@@ -478,6 +478,9 @@ async def run_guildwide(args: argparse.Namespace) -> None:
             "fixture": _fixture_ref(channel.fixture_path),
             "adapter": "guildwide",
             "model_id": model_id,
+            "agent_model_id": agent_model_id,
+            "watcher_model_id": watcher_model_id,
+            "skim_model_id": skim_model_id,
             "cadence_seconds": 0,
             "history_size": args.history_size,
             "started_at": combined["started_at"],
@@ -534,6 +537,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("fixtures", type=Path, nargs="+")
     parser.add_argument("--model", default=DEFAULT_AGENT_MODEL)
     parser.add_argument("--watcher-model", default=DEFAULT_WATCHER_MODEL)
+    parser.add_argument("--skim-model", default=DEFAULT_SKIM_MODEL)
     parser.add_argument("--history-size", type=int, default=60)
     parser.add_argument("--run-name", default="guildwide")
     return parser

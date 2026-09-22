@@ -10,12 +10,12 @@ import pytest
 # The bot-side module is a re-export shim; patch the real implementation or
 # the rebinding lands on the alias and the router keeps its own globals.
 from smarter_dev.shared import model_router
-from smarter_dev.shared.model_router import build_model_for
-from smarter_dev.shared.model_router import model_settings_for
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ModelProvider
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import get_model
+from smarter_dev.shared.model_router import build_model_for
+from smarter_dev.shared.model_router import model_settings_for
 
 # Qwen3.5 397B is the ONLY model Digital Ocean still serves — Gemma, GLM and
 # DeepSeek moved to author-precision OpenRouter endpoints on 2026-08-13 — so it
@@ -75,8 +75,8 @@ def test_digitalocean_threads_base_url_and_key(monkeypatch):
     # DO's endpoint quirks: forced tool choice 500s/stalls on several hosted
     # models, and Qwen requires system messages only at position 0.
     profile = kwargs["profile"]
-    assert profile.openai_supports_tool_choice_required is False
-    assert profile.openai_chat_supports_multiple_system_messages is False
+    assert profile["openai_supports_tool_choice_required"] is False
+    assert profile["openai_chat_supports_multiple_system_messages"] is False
 
 
 def test_digitalocean_missing_key_falls_back_to_empty(monkeypatch):
