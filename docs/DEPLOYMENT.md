@@ -42,6 +42,7 @@ Edit `k8s/secrets.yaml` and replace ALL placeholder values with actual secrets:
 - `web-session-secret`: Strong random string for web sessions
 - `bot-api-key`: Skrift-native `sk_` service key the bot uses against `/api`
   (minted per docs/v2/legacy-sunset/runbooks/01-rotate-bot-key.md)
+- `typesafe-api-key`: TypeSafe API key for the default Jev proactive watcher
 
 A separate `smarter-dev-migrate-secrets` secret holds the admin
 (`doadmin`) `database-url` used only by the migrate job.
@@ -189,6 +190,25 @@ All configuration is handled through environment variables defined in:
 - `k8s/secrets.yaml`: Sensitive credentials
 
 The application uses Pydantic Settings to automatically load these from the environment.
+
+### Proactive watcher
+
+The bot deployment reads `typesafe-api-key` from `smarter-dev-secrets` as
+`TYPESAFE_API_KEY`. The production ConfigMap selects pinned
+`typesafe:jev-1.13.0`. Jev evaluates at most ten new messages with the last
+15 prior messages, after five minutes of quiet or ten minutes from the first
+pending message. Direct mentions and replies wake the agent immediately.
+The separately configured GLM skim model remains available for text generation
+and as a watcher fallback if Jev's provider call fails. The Jev minimum-field
+confidence threshold is 0.0, matching the evaluated setting, so valid low
+confidence judgments do not automatically invoke GLM.
+
+To roll back immediately, set `PROACTIVE_WATCHER_MODEL` on the bot Deployment
+to `z-ai/glm-5.3-flash` with `kubectl set env deployment/smarter-dev-bot
+PROACTIVE_WATCHER_MODEL=z-ai/glm-5.3-flash -n smarter-dev`, then verify its
+rollout. Restore the same value in `k8s/configmap.yaml` before the next
+GitHub Actions deployment so the rollback persists. That selection also
+restores the former active/passive watcher schedule.
 
 ## Security Considerations
 

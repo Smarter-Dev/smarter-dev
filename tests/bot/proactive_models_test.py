@@ -40,6 +40,7 @@ def test_typesafe_route_bypasses_litellm(monkeypatch) -> None:
 
     assert isinstance(model, TypeSafeModel)
     assert model.model_name == "jev-latest"
+    assert model.client._http_client.headers["Accept-Encoding"] == "gzip, deflate"
 
 
 def test_typesafe_route_accepts_legacy_jev_key_alias(monkeypatch) -> None:

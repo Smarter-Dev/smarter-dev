@@ -24,11 +24,45 @@ from smarter_dev.bot.proactive.notifications import watcher_summary_notification
 from smarter_dev.bot.proactive.types import ActivationResult
 from smarter_dev.bot.proactive.types import ProposedReaction
 from smarter_dev.bot.proactive.types import ProposedResponse
+from smarter_dev.bot.proactive.watcher import JevWatcherRunner
+from smarter_dev.bot.proactive.watcher import WatcherRunner
 from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.proactive_settings_service import EnabledProactiveChannel
 from smarter_dev.bot.services.proactive_settings_service import ProactiveChannelSettings
 
 # --- debounce math -----------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def legacy_schedule_for_existing_plugin_tests(monkeypatch):
+    """Keep tests of the optional GLM schedule explicit after the switch."""
+    monkeypatch.setenv(proactive.WATCHER_MODEL_ENV_VAR, "z-ai/glm-5.3-flash")
+
+
+def test_production_default_is_pinned_jev_with_separate_skim(monkeypatch):
+    monkeypatch.delenv(proactive.WATCHER_MODEL_ENV_VAR)
+    monkeypatch.delenv(proactive.SKIM_MODEL_ENV_VAR, raising=False)
+    monkeypatch.setenv("TYPESAFE_API_KEY", "test-key")
+    monkeypatch.setenv("LITELLM_ENDPOINT", "https://proxy.example.test")
+    monkeypatch.setenv("LITELLM_API_KEY", "test-key")
+    run = proactive.ProactiveRuntime(SimpleNamespace(d={}), start_consumers=False)
+
+    watcher = run.watcher()
+
+    assert run.watcher_model_id == "typesafe:jev-1.13.0"
+    assert run.uses_jev_batching
+    assert run.skim_model_id == "z-ai/glm-5.3-flash"
+    assert isinstance(watcher, JevWatcherRunner)
+    assert watcher.minimum_confidence == 0.0
+    assert watcher.fallback_model_id == run.skim_model_id
+    assert isinstance(watcher.fallback, WatcherRunner)
+
+
+def test_glm_override_is_rollback_route():
+    run = proactive.ProactiveRuntime(SimpleNamespace(d={}), start_consumers=False)
+
+    assert run.watcher_model_id == "z-ai/glm-5.3-flash"
+    assert not run.uses_jev_batching
 
 
 def test_fire_delay_uses_quiet_gap():
@@ -43,6 +77,20 @@ def test_fire_delay_caps_at_max_wait_from_first():
 
 def test_fire_delay_never_negative():
     assert proactive.compute_fire_delay(0.0, 0.0, 500.0) == 0.0
+
+
+def test_jev_batch_delay_uses_count_quiet_and_oldest_deadlines():
+    state = proactive.ChannelProducerState(guild_id="2", channel_id="1")
+    state.first_at = 100.0
+    state.last_at = 200.0
+    state.buffer = [object()] * 9
+    assert proactive.producer_fire_delay(state, 200.0, jev=True) == 300.0
+
+    state.last_at = 650.0
+    assert proactive.producer_fire_delay(state, 650.0, jev=True) == 50.0
+
+    state.buffer.append(object())
+    assert proactive.producer_fire_delay(state, 650.0, jev=True) == 0.0
 
 
 def test_execution_destination_can_be_selected_per_guild(monkeypatch):
@@ -268,13 +316,18 @@ class _FakeIterator:
 def _fake_bot(history_messages, service, *, channel_names=None):
     channel_names = channel_names or {1: "general"}
 
-    def fetch_messages(channel_id):
+    def fetch_messages(channel_id, before=None):
         if isinstance(history_messages, dict):
             channel_history = history_messages.get(channel_id, [])
             if isinstance(channel_history, Exception):
                 raise channel_history
-            return _FakeIterator(channel_history)
-        return _FakeIterator(history_messages)
+        else:
+            channel_history = history_messages
+        if before is not None:
+            channel_history = [
+                message for message in channel_history if int(message.id) < before
+            ]
+        return _FakeIterator(channel_history)
 
     rest = SimpleNamespace(
         fetch_messages=fetch_messages,
@@ -322,10 +375,12 @@ def wake_setup(monkeypatch):
     producers = []
     producer_usage = {}
     producer_stores = []
+    producer_kwargs = []
     captured_stores = []
     captured_kwargs = []
 
     def fake_producer_factory(**kwargs):
+        producer_kwargs.append(kwargs)
         producer = _StubProducer(kwargs["notification_queue"])
         producer.usage_by_model = dict(producer_usage)
         producers.append(producer)
@@ -348,6 +403,7 @@ def wake_setup(monkeypatch):
         producers=producers,
         producer_usage=producer_usage,
         producer_stores=producer_stores,
+        producer_kwargs=producer_kwargs,
         captured_stores=captured_stores,
         captured_kwargs=captured_kwargs,
     )
@@ -884,6 +940,31 @@ async def test_passive_message_buffers_without_arming_the_debounce(listener_setu
     assert listener_setup.scheduled == []  # waits for the 15-min sweep
 
 
+async def test_jev_message_arms_batch_timer_even_in_passive_mode(
+    listener_setup, monkeypatch
+):
+    monkeypatch.setenv(proactive.WATCHER_MODEL_ENV_VAR, "typesafe:jev-1.13.0")
+
+    await proactive.on_guild_message(_event(_hikari_message()))
+
+    state = listener_setup.runtime.channel_states[1]
+    assert [message.id for message in state.buffer] == ["555"]
+    assert state.buffer_arrivals == [state.first_at]
+    assert listener_setup.scheduled == [state]
+
+
+async def test_jev_passive_sweep_leaves_batch_for_its_own_timer(
+    listener_setup, monkeypatch
+):
+    monkeypatch.setenv(proactive.WATCHER_MODEL_ENV_VAR, "typesafe:jev-1.13.0")
+    await proactive.on_guild_message(_event(_hikari_message()))
+    state = listener_setup.runtime.channel_states[1]
+
+    await proactive._passive_sweep(listener_setup.runtime)
+
+    assert [message.id for message in state.buffer] == ["555"]
+
+
 async def test_engagement_flips_to_active_and_arms_the_debounce(listener_setup):
     await proactive.on_guild_message(_event(_hikari_message(user_mentions_ids=(999,))))
     state = listener_setup.runtime.channel_states[1]
@@ -977,6 +1058,46 @@ async def test_plain_active_message_buffers_for_the_producer(listener_setup):
     assert listener_setup.runtime.guild_state_for(2).queue.items == []
     assert [message.id for message in state.buffer] == ["555"]
     assert listener_setup.scheduled == [state]
+
+
+async def test_jev_producer_drains_at_most_ten_and_uses_fifteen_context(
+    wake_setup, monkeypatch
+):
+    monkeypatch.setenv(proactive.WATCHER_MODEL_ENV_VAR, "typesafe:jev-1.13.0")
+    scheduled = []
+    monkeypatch.setattr(proactive, "_schedule_producer", scheduled.append)
+    wake_setup.bot.rest.fetch_messages = lambda channel_id, before=None: _FakeIterator(
+        [
+            _hikari_message(id=number)
+            for number in [*range(1, 31), *range(100, 112)]
+            if before is None or number < before
+        ]
+    )
+    state = wake_setup.runtime.state_for(2, 1)
+    state.buffer = [
+        proactive.channel_message_from_hikari(_hikari_message(id=number))
+        for number in range(100, 112)
+    ]
+    now = proactive.time.monotonic()
+    state.buffer_arrivals = [now] * 12
+    state.first_at = state.last_at = now
+
+    await proactive._run_producer(state)
+
+    assert [message.id for message in wake_setup.producers[0].contexts[0].new_messages] == [
+        str(number) for number in range(100, 110)
+    ]
+    assert all(
+        int(message.id) < 100
+        for message in wake_setup.producers[0].contexts[0].history
+    )
+    assert [message.id for message in state.buffer] == ["110", "111"]
+    assert wake_setup.producer_kwargs[0]["context_size"] == 15
+    assert scheduled == [state]
+
+    # A duplicate immediate timer must not send the two-message tail early.
+    await proactive._run_producer(state)
+    assert len(wake_setup.producers) == 1
 
 
 async def test_producer_runs_while_agent_consumer_is_mid_wake(wake_setup):

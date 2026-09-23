@@ -1,6 +1,6 @@
-"""Proactive chat bot plugin: passive watch, active ingest, /proactive toggle.
+"""Proactive chat bot plugin: watcher scheduling and /proactive toggle.
 
-Two scheduling modes per enabled channel:
+The default generative watcher has two scheduling modes per enabled channel:
 
 - PASSIVE (the default, all messages at all times): messages buffer and the
   15-minute sweep reviews each batch through the DeepSeek watcher — cold
@@ -11,10 +11,13 @@ Two scheduling modes per enabled channel:
   further engagement extends the window, and it decays back to passive by
   absence.
 
-Engagement messages wake the agent deterministically; everything else goes
-through the watcher gate. The agent (Gemini 3.8 Flash by default, full
-chat-tool parity) acts or deliberately stays silent; its watch-instruction
-updates persist per channel via the proactive-settings API, and its history
+When Jev is configured, every channel instead uses ten-message batches with
+five minutes of quiet or ten minutes from the oldest pending message as its
+partial-batch deadline. Engagement still wakes the agent immediately.
+
+Other activity goes through the watcher gate. The agent (Gemini 3.8 Flash by
+default, full chat-tool parity) acts or deliberately stays silent. Its watch
+instructions persist per channel via the proactive-settings API, and its history
 persists in Redis.
 """
 
@@ -41,6 +44,8 @@ from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
 from smarter_dev.bot.agents.response_fitting import fit_writer_message
 from smarter_dev.bot.agents.response_fitting import split_for_discord
 from smarter_dev.bot.plugins.admin_gate import is_admin
+from smarter_dev.bot.proactive.adapter import JEV_WATCHER_CONTEXT_SIZE
+from smarter_dev.bot.proactive.adapter import WATCHER_CONTEXT_SIZE
 from smarter_dev.bot.proactive.adapter import AgentConsumer
 from smarter_dev.bot.proactive.adapter import WatcherProducer
 from smarter_dev.bot.proactive.adapter import bot_directed_message_ids
@@ -75,6 +80,9 @@ from smarter_dev.bot.proactive.types import ChannelMessage
 from smarter_dev.bot.proactive.watcher import JevWatcherRunner
 from smarter_dev.bot.proactive.watcher import SkimRunner
 from smarter_dev.bot.proactive.watcher import WatcherRunner
+from smarter_dev.bot.proactive.windows import JEV_BATCH_SIZE
+from smarter_dev.bot.proactive.windows import JEV_MAX_WAIT_SECONDS
+from smarter_dev.bot.proactive.windows import JEV_QUIET_SECONDS
 from smarter_dev.bot.proactive.windows import MAX_WAIT_SECONDS
 from smarter_dev.bot.proactive.windows import PASSIVE_SECONDS
 from smarter_dev.bot.proactive.windows import QUIET_SECONDS
@@ -105,8 +113,9 @@ AGENT_MODEL_ENV_VAR = "PROACTIVE_AGENT_MODEL"
 WATCHER_MODEL_ENV_VAR = "PROACTIVE_WATCHER_MODEL"
 SKIM_MODEL_ENV_VAR = "PROACTIVE_SKIM_MODEL"
 DEFAULT_AGENT_MODEL = "gemini-3.8-flash"
-DEFAULT_WATCHER_MODEL = "z-ai/glm-5.3-flash"
-DEFAULT_SKIM_MODEL = DEFAULT_WATCHER_MODEL
+DEFAULT_WATCHER_MODEL = "typesafe:jev-1.13.0"
+# The skim tool and Jev's provider-error fallback still need a text model.
+DEFAULT_SKIM_MODEL = "z-ai/glm-5.3-flash"
 HISTORY_FETCH_LIMIT = 60
 # Cap on one compaction-summarize LLM call; past it the wake falls back to
 # the agent model, then to truncation. A hung summarize blocks the guild's
@@ -145,6 +154,22 @@ def compute_fire_delay(
     """Seconds until the current burst should fire, measured from ``now``."""
     fire_at = min(last_at + quiet_seconds, first_at + max_wait_seconds)
     return max(0.0, fire_at - now)
+
+
+def producer_fire_delay(
+    state: ChannelProducerState, now: float, *, jev: bool
+) -> float:
+    if jev:
+        if len(state.buffer) >= JEV_BATCH_SIZE:
+            return 0.0
+        return compute_fire_delay(
+            state.first_at,
+            state.last_at,
+            now,
+            quiet_seconds=JEV_QUIET_SECONDS,
+            max_wait_seconds=JEV_MAX_WAIT_SECONDS,
+        )
+    return compute_fire_delay(state.first_at, state.last_at, now)
 
 
 def has_moderator_permissions(permissions: hikari.Permissions) -> bool:
@@ -309,11 +334,13 @@ class ChannelProducerState:
     guild_id: str
     channel_id: str
     buffer: list[ChannelMessage] = field(default_factory=list)
+    buffer_arrivals: list[float] = field(default_factory=list)
     first_at: float = 0.0
     last_at: float = 0.0
     timer: asyncio.Task | None = None
     producer_tasks: set[asyncio.Task] = field(default_factory=set)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    processing_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     last_wake_at: float = 0.0
     # Monotonic deadline of the active-ingest window; 0 means passive.
     active_until: float = 0.0
@@ -407,6 +434,10 @@ class ProactiveRuntime:
         return os.getenv(WATCHER_MODEL_ENV_VAR, DEFAULT_WATCHER_MODEL)
 
     @property
+    def uses_jev_batching(self) -> bool:
+        return self.watcher_model_id.startswith("typesafe:jev")
+
+    @property
     def agent_model_id(self) -> str:
         if self._agent_model_id is None:
             ensure_openrouter_key_alias()
@@ -429,6 +460,10 @@ class ProactiveRuntime:
             self._watcher = build_watcher_runner(
                 self.watcher_model_id,
                 fallback_model_id=fallback_model_id,
+                # The evaluated Jev configuration used 0.0. The old 0.2
+                # minimum across four fields sent many valid decisions to
+                # GLM, making it a second primary classifier in practice.
+                minimum_confidence=0.0,
             )
         return self._watcher
 
@@ -612,10 +647,14 @@ def _runtime() -> ProactiveRuntime:
 
 
 async def _fetch_history(
-    bot, channel_id: int, exclude_ids: set[str]
+    bot, channel_id: int, exclude_ids: set[str], *, before_id: str | None = None
 ) -> list[ChannelMessage]:
     fetched: list[ChannelMessage] = []
-    async for message in bot.rest.fetch_messages(channel_id).limit(HISTORY_FETCH_LIMIT):
+    if before_id is not None and before_id.isdigit():
+        stream = bot.rest.fetch_messages(channel_id, before=int(before_id))
+    else:
+        stream = bot.rest.fetch_messages(channel_id)
+    async for message in stream.limit(HISTORY_FETCH_LIMIT):
         converted = channel_message_from_hikari(message)
         if converted.id not in exclude_ids:
             fetched.append(converted)
@@ -669,14 +708,39 @@ async def _record_usage(
 
 
 async def _run_producer(state: ChannelProducerState, *, passive: bool = False) -> None:
+    """Serialize reviews so a later Jev batch cannot advance the cursor first."""
+    async with state.processing_lock:
+        try:
+            await _run_producer_once(state, passive=passive)
+        finally:
+            if _runtime().uses_jev_batching and state.buffer and not passive:
+                _schedule_producer(state)
+
+
+async def _run_producer_once(
+    state: ChannelProducerState, *, passive: bool = False
+) -> None:
     """Review the next buffered batch and enqueue any watcher wake."""
     run = _runtime()
     service = run.settings_service()
     if service is None:
         return
     async with state.lock:
-        buffered = state.buffer
-        state.buffer = []
+        if run.uses_jev_batching and not passive:
+            if producer_fire_delay(state, time.monotonic(), jev=True) > 0:
+                return
+        take = JEV_BATCH_SIZE if run.uses_jev_batching else len(state.buffer)
+        buffered = state.buffer[:take]
+        state.buffer = state.buffer[take:]
+        if run.uses_jev_batching:
+            state.buffer_arrivals = state.buffer_arrivals[take:]
+            if state.buffer_arrivals:
+                state.first_at = state.buffer_arrivals[0]
+                state.last_at = state.buffer_arrivals[-1]
+            elif state.buffer:
+                state.first_at = state.last_at = time.monotonic()
+            else:
+                state.first_at = state.last_at = 0.0
         buffered_ids = {message.id for message in buffered}
         live_notified_directed_ids = state.pending_directed_ids & buffered_ids
         state.pending_directed_ids.difference_update(buffered_ids)
@@ -698,6 +762,7 @@ async def _run_producer(state: ChannelProducerState, *, passive: bool = False) -
         run.bot,
         int(state.channel_id),
         exclude_ids={message.id for message in new_messages},
+        before_id=new_messages[0].id if run.uses_jev_batching and new_messages else None,
     )
     visible = ChannelEnvironment(
         visible=[*history, *new_messages], bot_user_id=bot_user_id
@@ -721,6 +786,11 @@ async def _run_producer(state: ChannelProducerState, *, passive: bool = False) -
             instruction_store=instruction_store,
             watcher_model_id=run.watcher_model_id,
             notification_queue=produced_queue,
+            context_size=(
+                JEV_WATCHER_CONTEXT_SIZE
+                if run.uses_jev_batching
+                else WATCHER_CONTEXT_SIZE
+            ),
             bot_display_name=me.username if me else "the bot",
         )
         context = ActivationContext(
@@ -855,6 +925,11 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
     wake_deps: list[ProactiveDeps] = []
 
     def request_mode(channel_id: str, mode: str, minutes: int) -> str:
+        if run.uses_jev_batching:
+            return (
+                "Jev uses the same 10-message / 5-minute quiet / 10-minute "
+                "oldest-message schedule in both monitoring modes."
+            )
         channel_state = run.state_for(int(state.guild_id), int(channel_id))
         if mode == "active":
             duration = max(1, minutes)
@@ -1086,7 +1161,10 @@ def _schedule_producer(state: ChannelProducerState) -> None:
         state.timer.cancel()
 
     async def fire_after_delay() -> None:
-        delay = compute_fire_delay(state.first_at, state.last_at, time.monotonic())
+        run = _runtime()
+        delay = producer_fire_delay(
+            state, time.monotonic(), jev=run.uses_jev_batching
+        )
         await asyncio.sleep(delay)
         task = asyncio.create_task(_run_producer_guarded(state))
         state.producer_tasks.add(task)
@@ -1167,6 +1245,8 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
     state.last_at = now
     converted = channel_message_from_hikari(event.message)
     state.buffer.append(converted)
+    if run.uses_jev_batching:
+        state.buffer_arrivals.append(now)
 
     me = run.bot.get_me()
     bot_user_id = str(me.id) if me else ""
@@ -1199,9 +1279,9 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
             ),
         )
         state.pending_directed_ids.add(converted.id)
-    if now < state.active_until:
+    if run.uses_jev_batching or now < state.active_until:
         _schedule_producer(state)
-    # Passive channels leave the buffer for the 15-minute sweep.
+    # GLM passive channels leave the buffer for the 15-minute sweep.
 
 
 DISCORD_EPOCH_MS = 1420070400000
@@ -1307,12 +1387,16 @@ async def on_guild_reaction(event: hikari.GuildReactionAddEvent) -> None:
             message_id=str(event.message_id),
         )
     )
-    if now < state.active_until:
+    if run.uses_jev_batching:
+        state.buffer_arrivals.append(now)
+    if run.uses_jev_batching or now < state.active_until:
         _schedule_producer(state)
 
 
 async def _passive_sweep(run: ProactiveRuntime) -> None:
     """One 15-minute pass: review passive buffers and long-idle channels."""
+    if run.uses_jev_batching:
+        return
     for state in list(run.channel_states.values()):
         try:
             if state.buffer:
@@ -1436,6 +1520,8 @@ async def _recover_channels(run: ProactiveRuntime) -> None:
                 continue
             state.buffer.extend(missed)
             state.first_at = state.last_at = time.monotonic()
+            if run.uses_jev_batching:
+                state.buffer_arrivals.extend([state.first_at] * len(missed))
             await run.enqueue_notification(
                 cursor["guild_id"],
                 recovery_notification(
@@ -1450,7 +1536,11 @@ async def _recover_channels(run: ProactiveRuntime) -> None:
                 len(missed),
                 channel_id,
             )
-            await _run_producer(state, passive=True)
+            while state.buffer:
+                remaining = len(state.buffer)
+                await _run_producer(state, passive=True)
+                if len(state.buffer) >= remaining:
+                    break
         except Exception:  # noqa: BLE001 — one channel must not kill recovery
             logger.exception("proactive recovery failed channel=%s", channel_id)
 
