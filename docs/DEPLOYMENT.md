@@ -199,9 +199,9 @@ The bot deployment reads `typesafe-api-key` from `smarter-dev-secrets` as
 15 prior messages, after five minutes of quiet or ten minutes from the first
 pending message. Direct mentions and replies wake the agent immediately.
 The separately configured GLM skim model remains available for text generation
-and as a watcher fallback if Jev's provider call fails. The Jev minimum-field
-confidence threshold is 0.0, matching the evaluated setting, so valid low
-confidence judgments do not automatically invoke GLM.
+after a wake; it does not classify messages when Jev fails. A Jev provider
+error or timeout produces a logged abstention with no watcher wake or GLM call.
+The evaluated Jev minimum-field confidence threshold is 0.0.
 
 To roll back immediately, set `PROACTIVE_WATCHER_MODEL` on the bot Deployment
 to `z-ai/glm-5.3-flash` with `kubectl set env deployment/smarter-dev-bot

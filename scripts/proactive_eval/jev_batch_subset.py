@@ -115,7 +115,6 @@ async def run(cases: list[dict], preflight_cost: float) -> dict:
         raise SystemExit("TYPESAFE_API_KEY or JEV_API_KEY is not set")
     runner = build_watcher_runner(
         MODEL_ID,
-        fallback_model_id=None,
         boolean_threshold=0.5,
         minimum_confidence=0.0,
         timeout_seconds=30.0,
