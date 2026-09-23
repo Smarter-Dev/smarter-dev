@@ -282,8 +282,6 @@ class JevWatcherRunner:
 
     model: Model | str
     model_id: str = "typesafe:jev-latest"
-    fallback: WatcherRunner | None = None
-    fallback_model_id: str | None = None
     boolean_threshold: float = 0.5
     minimum_confidence: float = 0.2
     timeout_seconds: float = 30.0
@@ -291,73 +289,35 @@ class JevWatcherRunner:
     _agent: Agent = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        # A classifier failure is safer to expose as an abstention/fallback than
-        # to hide behind an additional paid prediction.  Callers that explicitly
-        # want result-validation retries can opt in.
+        # A classifier failure is exposed as an abstention without another
+        # model call. Callers can explicitly opt in to validation retries.
         self._agent = Agent(
             self.model,
             output_type=JevWatcherJudgments,
             retries=self.retries,
         )
 
-    async def _fallback(
+    def _abstain(
         self,
         *,
         cause: str,
-        instructions: str,
-        context_transcript: str,
-        new_transcript: str,
-        bot_user_id: str,
-        bot_display_name: str,
-        new_message_ids: list[str],
-        primary_usage: dict[str, int] | None = None,
     ) -> tuple[WatcherDecision, dict]:
-        if self.fallback is None:
-            decision = WatcherDecision(
-                wake=False,
-                reason=f"Jev abstained after {cause}; no fallback is configured.",
-            ).with_classifier_metadata(
-                {
-                    "provider": "typesafe",
-                    "abstained": True,
-                    "fallback_used": False,
-                    "failure": cause,
-                }
-            )
-            return decision, primary_usage or {
-                "input_tokens": 0,
-                "output_tokens": 0,
-                "cache_read_tokens": 0,
-            }
-        decision, usage = await self.fallback.decide(
-            instructions=instructions,
-            context_transcript=context_transcript,
-            new_transcript=new_transcript,
-            bot_user_id=bot_user_id,
-            bot_display_name=bot_display_name,
-            new_message_ids=new_message_ids,
-        )
-        fallback_metadata = dict(decision._classifier_metadata)
-        decision = decision.with_classifier_metadata(
+        decision = WatcherDecision(
+            wake=False,
+            reason=f"Jev abstained after {cause}.",
+        ).with_classifier_metadata(
             {
                 "provider": "typesafe",
                 "abstained": True,
-                "fallback_used": True,
+                "fallback_used": False,
                 "failure": cause,
-                "fallback": fallback_metadata,
-                "requests": fallback_metadata.get("requests", 0),
             }
         )
-        if self.fallback_model_id is None:
-            return decision, usage
-        usage_by_model = {self.fallback_model_id: usage}
-        if primary_usage is not None:
-            usage_by_model[self.model_id] = primary_usage
-        totals = {
-            key: sum(item.get(key, 0) for item in usage_by_model.values())
-            for key in ("input_tokens", "output_tokens", "cache_read_tokens")
+        return decision, {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
         }
-        return decision, {**totals, "usage_by_model": usage_by_model}
 
     async def decide(
         self,
@@ -388,24 +348,12 @@ class JevWatcherRunner:
                     },
                 )
         except TimeoutError:
-            return await self._fallback(
+            return self._abstain(
                 cause="timeout",
-                instructions=instructions,
-                context_transcript=context_transcript,
-                new_transcript=new_transcript,
-                bot_user_id=bot_user_id,
-                bot_display_name=bot_display_name,
-                new_message_ids=message_ids,
             )
-        except Exception as error:  # noqa: BLE001 - optional safe fallback
-            return await self._fallback(
+        except Exception as error:  # noqa: BLE001 - expose provider failure
+            return self._abstain(
                 cause=f"{type(error).__name__}",
-                instructions=instructions,
-                context_transcript=context_transcript,
-                new_transcript=new_transcript,
-                bot_user_id=bot_user_id,
-                bot_display_name=bot_display_name,
-                new_message_ids=message_ids,
             )
 
         provider_details = result.response.provider_details or {}
@@ -421,22 +369,6 @@ class JevWatcherRunner:
         decision._classifier_metadata["requests"] = (
             getattr(run_usage, "requests", 0) or 0
         )
-        if decision._classifier_metadata.get("abstained"):
-            fallback_decision, fallback_usage = await self._fallback(
-                cause="low_confidence",
-                instructions=instructions,
-                context_transcript=context_transcript,
-                new_transcript=new_transcript,
-                bot_user_id=bot_user_id,
-                bot_display_name=bot_display_name,
-                new_message_ids=message_ids,
-                primary_usage=jev_usage,
-            )
-            if self.fallback is not None:
-                fallback_decision._classifier_metadata["jev"] = (
-                    decision._classifier_metadata
-                )
-                return fallback_decision, fallback_usage
         return decision, jev_usage
 
 

@@ -6,7 +6,6 @@ from pydantic_ai.models.test import TestModel
 
 from smarter_dev.bot.proactive.watcher import JevWatcherJudgments
 from smarter_dev.bot.proactive.watcher import JevWatcherRunner
-from smarter_dev.bot.proactive.watcher import WatcherDecision
 from smarter_dev.bot.proactive.watcher import build_jev_watcher_instructions
 from smarter_dev.bot.proactive.watcher import build_jev_watcher_material
 from smarter_dev.bot.proactive.watcher import decision_from_jev
@@ -104,21 +103,8 @@ class _FailingAgent:
         raise RuntimeError("provider body must not leak")
 
 
-class _Fallback:
-    async def decide(self, **kwargs):
-        return WatcherDecision(wake=True, reason="fallback"), {
-            "input_tokens": 7,
-            "output_tokens": 2,
-            "cache_read_tokens": 0,
-        }
-
-
-async def test_jev_api_failure_uses_configured_fallback_without_error_text() -> None:
-    runner = JevWatcherRunner(
-        TestModel(),
-        fallback=_Fallback(),
-        fallback_model_id="z-ai/glm-5.3-flash",
-    )
+async def test_jev_api_failure_abstains_without_error_text_or_fallback() -> None:
+    runner = JevWatcherRunner(TestModel())
     runner._agent = _FailingAgent()
 
     decision, usage = await runner.decide(
@@ -129,11 +115,13 @@ async def test_jev_api_failure_uses_configured_fallback_without_error_text() -> 
         new_message_ids=["m1"],
     )
 
-    assert decision.wake is True
+    assert decision.wake is False
     metadata = decision.details()["classifier"]
+    assert metadata["abstained"] is True
+    assert metadata["fallback_used"] is False
     assert metadata["failure"] == "RuntimeError"
     assert "provider body" not in str(metadata)
-    assert usage["usage_by_model"]["z-ai/glm-5.3-flash"]["input_tokens"] == 7
+    assert usage["input_tokens"] == 0
 
 
 class _SuccessfulAgent:
@@ -154,12 +142,10 @@ class _SuccessfulAgent:
         )
 
 
-async def test_jev_low_confidence_fallback_accounts_for_both_calls() -> None:
+async def test_jev_low_confidence_abstains_with_jev_usage_only() -> None:
     runner = JevWatcherRunner(
         TestModel(),
         model_id="typesafe:jev-latest",
-        fallback=_Fallback(),
-        fallback_model_id="z-ai/glm-5.3-flash",
         minimum_confidence=0.2,
     )
     runner._agent = _SuccessfulAgent()
@@ -172,6 +158,7 @@ async def test_jev_low_confidence_fallback_accounts_for_both_calls() -> None:
         new_message_ids=["m1"],
     )
 
-    assert decision.details()["classifier"]["fallback_used"] is True
-    assert usage["usage_by_model"]["typesafe:jev-latest"]["input_tokens"] == 11
-    assert usage["usage_by_model"]["z-ai/glm-5.3-flash"]["input_tokens"] == 7
+    assert decision.wake is False
+    assert decision.details()["classifier"]["abstained"] is True
+    assert decision.details()["classifier"]["fallback_used"] is False
+    assert usage["input_tokens"] == 11

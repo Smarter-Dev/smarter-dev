@@ -232,7 +232,6 @@ async def run_pilot(
 
     runner = build_watcher_runner(
         JEV_MODEL_ID,
-        fallback_model_id=None,
         boolean_threshold=BOOLEAN_THRESHOLD,
         minimum_confidence=MINIMUM_CONFIDENCE,
         timeout_seconds=TIMEOUT_SECONDS,
