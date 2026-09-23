@@ -61,13 +61,11 @@ def test_watcher_factory_selects_jev_without_changing_glm(monkeypatch) -> None:
     monkeypatch.setenv("LITELLM_ENDPOINT", "https://proxy.example.test")
     monkeypatch.setenv("LITELLM_API_KEY", "secret")
 
-    jev = build_watcher_runner(
-        "typesafe:jev-latest", fallback_model_id="z-ai/glm-5.3-flash"
-    )
+    jev = build_watcher_runner("typesafe:jev-latest")
     glm = build_watcher_runner("z-ai/glm-5.3-flash")
 
     assert isinstance(jev, JevWatcherRunner)
-    assert jev.fallback_model_id == "z-ai/glm-5.3-flash"
+    assert not hasattr(jev, "fallback")
     assert isinstance(glm, WatcherRunner)
 
 
