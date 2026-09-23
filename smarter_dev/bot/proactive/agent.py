@@ -575,7 +575,9 @@ def build_kimi_agent(
         minutes: int = 10,
     ) -> str:
         """Switch one enabled channel between active (fast ingest) and
-        passive (15-minute batch review) monitoring for the given duration."""
+        passive (15-minute batch review) monitoring for the given duration.
+        Jev uses its fixed 10-message / 5-minute / 10-minute schedule in
+        either mode, so this control reports that timing instead."""
         if error := disabled_channel_error(ctx.deps, channel_id):
             return error
         if not ctx.deps.budget.try_spend():

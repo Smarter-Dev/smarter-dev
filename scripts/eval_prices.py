@@ -1,4 +1,4 @@
-"""Inject prices for models newer than the bundled genai-prices snapshot.
+"""Inject project-authoritative prices into the genai-prices snapshot.
 
 The pip snapshot (and its remote refresh) lags new releases, so models like
 Gemini 3.1 Flash Lite and GPT 5.4 nano/mini or GPT 5.6 Luna aren't priceable
@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from genai_prices import data_snapshot, types
+from genai_prices import data_snapshot
+from genai_prices import types
 
 # provider_id -> { api_id: (display_name, input_mtok, output_mtok, cache_read_mtok, cache_write_mtok) }
 CUSTOM_PRICES: dict[str, dict[str, tuple[str, str, str, str | None, str | None]]] = {
@@ -104,17 +105,16 @@ def _model_info(
 
 def install() -> list[str]:
     """Append custom models to the snapshot and activate it. Returns the
-    list of api_ids added (skips any the snapshot already knows)."""
+    list of api_ids installed. Existing entries are replaced because provider
+    snapshots can lag or disagree with the route the project actually uses."""
     snap = data_snapshot.get_snapshot()
     added: list[str] = []
     for prov_id, models in CUSTOM_PRICES.items():
         prov = next((p for p in snap.providers if p.id == prov_id), None)
         if prov is None:
             continue
-        existing = {m.id for m in prov.models}
         for api_id, (name, inp, out, cache, cache_write) in models.items():
-            if api_id in existing:
-                continue
+            prov.models[:] = [model for model in prov.models if model.id != api_id]
             prov.models.append(_model_info(api_id, name, inp, out, cache, cache_write))
             added.append(api_id)
     data_snapshot.set_custom_snapshot(snap)
@@ -122,7 +122,8 @@ def install() -> list[str]:
 
 
 if __name__ == "__main__":
-    from genai_prices import Usage, calc_price
+    from genai_prices import Usage
+    from genai_prices import calc_price
 
     print("added:", install())
     pd = calc_price(

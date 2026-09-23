@@ -4,16 +4,24 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import TYPE_CHECKING
 
+import httpx2
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.models.typesafe import TypeSafeModel
 from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.providers.typesafe import TypeSafeProvider
 
 from smarter_dev.bot.agents.chat_agent import build_agent_model
 from smarter_dev.bot.agents.model_router import build_model_for
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ModelProvider
+
+if TYPE_CHECKING:
+    from smarter_dev.bot.proactive.watcher import JevWatcherRunner
+    from smarter_dev.bot.proactive.watcher import WatcherRunner
 
 KIMI_OPENROUTER_MODEL_ID = "moonshotai/kimi-k3"
 _LITELLM_MODEL_ALIASES = {
@@ -28,6 +36,21 @@ def ensure_openrouter_key_alias() -> None:
     OPENROUTER_API_KEY (or legacy OPEN_ROUTER). Bridge the gap."""
     if not os.getenv("OPENROUTER_API_KEY") and os.getenv("OPEN_ROUTER_API_KEY"):
         os.environ["OPENROUTER_API_KEY"] = os.environ["OPEN_ROUTER_API_KEY"]
+
+
+def ensure_typesafe_key_alias() -> None:
+    """Accept TypeSafe's earlier Jev-branded environment variable.
+
+    The native Pydantic AI provider only reads ``TYPESAFE_API_KEY``. Existing
+    Jev users may already have ``JEV_API_KEY`` in their local environment, so
+    bridge it in memory without reading, logging, or rewriting the secret.
+    """
+    if not os.getenv("TYPESAFE_API_KEY") and os.getenv("JEV_API_KEY"):
+        os.environ["TYPESAFE_API_KEY"] = os.environ["JEV_API_KEY"]
+
+
+def typesafe_key_present() -> bool:
+    return bool(os.getenv("TYPESAFE_API_KEY") or os.getenv("JEV_API_KEY"))
 
 
 def _openrouter_key_present() -> bool:
@@ -56,6 +79,19 @@ def resolve_agent_model_id(requested: str) -> str:
 
 
 def build_twopass_model(model_id: str) -> Model:
+    if model_id.startswith("typesafe:"):
+        ensure_typesafe_key_alias()
+        # httpx2 2.13 calls brotli.process with an unsupported buffer keyword
+        # when the server returns br. Keep this client on gzip/deflate until
+        # that decoder and the installed brotli implementation agree.
+        http_client = httpx2.AsyncClient(
+            headers={"Accept-Encoding": "gzip, deflate"}
+        )
+        return TypeSafeModel(
+            model_id.removeprefix("typesafe:"),
+            provider=TypeSafeProvider(http_client=http_client),
+        )
+    ensure_openrouter_key_alias()
     litellm_endpoint = os.getenv("LITELLM_ENDPOINT", "").rstrip("/")
     litellm_api_key = os.getenv("LITELLM_API_KEY", "")
     if litellm_endpoint and litellm_api_key:
@@ -83,3 +119,40 @@ def build_twopass_model(model_id: str) -> Model:
             )
         )
     return build_agent_model(model_id)
+
+
+def build_watcher_runner(
+    model_id: str,
+    *,
+    fallback_model_id: str | None = None,
+    boolean_threshold: float = 0.5,
+    minimum_confidence: float = 0.2,
+    timeout_seconds: float = 30.0,
+) -> WatcherRunner | JevWatcherRunner:
+    """Build the appropriate watcher without sending TypeSafe through LiteLLM.
+
+    Jev is a classifier rather than a text generator, so it uses a dedicated
+    runner and output schema.  A generative fallback is optional; production
+    supplies its independently configured skim model while classifier-only
+    benchmarks deliberately leave it disabled.
+    """
+    from smarter_dev.bot.proactive.watcher import JevWatcherRunner
+    from smarter_dev.bot.proactive.watcher import WatcherRunner
+
+    model = build_twopass_model(model_id)
+    if not model_id.startswith("typesafe:"):
+        return WatcherRunner(model)
+    fallback = (
+        WatcherRunner(build_twopass_model(fallback_model_id))
+        if fallback_model_id
+        else None
+    )
+    return JevWatcherRunner(
+        model,
+        model_id=model_id,
+        fallback=fallback,
+        fallback_model_id=fallback_model_id,
+        boolean_threshold=boolean_threshold,
+        minimum_confidence=minimum_confidence,
+        timeout_seconds=timeout_seconds,
+    )
