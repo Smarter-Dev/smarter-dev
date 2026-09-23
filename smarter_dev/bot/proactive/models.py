@@ -124,7 +124,6 @@ def build_twopass_model(model_id: str) -> Model:
 def build_watcher_runner(
     model_id: str,
     *,
-    fallback_model_id: str | None = None,
     boolean_threshold: float = 0.5,
     minimum_confidence: float = 0.2,
     timeout_seconds: float = 30.0,
@@ -132,9 +131,8 @@ def build_watcher_runner(
     """Build the appropriate watcher without sending TypeSafe through LiteLLM.
 
     Jev is a classifier rather than a text generator, so it uses a dedicated
-    runner and output schema.  A generative fallback is optional; production
-    supplies its independently configured skim model while classifier-only
-    benchmarks deliberately leave it disabled.
+    runner and output schema. The skim model is configured separately and
+    never makes a classification decision when Jev abstains.
     """
     from smarter_dev.bot.proactive.watcher import JevWatcherRunner
     from smarter_dev.bot.proactive.watcher import WatcherRunner
@@ -142,16 +140,9 @@ def build_watcher_runner(
     model = build_twopass_model(model_id)
     if not model_id.startswith("typesafe:"):
         return WatcherRunner(model)
-    fallback = (
-        WatcherRunner(build_twopass_model(fallback_model_id))
-        if fallback_model_id
-        else None
-    )
     return JevWatcherRunner(
         model,
         model_id=model_id,
-        fallback=fallback,
-        fallback_model_id=fallback_model_id,
         boolean_threshold=boolean_threshold,
         minimum_confidence=minimum_confidence,
         timeout_seconds=timeout_seconds,

@@ -114,7 +114,7 @@ WATCHER_MODEL_ENV_VAR = "PROACTIVE_WATCHER_MODEL"
 SKIM_MODEL_ENV_VAR = "PROACTIVE_SKIM_MODEL"
 DEFAULT_AGENT_MODEL = "gemini-3.8-flash"
 DEFAULT_WATCHER_MODEL = "typesafe:jev-1.13.0"
-# The skim tool and Jev's provider-error fallback still need a text model.
+# The agent's skim tool still needs a separate text model.
 DEFAULT_SKIM_MODEL = "z-ai/glm-5.3-flash"
 HISTORY_FETCH_LIMIT = 60
 # Cap on one compaction-summarize LLM call; past it the wake falls back to
@@ -452,17 +452,10 @@ class ProactiveRuntime:
 
     def watcher(self) -> WatcherRunner | JevWatcherRunner:
         if self._watcher is None:
-            fallback_model_id = (
-                self.skim_model_id
-                if self.watcher_model_id.startswith("typesafe:")
-                else None
-            )
             self._watcher = build_watcher_runner(
                 self.watcher_model_id,
-                fallback_model_id=fallback_model_id,
-                # The evaluated Jev configuration used 0.0. The old 0.2
-                # minimum across four fields sent many valid decisions to
-                # GLM, making it a second primary classifier in practice.
+                # Match the evaluated Jev setting: valid low-confidence
+                # judgments are used instead of forcing an abstention.
                 minimum_confidence=0.0,
             )
         return self._watcher
@@ -804,6 +797,15 @@ async def _run_producer_once(
         )
         usage_by_model = await producer.produce(context)
         details = producer.details
+        failure = (
+            details.get("watcher", {}).get("classifier", {}).get("failure")
+        )
+        if failure:
+            logger.warning(
+                "proactive Jev watcher abstained channel=%s failure=%s",
+                state.channel_id,
+                failure,
+            )
         if (
             producer.wake_produced
             and run.execution_mode_for(state.guild_id) != EXTERNAL_EXECUTION_MODE

@@ -25,7 +25,6 @@ from smarter_dev.bot.proactive.types import ActivationResult
 from smarter_dev.bot.proactive.types import ProposedReaction
 from smarter_dev.bot.proactive.types import ProposedResponse
 from smarter_dev.bot.proactive.watcher import JevWatcherRunner
-from smarter_dev.bot.proactive.watcher import WatcherRunner
 from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.proactive_settings_service import EnabledProactiveChannel
 from smarter_dev.bot.services.proactive_settings_service import ProactiveChannelSettings
@@ -54,8 +53,8 @@ def test_production_default_is_pinned_jev_with_separate_skim(monkeypatch):
     assert run.skim_model_id == "z-ai/glm-5.3-flash"
     assert isinstance(watcher, JevWatcherRunner)
     assert watcher.minimum_confidence == 0.0
-    assert watcher.fallback_model_id == run.skim_model_id
-    assert isinstance(watcher.fallback, WatcherRunner)
+    assert not hasattr(watcher, "fallback")
+    assert not hasattr(watcher, "fallback_model_id")
 
 
 def test_glm_override_is_rollback_route():
