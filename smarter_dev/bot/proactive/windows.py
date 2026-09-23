@@ -10,11 +10,52 @@ real wake schedule).
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
+from datetime import timedelta
 
 QUIET_SECONDS = 15
 MAX_WAIT_SECONDS = 60
 PASSIVE_SECONDS = 900
+JEV_BATCH_SIZE = 10
+JEV_QUIET_SECONDS = 300
+JEV_MAX_WAIT_SECONDS = 600
+
+
+def jev_batch_windows(
+    timestamps: list[datetime],
+) -> list[tuple[datetime, datetime, int]]:
+    """Replay the live Jev schedule as (first message, fire time, count).
+
+    A tenth message fires immediately. A partial batch fires after five
+    minutes of quiet or ten minutes from its first message, whichever is
+    earlier. No empty windows are produced.
+    """
+    if not timestamps:
+        return []
+    windows = []
+    first = last = timestamps[0]
+    count = 1
+    quiet = timedelta(seconds=JEV_QUIET_SECONDS)
+    max_wait = timedelta(seconds=JEV_MAX_WAIT_SECONDS)
+    for timestamp in timestamps[1:]:
+        if count == 0:
+            first = last = timestamp
+            count = 1
+            continue
+        fire_at = min(last + quiet, first + max_wait)
+        if timestamp >= fire_at:
+            windows.append((first, fire_at, count))
+            first = last = timestamp
+            count = 1
+        else:
+            last = timestamp
+            count += 1
+        if count == JEV_BATCH_SIZE:
+            windows.append((first, timestamp, count))
+            count = 0
+    if count:
+        windows.append((first, min(last + quiet, first + max_wait), count))
+    return windows
 
 
 def burst_windows(

@@ -25,6 +25,7 @@ from smarter_dev.bot.proactive.watcher import WatcherDecision
 from smarter_dev.bot.proactive.watcher import WatcherRunner
 
 WATCHER_CONTEXT_SIZE = 30
+JEV_WATCHER_CONTEXT_SIZE = 15
 
 
 def bot_directed_message_ids(

@@ -6,11 +6,13 @@ import os
 import sys
 from typing import TYPE_CHECKING
 
+import httpx2
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.typesafe import TypeSafeModel
 from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.providers.typesafe import TypeSafeProvider
 
 from smarter_dev.bot.agents.chat_agent import build_agent_model
 from smarter_dev.bot.agents.model_router import build_model_for
@@ -79,7 +81,16 @@ def resolve_agent_model_id(requested: str) -> str:
 def build_twopass_model(model_id: str) -> Model:
     if model_id.startswith("typesafe:"):
         ensure_typesafe_key_alias()
-        return TypeSafeModel(model_id.removeprefix("typesafe:"))
+        # httpx2 2.13 calls brotli.process with an unsupported buffer keyword
+        # when the server returns br. Keep this client on gzip/deflate until
+        # that decoder and the installed brotli implementation agree.
+        http_client = httpx2.AsyncClient(
+            headers={"Accept-Encoding": "gzip, deflate"}
+        )
+        return TypeSafeModel(
+            model_id.removeprefix("typesafe:"),
+            provider=TypeSafeProvider(http_client=http_client),
+        )
     ensure_openrouter_key_alias()
     litellm_endpoint = os.getenv("LITELLM_ENDPOINT", "").rstrip("/")
     litellm_api_key = os.getenv("LITELLM_API_KEY", "")

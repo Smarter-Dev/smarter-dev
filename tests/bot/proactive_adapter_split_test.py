@@ -63,8 +63,10 @@ class _ExplodingWatcher:
 class _StubWatcher:
     def __init__(self, decision: WatcherDecision):
         self.decision = decision
+        self.calls = []
 
     async def decide(self, **kwargs):
+        self.calls.append(kwargs)
         return self.decision, {
             "input_tokens": 11,
             "output_tokens": 2,
@@ -154,6 +156,29 @@ async def test_watcher_producer_returns_only_watcher_usage():
         }
     }
     assert "agent-model" not in usage
+
+
+async def test_jev_watcher_context_contains_only_fifteen_prior_messages():
+    queue = NotificationQueue()
+    watcher = _StubWatcher(WatcherDecision(wake=False))
+    producer = _producer(watcher, queue)
+    producer.context_size = adapter.JEV_WATCHER_CONTEXT_SIZE
+    context = ActivationContext(
+        channel_name="general",
+        guild_name="Smarter Dev",
+        bot_user_id="bot-1",
+        activated_at=T + timedelta(minutes=1),
+        history=[_message(f"old-{index}", index) for index in range(20)],
+        new_messages=[_message("new", 21)],
+    )
+
+    await producer.activate(context)
+
+    transcript = watcher.calls[0]["context_transcript"]
+    assert "[id=old-4]" not in transcript
+    assert "[id=old-5]" in transcript
+    assert "[id=old-19]" in transcript
+    assert "[id=new]" in watcher.calls[0]["new_transcript"]
 
 
 class _RecordingAgentRunner:

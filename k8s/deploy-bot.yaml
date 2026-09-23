@@ -75,6 +75,11 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: openrouter-api-key
+                  - name: TYPESAFE_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: typesafe-api-key
                   - name: LOGFIRE_TOKEN
                     valueFrom:
                       secretKeyRef:
