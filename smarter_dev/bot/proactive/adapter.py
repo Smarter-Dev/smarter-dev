@@ -19,11 +19,13 @@ from smarter_dev.bot.proactive.notifications import reply_notification
 from smarter_dev.bot.proactive.notifications import watcher_summary_notification
 from smarter_dev.bot.proactive.types import ActivationContext
 from smarter_dev.bot.proactive.types import ActivationResult
+from smarter_dev.bot.proactive.watcher import JevWatcherRunner
 from smarter_dev.bot.proactive.watcher import SkimRunner
 from smarter_dev.bot.proactive.watcher import WatcherDecision
 from smarter_dev.bot.proactive.watcher import WatcherRunner
 
 WATCHER_CONTEXT_SIZE = 30
+JEV_WATCHER_CONTEXT_SIZE = 15
 
 
 def bot_directed_message_ids(
@@ -157,15 +159,21 @@ one-sentence note on what you did and why."""
 
 def _merge_usage(usage_by_model: dict, model_id: str, usage: dict) -> None:
     entry = usage_by_model.setdefault(
-        model_id, {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
+        model_id,
+        {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+        },
     )
     for key, value in usage.items():
-        entry[key] += value
+        if key != "usage_by_model":
+            entry[key] = entry.get(key, 0) + value
 
 
 @dataclass
 class WatcherProducer:
-    watcher: WatcherRunner
+    watcher: WatcherRunner | JevWatcherRunner
     instruction_store: InstructionStore
     watcher_model_id: str
     notification_queue: NotificationQueue
@@ -211,9 +219,15 @@ class WatcherProducer:
                 new_transcript=env.render(context.new_messages),
                 bot_user_id=context.bot_user_id,
                 bot_display_name=self.bot_display_name,
+                new_message_ids=[message.id for message in context.new_messages],
             )
-            _merge_usage(usage_by_model, self.watcher_model_id, watcher_usage)
-            details = {"watcher": decision.model_dump()}
+            split_usage = watcher_usage.get("usage_by_model")
+            if split_usage:
+                for model_id, model_usage in split_usage.items():
+                    _merge_usage(usage_by_model, model_id, model_usage)
+            else:
+                _merge_usage(usage_by_model, self.watcher_model_id, watcher_usage)
+            details = {"watcher": decision.details()}
             if decision.wake:
                 # Non-waking watcher summaries are deliberately discarded —
                 # only waking activity reaches the agent.
@@ -243,6 +257,7 @@ class AgentConsumer:
     agent_model_id: str
     notification_queue: NotificationQueue
     watcher_model_id: str | None = None
+    skim_model_id: str | None = None
     # Builds the deps object handed to the agent's tools. The default is the
     # eval's AgentDeps; the production plugin injects a factory that returns
     # ProactiveDeps carrying the live bot/channel for the parity tools.
@@ -281,11 +296,12 @@ class AgentConsumer:
 
         async def skim_transcript(transcript: str) -> str:
             text, skim_usage = await self.skim.skim(transcript)
-            if self.watcher_model_id is None:
+            usage_model_id = self.skim_model_id or self.watcher_model_id
+            if usage_model_id is None:
                 raise ValueError(
-                    "watcher_model_id is required to attribute skim usage"
+                    "skim_model_id is required to attribute skim usage"
                 )
-            _merge_usage(usage_by_model, self.watcher_model_id, skim_usage)
+            _merge_usage(usage_by_model, usage_model_id, skim_usage)
             return text
 
         build_deps = self.deps_factory or AgentDeps
@@ -339,12 +355,13 @@ class AgentConsumer:
 
 @dataclass
 class TwoPassAdapter:
-    watcher: WatcherRunner
+    watcher: WatcherRunner | JevWatcherRunner
     agent_runner: KimiAgentRunner
     skim: SkimRunner
     instruction_store: InstructionStore
     watcher_model_id: str
     agent_model_id: str
+    skim_model_id: str | None = None
     context_size: int = WATCHER_CONTEXT_SIZE
     # Shown to the watcher so name-mentions ("hey smarter dev…") register as
     # directed at the bot even without an @.
@@ -392,6 +409,7 @@ class TwoPassAdapter:
             agent_model_id=self.agent_model_id,
             notification_queue=notification_queue,
             watcher_model_id=self.watcher_model_id,
+            skim_model_id=self.skim_model_id,
             deps_factory=self.deps_factory,
             brief_preamble=self.brief_preamble,
             instruction_stores={
