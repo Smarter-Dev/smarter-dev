@@ -7,11 +7,13 @@ only the description — and the same refuse-if-not-meaningful contract applies.
 
 Images moved from Gemini 3.1 Flash Lite to GPT-6 Luna on 2026-09-24. Audio could
 not follow: the OpenAI Responses API takes no audio input, so audio goes to
-Gemini 3.8 Flash, the one Gemini Flash still in use.
+Gemini 3.8 Flash, the one Gemini Flash still in use. Luna refuses BMP and reads
+only an animated GIF's first frame, so ``shared.media_images`` converts those.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 
@@ -21,6 +23,8 @@ from pydantic_ai.models.openai import OpenAIResponsesModel
 from pydantic_ai.models.openai import OpenAIResponsesModelSettings
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.openai import OpenAIProvider
+
+from smarter_dev.shared.media_images import prepare_image
 
 logger = logging.getLogger(__name__)
 
@@ -112,5 +116,14 @@ async def describe_media(
         f"KIND: {kind}\n\n"
         f"INSTRUCTION:\n{instruction}"
     )
-    result = await agent.run([prompt, BinaryContent(data=data, media_type=media_type)])
+    if is_audio:
+        parts = [(data, media_type)]
+    else:
+        # BMP -> PNG, animated GIF -> sampled frames (see media_images).
+        parts, note = await asyncio.to_thread(prepare_image, data, media_type)
+        if note:
+            prompt += f"\n\nNOTE: {note}"
+    result = await agent.run(
+        [prompt, *(BinaryContent(data=part, media_type=mt) for part, mt in parts)]
+    )
     return result.output
