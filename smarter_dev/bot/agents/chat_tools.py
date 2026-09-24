@@ -367,41 +367,67 @@ def _looks_like_audio(data: bytes) -> bool:
     return len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0
 
 
-# Non-``text/`` media types that are still text (code, data, config).
-_TEXTUAL_SUBTYPE_MARKERS = (
-    "json", "xml", "javascript", "ecmascript", "yaml", "toml", "csv",
-    "x-sh", "x-python", "sql", "markdown", "x-httpd-php",
+# Labels that name a binary format: refused by type, whatever the bytes
+# look like. Anything else may be text (Discord labels by extension from an
+# undocumented table, so e.g. .ps1 or .tex may carry an application/ type).
+_BINARY_TYPE_PREFIXES = (
+    "image/", "audio/", "video/", "font/", "model/",
+    "application/vnd.openxmlformats-officedocument.",
+    "application/vnd.oasis.opendocument.",
+    "application/vnd.ms-",
 )
+_BINARY_TYPES = frozenset({
+    "application/zip", "application/x-zip-compressed", "application/gzip",
+    "application/x-gzip", "application/x-tar", "application/x-7z-compressed",
+    "application/x-rar-compressed", "application/vnd.rar", "application/x-bzip2",
+    "application/x-xz", "application/zstd", "application/java-archive",
+    "application/vnd.android.package-archive", "application/x-msdownload",
+    "application/x-executable", "application/x-mach-binary",
+    "application/x-sharedlib", "application/x-sqlite3", "application/vnd.sqlite3",
+    "application/x-shockwave-flash", "application/wasm", "application/msword",
+    "application/x-iso9660-image", "application/x-apple-diskimage",
+})
 
 
-def _is_textual_type(media_type: str) -> bool:
-    base = media_type.split(";", 1)[0].strip().lower()
-    return base.startswith("text/") or any(m in base for m in _TEXTUAL_SUBTYPE_MARKERS)
+def _base_type(media_type: str) -> str:
+    """``media_type`` without parameters, lowercased (``text/csv; charset=x``
+    -> ``text/csv``)."""
+    return media_type.split(";", 1)[0].strip().lower()
 
 
-def _is_unlabelled_type(media_type: str) -> bool:
-    return media_type.split(";", 1)[0].strip().lower() in ("", "application/octet-stream")
+def _is_binary_type(media_type: str) -> bool:
+    base = _base_type(media_type)
+    if base == "image/svg+xml":  # an image, but text the summarizer can read
+        return False
+    return base in _BINARY_TYPES or base.startswith(_BINARY_TYPE_PREFIXES)
 
 
-def _decode_text(data: bytes, *, textual: bool) -> str | None:
+def _decode_text(data: bytes, *, labelled_text: bool) -> str | None:
     """``data`` as text, or None when it does not decode as text.
 
-    UTF-16 with a BOM (e.g. PowerShell ``>`` output) decodes as such. A
-    file whose type says text falls back to Windows-1252 rather than being
-    refused for one non-UTF-8 byte; an unlabelled file must be clean UTF-8
-    with no NUL bytes, which is a guess, not proof it is text.
+    UTF-32/UTF-16 with a BOM (e.g. PowerShell ``>`` output) decode as such.
+    A ``text/`` file falls back to Windows-1252 rather than being refused for
+    one non-UTF-8 byte. Any other label must be clean UTF-8 with no NUL
+    bytes, which is a guess, not proof it is text.
     """
-    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
-        try:
-            return data.decode("utf-16")
-        except UnicodeDecodeError:
-            return None
+    for bom, codec in (
+        (b"\xff\xfe\x00\x00", "utf-32"),
+        (b"\x00\x00\xfe\xff", "utf-32"),
+        (b"\xff\xfe", "utf-16"),
+        (b"\xfe\xff", "utf-16"),
+    ):
+        if data.startswith(bom):
+            try:
+                text = data.decode(codec)
+            except UnicodeDecodeError:
+                return None
+            return None if "\x00" in text[:8192] else text
     if b"\x00" in data[:8192]:
         return None
     try:
         return data.decode("utf-8-sig")
     except UnicodeDecodeError:
-        return data.decode("cp1252", errors="replace") if textual else None
+        return data.decode("cp1252", errors="replace") if labelled_text else None
 
 
 async def _read_discord_attachment(url: str, instruction: str) -> dict[str, str]:
@@ -448,11 +474,12 @@ async def _read_discord_attachment(url: str, instruction: str) -> dict[str, str]
             )
             return {"url": url, "kind": "pdf", "summary": "", "error": "pdf_read_failed"}
         return await _summarize_text(url, instruction, content)
-    # Only files labelled as text, or not labelled at all, are decoded; a
-    # zip, office file or video is refused by its type, not by sniffing.
-    textual = _is_textual_type(media_type)
-    if textual or _is_unlabelled_type(media_type):
-        text = _decode_text(data, textual=textual)
+    # A zip, office file or video is refused by its label, not by sniffing;
+    # everything else is decoded if its bytes are text.
+    if not _is_binary_type(media_type):
+        text = _decode_text(
+            data, labelled_text=_base_type(media_type).startswith("text/")
+        )
         if text is not None:
             return await _summarize_text(url, instruction, text)
     return {
