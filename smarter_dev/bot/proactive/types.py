@@ -15,6 +15,34 @@ from smarter_dev.bot.proactive.timestamps import utc_timestamp
 
 
 @dataclass(frozen=True)
+class ChannelAttachment:
+    """A file on a channel message: enough for the agent to name it and read
+    it with ``web_read``. ``url`` is Discord's signed CDN URL, which expires."""
+
+    filename: str
+    url: str
+    content_type: str = ""
+    size: int = 0
+
+    @classmethod
+    def from_record(cls, record: dict) -> ChannelAttachment:
+        return cls(
+            filename=record["filename"],
+            url=record["url"],
+            content_type=record.get("content_type", ""),
+            size=record.get("size", 0),
+        )
+
+    def to_record(self) -> dict:
+        return {
+            "filename": self.filename,
+            "url": self.url,
+            "content_type": self.content_type,
+            "size": self.size,
+        }
+
+
+@dataclass(frozen=True)
 class ChannelMessage:
     """One channel message — replayed fixture line, live event, or an
     injected/sent bot response."""
@@ -37,6 +65,9 @@ class ChannelMessage:
     # Guild role names of the author, when the runtime knows them (live
     # gateway messages); fixtures and injected messages leave this empty.
     roles: tuple[str, ...] = ()
+    # Attachment details for live messages; fixtures predating this field
+    # carry only ``attachment_count``.
+    attachments: tuple[ChannelAttachment, ...] = ()
 
     @classmethod
     def from_record(cls, record: dict) -> ChannelMessage:
@@ -56,6 +87,10 @@ class ChannelMessage:
             message_type=record["message_type"],
             reaction_counts=dict(record["reaction_counts"]),
             roles=tuple(record.get("roles", ())),
+            attachments=tuple(
+                ChannelAttachment.from_record(attachment)
+                for attachment in record.get("attachments", ())
+            ),
         )
 
     def to_record(self) -> dict:
@@ -76,6 +111,9 @@ class ChannelMessage:
             "reaction_counts": dict(self.reaction_counts),
             "message_type": self.message_type,
             "roles": list(self.roles),
+            "attachments": [
+                attachment.to_record() for attachment in self.attachments
+            ],
         }
 
 

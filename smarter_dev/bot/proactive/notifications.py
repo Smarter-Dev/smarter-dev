@@ -18,6 +18,7 @@ from datetime import datetime
 
 from smarter_dev.bot.proactive.timestamps import as_utc
 from smarter_dev.bot.proactive.timestamps import utc_timestamp
+from smarter_dev.bot.proactive.transcript import with_attachments
 from smarter_dev.bot.proactive.types import ChannelMessage
 
 NOTIFICATION_QUEUE_LIMIT = 20
@@ -57,7 +58,8 @@ def mention_notification(
         created_at=message.timestamp,
         body=(
             f"You were @mentioned by {_user_metadata(message)} in message "
-            f"id={message.id} (sent_at={utc_timestamp(message.timestamp)}):\n> {message.content}"
+            f"id={message.id} (sent_at={utc_timestamp(message.timestamp)}):\n"
+            f"> {with_attachments(message.to_record())}"
         ),
         channel_id=channel_id,
         channel_name=channel_name,
@@ -83,7 +85,8 @@ def reply_notification(
         created_at=message.timestamp,
         body=(
             f"{_user_metadata(message)} replied to {replied_line} with "
-            f"message id={message.id} (sent_at={utc_timestamp(message.timestamp)}):\n> {message.content}"
+            f"message id={message.id} (sent_at={utc_timestamp(message.timestamp)}):\n"
+            f"> {with_attachments(message.to_record())}"
         ),
         channel_id=channel_id,
         channel_name=channel_name,

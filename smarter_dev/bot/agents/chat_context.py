@@ -180,6 +180,7 @@ def _build_attachments(
             url=att.url,
             media_type=(getattr(att, "media_type", None) or None),
             filename=(getattr(att, "filename", "") or None),
+            size=(getattr(att, "size", None) or None),
         )
         for att in msg.attachments or []
     ]
@@ -195,6 +196,7 @@ async def _convert(
     bot_user = bot.get_me()
     bot_user_id = bot_user.id if bot_user else None
 
+    window_ids = {msg.id for msg in raw_messages}
     messages: list[Message] = []
     for msg in raw_messages:
         body = msg.content or ""
@@ -229,6 +231,11 @@ async def _convert(
                 body=resolved_body,
                 reactions=reactions,
                 attachments=_build_attachments(msg, is_self=is_self),
+                reply_to_attachments=(
+                    _build_attachments(ref, is_self=reply_to_is_self)
+                    if ref is not None and ref.id not in window_ids
+                    else []
+                ),
                 sent_at=getattr(msg, "created_at", None) or getattr(msg, "timestamp", None),
                 mentions_bot=mentions_bot,
             )
