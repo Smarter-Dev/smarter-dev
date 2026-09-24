@@ -92,7 +92,7 @@ async def ask(agent, qid: str, body: str) -> dict:
         user_prompt=user_prompt, message_history=history, deps=deps
     )
     out = result.output
-    usage = result.usage()
+    usage = result.usage
     return {
         "responded": out.response is not None,
         "message": out.response.message if out.response else None,

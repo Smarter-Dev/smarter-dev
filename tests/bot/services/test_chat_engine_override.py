@@ -74,7 +74,7 @@ def _result(output, *, input_tokens=0, output_tokens=0):
     )
     return SimpleNamespace(
         output=output,
-        usage=lambda: usage,
+        usage=usage,
         all_messages=lambda: [],
         new_messages=lambda: [],
     )
