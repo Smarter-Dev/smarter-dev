@@ -130,7 +130,12 @@ spec:
                         cpu: 50m
                         memory: 384Mi
                     limits:
-                        cpu: 200m
+                        # 200m throttled startup (imports + plugin loading) to
+                        # ~7 min, and the pgrep probes mark the pod Ready at
+                        # process start, so every deploy left the bot offline
+                        # that long (2026-09-24, #88 roll). Startup is the only
+                        # burst; steady state stays well under the request.
+                        cpu: "1"
                         memory: 512Mi
                 startupProbe:
                     exec:
