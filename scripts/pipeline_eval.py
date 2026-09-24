@@ -689,7 +689,7 @@ def _model_settings(model_id: str, thinking: str):
         return GoogleModelSettings(
             google_thinking_config={"thinking_level": thinking.upper()},
         )
-    if model_id.startswith("gpt-5") or model_id.startswith("openai/gpt-5"):
+    if model_id.startswith(("gpt-5", "gpt-6", "openai/gpt-5", "openai/gpt-6")):
         from pydantic_ai.models.openai import OpenAIResponsesModelSettings
         return OpenAIResponsesModelSettings(
             openai_reasoning_effort=thinking.lower(),

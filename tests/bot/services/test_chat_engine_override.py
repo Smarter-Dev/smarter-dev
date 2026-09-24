@@ -187,7 +187,7 @@ async def test_override_present_builds_agent_for_override_model(
     """A channel override routes the turn through the override model's wire id."""
     agent_mock = MagicMock()
     agent_mock.run = AsyncMock(return_value=_result(_send()))
-    engine, _ = _make_engine(_override("gpt-5-4"), fake_redis)
+    engine, _ = _make_engine(_override("gpt-6-sol"), fake_redis)
 
     get_agent = patch(
         "smarter_dev.bot.services.chat_engine.get_chat_agent",
@@ -203,7 +203,7 @@ async def test_override_present_builds_agent_for_override_model(
     ):
         await engine._run_once(first_activation=True)
 
-    get_agent_mock.assert_called_once_with("gpt-5.4", None)
+    get_agent_mock.assert_called_once_with("gpt-6-sol", None)
     agent_mock.run.assert_awaited_once()
 
 
@@ -213,7 +213,7 @@ async def test_override_reasoning_threads_to_agent(fake_memory, fake_redis):
     agent_mock = MagicMock()
     agent_mock.run = AsyncMock(return_value=_result(_send()))
     engine, _ = _make_engine(
-        _override("gpt-5-4", reasoning_level="high"), fake_redis
+        _override("gpt-6-sol", reasoning_level="high"), fake_redis
     )
 
     get_agent = patch(
@@ -230,7 +230,7 @@ async def test_override_reasoning_threads_to_agent(fake_memory, fake_redis):
     ):
         await engine._run_once(first_activation=True)
 
-    get_agent_mock.assert_called_once_with("gpt-5.4", "high")
+    get_agent_mock.assert_called_once_with("gpt-6-sol", "high")
 
 
 @pytest.mark.asyncio
@@ -238,7 +238,7 @@ async def test_over_budget_skips_the_turn(fake_memory, fake_redis):
     """When the budget is spent the engine must not call the model."""
     agent_mock = MagicMock()
     agent_mock.run = AsyncMock(return_value=_result(_send()))
-    engine, _ = _make_engine(_override("gpt-5-4", hourly=100), fake_redis)
+    engine, _ = _make_engine(_override("gpt-6-sol", hourly=100), fake_redis)
 
     with _patches(agent_mock=agent_mock, fake_memory=fake_memory)[0], _patches(
         agent_mock=agent_mock, fake_memory=fake_memory
@@ -267,7 +267,7 @@ async def test_under_budget_runs_and_meters_usage(fake_memory, fake_redis):
     agent_mock.run = AsyncMock(
         return_value=_result(_send(), input_tokens=100, output_tokens=50)
     )
-    engine, _ = _make_engine(_override("gpt-5-4", daily=1000), fake_redis)
+    engine, _ = _make_engine(_override("gpt-6-sol", daily=1000), fake_redis)
 
     with _patches(agent_mock=agent_mock, fake_memory=fake_memory)[0], _patches(
         agent_mock=agent_mock, fake_memory=fake_memory
@@ -349,7 +349,7 @@ async def test_turn_prompt_carries_model_identity(fake_memory, fake_redis):
     agent_mock = MagicMock()
     agent_mock.run = AsyncMock(return_value=_result(_send()))
     engine, _ = _make_engine(
-        _override("gpt-5-4", reasoning_level="high"), fake_redis
+        _override("gpt-6-sol", reasoning_level="high"), fake_redis
     )
 
     with patch(
@@ -366,7 +366,7 @@ async def test_turn_prompt_carries_model_identity(fake_memory, fake_redis):
         await engine._run_once(first_activation=True)
 
     user_prompt = agent_mock.run.await_args.kwargs["user_prompt"]
-    assert '<your-model id="gpt-5.4"' in user_prompt
+    assert '<your-model id="gpt-6-sol"' in user_prompt
     assert 'reasoning-level="high"' in user_prompt
 
 
@@ -423,7 +423,7 @@ async def test_channel_override_wins_over_temporary_default(
     agent_mock = MagicMock()
     agent_mock.run = AsyncMock(return_value=_result(_send()))
     fake_redis.get = AsyncMock(return_value=_temporary_default_payload())
-    engine, _ = _make_engine(_override("gpt-5-4"), fake_redis)
+    engine, _ = _make_engine(_override("gpt-6-sol"), fake_redis)
 
     get_agent = patch(
         "smarter_dev.bot.services.chat_engine.get_chat_agent",
@@ -439,7 +439,7 @@ async def test_channel_override_wins_over_temporary_default(
     ):
         await engine._run_once(first_activation=True)
 
-    get_agent_mock.assert_called_once_with("gpt-5.4", None)
+    get_agent_mock.assert_called_once_with("gpt-6-sol", None)
 
 
 @pytest.mark.asyncio
@@ -478,7 +478,7 @@ async def test_persisted_turn_records_override_model_name(fake_memory, fake_redi
     agent_mock.run = AsyncMock(
         return_value=_result(_send(), input_tokens=10, output_tokens=5)
     )
-    engine, _ = _make_engine(_override("gpt-5-4", daily=1000), fake_redis)
+    engine, _ = _make_engine(_override("gpt-6-sol", daily=1000), fake_redis)
 
     start_engagement = AsyncMock(return_value="engagement-1")
     persist_turn = AsyncMock()
@@ -497,7 +497,7 @@ async def test_persisted_turn_records_override_model_name(fake_memory, fake_redi
         await engine._run_once(first_activation=True)
 
     persist_turn.assert_awaited_once()
-    assert persist_turn.await_args.kwargs["chat_model_name"] == "gpt-5.4"
+    assert persist_turn.await_args.kwargs["chat_model_name"] == "gpt-6-sol"
 
 
 @pytest.mark.asyncio
@@ -512,7 +512,7 @@ async def test_over_budget_on_first_activation_recovers_when_budget_frees(
     agent_mock.run = AsyncMock(
         return_value=_result(_send(), input_tokens=10, output_tokens=5)
     )
-    engine, _ = _make_engine(_override("gpt-5-4", hourly=100), fake_redis)
+    engine, _ = _make_engine(_override("gpt-6-sol", hourly=100), fake_redis)
 
     budget_reset = AsyncMock(return_value=1_800_000_000)
     start_engagement = AsyncMock(return_value="engagement-1")
@@ -644,7 +644,7 @@ async def test_response_filter_drops_activation_skips_turn(fake_memory, fake_red
     agent_mock = MagicMock()
     agent_mock.run = AsyncMock(return_value=_result(_send()))
     engine, _ = _make_engine(
-        _override("gpt-5-4", response_filter="only python questions"), fake_redis
+        _override("gpt-6-sol", response_filter="only python questions"), fake_redis
     )
     start_engagement = AsyncMock(return_value="engagement-1")
 
@@ -684,7 +684,7 @@ async def test_response_filter_first_activation_starts_from_later_ontopic_messag
     agent_mock = MagicMock()
     agent_mock.run = AsyncMock(return_value=_result(_send()))
     engine, _ = _make_engine(
-        _override("gpt-5-4", daily=1000, response_filter="only python questions"),
+        _override("gpt-6-sol", daily=1000, response_filter="only python questions"),
         fake_redis,
     )
     off_topic_trigger = _fake_message(700, content="what's for lunch")
@@ -722,7 +722,7 @@ async def test_response_filter_partial_drop_only_survivors_reach_agent(
     agent_mock = MagicMock()
     agent_mock.run = AsyncMock(return_value=_result(_send()))
     engine, _ = _make_engine(
-        _override("gpt-5-4", daily=1000, response_filter="only python questions"),
+        _override("gpt-6-sol", daily=1000, response_filter="only python questions"),
         fake_redis,
     )
     drop_msg = _fake_message(500, content="what's for lunch")
@@ -774,7 +774,7 @@ async def test_response_filter_gate_error_runs_turn_unfiltered(
     agent_mock = MagicMock()
     agent_mock.run = AsyncMock(return_value=_result(_send()))
     engine, _ = _make_engine(
-        _override("gpt-5-4", daily=1000, response_filter="only python questions"),
+        _override("gpt-6-sol", daily=1000, response_filter="only python questions"),
         fake_redis,
     )
 
@@ -800,7 +800,7 @@ async def test_gate_receives_channel_name(fake_redis):
     """The gate must see the channel/thread name — for a forum post it is the
     title, often the only statement of what the conversation is about."""
     engine, _ = _make_engine(
-        _override("gpt-5-4", response_filter="only python questions"), fake_redis
+        _override("gpt-6-sol", response_filter="only python questions"), fake_redis
     )
     gate = AsyncMock(return_value=[])
 
@@ -822,7 +822,7 @@ async def test_gate_channel_name_lookup_failure_degrades_to_none(fake_redis):
     """A channel-info failure must not break the gate — it judges without the
     name rather than erroring the turn."""
     engine, _ = _make_engine(
-        _override("gpt-5-4", response_filter="only python questions"), fake_redis
+        _override("gpt-6-sol", response_filter="only python questions"), fake_redis
     )
     gate = AsyncMock(return_value=[])
 
@@ -857,7 +857,7 @@ async def test_fallback_flag_skips_budget_and_uses_fallback_model(
         return_value=_result(_send(), input_tokens=10, output_tokens=5)
     )
     engine, _ = _make_engine(
-        _override("gemma-4-31b", hourly=100, fallback_model_key="gpt-5-4"), fake_redis
+        _override("gemma-4-31b", hourly=100, fallback_model_key="gpt-6-sol"), fake_redis
     )
     fake_redis.exists = AsyncMock(return_value=1)  # fallback flag present
 
@@ -879,7 +879,7 @@ async def test_fallback_flag_skips_budget_and_uses_fallback_model(
         await engine._run_once(first_activation=True)
 
     # The fallback model's wire id, reasoning left to its own default.
-    get_agent_mock.assert_called_once_with("gpt-5.4", None)
+    get_agent_mock.assert_called_once_with("gpt-6-sol", None)
     over_budget.assert_not_called()  # budget enforcement skipped entirely
     agent_mock.run.assert_awaited_once()
     # Free-fallback spend goes to the display-only windows, not the enforced ones.
@@ -895,7 +895,7 @@ async def test_fallback_persisted_turn_records_fallback_model(fake_memory, fake_
         return_value=_result(_send(), input_tokens=10, output_tokens=5)
     )
     engine, _ = _make_engine(
-        _override("gemma-4-31b", hourly=100, fallback_model_key="gpt-5-4"), fake_redis
+        _override("gemma-4-31b", hourly=100, fallback_model_key="gpt-6-sol"), fake_redis
     )
     fake_redis.exists = AsyncMock(return_value=1)
 
@@ -916,7 +916,7 @@ async def test_fallback_persisted_turn_records_fallback_model(fake_memory, fake_
         await engine._run_once(first_activation=True)
 
     persist_turn.assert_awaited_once()
-    assert persist_turn.await_args.kwargs["chat_model_name"] == "gpt-5.4"
+    assert persist_turn.await_args.kwargs["chat_model_name"] == "gpt-6-sol"
 
 
 @pytest.mark.asyncio
@@ -1002,7 +1002,7 @@ async def test_ended_marker_notifies_primary_restored_then_runs_primary(
     agent_mock = MagicMock()
     agent_mock.run = AsyncMock(return_value=_result(_send()))
     engine, _ = _make_engine(
-        _override("gpt-5-4", daily=1000, fallback_model_key="gemma-4-31b"), fake_redis
+        _override("gpt-6-sol", daily=1000, fallback_model_key="gemma-4-31b"), fake_redis
     )
     fake_redis.exists = AsyncMock(return_value=0)  # flag expired
     fake_redis.delete = AsyncMock(return_value=1)  # marker still present
@@ -1023,13 +1023,13 @@ async def test_ended_marker_notifies_primary_restored_then_runs_primary(
 
     fake_redis.delete.assert_awaited_once()  # marker cleared
     # The primary model ran (its wire id), not the fallback.
-    get_agent_mock.assert_called_once_with("gpt-5.4", None)
+    get_agent_mock.assert_called_once_with("gpt-6-sol", None)
     # A "primary is back" notice was posted, naming the primary model.
     notices = [
         call.kwargs.get("content", "")
         for call in engine.bot.rest.create_message.await_args_list
     ]
-    assert any("answering again" in text and "GPT-5.4" in text for text in notices)
+    assert any("answering again" in text and "GPT-6 Sol" in text for text in notices)
 
 
 @pytest.mark.asyncio
@@ -1043,7 +1043,7 @@ async def test_ended_marker_while_over_budget_does_not_announce_restored(
     agent_mock = MagicMock()
     agent_mock.run = AsyncMock(return_value=_result(_send()))
     engine, _ = _make_engine(
-        _override("gpt-5-4", daily=1000, fallback_model_key="gemma-4-31b"), fake_redis
+        _override("gpt-6-sol", daily=1000, fallback_model_key="gemma-4-31b"), fake_redis
     )
     fake_redis.exists = AsyncMock(return_value=0)  # fallback flag expired
     fake_redis.delete = AsyncMock(return_value=1)  # marker would clear if touched
@@ -1080,7 +1080,7 @@ async def test_budget_exhausted_notice_carries_fallback_button(
     agent_mock = MagicMock()
     agent_mock.run = AsyncMock(return_value=_result(_send()))
     engine, _ = _make_engine(
-        _override("gpt-5-4", hourly=100, fallback_model_key="gemma-4-31b"), fake_redis
+        _override("gpt-6-sol", hourly=100, fallback_model_key="gemma-4-31b"), fake_redis
     )
 
     with _patches(agent_mock=agent_mock, fake_memory=fake_memory)[0], _patches(
@@ -1109,7 +1109,7 @@ async def test_budget_exhausted_notice_has_no_button_without_fallback(
     components), unchanged from the pre-feature behaviour."""
     agent_mock = MagicMock()
     agent_mock.run = AsyncMock(return_value=_result(_send()))
-    engine, _ = _make_engine(_override("gpt-5-4", hourly=100), fake_redis)
+    engine, _ = _make_engine(_override("gpt-6-sol", hourly=100), fake_redis)
 
     with _patches(agent_mock=agent_mock, fake_memory=fake_memory)[0], _patches(
         agent_mock=agent_mock, fake_memory=fake_memory

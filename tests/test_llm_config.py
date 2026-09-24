@@ -5,10 +5,12 @@ from __future__ import annotations
 from smarter_dev import llm_config
 
 
-def test_default_model_routes_via_openrouter():
-    # Luna moved to OpenRouter 2026-08-06 for the 50% rate; litellm wants the
-    # openrouter/<upstream>/<model> form.
-    assert llm_config.DEFAULT_LLM_MODEL == "openrouter/openai/gpt-5.6-luna"
+def test_default_model_is_gpt_6_luna_on_openai_directly():
+    # GPT-6 Luna replaced OpenRouter-served 5.6 Luna on 2026-09-24; it costs no
+    # more direct, so the OpenRouter hop was dropped.
+    assert llm_config.DEFAULT_LLM_MODEL == "gpt-6-luna"
+    assert llm_config._get_provider_from_model(llm_config.DEFAULT_LLM_MODEL) == "openai"
+    assert llm_config._is_reasoning_model(llm_config.DEFAULT_LLM_MODEL)
 
 
 def test_provider_detected_from_openrouter_prefix():

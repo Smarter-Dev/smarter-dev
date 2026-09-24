@@ -205,8 +205,8 @@ class CatalogModel:
         open-weight families are uneven on tool-choice and json_schema output
         wherever they are hosted, and prompted JSON is the one mode all of them
         handle. Digital Ocean and Zen serve nothing else, so everything there
-        qualifies; OpenRouter mixes open weights in with Grok and OpenAI's Luna,
-        which do structured output natively and must not be downgraded.
+        qualifies; OpenRouter mixes open weights in with Grok, which does
+        structured output natively and must not be downgraded.
         """
         if self.provider in (
             ModelProvider.DIGITALOCEAN,
@@ -265,8 +265,8 @@ def model_vendor(model: CatalogModel) -> str:
 
 
 # Common reasoning ladders, named once so the catalog stays scannable.
-# OpenAI GPT-5.4/5.5: none → xhigh. GPT-5.6 adds "max". Gemini's thinking_level
-# caps at "high". Open reasoning models (GLM/DeepSeek/Qwen served via DO) expose
+# OpenAI GPT-5.4/5.5: none → xhigh. GPT-5.6 and GPT-6 add "max". Gemini's
+# thinking_level caps at "high". Open reasoning models (GLM/DeepSeek/Qwen served via DO) expose
 # a low/medium/high effort knob through the OpenAI-compatible API.
 _OPENAI_5X = (
     ReasoningLevel.NONE,
@@ -536,77 +536,32 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
     # --- GPT via OpenAI ---
+    # GPT-6 replaced GPT-5.6 Terra and Luna on 2026-09-24: Sol ($2/$10 per M)
+    # takes Terra's flagship slot and Luna ($0.10/$0.50) takes 5.6 Luna's cheap,
+    # fast one — and the server default. GPT-5.4, 5.4 Mini, 5.5 and 5.6 Sol left
+    # the same day: 6 Sol undercuts all three flagships, and 6 Luna takes Mini's
+    # cheap slot. 5.4 Nano left too: the production OpenAI key admits only 6 Luna
+    # and 6 Sol, so Nano's gate job moved to 6 Luna. Both are served by OpenAI directly: 6
+    # Luna costs no more direct than 5.6 Luna did through OpenRouter, so the
+    # OpenRouter hop (and its 5% fee) went with it. Same none → max ladder as
+    # 5.6. The retired models' price patches stay in llm_pricing for the settled
+    # usage rows that carry their wire ids.
     CatalogModel(
-        key="gpt-5-4-nano",
-        label="GPT-5.4 Nano",
+        key="gpt-6-luna",
+        label="GPT-6 Luna",
         family="GPT",
         provider=ModelProvider.OPENAI,
-        model_id="gpt-5.4-nano",
-        supports_vision=True,
-        reasoning_levels=_OPENAI_5X,
-        default_reasoning=ReasoningLevel.MEDIUM,
-    ),
-    CatalogModel(
-        key="gpt-5-4-mini",
-        label="GPT-5.4 Mini",
-        family="GPT",
-        provider=ModelProvider.OPENAI,
-        model_id="gpt-5.4-mini",
-        supports_vision=True,
-        reasoning_levels=_OPENAI_5X,
-        default_reasoning=ReasoningLevel.MEDIUM,
-    ),
-    CatalogModel(
-        key="gpt-5-4",
-        label="GPT-5.4",
-        family="GPT",
-        provider=ModelProvider.OPENAI,
-        model_id="gpt-5.4",
-        supports_vision=True,
-        reasoning_levels=_OPENAI_5X,
-        default_reasoning=ReasoningLevel.MEDIUM,
-    ),
-    CatalogModel(
-        key="gpt-5-5",
-        label="GPT-5.5",
-        family="GPT",
-        provider=ModelProvider.OPENAI,
-        model_id="gpt-5.5",
-        supports_vision=True,
-        reasoning_levels=_OPENAI_5X,
-        default_reasoning=ReasoningLevel.MEDIUM,
-    ),
-    # Luna is OpenAI's model but is served through OpenRouter (2026-08-06):
-    # same OpenAI upstream at half the rate ($0.10/$0.60 against direct's
-    # $0.20/$1.20). Probed live: OpenRouter passes reasoning_effort through to
-    # the upstream — every level none→max returns 200 — so the full 5.6
-    # ladder stays.
-    CatalogModel(
-        key="gpt-5-6-luna",
-        label="GPT-5.6 Luna",
-        family="GPT",
-        provider=ModelProvider.OPENROUTER,
-        model_id="openai/gpt-5.6-luna",
+        model_id="gpt-6-luna",
         supports_vision=True,
         reasoning_levels=_OPENAI_56,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
     CatalogModel(
-        key="gpt-5-6-sol",
-        label="GPT-5.6 Sol",
+        key="gpt-6-sol",
+        label="GPT-6 Sol",
         family="GPT",
         provider=ModelProvider.OPENAI,
-        model_id="gpt-5.6-sol",
-        supports_vision=True,
-        reasoning_levels=_OPENAI_56,
-        default_reasoning=ReasoningLevel.MEDIUM,
-    ),
-    CatalogModel(
-        key="gpt-5-6-terra",
-        label="GPT-5.6 Terra",
-        family="GPT",
-        provider=ModelProvider.OPENAI,
-        model_id="gpt-5.6-terra",
+        model_id="gpt-6-sol",
         supports_vision=True,
         reasoning_levels=_OPENAI_56,
         default_reasoning=ReasoningLevel.MEDIUM,
@@ -675,6 +630,29 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
 _MODEL_BY_KEY: dict[str, CatalogModel] = {
     model.key: model for model in MODEL_CATALOG
 }
+
+
+# Retired key -> the model that took its place, for *selections* only: the
+# server-wide chat settings, a web conversation's picked model, a queued turn and
+# the temporary default override. Channel pins never read through this — a
+# channel that advertises its model stops with a notice until an admin repins
+# (Zech, 2026-09-24). It exists so the deploy that retires a key can leave the
+# stored selections alone while pods on the previous build are still serving;
+# the stored keys are rewritten by a later migration, once no old pod remains.
+RETIRED_SUCCESSORS: dict[str, str] = {
+    "gpt-5-6-luna": "gpt-6-luna",
+    "gpt-5-6-terra": "gpt-6-sol",
+    "gpt-5-4-mini": "gpt-6-luna",
+    "gpt-5-4": "gpt-6-sol",
+    "gpt-5-5": "gpt-6-sol",
+    "gpt-5-6-sol": "gpt-6-sol",
+    "gpt-5-4-nano": "gpt-6-luna",
+}
+
+
+def successor_key(key: str) -> str:
+    """``key``, or the key of the model that replaced it if it was retired."""
+    return RETIRED_SUCCESSORS.get(key, key)
 
 
 def catalog_by_key() -> dict[str, CatalogModel]:

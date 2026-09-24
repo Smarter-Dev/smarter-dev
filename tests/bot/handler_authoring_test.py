@@ -1225,30 +1225,29 @@ def _settings_with(**overrides):
 
 
 def test_configured_model_builder_routes_catalog_ids_through_model_router(monkeypatch):
-    # The admin author and second judge both default to Terra, which the catalog
+    # The admin author and judges default to GPT-6 Sol, which the catalog
     # serves via OpenAI — building it as a Google model would send a GPT id to
     # the Gemini API. Catalog wire ids must route through the shared router;
     # anything else is assumed to be a Gemini id.
     monkeypatch.setenv("GEMINI_API_KEY", "test-gemini-key")
     monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
-    terra = _build_configured_model("gpt-5.6-terra")
-    assert isinstance(terra, OpenAIResponsesModel)
+    sol = _build_configured_model("gpt-6-sol")
+    assert isinstance(sol, OpenAIResponsesModel)
 
-    luna = _build_configured_model("openai/gpt-5.6-luna")
-    assert isinstance(luna, OpenAIChatModel)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-openrouter-key")
+    grok = _build_configured_model("x-ai/grok-4.6")
+    assert isinstance(grok, OpenAIChatModel)
 
     gemini = _build_configured_model("gemini-3-flash-preview")
     assert isinstance(gemini, GoogleModel)
 
 
-def test_admin_model_defaults_are_the_stronger_pair():
-    assert Settings.model_fields["handler_admin_author_model"].default == "gpt-5.6-terra"
-    assert (
-        Settings.model_fields["handler_admin_judge_model"].default == "gemini-3.7-flash"
-    )
+def test_admin_model_defaults_are_gpt_6_sol():
+    assert Settings.model_fields["handler_admin_author_model"].default == "gpt-6-sol"
+    assert Settings.model_fields["handler_admin_judge_model"].default == "gpt-6-sol"
     assert (
         Settings.model_fields["handler_admin_second_judge_model"].default
-        == "gpt-5.6-terra"
+        == "gpt-6-sol"
     )
 
 
@@ -1262,9 +1261,21 @@ def test_standard_tier_model_defaults_are_unchanged():
     )
 
 
-def test_admin_judge_panel_defaults_to_gemini_then_terra(monkeypatch):
+def test_admin_judge_panel_defaults_to_gpt_6_sol_alone(monkeypatch):
     monkeypatch.setattr(handler_authoring, "get_settings", _settings_with)
-    assert _admin_judge_models() == ["gemini-3.7-flash", "gpt-5.6-terra"]
+    assert _admin_judge_models() == ["gpt-6-sol"]
+
+
+def test_admin_judge_panel_keeps_two_distinct_judges_in_order(monkeypatch):
+    monkeypatch.setattr(
+        handler_authoring,
+        "get_settings",
+        lambda: _settings_with(
+            handler_admin_judge_model="gemini-3.7-flash",
+            handler_admin_second_judge_model="gpt-6-sol",
+        ),
+    )
+    assert _admin_judge_models() == ["gemini-3.7-flash", "gpt-6-sol"]
 
 
 def test_admin_judge_panel_ignores_the_standard_tier_judge(monkeypatch):
@@ -1280,7 +1291,10 @@ def test_empty_second_judge_leaves_a_single_judge_panel(monkeypatch):
     monkeypatch.setattr(
         handler_authoring,
         "get_settings",
-        lambda: _settings_with(handler_admin_second_judge_model=""),
+        lambda: _settings_with(
+            handler_admin_judge_model="gemini-3.7-flash",
+            handler_admin_second_judge_model="",
+        ),
     )
     assert _admin_judge_models() == ["gemini-3.7-flash"]
 
@@ -1290,11 +1304,11 @@ def test_duplicate_admin_judge_models_are_deduplicated(monkeypatch):
         handler_authoring,
         "get_settings",
         lambda: _settings_with(
-            handler_admin_judge_model="gpt-5.6-terra",
-            handler_admin_second_judge_model="gpt-5.6-terra",
+            handler_admin_judge_model="gemini-3.7-flash",
+            handler_admin_second_judge_model="gemini-3.7-flash",
         ),
     )
-    assert _admin_judge_models() == ["gpt-5.6-terra"]
+    assert _admin_judge_models() == ["gemini-3.7-flash"]
 
 
 def test_admin_author_agent_uses_the_admin_author_model(monkeypatch):
@@ -1305,21 +1319,21 @@ def test_admin_author_agent_uses_the_admin_author_model(monkeypatch):
     monkeypatch.setattr(
         handler_authoring,
         "get_settings",
-        lambda: _settings_with(handler_admin_author_model="gpt-5.6-terra"),
+        lambda: _settings_with(handler_admin_author_model="gpt-6-sol"),
     )
     agent = handler_authoring._get_admin_author_agent()
-    assert agent.model.model_name == "gpt-5.6-terra"
+    assert agent.model.model_name == "gpt-6-sol"
 
 
 def test_handler_model_settings_uses_the_requested_reasoning_level():
-    terra_high = _handler_model_settings("gpt-5.6-terra", ReasoningLevel.HIGH)
-    assert terra_high["openai_reasoning_effort"] == "high"
+    sol_high = _handler_model_settings("gpt-6-sol", ReasoningLevel.HIGH)
+    assert sol_high["openai_reasoning_effort"] == "high"
 
     gemini_high = _handler_model_settings("gemini-3.7-flash", ReasoningLevel.HIGH)
     assert gemini_high["google_thinking_config"] == {"thinking_level": "HIGH"}
 
-    terra_medium = _handler_model_settings("gpt-5.6-terra", ReasoningLevel.MEDIUM)
-    assert terra_medium["openai_reasoning_effort"] == "medium"
+    sol_medium = _handler_model_settings("gpt-6-sol", ReasoningLevel.MEDIUM)
+    assert sol_medium["openai_reasoning_effort"] == "medium"
 
 
 def test_handler_model_settings_falls_back_for_non_catalog_ids():

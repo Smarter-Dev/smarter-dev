@@ -5,12 +5,12 @@ Plays one sustained multi-turn conversation (a YAML file with a `turns` list)
 through the real chat pipeline TWICE and contrasts the token cost:
 
   1. TWO-STAGE — small WORKER (default Gemini 3.5 Flash Lite) runs the agentic
-     turn and emits a brief; large WRITER (default GPT-5.6 Terra) writes the
+     turn and emits a brief; large WRITER (default GPT-6 Sol) writes the
      reply. The worker carries conversation history across turns (exactly like
      the engine, which persists ``result.all_messages()``); the writer only
      ever sees a fresh, small brief.
   2. SINGLE-STAGE — the ordinary chat bot on the SAME large model
-     (default GPT-5.6 Terra) does the whole turn, carrying full history itself.
+     (default GPT-6 Sol) does the whole turn, carrying full history itself.
 
 Each turn is replayed with growing history, so the report shows how the two
 approaches' token curves — and cost — diverge over a long conversation.
@@ -22,7 +22,7 @@ contrast (two-stage total vs single-stage total, savings and ratio).
 Usage:
     uv run python scripts/two_stage_conversation_eval.py
     uv run python scripts/two_stage_conversation_eval.py path/to/conversation.yaml --out report.md
-    uv run python scripts/two_stage_conversation_eval.py --worker gemini-3-5-flash-lite --large gpt-5-6-terra
+    uv run python scripts/two_stage_conversation_eval.py --worker gemini-3-5-flash-lite --large gpt-6-sol
 
 Requires provider API keys in the environment (loaded from .env): GEMINI_API_KEY
 / GOOGLE_API_KEY for Gemini, OPENAI_API_KEY for GPT.
@@ -500,7 +500,7 @@ def main() -> int:
     parser.add_argument("conversation", nargs="?", default=str(DEFAULT_CONVERSATION), help="conversation YAML path")
     parser.add_argument("--worker", default="gemini-3-5-flash-lite", help="two-stage worker model catalog key")
     parser.add_argument("--writer", default=None, help="two-stage writer model catalog key (default: same as --large)")
-    parser.add_argument("--large", default="gpt-5-6-terra", help="large model catalog key (writer + single-stage bot)")
+    parser.add_argument("--large", default="gpt-6-sol", help="large model catalog key (writer + single-stage bot)")
     parser.add_argument("--out", default="two_stage_conversation_report.md", help="output Markdown path")
     args = parser.parse_args()
     return asyncio.run(_main_async(args))

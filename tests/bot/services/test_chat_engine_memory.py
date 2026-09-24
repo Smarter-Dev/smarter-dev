@@ -146,7 +146,7 @@ def _briefing(*, remembered: list[str] | None = None) -> BriefingDecision:
     )
 
 
-def _override(model_key: str = "gpt-5-4", *, drafter_model: str | None = None):
+def _override(model_key: str = "gpt-6-sol", *, drafter_model: str | None = None):
     return SimpleNamespace(
         model_key=model_key,
         drafter_model=drafter_model,
@@ -644,7 +644,7 @@ async def test_writer_stage_receives_the_blob_verbatim(fake_memory, event_redis)
     )
     service = _memory_service(_snapshot())
     engine = _make_engine(
-        event_redis, service, override=_override("gemma-4-31b", drafter_model="gpt-5-4")
+        event_redis, service, override=_override("gemma-4-31b", drafter_model="gpt-6-sol")
     )
 
     with _EngineHarness(fake_memory=fake_memory, agent=worker_agent), patch(
@@ -674,7 +674,7 @@ async def test_writer_stage_omits_memory_sections_when_there_is_none(
     )
     service = _memory_service(EMPTY_SNAPSHOT)
     engine = _make_engine(
-        event_redis, service, override=_override("gemma-4-31b", drafter_model="gpt-5-4")
+        event_redis, service, override=_override("gemma-4-31b", drafter_model="gpt-6-sol")
     )
 
     with _EngineHarness(fake_memory=fake_memory, agent=worker_agent), patch(

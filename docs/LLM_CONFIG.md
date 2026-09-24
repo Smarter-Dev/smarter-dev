@@ -8,12 +8,12 @@ The project uses three model types for different purposes:
 
 | Model Type | Environment Variable | Default | Purpose |
 |------------|---------------------|---------|---------|
-| `fast` | `LLM_FAST_MODEL` | `gpt-5.6-luna` | Quick operations (most agents) |
-| `medium` | `LLM_MEDIUM_MODEL` | `gpt-5.6-luna` | Higher quality reasoning (forum agent) |
-| `judge` | `LLM_JUDGE_MODEL` | `gpt-5.6-luna` | Evaluation/testing |
+| `fast` | `LLM_FAST_MODEL` | `gpt-6-luna` | Quick operations (most agents) |
+| `medium` | `LLM_MEDIUM_MODEL` | `gpt-6-luna` | Higher quality reasoning (forum agent) |
+| `judge` | `LLM_JUDGE_MODEL` | `gpt-6-luna` | Evaluation/testing |
 
 The primary Discord chat agent and its conversation compactor also default to
-`gpt-5.6-luna`. Override them with `CHAT_AGENT_MODEL` and
+`gpt-6-luna`. Override them with `CHAT_AGENT_MODEL` and
 `CHAT_AGENT_COMPACT_MODEL`, respectively.
 
 Discord voice messages use Gemini TTS directly rather than DSPy:
@@ -76,22 +76,22 @@ LLM_FAST_MODEL=gpt-5-nano-2025-08-07 LLM_MEDIUM_MODEL=gpt-5-nano-2025-08-07 LLM_
 Add to your shell profile (`.bashrc`, `.zshrc`, etc.):
 
 ```bash
-export LLM_FAST_MODEL=gpt-5.6-luna
-export LLM_MEDIUM_MODEL=gpt-5.6-luna
-export LLM_JUDGE_MODEL=gpt-5.6-luna
-export CHAT_AGENT_MODEL=gpt-5.6-luna
-export CHAT_AGENT_COMPACT_MODEL=gpt-5.6-luna
+export LLM_FAST_MODEL=gpt-6-luna
+export LLM_MEDIUM_MODEL=gpt-6-luna
+export LLM_JUDGE_MODEL=gpt-6-luna
+export CHAT_AGENT_MODEL=gpt-6-luna
+export CHAT_AGENT_COMPACT_MODEL=gpt-6-luna
 ```
 
 Or create a `.env` file:
 
 ```bash
 # .env
-LLM_FAST_MODEL=gpt-5.6-luna
-LLM_MEDIUM_MODEL=gpt-5.6-luna
-LLM_JUDGE_MODEL=gpt-5.6-luna
-CHAT_AGENT_MODEL=gpt-5.6-luna
-CHAT_AGENT_COMPACT_MODEL=gpt-5.6-luna
+LLM_FAST_MODEL=gpt-6-luna
+LLM_MEDIUM_MODEL=gpt-6-luna
+LLM_JUDGE_MODEL=gpt-6-luna
+CHAT_AGENT_MODEL=gpt-6-luna
+CHAT_AGENT_COMPACT_MODEL=gpt-6-luna
 VOICE_TTS_MODEL=gemini-2.5-flash-preview-tts
 VOICE_TTS_VOICE=Kore
 VOICE_WORDS_PER_MINUTE=150
@@ -161,9 +161,9 @@ Test runs also display model information:
 
 ```
 LLM Models:
-   Fast:   gpt-5.6-luna (env: LLM_FAST_MODEL)
-   Medium: gpt-5.6-luna (env: LLM_MEDIUM_MODEL)
-   Judge:  gpt-5.6-luna (env: LLM_JUDGE_MODEL)
+   Fast:   gpt-6-luna (env: LLM_FAST_MODEL)
+   Medium: gpt-6-luna (env: LLM_MEDIUM_MODEL)
+   Judge:  gpt-6-luna (env: LLM_JUDGE_MODEL)
 ```
 
 ## Implementation

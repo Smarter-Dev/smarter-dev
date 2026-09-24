@@ -126,28 +126,28 @@ def test_build_writer_prompt_is_pure():
 
 def test_writer_agent_has_no_tools():
     _reset_cache()
-    agent = get_writer_agent("gpt-5.4")
+    agent = get_writer_agent("gpt-6-sol")
     assert list(agent._function_toolset.tools.keys()) == []
 
 
 def test_writer_agent_output_is_writer_output():
     _reset_cache()
-    agent = get_writer_agent("gpt-5.4")
+    agent = get_writer_agent("gpt-6-sol")
     assert agent.output_type is WriterOutput
 
 
 def test_writer_agent_caches_per_model_id():
     _reset_cache()
-    first = get_writer_agent("gpt-5.4")
-    second = get_writer_agent("gpt-5.4")
+    first = get_writer_agent("gpt-6-sol")
+    second = get_writer_agent("gpt-6-sol")
     assert first is second
 
 
 def test_writer_agent_caches_per_reasoning_level():
     """A given (model id, reasoning level) pair reuses one cached agent."""
     _reset_cache()
-    first = get_writer_agent("gpt-5.4", "high")
-    second = get_writer_agent("gpt-5.4", "high")
+    first = get_writer_agent("gpt-6-sol", "high")
+    second = get_writer_agent("gpt-6-sol", "high")
     assert first is second
 
 
@@ -155,22 +155,22 @@ def test_distinct_reasoning_levels_yield_distinct_writer_agents():
     """The writer honours the admin-chosen reasoning, so the same model at two
     reasoning levels caches as two distinct agents (distinct model_settings)."""
     _reset_cache()
-    high = get_writer_agent("gpt-5.4", "high")
-    low = get_writer_agent("gpt-5.4", "low")
+    high = get_writer_agent("gpt-6-sol", "high")
+    low = get_writer_agent("gpt-6-sol", "low")
     assert high is not low
 
 
 def test_default_reasoning_is_distinct_from_explicit_level():
     """The default (None) reasoning caches separately from an explicit level."""
     _reset_cache()
-    default = get_writer_agent("gpt-5.4")
-    explicit = get_writer_agent("gpt-5.4", "high")
+    default = get_writer_agent("gpt-6-sol")
+    explicit = get_writer_agent("gpt-6-sol", "high")
     assert default is not explicit
 
 
 def test_distinct_model_ids_yield_distinct_writer_agents():
     _reset_cache()
-    gpt = get_writer_agent("gpt-5.4")
+    gpt = get_writer_agent("gpt-6-sol")
     gemini = get_writer_agent("gemini-3.1-pro")
     assert gpt is not gemini
 
@@ -186,9 +186,9 @@ def test_writer_system_prompt_carries_model_identity():
     """The writer answers 'what model are you?' from its own system prompt (the
     drafter can't be relied on to relay it), so the catalog label is injected."""
     _reset_cache()
-    agent = get_writer_agent("gpt-5.6-terra")
+    agent = get_writer_agent("gpt-6-sol")
     prompt = agent._system_prompts[0]
-    assert "GPT-5.6 Terra" in prompt
+    assert "GPT-6 Sol" in prompt
     assert "Never bring it up otherwise" in prompt
 
 

@@ -113,6 +113,17 @@ async def test_read_round_trips_a_stored_override():
 
 
 @pytest.mark.asyncio
+async def test_read_moves_a_retired_key_onto_its_successor():
+    stored = json.dumps(
+        {"model_key": "gpt-5-6-terra", "reasoning_level": "high",
+         "expires_at_epoch": 1_790_000_000}
+    )
+    override = await read_default_model_override(_redis_with(stored))
+    assert override is not None
+    assert override.model_key == "gpt-6-sol"
+
+
+@pytest.mark.asyncio
 async def test_read_absent_key_returns_none():
     assert await read_default_model_override(_redis_with(None)) is None
 

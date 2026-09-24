@@ -344,6 +344,48 @@ class TestOpenAIPricing:
         # 100k fresh @ $2 + 800k read @ $0.20 + 100k write @ $2.50.
         assert cost == Decimal("0.61")
 
+    def test_gpt_6_over_272k_prices_base_rate_and_says_so(self, caplog):
+        # Totals span a turn's requests, so no tier applies; a total over the
+        # long-context threshold is logged instead of passing silently.
+        with caplog.at_level(logging.WARNING, logger="smarter_dev.web.llm_pricing"):
+            assert calc_cost(300_000, 0, "gpt-6-luna") == Decimal("0.03")
+        assert "priced at the base rate" in caplog.text
+
+    def test_gpt_6_under_272k_logs_nothing(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="smarter_dev.web.llm_pricing"):
+            calc_cost(200_000, 1_000, "gpt-6-sol")
+        assert "priced at the base rate" not in caplog.text
+
+    def test_gpt_6_luna_rates(self):
+        # $0.10/M input + $0.50/M output.
+        assert calc_cost(1_000_000, 1_000_000, "gpt-6-luna") == Decimal("0.60")
+
+    def test_gpt_6_luna_cache_read_and_write_rates(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=800_000,
+            cache_write_tokens=100_000,
+            model_name="openai:gpt-6-luna",
+        )
+        # 100k fresh @ $0.10 + 800k read @ $0.01 + 100k write @ $0.125.
+        assert cost == Decimal("0.0305")
+
+    def test_gpt_6_sol_rates(self):
+        # $2/M input + $10/M output.
+        assert calc_cost(1_000_000, 1_000_000, "gpt-6-sol") == Decimal("12.00")
+
+    def test_gpt_6_sol_cache_read_and_write_rates(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=800_000,
+            cache_write_tokens=100_000,
+            model_name="openai:gpt-6-sol",
+        )
+        # 100k fresh @ $2 + 800k read @ $0.20 + 100k write @ $2.50.
+        assert cost == Decimal("0.61")
+
 
 class TestAnthropicPricing:
     def test_opus_5_rates(self):

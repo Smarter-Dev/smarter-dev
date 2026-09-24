@@ -25,7 +25,7 @@ from smarter_dev.bot.agents.response_fitting import split_for_discord
 
 
 def test_length_summarizer_uses_luna():
-    assert LENGTH_SUMMARIZER_MODEL_KEY == "gpt-5-6-luna"
+    assert LENGTH_SUMMARIZER_MODEL_KEY == "gpt-6-luna"
 
 
 def test_split_short_text_passes_through():

@@ -66,7 +66,7 @@ async def _seed_conversation(
     conversation = WebChatConversation(
         owner_user_id=user.id,
         intelligence_mode="efficient",
-        selected_model_key="gpt-5-6-luna",
+        selected_model_key="gpt-6-luna",
         reasoning_level="medium",
         title="New Chat",
         status="idle",
@@ -101,7 +101,7 @@ async def _seed_exchanges(
             submission_key=f"submission-{ordinal}",
             response_version_group=uuid4(),
             response_sequence=response_sequence,
-            model_key="gpt-5-6-luna",
+            model_key="gpt-6-luna",
             status="complete",
         )
         db_session.add(turn)
@@ -139,7 +139,7 @@ async def _seed_current_turn(
         submission_key=f"submission-{ordinal}",
         response_version_group=uuid4(),
         response_sequence=ordinal * 2,
-        model_key="gpt-5-6-luna",
+        model_key="gpt-6-luna",
         status="running",
     )
     db_session.add(turn)
@@ -469,7 +469,7 @@ class TestStructuredHistoryScoping:
                         for row in stale_prefix
                     ]
                 ),
-                model_key="gpt-5-6-luna",
+                model_key="gpt-6-luna",
                 status="complete",
                 context_revision=1,
             )
@@ -517,7 +517,7 @@ class TestStructuredHistoryScoping:
                         for row in in_thread_prefix
                     ]
                 ),
-                model_key="gpt-5-6-luna",
+                model_key="gpt-6-luna",
                 status="complete",
                 context_revision=1,
             )
@@ -730,7 +730,7 @@ class TestMaybeCompactFloor:
             conversation=conversation,
             turn=turn,
             owner_id=user.id,
-            selected_model=SimpleNamespace(key="gpt-5-6-luna"),
+            selected_model=SimpleNamespace(key="gpt-6-luna"),
             settings=SimpleNamespace(
                 compaction_model_key="compactor",
                 compaction_fallback_model_key=None,

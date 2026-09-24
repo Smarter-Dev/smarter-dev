@@ -6,7 +6,7 @@ Discord:
 
     small WORKER (default Gemini 3.5 Flash Lite)  runs the agentic turn and
       emits a context brief (BriefingDecision)
-    large WRITER (default GPT-5.6 Terra)          turns the brief's rendered
+    large WRITER (default GPT-6 Sol)              turns the brief's rendered
       prompt into the friendly Discord reply (WriterOutput)
 
 It writes a Markdown report showing, per scenario: the conversation, the brief
@@ -18,7 +18,7 @@ Usage:
     uv run python scripts/two_stage_eval.py                       # all built-in scenarios
     uv run python scripts/two_stage_eval.py path/to/scenario.yaml # specific file(s)
     uv run python scripts/two_stage_eval.py some_dir --out report.md
-    uv run python scripts/two_stage_eval.py --worker gemini-3-5-flash-lite --writer gpt-5-6-terra
+    uv run python scripts/two_stage_eval.py --worker gemini-3-5-flash-lite --writer gpt-6-sol
 
 Scenario YAML schema (same shape as scripts/chat_eval.py, plus name/note):
 
@@ -552,7 +552,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("paths", nargs="*", help="scenario YAML files or dirs (default: scripts/two_stage_eval_scenarios)")
     parser.add_argument("--worker", default="gemini-3-5-flash-lite", help="worker model catalog key")
-    parser.add_argument("--writer", default="gpt-5-6-terra", help="writer model catalog key")
+    parser.add_argument("--writer", default="gpt-6-sol", help="writer model catalog key")
     parser.add_argument("--worker-reasoning", default=None, help="worker reasoning level (default: model default)")
     parser.add_argument("--out", default="two_stage_eval_report.md", help="output Markdown path")
     args = parser.parse_args()

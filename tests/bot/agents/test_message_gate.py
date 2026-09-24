@@ -1,4 +1,4 @@
-"""Tests for the pre-turn message gate (GPT-5.4 Nano relevance filter).
+"""Tests for the pre-turn message gate (GPT-6 Luna relevance filter).
 
 No live API calls: the mapping/order/hallucination cases drive the real agent
 through pydantic_ai's ``TestModel``/``FunctionModel`` via ``agent.override``,
@@ -179,3 +179,11 @@ async def test_grounding_is_rendered_but_never_returned():
     # The grounding id the model tried to return is intersected out.
     assert result == ["1"]
     assert "earlier chatter" in captured["prompt"]
+
+
+def test_gate_runs_on_gpt_6_luna():
+    """The production OpenAI key admits only GPT-6 Luna and Sol (2026-09-24)."""
+    from smarter_dev.shared.model_catalog import get_model
+
+    assert message_gate.GATE_MODEL_KEY == "gpt-6-luna"
+    assert get_model(message_gate.GATE_MODEL_KEY) is not None

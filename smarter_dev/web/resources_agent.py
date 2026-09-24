@@ -10,7 +10,7 @@ Four-stage pipeline, presented to the user as a single agent:
    ``corpus_topics`` (researcher's search list), ``web_search_topics``
    (extra targets for the gap-filler), and ``reframing_instructions``
    (angle/emphasis notes for the author).
-1. **Researcher** (gpt-5.4-nano · think=medium) — searches the curated
+1. **Researcher** (gpt-6-luna · think=medium) — searches the curated
    catalog (``search_resources``) for the reframer's corpus topics,
    opens promising sources (``read_source``), and produces a typed
    ``ResearchOutput`` listing distilled excerpts, further-reading, and
@@ -74,7 +74,7 @@ from smarter_dev.web.research_tools import jina_read
 logger = logging.getLogger(__name__)
 
 REFRAMER_MODEL = os.getenv("RESOURCE_REFRAMER_MODEL", "gemini-3-flash-preview")
-RESEARCHER_MODEL = os.getenv("RESOURCE_RESEARCHER_MODEL", "gpt-5.4-nano")
+RESEARCHER_MODEL = os.getenv("RESOURCE_RESEARCHER_MODEL", "gpt-6-luna")
 GAP_FILLER_MODEL = os.getenv("RESOURCE_GAP_FILLER_MODEL", "gemini-3-flash-preview")
 AUTHOR_MODEL = os.getenv("RESOURCE_AUTHOR_MODEL", "gemini-3-flash-preview")
 

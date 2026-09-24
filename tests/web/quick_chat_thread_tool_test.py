@@ -49,7 +49,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _JOBS_SOURCE = (_PROJECT_ROOT / "smarter_dev" / "web" / "chat" / "jobs.py").read_text()
 _CHAT_JS = _PROJECT_ROOT / "themes" / "smarterdev" / "static" / "js" / "chat.js"
 
-MODEL_KEY = "gpt-5-6-luna"
+MODEL_KEY = "gpt-6-luna"
 
 
 def _chat_js_function_source(name: str) -> str:

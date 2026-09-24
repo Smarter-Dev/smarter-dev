@@ -84,7 +84,7 @@ _SETTINGS_TEMPLATE = (
     _PROJECT_ROOT / "templates" / "admin" / "chat_settings.html"
 ).read_text()
 
-MODEL_KEY = "gpt-5-6-luna"
+MODEL_KEY = "gpt-6-luna"
 INCOMING = "Can you explain how postgres advisory locks work?"
 
 
