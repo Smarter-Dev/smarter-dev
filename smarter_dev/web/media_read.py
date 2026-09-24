@@ -14,7 +14,6 @@ unavailable the read still works, just uncached.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import io
 import logging
@@ -22,7 +21,8 @@ import os
 
 import httpx
 
-from smarter_dev.shared.media_images import prepare_image
+from smarter_dev.shared.media_images import ImageTooLarge
+from smarter_dev.shared.media_images import prepare_image_bounded
 from smarter_dev.web.research_tools import jina_read
 
 logger = logging.getLogger(__name__)
@@ -156,7 +156,10 @@ async def _describe_media(
         parts = [(data, media_type)]
     else:
         # BMP -> PNG, animated GIF -> sampled frames (see media_images).
-        parts, note = await asyncio.to_thread(prepare_image, data, media_type)
+        try:
+            parts, note = await prepare_image_bounded(data, media_type)
+        except ImageTooLarge as too_large:
+            return str(too_large)
         if note:
             prompt += f"\n\nNOTE: {note}"
     result = await agent.run(
