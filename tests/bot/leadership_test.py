@@ -10,6 +10,7 @@ was accepted, and at no sampled moment do two processes act.
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 import uuid
 from datetime import UTC
@@ -889,6 +890,183 @@ async def test_redis_returning_with_the_lease_taken_stands_the_holder_down_at_on
     assert not process.coordinator.acting, "sole-acting must end in the same step"
     await process.stop()
     assert await process.redis.get(LEASE_KEY) == b"other"
+
+
+def losses(caplog) -> dict[str, int]:
+    """Drop counts by reason, summed across the (rate-limited) log lines."""
+    counts: dict[str, int] = {}
+    for record in caplog.records:
+        match = re.match(r"dropped (\d+) gateway events: (.*)", record.getMessage())
+        if match:
+            counts[match[2]] = counts.get(match[2], 0) + int(match[1])
+    return counts
+
+
+def held_renewals(process: Process) -> asyncio.Event:
+    """Renewals wait until the returned event is set: a renewal running late."""
+    release = asyncio.Event()
+    real_eval = process.redis.eval
+
+    async def late(script, *args, **kwargs):
+        if script == leadership._RENEW:
+            await release.wait()
+        return await real_eval(script, *args, **kwargs)
+
+    process.redis.eval = late
+    return release
+
+
+async def test_a_stall_past_the_margin_with_the_lease_kept_runs_each_event_once(
+    server, caplog
+) -> None:
+    """The loop stalls past ttl - margin but not ttl: the lease is still this
+    holder's, so what arrived during the stall runs, once."""
+    process = Process("only", server, ttl=2.0, margin=1.5)
+    process.start()
+    await until(lambda: process.coordinator.acting)
+    process.receive(1)
+    await settle()
+
+    time.sleep(0.8)  # the event loop stalls
+    assert process.coordinator.fenced
+    process.receive(2)  # delivered while the lease is unconfirmed
+    await until(lambda: process.coordinator.acting, timeout=1)
+    process.receive(3)
+    await settle()
+
+    assert process.handled == ["1", "2", "3"]
+    assert process.gate.replayed == 1 and process.gate.dropped == 0
+    assert losses(caplog) == {}
+    await process.stop()
+
+
+async def test_a_stall_past_the_lease_retakes_it_and_drops_what_it_buffered_loudly(
+    server, caplog
+) -> None:
+    """Past ttl the lease lapsed: taking it back proves nothing about the
+    gap, so nothing buffered is replayed, and the drop is logged."""
+    process = Process("only", server)
+    process.start()
+    await until(lambda: process.coordinator.acting)
+
+    time.sleep(0.8)  # longer than the 0.6s lease
+    assert await process.redis.get(LEASE_KEY) is None
+    process.receive(1)
+    process.receive(2)
+    await until(lambda: process.coordinator.acting, timeout=1)
+    process.receive(3)
+    await settle()
+
+    assert await process.redis.get(LEASE_KEY) == b"only", "retaken"
+    assert process.handled == ["3"]
+    assert process.gate.replayed == 0 and process.gate.dropped == 2
+    assert losses(caplog) == {
+        "the lease had lapsed; taking it back does not prove continuity": 2
+    }
+    await process.stop()
+
+
+async def test_a_late_renewal_that_finds_the_lease_taken_drops_what_it_buffered_loudly(
+    server, caplog
+) -> None:
+    process = Process("only", server, ttl=3.0, margin=2.7)
+    process.start()
+    await until(lambda: process.coordinator.acting)
+    release = held_renewals(process)
+    await until(lambda: process.coordinator.fenced, timeout=1)
+    process.receive(1)
+    await settle()
+
+    await process.redis.set(LEASE_KEY, "other")
+    release.set()
+    await until(lambda: not process.coordinator.fenced, timeout=1)
+    assert not process.coordinator.acting
+    assert process.handled == []
+    assert losses(caplog) == {"the acting lease was lost to another bot": 1}
+    await process.stop()
+
+
+async def test_a_fenced_buffer_past_its_bounds_logs_what_it_drops(
+    server, caplog, monkeypatch
+) -> None:
+    monkeypatch.setattr(leadership, "STANDBY_BUFFER_EVENTS", 3)
+    monkeypatch.setattr(leadership, "STANDBY_BUFFER_SECONDS", 0.2)
+    process = Process("only", server, ttl=3.0, margin=2.7)
+    process.start()
+    await until(lambda: process.coordinator.acting)
+    release = held_renewals(process)
+    await until(lambda: process.coordinator.fenced, timeout=1)
+
+    process.receive(1)
+    await settle()
+    await asyncio.sleep(0.25)  # 1 is now older than the buffer holds
+    for message_id in range(2, 7):  # 2 and 3 overflow
+        process.receive(message_id)
+    await settle()
+    assert losses(caplog) == {
+        "lease unconfirmed for over 0s": 1,
+        "over 3 events buffered while the lease was unconfirmed": 1,
+    }, "the first of each is logged at once"
+
+    release.set()
+    await until(lambda: process.coordinator.acting, timeout=1)
+    await settle()
+    assert process.handled == ["4", "5", "6"]
+    assert losses(caplog) == {
+        "lease unconfirmed for over 0s": 1,
+        "over 3 events buffered while the lease was unconfirmed": 2,
+    }, "the rate-limited rest are logged by the renewal"
+    assert process.gate.dropped == 3
+    await process.stop()
+
+
+async def test_acting_again_on_a_sole_pod_answer_drops_what_it_buffered_loudly(
+    server, cluster, caplog
+) -> None:
+    """Only a renewal proves the lease was kept; replaying later would also
+    run the buffered events after newer live ones."""
+    process = Process("only", server, cluster)
+    process.start()
+    await until(lambda: process.coordinator.acting)
+    real_eval = process.redis.eval
+    process.redis.eval = down
+    cluster.pods.add("new-pending")
+    await until(lambda: process.coordinator.fenced, timeout=1)
+    process.receive(1)
+    await settle()
+
+    cluster.pods.discard("new-pending")
+    await until(lambda: process.coordinator.acting, timeout=1)  # sole pod again
+    process.receive(2)
+    await settle()
+    process.redis.eval = real_eval
+    await until(lambda: not process.coordinator.degraded, timeout=1)
+    await settle()
+    assert process.handled == ["2"]
+    assert losses(caplog) == {"acting again before a renewal confirmed the lease": 1}
+    await process.stop()
+
+
+async def test_a_timed_send_due_after_the_holder_fenced_goes_to_the_successor_once(
+    server, cluster
+) -> None:
+    """Fenced long before SIGTERM, the record says when it last could act."""
+    old, new = await incumbent_and_standby(server, cluster)
+    real_eval = old.redis.eval
+    old.redis.eval = down
+    await until(lambda: not old.coordinator.acting, timeout=1)  # sees the standby
+    await asyncio.sleep(0.05)
+    due = time.time()  # falls due while old is fenced
+    old_decides = asyncio.create_task(old.coordinator.should_send(due, wait=2))
+    await asyncio.sleep(0.3)
+
+    old.redis.eval = real_eval  # it reaches Redis for its handover
+    await old.exit()
+    await until(lambda: new.coordinator.acting, timeout=1)
+    assert new.coordinator.handover.stopped_at <= due < time.time() - 0.3
+    assert not await old_decides
+    assert await new.coordinator.should_send(due, wait=0.1)
+    await new.stop()
 
 
 async def test_a_blip_shorter_than_the_margin_changes_nothing(server) -> None:
