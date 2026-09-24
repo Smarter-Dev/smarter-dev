@@ -274,7 +274,7 @@ _patch_provider(
 # GPT-6 Sol — not yet in genai-prices. Cache writes are 1.25x uncached input
 # and cache reads are 10% of uncached input. Prompts above 272K input tokens
 # are billed at 2x input/cache and 1.5x output for the whole request; this is
-# the base rate only — see _LONG_CONTEXT_THRESHOLDS for why, and the warning.
+# the base rate, and _LONG_CONTEXT_TIERS carries the tier.
 # https://developers.openai.com/api/docs/models/gpt-6-sol
 _patch_provider(
     "openai",
@@ -292,8 +292,8 @@ _patch_provider(
 
 # GPT-6 Luna — not yet in genai-prices. Served by OpenAI directly, the
 # server-default chat model since 2026-09-24. Same cache ratios and same
-# >272K-input long-context multiplier as GPT-6 Sol; base rate only (see
-# _LONG_CONTEXT_THRESHOLDS).
+# >272K-input long-context multiplier as GPT-6 Sol, carried by
+# _LONG_CONTEXT_TIERS.
 # https://developers.openai.com/api/docs/models/gpt-6-luna
 _patch_provider(
     "openai",
@@ -462,8 +462,8 @@ _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
         cache_read_mtok=Decimal("0.50"),
     ),
     # Grok 4.7 undercuts 4.6 by 20% on every axis — $1.60/$4.80/$0.40 — and
-    # keeps the same >200K doubling ($3.20/$9.60/$0.80), which the base rate
-    # here does not model, for the same reason as 4.5. Read from GET
+    # keeps the same >200K doubling ($3.20/$9.60/$0.80), priced from
+    # _LONG_CONTEXT_TIERS for single requests only. Read from GET
     # https://openrouter.ai/api/v1/models on 2026-09-24.
     "x-ai/grok-4.7": types.ModelPrice(
         input_mtok=Decimal("1.60"),
@@ -636,31 +636,45 @@ _PROVIDER_MAP: dict[str, str] = {
 }
 
 
-# Models whose price rises for the whole request once a single prompt passes a
-# token threshold. Their patches above carry the base rate only, because the
-# token counts priced here are a turn's (or a session's) total across several
-# requests: a tier keyed on that total would surcharge turns whose requests were
-# each well under the threshold. The cost of that choice is an undercharge on a
-# request that really did pass it, so a total over the threshold is logged
-# rather than priced silently. Chat compacts far below it.
-_LONG_CONTEXT_THRESHOLDS: dict[str, int] = {
-    "gpt-6-sol": 272_000,
-    "gpt-6-luna": 272_000,
+@dataclass(frozen=True, slots=True)
+class LongContextTier:
+    """A whole request's price multipliers once its prompt reaches a size."""
+
+    min_input_tokens: int
+    input_multiplier: Decimal  # also applies to cache reads and writes
+    output_multiplier: Decimal
+
+
+# Models whose price rises for the whole request once a single prompt reaches a
+# token count. The patches and tables above carry the base rate; the tier is
+# applied only when the tokens priced are ONE provider request's
+# (``per_request=True``: web chat settles each request on its own). Everywhere
+# else the counts are a turn's or session's total across several requests, and
+# a tier keyed on that total would surcharge turns whose requests were each
+# well under the threshold. Those totals stay at the base rate, which
+# undercharges a request that really did reach the tier, so a total over the
+# threshold is logged rather than priced silently.
+_LONG_CONTEXT_TIERS: dict[str, LongContextTier] = {
+    # OpenAI: prompts above 272K bill 2x input/cache and 1.5x output.
+    "gpt-6-sol": LongContextTier(272_001, Decimal("2"), Decimal("1.5")),
+    "gpt-6-luna": LongContextTier(272_001, Decimal("2"), Decimal("1.5")),
+    # OpenRouter's xAI endpoints: an override from min_prompt_tokens 200000
+    # doubles prompt, cache read and completion ($3.20/$0.80/$9.60). Read from
+    # GET /api/v1/models/x-ai/grok-4.7/endpoints on 2026-09-24.
+    "x-ai/grok-4.7": LongContextTier(200_000, Decimal("2"), Decimal("2")),
 }
 
 
-def _warn_if_long_context(model_ref: str, input_tokens: int) -> None:
-    for prefix, threshold in _LONG_CONTEXT_THRESHOLDS.items():
-        if model_ref.startswith(prefix) and input_tokens > threshold:
-            logger.warning(
-                "%s usage of %d input tokens priced at the base rate; if one "
-                "request passed %d tokens, OpenAI bills it at 2x input and "
-                "cache and 1.5x output",
-                model_ref,
-                input_tokens,
-                threshold,
-            )
-            return
+def long_context_tier(model_ref: str, input_tokens: int) -> LongContextTier | None:
+    """The tier one request of *input_tokens* bills at, or None for base rate.
+
+    *model_ref* is a wire id with or without its ``provider:`` prefix.
+    """
+    model_ref = model_ref.split(":", 1)[-1]
+    for prefix, tier in _LONG_CONTEXT_TIERS.items():
+        if model_ref.startswith(prefix):
+            return tier if input_tokens >= tier.min_input_tokens else None
+    return None
 
 
 def calc_session_cost(
@@ -669,13 +683,54 @@ def calc_session_cost(
     cache_read_tokens: int,
     cache_write_tokens: int,
     model_name: str,
+    *,
+    per_request: bool = False,
 ) -> Decimal:
     """Calculate the USD cost for a research session.
 
     *model_name* is the pydantic-ai model string, e.g.
     ``"google-gla:gemini-3.1-flash-lite-preview"``.  We split on ``":"``
     to extract the provider_id and model_ref expected by genai-prices.
+    Pass ``per_request=True`` only when the counts are one provider
+    request's, so a long-context tier can be priced (see
+    ``_LONG_CONTEXT_TIERS``).
     """
+    tier = long_context_tier(model_name, input_tokens)
+    if tier is not None and not per_request:
+        logger.warning(
+            "%s usage of %d input tokens priced at the base rate; if one "
+            "request reached %d tokens, it bills at %sx input and cache and "
+            "%sx output",
+            model_name,
+            input_tokens,
+            tier.min_input_tokens,
+            tier.input_multiplier,
+            tier.output_multiplier,
+        )
+    if tier is None or not per_request:
+        return _base_cost(
+            input_tokens,
+            output_tokens,
+            cache_read_tokens,
+            cache_write_tokens,
+            model_name,
+        )
+    # Every rate is linear in its tokens, so the input side and the output side
+    # can be priced apart and scaled by their own multipliers.
+    input_cost = _base_cost(
+        input_tokens, 0, cache_read_tokens, cache_write_tokens, model_name
+    )
+    output_cost = _base_cost(0, output_tokens, 0, 0, model_name)
+    return input_cost * tier.input_multiplier + output_cost * tier.output_multiplier
+
+
+def _base_cost(
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_tokens: int,
+    cache_write_tokens: int,
+    model_name: str,
+) -> Decimal:
     parts = model_name.split(":", 1)
     if len(parts) == 2:
         pydantic_provider, model_ref = parts
@@ -729,8 +784,6 @@ def calc_session_cost(
                 price=openrouter_price,
             )
 
-    _warn_if_long_context(model_ref, input_tokens)
-
     usage = types.Usage(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
@@ -768,10 +821,11 @@ def price_rates_for_model(model) -> ModelPriceRates | None:
     wire_id = getattr(model, "model_id", str(model))
     model_name = f"{provider_prefix}:{wire_id}" if provider_prefix else wire_id
     try:
-        uncached = calc_session_cost(1_000_000, 0, 0, 0, model_name)
-        output = calc_session_cost(0, 1_000_000, 0, 0, model_name)
-        cached = calc_session_cost(1_000_000, 0, 1_000_000, 0, model_name)
-        cache_write = calc_session_cost(1_000_000, 0, 0, 1_000_000, model_name)
+        # Base rates: a synthetic 1M-token prompt is not a long-context request.
+        uncached = _base_cost(1_000_000, 0, 0, 0, model_name)
+        output = _base_cost(0, 1_000_000, 0, 0, model_name)
+        cached = _base_cost(1_000_000, 0, 1_000_000, 0, model_name)
+        cache_write = _base_cost(1_000_000, 0, 0, 1_000_000, model_name)
     except (LookupError, ValueError):
         return None
     return ModelPriceRates(uncached, output, cached, cache_write)
@@ -801,6 +855,8 @@ def calc_cost(
     model_name: str,
     cache_read_tokens: int = 0,
     cache_write_tokens: int = 0,
+    *,
+    per_request: bool = False,
 ) -> Decimal:
     """Cheaper-to-call cost helper for per-turn token totals.
 
@@ -808,7 +864,8 @@ def calc_cost(
     follow the provider-reporting convention: a subset of ``input_tokens``,
     billed at the cache rates instead of the full input rate. Used by
     per-turn cost computations on the chat agent (chat, compaction, voice
-    buckets each call this once). An unknown model returns Decimal("0") so
+    buckets each call this once); ``per_request`` is as in
+    ``calc_session_cost``. An unknown model returns Decimal("0") so
     the turn write still lands, but logs loudly — a $0 model means this
     module needs a price entry.
     """
@@ -819,6 +876,7 @@ def calc_cost(
             cache_read_tokens=cache_read_tokens,
             cache_write_tokens=cache_write_tokens,
             model_name=model_name,
+            per_request=per_request,
         )
     except LookupError:
         logger.warning(
