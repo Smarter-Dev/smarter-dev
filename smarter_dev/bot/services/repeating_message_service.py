@@ -111,7 +111,10 @@ class RepeatingMessageService(BaseService):
         while self._running:
             try:
                 # Check for due messages
-                await self._check_and_send_due_messages()
+                # Only the acting process sends. One that takes over mid-minute
+                # finds anything its predecessor missed still due next minute.
+                if leadership.is_acting():
+                    await self._check_and_send_due_messages()
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -164,14 +167,6 @@ class RepeatingMessageService(BaseService):
                     continue
 
                 logger.info(f"Processing due message {message_id}: next_send_time={next_send_time}, current_time={now}")
-
-                # Every connected bot sees it due at the same minute; the first
-                # to claim it sends. The claim lapses before the next minute's
-                # check, so a failed send is retried as before.
-                if not await leadership.claim(
-                    f"repeating-message:{message_id}:{next_send_time}", ttl_ms=50_000
-                ):
-                    continue
 
                 self._processing_messages.add(message_id)
                 processed_message_series.add(message_id)
