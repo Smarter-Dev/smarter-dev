@@ -25,7 +25,9 @@ from smarter_dev.web.research_tools import brave_search, jina_read
 # annotations via get_type_hints at materialization on the worker, so it must
 # be a real module global (pydantic-ai core only; providers stay worker-side).
 
-SCOUT_MODEL = os.getenv("BLOGGING_SCOUT_MODEL", "gemini-3.8-flash")
+# GPT-6 Luna since 2026-09-24, replacing the Gemini 3 Flash preview (Zech:
+# "significantly cheaper"). OpenAI Responses API via OPENAI_API_KEY.
+SCOUT_MODEL = os.getenv("BLOGGING_SCOUT_MODEL", "gpt-6-luna")
 SCOUT_AGENT_NAME = "blogging.scout"
 _PROMPT = (Path(__file__).parent / "prompts" / "scout.md").read_text(
     encoding="utf-8"
@@ -85,11 +87,11 @@ def _build_deps(ctx: ResumeContext) -> ScoutDeps:
 
 
 scout_agent = skrift.Agent(
-    f"google-gla:{SCOUT_MODEL}",
+    f"openai-responses:{SCOUT_MODEL}",
     name=SCOUT_AGENT_NAME,
     system_prompt=_PROMPT,
     output_type=ScoutOutput,
-    model_settings={"google_thinking_config": {"thinking_level": "MEDIUM"}},
+    model_settings={"openai_reasoning_effort": "medium"},
     deps_type=ScoutDeps,
     deps_factory=_build_deps,
 )

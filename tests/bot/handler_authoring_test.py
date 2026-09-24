@@ -1251,15 +1251,25 @@ def test_admin_model_defaults_are_gpt_6_sol():
     )
 
 
-def test_standard_tier_model_defaults_are_gemini_3_8_flash():
-    # Moved off the Gemini 3 Flash preview on 2026-09-24, when 3.8 Flash became
-    # the only Gemini Flash in use.
-    assert (
-        Settings.model_fields["handler_author_model"].default == "gemini-3.8-flash"
-    )
-    assert (
-        Settings.model_fields["handler_judge_model"].default == "gemini-3.8-flash"
-    )
+def test_standard_tier_model_defaults_are_gpt_6_luna():
+    # Moved off the Gemini 3 Flash preview onto cheaper GPT-6 Luna on 2026-09-24.
+    assert Settings.model_fields["handler_author_model"].default == "gpt-6-luna"
+    assert Settings.model_fields["handler_judge_model"].default == "gpt-6-luna"
+
+
+def test_standard_tier_agents_run_gpt_6_luna_at_medium(monkeypatch):
+    monkeypatch.setattr(handler_authoring, "_author_agent", None)
+    monkeypatch.setattr(handler_authoring, "_judge_agent", None)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setattr(handler_authoring, "get_settings", _settings_with)
+    for agent in (
+        handler_authoring._get_author_agent(),
+        handler_authoring._get_judge_agent(),
+    ):
+        assert agent.model.model_name == "gpt-6-luna"
+        assert agent.model_settings["openai_reasoning_effort"] == "medium"
+    monkeypatch.setattr(handler_authoring, "_author_agent", None)
+    monkeypatch.setattr(handler_authoring, "_judge_agent", None)
 
 
 def test_admin_judge_panel_defaults_to_gpt_6_sol_alone(monkeypatch):
