@@ -367,14 +367,41 @@ def _looks_like_audio(data: bytes) -> bool:
     return len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0
 
 
-def _decode_text(data: bytes) -> str | None:
-    """``data`` as UTF-8 text, or None when it is binary."""
+# Non-``text/`` media types that are still text (code, data, config).
+_TEXTUAL_SUBTYPE_MARKERS = (
+    "json", "xml", "javascript", "ecmascript", "yaml", "toml", "csv",
+    "x-sh", "x-python", "sql", "markdown", "x-httpd-php",
+)
+
+
+def _is_textual_type(media_type: str) -> bool:
+    base = media_type.split(";", 1)[0].strip().lower()
+    return base.startswith("text/") or any(m in base for m in _TEXTUAL_SUBTYPE_MARKERS)
+
+
+def _is_unlabelled_type(media_type: str) -> bool:
+    return media_type.split(";", 1)[0].strip().lower() in ("", "application/octet-stream")
+
+
+def _decode_text(data: bytes, *, textual: bool) -> str | None:
+    """``data`` as text, or None when it does not decode as text.
+
+    UTF-16 with a BOM (e.g. PowerShell ``>`` output) decodes as such. A
+    file whose type says text falls back to Windows-1252 rather than being
+    refused for one non-UTF-8 byte; an unlabelled file must be clean UTF-8
+    with no NUL bytes, which is a guess, not proof it is text.
+    """
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        try:
+            return data.decode("utf-16")
+        except UnicodeDecodeError:
+            return None
     if b"\x00" in data[:8192]:
         return None
     try:
         return data.decode("utf-8-sig")
     except UnicodeDecodeError:
-        return None
+        return data.decode("cp1252", errors="replace") if textual else None
 
 
 async def _read_discord_attachment(url: str, instruction: str) -> dict[str, str]:
@@ -421,8 +448,11 @@ async def _read_discord_attachment(url: str, instruction: str) -> dict[str, str]
             )
             return {"url": url, "kind": "pdf", "summary": "", "error": "pdf_read_failed"}
         return await _summarize_text(url, instruction, content)
-    if not media_type.startswith("video/"):
-        text = _decode_text(data)
+    # Only files labelled as text, or not labelled at all, are decoded; a
+    # zip, office file or video is refused by its type, not by sniffing.
+    textual = _is_textual_type(media_type)
+    if textual or _is_unlabelled_type(media_type):
+        text = _decode_text(data, textual=textual)
         if text is not None:
             return await _summarize_text(url, instruction, text)
     return {

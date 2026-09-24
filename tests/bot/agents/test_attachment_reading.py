@@ -138,6 +138,43 @@ async def test_binary_attachment_reports_the_limit_instead_of_guessing():
 
 
 @pytest.mark.asyncio
+async def test_binary_type_is_refused_even_when_its_bytes_decode_as_utf8():
+    # No NUL and valid UTF-8, but labelled as a zip: the type decides.
+    fetch = AsyncMock(return_value=(b"PK\x03\x04binary", "application/zip"))
+    with patch.object(chat_tools.web_fetch, "fetch_bytes", fetch), _no_jina():
+        out = await web_read(_ctx(), ZIP_URL, "what's inside?")
+    assert out["error"] == "unsupported_attachment_type"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("data", "content_type", "expected"),
+    [
+        # PowerShell `>` writes UTF-16LE with a BOM.
+        ("\ufeffERROR build failed\r\n".encode("utf-16-le"), "text/plain", "ERROR build failed"),
+        # Excel "CSV" export in Windows-1252.
+        ("name,city\nJosé,Montréal\n".encode("cp1252"), "text/csv", "José,Montréal"),
+        # Unlabelled but clean UTF-8 text is still read.
+        (b"fn main() {}\n", "application/octet-stream", "fn main() {}"),
+    ],
+)
+async def test_text_in_other_encodings_is_decoded(data, content_type, expected):
+    fetch = AsyncMock(return_value=(data, content_type))
+    with patch.object(chat_tools.web_fetch, "fetch_bytes", fetch), _no_jina(), _summarizer() as s:
+        out = await web_read(_ctx(), LOG_URL, "read")
+    assert "error" not in out
+    assert expected in s.call_args.kwargs["content"]
+
+
+@pytest.mark.asyncio
+async def test_unlabelled_non_utf8_bytes_are_refused():
+    fetch = AsyncMock(return_value=(bytes(range(128, 256)), "application/octet-stream"))
+    with patch.object(chat_tools.web_fetch, "fetch_bytes", fetch), _no_jina():
+        out = await web_read(_ctx(), ZIP_URL, "read")
+    assert out["error"] == "unsupported_attachment_type"
+
+
+@pytest.mark.asyncio
 async def test_image_attachment_goes_to_the_media_reader_when_bytes_are_an_image():
     png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
     with (
