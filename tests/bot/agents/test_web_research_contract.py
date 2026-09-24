@@ -29,5 +29,6 @@ def test_web_search_description_requires_reading_for_deep_answers():
 def test_web_read_description_guides_the_summary_with_an_instruction():
     description = web_read.__doc__ or ""
     assert "Read a URL" in description
-    assert "message <attachment>" in description
+    assert "an attachment's url" in description
+    assert "<attachment>" not in description
     assert "summary guided by `instruction`" in description

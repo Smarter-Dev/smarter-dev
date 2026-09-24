@@ -6,6 +6,7 @@ test-importable while the old agent module gets rewritten.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import logging
 import os
@@ -44,7 +45,9 @@ async def fetch_via_jina(url: str) -> dict[str, str] | None:
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.get(f"https://r.jina.ai/{url}", headers=headers)
             if resp.status_code != 200:
-                logger.debug("Jina Reader returned %s for %s", resp.status_code, url)
+                logger.debug(
+                    "Jina Reader returned %s for %s", resp.status_code, url_for_log(url)
+                )
                 return None
             data = resp.json().get("data", {})
             return {
@@ -54,7 +57,7 @@ async def fetch_via_jina(url: str) -> dict[str, str] | None:
                 "url": data.get("url", url),
             }
     except Exception as e:
-        logger.debug("Jina Reader failed for %s: %s", url, e)
+        logger.debug("Jina Reader failed for %s: %s", url_for_log(url), e)
         return None
 
 
@@ -95,46 +98,81 @@ async def fetch_pdf_text(url: str, max_chars: int = 20_000) -> str | None:
             resp = await client.get(url, headers={"User-Agent": USER_AGENT})
             if resp.status_code != 200:
                 return None
-            with pdfplumber.open(io.BytesIO(resp.content)) as pdf:
-                pages = []
-                for page in pdf.pages:
-                    text = page.extract_text() or ""
-                    pages.append(text)
-                    if sum(len(p) for p in pages) >= max_chars:
-                        break
-            return "\n\n".join(pages)[:max_chars]
+            return pdf_text_from_bytes(resp.content, max_chars=max_chars)
     except Exception as e:
-        logger.debug("PDF fetch failed for %s: %s", url, e)
+        logger.debug("PDF fetch failed for %s: %s", url_for_log(url), e)
         return None
 
 
-async def fetch_bytes(
-    url: str, *, max_bytes: int = 20 * 1024 * 1024
-) -> tuple[bytes, str] | None:
-    """Download raw bytes and content-type for a URL (images / audio).
+def pdf_text_from_bytes(data: bytes, max_chars: int = 20_000) -> str:
+    """Plain text of an in-memory PDF via pdfplumber, truncated to ``max_chars``."""
+    with pdfplumber.open(io.BytesIO(data)) as pdf:
+        pages = []
+        for page in pdf.pages:
+            text = page.extract_text() or ""
+            pages.append(text)
+            if sum(len(p) for p in pages) >= max_chars:
+                break
+    return "\n\n".join(pages)[:max_chars]
 
-    Returns ``(data, content_type)`` or ``None`` on failure or when the body
-    exceeds ``max_bytes``. ``content_type`` is the bare type without params
+
+_DISCORD_ATTACHMENT_HOSTS = ("cdn.discordapp.com", "media.discordapp.net")
+
+
+def is_discord_attachment_url(url: str) -> bool:
+    """True for a Discord CDN attachment URL (signed, expiring)."""
+    parsed = urlparse(url)
+    return (parsed.hostname or "") in _DISCORD_ATTACHMENT_HOSTS and (
+        parsed.path.startswith("/attachments/")
+        or parsed.path.startswith("/ephemeral-attachments/")
+    )
+
+
+def url_for_log(url: str) -> str:
+    """``url`` without its query or fragment. Discord's signed attachment
+    URLs carry their access signature in the query, so logs never get it."""
+    return url.split("?", 1)[0].split("#", 1)[0]
+
+
+async def fetch_bytes(
+    url: str, *, max_bytes: int = 20 * 1024 * 1024, total_timeout: float = 60.0
+) -> tuple[bytes, str] | None:
+    """Download raw bytes and content-type for a URL (images / audio / files).
+
+    Returns ``(data, content_type)`` or ``None`` on failure, when the body
+    exceeds ``max_bytes``, or when the whole download outlasts
+    ``total_timeout`` seconds. ``content_type`` is the bare type without params
     (e.g. ``image/png``) and may be empty if the server omitted it.
     """
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            resp = await client.get(url, headers={"User-Agent": USER_AGENT})
-            if resp.status_code != 200:
-                return None
-            data = resp.content
-            if len(data) > max_bytes:
-                logger.debug(
-                    "fetch_bytes: %s is %d bytes, over the %d cap",
-                    url,
-                    len(data),
-                    max_bytes,
+        async with asyncio.timeout(total_timeout), httpx.AsyncClient(
+            timeout=30.0, follow_redirects=True
+        ) as client:
+            async with client.stream(
+                "GET", url, headers={"User-Agent": USER_AGENT}
+            ) as resp:
+                if resp.status_code != 200:
+                    return None
+                # Stream so an oversized body is abandoned at the cap rather
+                # than held in memory whole.
+                chunks: list[bytes] = []
+                received = 0
+                async for chunk in resp.aiter_bytes():
+                    received += len(chunk)
+                    if received > max_bytes:
+                        logger.debug(
+                            "fetch_bytes: %s is over the %d byte cap",
+                            url_for_log(url),
+                            max_bytes,
+                        )
+                        return None
+                    chunks.append(chunk)
+                content_type = (
+                    resp.headers.get("content-type", "").split(";")[0].strip()
                 )
-                return None
-            content_type = resp.headers.get("content-type", "").split(";")[0].strip()
-            return data, content_type
+                return b"".join(chunks), content_type
     except Exception as e:
-        logger.debug("fetch_bytes failed for %s: %s", url, e)
+        logger.debug("fetch_bytes failed for %s: %s", url_for_log(url), e)
         return None
 
 
@@ -153,6 +191,9 @@ __all__ = [
     "fetch_pdf_text",
     "fetch_via_jina",
     "fetch_youtube_metadata",
+    "is_discord_attachment_url",
     "is_youtube_url",
+    "pdf_text_from_bytes",
     "strip_html",
+    "url_for_log",
 ]

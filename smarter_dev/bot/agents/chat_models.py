@@ -36,6 +36,7 @@ class MessageAttachment(BaseModel):
     url: str
     media_type: str | None = None  # e.g. "image/png", "audio/ogg"
     filename: str | None = None
+    size: int | None = None  # bytes
 
     @property
     def kind(self) -> str:
@@ -75,6 +76,14 @@ class Message(BaseModel):
     body: str
     reactions: list[str] = Field(default_factory=list)
     attachments: list[MessageAttachment] = Field(default_factory=list)
+    reply_to_attachments: list[MessageAttachment] = Field(
+        default_factory=list,
+        description=(
+            "Attachments on the replied-to message when that message is not "
+            "itself in the rendered window, so a reply to an older file can "
+            "still read it."
+        ),
+    )
     sent_at: datetime | None = Field(
         default=None,
         description=(

@@ -76,6 +76,7 @@ from smarter_dev.bot.proactive.parity import ProactiveDeps
 from smarter_dev.bot.proactive.parity import build_proactive_agent
 from smarter_dev.bot.proactive.redis_queue import RedisNotificationQueue
 from smarter_dev.bot.proactive.types import ActivationContext
+from smarter_dev.bot.proactive.types import ChannelAttachment
 from smarter_dev.bot.proactive.types import ChannelMessage
 from smarter_dev.bot.proactive.watcher import JevWatcherRunner
 from smarter_dev.bot.proactive.watcher import SkimRunner
@@ -309,6 +310,7 @@ def channel_message_from_hikari(message) -> ChannelMessage:
         message_type = int(message.type)
     except (TypeError, ValueError):
         message_type = 0
+    attachments = tuple(getattr(message, "attachments", ()) or ())
     return ChannelMessage(
         id=str(message.id),
         timestamp=message.created_at,
@@ -320,10 +322,20 @@ def channel_message_from_hikari(message) -> ChannelMessage:
         reply_to_id=reply_to_id,
         mention_user_ids=mention_ids,
         mention_everyone=bool(getattr(message, "mentions_everyone", False)),
-        attachment_count=len(getattr(message, "attachments", ()) or ()),
+        attachment_count=len(attachments),
         sticker_count=len(getattr(message, "stickers", ()) or ()),
         message_type=message_type,
         roles=role_names,
+        attachments=tuple(
+            ChannelAttachment(
+                filename=getattr(attachment, "filename", "") or "",
+                url=attachment.url,
+                content_type=getattr(attachment, "media_type", None) or "",
+                size=getattr(attachment, "size", 0) or 0,
+            )
+            for attachment in attachments
+            if isinstance(getattr(attachment, "url", None), str)
+        ),
     )
 
 

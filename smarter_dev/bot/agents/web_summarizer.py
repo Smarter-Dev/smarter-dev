@@ -21,6 +21,7 @@ from pydantic_ai import Agent
 
 from smarter_dev.bot.agents.model_router import build_model_for
 from smarter_dev.bot.agents.model_router import model_settings_for
+from smarter_dev.bot.utils.web_fetch import url_for_log
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import get_model
@@ -122,7 +123,7 @@ async def summarize_web_content(
         logger.critical(
             "WEB SUMMARIZER FAILOVER: GPT-6 Luna failed; using Gemini 3.8 "
             "Flash for url=%s title=%r",
-            url,
+            url_for_log(url),
             title,
             exc_info=True,
         )
