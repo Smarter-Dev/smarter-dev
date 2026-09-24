@@ -37,9 +37,16 @@ One Redis key, the *acting lease*, says which process acts:
   exists, except with a record, which only a stopping holder writes.
   When Redis answers again the holder renews its lease or retakes it if it
   lapsed; if another process holds it, it stops acting in the same step.
+- **Unconfirmed lease.** A holder fenced by time alone (a renewal late, say
+  an event-loop stall past the margin) buffers the events it receives, as a
+  standby does, within the same bounds. A renewal that finds the lease still
+  this holder's proves nobody else could have acted, so it replays them, in
+  arrival order before any live event. A lease that lapsed and was taken
+  back, or was lost, proves nothing: the buffer is dropped, and logged.
 
 Steady state is unchanged: one process holding the lease, renewing it every
-few seconds; no Redis or Kubernetes call on any event path.
+few seconds; no Redis or Kubernetes call on any event path. Every event
+dropped is logged with its count and reason (rate-limited), not only counted.
 
 Event identity is Discord's id where it has one (messages, deletes,
 interactions, edits) and a hash of the payload otherwise; two sessions are
@@ -61,7 +68,13 @@ What this does not guarantee:
   lease. Nothing is replayed; events in between are lost.
 - A holder that loses Redis while another bot pod exists (a deploy under way)
   stops acting after ``ttl - margin`` until Redis returns or it is replaced.
-  If the Kubernetes API fails too, so does a sole holder.
+  If the Kubernetes API fails too, so does a sole holder. Its handover record
+  gives the last moment it could have acted as its stop time, so timed sends
+  that fell due while it was fenced go to the successor.
+- A holder whose lease lapses (an event-loop stall longer than ``ttl``)
+  drops what it buffered in the meantime, logged; so does one fenced longer
+  than the buffer's bounds, or one that acts again on a sole-pod answer
+  before a renewal confirms the lease.
 - Work already accepted by the old process when it stops (running listeners,
   work they handed to background tasks registered with ``track``, and chat
   turns) finishes there within the drain budget in ``run_bot``; what is still
@@ -111,6 +124,9 @@ STANDBY_BUFFER_SECONDS = 20.0
 STANDBY_BUFFER_EVENTS = 5000
 HANDOVER_MEMORY_SECONDS = 60.0
 INTERACTION_REPLAY_SECONDS = 2.0
+# At most one log line per drop reason this often; the rest are summed into
+# the next.
+LOSS_LOG_SECONDS = 10.0
 # How long a queued timed send on a standby waits for a handover in progress.
 HANDOVER_WAIT_SECONDS = 60.0
 # How often to ask Kubernetes for the other bot pods (standing by, or holding
@@ -121,15 +137,18 @@ SOLE_POD_SECONDS = 5.0
 
 # Only the holder may extend or delete the lease; a process that lost it must
 # not clobber the new holder's. A holder whose lease lapsed with nobody taking
-# it (a pause, a Redis outage) takes it back.
+# it (a pause, a Redis outage) takes it back. Only _KEPT shows the lease was
+# this holder's throughout.
+_LOST, _KEPT, _RETAKEN = 0, 1, 2
 _RENEW = """
 local holder = redis.call('get', KEYS[1])
 if holder == ARGV[1] then
-    return redis.call('pexpire', KEYS[1], ARGV[2])
+    redis.call('pexpire', KEYS[1], ARGV[2])
+    return 1
 end
 if not holder then
     redis.call('set', KEYS[1], ARGV[1], 'PX', ARGV[2])
-    return 1
+    return 2
 end
 return 0
 """
@@ -311,6 +330,7 @@ class Coordinator:
         self._acting_changed = asyncio.Event()
         self._hooks: list[tuple[Callable[[], Any], bool]] = []
         self._stop_hooks: list[Callable[[], Any]] = []
+        self._renewal_hooks: list[Callable[[int], Any]] = []
         self._waiting_logged = False
         self._watch_logged: str | None = None
         self._takeover_checked_at: float | None = None
@@ -326,6 +346,12 @@ class Coordinator:
             return False
         now = self._clock()
         return now < self._valid_until or now < self._sole_until
+
+    @property
+    def fenced(self) -> bool:
+        """Holding the lease but no longer sure of it: acting paused until a
+        renewal says whether it was kept."""
+        return self._holding and not self.stopping and not self.acting
 
     @property
     def can_take_over(self) -> bool:
@@ -347,6 +373,10 @@ class Coordinator:
 
     def on_stop(self, callback: Callable[[], Any]) -> None:
         self._stop_hooks.append(callback)
+
+    def on_renewed(self, callback: Callable[[int], Any]) -> None:
+        """Call ``callback`` with each renewal's outcome: _KEPT, _RETAKEN or _LOST."""
+        self._renewal_hooks.append(callback)
 
     async def run(self) -> None:
         """Take the lease and keep it; call once the bot is connected and set up."""
@@ -467,14 +497,22 @@ class Coordinator:
             logger.error("%s; not acting until Redis answers", problem)
 
     async def _renew(self, sent: float) -> None:
-        if await self._redis.eval(_RENEW, 1, LEASE_KEY, self.holder, self._ttl_ms):
-            self._valid_until = sent + self._ttl - self._margin
-            self._fenced_logged = False
-        else:
+        outcome = int(await self._redis.eval(_RENEW, 1, LEASE_KEY, self.holder, self._ttl_ms))
+        if outcome == _LOST:
             self._holding = False
             self._sole_until = 0.0
             self._acting_changed.set()
             logger.error("lost the acting lease to another bot; standing by")
+        else:
+            self._valid_until = sent + self._ttl - self._margin
+            self._fenced_logged = False
+            if outcome == _RETAKEN:
+                logger.warning("the acting lease had lapsed unclaimed; took it back")
+        for callback in self._renewal_hooks:
+            try:
+                callback(outcome)
+            except Exception:
+                logger.exception("renewal hook failed")
 
     def _take_over(self, stopped_at: Any, handled: Iterable[Any]) -> None:
         stopped = _text(stopped_at) if stopped_at else ""
@@ -545,6 +583,12 @@ class Coordinator:
 
     async def stop_acting(self, handled: Iterable[str] = ()) -> None:
         """Stop acting now, leave a handover record, and release the lease."""
+        # The record's stop time is the last moment this process could have
+        # acted: a holder fenced long before SIGTERM leaves what fell due
+        # since then to its successor (should_send).
+        now = self._clock()
+        last_acting = now if self.acting else min(now, max(self._valid_until, self._sole_until))
+        stopped_at = time.time() - (now - last_acting)
         self.stopping = True
         self._acting_changed.set()
         for callback in self._stop_hooks:
@@ -565,7 +609,7 @@ class Coordinator:
                 HANDED_OVER_KEY,
                 self.holder,
                 int(HANDOVER_MEMORY_SECONDS * 1000),
-                str(time.time()),
+                str(stopped_at),
                 *keys,
             )
         except Exception as error:  # noqa: BLE001
@@ -576,7 +620,11 @@ class Coordinator:
             )
             return
         if handed:
-            logger.info("released the acting lease (%d recent events handed over)", len(keys))
+            logger.info(
+                "released the acting lease (%d recent events handed over, last acted %.1fs ago)",
+                len(keys),
+                now - last_acting,
+            )
         else:
             logger.warning("the acting lease was already another bot's; no handover record")
 
@@ -635,6 +683,10 @@ class EventGate:
         self._started_task: asyncio.Task[Any] | None = None
         self._recent: collections.deque[tuple[float, str]] = collections.deque()
         self._buffer: collections.deque[tuple[float, str, hikari.Event]] = collections.deque()
+        # Events received while holding an unconfirmed lease.
+        self._fenced: collections.deque[tuple[float, str, hikari.Event]] = collections.deque()
+        self._unlogged: collections.Counter[str] = collections.Counter()
+        self._loss_logged_at: dict[str, float] = {}
         self._predecessor_handled: set[str] = set()
         self._skip_until = 0.0
         self.handled = 0
@@ -667,6 +719,10 @@ class EventGate:
         self._dispatch = lambda event: original_dispatch(event_manager, event)
         event_manager.__class__ = _GatedEventManager
         coordinator.on_acting(self._take_over, once=False)
+        coordinator.on_renewed(self._after_renewal)
+        coordinator.on_stop(
+            lambda: self._discard_fenced("stopping; left to the successor's standby buffer")
+        )
 
     def dispatch(self, event: hikari.Event) -> asyncio.Future[Any]:
         if isinstance(event, hikari.StartedEvent) and not self._coordinator.acting:
@@ -676,20 +732,113 @@ class EventGate:
             return self._dispatch(event)
         now = self._clock()
         if self._coordinator.acting:
+            if self._fenced:
+                # Acting again on a sole-pod answer, not a renewal: nothing
+                # proved the lease was kept, and they would now run out of order.
+                self._discard_fenced("acting again before a renewal confirmed the lease")
             if now < self._skip_until and key in self._predecessor_handled:
                 self.already_handled += 1
                 return _done()
             return self._run(now, key, event)
-        if not self._coordinator.stopping and self._coordinator.acting_since is None:
+        if self._coordinator.fenced:
+            self._hold_while_fenced(now, key, event)
+        elif not self._coordinator.stopping and self._coordinator.acting_since is None:
             # A standby: keep it in case the handover lands before it is handled.
             self._buffer.append((now, key, event))
             self._prune(self._buffer, now - STANDBY_BUFFER_SECONDS)
             while len(self._buffer) > STANDBY_BUFFER_EVENTS:
                 self._buffer.popleft()
                 self.dropped += 1
+        elif self._coordinator.stopping:
+            self._lose(1, "stopping; left to the successor's standby buffer")
         else:
-            self.dropped += 1  # stopping, or fenced while Redis is unreachable
+            self._lose(1, "the acting lease was lost to another bot")
         return _done()
+
+    def _hold_while_fenced(self, now: float, key: str, event: hikari.Event) -> None:
+        self._fenced.append((now, key, event))
+        expired = self._prune(self._fenced, now - STANDBY_BUFFER_SECONDS)
+        if expired:
+            self._lose(
+                expired, f"lease unconfirmed for over {STANDBY_BUFFER_SECONDS:.0f}s"
+            )
+        overflow = len(self._fenced) - STANDBY_BUFFER_EVENTS
+        for _ in range(overflow):
+            self._fenced.popleft()
+        if overflow > 0:
+            self._lose(
+                overflow,
+                f"over {STANDBY_BUFFER_EVENTS} events buffered while the lease was unconfirmed",
+            )
+
+    def _after_renewal(self, outcome: int) -> None:
+        if self._fenced:
+            if outcome == _KEPT:
+                if self._coordinator.acting:
+                    self._replay_fenced()
+            elif outcome == _RETAKEN:
+                self._discard_fenced("the lease had lapsed; taking it back does not prove continuity")
+            else:
+                self._discard_fenced("the acting lease was lost to another bot")
+        self._flush_losses()
+
+    def _replay_fenced(self) -> None:
+        """Run what arrived while the lease was unconfirmed, in arrival order.
+
+        Runs inside the coordinator's task right after the renewal, so no
+        live event can interleave.
+        """
+        buffered, self._fenced = list(self._fenced), collections.deque()
+        now = self._clock()
+        replayed = expired = late = 0
+        for received, key, event in buffered:
+            if received < now - STANDBY_BUFFER_SECONDS:
+                expired += 1
+            elif (
+                key.startswith("INTERACTION_CREATE:")
+                and now - received > INTERACTION_REPLAY_SECONDS
+            ):
+                late += 1
+            elif now < self._skip_until and key in self._predecessor_handled:
+                self.already_handled += 1
+            else:
+                replayed += 1
+                self._run(now, key, event)
+        self.replayed += replayed
+        logger.info(
+            "acting lease confirmed; replayed %d events received while it was unconfirmed",
+            replayed,
+        )
+        if expired:
+            self._lose(expired, f"lease unconfirmed for over {STANDBY_BUFFER_SECONDS:.0f}s")
+        if late:
+            self._lose(late, "interactions buffered past the time to acknowledge them")
+
+    def _discard_fenced(self, reason: str) -> None:
+        count = len(self._fenced)
+        self._fenced.clear()
+        if count:
+            self._lose(count, reason, log_now=True)
+
+    def _lose(self, count: int, reason: str, *, log_now: bool = False) -> None:
+        """Drop ``count`` events, logging it now or, rate-limited, with the next."""
+        self.dropped += count
+        self._unlogged[reason] += count
+        now = self._clock()
+        logged_at = self._loss_logged_at.get(reason)
+        if log_now or logged_at is None or now - logged_at >= LOSS_LOG_SECONDS:
+            self._log_loss(reason, now)
+
+    def _log_loss(self, reason: str, now: float) -> None:
+        count = self._unlogged.pop(reason, 0)
+        if count:
+            self._loss_logged_at[reason] = now
+            logger.warning("dropped %d gateway events: %s", count, reason)
+
+    def _flush_losses(self) -> None:
+        now = self._clock()
+        for reason in list(self._unlogged):
+            self._log_loss(reason, now)
 
     def _run(self, now: float, key: str, event: hikari.Event) -> asyncio.Future[Any]:
         self.handled += 1
@@ -701,9 +850,12 @@ class EventGate:
         return future
 
     @staticmethod
-    def _prune(entries: collections.deque, older_than: float) -> None:
+    def _prune(entries: collections.deque, older_than: float) -> int:
+        pruned = 0
         while entries and entries[0][0] < older_than:
             entries.popleft()
+            pruned += 1
+        return pruned
 
     def _take_over(self) -> None:
         """Replay what the predecessor did not handle; skip what it did."""
@@ -764,6 +916,7 @@ class EventGate:
         return len(still_running)
 
     def summary(self) -> str:
+        self._flush_losses()
         return (
             f"handled {self.handled} events ({self.replayed} replayed from standby), "
             f"skipped {self.already_handled} already handled, dropped {self.dropped}"
