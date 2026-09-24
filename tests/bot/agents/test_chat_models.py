@@ -12,6 +12,7 @@ import pytest
 from smarter_dev.bot.agents.chat_models import (
     BriefingDecision,
     MessageScore,
+    ResponseBody,
     TurnDecision,
     WriterBrief,
     WriterOutput,
@@ -182,7 +183,18 @@ def test_writer_output_rejects_empty_message():
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("model", [TurnDecision, BriefingDecision])
+@pytest.mark.parametrize(
+    "model",
+    # The top-level output models and the models nested in them.
+    [
+        TurnDecision,
+        BriefingDecision,
+        WriterOutput,
+        MessageScore,
+        ResponseBody,
+        WriterBrief,
+    ],
+)
 def test_required_fields_precede_defaulted_ones(model):
     """Grok 4.6/4.7 omit a required field that follows optional ones from the
     output tool call — even after the retry names it — so every Grok turn
