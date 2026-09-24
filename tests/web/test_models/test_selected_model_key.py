@@ -152,3 +152,14 @@ def test_gemini_flash_and_grok_migration_copies_the_slot_holders():
     }
     # The previous build already knows 3.8 Flash, so only Grok 4.7 is unwound.
     assert module._NEW_KEYS == frozenset({"grok-4-7"})
+
+
+def test_gemini_flash_and_grok_contract_step_follows_its_add_step():
+    add = _load_migration("b7d3f9a2c6e4")
+    contract = _load_migration("7a18ff6495e1")
+    assert contract.down_revision == "b7d3f9a2c6e4"
+    # It rewrites exactly the pairs the add step admitted, and the same live
+    # selection columns the GPT contract step did; never a channel pin.
+    assert contract._SUCCESSORS == add._SUCCESSORS
+    assert contract._SELECTION_COLUMNS == _load_migration("e5a9c3f7d2b8")._SELECTION_COLUMNS
+    assert all(table != "channel_model_overrides" for table, _ in contract._SELECTION_COLUMNS)
