@@ -176,6 +176,7 @@ class TestOpenRouterPricing:
         assert cost == Decimal("0.98")
 
     def test_grok_4_6_rates(self):
+        # Retired for 4.7 on 2026-09-24; rows written while it served still price.
         assert calc_cost(1_000_000, 1_000_000, "x-ai/grok-4.6") == Decimal("8.00")
 
     def test_grok_4_6_cache_rate(self):
@@ -189,6 +190,21 @@ class TestOpenRouterPricing:
         # 400K uncached at $2/M + 600K cached reads at $0.50/M — 4.6 reads
         # cost more than 4.5's $0.30.
         assert cost == Decimal("1.10")
+
+    def test_grok_4_7_rates(self):
+        # 4.7 replaced 4.6 on 2026-09-24 at $1.60/$4.80 per M.
+        assert calc_cost(1_000_000, 1_000_000, "x-ai/grok-4.7") == Decimal("6.40")
+
+    def test_grok_4_7_cache_rate(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=600_000,
+            cache_write_tokens=0,
+            model_name="openrouter:x-ai/grok-4.7",
+        )
+        # 400K uncached at $1.60/M + 600K cached reads at $0.40/M.
+        assert cost == Decimal("0.88")
 
     def test_author_precision_routes_priced_at_their_measured_endpoint(self):
         # Moved off Zen/DO on 2026-08-13. Rates are measured from what actually

@@ -2,7 +2,7 @@
 
 Four-stage pipeline, presented to the user as a single agent:
 
-0. **Reframer** (gemini-3-flash-preview · think=medium) — interrogates the
+0. **Reframer** (gemini-3.8-flash · think=medium) — interrogates the
    user's raw prompt (is it reasonable, is there a more normal question
    underneath, does it fit the shape of the catalog?) and emits a short
    user-visible message restating what they asked plus structured
@@ -15,11 +15,11 @@ Four-stage pipeline, presented to the user as a single agent:
    opens promising sources (``read_source``), and produces a typed
    ``ResearchOutput`` listing distilled excerpts, further-reading, and
    gaps the catalog didn't cover.
-2. **Gap-filler** (gemini-3-flash-preview · think=low) — runs when the
+2. **Gap-filler** (gemini-3.8-flash · think=low) — runs when the
    researcher reported gaps OR the reframer asked for extra web topics.
    For each item, runs ``web_search`` over the open web and ``read_url``
    on the single best result. Returns one ``GapCitation`` per input.
-3. **Author** (gemini-3-flash-preview · think=low) — gets the merged
+3. **Author** (gemini-3.8-flash · think=low) — gets the merged
    research bundle (curated excerpts + web citations) plus the
    reframer's instructions and the original prompt, and writes the
    final markdown answer using the production system prompt.
@@ -73,10 +73,10 @@ from smarter_dev.web.research_tools import jina_read
 
 logger = logging.getLogger(__name__)
 
-REFRAMER_MODEL = os.getenv("RESOURCE_REFRAMER_MODEL", "gemini-3-flash-preview")
+REFRAMER_MODEL = os.getenv("RESOURCE_REFRAMER_MODEL", "gemini-3.8-flash")
 RESEARCHER_MODEL = os.getenv("RESOURCE_RESEARCHER_MODEL", "gpt-6-luna")
-GAP_FILLER_MODEL = os.getenv("RESOURCE_GAP_FILLER_MODEL", "gemini-3-flash-preview")
-AUTHOR_MODEL = os.getenv("RESOURCE_AUTHOR_MODEL", "gemini-3-flash-preview")
+GAP_FILLER_MODEL = os.getenv("RESOURCE_GAP_FILLER_MODEL", "gemini-3.8-flash")
+AUTHOR_MODEL = os.getenv("RESOURCE_AUTHOR_MODEL", "gemini-3.8-flash")
 
 # Per-stage Agent names — four separate Skrift agents (one per stage),
 # all transparent to the end user via the shared tool-event stream.

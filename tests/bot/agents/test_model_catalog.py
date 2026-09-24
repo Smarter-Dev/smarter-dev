@@ -73,7 +73,7 @@ def test_resolve_reasoning_level_keeps_supported_choice():
 
 
 def test_resolve_reasoning_level_clamps_unsupported_to_nearest():
-    gemini = get_model("gemini-3-7-flash")  # caps at HIGH
+    gemini = get_model("gemini-3-8-flash")  # caps at HIGH
     assert resolve_reasoning_level(gemini, ReasoningLevel.MAX) is ReasoningLevel.HIGH
     glm = get_model("glm-5-3-flash")  # LOW/MEDIUM/HIGH only
     assert resolve_reasoning_level(glm, ReasoningLevel.NONE) is ReasoningLevel.LOW
@@ -87,40 +87,47 @@ def test_resolve_reasoning_level_none_for_models_without_reasoning():
 
 
 def test_gemini_lineup_reflects_current_releases():
-    # 3.6 Flash replaced 3.5 Flash (2026-07-21). 3.1 Flash Lite left on
-    # 2026-08-13, superseded within its own class by 3.5 Flash Lite — Flash and
-    # Flash Lite are separate classes, so 3.6 Flash never replaced it.
-    assert get_model("gemini-3-5-flash") is None
-    flash_3_6 = get_model("gemini-3-6-flash")
-    assert flash_3_6 is not None
-    assert flash_3_6.model_id == "gemini-3.6-flash"
-    assert flash_3_6.provider is ModelProvider.GOOGLE
-    lite_3_5 = get_model("gemini-3-5-flash-lite")
-    assert lite_3_5 is not None
-    assert lite_3_5.model_id == "gemini-3.5-flash-lite"
-    assert lite_3_5.provider is ModelProvider.GOOGLE
-    assert get_model("gemini-3-1-flash-lite") is None
-    # 3.7 Flash shipped 2026-08-13 and took the slot from Gemini 3 Flash — the
-    # oldest Flash we carried, and the last entry on a preview wire id.
-    assert get_model("gemini-3-flash") is None
-    flash_3_7 = get_model("gemini-3-7-flash")
-    assert flash_3_7 is not None
-    assert flash_3_7.model_id == "gemini-3.7-flash"
-    assert flash_3_7.provider is ModelProvider.GOOGLE
-    assert flash_3_7.supports_vision is True
-    # Verified against the Gemini models API rather than assumed.
-    assert flash_3_7.context_window == 1_048_576
-    assert flash_3_7.max_output_tokens == 65_536
-    # 3.8 Flash joined on 2026-09-03 as the proactive agent's model, ALONGSIDE
-    # 3.7 rather than replacing it — the handler admin judge still pins 3.7.
-    # Its slot came from the retired Claude family, not from another Gemini.
+    # 3.8 Flash is the only Gemini Flash since 2026-09-24: 3.5 Flash Lite, 3.6
+    # Flash and 3.7 Flash all retired onto it. 3.1 Pro stays — not a Flash.
+    for retired in (
+        "gemini-3-5-flash",
+        "gemini-3-1-flash-lite",
+        "gemini-3-flash",
+        "gemini-3-5-flash-lite",
+        "gemini-3-6-flash",
+        "gemini-3-7-flash",
+    ):
+        assert get_model(retired) is None, retired
+    flash = [
+        m for m in MODEL_CATALOG if m.family == "Gemini" and "Flash" in m.label
+    ]
+    assert [m.key for m in flash] == ["gemini-3-8-flash"]
     flash_3_8 = get_model("gemini-3-8-flash")
-    assert flash_3_8 is not None
     assert flash_3_8.model_id == "gemini-3.8-flash"
     assert flash_3_8.provider is ModelProvider.GOOGLE
     assert flash_3_8.supports_vision is True
+    # Verified against the Gemini models API rather than assumed.
     assert flash_3_8.context_window == 1_048_576
     assert flash_3_8.max_output_tokens == 65_536
+    assert get_model("gemini-3-1-pro") is not None
+
+
+def test_retired_gemini_flash_keys_read_as_3_8_flash():
+    assert successor_key("gemini-3-5-flash-lite") == "gemini-3-8-flash"
+    assert successor_key("gemini-3-6-flash") == "gemini-3-8-flash"
+    assert successor_key("gemini-3-7-flash") == "gemini-3-8-flash"
+    assert successor_key("gemini-3-8-flash") == "gemini-3-8-flash"
+
+
+def test_retired_keys_resolve_to_a_live_model_in_one_step():
+    """``successor_key`` is a single lookup, so no successor may itself be retired.
+
+    A chain (a -> b, b -> c) would leave a selection on ``a`` reading as the
+    dead ``b``.
+    """
+    for retired, successor in RETIRED_SUCCESSORS.items():
+        assert successor not in RETIRED_SUCCESSORS, (retired, successor)
+        assert get_model(successor_key(retired)) is not None, retired
 
 
 def test_proactive_agent_model_resolves_through_the_catalog():
@@ -218,12 +225,14 @@ def test_poolside_left_the_catalog():
 
 def test_grok_routes_through_openrouter_with_verified_capabilities():
     # We hold no first-party xAI key, so Grok rides OpenRouter. Capabilities
-    # verified against OpenRouter's endpoints API (2026-08). Grok 4.5 was
-    # retired for 4.6 on 2026-08-13.
+    # verified against OpenRouter's endpoints API (2026-09-24). Grok 4.5 was
+    # retired for 4.6 on 2026-08-13, and 4.6 for 4.7 on 2026-09-24.
     assert get_model("grok-4-5") is None
-    model = get_model("grok-4-6")
+    assert get_model("grok-4-6") is None
+    assert successor_key("grok-4-6") == "grok-4-7"
+    model = get_model("grok-4-7")
     assert model is not None
-    assert model.model_id == "x-ai/grok-4.6"
+    assert model.model_id == "x-ai/grok-4.7"
     assert model.family == "Grok"
     assert model.provider is ModelProvider.OPENROUTER
     assert model.supports_vision is True
@@ -235,6 +244,7 @@ def test_grok_routes_through_openrouter_with_verified_capabilities():
         ReasoningLevel.HIGH,
     )
     assert model.default_reasoning is ReasoningLevel.MEDIUM
+    assert [m.key for m in MODEL_CATALOG if m.family == "Grok"] == ["grok-4-7"]
 
 
 def test_qwen3_8_routes_through_openrouter_not_digital_ocean():
@@ -293,7 +303,7 @@ def test_prompted_output_follows_the_model_not_the_endpoint():
 
     # Proprietary models keep native structured output, including Grok, which
     # shares OpenRouter with the open weights.
-    for key in ("grok-4-6", "gpt-6-luna", "gemini-3-5-flash-lite", "gemini-3-8-flash"):
+    for key in ("grok-4-7", "gpt-6-luna", "gemini-3-1-pro", "gemini-3-8-flash"):
         assert get_model(key).needs_prompted_output is False, key
 
 

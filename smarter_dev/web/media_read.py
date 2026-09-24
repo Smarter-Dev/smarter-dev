@@ -1,11 +1,11 @@
 """Worker-tier URL reader for handlers — any URL: image, audio, PDF, or web page.
 
 Mirrors the chat agent's ``web_read`` capability but kept self-contained in the
-web/worker tier (no bot-package imports): images/audio are described by a Gemini
-multimodal agent, PDFs are extracted with pdfplumber, everything else is read as
-page text via Jina.
+web/worker tier (no bot-package imports): images are described by GPT-6 Luna and
+audio by Gemini 3.8 Flash (the OpenAI Responses API takes no audio input), PDFs
+are extracted with pdfplumber, everything else is read as page text via Jina.
 
-Media describes (the expensive part — a Gemini call) are cached in Redis keyed on
+Media describes (the expensive part — a model call) are cached in Redis keyed on
 the **file's content hash + the instruction**, so the same screenshot posted
 across many messages is only read once. Caching is best-effort: if Redis is
 unavailable the read still works, just uncached.
@@ -50,6 +50,7 @@ If the media can't be meaningfully read (blank, corrupt, or it doesn't contain w
 INSTRUCTION asks for), say so plainly rather than fabricating."""
 
 _media_agent = None
+_audio_agent = None
 
 
 def _url_extension(url: str) -> str:
@@ -96,16 +97,40 @@ async def _fetch_bytes(url: str) -> tuple[bytes, str] | None:
         return None
 
 
+# Images moved from Gemini 3.1 Flash Lite to GPT-6 Luna on 2026-09-24; audio
+# went to Gemini 3.8 Flash instead, since Luna cannot take it. Same env vars and
+# defaults as the bot's ``media_reader``.
 def _get_media_agent():
     global _media_agent
     if _media_agent is None:
+        from pydantic_ai import Agent
+        from pydantic_ai.models.openai import OpenAIResponsesModel
+        from pydantic_ai.models.openai import OpenAIResponsesModelSettings
+        from pydantic_ai.providers.openai import OpenAIProvider
+
+        model_id = os.getenv("MEDIA_READER_MODEL", "gpt-6-luna")
+        _media_agent = Agent(
+            OpenAIResponsesModel(
+                model_id,
+                provider=OpenAIProvider(api_key=os.getenv("OPENAI_API_KEY") or ""),
+            ),
+            output_type=str,
+            system_prompt=_MEDIA_SYSTEM_PROMPT,
+            model_settings=OpenAIResponsesModelSettings(openai_reasoning_effort="low"),
+        )
+    return _media_agent
+
+
+def _get_audio_agent():
+    global _audio_agent
+    if _audio_agent is None:
         from pydantic_ai import Agent
         from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
         from pydantic_ai.providers.google import GoogleProvider
 
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
-        model_id = os.getenv("MEDIA_READER_MODEL", "gemini-3.1-flash-lite")
-        _media_agent = Agent(
+        model_id = os.getenv("MEDIA_READER_AUDIO_MODEL", "gemini-3.8-flash")
+        _audio_agent = Agent(
             GoogleModel(model_id, provider=GoogleProvider(api_key=api_key)),
             output_type=str,
             system_prompt=_MEDIA_SYSTEM_PROMPT,
@@ -113,7 +138,7 @@ def _get_media_agent():
                 google_thinking_config={"thinking_level": "LOW"}
             ),
         )
-    return _media_agent
+    return _audio_agent
 
 
 async def _describe_media(
@@ -121,7 +146,8 @@ async def _describe_media(
 ) -> str:
     from pydantic_ai import BinaryContent
 
-    agent = _get_media_agent()
+    is_audio = kind == "audio" or media_type.startswith("audio/")
+    agent = _get_audio_agent() if is_audio else _get_media_agent()
     prompt = f"URL: {url}\nKIND: {kind}\n\nINSTRUCTION:\n{instruction}"
     result = await agent.run([prompt, BinaryContent(data=data, media_type=media_type)])
     return str(result.output)

@@ -254,7 +254,7 @@ async def test_superseded_worker_cannot_consume_the_final_response(chat_db):
 
     with pytest.raises(RunSuperseded):
         await chat_jobs._final_response(
-            model=get_model("gemini-3-5-flash-lite"),
+            model=get_model("gemini-3-8-flash"),
             reasoning=None,
             prompt="anything",
             history=[],
@@ -300,7 +300,7 @@ def _metered(turn, conversation, owner_id, *, worker_lease_token):
     metered.wrapped = None  # count_tokens failure falls back to a size estimate
     metered.request_ordinal = 0
     metered.context = MeteringContext(
-        model=get_model("gemini-3-5-flash-lite"),
+        model=get_model("gemini-3-8-flash"),
         owner_id=owner_id,
         conversation_id=conversation.id,
         turn_id=turn.id,

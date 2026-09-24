@@ -155,7 +155,7 @@ def _usage_payload(**overrides) -> dict:
                 "cache_read_tokens": 0,
             },
             {
-                "model_id": "gemini-3.7-flash",
+                "model_id": "gemini-3.8-flash",
                 "operation": "agent",
                 "input_tokens": 0,
                 "output_tokens": 1_000_000,
@@ -205,9 +205,9 @@ class TestPostProactiveWakeUsage:
 
         agent = by_operation["proactive-agent"]
         assert agent.provider_key == "google"
-        assert agent.catalog_model_key == "gemini-3-7-flash"
+        assert agent.catalog_model_key == "gemini-3-8-flash"
         assert agent.output_tokens == 1_000_000
-        # 1M output tokens at Gemini 3.7 Flash's rate.
+        # 1M output tokens at Gemini 3.8 Flash's rate.
         assert agent.cost_usd == Decimal("3.75")
 
         session_mock.commit.assert_awaited_once()

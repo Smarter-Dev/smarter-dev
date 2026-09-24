@@ -419,13 +419,13 @@ async def test_summarize_web_content_fails_over_to_gemini_and_logs_critical(capl
     fallback_agent.run.assert_awaited_once_with(primary_agent.run.call_args.args[0])
     assert "WEB SUMMARIZER FAILOVER" in caplog.text
     assert "GPT-6 Luna failed" in caplog.text
-    assert "using Gemini 3.1 Flash Lite" in caplog.text
+    assert "using Gemini 3.8 Flash" in caplog.text
     assert "https://e.test" in caplog.text
     assert "Luna unavailable" in caplog.text
     record_failover.assert_called_once()
     assert record_failover.call_args.kwargs == {
         "operation": "web_summarizer",
         "primary_model": "gpt-6-luna",
-        "fallback_model": "gemini-3.1-flash-lite",
+        "fallback_model": "gemini-3.8-flash",
         "error": primary_agent.run.side_effect,
     }

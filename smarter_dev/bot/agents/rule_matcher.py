@@ -35,7 +35,8 @@ from smarter_dev.web.guild_rules import format_rules_for_prompt
 
 logger = logging.getLogger(__name__)
 
-RULE_MATCHER_MODEL_KEY = "gemini-3-5-flash-lite"
+# 3.8 Flash since 2026-09-24, when 3.5 Flash Lite left the catalog.
+RULE_MATCHER_MODEL_KEY = "gemini-3-8-flash"
 
 SYSTEM_PROMPT = """\
 You help a Discord moderator cite the server's own rules. A moderator has \
