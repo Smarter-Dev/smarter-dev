@@ -1,8 +1,9 @@
 """Worker-tier URL reader for handlers — any URL: image, audio, PDF, or web page.
 
 Mirrors the chat agent's ``web_read`` capability but kept self-contained in the
-web/worker tier (no bot-package imports): images are described by GPT-6 Luna and
-audio by Gemini 3.8 Flash (the OpenAI Responses API takes no audio input), PDFs
+web/worker tier (no bot-package imports): images are described by GPT-6 Luna
+(BMP re-encoded and animated GIFs sampled by ``shared.media_images``, as in the
+bot) and audio by Gemini 3.8 Flash (the OpenAI Responses API takes no audio input), PDFs
 are extracted with pdfplumber, everything else is read as page text via Jina.
 
 Media describes (the expensive part — a model call) are cached in Redis keyed on
@@ -20,6 +21,8 @@ import os
 
 import httpx
 
+from smarter_dev.shared.media_images import ImageTooLarge
+from smarter_dev.shared.media_images import prepare_image_bounded
 from smarter_dev.web.research_tools import jina_read
 
 logger = logging.getLogger(__name__)
@@ -149,7 +152,19 @@ async def _describe_media(
     is_audio = kind == "audio" or media_type.startswith("audio/")
     agent = _get_audio_agent() if is_audio else _get_media_agent()
     prompt = f"URL: {url}\nKIND: {kind}\n\nINSTRUCTION:\n{instruction}"
-    result = await agent.run([prompt, BinaryContent(data=data, media_type=media_type)])
+    if is_audio:
+        parts = [(data, media_type)]
+    else:
+        # BMP -> PNG, animated GIF -> sampled frames (see media_images).
+        try:
+            parts, note = await prepare_image_bounded(data, media_type)
+        except ImageTooLarge as too_large:
+            return str(too_large)
+        if note:
+            prompt += f"\n\nNOTE: {note}"
+    result = await agent.run(
+        [prompt, *(BinaryContent(data=part, media_type=mt) for part, mt in parts)]
+    )
     return str(result.output)
 
 
