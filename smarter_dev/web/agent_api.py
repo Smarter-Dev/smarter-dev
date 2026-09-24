@@ -259,7 +259,7 @@ def _require_user_id(request: Request) -> UUID:
 def _derive_title(question: str, max_len: int = 80) -> str:
     """Cheap derived title — first sentence or truncated question.
 
-    Used as the placeholder while ``generate_title`` (Gemini Flash Lite) is
+    Used as the placeholder while ``generate_title`` (GPT-6 Luna) is
     still in flight on the background task.
     """
     clean = " ".join(question.split())

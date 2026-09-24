@@ -18,8 +18,10 @@ from skrift.agents.models import ResumeContext
 
 from smarter_dev.web.blogging_agent.research_agent import Citation
 
+# GPT-6 Luna since 2026-09-24, replacing the Gemini 3 Flash preview (Zech:
+# "significantly cheaper"). OpenAI Responses API via OPENAI_API_KEY.
 SYNTHESIS_MODEL = os.getenv(
-    "BLOGGING_SYNTHESIS_MODEL", "gemini-3-flash-preview"
+    "BLOGGING_SYNTHESIS_MODEL", "gpt-6-luna"
 )
 SYNTHESIS_AGENT_NAME = "blogging.synthesis"
 _PROMPT = (Path(__file__).parent / "prompts" / "synthesis.md").read_text(
@@ -77,11 +79,11 @@ def _build_deps(ctx: ResumeContext) -> SynthesisDeps:
 
 
 synthesis_agent = skrift.Agent(
-    f"google-gla:{SYNTHESIS_MODEL}",
+    f"openai-responses:{SYNTHESIS_MODEL}",
     name=SYNTHESIS_AGENT_NAME,
     system_prompt=_PROMPT,
     output_type=SynthesisOutput,
-    model_settings={"google_thinking_config": {"thinking_level": "MEDIUM"}},
+    model_settings={"openai_reasoning_effort": "medium"},
     deps_type=SynthesisDeps,
     deps_factory=_build_deps,
 )

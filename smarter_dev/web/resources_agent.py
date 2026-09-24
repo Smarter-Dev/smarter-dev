@@ -2,7 +2,7 @@
 
 Four-stage pipeline, presented to the user as a single agent:
 
-0. **Reframer** (gemini-3-flash-preview · think=medium) — interrogates the
+0. **Reframer** (gpt-6-luna · effort=medium) — interrogates the
    user's raw prompt (is it reasonable, is there a more normal question
    underneath, does it fit the shape of the catalog?) and emits a short
    user-visible message restating what they asked plus structured
@@ -15,11 +15,11 @@ Four-stage pipeline, presented to the user as a single agent:
    opens promising sources (``read_source``), and produces a typed
    ``ResearchOutput`` listing distilled excerpts, further-reading, and
    gaps the catalog didn't cover.
-2. **Gap-filler** (gemini-3-flash-preview · think=low) — runs when the
+2. **Gap-filler** (gpt-6-luna · effort=low) — runs when the
    researcher reported gaps OR the reframer asked for extra web topics.
    For each item, runs ``web_search`` over the open web and ``read_url``
    on the single best result. Returns one ``GapCitation`` per input.
-3. **Author** (gemini-3-flash-preview · think=low) — gets the merged
+3. **Author** (gpt-6-luna · effort=low) — gets the merged
    research bundle (curated excerpts + web citations) plus the
    reframer's instructions and the original prompt, and writes the
    final markdown answer using the production system prompt.
@@ -73,10 +73,12 @@ from smarter_dev.web.research_tools import jina_read
 
 logger = logging.getLogger(__name__)
 
-REFRAMER_MODEL = os.getenv("RESOURCE_REFRAMER_MODEL", "gemini-3-flash-preview")
+# GPT-6 Luna since 2026-09-24, replacing the Gemini 3 Flash preview (Zech:
+# "significantly cheaper"). OpenAI Responses API via OPENAI_API_KEY.
+REFRAMER_MODEL = os.getenv("RESOURCE_REFRAMER_MODEL", "gpt-6-luna")
 RESEARCHER_MODEL = os.getenv("RESOURCE_RESEARCHER_MODEL", "gpt-6-luna")
-GAP_FILLER_MODEL = os.getenv("RESOURCE_GAP_FILLER_MODEL", "gemini-3-flash-preview")
-AUTHOR_MODEL = os.getenv("RESOURCE_AUTHOR_MODEL", "gemini-3-flash-preview")
+GAP_FILLER_MODEL = os.getenv("RESOURCE_GAP_FILLER_MODEL", "gpt-6-luna")
+AUTHOR_MODEL = os.getenv("RESOURCE_AUTHOR_MODEL", "gpt-6-luna")
 
 # Per-stage Agent names — four separate Skrift agents (one per stage),
 # all transparent to the end user via the shared tool-event stream.
@@ -813,7 +815,7 @@ def _build_openai_model(model_id: str) -> str:
 
 
 def _reframer_model_settings() -> dict:
-    return {"google_thinking_config": {"thinking_level": "MEDIUM"}}
+    return {"openai_reasoning_effort": "medium"}
 
 
 def _researcher_model_settings() -> dict:
@@ -821,11 +823,11 @@ def _researcher_model_settings() -> dict:
 
 
 def _gap_filler_model_settings() -> dict:
-    return {"google_thinking_config": {"thinking_level": "LOW"}}
+    return {"openai_reasoning_effort": "low"}
 
 
 def _author_model_settings() -> dict:
-    return {"google_thinking_config": {"thinking_level": "LOW"}}
+    return {"openai_reasoning_effort": "low"}
 
 
 @dataclass
@@ -856,7 +858,7 @@ def _build_deps(ctx: ResumeContext) -> RunDeps:
 
 
 reframer_agent = skrift.Agent(
-    _build_google_model(REFRAMER_MODEL),
+    _build_openai_model(REFRAMER_MODEL),
     name=REFRAMER_AGENT_NAME,
     system_prompt=_REFRAMER_PROMPT,
     output_type=ReframerOutput,
@@ -876,7 +878,7 @@ researcher_agent = skrift.Agent(
 )
 
 gap_filler_agent = skrift.Agent(
-    _build_google_model(GAP_FILLER_MODEL),
+    _build_openai_model(GAP_FILLER_MODEL),
     name=GAP_FILLER_AGENT_NAME,
     system_prompt=_GAP_FILLER_PROMPT,
     output_type=GapFillerOutput,
@@ -886,7 +888,7 @@ gap_filler_agent = skrift.Agent(
 )
 
 author_agent = skrift.Agent(
-    _build_google_model(AUTHOR_MODEL),
+    _build_openai_model(AUTHOR_MODEL),
     name=AUTHOR_AGENT_NAME,
     system_prompt=_SYSTEM_PROMPT,
     model_settings=_author_model_settings(),

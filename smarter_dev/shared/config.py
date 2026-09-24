@@ -112,12 +112,12 @@ class Settings(BaseSettings):
         description="Master kill switch for the agentic handler system",
     )
     handler_author_model: str = Field(
-        default="gemini-3-flash-preview",
-        description="Model that writes handler scripts from a description (Gemini 3 Flash)",
+        default="gpt-6-luna",
+        description="Model that writes handler scripts from a description (GPT-6 Luna)",
     )
     handler_judge_model: str = Field(
-        default="gemini-3-flash-preview",
-        description="Model that reviews candidate handler scripts (Gemini 3 Flash)",
+        default="gpt-6-luna",
+        description="Model that reviews candidate handler scripts (GPT-6 Luna)",
     )
     handler_admin_author_model: str = Field(
         default="gpt-6-sol",

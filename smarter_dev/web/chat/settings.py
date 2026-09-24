@@ -25,13 +25,14 @@ from smarter_dev.web.models import ChatSpendLimit
 # The model that answers by default. Whatever sits here must also be enabled in
 # chat_catalog_models — validate_settings_input rejects a disabled default.
 # GPT-6 Luna is both the better default and the cheaper one: $0.10/$0.50 per M
-# from OpenAI directly against Gemini 3.5 Flash Lite's $0.30/$2.50.
+# from OpenAI directly against the $0.30/$2.50 Gemini 3.5 Flash Lite charged.
 DEFAULT_MODEL = "gpt-6-luna"
 # Where auxiliary work goes when the model configured for it fails. Deliberately
 # a DIFFERENT vendor from DEFAULT_MODEL — a fallback that shares an upstream
-# with the thing it is backstopping is not a fallback. 3.5 Flash Lite supersedes
-# 3.1 in its own class; 3.6 Flash is a different class, not a replacement.
-DEFAULT_FALLBACK_MODEL = "gemini-3-5-flash-lite"
+# with the thing it is backstopping is not a fallback. 3.8 Flash took the slot
+# on 2026-09-24, when it became the only Gemini Flash in the catalog; 3.5 Flash
+# Lite held it before.
+DEFAULT_FALLBACK_MODEL = "gemini-3-8-flash"
 # Laguna S 2.1 held this slot until it left the catalog on 2026-08-13. DeepSeek
 # V4 Flash is the closest replacement the catalog still carries: $0.14/$0.28 per
 # M against Laguna's $0.10/$0.20, and the cheapest remaining tool-capable model.

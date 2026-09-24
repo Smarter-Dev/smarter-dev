@@ -60,7 +60,7 @@ REASONING_KEY = "glm-5-3-flash"
 # A second reasoning-capable model used as a fallback target in tests.
 FALLBACK_KEY = "deepseek-v4"
 # A catalog model used as the two-stage drafter target in tests.
-DRAFTER_KEY = "gemini-3-6-flash"
+DRAFTER_KEY = "gemini-3-8-flash"
 
 
 def _override(
@@ -593,7 +593,7 @@ async def test_chat_bot_settings_shows_select_for_admin():
 
 def _default_override_ctx(
     redis,
-    model: str = "gemini-3-6-flash",
+    model: str = "gemini-3-8-flash",
     reasoning: str = "high",
     end_date: str = "2030-01-01",
 ):
@@ -637,12 +637,12 @@ async def test_chat_default_model_override_stores_self_expiring_override():
     args, kwargs = redis.set.await_args
     assert kwargs["exat"] == expected_epoch
     assert json.loads(args[1]) == {
-        "model_key": "gemini-3-6-flash",
+        "model_key": "gemini-3-8-flash",
         "reasoning_level": "high",
         "expires_at_epoch": expected_epoch,
     }
     message = ctx.respond.call_args.args[0]
-    assert "Gemini 3.6 Flash" in message
+    assert "Gemini 3.8 Flash" in message
     assert f"<t:{expected_epoch}:f>" in message
 
 

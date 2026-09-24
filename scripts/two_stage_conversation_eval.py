@@ -22,7 +22,7 @@ contrast (two-stage total vs single-stage total, savings and ratio).
 Usage:
     uv run python scripts/two_stage_conversation_eval.py
     uv run python scripts/two_stage_conversation_eval.py path/to/conversation.yaml --out report.md
-    uv run python scripts/two_stage_conversation_eval.py --worker gemini-3-5-flash-lite --large gpt-6-sol
+    uv run python scripts/two_stage_conversation_eval.py --worker gemini-3-8-flash --large gpt-6-sol
 
 Requires provider API keys in the environment (loaded from .env): GEMINI_API_KEY
 / GOOGLE_API_KEY for Gemini, OPENAI_API_KEY for GPT.
@@ -498,7 +498,7 @@ async def _main_async(args: argparse.Namespace) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("conversation", nargs="?", default=str(DEFAULT_CONVERSATION), help="conversation YAML path")
-    parser.add_argument("--worker", default="gemini-3-5-flash-lite", help="two-stage worker model catalog key")
+    parser.add_argument("--worker", default="gemini-3-8-flash", help="two-stage worker model catalog key")
     parser.add_argument("--writer", default=None, help="two-stage writer model catalog key (default: same as --large)")
     parser.add_argument("--large", default="gpt-6-sol", help="large model catalog key (writer + single-stage bot)")
     parser.add_argument("--out", default="two_stage_conversation_report.md", help="output Markdown path")

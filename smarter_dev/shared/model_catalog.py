@@ -459,31 +459,20 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
     # --- Gemini via Google ---
     # Gemini 3 Flash left the catalog on 2026-08-13 — the oldest Flash we
     # carried, and still on a *preview* wire id — to make room for 3.7 Flash.
-    # Like 3.1 Flash Lite before it, the wire id stays in service outside the
-    # catalog: the resources agent's reframer/gap-filler/author and the blogging
-    # scout and research agents all pin ``gemini-3-flash-preview`` directly, so
-    # its price patch and provider mapping remain live rather than historical.
-    CatalogModel(
-        key="gemini-3-7-flash",
-        label="Gemini 3.7 Flash",
-        family="Gemini",
-        provider=ModelProvider.GOOGLE,
-        model_id="gemini-3.7-flash",
-        supports_vision=True,
-        # Verified against the Gemini models API, not assumed: 1M in, 64K out.
-        context_window=1_048_576,
-        max_output_tokens=65_536,
-        reasoning_levels=_GEMINI_THINKING,
-        default_reasoning=ReasoningLevel.MEDIUM,
-    ),
+    # 3.5 Flash Lite, 3.6 Flash and 3.7 Flash left on 2026-09-24, so 3.8 Flash
+    # is the one Gemini Flash in the catalog and in use: the selections on the
+    # three retired keys read as 3.8 Flash (``RETIRED_SUCCESSORS``), and the
+    # agents that pinned Gemini Flash wire ids directly — the rule matcher, the
+    # summarizer fallback, the resources agent, the blogging agents and the
+    # handler author/judge — moved to it the same day. Their price patches and
+    # provider mappings stay for the usage rows that carry their wire ids.
+    #
     # Gemini 3.8 Flash joined on 2026-09-03 when it became the proactive
     # agent's model. It is in the catalog for the usage ledger's benefit as much
     # as the picker's: ``_normalized_model_identity`` resolves a wire id through
     # this catalog, so an absent entry files the proactive agent's whole spend
     # under provider "unknown" in the invoice breakdown. Same promotional
-    # $0.75/$3.75 per M as 3.6 and 3.7 Flash, so it costs a channel no more than
-    # the 3.7 Flash sitting above it. Slots came free from the retired Claude
-    # family rather than from another Gemini.
+    # $0.75/$3.75 per M as 3.6 and 3.7 Flash were.
     CatalogModel(
         key="gemini-3-8-flash",
         label="Gemini 3.8 Flash",
@@ -491,18 +480,19 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         provider=ModelProvider.GOOGLE,
         model_id="gemini-3.8-flash",
         supports_vision=True,
-        # Same envelope as 3.7 Flash: 1M in, 64K out.
+        # Verified against the Gemini models API, not assumed: 1M in, 64K out.
         context_window=1_048_576,
         max_output_tokens=65_536,
         reasoning_levels=_GEMINI_THINKING,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
     # Gemini 3.1 Flash Lite left the catalog on 2026-08-13, superseded by 3.5
-    # Flash Lite in the same class (3.6 Flash is a different class, not a
-    # replacement), freeing the last slot for DeepSeek V4 Pro. The wire id is
-    # still live: title generation, media reading, image prompt review and the
-    # blogging agents all pin it directly rather than through the catalog, so
-    # its price patch and provider mapping stay load-bearing, not historical.
+    # Flash Lite in the same class, freeing the last slot for DeepSeek V4 Pro.
+    # Its direct pins — title generation, media reading, image prompt review
+    # and the blogging review/summariser agents — moved to GPT-6 Luna on
+    # 2026-09-24; only ``gemini-3.1-flash-lite-image``, which *generates*
+    # images and has no Luna equivalent, is still in service.
+    # 3.1 Pro stays: it is not a Flash, and nothing has replaced it.
     CatalogModel(
         key="gemini-3-1-pro",
         label="Gemini 3.1 Pro",
@@ -512,28 +502,6 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         supports_vision=True,
         reasoning_levels=_GEMINI_THINKING,
         default_reasoning=ReasoningLevel.HIGH,
-    ),
-    CatalogModel(
-        key="gemini-3-5-flash-lite",
-        label="Gemini 3.5 Flash Lite",
-        family="Gemini",
-        provider=ModelProvider.GOOGLE,
-        model_id="gemini-3.5-flash-lite",
-        supports_vision=True,
-        reasoning_levels=_GEMINI_THINKING,
-        default_reasoning=ReasoningLevel.MEDIUM,
-    ),
-    # Gemini 3.6 Flash replaced 3.5 Flash (2026-07-21); the old
-    # ``gemini-3-5-flash`` key was remapped to this entry by migration.
-    CatalogModel(
-        key="gemini-3-6-flash",
-        label="Gemini 3.6 Flash",
-        family="Gemini",
-        provider=ModelProvider.GOOGLE,
-        model_id="gemini-3.6-flash",
-        supports_vision=True,
-        reasoning_levels=_GEMINI_THINKING,
-        default_reasoning=ReasoningLevel.MEDIUM,
     ),
     # --- GPT via OpenAI ---
     # GPT-6 replaced GPT-5.6 Terra and Luna on 2026-09-24: Sol ($2/$10 per M)
@@ -606,17 +574,18 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
     # --- Grok via OpenRouter ---
     # xAI has no first-party key here, so Grok routes through OpenRouter's
     # OpenAI-compatible /chat/completions. Capabilities verified against GET
-    # /api/v1/models/x-ai/grok-4.6/endpoints (2026-08): 500K context,
+    # /api/v1/models/x-ai/grok-4.7/endpoints (2026-09-24): 500K context,
     # text+image input, tools, and a reasoning_effort knob. OpenRouter
     # normalizes low/medium/high effort for every route, so the standard
-    # open-effort ladder applies. 4.6 replaced 4.5 on 2026-08-13 at the same
-    # $2/$6 headline rate.
+    # open-effort ladder applies. 4.7 replaced 4.6 on 2026-09-24, and costs
+    # less: $1.60/$4.80 against 4.6's $2/$6. Every endpoint is xAI's own, so
+    # there is no routing to constrain.
     CatalogModel(
-        key="grok-4-6",
-        label="Grok 4.6 (xAI)",
+        key="grok-4-7",
+        label="Grok 4.7 (xAI)",
         family="Grok",
         provider=ModelProvider.OPENROUTER,
-        model_id="x-ai/grok-4.6",
+        model_id="x-ai/grok-4.7",
         supports_vision=True,
         context_window=500_000,
         reasoning_levels=_OPEN_EFFORT,
@@ -647,6 +616,12 @@ RETIRED_SUCCESSORS: dict[str, str] = {
     "gpt-5-5": "gpt-6-sol",
     "gpt-5-6-sol": "gpt-6-sol",
     "gpt-5-4-nano": "gpt-6-luna",
+    # 2026-09-24: 3.8 Flash is the only Gemini Flash left, and Grok 4.7
+    # replaced 4.6.
+    "gemini-3-5-flash-lite": "gemini-3-8-flash",
+    "gemini-3-6-flash": "gemini-3-8-flash",
+    "gemini-3-7-flash": "gemini-3-8-flash",
+    "grok-4-6": "grok-4-7",
 }
 
 

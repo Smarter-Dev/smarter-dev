@@ -15,8 +15,10 @@ import skrift
 from pydantic import BaseModel, Field
 from skrift.agents.models import ResumeContext
 
+# GPT-6 Luna since 2026-09-24, replacing the Gemini 3 Flash preview (Zech:
+# "significantly cheaper"). OpenAI Responses API via OPENAI_API_KEY.
 BRAINSTORM_MODEL = os.getenv(
-    "BLOGGING_BRAINSTORM_MODEL", "gemini-3-flash-preview"
+    "BLOGGING_BRAINSTORM_MODEL", "gpt-6-luna"
 )
 BRAINSTORM_AGENT_NAME = "blogging.brainstorm"
 _PROMPT = (Path(__file__).parent / "prompts" / "brainstorm.md").read_text(
@@ -93,11 +95,11 @@ def _build_deps(ctx: ResumeContext) -> BrainstormDeps:
 
 
 brainstorm_agent = skrift.Agent(
-    f"google-gla:{BRAINSTORM_MODEL}",
+    f"openai-responses:{BRAINSTORM_MODEL}",
     name=BRAINSTORM_AGENT_NAME,
     system_prompt=_PROMPT,
     output_type=BrainstormOutput,
-    model_settings={"google_thinking_config": {"thinking_level": "MEDIUM"}},
+    model_settings={"openai_reasoning_effort": "medium"},
     deps_type=BrainstormDeps,
     deps_factory=_build_deps,
 )

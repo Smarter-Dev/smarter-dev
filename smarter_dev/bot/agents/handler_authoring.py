@@ -5,11 +5,11 @@ in the live user-interaction context — so a *triggered* execution, which runs 
 the worker, structurally has no path to this code. That is the "triggered
 executions can't author" invariant, enforced by where the code lives.
 
-Pipeline: the Author (member tier Gemini 3 Flash; admin tier GPT-6 Sol at
+Pipeline: the Author (member tier GPT-6 Luna; admin tier GPT-6 Sol at
 high reasoning) sees the existing named handlers and returns a structured plan
 — edit one of them or create a new, named one — or marks the request
 infeasible; the host-side :mod:`~smarter_dev.web.handler_lint` rejects opaque
-blobs / dynamic execution; the Judge (member tier Gemini 3 Flash; admin tier
+blobs / dynamic execution; the Judge (member tier GPT-6 Luna; admin tier
 GPT-6 Sol, with an optional second judge, any-reject-wins) reviews the script as inert
 data and APPROVEs or REJECTs. The author and judge callables are injectable so
 the orchestration is unit-testable without any model calls.
@@ -624,12 +624,14 @@ def _get_author_agent() -> Agent[_AuthorDeps, HandlerPlan]:
     global _author_agent
     if _author_agent is None:
         _author_agent = Agent(
-            _build_google_model(get_settings().handler_author_model),
+            _build_configured_model(get_settings().handler_author_model),
             deps_type=_AuthorDeps,
             output_type=HandlerPlan,
             system_prompt=AUTHOR_PROMPT,
             tools=[_list_channel_emojis],
-            model_settings=_HANDLER_THINKING,
+            model_settings=_handler_model_settings(
+                get_settings().handler_author_model, ReasoningLevel.MEDIUM
+            ),
         )
     return _author_agent
 
@@ -638,10 +640,12 @@ def _get_judge_agent() -> Agent[None, JudgeVerdict]:
     global _judge_agent
     if _judge_agent is None:
         _judge_agent = Agent(
-            _build_google_model(get_settings().handler_judge_model),
+            _build_configured_model(get_settings().handler_judge_model),
             output_type=JudgeVerdict,
             system_prompt=JUDGE_PROMPT,
-            model_settings=_HANDLER_THINKING,
+            model_settings=_handler_model_settings(
+                get_settings().handler_judge_model, ReasoningLevel.MEDIUM
+            ),
         )
     return _judge_agent
 
