@@ -84,17 +84,17 @@ async def test_get_override_uses_cache(service, mock_api_client):
 
 async def test_set_override_puts_and_returns_dto(service, mock_api_client):
     mock_api_client.put.return_value = create_mock_response(
-        200, _payload("gpt-5-4", daily=100, hourly=10)
+        200, _payload("gpt-6-sol", daily=100, hourly=10)
     )
 
     result = await service.set_override(
-        GUILD, CHANNEL, "gpt-5-4", 100, 10, reasoning_level="high"
+        GUILD, CHANNEL, "gpt-6-sol", 100, 10, reasoning_level="high"
     )
 
     mock_api_client.put.assert_awaited_once_with(
         PATH,
         json_data={
-            "model_key": "gpt-5-4",
+            "model_key": "gpt-6-sol",
             "reasoning_level": "high",
             "daily_token_budget": 100,
             "hourly_token_budget": 10,
@@ -104,7 +104,7 @@ async def test_set_override_puts_and_returns_dto(service, mock_api_client):
             "drafter_model": None,
         },
     )
-    assert result.model_key == "gpt-5-4"
+    assert result.model_key == "gpt-6-sol"
     assert result.daily_token_budget == 100
 
 
@@ -153,7 +153,7 @@ async def test_set_override_sends_new_settings(service, mock_api_client):
     result = await service.set_override(
         GUILD,
         CHANNEL,
-        "gpt-5-4",
+        "gpt-6-sol",
         0,
         0,
         auto_respond=True,
@@ -164,7 +164,7 @@ async def test_set_override_sends_new_settings(service, mock_api_client):
     mock_api_client.put.assert_awaited_once_with(
         PATH,
         json_data={
-            "model_key": "gpt-5-4",
+            "model_key": "gpt-6-sol",
             "reasoning_level": None,
             "daily_token_budget": 0,
             "hourly_token_budget": 0,
@@ -206,7 +206,7 @@ async def test_set_override_sends_drafter_model(service, mock_api_client):
     )
 
     result = await service.set_override(
-        GUILD, CHANNEL, "gpt-5-4", 0, 0, drafter_model="glm-4-6"
+        GUILD, CHANNEL, "gpt-6-sol", 0, 0, drafter_model="glm-4-6"
     )
 
     _, put_kwargs = mock_api_client.put.call_args

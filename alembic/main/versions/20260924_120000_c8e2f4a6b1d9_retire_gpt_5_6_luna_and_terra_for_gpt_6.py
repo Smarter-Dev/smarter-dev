@@ -1,20 +1,23 @@
-"""admit GPT-6 Luna and Sol beside the GPT-5.6 Luna and Terra rows they replace
+"""admit GPT-6 Luna and Sol beside the GPT-5.x rows they replace
 
 On 2026-09-24 GPT-6 replaces the two GPT-5.6 models the chat still carried:
 Luna ($0.10/$0.50 per M) takes 5.6 Luna's cheap, fast slot — the server default
 — and Sol ($2/$10) takes Terra's flagship slot. Both are served by OpenAI
 directly; 5.6 Luna went through OpenRouter, and 6 Luna costs no more direct than
-that did, so the OpenRouter hop and its fee go with it.
+that did, so the OpenRouter hop and its fee go with it. The same day GPT-5.4,
+5.4 Mini, 5.5 and 5.6 Sol retire too: Mini onto 6 Luna, the three flagships
+onto 6 Sol, which undercuts all of them. 5.4 Nano stays.
 
 This revision only adds. It runs before the deploy rolls the pods, so for a
 few minutes pods on the previous build — which know neither GPT-6 key — read
 the same tables. Everything they read is therefore left as it was: each
-successor gets a ``chat_catalog_models`` row carrying the retired row's
-``enabled``, ``cost_tier`` and ``sort_order``, and nothing else changes. The
+successor gets a ``chat_catalog_models`` row carrying its direct predecessor's
+(5.6 Luna's, Terra's) ``enabled``, ``cost_tier`` and ``sort_order``, enabled
+too if any model it replaces was, and nothing else changes. The
 previous build lists catalog rows by walking its own catalog, so a row for a key
 it does not know is invisible to it. The retired rows stay because the previous
-build's ``ensure_settings`` would otherwise seed them straight back, 5.6 Luna
-enabled.
+build's ``ensure_settings`` would otherwise seed them straight back, disabled
+or — for 5.6 Luna, its default — enabled.
 
 The new build reads a stored retired key as its successor
 (``model_catalog.successor_key``) wherever it is a *selection*: the seven
@@ -33,7 +36,7 @@ nobody chose for it. That covers all three pinned columns of
 ``channel_model_overrides`` — ``model_key``, ``fallback_model_key`` and
 ``drafter_model``.
 
-If the server default is a retired key, its successor row is enabled too:
+If the server default is a retired key, its successor row is enabled:
 ``validate_settings_input`` refuses to save while the default model is
 disabled, and the new build reads the default as the successor.
 
@@ -58,11 +61,25 @@ down_revision: Union[str, None] = "f3b8d1c6a4e9"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
-# Retired key -> successor key.
+# Retired key -> successor key; must match ``model_catalog.RETIRED_SUCCESSORS``.
+# Each successor's first entry is its direct predecessor: the model whose slot
+# it takes, and whose catalog row it copies.
 _SUCCESSORS: tuple[tuple[str, str], ...] = (
     ("gpt-5-6-luna", "gpt-6-luna"),
     ("gpt-5-6-terra", "gpt-6-sol"),
+    ("gpt-5-4-mini", "gpt-6-luna"),
+    ("gpt-5-4", "gpt-6-sol"),
+    ("gpt-5-5", "gpt-6-sol"),
+    ("gpt-5-6-sol", "gpt-6-sol"),
 )
+
+
+def _predecessors() -> dict[str, str]:
+    """Successor key -> its direct predecessor (its first ``_SUCCESSORS`` entry)."""
+    first: dict[str, str] = {}
+    for retired_key, successor_key in _SUCCESSORS:
+        first.setdefault(successor_key, retired_key)
+    return first
 
 # (table, column) pairs holding a live selection: server-wide defaults and
 # per-conversation picks, none of which a channel advertises. Only the downgrade
@@ -100,26 +117,34 @@ def _copy_catalog_row(from_key: str, to_key: str) -> None:
 
 
 def upgrade() -> None:
-    for retired_key, successor_key in _SUCCESSORS:
+    for successor_key, retired_key in _predecessors().items():
         _copy_catalog_row(retired_key, successor_key)
+    for retired_key, successor_key in _SUCCESSORS:
+        # A successor serves every selection of every model it replaces, so it
+        # is enabled if any of them was — else a conversation left on an
+        # enabled GPT-5.5 would read as a disabled GPT-6 Sol. The same goes for
+        # the server default.
         op.execute(
             sa.text(
                 "UPDATE chat_catalog_models SET enabled = true"
-                " WHERE model_key = :successor_key AND EXISTS ("
-                " SELECT 1 FROM chat_settings"
-                " WHERE default_model_key = :retired_key)"
+                " WHERE model_key = :successor_key AND ("
+                " EXISTS (SELECT 1 FROM chat_catalog_models"
+                " WHERE model_key = :retired_key AND enabled)"
+                " OR EXISTS (SELECT 1 FROM chat_settings"
+                " WHERE default_model_key = :retired_key))"
             ).bindparams(retired_key=retired_key, successor_key=successor_key)
         )
 
 
 def downgrade() -> None:
     # Run with the new image, before the previous one is redeployed: the
-    # previous build knows no GPT-6 key. Every GPT-6 selection moves back onto
-    # the GPT-5.6 model it replaced — including ones picked after the upgrade —
-    # and whatever an admin set on the GPT-6 rows carries back to the retired
-    # rows. Channel pins are left alone here too; a channel repinned to GPT-6
-    # stops with a notice under the previous build until an admin repins it.
-    for retired_key, successor_key in _SUCCESSORS:
+    # previous build knows no GPT-6 key. Every GPT-6 selection — including ones
+    # picked after the upgrade — moves back onto the successor's direct
+    # predecessor, and whatever an admin set on the GPT-6 row carries back to
+    # that predecessor's row. The other retired rows were never touched. Channel
+    # pins are left alone here too; a channel repinned to GPT-6 stops with a
+    # notice under the previous build until an admin repins it.
+    for successor_key, retired_key in _predecessors().items():
         for table, column in _SELECTION_COLUMNS:
             op.execute(
                 sa.text(

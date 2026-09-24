@@ -1,7 +1,7 @@
 """Stage 4 of the blogging pipeline — Research.
 
 The outer Research stage is a Gemini 3 Flash agent whose only tool is
-``dig_into``. Each call dispatches a GPT-5.4-Nano sub-agent that runs its
+``dig_into``. Each call dispatches a GPT-6 Luna sub-agent that runs its
 own multi-turn search/read loop and returns 4-8 verbatim citations.
 
 Sub-agent dispatches are auto-tracked by Skrift's event log
@@ -34,7 +34,7 @@ RESEARCH_MODEL = os.getenv(
 )
 RESEARCH_AGENT_NAME = "blogging.research"
 RESEARCHER_SUBAGENT_MODEL = os.getenv(
-    "BLOGGING_RESEARCHER_SUBAGENT_MODEL", "gpt-5.4-nano"
+    "BLOGGING_RESEARCHER_SUBAGENT_MODEL", "gpt-6-luna"
 )
 RESEARCHER_SUBAGENT_NAME = "blogging.researcher_subagent"
 
@@ -119,7 +119,7 @@ class ResearchInput(BaseModel):
     open_questions: list[str]
 
 
-# ── Sub-agent (GPT-5.4-Nano) ─────────────────────────────────────────
+# ── Sub-agent (GPT-6 Luna) ───────────────────────────────────────────
 
 
 @dataclass

@@ -79,3 +79,18 @@ async def test_channel_pins_keep_the_retired_key(db_session):
 
     assert pin.model_key == "gpt-5-6-terra"
     assert pin.fallback_model_key == "gpt-5-6-luna"
+
+
+def test_migration_successors_match_the_catalog_map():
+    import importlib.util
+    from pathlib import Path
+
+    from smarter_dev.shared.model_catalog import RETIRED_SUCCESSORS
+
+    path = next(
+        Path("alembic/main/versions").glob("*_c8e2f4a6b1d9_*.py")
+    )
+    spec = importlib.util.spec_from_file_location("c8e2f4a6b1d9", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert dict(module._SUCCESSORS) == RETIRED_SUCCESSORS
