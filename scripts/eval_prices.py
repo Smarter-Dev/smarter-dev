@@ -54,6 +54,10 @@ CUSTOM_PRICES: dict[str, dict[str, tuple[str, str, str, str | None, str | None]]
         # GPT-5.6 Terra — rates effective 2026-07-30 after a 20% cut.
         # $2.00 in / $12.00 out / $0.20 cached-read / $2.50 cache-write.
         "gpt-5.6-terra": ("GPT 5.6 Terra", "2", "12", "0.2", "2.5"),
+        # GPT-6 Luna — $0.10 in / $0.50 out / $0.01 cached-read / $0.125 cache-write.
+        "gpt-6-luna": ("GPT 6 Luna", "0.1", "0.5", "0.01", "0.125"),
+        # GPT-6 Sol — $2.00 in / $10.00 out / $0.20 cached-read / $2.50 cache-write.
+        "gpt-6-sol": ("GPT 6 Sol", "2", "10", "0.2", "2.5"),
     },
     "openrouter": {
         # DeepSeek V4 Flash on the deepseek-origin route the bot pins (see
@@ -128,7 +132,7 @@ if __name__ == "__main__":
     print("added:", install())
     pd = calc_price(
         Usage(input_tokens=1_000_000, output_tokens=1_000_000),
-        model_ref="gpt-5.6-luna",
+        model_ref="gpt-6-luna",
         provider_id="openai",
     )
-    print(f"gpt-5.6-luna 1M/1M -> ${pd.total_price} (matched {pd.model.id})")
+    print(f"gpt-6-luna 1M/1M -> ${pd.total_price} (matched {pd.model.id})")

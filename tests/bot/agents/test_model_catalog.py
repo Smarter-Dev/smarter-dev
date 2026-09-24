@@ -14,6 +14,8 @@ from smarter_dev.shared.model_catalog import is_valid_model_key
 from smarter_dev.shared.model_catalog import models_by_family
 from smarter_dev.shared.model_catalog import parse_reasoning_level
 from smarter_dev.shared.model_catalog import resolve_reasoning_level
+from smarter_dev.shared.model_catalog import RETIRED_SUCCESSORS
+from smarter_dev.shared.model_catalog import successor_key
 
 # Open-weights families. These no longer map to a single provider: the same
 # family can be served by Digital Ocean and OpenCode Zen at once (Kimi K2.6 on
@@ -66,7 +68,7 @@ def test_resolve_reasoning_level_falls_back_to_default():
 
 
 def test_resolve_reasoning_level_keeps_supported_choice():
-    gpt = get_model("gpt-5-4")
+    gpt = get_model("gpt-6-sol")
     assert resolve_reasoning_level(gpt, ReasoningLevel.XHIGH) is ReasoningLevel.XHIGH
 
 
@@ -135,10 +137,10 @@ def test_proactive_agent_model_resolves_through_the_catalog():
     assert matches[0].provider is ModelProvider.GOOGLE
 
 
-def test_gpt_5_6_lineup_is_selectable():
+def test_gpt_6_lineup_is_selectable():
     expected = {
-        "gpt-5-6-sol": "gpt-5.6-sol",
-        "gpt-5-6-terra": "gpt-5.6-terra",
+        "gpt-6-luna": "gpt-6-luna",
+        "gpt-6-sol": "gpt-6-sol",
     }
     for key, model_id in expected.items():
         model = get_model(key)
@@ -149,15 +151,14 @@ def test_gpt_5_6_lineup_is_selectable():
         assert model.default_reasoning in model.reasoning_levels
 
 
-def test_luna_routes_through_openrouter():
-    # Switched 2026-08-06 for OpenRouter's 50% rate ($0.10/$0.60 against
-    # OpenAI direct's $0.20/$1.20). Probed live through OpenRouter: every
-    # effort none→max returns 200 from the OpenAI upstream, so the full
-    # GPT-5.6 ladder stays.
-    luna = get_model("gpt-5-6-luna")
+def test_gpt_6_luna_is_served_by_openai_directly():
+    # GPT-6 Luna replaced 5.6 Luna on 2026-09-24. 5.6 Luna went through
+    # OpenRouter for its half-price rate; 6 Luna costs no more direct, so the
+    # OpenRouter hop was dropped. OpenAI documents the full none→max ladder.
+    luna = get_model("gpt-6-luna")
     assert luna is not None
-    assert luna.provider is ModelProvider.OPENROUTER
-    assert luna.model_id == "openai/gpt-5.6-luna"
+    assert luna.provider is ModelProvider.OPENAI
+    assert luna.model_id == "gpt-6-luna"
     assert luna.family == "GPT"
     assert luna.supports_vision is True
     assert luna.reasoning_levels == (
@@ -169,6 +170,31 @@ def test_luna_routes_through_openrouter():
         ReasoningLevel.MAX,
     )
     assert luna.default_reasoning is ReasoningLevel.MEDIUM
+
+
+def test_gpt_5_6_luna_and_terra_left_the_catalog():
+    assert get_model("gpt-5-6-luna") is None
+    assert get_model("gpt-5-6-terra") is None
+    assert not [
+        m for m in MODEL_CATALOG if m.provider is ModelProvider.OPENROUTER
+        and m.model_id.startswith("openai/")
+    ]
+
+
+def test_retired_gpt_5_x_keys_read_as_their_gpt_6_successors():
+    assert successor_key("gpt-5-6-luna") == "gpt-6-luna"
+    assert successor_key("gpt-5-6-terra") == "gpt-6-sol"
+    assert successor_key("gpt-5-4-mini") == "gpt-6-luna"
+    assert successor_key("gpt-5-4") == "gpt-6-sol"
+    assert successor_key("gpt-5-5") == "gpt-6-sol"
+    assert successor_key("gpt-5-6-sol") == "gpt-6-sol"
+    assert successor_key("gpt-5-4-nano") == "gpt-6-luna"
+    assert successor_key("gpt-6-sol") == "gpt-6-sol"
+    assert successor_key("no-such-model") == "no-such-model"
+    # Every successor is a live catalog model, and no retired key still is.
+    for retired, successor in RETIRED_SUCCESSORS.items():
+        assert get_model(retired) is None
+        assert get_model(successor) is not None
 
 
 def test_claude_left_the_catalog():
@@ -253,7 +279,7 @@ def test_prompted_output_follows_the_model_not_the_endpoint():
 
     Regression guard for the 2026-08-13 moves: gating on provider alone meant
     Gemma/GLM/DeepSeek silently lost PromptedOutput the moment they moved to
-    OpenRouter, while Grok and Luna — which share that provider and DO handle
+    OpenRouter, while Grok — which shares that provider and DOES handle
     native tool output — must not be forced onto it.
     """
     for key in ("gemma-4-31b", "glm-5-3-flash", "deepseek-v4", "qwen3-6-plus"):
@@ -265,9 +291,9 @@ def test_prompted_output_follows_the_model_not_the_endpoint():
         assert get_model(key).needs_prompted_output is True, key
     assert get_model("qwen3-5-397b").needs_prompted_output is True
 
-    # Proprietary models keep native structured output, including the two that
-    # share OpenRouter with the open weights.
-    for key in ("grok-4-6", "gpt-5-6-luna", "gemini-3-5-flash-lite", "gemini-3-8-flash"):
+    # Proprietary models keep native structured output, including Grok, which
+    # shares OpenRouter with the open weights.
+    for key in ("grok-4-6", "gpt-6-luna", "gemini-3-5-flash-lite", "gemini-3-8-flash"):
         assert get_model(key).needs_prompted_output is False, key
 
 

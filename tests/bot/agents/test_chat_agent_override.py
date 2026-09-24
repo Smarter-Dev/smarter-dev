@@ -34,24 +34,24 @@ def test_default_and_override_ids_return_agents(monkeypatch):
 def test_distinct_model_ids_yield_distinct_agents():
     _reset_cache()
     gemini = get_chat_agent("gemini-3.1-flash-lite")
-    gpt = get_chat_agent("gpt-5.4")
+    gpt = get_chat_agent("gpt-6-sol")
     assert gemini is not gpt
 
 
 def test_same_model_id_returns_cached_instance():
     _reset_cache()
-    first = get_chat_agent("gpt-5.4")
-    second = get_chat_agent("gpt-5.4")
+    first = get_chat_agent("gpt-6-sol")
+    second = get_chat_agent("gpt-6-sol")
     assert first is second
 
 
 def test_reasoning_level_partitions_the_agent_cache():
     """Same model, different reasoning levels -> distinct agents; same level -> one."""
     _reset_cache()
-    high = get_chat_agent("gpt-5.4", "high")
-    high_again = get_chat_agent("gpt-5.4", "high")
-    low = get_chat_agent("gpt-5.4", "low")
-    default = get_chat_agent("gpt-5.4")
+    high = get_chat_agent("gpt-6-sol", "high")
+    high_again = get_chat_agent("gpt-6-sol", "high")
+    low = get_chat_agent("gpt-6-sol", "low")
+    default = get_chat_agent("gpt-6-sol")
     assert high is high_again
     assert high is not low
     assert high is not default
@@ -70,8 +70,8 @@ def test_none_resolves_to_env_default_and_is_singleton_equivalent(monkeypatch):
 
 
 def test_resolved_reasoning_level_returns_supported_choice():
-    # gpt-5.4 supports "high" — an explicit supported pick passes through.
-    assert resolved_reasoning_level("gpt-5.4", "high") == "high"
+    # gpt-6-sol supports "high" — an explicit supported pick passes through.
+    assert resolved_reasoning_level("gpt-6-sol", "high") == "high"
 
 
 def test_resolved_reasoning_level_clamps_unsupported_choice():
@@ -83,7 +83,7 @@ def test_resolved_reasoning_level_clamps_unsupported_choice():
 
 def test_resolved_reasoning_level_falls_back_to_model_default():
     # No explicit choice -> the catalog model's default_reasoning (MEDIUM here).
-    assert resolved_reasoning_level("gpt-5.4", None) == "medium"
+    assert resolved_reasoning_level("gpt-6-sol", None) == "medium"
 
 
 def test_resolved_reasoning_level_none_for_model_without_knob():

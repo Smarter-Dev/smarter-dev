@@ -128,18 +128,19 @@ SMALL = "hello"
 # ---------------------------------------------------------------------------
 
 
-def test_default_chat_and_compaction_models_are_luna_via_openrouter():
-    assert DEFAULT_CHAT_MODEL == "openai/gpt-5.6-luna"
-    assert DEFAULT_COMPACT_MODEL == "openai/gpt-5.6-luna"
+def test_default_chat_and_compaction_models_are_gpt_6_luna_direct():
+    assert DEFAULT_CHAT_MODEL == "gpt-6-luna"
+    assert DEFAULT_COMPACT_MODEL == "gpt-6-luna"
 
 
 def test_should_fold_luna_default_cold_threshold(monkeypatch):
     monkeypatch.delenv("CHAT_AGENT_MODEL", raising=False)
-    # (p + n*c)(F - S) >= Sigma crosses at F ~= 9375 tokens. The OpenRouter
-    # move halved every Luna rate, which scales both sides equally — the
-    # crossing point is unchanged.
-    assert not _should_fold(9_000, 3_000, cache_warm=False)
-    assert _should_fold(10_000, 3_000, cache_warm=False)
+    # (p + n*c)(F - S) >= Sigma crosses at F = 8125 tokens on GPT-6 Luna. Its
+    # input and cache rates match OpenRouter 5.6 Luna's; only the cheaper
+    # $0.50 output (against $0.60) makes the summary cheaper, so folding pays
+    # off ~1250 tokens sooner than the 9375 it did.
+    assert not _should_fold(8_100, 3_000, cache_warm=False)
+    assert _should_fold(8_150, 3_000, cache_warm=False)
 
 
 def test_should_fold_luna_default_never_warm_below_cap(monkeypatch):
@@ -156,10 +157,13 @@ def test_hard_cap_folds_regardless_of_economics(monkeypatch):
     assert _should_fold(HARD_FOLD_TOKENS, 0, cache_warm=True)
 
 
-def test_explicit_openrouter_luna_uses_reduced_rate_threshold(monkeypatch):
+def test_retired_openrouter_luna_pin_keeps_its_own_rates(monkeypatch):
+    # An env pin of the retired OpenRouter 5.6 Luna id still prices at its
+    # own rate. Its input and cache rates match GPT-6 Luna's and the summary
+    # runs on the GPT-6 Luna default, so the crossing point is the same 8125.
     monkeypatch.setenv("CHAT_AGENT_MODEL", "openai/gpt-5.6-luna")
-    assert not _should_fold(9_000, 3_000, cache_warm=False)
-    assert _should_fold(10_000, 3_000, cache_warm=False)
+    assert not _should_fold(8_100, 3_000, cache_warm=False)
+    assert _should_fold(8_150, 3_000, cache_warm=False)
 
 
 def test_explicit_direct_openai_luna_keeps_same_threshold(monkeypatch):
@@ -178,6 +182,14 @@ def test_should_fold_luna_warm_threshold(monkeypatch):
     # Luna-on-Luna compaction is not economical while warm below the hard cap.
     assert not _should_fold(15_000, 3_000, cache_warm=True)
     assert _should_fold(17_000, 3_000, cache_warm=True)
+
+
+def test_gpt_6_sol_prices_at_its_list_rate():
+    from smarter_dev.bot.agents.chat_compaction import _prices_for
+
+    # $2 in / $0.20 cached / $10 out per Mtok — not the $0.50/$2 fallback.
+    assert _prices_for("gpt-6-sol") == (2.00, 0.20, 10.00)
+    assert _prices_for("gpt-6-luna") == (0.10, 0.01, 0.50)
 
 
 def test_should_fold_nothing_to_save():

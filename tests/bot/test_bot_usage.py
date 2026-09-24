@@ -26,7 +26,7 @@ from smarter_dev.bot.services.user_message_limit import USER_MESSAGE_LIMIT
 
 def _override(daily: int = 0, hourly: int = 0):
     return SimpleNamespace(
-        model_key="gpt-5-4",
+        model_key="gpt-6-sol",
         daily_token_budget=daily,
         hourly_token_budget=hourly,
         reasoning_level=None,

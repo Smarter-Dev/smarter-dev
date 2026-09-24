@@ -26,8 +26,10 @@ from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
 from sqlalchemy.orm import Mapped, relationship
 from sqlalchemy.orm import mapped_column
 from sqlalchemy.sql import func
+from sqlalchemy.types import TypeDecorator
 
 from smarter_dev.shared.database import Base
+from smarter_dev.shared.model_catalog import successor_key
 
 # Re-exported so the sweep and the schema keep importing it from here; the bot
 # tier must not import web models.
@@ -4262,32 +4264,49 @@ class AgentMessage(Base):
 # ---------------------------------------------------------------------------
 
 
+class SelectedModelKey(TypeDecorator):
+    """A catalog key somebody selected, read back as its successor if retired.
+
+    Only the server-wide chat settings and a web conversation's picked model use
+    it — never a channel pin, never history. Reading through
+    :func:`successor_key` lets a deploy retire a model without rewriting these
+    columns while pods on the previous build still read them; the ORM loads the
+    successor as the committed value, so a read alone never writes it back.
+    """
+
+    impl = String(100)
+    cache_ok = True
+
+    def process_result_value(self, value, dialect):
+        return successor_key(value) if value is not None else None
+
+
 class ChatSettings(Base):
     __tablename__ = "chat_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
-    default_model_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    default_model_key: Mapped[str] = mapped_column(SelectedModelKey(), nullable=False)
     default_reasoning: Mapped[str | None] = mapped_column(String(16), nullable=True)
     default_intelligence_mode: Mapped[str] = mapped_column(String(40), nullable=False)
-    summarizer_model_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    summarizer_model_key: Mapped[str] = mapped_column(SelectedModelKey(), nullable=False)
     summarizer_fallback_model_key: Mapped[str | None] = mapped_column(
-        String(100), nullable=True
+        SelectedModelKey(), nullable=True
     )
-    compaction_model_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    compaction_model_key: Mapped[str] = mapped_column(SelectedModelKey(), nullable=False)
     compaction_fallback_model_key: Mapped[str | None] = mapped_column(
-        String(100), nullable=True
+        SelectedModelKey(), nullable=True
     )
     # The model that decides, after a long silence in a Quick chat, whether the
     # returning message is a new subject. An administrator setting like the
     # summarizer and the compaction model: the person chatting never sees it.
     thread_evaluator_model_key: Mapped[str] = mapped_column(
-        String(100),
+        SelectedModelKey(),
         nullable=False,
         default="deepseek-v4",
         server_default=text("'deepseek-v4'"),
     )
     thread_evaluator_fallback_model_key: Mapped[str | None] = mapped_column(
-        String(100), nullable=True
+        SelectedModelKey(), nullable=True
     )
     # How long a Quick chat must sit idle before the evaluator is worth running.
     # A setting rather than a constant because it will want tuning against real
@@ -4358,7 +4377,7 @@ class WebChatConversation(Base):
     chat_mode: Mapped[str] = mapped_column(
         String(16), nullable=False, default="standard", server_default=text("'standard'")
     )
-    selected_model_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    selected_model_key: Mapped[str] = mapped_column(SelectedModelKey(), nullable=False)
     reasoning_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     # A title nobody chose is fair game to overwrite: the first message's opening

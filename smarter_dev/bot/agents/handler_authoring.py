@@ -5,12 +5,12 @@ in the live user-interaction context — so a *triggered* execution, which runs 
 the worker, structurally has no path to this code. That is the "triggered
 executions can't author" invariant, enforced by where the code lives.
 
-Pipeline: the Author (member tier Gemini 3 Flash; admin tier GPT-5.6 Terra at
+Pipeline: the Author (member tier Gemini 3 Flash; admin tier GPT-6 Sol at
 high reasoning) sees the existing named handlers and returns a structured plan
 — edit one of them or create a new, named one — or marks the request
 infeasible; the host-side :mod:`~smarter_dev.web.handler_lint` rejects opaque
-blobs / dynamic execution; the Judge (member tier Gemini 3 Flash; admin tier a
-Gemini 3.7 Flash + Terra panel, any-reject-wins) reviews the script as inert
+blobs / dynamic execution; the Judge (member tier Gemini 3 Flash; admin tier
+GPT-6 Sol, with an optional second judge, any-reject-wins) reviews the script as inert
 data and APPROVEs or REJECTs. The author and judge callables are injectable so
 the orchestration is unit-testable without any model calls.
 """
@@ -581,7 +581,7 @@ def _build_configured_model(model_id: str) -> Model:
     """Build a configured author/judge model, honoring the catalog's routing.
 
     These models are configured by wire id. A catalog id routes through the
-    shared model router (Terra, the admin author and second judge default, is
+    shared model router (GPT-6 Sol, the admin author and judge default, is
     served via OpenAI); anything else is assumed to be a Gemini id, matching the
     member-tier author/judge defaults.
     """
@@ -844,8 +844,8 @@ async def _list_channels(ctx: RunContext[_AdminAuthorDeps]) -> list[dict]:
 AdminAuthor = Callable[..., Awaitable["AdminHandlerPlan"]]
 
 _admin_author_agent: Agent[_AdminAuthorDeps, AdminHandlerPlan] | None = None
-# Admin scripts get moderation powers, so two judges review in series (their
-# blind spots were shown not to overlap) — one agent per judge model.
+# Admin scripts get moderation powers, so up to two judges review in parallel
+# and either rejection blocks install — one agent per distinct judge model.
 _admin_judge_agents: dict[str, Agent[None, JudgeVerdict]] = {}
 
 

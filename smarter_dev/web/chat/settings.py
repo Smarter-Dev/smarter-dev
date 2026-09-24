@@ -24,9 +24,9 @@ from smarter_dev.web.models import ChatSpendLimit
 
 # The model that answers by default. Whatever sits here must also be enabled in
 # chat_catalog_models — validate_settings_input rejects a disabled default.
-# Luna is both the better default and the cheaper one: $0.10/$0.60 per M through
-# OpenRouter against Gemini 3.5 Flash Lite's $0.30/$2.50.
-DEFAULT_MODEL = "gpt-5-6-luna"
+# GPT-6 Luna is both the better default and the cheaper one: $0.10/$0.50 per M
+# from OpenAI directly against Gemini 3.5 Flash Lite's $0.30/$2.50.
+DEFAULT_MODEL = "gpt-6-luna"
 # Where auxiliary work goes when the model configured for it fails. Deliberately
 # a DIFFERENT vendor from DEFAULT_MODEL — a fallback that shares an upstream
 # with the thing it is backstopping is not a fallback. 3.5 Flash Lite supersedes

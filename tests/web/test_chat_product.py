@@ -78,15 +78,15 @@ from smarter_dev.web.llm_pricing import price_rates_for_model
 def test_priced_catalog_choices_remain_enabled_during_admin_save():
     filtered, skipped = filter_unpriced_catalog_selections(
         {
-            "gpt-5-6-luna": (True, "low"),
-            "gpt-5-6-sol": (True, "medium"),
-            "gpt-5-6-terra": (True, "high"),
+            "gpt-6-luna": (True, "low"),
+            "gemini-3-6-flash": (True, "medium"),
+            "gpt-6-sol": (True, "high"),
         }
     )
     assert filtered == {
-        "gpt-5-6-luna": (True, "low"),
-        "gpt-5-6-sol": (True, "medium"),
-        "gpt-5-6-terra": (True, "high"),
+        "gpt-6-luna": (True, "low"),
+        "gemini-3-6-flash": (True, "medium"),
+        "gpt-6-sol": (True, "high"),
     }
     assert skipped == []
 
@@ -518,7 +518,7 @@ def test_web_compaction_uses_cache_and_price_economics():
 
 def test_model_warning_uses_actual_rates_and_no_universal_discount_claim():
     old = get_model("gemini-3-5-flash-lite")
-    new = get_model("gpt-5-4-mini")
+    new = get_model("gpt-6-luna")
     assert price_rates_for_model(old) is not None
     warning = model_change_warning(old, new)
     assert (
