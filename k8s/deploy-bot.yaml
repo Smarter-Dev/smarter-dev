@@ -133,8 +133,8 @@ spec:
                         # 200m throttled startup (imports + plugin loading) to
                         # ~7 min, and the pgrep probes mark the pod Ready at
                         # process start, so every deploy left the bot offline
-                        # that long (2026-09-24, #88 roll). Startup is the only
-                        # burst; steady state stays well under the request.
+                        # that long (2026-09-24, #88 roll). Startup is the
+                        # burst; steady state sampled at 49m (19:21Z).
                         cpu: "1"
                         memory: 512Mi
                 startupProbe:
