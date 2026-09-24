@@ -352,7 +352,9 @@ def test_peak_memory_at_the_caps(tmp_path):
 
     assert results["bmp"]["types"] == ["image/png"]
     assert results["gif"]["types"] == ["image/png"] * MAX_GIF_FRAMES
-    assert results["noisy_gif"]["types"] == ["image/png"] * 3
+    # Three 1000 x 1000 noise frames do not fit one request under #25's
+    # MAX_SEND_BYTES, and a GIF over it goes as its first frame.
+    assert results["noisy_gif"]["types"] == ["image/png"]
     for name, result in results.items():
         assert result["growth_mib"] <= PEAK_BUDGET_MIB, (name, result)
 

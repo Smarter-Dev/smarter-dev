@@ -44,6 +44,9 @@ import struct
 
 from PIL import Image
 
+from smarter_dev.shared.media_reads import MAX_SEND_BYTES
+from smarter_dev.shared.media_reads import too_large_to_send
+
 logger = logging.getLogger(__name__)
 
 OPENAI_IMAGE_TYPES = frozenset({"image/png", "image/jpeg", "image/webp", "image/gif"})
@@ -56,6 +59,17 @@ MAX_GIF_COUNT = 500
 MAX_GIF_DECODE_PIXELS = 50_000_000
 # OpenAI first scales an image to fit 2048 x 2048; larger adds only bytes.
 MAX_SIDE = 2048
+# A JPEG over the send cap is decoded at 1/2 to 1/8 scale (``draft``), so its
+# header may be this large and still decode near 2048 px.
+MAX_JPEG_DRAFT_PIXELS = 64_000_000
+# A PNG or WebP over the send cap is decoded whole to be scaled down: ~16 MB
+# as RGBA at this size.
+MAX_DOWNSCALE_PIXELS = 4_096_000
+_DOWNSCALABLE_FORMATS = {"image/png": "PNG", "image/webp": "WEBP"}
+_MODEL_SHORT_SIDE = 768
+_DRAFT_SIDE = 1024
+# What a drafted JPEG may decode to: ~12 MB as RGB.
+_MAX_DRAFTED_PIXELS = 4_000_000
 
 # The one type the readers receive that the model refuses (the attachment
 # sniffer and URL extensions admit PNG, JPEG, GIF, WebP and BMP).
@@ -75,7 +89,7 @@ async def prepare_image_bounded(
     data: bytes, media_type: str
 ) -> tuple[list[tuple[bytes, str]], str]:
     """``prepare_image`` in a worker thread, one conversion at a time."""
-    if not _needs_work(media_type):
+    if not _needs_work(data, media_type):
         return [(data, media_type)], ""
     async with _conversions:
         return await asyncio.to_thread(prepare_image, data, media_type)
@@ -86,13 +100,29 @@ def prepare_image(data: bytes, media_type: str) -> tuple[list[tuple[bytes, str]]
 
     The note is empty unless the parts need explaining (sampled GIF frames).
     Bytes Pillow cannot read are passed through unchanged, so the model's own
-    refusal still surfaces as it did before. Raises ``ImageTooLarge`` for a BMP
-    over the pixel cap, whose message is fit to show as the read's result.
+    refusal still surfaces as it did before. Raises ``ImageTooLarge`` for an
+    image that cannot be sent within the caps, with a message fit to show as
+    the read's result. The parts never add up to more than ``MAX_SEND_BYTES``.
     """
-    if not _needs_work(media_type):
+    if not _needs_work(data, media_type):
         return [(data, media_type)], ""
     if media_type == "image/gif":
-        return _prepare_gif(data)
+        parts, note = _prepare_gif(data)
+    elif media_type in _CONVERTIBLE_FORMATS:
+        parts, note = _prepare_convertible(data, media_type)
+    elif media_type == "image/jpeg":
+        parts, note = [(_downscaled_jpeg(data), "image/jpeg")], ""
+    elif media_type in _DOWNSCALABLE_FORMATS:
+        parts, note = [_downscaled(data, _DOWNSCALABLE_FORMATS[media_type])], ""
+    else:
+        raise ImageTooLarge(too_large_to_send(len(data), "image"))
+    size = sum(len(part) for part, _ in parts)
+    if size > MAX_SEND_BYTES:
+        raise ImageTooLarge(too_large_to_send(size, "image"))
+    return parts, note
+
+
+def _prepare_convertible(data: bytes, media_type: str) -> tuple[list[tuple[bytes, str]], str]:
     try:
         with Image.open(io.BytesIO(data), formats=[_CONVERTIBLE_FORMATS[media_type]]) as image:
             width, height = image.size
@@ -109,34 +139,108 @@ def prepare_image(data: bytes, media_type: str) -> tuple[list[tuple[bytes, str]]
         return [(data, media_type)], ""
 
 
-def _needs_work(media_type: str) -> bool:
-    return media_type == "image/gif" or media_type in _CONVERTIBLE_FORMATS
+def _needs_work(data: bytes, media_type: str) -> bool:
+    return (
+        media_type == "image/gif"
+        or media_type in _CONVERTIBLE_FORMATS
+        or len(data) > MAX_SEND_BYTES
+    )
+
+
+def _downscaled(data: bytes, pillow_format: str) -> tuple[bytes, str]:
+    """A PNG or WebP over the send cap, decoded whole and scaled down.
+
+    Neither format can decode at reduced scale, so the header must be within
+    ``MAX_DOWNSCALE_PIXELS``: a 2560 x 1600 screenshot is, a 4K one is not.
+    """
+    try:
+        with Image.open(io.BytesIO(data), formats=[pillow_format]) as image:
+            width, height = image.size
+            if width * height > MAX_DOWNSCALE_PIXELS:
+                raise ImageTooLarge(
+                    f"The image is {width}x{height} pixels and "
+                    f"{len(data) / 1_048_576:.1f} MB, too large to read."
+                )
+            has_alpha = image.mode in ("RGBA", "LA", "PA") or "transparency" in image.info
+            image.load()
+            # OpenAI scales an image's short side to 768 px before the model
+            # sees it, so an integer reduce that keeps it at least that loses
+            # nothing, and costs far less than convert + thumbnail (measured
+            # 23 against 56 MiB on a 2560 x 1600 PNG).
+            factor = max(1, min(width, height) // _MODEL_SHORT_SIDE)
+            reduced = image.reduce(factor) if factor > 1 else image
+            frame = reduced.convert("RGBA" if has_alpha else "RGB")
+            del reduced
+    except ImageTooLarge:
+        raise
+    except Exception as unreadable:  # noqa: BLE001
+        raise ImageTooLarge(too_large_to_send(len(data), "image")) from unreadable
+    frame.thumbnail((MAX_SIDE, MAX_SIDE))
+    out = io.BytesIO()
+    if has_alpha:
+        frame.save(out, "PNG")
+        return out.getvalue(), "image/png"
+    frame.save(out, "JPEG", quality=90)
+    return out.getvalue(), "image/jpeg"
+
+
+def _downscaled_jpeg(data: bytes) -> bytes:
+    """A JPEG over the send cap, decoded at reduced scale and re-encoded."""
+    try:
+        with Image.open(io.BytesIO(data), formats=["JPEG"]) as image:
+            width, height = image.size
+            if width * height > MAX_JPEG_DRAFT_PIXELS:
+                raise ImageTooLarge(
+                    f"The image is {width}x{height} pixels, too large to read."
+                )
+            # draft() makes the decoder itself scale by 1/2..1/8, so the full
+            # size is never allocated. It keeps at least the size asked for,
+            # so asking for 1024 lands between 1024 and 2048 px a side.
+            image.draft("RGB", (_DRAFT_SIDE, _DRAFT_SIDE))
+            if image.size[0] * image.size[1] > _MAX_DRAFTED_PIXELS:
+                raise ImageTooLarge(
+                    f"The image is {width}x{height} pixels, too large to read."
+                )
+            frame = image.convert("RGB")
+    except ImageTooLarge:
+        raise
+    except Exception as unreadable:  # noqa: BLE001
+        raise ImageTooLarge(too_large_to_send(len(data), "image")) from unreadable
+    frame.thumbnail((MAX_SIDE, MAX_SIDE))
+    out = io.BytesIO()
+    frame.save(out, "JPEG", quality=85)
+    return out.getvalue()
 
 
 def _prepare_gif(data: bytes) -> tuple[list[tuple[bytes, str]], str]:
-    as_is = [(data, "image/gif")], ""
-    if len(data) > MAX_GIF_BYTES:
-        return as_is
     scan = scan_gif(data)
-    if scan is None:
-        return as_is
+    if len(data) > MAX_GIF_BYTES or scan is None:
+        return _gif_as_is(data, scan)
     total, canvas = scan
     # The last frame is always sampled, and seek() decodes every frame before
     # it onto the (grown) canvas, so all ``total`` frames are decoded at that
     # size.
     if total < 2 or canvas > MAX_DECODE_PIXELS or total * canvas > MAX_GIF_DECODE_PIXELS:
-        return as_is
+        return _gif_as_is(data, scan)
     try:
         with Image.open(io.BytesIO(data), formats=["GIF"]) as image:
             count = min(MAX_GIF_FRAMES, total)
             # First and last always included; the rest spread between them.
             indices = sorted({round(i * (total - 1) / (count - 1)) for i in range(count)})
             shown = []
+            sent = 0
             for index in indices:
                 image.seek(index)
-                shown.append((index, _png(image)))
+                png = _png(image)
+                sent += len(png)
+                if sent > MAX_SEND_BYTES:
+                    break  # the frames so far still fit one request
+                shown.append((index, png))
     except Exception:  # noqa: BLE001 — undecodable: send it as it arrived
-        return as_is
+        return _gif_as_is(data, scan)
+    if len(shown) < 2:
+        del shown
+        return _gif_as_is(data, scan)
     note = (
         f"This is an animated GIF of {total} frames. {len(shown)} evenly "
         "spaced frames are attached in playback order (frames "
@@ -144,6 +248,28 @@ def _prepare_gif(data: bytes) -> tuple[list[tuple[bytes, str]], str]:
         "is not visible."
     )
     return [(png, "image/png") for _, png in shown], note
+
+
+def _gif_as_is(
+    data: bytes, scan: tuple[int, int] | None
+) -> tuple[list[tuple[bytes, str]], str]:
+    """A GIF not sampled: sent as it arrived, or its first frame if too big.
+
+    The model reads a GIF's first frame only, so a GIF over the send cap loses
+    nothing by going as that frame, decoded on the canvas it is drawn on.
+    """
+    if len(data) <= MAX_SEND_BYTES:
+        return [(data, "image/gif")], ""
+    if scan is None or scan[1] > MAX_DECODE_PIXELS:
+        raise ImageTooLarge(too_large_to_send(len(data), "image"))
+    try:
+        with Image.open(io.BytesIO(data), formats=["GIF"]) as image:
+            first = _png(image)
+    except Exception as unreadable:  # noqa: BLE001
+        raise ImageTooLarge(too_large_to_send(len(data), "image")) from unreadable
+    return [(first, "image/png")], (
+        "This GIF was too large to send whole; only its first frame is attached."
+    )
 
 
 def scan_gif(data: bytes) -> tuple[int, int] | None:

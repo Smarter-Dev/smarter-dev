@@ -7,6 +7,7 @@ Pydantic AI Agent as its tool surface.
 
 from __future__ import annotations
 
+import codecs
 import logging
 import mimetypes
 from contextlib import asynccontextmanager
@@ -27,8 +28,12 @@ from smarter_dev.bot.agents.media_reader import describe_media
 from smarter_dev.bot.agents.url_registry import resolve_escaped_url
 from smarter_dev.bot.agents.web_summarizer import summarize_web_content
 from smarter_dev.bot.utils import web_fetch
+from smarter_dev.shared import pdf_text
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.guild_event_log import chat_memory_enabled
+from smarter_dev.shared.media_reads import MAX_DOWNLOAD_BYTES
+from smarter_dev.shared.media_reads import MediaReaderBusy
+from smarter_dev.shared.media_reads import media_read_slot
 from smarter_dev.web.models import MAX_MEMORY_NOTE_CHARS
 from smarter_dev.web.research_tools import brave_search
 from smarter_dev.web.search_previews import mark_search_preview_failed
@@ -247,12 +252,44 @@ async def web_read(
     )
     await _post_status(ctx, f"Reading <{url}>")
 
+    ext = _url_extension(url)
+    # Anything downloaded whole here is read in the process's one media-read
+    # slot, from download to model reply, so reads cannot add up (#25).
+    if web_fetch.is_discord_attachment_url(url) or ext in (
+        *IMAGE_EXTS, *AUDIO_EXTS, ".pdf"
+    ):
+        try:
+            async with media_read_slot():
+                return await _read_downloaded(url, instruction, ext, log_url)
+        except MediaReaderBusy as busy:
+            return {"url": url, "summary": "", "error": "busy", "detail": str(busy)}
+
+    title = ""
+    if web_fetch.is_youtube_url(url):
+        meta = await web_fetch.fetch_youtube_metadata(url)
+        title = meta.get("title", "")
+        content = meta.get("description", "")
+    else:
+        data = await web_fetch.fetch_via_jina(url)
+        if data is None:
+            logger.warning("web_read: fetch_failed for %r", log_url)
+            return {"url": url, "title": "", "summary": "", "error": "fetch_failed"}
+        title = data.get("title", "")
+        content = data.get("content", "")
+
+    return await _summarize_text(url, instruction, content, title)
+
+
+async def _read_downloaded(
+    url: str, instruction: str, ext: str, log_url: str
+) -> dict[str, str]:
     if web_fetch.is_discord_attachment_url(url):
         return await _read_discord_attachment(url, instruction)
-
+    if ext == ".pdf":
+        content = await web_fetch.fetch_pdf_text(url, max_chars=MAX_READ_CHARS) or ""
+        return await _summarize_text(url, instruction, content)
     # Image / audio URLs: download the bytes and read them with the multimodal
     # media reader instead of trying to extract text.
-    ext = _url_extension(url)
     if ext in IMAGE_EXTS or ext in AUDIO_EXTS:
         kind = "image" if ext in IMAGE_EXTS else "audio"
         fetched = await web_fetch.fetch_bytes(url)
@@ -271,23 +308,7 @@ async def web_read(
         if not media_type:
             return {"url": url, "kind": kind, "summary": "", "error": "unknown_media_type"}
         return await _read_media(url, instruction, data, media_type, kind)
-
-    title = ""
-    if web_fetch.is_youtube_url(url):
-        meta = await web_fetch.fetch_youtube_metadata(url)
-        title = meta.get("title", "")
-        content = meta.get("description", "")
-    elif ext == ".pdf":
-        content = await web_fetch.fetch_pdf_text(url, max_chars=MAX_READ_CHARS) or ""
-    else:
-        data = await web_fetch.fetch_via_jina(url)
-        if data is None:
-            logger.warning("web_read: fetch_failed for %r", log_url)
-            return {"url": url, "title": "", "summary": "", "error": "fetch_failed"}
-        title = data.get("title", "")
-        content = data.get("content", "")
-
-    return await _summarize_text(url, instruction, content, title)
+    raise AssertionError(f"not a downloaded read: {ext!r}")
 
 
 async def _read_media(
@@ -402,32 +423,45 @@ def _is_binary_type(media_type: str) -> bool:
     return base in _BINARY_TYPES or base.startswith(_BINARY_TYPE_PREFIXES)
 
 
+# Only this much of a text file is decoded: the summary reads MAX_READ_CHARS,
+# and a character is at most four bytes, so nothing past it can survive.
+MAX_TEXT_DECODE_BYTES = MAX_READ_CHARS * 4
+
+
 def _decode_text(data: bytes, *, labelled_text: bool) -> str | None:
     """``data`` as text, or None when it does not decode as text.
 
     UTF-32/UTF-16 with a BOM (e.g. PowerShell ``>`` output) decode as such.
     A ``text/`` file falls back to Windows-1252 rather than being refused for
     one non-UTF-8 byte. Any other label must be clean UTF-8 with no NUL
-    bytes, which is a guess, not proof it is text.
+    bytes, which is a guess, not proof it is text. Only the first
+    ``MAX_TEXT_DECODE_BYTES`` are decoded; a character cut at that boundary is
+    dropped rather than failing the file.
     """
+    whole = len(data) <= MAX_TEXT_DECODE_BYTES
+    head = data[:MAX_TEXT_DECODE_BYTES]
+
+    def decode(codec: str, errors: str = "strict") -> str:
+        return codecs.getincrementaldecoder(codec)(errors).decode(head, final=whole)
+
     for bom, codec in (
         (b"\xff\xfe\x00\x00", "utf-32"),
         (b"\x00\x00\xfe\xff", "utf-32"),
         (b"\xff\xfe", "utf-16"),
         (b"\xfe\xff", "utf-16"),
     ):
-        if data.startswith(bom):
+        if head.startswith(bom):
             try:
-                text = data.decode(codec)
+                text = decode(codec)
             except UnicodeDecodeError:
                 return None
             return None if "\x00" in text[:8192] else text
-    if b"\x00" in data[:8192]:
+    if b"\x00" in head[:8192]:
         return None
     try:
-        return data.decode("utf-8-sig")
+        return decode("utf-8-sig")
     except UnicodeDecodeError:
-        return data.decode("cp1252", errors="replace") if labelled_text else None
+        return decode("cp1252", "replace") if labelled_text else None
 
 
 async def _read_discord_attachment(url: str, instruction: str) -> dict[str, str]:
@@ -436,7 +470,7 @@ async def _read_discord_attachment(url: str, instruction: str) -> dict[str, str]
     Jina cannot be relied on to fetch Discord's signed CDN URLs, so the bytes
     come straight from Discord (size- and time-bounded by ``fetch_bytes``) and
     are routed on the file itself: images and audio to the media reader, PDFs
-    to pdfplumber, text (UTF-8, BOM-marked UTF-16/32, or Windows-1252 when
+    to pdfplumber (in a bounded child process), text (UTF-8, BOM-marked UTF-16/32, or Windows-1252 when
     labelled text/) summarized as text. Anything else — video,
     archives, other binaries — is reported as unsupported rather than guessed.
     """
@@ -449,8 +483,8 @@ async def _read_discord_attachment(url: str, instruction: str) -> dict[str, str]
             "url": url,
             "summary": "",
             "error": "fetch_failed",
-            "detail": "Could not download the attachment; it may be over 20 MB "
-            "or its link may have expired.",
+            "detail": "Could not download the attachment; it may be over "
+            f"{MAX_DOWNLOAD_BYTES // 1_048_576} MB or its link may have expired.",
         }
     data, content_type = fetched
     ext = _url_extension(url)
@@ -467,13 +501,23 @@ async def _read_discord_attachment(url: str, instruction: str) -> dict[str, str]
     if ext == ".pdf" or media_type == "application/pdf":
         if not data.startswith(b"%PDF-"):
             return {"url": url, "kind": "pdf", "summary": "", "error": "content_mismatch"}
+        # The parse runs in a bounded child process; drop our copy of the
+        # bytes first so the two are never held at once.
+        path = pdf_text.spool(data)
+        del data, fetched
         try:
-            content = web_fetch.pdf_text_from_bytes(data, max_chars=MAX_READ_CHARS)
-        except Exception as e:
+            content = await pdf_text.pdf_text_from_file(path, MAX_READ_CHARS)
+        except pdf_text.PdfUnreadable as e:
             logger.warning(
                 "web_read: could not parse pdf %r: %s", web_fetch.url_for_log(url), e
             )
-            return {"url": url, "kind": "pdf", "summary": "", "error": "pdf_read_failed"}
+            return {
+                "url": url,
+                "kind": "pdf",
+                "summary": "",
+                "error": "pdf_read_failed",
+                "detail": str(e),
+            }
         return await _summarize_text(url, instruction, content)
     # A zip, office file or video is refused by its label, not by sniffing;
     # everything else is decoded if its bytes are text.
