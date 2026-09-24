@@ -23,6 +23,8 @@ from datetime import timedelta
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
 
+from smarter_dev.shared.model_catalog import successor_key
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL_OVERRIDE_KEY = "chat-default-model-override"
@@ -99,7 +101,8 @@ async def read_default_model_override(redis: Redis) -> DefaultModelOverride | No
     Redis trouble or a corrupt/stale payload degrades to "no override" (Redis
     expiry itself handles the time bound). Validation of the stored
     ``model_key`` against the catalog is the caller's job — the engine already
-    treats an unknown key as "use the default".
+    treats an unknown key as "use the default". A key retired while the
+    override was set reads as its successor (``successor_key``).
     """
     try:
         raw = await redis.get(DEFAULT_MODEL_OVERRIDE_KEY)
@@ -111,7 +114,7 @@ async def read_default_model_override(redis: Redis) -> DefaultModelOverride | No
     try:
         payload = json.loads(raw)
         return DefaultModelOverride(
-            model_key=payload["model_key"],
+            model_key=successor_key(payload["model_key"]),
             reasoning_level=payload.get("reasoning_level"),
             expires_at_epoch=int(payload["expires_at_epoch"]),
         )

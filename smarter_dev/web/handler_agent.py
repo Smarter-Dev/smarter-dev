@@ -9,7 +9,7 @@ and decides what (if anything) to emit. Two shapes:
   agent that reads two pages leaves the script one read.
 - ``has_tools=False`` — a pure text transform: prompt in, plaintext out, no tools.
 
-Model: GPT-5.6 Luna by default. A budget cap raised inside a tool propagates
+Model: GPT-6 Luna by default. A budget cap raised inside a tool propagates
 out of ``agent.run`` and stops the fire loud.
 """
 
@@ -32,7 +32,7 @@ from smarter_dev.web.research_tools import brave_search
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "openai/gpt-5.6-luna"
+DEFAULT_MODEL = "gpt-6-luna"
 MODEL_ENV_VAR = "HANDLER_AGENT_MODEL"
 
 _GATHER_PROMPT = (

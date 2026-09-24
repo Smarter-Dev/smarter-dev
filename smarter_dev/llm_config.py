@@ -15,9 +15,9 @@ from google import genai
 if TYPE_CHECKING:
     import dspy
 
-# Luna via OpenRouter (2026-08-06): the same OpenAI upstream at half the
-# rate. litellm routes "openrouter/<upstream>/<model>" ids to OpenRouter.
-DEFAULT_LLM_MODEL = "openrouter/openai/gpt-5.6-luna"
+# GPT-6 Luna from OpenAI directly (2026-09-24). It costs no more direct than
+# 5.6 Luna did through OpenRouter, so the OpenRouter hop and its fee are gone.
+DEFAULT_LLM_MODEL = "gpt-6-luna"
 
 
 def get_llm_model(model_type: str = "fast") -> dspy.LM:
@@ -33,9 +33,9 @@ def get_llm_model(model_type: str = "fast") -> dspy.LM:
         Configured dspy.LM instance
 
     Environment Variables:
-        LLM_FAST_MODEL: Fast model for quick operations (default: gpt-5.6-luna)
-        LLM_MEDIUM_MODEL: Medium intelligence model (default: gpt-5.6-luna)
-        LLM_JUDGE_MODEL: Model for LLM-as-judge tests (default: gpt-5.6-luna)
+        LLM_FAST_MODEL: Fast model for quick operations (default: gpt-6-luna)
+        LLM_MEDIUM_MODEL: Medium intelligence model (default: gpt-6-luna)
+        LLM_JUDGE_MODEL: Model for LLM-as-judge tests (default: gpt-6-luna)
         OPENAI_API_KEY: OpenAI API key
         GEMINI_API_KEY: Google Gemini API key
         ANTHROPIC_API_KEY: Anthropic API key
@@ -184,7 +184,7 @@ def _get_api_key_for_model(model_name: str) -> str | None:
 def _is_reasoning_model(model_name: str) -> bool:
     """Check if model is a reasoning model requiring special parameters."""
     unprefixed = model_name.removeprefix("openrouter/").removeprefix("openai/")
-    return unprefixed.startswith(("o1", "gpt-5"))
+    return unprefixed.startswith(("o1", "gpt-5", "gpt-6"))
 
 
 def validate_model_config(model_type: str = "fast") -> tuple[bool, str]:

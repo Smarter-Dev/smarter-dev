@@ -50,6 +50,11 @@ def test_provider_key_resolves_flat_wire_ids_via_catalog():
     assert provider_key_from_model_name("openai/gpt-5.6-luna") == "openrouter"
     # Rows written before the move carry the direct-OpenAI flat id.
     assert provider_key_from_model_name("gpt-5.6-luna") == "openai"
+    # GPT-6 replaced 5.6 Luna and Terra on 2026-09-24, served by OpenAI
+    # directly; the retired ids above and Terra's stay mapped for old rows.
+    assert provider_key_from_model_name("gpt-6-luna") == "openai"
+    assert provider_key_from_model_name("gpt-6-sol") == "openai"
+    assert provider_key_from_model_name("gpt-5.6-terra") == "openai"
 
 
 def test_retired_claude_wire_ids_keep_their_provider():

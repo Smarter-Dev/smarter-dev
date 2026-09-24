@@ -87,7 +87,7 @@ async def _seed_conversation(
     conversation = WebChatConversation(
         owner_user_id=user.id,
         intelligence_mode="efficient",
-        selected_model_key="gpt-5-6-luna",
+        selected_model_key="gpt-6-luna",
         reasoning_level="medium",
         title=title,
         status="idle",

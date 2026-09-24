@@ -72,7 +72,7 @@ DREAM_MODEL_ENV_VAR = "CHAT_DREAM_MODEL"
 # remembers long-term, so it gets the capable model in the chat agent's own
 # family (voice continuity) rather than the cheap one. Quality compounds here
 # in a way it does not anywhere else in the chat stack.
-DEFAULT_DREAM_MODEL = "gpt-5.6-terra"
+DEFAULT_DREAM_MODEL = "gpt-6-sol"
 DREAM_REASONING_LEVEL = ReasoningLevel.HIGH
 # Two shots at getting under the character limit before we cut it ourselves.
 DREAM_OUTPUT_RETRIES = 2

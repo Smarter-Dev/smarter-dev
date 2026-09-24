@@ -186,9 +186,9 @@ def test_writer_system_prompt_carries_model_identity():
     """The writer answers 'what model are you?' from its own system prompt (the
     drafter can't be relied on to relay it), so the catalog label is injected."""
     _reset_cache()
-    agent = get_writer_agent("gpt-5.6-terra")
+    agent = get_writer_agent("gpt-6-sol")
     prompt = agent._system_prompts[0]
-    assert "GPT-5.6 Terra" in prompt
+    assert "GPT-6 Sol" in prompt
     assert "Never bring it up otherwise" in prompt
 
 

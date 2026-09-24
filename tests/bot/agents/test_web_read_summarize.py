@@ -58,7 +58,7 @@ def test_web_summarizer_uses_luna_primary_and_low_thinking_gemini_fallback():
 
     assert primary is not fallback
     primary_call, fallback_call = agent_class.call_args_list
-    assert web_summarizer.PRIMARY_MODEL_KEY == "gpt-5-6-luna"
+    assert web_summarizer.PRIMARY_MODEL_KEY == "gpt-6-luna"
     assert primary_call.args == (primary,)
     assert primary_call.kwargs["model_settings"]["openai_reasoning_effort"] == "medium"
     assert fallback_call.args == (fallback,)
@@ -418,14 +418,14 @@ async def test_summarize_web_content_fails_over_to_gemini_and_logs_critical(capl
     assert result == "FALLBACK"
     fallback_agent.run.assert_awaited_once_with(primary_agent.run.call_args.args[0])
     assert "WEB SUMMARIZER FAILOVER" in caplog.text
-    assert "GPT-5.6 Luna failed" in caplog.text
+    assert "GPT-6 Luna failed" in caplog.text
     assert "using Gemini 3.1 Flash Lite" in caplog.text
     assert "https://e.test" in caplog.text
     assert "Luna unavailable" in caplog.text
     record_failover.assert_called_once()
     assert record_failover.call_args.kwargs == {
         "operation": "web_summarizer",
-        "primary_model": "openai/gpt-5.6-luna",
+        "primary_model": "gpt-6-luna",
         "fallback_model": "gemini-3.1-flash-lite",
         "error": primary_agent.run.side_effect,
     }
