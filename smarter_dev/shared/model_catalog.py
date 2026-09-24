@@ -546,49 +546,11 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         reasoning_levels=_OPENAI_5X,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
-    CatalogModel(
-        key="gpt-5-4-mini",
-        label="GPT-5.4 Mini",
-        family="GPT",
-        provider=ModelProvider.OPENAI,
-        model_id="gpt-5.4-mini",
-        supports_vision=True,
-        reasoning_levels=_OPENAI_5X,
-        default_reasoning=ReasoningLevel.MEDIUM,
-    ),
-    CatalogModel(
-        key="gpt-5-4",
-        label="GPT-5.4",
-        family="GPT",
-        provider=ModelProvider.OPENAI,
-        model_id="gpt-5.4",
-        supports_vision=True,
-        reasoning_levels=_OPENAI_5X,
-        default_reasoning=ReasoningLevel.MEDIUM,
-    ),
-    CatalogModel(
-        key="gpt-5-5",
-        label="GPT-5.5",
-        family="GPT",
-        provider=ModelProvider.OPENAI,
-        model_id="gpt-5.5",
-        supports_vision=True,
-        reasoning_levels=_OPENAI_5X,
-        default_reasoning=ReasoningLevel.MEDIUM,
-    ),
-    CatalogModel(
-        key="gpt-5-6-sol",
-        label="GPT-5.6 Sol",
-        family="GPT",
-        provider=ModelProvider.OPENAI,
-        model_id="gpt-5.6-sol",
-        supports_vision=True,
-        reasoning_levels=_OPENAI_56,
-        default_reasoning=ReasoningLevel.MEDIUM,
-    ),
     # GPT-6 replaced GPT-5.6 Terra and Luna on 2026-09-24: Sol ($2/$10 per M)
     # takes Terra's flagship slot and Luna ($0.10/$0.50) takes 5.6 Luna's cheap,
-    # fast one — and the server default. Both are served by OpenAI directly: 6
+    # fast one — and the server default. GPT-5.4, 5.4 Mini, 5.5 and 5.6 Sol left
+    # the same day: 6 Sol undercuts all three flagships, and 6 Luna takes Mini's
+    # cheap slot. 5.4 Nano stays until evals show 6 Luna can take its jobs. Both are served by OpenAI directly: 6
     # Luna costs no more direct than 5.6 Luna did through OpenRouter, so the
     # OpenRouter hop (and its 5% fee) went with it. Same none → max ladder as
     # 5.6. The retired models' price patches stay in llm_pricing for the settled
@@ -689,6 +651,10 @@ _MODEL_BY_KEY: dict[str, CatalogModel] = {
 RETIRED_SUCCESSORS: dict[str, str] = {
     "gpt-5-6-luna": "gpt-6-luna",
     "gpt-5-6-terra": "gpt-6-sol",
+    "gpt-5-4-mini": "gpt-6-luna",
+    "gpt-5-4": "gpt-6-sol",
+    "gpt-5-5": "gpt-6-sol",
+    "gpt-5-6-sol": "gpt-6-sol",
 }
 
 

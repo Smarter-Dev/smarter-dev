@@ -43,7 +43,7 @@ def _expected_tool_names() -> set[str]:
 
 def test_worker_agent_outputs_briefing_decision():
     _reset_caches()
-    agent = get_worker_agent("gpt-5.4")
+    agent = get_worker_agent("gpt-6-sol")
     assert agent._output_type is BriefingDecision
 
 
@@ -70,7 +70,7 @@ def _registered_tool_names(agent) -> set[str]:
 
 def test_worker_agent_has_same_tools_as_chat_agent():
     _reset_caches()
-    agent = get_worker_agent("gpt-5.4")
+    agent = get_worker_agent("gpt-6-sol")
     assert _registered_tool_names(agent) == _expected_tool_names()
 
 
@@ -78,14 +78,14 @@ def test_worker_agent_tools_are_budget_guarded():
     """The worker runs the agentic loop in two-stage mode, so it needs the
     same runaway protection as the single-stage chat agent."""
     _reset_caches()
-    assert isinstance(get_worker_agent("gpt-5.4")._user_toolsets[0], ToolBudgetGuard)
-    assert isinstance(get_chat_agent("gpt-5.4")._user_toolsets[0], ToolBudgetGuard)
+    assert isinstance(get_worker_agent("gpt-6-sol")._user_toolsets[0], ToolBudgetGuard)
+    assert isinstance(get_chat_agent("gpt-6-sol")._user_toolsets[0], ToolBudgetGuard)
 
 
 def test_worker_agent_uses_worker_prompt_not_chat_prompt():
     _reset_caches()
-    worker = get_worker_agent("gpt-5.4")
-    chat = get_chat_agent("gpt-5.4")
+    worker = get_worker_agent("gpt-6-sol")
+    chat = get_chat_agent("gpt-6-sol")
     assert worker._system_prompts[0] == chat_agent.WORKER_SYSTEM_PROMPT
     assert worker._system_prompts[0] != chat._system_prompts[0]
 
@@ -108,16 +108,16 @@ def test_worker_prompt_requires_comprehensive_self_contained_brief():
 
 def test_same_model_and_reasoning_returns_cached_worker():
     _reset_caches()
-    first = get_worker_agent("gpt-5.4", "high")
-    second = get_worker_agent("gpt-5.4", "high")
+    first = get_worker_agent("gpt-6-sol", "high")
+    second = get_worker_agent("gpt-6-sol", "high")
     assert first is second
 
 
 def test_reasoning_level_partitions_worker_cache():
     _reset_caches()
-    high = get_worker_agent("gpt-5.4", "high")
-    low = get_worker_agent("gpt-5.4", "low")
-    default = get_worker_agent("gpt-5.4")
+    high = get_worker_agent("gpt-6-sol", "high")
+    low = get_worker_agent("gpt-6-sol", "low")
+    default = get_worker_agent("gpt-6-sol")
     assert high is not low
     assert high is not default
 
@@ -125,7 +125,7 @@ def test_reasoning_level_partitions_worker_cache():
 def test_distinct_model_ids_yield_distinct_workers():
     _reset_caches()
     gemini = get_worker_agent("gemini-3.1-flash-lite")
-    gpt = get_worker_agent("gpt-5.4")
+    gpt = get_worker_agent("gpt-6-sol")
     assert gemini is not gpt
 
 
@@ -133,8 +133,8 @@ def test_worker_and_chat_caches_are_independent():
     """Building a worker for a model must not hand back its chat agent, and the
     chat agent's output type stays TurnDecision (no regression)."""
     _reset_caches()
-    worker = get_worker_agent("gpt-5.4")
-    chat = get_chat_agent("gpt-5.4")
+    worker = get_worker_agent("gpt-6-sol")
+    chat = get_chat_agent("gpt-6-sol")
     assert worker is not chat
     assert chat._output_type is TurnDecision
 

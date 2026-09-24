@@ -60,6 +60,11 @@ _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gpt-5.6-luna", "openai")
 # Terra's direct-OpenAI id.
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("openai/gpt-5.6-luna", "openrouter")
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gpt-5.6-terra", "openai")
+# Also 2026-09-24: the rest of the direct-OpenAI GPT line except 5.4 Nano.
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("gpt-5.4-mini", "openai")
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("gpt-5.4", "openai")
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("gpt-5.5", "openai")
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("gpt-5.6-sol", "openai")
 # Retired when GLM/DeepSeek moved to OpenCode Zen and Laguna XS left the catalog:
 # the models live on under new ids (or not at all), but rows written before the
 # move still carry the old wire id and would otherwise fall to "unknown" and

@@ -68,7 +68,7 @@ def test_resolve_reasoning_level_falls_back_to_default():
 
 
 def test_resolve_reasoning_level_keeps_supported_choice():
-    gpt = get_model("gpt-5-4")
+    gpt = get_model("gpt-6-sol")
     assert resolve_reasoning_level(gpt, ReasoningLevel.XHIGH) is ReasoningLevel.XHIGH
 
 
@@ -137,9 +137,9 @@ def test_proactive_agent_model_resolves_through_the_catalog():
     assert matches[0].provider is ModelProvider.GOOGLE
 
 
-def test_gpt_5_6_and_6_lineup_is_selectable():
+def test_gpt_6_lineup_is_selectable():
     expected = {
-        "gpt-5-6-sol": "gpt-5.6-sol",
+        "gpt-5-4-nano": "gpt-5.4-nano",
         "gpt-6-luna": "gpt-6-luna",
         "gpt-6-sol": "gpt-6-sol",
     }
@@ -182,9 +182,14 @@ def test_gpt_5_6_luna_and_terra_left_the_catalog():
     ]
 
 
-def test_retired_gpt_5_6_keys_read_as_their_gpt_6_successors():
+def test_retired_gpt_5_x_keys_read_as_their_gpt_6_successors():
     assert successor_key("gpt-5-6-luna") == "gpt-6-luna"
     assert successor_key("gpt-5-6-terra") == "gpt-6-sol"
+    assert successor_key("gpt-5-4-mini") == "gpt-6-luna"
+    assert successor_key("gpt-5-4") == "gpt-6-sol"
+    assert successor_key("gpt-5-5") == "gpt-6-sol"
+    assert successor_key("gpt-5-6-sol") == "gpt-6-sol"
+    assert successor_key("gpt-5-4-nano") == "gpt-5-4-nano"
     assert successor_key("gpt-6-sol") == "gpt-6-sol"
     assert successor_key("no-such-model") == "no-such-model"
     # Every successor is a live catalog model, and no retired key still is.

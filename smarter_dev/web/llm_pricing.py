@@ -194,7 +194,8 @@ _patch_provider(
     ),
 )
 
-# GPT-5.5 — official legacy rate. Long-context requests above 272K input
+# GPT-5.5 — official legacy rate. Retired for GPT-6 Sol on 2026-09-24; kept
+# for the usage rows it wrote. Long-context requests above 272K input
 # tokens receive a 2x input / 1.5x output multiplier that cannot be separated
 # from aggregate provider usage, so this is the documented base rate.
 # https://developers.openai.com/api/docs/models/gpt-5.5
@@ -229,7 +230,8 @@ _patch_provider(
     ),
 )
 
-# GPT-5.6 Sol — current flagship rate. Explicit cache writes are 1.25x
+# GPT-5.6 Sol — retired for GPT-6 Sol on 2026-09-24; kept for the usage rows
+# it wrote. Explicit cache writes are 1.25x
 # uncached input and cache reads are 10% of uncached input.
 # https://developers.openai.com/api/docs/models/gpt-5.6-sol
 _patch_provider(
@@ -302,6 +304,7 @@ _patch_provider(
 )
 
 # GPT-5.4 Mini — keep this more-specific prefix ahead of standard GPT-5.4.
+# Retired for GPT-6 Luna on 2026-09-24; kept for the usage rows it wrote.
 _patch_provider(
     "openai",
     types.ModelInfo(
@@ -315,7 +318,8 @@ _patch_provider(
     ),
 )
 
-# GPT-5.4 (standard) — not yet in genai-prices
+# GPT-5.4 (standard) — not yet in genai-prices. Retired for GPT-6 Sol on
+# 2026-09-24; kept for the usage rows it wrote.
 # NOTE: must come after mini/nano so the more specific matches win.
 _patch_provider(
     "openai",

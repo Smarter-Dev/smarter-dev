@@ -235,7 +235,7 @@ async def test_no_drafter_model_runs_single_stage(fake_memory, fake_redis):
             )
         )
     )
-    engine, _ = _make_engine(_override("gpt-5-4", drafter_model=None), fake_redis)
+    engine, _ = _make_engine(_override("gpt-6-sol", drafter_model=None), fake_redis)
 
     with patch(
         "smarter_dev.bot.services.chat_engine.get_chat_agent",
@@ -251,7 +251,7 @@ async def test_no_drafter_model_runs_single_stage(fake_memory, fake_redis):
     )[3]:
         await engine._run_once(first_activation=True)
 
-    get_chat.assert_called_once_with("gpt-5.4", None)
+    get_chat.assert_called_once_with("gpt-6-sol", None)
     get_worker.assert_not_called()
     get_writer.assert_not_called()
     chat_agent.run.assert_awaited_once()
@@ -284,7 +284,7 @@ async def test_two_stage_worker_briefs_writer_writes_and_sends(
         )
     )
     engine, _ = _make_engine(
-        _override("gemma-4-31b", drafter_model="gpt-5-4"), fake_redis
+        _override("gemma-4-31b", drafter_model="gpt-6-sol"), fake_redis
     )
 
     with patch(
@@ -305,7 +305,7 @@ async def test_two_stage_worker_briefs_writer_writes_and_sends(
     get_chat.assert_not_called()
     # The DRAFTER (worker) runs the cheap drafter model; the primary answers as
     # the WRITER, honouring its reasoning level (None here).
-    get_worker.assert_called_once_with("gpt-5.4", None)
+    get_worker.assert_called_once_with("gpt-6-sol", None)
     get_writer.assert_called_once_with("google/gemma-4-31b-it", None)
     worker_agent.run.assert_awaited_once()
     writer_agent.run.assert_awaited_once()
@@ -336,7 +336,7 @@ async def test_two_stage_advertises_primary_answerer_not_drafter(
         return_value=_writer_result(WriterOutput(message="hi"))
     )
     engine, _ = _make_engine(
-        _override("gemma-4-31b", drafter_model="gpt-5-4"), fake_redis
+        _override("gemma-4-31b", drafter_model="gpt-6-sol"), fake_redis
     )
 
     with patch(
@@ -355,10 +355,10 @@ async def test_two_stage_advertises_primary_answerer_not_drafter(
         await engine._run_once(first_activation=True)
 
     user_prompt = worker_agent.run.await_args.kwargs["user_prompt"]
-    # Primary (answerer) is Gemma 4 31B; the cheap drafter is GPT-5.4. The metadata
+    # Primary (answerer) is Gemma 4 31B; the cheap drafter is GPT-6 Sol. The metadata
     # advertises the primary answerer, not the drafter running the turn.
     assert "Gemma 4 31B" in user_prompt
-    assert "GPT-5.4" not in user_prompt
+    assert "GPT-6 Sol" not in user_prompt
 
 
 @pytest.mark.asyncio
@@ -377,7 +377,7 @@ async def test_two_stage_persists_combined_token_totals(fake_memory, fake_redis)
         )
     )
     engine, _ = _make_engine(
-        _override("gemma-4-31b", drafter_model="gpt-5-4"), fake_redis
+        _override("gemma-4-31b", drafter_model="gpt-6-sol"), fake_redis
     )
 
     persist_turn = AsyncMock()
@@ -432,7 +432,7 @@ async def test_two_stage_overlong_writer_reply_is_fitted(fake_memory, fake_redis
         )
     )
     engine, _ = _make_engine(
-        _override("gemma-4-31b", drafter_model="gpt-5-4"), fake_redis
+        _override("gemma-4-31b", drafter_model="gpt-6-sol"), fake_redis
     )
 
     fit_mock = AsyncMock(return_value=FitResult("fitted reply", 0, 0, "summarized"))
@@ -476,7 +476,7 @@ async def test_two_stage_silent_brief_never_calls_writer(fake_memory, fake_redis
         )
     )
     engine, _ = _make_engine(
-        _override("gemma-4-31b", drafter_model="gpt-5-4"), fake_redis
+        _override("gemma-4-31b", drafter_model="gpt-6-sol"), fake_redis
     )
 
     with patch(
@@ -521,7 +521,7 @@ async def test_two_stage_voice_request_sends_voice(fake_memory, fake_redis):
     )
     voice_send = AsyncMock(return_value=None)
     engine, _ = _make_engine(
-        _override("gemma-4-31b", drafter_model="gpt-5-4"),
+        _override("gemma-4-31b", drafter_model="gpt-6-sol"),
         fake_redis,
         voice_send=voice_send,
     )
@@ -559,7 +559,7 @@ async def test_two_stage_no_voice_when_not_requested(fake_memory, fake_redis):
     )
     voice_send = AsyncMock(return_value=None)
     engine, _ = _make_engine(
-        _override("gemma-4-31b", drafter_model="gpt-5-4"),
+        _override("gemma-4-31b", drafter_model="gpt-6-sol"),
         fake_redis,
         voice_send=voice_send,
     )
@@ -599,7 +599,7 @@ async def test_two_stage_reply_directly_targets_top_ranked_message(
         return_value=_writer_result(WriterOutput(message="Replying directly."))
     )
     engine, _ = _make_engine(
-        _override("gemma-4-31b", drafter_model="gpt-5-4"), fake_redis
+        _override("gemma-4-31b", drafter_model="gpt-6-sol"), fake_redis
     )
 
     with patch(
@@ -646,7 +646,7 @@ async def test_stale_drafter_model_falls_back_to_single_stage(
         )
     )
     engine, _ = _make_engine(
-        _override("gpt-5-4", drafter_model="this-model-was-removed"), fake_redis
+        _override("gpt-6-sol", drafter_model="this-model-was-removed"), fake_redis
     )
 
     with patch(
@@ -663,6 +663,6 @@ async def test_stale_drafter_model_falls_back_to_single_stage(
     )[3]:
         await engine._run_once(first_activation=True)
 
-    get_chat.assert_called_once_with("gpt-5.4", None)
+    get_chat.assert_called_once_with("gpt-6-sol", None)
     get_worker.assert_not_called()
     get_writer.assert_not_called()
