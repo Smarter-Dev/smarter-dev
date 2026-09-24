@@ -1773,10 +1773,19 @@ class ChannelEngine:
                 or getattr(author, "display_name", None)
                 or ""
             )
+        # The gate judges text, so name each attachment in it — otherwise a
+        # file-only message reads as empty and is filtered out unseen.
+        content = getattr(message, "content", None) or ""
+        attachment_lines = [
+            f"[attachment: {getattr(att, 'filename', None) or 'file'}"
+            + (f", {att.media_type}" if getattr(att, "media_type", None) else "")
+            + "]"
+            for att in getattr(message, "attachments", None) or ()
+        ]
         return GateMessage(
             message_id=str(message.id),
             author_display=author_display,
-            content=getattr(message, "content", None) or "",
+            content="\n".join([content, *attachment_lines]).strip(),
         )
 
     async def _fetch_gate_grounding(self, candidates: list[Any]) -> list[GateMessage]:
