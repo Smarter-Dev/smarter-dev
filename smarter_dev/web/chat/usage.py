@@ -35,6 +35,8 @@ def usage_cost(
     output_tokens: int,
     cache_read_tokens: int = 0,
     cache_write_tokens: int = 0,
+    *,
+    per_request: bool = False,
 ) -> Decimal:
     model_name = f"{_PROVIDER_PREFIX[model.provider.value]}:{model.model_id}"
     return calc_cost(
@@ -43,6 +45,7 @@ def usage_cost(
         model_name,
         max(cache_read_tokens, 0),
         max(cache_write_tokens, 0),
+        per_request=per_request,
     )
 
 
@@ -148,12 +151,14 @@ async def record_settled_chat_usage(
     )
     if existing is not None:
         return existing
+    # Settled once per provider request, so a long-context tier applies.
     cost = usage_cost(
         model,
         input_tokens,
         output_tokens,
         cache_read_tokens,
         cache_write_tokens,
+        per_request=True,
     )
     overage, window_id, metered_at = await settle_reservation_actual(
         session, operation_key, actual_cost=cost, tier=tier
