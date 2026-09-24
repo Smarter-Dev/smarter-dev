@@ -662,6 +662,28 @@ async def test_a_message_due_inside_the_gap_goes_to_the_successor(server) -> Non
     await new.stop()
 
 
+async def test_without_a_handover_what_fell_due_while_the_old_pod_ran_is_left_to_it(
+    server,
+) -> None:
+    gone = False
+
+    async def predecessor_gone() -> bool:
+        return gone
+
+    process = Process("first", server, predecessor_gone=predecessor_gone)
+    process.start()  # lease free, no record: the first deploy of this code
+    await asyncio.sleep(0.05)
+    due_while_old_ran = time.time()
+    await asyncio.sleep(2.1)  # the next peer check still sees the old pod
+    gone = True
+    await until(lambda: process.coordinator.acting, timeout=4)
+    due_after = time.time() - 0.001
+    leadership.install(process.coordinator)
+    assert not await leadership.should_send(due_while_old_ran, wait=0.1)
+    assert await leadership.should_send(due_after, wait=0.1)
+    await process.stop()
+
+
 # Chat engines: a turn accepted before SIGTERM is answered before exit.
 
 
