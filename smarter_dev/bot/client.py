@@ -15,6 +15,7 @@ import hikari
 import lightbulb
 from aiohttp import web
 
+from smarter_dev.bot import leadership
 from smarter_dev.bot.agents.streak_agent import StreakCelebrationAgent
 from smarter_dev.bot.attachment_filter import check_attachment_filter
 from smarter_dev.bot.audit_logger import log_member_ban
@@ -42,6 +43,10 @@ logger = logging.getLogger(__name__)
 
 configure_observability("smarter-dev-bot")
 
+# How long a stopping bot waits for its running event handlers. Must stay
+# below terminationGracePeriodSeconds in k8s/deploy-bot.yaml.
+SHUTDOWN_DRAIN_SECONDS = 40.0
+
 
 def install_shutdown_signals() -> None:
     """Cancel the running bot task on SIGTERM or SIGINT so it closes cleanly.
@@ -55,6 +60,32 @@ def install_shutdown_signals() -> None:
     task = asyncio.current_task()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, task.cancel)
+
+
+def gateway_connected(bot: lightbulb.BotApp) -> bool:
+    """Whether every shard holds a live gateway connection."""
+    shards = getattr(bot, "shards", None) or {}
+    return bool(shards) and all(
+        shard.is_alive and shard.is_connected for shard in shards.values()
+    )
+
+
+def ready_to_act(bot: lightbulb.BotApp) -> bool:
+    """Connected, and everything a listener needs is set up.
+
+    Services are set up and plugins loaded before the gateway starts, but
+    ``setup_bot_services`` swallows its own failures, so check its result;
+    lightbulb fetches the application on StartedEvent. A standby that cannot
+    reach Redis could not take the lease, so it must not let Kubernetes stop
+    the process that holds it.
+    """
+    services = getattr(bot, "d", {}).get("_services")
+    return (
+        gateway_connected(bot)
+        and bool(services)
+        and getattr(bot, "application", None) is not None
+        and leadership.can_take_over()
+    )
 
 
 async def start_health_server(bot: lightbulb.BotApp, port: int = 8080) -> web.AppRunner:
@@ -74,8 +105,20 @@ async def start_health_server(bot: lightbulb.BotApp, port: int = 8080) -> web.Ap
         else:
             return web.json_response({"status": "unhealthy", "discord": "disconnected"}, status=503)
 
+    async def ready_handler(request: web.Request) -> web.Response:
+        # Kubernetes stops the old bot once this passes, so it must mean this
+        # process could act right now, not that it exists. A standby is ready
+        # without the lease: requiring it would deadlock the handover.
+        body = {
+            "ready": ready_to_act(bot),
+            "acting": leadership.is_acting(),
+            "coordination": "degraded" if leadership.coordination_degraded() else "ok",
+        }
+        return web.json_response(body, status=200 if body["ready"] else 503)
+
     app = web.Application()
     app.router.add_get("/health", health_handler)
+    app.router.add_get("/ready", ready_handler)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
@@ -1380,6 +1423,78 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
         logger.warning("Bot will run without plugins")
 
 
+def create_coordination(
+    bot: lightbulb.BotApp, settings: Settings
+) -> tuple[leadership.Coordinator, leadership.EventGate]:
+    """Act only while holding the lease; see smarter_dev.bot.leadership."""
+    import redis.asyncio as redis_async
+
+    redis = redis_async.from_url(
+        settings.effective_redis_url, socket_timeout=2, socket_connect_timeout=2
+    )
+    from smarter_dev.bot.peer_pods import other_bot_pods
+
+    coordinator = leadership.Coordinator(
+        redis, leadership.holder_id(), other_pods=other_bot_pods
+    )
+    leadership.install(coordinator)
+    return coordinator, leadership.EventGate(bot, coordinator)
+
+
+async def drain_accepted_work(gate: leadership.EventGate, budget: float) -> None:
+    """Finish what this process accepted before handing over: running
+    listeners, the background work they started, and chat turns queued or
+    running on its engines, all at once under one budget.
+
+    Queued chat turns fire at once (and again whenever a listener still
+    running queues another), rather than after the other work.
+    """
+    from smarter_dev.bot.services.chat_engine_registry import get_chat_engine_registry
+
+    registry = get_chat_engine_registry()
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + budget
+    settled = False
+    while True:
+        await registry.fire_queued()
+        pending = gate.in_flight() | leadership.tracked()
+        busy = await registry.busy_channels()
+        if not pending and not busy:
+            if settled:
+                break
+            # A finished turn can refire, and a finished listener can have
+            # queued a turn, just after; look once more before calling it done.
+            settled = True
+            await asyncio.sleep(0.05)
+            continue
+        settled = False
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            break
+        if pending:
+            await asyncio.wait(pending, timeout=min(0.1, remaining))
+        else:
+            await asyncio.sleep(min(0.1, remaining))
+
+    listeners = gate.in_flight()
+    tracked = leadership.tracked()
+    busy = await registry.busy_channels()
+    if listeners:
+        logger.warning(f"shutdown budget ran out with {len(listeners)} listeners running")
+    if tracked:
+        names = [task.get_name() for task in tracked]
+        logger.warning(f"shutdown budget ran out; cancelling background work {names}")
+        for task in tracked:
+            task.cancel()
+    if busy:
+        # Cancel rather than wait: closing the gateway cleanly needs the rest
+        # of the grace period.
+        logger.warning(f"shutdown budget ran out; abandoning chat turns in channels {busy}")
+        await registry.abandon(busy)
+    await registry.shutdown_all()
+    logger.info(f"stopped acting: {gate.summary()}")
+
+
 async def run_bot() -> None:
     """Run the Discord bot with Lightbulb v2 syntax."""
     settings = get_settings()
@@ -1400,6 +1515,8 @@ async def run_bot() -> None:
 
     # Create bot
     bot = create_bot(settings)
+
+    coordinator, gate = create_coordination(bot, settings)
 
     # Set up event handlers
     @bot.listen()
@@ -1935,12 +2052,17 @@ async def run_bot() -> None:
 
     # Run bot and keep alive
     health_runner = None
+    coordination_task = None
     try:
         # Start the bot and wait for it to be ready
         await bot.start()
 
         # Start health check server for Kubernetes probes
         health_runner = await start_health_server(bot, get_settings().bot_health_port)
+
+        # Take the lease only once connected and set up, so whoever holds it
+        # can act.
+        coordination_task = asyncio.create_task(coordinator.run())
 
         # Keep the bot running until interrupted
         logger.info("Bot is now running. Press Ctrl+C to stop.")
@@ -1958,6 +2080,12 @@ async def run_bot() -> None:
         raise
     finally:
         logger.info("Shutting down bot...")
+        # Hand over first, so the standby acts on every new event while this
+        # process finishes what it had already accepted.
+        await coordinator.stop_acting(gate.recent_handled())
+        if coordination_task:
+            coordination_task.cancel()
+        await drain_accepted_work(gate, SHUTDOWN_DRAIN_SECONDS)
         if health_runner:
             await health_runner.cleanup()
         await bot.close()

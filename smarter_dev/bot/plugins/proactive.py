@@ -40,6 +40,7 @@ import lightbulb
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 from redis.exceptions import RedisError
 
+from smarter_dev.bot import leadership
 from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
 from smarter_dev.bot.agents.response_fitting import fit_writer_message
 from smarter_dev.bot.agents.response_fitting import split_for_discord
@@ -1180,7 +1181,7 @@ def _schedule_producer(state: ChannelProducerState) -> None:
             state, time.monotonic(), jev=run.uses_jev_batching
         )
         await asyncio.sleep(delay)
-        task = asyncio.create_task(_run_producer_guarded(state))
+        task = leadership.track(asyncio.create_task(_run_producer_guarded(state)))
         state.producer_tasks.add(task)
         task.add_done_callback(state.producer_tasks.discard)
 
@@ -1446,8 +1447,9 @@ async def _passive_ticker() -> None:
         run = runtime
         if run is None:
             return
-        await _passive_sweep(run)
-        await _sweep_expired_envelopes(run)
+        if leadership.is_acting():
+            await _passive_sweep(run)
+            await _sweep_expired_envelopes(run)
         delay = PASSIVE_SECONDS
 
 
@@ -1601,8 +1603,25 @@ async def _apply_control_command(
     )
 
 
+# While this process does not act it reads no commands; one it read but has
+# not started stays pending until a consumer that acts reclaims it after
+# CONTROL_RECLAIM_MS idle.
+CONTROL_IDLE_SECONDS = 1.0
+CONTROL_BLOCK_MS = 5_000
+CONTROL_RECLAIM_MS = 60_000
+
+
 async def _control_loop(run: ProactiveRuntime) -> None:
-    """Consume idempotent watcher-control commands emitted by workers."""
+    """Consume watcher-control commands emitted by workers, only while acting.
+
+    Delivery is at least once. A command is marked processed (by its
+    command_id) and acked only after it was applied, so one reclaimed from a
+    process that stopped mid-command is applied if it was not yet marked.
+    A process that dies between applying and marking applies it twice: the
+    active-window write is idempotent, the agent's mode-change notification
+    repeats. A command already running when its process stops acting
+    finishes there (``leadership.run_accepted``) rather than being cut off.
+    """
     redis_client = run.bot.d.get("chat_memory_redis")
     if redis_client is None:
         return
@@ -1615,11 +1634,14 @@ async def _control_loop(run: ProactiveRuntime) -> None:
             raise
     consumer = f"{socket.gethostname()}-{id(run)}"
     while True:
+        if not leadership.is_acting():
+            await asyncio.sleep(CONTROL_IDLE_SECONDS)
+            continue
         reclaimed = await redis_client.xautoclaim(
             CONTROL_STREAM_KEY,
             CONTROL_GROUP,
             consumer,
-            60_000,
+            CONTROL_RECLAIM_MS,
             "0-0",
             count=20,
         )
@@ -1631,29 +1653,35 @@ async def _control_loop(run: ProactiveRuntime) -> None:
                 consumer,
                 {CONTROL_STREAM_KEY: ">"},
                 count=20,
-                block=30_000,
+                block=CONTROL_BLOCK_MS,
             )
         )
         for _stream, entries in records or ():
             for stream_id, fields in entries:
-                try:
-                    payload = fields.get(b"payload", fields.get("payload"))
-                    command = ControlCommand.model_validate_json(_redis_text(payload))
-                    processed_key = f"{CONTROL_PROCESSED_PREFIX}:{command.command_id}"
-                    if not await redis_client.exists(processed_key):
-                        await _apply_control_command(run, command)
-                        await redis_client.set(processed_key, "1", ex=7 * 24 * 60 * 60)
-                    await redis_client.xack(
-                        CONTROL_STREAM_KEY, CONTROL_GROUP, stream_id
-                    )
-                    await redis_client.xdel(CONTROL_STREAM_KEY, stream_id)
-                except asyncio.CancelledError:
-                    raise
-                except Exception:
-                    logger.exception(
-                        "failed proactive control command stream_id=%s",
-                        _redis_text(stream_id),
-                    )
+                if not leadership.is_acting():
+                    break
+                await leadership.run_accepted(
+                    _process_control_entry(run, redis_client, stream_id, fields)
+                )
+
+
+async def _process_control_entry(
+    run: ProactiveRuntime, redis_client, stream_id, fields
+) -> None:
+    try:
+        payload = fields.get(b"payload", fields.get("payload"))
+        command = ControlCommand.model_validate_json(_redis_text(payload))
+        processed_key = f"{CONTROL_PROCESSED_PREFIX}:{command.command_id}"
+        if not await redis_client.exists(processed_key):
+            await _apply_control_command(run, command)
+            await redis_client.set(processed_key, "1", ex=7 * 24 * 60 * 60)
+        await redis_client.xack(CONTROL_STREAM_KEY, CONTROL_GROUP, stream_id)
+        await redis_client.xdel(CONTROL_STREAM_KEY, stream_id)
+    except Exception:
+        logger.exception(
+            "failed proactive control command stream_id=%s",
+            _redis_text(stream_id),
+        )
 
 
 @plugin.listener(hikari.StartedEvent)
@@ -1664,6 +1692,9 @@ async def on_started(event: hikari.StartedEvent) -> None:
         run.passive_task = asyncio.create_task(_passive_ticker())
         run.recovery_task = asyncio.create_task(_recover_channels(run))
         run.control_task = asyncio.create_task(_control_loop(run))
+        # The loop reads commands only while this process acts; stopping
+        # also ends a blocked read. A command already running finishes.
+        leadership.on_stop(run.control_task.cancel)
 
 
 @plugin.command

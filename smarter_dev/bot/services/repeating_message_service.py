@@ -15,6 +15,7 @@ from typing import Any
 
 import hikari
 
+from smarter_dev.bot import leadership
 from smarter_dev.bot.guild_event_recorder import record_guild_event
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.base import BaseService
@@ -110,7 +111,10 @@ class RepeatingMessageService(BaseService):
         while self._running:
             try:
                 # Check for due messages
-                await self._check_and_send_due_messages()
+                # Only the acting process sends. One that takes over mid-minute
+                # finds anything its predecessor missed still due next minute.
+                if leadership.is_acting():
+                    await self._check_and_send_due_messages()
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -167,8 +171,17 @@ class RepeatingMessageService(BaseService):
                 self._processing_messages.add(message_id)
                 processed_message_series.add(message_id)
 
-                # Process message synchronously to avoid race conditions
-                await self._process_repeating_message(message_data)
+                # A process that stopped acting mid-list leaves the rest to
+                # its successor, which finds them still due.
+                if not leadership.is_acting():
+                    self._processing_messages.discard(message_id)
+                    break
+
+                # Process message synchronously to avoid race conditions.
+                # The send and the next_send_time update run as one tracked
+                # unit, so shutdown finishes both rather than leaving a sent
+                # message due again next minute.
+                await leadership.run_accepted(self._process_repeating_message(message_data))
 
         except Exception as e:
             logger.error(f"Error checking for due repeating messages: {e}")

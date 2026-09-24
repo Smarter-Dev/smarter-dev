@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any
 
 import hikari
+from smarter_dev.bot import leadership
 from smarter_dev.bot.guild_event_recorder import record_guild_event
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.base import BaseService
@@ -129,7 +130,12 @@ class QuestService(BaseService):
             if delay > 0:
                 await asyncio.sleep(delay)
 
-            await self._announce_quest(quest)
+            # Every process queues it; only the one acting when it fell due sends it.
+            if await leadership.should_send(
+                release_time.timestamp()
+            ):
+                # Tracked, so a process handing over finishes a send it began.
+                await leadership.run_accepted(self._announce_quest(quest))
 
         finally:
             if quest_id:

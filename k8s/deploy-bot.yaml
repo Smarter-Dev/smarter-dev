@@ -1,4 +1,35 @@
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+    name: smarter-dev-bot
+    namespace: smarter-dev
+---
+# Read-only: list the bot's own pods, nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+    name: smarter-dev-bot-peers
+    namespace: smarter-dev
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+    name: smarter-dev-bot-peers
+    namespace: smarter-dev
+subjects:
+  - kind: ServiceAccount
+    name: smarter-dev-bot
+    namespace: smarter-dev
+roleRef:
+    apiGroup: rbac.authorization.k8s.io
+    kind: Role
+    name: smarter-dev-bot-peers
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,10 +38,10 @@ metadata:
     labels:
         app: smarter-dev-bot
 spec:
-    # RollingUpdate keeps the old bot connected while the new pod pulls its
-    # image, which Recreate did not (2m08s off Discord on 2026-09-24). The
-    # readiness probe only checks the process exists, so the old bot still
-    # stops before the new one reaches Discord; #19 closes that gap.
+    # RollingUpdate keeps the old bot acting until the new one is connected
+    # and set up (readiness below); Recreate took the bot off Discord for
+    # 2m08s on 2026-09-24. While both run, only the one holding the Redis
+    # acting lease acts (smarter_dev/bot/leadership.py).
     strategy:
         type: RollingUpdate
         rollingUpdate:
@@ -34,6 +65,13 @@ spec:
                 # drains still restart it.
                 cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
         spec:
+            # Lets the bot list its own pods: one taking a lease nobody
+            # handed over waits until no other bot pod exists, and one that
+            # lost Redis keeps acting only while it is the only bot pod
+            # (smarter_dev/bot/peer_pods.py, leadership.py). Without this
+            # access a standby is never Ready, so a roll stalls rather than
+            # stopping the old bot.
+            serviceAccountName: smarter-dev-bot
             containers:
               - name: discord-bot
                 image: zzmmrmn/smarter-dev-bot:<IMAGE_VERSION>
@@ -142,10 +180,9 @@ spec:
                         memory: 384Mi
                     limits:
                         # 200m throttled startup (imports + plugin loading) to
-                        # ~7 min, and the pgrep probes mark the pod Ready at
-                        # process start, so every deploy left the bot offline
-                        # that long (2026-09-24, #88 roll). Startup is the
-                        # burst; steady state sampled at 49m (19:21Z).
+                        # ~7 min, which left the bot offline that long on the
+                        # 2026-09-24 #88 roll. Startup is the burst; steady
+                        # state sampled at 49m (19:21Z).
                         cpu: "1"
                         memory: 512Mi
                 startupProbe:
@@ -160,11 +197,18 @@ spec:
                     periodSeconds: 30
                     timeoutSeconds: 5
                     failureThreshold: 3
+                # Ready means connected with services and commands set up,
+                # and able to reach Redis and the Kubernetes API, so a roll
+                # keeps the old bot until the new one could act.
+                # Liveness stays process-level: a Discord outage must not
+                # restart the bot.
                 readinessProbe:
-                    exec:
-                        command: ["pgrep", "-f", "smarter_dev.bot.client"]
-                    initialDelaySeconds: 5
-                    periodSeconds: 10
+                    httpGet:
+                        path: /ready
+                        port: 8080
+                    periodSeconds: 5
                     timeoutSeconds: 3
                     failureThreshold: 2
+            # Covers the 40s drain of accepted work in run_bot.
+            terminationGracePeriodSeconds: 60
             restartPolicy: Always

@@ -90,6 +90,57 @@ class ChatEngineRegistry:
             self._engines.pop(channel_id, None)
         logger.info("Removed chat engine for channel %s", channel_id)
 
+    async def fire_queued(self) -> None:
+        """Answer what every engine has queued now, without its idle timer."""
+        async with self._lock:
+            engines = list(self._engines.values())
+        for engine in engines:
+            if engine.active and engine.queue and not engine.run_lock.locked():
+                engine.fire_now()
+
+    async def busy_channels(self) -> list[int]:
+        """Channels with a turn running, queued or about to fire."""
+        async with self._lock:
+            engines = list(self._engines.values())
+        return [engine.channel_id for engine in engines if engine.active and not engine.is_idle]
+
+    async def drain(self, timeout: float) -> list[int]:
+        """Run every queued turn now and wait for running ones to finish.
+
+        For a process handing over to another: the messages its engines have
+        queued were delivered to this process only, so it must answer them
+        before it exits. Call before ``shutdown_all``, which drops queued
+        messages. Engines activated meanwhile are included. Returns the
+        channels still busy when ``timeout`` ran out.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        while True:
+            await self.fire_queued()
+            busy = await self.busy_channels()
+            if not busy:
+                # A finished turn can refire just after releasing its lock;
+                # look once more before calling it done.
+                await asyncio.sleep(0.05)
+                busy = await self.busy_channels()
+                if not busy:
+                    return []
+            if loop.time() >= deadline:
+                return busy
+            await asyncio.sleep(0.1)
+
+    async def abandon(self, channel_ids: list[int]) -> None:
+        """Cancel turns still running in these channels; their replies are lost.
+
+        ``shutdown`` waits for a running turn without a bound, so a process
+        that has run out of shutdown time must cancel them first.
+        """
+        async with self._lock:
+            engines = [self._engines[c] for c in channel_ids if c in self._engines]
+        for engine in engines:
+            if engine._runner_task and not engine._runner_task.done():
+                engine._runner_task.cancel()
+
     async def shutdown_all(self) -> None:
         async with self._lock:
             engines = list(self._engines.values())

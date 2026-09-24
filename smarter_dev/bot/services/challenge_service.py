@@ -14,6 +14,7 @@ from typing import Any
 
 import hikari
 
+from smarter_dev.bot import leadership
 from smarter_dev.bot.guild_event_recorder import record_guild_event
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.base import BaseService
@@ -164,8 +165,12 @@ class ChallengeService(BaseService):
                 logger.info(f"Queuing challenge '{title}' to announce in {delay_seconds:.1f} seconds")
                 await asyncio.sleep(delay_seconds)
 
-            # Announce the challenge at exactly the scheduled time
-            await self._announce_challenge(challenge_data)
+            # Announce the challenge at exactly the scheduled time. Every process queues it; only the one acting when it fell due sends it.
+            if await leadership.should_send(
+                release_time.timestamp()
+            ):
+                # Tracked, so a process handing over finishes a send it began.
+                await leadership.run_accepted(self._announce_challenge(challenge_data))
 
         except Exception as e:
             logger.error(f"Failed to queue and announce challenge {challenge_data.get('id', 'unknown')}: {e}")
