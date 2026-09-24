@@ -7,6 +7,8 @@ same screenshot from being re-described across many messages.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from smarter_dev.web import media_read
@@ -110,8 +112,11 @@ async def test_pdf_url_extracts_text_and_caches(monkeypatch):
     async def fake_fetch(url):
         return b"%PDF-bytes", "application/pdf"
 
-    def fake_extract(data):
-        extract_calls.append(data)
+    async def fake_extract(path):
+        # The PDF is handed over as a spooled file (parsed in a child process).
+        with open(path, "rb") as f:
+            extract_calls.append(f.read())
+        os.unlink(path)
         return "  page one text  "
 
     monkeypatch.setattr(media_read, "_fetch_bytes", fake_fetch)

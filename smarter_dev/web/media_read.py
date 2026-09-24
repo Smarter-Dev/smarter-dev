@@ -4,7 +4,7 @@ Mirrors the chat agent's ``web_read`` capability but kept self-contained in the
 web/worker tier (no bot-package imports): images are described by GPT-6 Luna
 (BMP re-encoded and animated GIFs sampled by ``shared.media_images``, as in the
 bot) and audio by Gemini 3.8 Flash (the OpenAI Responses API takes no audio input), PDFs
-are extracted with pdfplumber, everything else is read as page text via Jina.
+are extracted with pdfplumber in a bounded child process, everything else is read as page text via Jina.
 
 Media describes (the expensive part — a model call) are cached in Redis keyed on
 the **file's content hash + the instruction**, so the same screenshot posted
@@ -15,20 +15,25 @@ unavailable the read still works, just uncached.
 from __future__ import annotations
 
 import hashlib
-import io
 import logging
 import os
 
 import httpx
 
+from smarter_dev.shared import pdf_text
 from smarter_dev.shared.media_images import ImageTooLarge
 from smarter_dev.shared.media_images import prepare_image_bounded
+from smarter_dev.shared.media_reads import MAX_DOWNLOAD_BYTES
+from smarter_dev.shared.media_reads import MAX_SEND_BYTES
+from smarter_dev.shared.media_reads import MediaReaderBusy
+from smarter_dev.shared.media_reads import media_read_slot
+from smarter_dev.shared.media_reads import too_large_to_send
 from smarter_dev.web.research_tools import jina_read
 
 logger = logging.getLogger(__name__)
 
 MAX_READ_CHARS = 100_000
-MAX_FETCH_BYTES = 20 * 1024 * 1024  # don't download enormous files to read them
+MAX_FETCH_BYTES = MAX_DOWNLOAD_BYTES  # don't download enormous files to read them
 CACHE_TTL_SECONDS = 24 * 60 * 60
 
 # Extension -> media type, trusting the extension over the server's Content-Type
@@ -88,13 +93,29 @@ async def _cache_set(redis, key: str, value: str) -> None:
 
 
 async def _fetch_bytes(url: str) -> tuple[bytes, str] | None:
-    """Download a URL's bytes (capped). Returns (data, content_type) or None."""
+    """Download a URL's bytes (capped). Returns (data, content_type) or None.
+
+    Streamed, so a body over ``MAX_FETCH_BYTES`` is abandoned at the cap (or
+    refused from its Content-Length) instead of being downloaded whole first.
+    """
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            resp = await client.get(url)
-        if resp.status_code >= 400 or len(resp.content) > MAX_FETCH_BYTES:
-            return None
-        return resp.content, resp.headers.get("content-type", "")
+        async with (
+            httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client,
+            client.stream("GET", url) as resp,
+        ):
+            if resp.status_code >= 400:
+                return None
+            declared = resp.headers.get("content-length", "")
+            if declared.isdigit() and int(declared) > MAX_FETCH_BYTES:
+                return None
+            chunks: list[bytes] = []
+            received = 0
+            async for chunk in resp.aiter_bytes():
+                received += len(chunk)
+                if received > MAX_FETCH_BYTES:
+                    return None
+                chunks.append(chunk)
+            return b"".join(chunks), resp.headers.get("content-type", "")
     except Exception:  # noqa: BLE001
         logger.debug("media fetch failed for %s", url, exc_info=True)
         return None
@@ -153,6 +174,8 @@ async def _describe_media(
     agent = _get_audio_agent() if is_audio else _get_media_agent()
     prompt = f"URL: {url}\nKIND: {kind}\n\nINSTRUCTION:\n{instruction}"
     if is_audio:
+        if len(data) > MAX_SEND_BYTES:
+            return too_large_to_send(len(data), "audio clip")
         parts = [(data, media_type)]
     else:
         # BMP -> PNG, animated GIF -> sampled frames (see media_images).
@@ -168,21 +191,35 @@ async def _describe_media(
     return str(result.output)
 
 
-def _extract_pdf_text(data: bytes) -> str:
-    import pdfplumber
-
-    parts: list[str] = []
-    with pdfplumber.open(io.BytesIO(data)) as pdf:
-        for page in pdf.pages:
-            parts.append(page.extract_text() or "")
-    return "\n".join(parts)
+async def _extract_pdf_text(path: str) -> str:
+    return await pdf_text.pdf_text_from_file(path, MAX_READ_CHARS)
 
 
 async def read_url(url: str, instruction: str, *, redis=None) -> str:
     """Read any URL into instruction-guided text. Images/audio/PDF are cached by
     content hash + instruction so the same file isn't re-read across messages."""
     ext = _url_extension(url)
+    if ext in IMAGE_EXTS or ext in AUDIO_EXTS or ext == ".pdf":
+        # One download-to-reply read at a time in this process (#25).
+        try:
+            async with media_read_slot():
+                return await _read_downloaded(url, instruction, ext, redis)
+        except MediaReaderBusy as busy:
+            return f"error: {busy}"
 
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        data = await jina_read(client, url)
+    if "error" in data:
+        return f"error: {data['error']}"
+    content = (data.get("content") or "").strip()
+    if not content:
+        return f"error: no readable content at {url}"
+    title = data.get("title", "")
+    header = f"Title: {title}\n\n" if title else ""
+    return f"{header}{content[:MAX_READ_CHARS]}"
+
+
+async def _read_downloaded(url: str, instruction: str, ext: str, redis) -> str:
     if ext in IMAGE_EXTS or ext in AUDIO_EXTS:
         fetched = await _fetch_bytes(url)
         if fetched is None:
@@ -211,20 +248,17 @@ async def read_url(url: str, instruction: str, *, redis=None) -> str:
         cached = await _cache_get(redis, key)
         if cached is not None:
             return cached
-        text = _extract_pdf_text(data).strip()
+        # Parsed in a bounded child process (shared.pdf_text); drop our bytes
+        # first so the two are never held at once.
+        path = pdf_text.spool(data)
+        del data, fetched
+        try:
+            text = (await _extract_pdf_text(path)).strip()
+        except pdf_text.PdfUnreadable as e:
+            return f"error: {e}"
         if not text:
             return f"error: no readable text in {url}"
         text = text[:MAX_READ_CHARS]
         await _cache_set(redis, key, text)
         return text
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        data = await jina_read(client, url)
-    if "error" in data:
-        return f"error: {data['error']}"
-    content = (data.get("content") or "").strip()
-    if not content:
-        return f"error: no readable content at {url}"
-    title = data.get("title", "")
-    header = f"Title: {title}\n\n" if title else ""
-    return f"{header}{content[:MAX_READ_CHARS]}"
+    raise AssertionError(f"not a downloaded read: {ext!r}")

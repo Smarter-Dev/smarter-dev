@@ -25,6 +25,8 @@ from pydantic_ai.providers.openai import OpenAIProvider
 
 from smarter_dev.shared.media_images import ImageTooLarge
 from smarter_dev.shared.media_images import prepare_image_bounded
+from smarter_dev.shared.media_reads import MAX_SEND_BYTES
+from smarter_dev.shared.media_reads import too_large_to_send
 
 logger = logging.getLogger(__name__)
 
@@ -117,6 +119,8 @@ async def describe_media(
         f"INSTRUCTION:\n{instruction}"
     )
     if is_audio:
+        if len(data) > MAX_SEND_BYTES:
+            return too_large_to_send(len(data), "audio clip")
         parts = [(data, media_type)]
     else:
         # BMP -> PNG, animated GIF -> sampled frames (see media_images).
