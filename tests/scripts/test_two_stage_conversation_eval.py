@@ -75,6 +75,6 @@ def test_stage_cost_prices_cache_read_and_write_separately():
 
 def test_stage_cost_worker_cheaper_than_large_for_same_tokens():
     tokens = harness.TokenUse(input_tokens=500_000, output_tokens=200_000)
-    worker_cost = harness.stage_cost(tokens, get_model("gemini-3-5-flash-lite"))
+    worker_cost = harness.stage_cost(tokens, get_model("gemini-3-8-flash"))
     large_cost = harness.stage_cost(tokens, get_model("gpt-6-sol"))
     assert worker_cost < large_cost

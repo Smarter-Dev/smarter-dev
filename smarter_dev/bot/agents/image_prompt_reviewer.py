@@ -1,4 +1,4 @@
-"""Approve (or reject) an image prompt before it's generated (Gemini Flash Lite).
+"""Approve (or reject) an image prompt before it's generated (GPT-6 Luna).
 
 The chat agent is told images are for technical explanation only, but the model
 that decides to call ``generate_image`` is the same one holding the whole
@@ -15,12 +15,15 @@ import os
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
-from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
-from pydantic_ai.providers.google import GoogleProvider
+from pydantic_ai.models.openai import OpenAIResponsesModel
+from pydantic_ai.models.openai import OpenAIResponsesModelSettings
+from pydantic_ai.providers.openai import OpenAIProvider
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "gemini-3.1-flash-lite"
+# GPT-6 Luna since 2026-09-24, replacing Gemini 3.1 Flash Lite. An OpenAI wire
+# id, served by OpenAI directly.
+DEFAULT_MODEL = "gpt-6-luna"
 MODEL_ENV_VAR = "IMAGE_REVIEWER_MODEL"
 
 SYSTEM_PROMPT = """\
@@ -91,10 +94,11 @@ class ImagePromptDecision(BaseModel):
 _reviewer_agent: Agent[None, ImagePromptDecision] | None = None
 
 
-def _build_model() -> GoogleModel:
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+def _build_model() -> OpenAIResponsesModel:
     model_id = os.getenv(MODEL_ENV_VAR, DEFAULT_MODEL)
-    return GoogleModel(model_id, provider=GoogleProvider(api_key=api_key))
+    return OpenAIResponsesModel(
+        model_id, provider=OpenAIProvider(api_key=os.getenv("OPENAI_API_KEY") or "")
+    )
 
 
 def get_image_prompt_reviewer() -> Agent[None, ImagePromptDecision]:
@@ -105,9 +109,7 @@ def get_image_prompt_reviewer() -> Agent[None, ImagePromptDecision]:
             _build_model(),
             output_type=ImagePromptDecision,
             system_prompt=SYSTEM_PROMPT,
-            model_settings=GoogleModelSettings(
-                google_thinking_config={"thinking_level": "LOW"}
-            ),
+            model_settings=OpenAIResponsesModelSettings(openai_reasoning_effort="low"),
         )
     return _reviewer_agent
 

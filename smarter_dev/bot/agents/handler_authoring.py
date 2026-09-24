@@ -5,11 +5,11 @@ in the live user-interaction context — so a *triggered* execution, which runs 
 the worker, structurally has no path to this code. That is the "triggered
 executions can't author" invariant, enforced by where the code lives.
 
-Pipeline: the Author (member tier Gemini 3 Flash; admin tier GPT-6 Sol at
+Pipeline: the Author (member tier Gemini 3.8 Flash; admin tier GPT-6 Sol at
 high reasoning) sees the existing named handlers and returns a structured plan
 — edit one of them or create a new, named one — or marks the request
 infeasible; the host-side :mod:`~smarter_dev.web.handler_lint` rejects opaque
-blobs / dynamic execution; the Judge (member tier Gemini 3 Flash; admin tier
+blobs / dynamic execution; the Judge (member tier Gemini 3.8 Flash; admin tier
 GPT-6 Sol, with an optional second judge, any-reject-wins) reviews the script as inert
 data and APPROVEs or REJECTs. The author and judge callables are injectable so
 the orchestration is unit-testable without any model calls.

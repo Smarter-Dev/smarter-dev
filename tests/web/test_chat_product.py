@@ -79,13 +79,13 @@ def test_priced_catalog_choices_remain_enabled_during_admin_save():
     filtered, skipped = filter_unpriced_catalog_selections(
         {
             "gpt-6-luna": (True, "low"),
-            "gemini-3-6-flash": (True, "medium"),
+            "gemini-3-8-flash": (True, "medium"),
             "gpt-6-sol": (True, "high"),
         }
     )
     assert filtered == {
         "gpt-6-luna": (True, "low"),
-        "gemini-3-6-flash": (True, "medium"),
+        "gemini-3-8-flash": (True, "medium"),
         "gpt-6-sol": (True, "high"),
     }
     assert skipped == []
@@ -517,7 +517,7 @@ def test_web_compaction_uses_cache_and_price_economics():
 
 
 def test_model_warning_uses_actual_rates_and_no_universal_discount_claim():
-    old = get_model("gemini-3-5-flash-lite")
+    old = get_model("gemini-3-8-flash")
     new = get_model("gpt-6-luna")
     assert price_rates_for_model(old) is not None
     warning = model_change_warning(old, new)
@@ -570,7 +570,7 @@ async def test_document_stream_flushes_as_it_writes_and_returns_the_whole_body()
     and the body as it stands — the client appends the chunk and never has to
     reassemble the file from scratch.
     """
-    model = get_model("gemini-3-5-flash-lite")
+    model = get_model("gemini-3-8-flash")
     metered = _FakeMeteredModel(["a" * 600, "b" * 600, "tail"])
     flushes: list[tuple[str, str]] = []
 
@@ -602,7 +602,7 @@ async def test_document_stream_flushes_as_it_writes_and_returns_the_whole_body()
 @pytest.mark.asyncio
 async def test_document_stream_stops_at_the_ceiling_and_says_it_was_truncated():
     """Silently storing a file that stops mid-sentence is the bad failure."""
-    model = get_model("gemini-3-5-flash-lite")
+    model = get_model("gemini-3-8-flash")
     metered = _FakeMeteredModel(["x" * 40, "y" * 40])
     flushed: list[str] = []
 

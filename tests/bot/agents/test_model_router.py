@@ -22,7 +22,7 @@ from smarter_dev.shared.model_router import model_settings_for
 # stands in for both the plain-routing and the reasoning-knob cases here.
 _DO_MODEL = get_model("qwen3-5-397b")
 _DO_REASONING_MODEL = get_model("qwen3-5-397b")
-_GOOGLE_MODEL = get_model("gemini-3-5-flash-lite")
+_GOOGLE_MODEL = get_model("gemini-3-8-flash")
 _OPENAI_MODEL = get_model("gpt-6-sol")
 # Claude left the catalog on 2026-09-03, but ``build_model_for`` and
 # ``model_settings_for`` still carry an Anthropic branch — the provider stays
@@ -55,7 +55,7 @@ _ANTHROPIC_NO_REASONING_MODEL = CatalogModel(
 )
 _OPENCODE_ZEN_MODEL = get_model("kimi-k3")
 _OPENROUTER_MODEL = get_model("qwen3-8-2-4t")
-_OPENROUTER_REASONING_MODEL = get_model("grok-4-6")
+_OPENROUTER_REASONING_MODEL = get_model("grok-4-7")
 
 
 def test_digitalocean_threads_base_url_and_key(monkeypatch):

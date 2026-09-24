@@ -19,7 +19,7 @@ from skrift.agents.models import ResumeContext
 from smarter_dev.web.blogging_agent.research_agent import Citation
 
 SYNTHESIS_MODEL = os.getenv(
-    "BLOGGING_SYNTHESIS_MODEL", "gemini-3-flash-preview"
+    "BLOGGING_SYNTHESIS_MODEL", "gemini-3.8-flash"
 )
 SYNTHESIS_AGENT_NAME = "blogging.synthesis"
 _PROMPT = (Path(__file__).parent / "prompts" / "synthesis.md").read_text(

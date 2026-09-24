@@ -57,6 +57,17 @@ def test_provider_key_resolves_flat_wire_ids_via_catalog():
     assert provider_key_from_model_name("gpt-5.6-terra") == "openai"
 
 
+def test_retired_gemini_flash_and_grok_wire_ids_keep_their_provider():
+    # 3.5 Flash Lite, 3.6 and 3.7 Flash retired onto 3.8 Flash, and Grok 4.6
+    # onto 4.7, on 2026-09-24. Old rows still carry the retired wire ids.
+    assert provider_key_from_model_name("gemini-3.5-flash-lite") == "google"
+    assert provider_key_from_model_name("gemini-3.6-flash") == "google"
+    assert provider_key_from_model_name("gemini-3.7-flash") == "google"
+    assert provider_key_from_model_name("gemini-3.8-flash") == "google"
+    assert provider_key_from_model_name("x-ai/grok-4.6") == "openrouter"
+    assert provider_key_from_model_name("x-ai/grok-4.7") == "openrouter"
+
+
 def test_retired_claude_wire_ids_keep_their_provider():
     # The Claude family left the catalog on 2026-09-03, so these no longer
     # resolve through MODEL_CATALOG. Settled usage rows still carry the wire

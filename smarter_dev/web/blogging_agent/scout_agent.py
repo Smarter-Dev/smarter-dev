@@ -2,7 +2,7 @@
 
 Searches the web for current tech news, reads candidate pages via Jina,
 returns 2-3 ScoutTopic suggestions. Scout never sees raw page text — only
-Gemini-generated summaries.
+GPT-6 Luna summaries (see ``summariser``).
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from smarter_dev.web.research_tools import brave_search, jina_read
 # annotations via get_type_hints at materialization on the worker, so it must
 # be a real module global (pydantic-ai core only; providers stay worker-side).
 
-SCOUT_MODEL = os.getenv("BLOGGING_SCOUT_MODEL", "gemini-3-flash-preview")
+SCOUT_MODEL = os.getenv("BLOGGING_SCOUT_MODEL", "gemini-3.8-flash")
 SCOUT_AGENT_NAME = "blogging.scout"
 _PROMPT = (Path(__file__).parent / "prompts" / "scout.md").read_text(
     encoding="utf-8"
@@ -115,7 +115,7 @@ async def search_news(
 
 @scout_agent.tool
 async def read_news(ctx: RunContext[ScoutDeps], url: str) -> dict:
-    """Read a news page and return a 3-6 sentence Gemini-generated summary.
+    """Read a news page and return a 3-6 sentence GPT-6 Luna summary.
 
     The raw page is cached per-URL for the duration of this run, so a
     repeat call returns the same summary without a network round-trip.

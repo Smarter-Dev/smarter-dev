@@ -34,7 +34,9 @@ def _patch_provider(provider_id: str, model: types.ModelInfo) -> None:
         provider.models.append(model)
 
 
-# Gemini 3.1 Flash Lite (GA + preview prefix) — not yet in genai-prices
+# Gemini 3.1 Flash Lite (GA + preview prefix) — not yet in genai-prices. Its
+# direct pins moved to GPT-6 Luna on 2026-09-24; kept for the usage rows it
+# wrote.
 _patch_provider(
     "google",
     types.ModelInfo(
@@ -48,7 +50,8 @@ _patch_provider(
     ),
 )
 
-# Gemini 3 Flash Preview — not yet in genai-prices
+# Gemini 3 Flash Preview — not yet in genai-prices. Its direct pins moved to
+# Gemini 3.8 Flash on 2026-09-24; kept for the usage rows it wrote.
 _patch_provider(
     "google",
     types.ModelInfo(
@@ -62,7 +65,8 @@ _patch_provider(
     ),
 )
 
-# Gemini 3.5 Flash Lite — not yet in genai-prices
+# Gemini 3.5 Flash Lite — not yet in genai-prices. Retired for Gemini 3.8
+# Flash on 2026-09-24; kept for the usage rows it wrote.
 # NOTE: must come before gemini-3.5-flash so the more specific match wins
 _patch_provider(
     "google",
@@ -107,7 +111,9 @@ _patch_provider(
 #
 # NOTE the match ordering trap: "gemini-3.7-flash" must not be matched by a
 # broader prefix, so keep each id exact-versioned as below. The reversion on
-# 2027-01-01 is one edit per entry — 3.8 Flash is the third.
+# 2027-01-01 is one edit per entry — 3.8 Flash is the third. 3.6 and 3.7 Flash
+# were retired for 3.8 Flash on 2026-09-24 and are kept for the usage rows they
+# wrote, so only the 3.8 entry is live.
 _patch_provider(
     "google",
     types.ModelInfo(
@@ -449,10 +455,20 @@ _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
     ),
     # Grok 4.6 carries 4.5's headline rate and the same >200K doubling
     # ($4/$12/$1.00), but charges more for cached reads: $0.50 against $0.30.
+    # Retired 2026-09-24 in favour of 4.7; kept for historical rows.
     "x-ai/grok-4.6": types.ModelPrice(
         input_mtok=Decimal("2.00"),
         output_mtok=Decimal("6.00"),
         cache_read_mtok=Decimal("0.50"),
+    ),
+    # Grok 4.7 undercuts 4.6 by 20% on every axis — $1.60/$4.80/$0.40 — and
+    # keeps the same >200K doubling ($3.20/$9.60/$0.80), which the base rate
+    # here does not model, for the same reason as 4.5. Read from GET
+    # https://openrouter.ai/api/v1/models on 2026-09-24.
+    "x-ai/grok-4.7": types.ModelPrice(
+        input_mtok=Decimal("1.60"),
+        output_mtok=Decimal("4.80"),
+        cache_read_mtok=Decimal("0.40"),
     ),
     # Qwen3.8 2.4T A95B. Every OpenRouter endpoint quotes the same rate, so
     # there is no route-dependent price to model here.

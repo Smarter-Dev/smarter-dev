@@ -1,6 +1,6 @@
 """Stage 4 of the blogging pipeline — Research.
 
-The outer Research stage is a Gemini 3 Flash agent whose only tool is
+The outer Research stage is a Gemini 3.8 Flash agent whose only tool is
 ``dig_into``. Each call dispatches a GPT-6 Luna sub-agent that runs its
 own multi-turn search/read loop and returns 4-8 verbatim citations.
 
@@ -30,7 +30,7 @@ from smarter_dev.web.research_tools import brave_search, jina_read
 # be a real module global (pydantic-ai core only; providers stay worker-side).
 
 RESEARCH_MODEL = os.getenv(
-    "BLOGGING_RESEARCH_MODEL", "gemini-3-flash-preview"
+    "BLOGGING_RESEARCH_MODEL", "gemini-3.8-flash"
 )
 RESEARCH_AGENT_NAME = "blogging.research"
 RESEARCHER_SUBAGENT_MODEL = os.getenv(
@@ -202,7 +202,7 @@ async def read_page_for_excerpts(
     return {"url": url, "title": title, "excerpts": excerpts}
 
 
-# ── Outer Research stage (Gemini 3 Flash) ────────────────────────────
+# ── Outer Research stage (Gemini 3.8 Flash) ──────────────────────────
 
 
 @dataclass

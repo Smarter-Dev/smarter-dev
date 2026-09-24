@@ -18,7 +18,7 @@ from smarter_dev.web.bot_admin.channel_config import (
 def _form(**overrides) -> dict:
     fields = {
         "bot_kind": "legacy",
-        "model_key": "gemini-3-7-flash",
+        "model_key": "gemini-3-8-flash",
         "reasoning_level": "",
         "daily_token_budget": "0",
         "hourly_token_budget": "0",
@@ -35,7 +35,7 @@ def test_parses_a_legacy_configuration():
     parsed = parse_channel_config_form(_form(auto_respond="on"))
     assert parsed == ChannelConfigForm(
         proactive_enabled=False,
-        model_key="gemini-3-7-flash",
+        model_key="gemini-3-8-flash",
         reasoning_level=None,
         daily_token_budget=0,
         hourly_token_budget=0,
@@ -50,7 +50,7 @@ def test_proactive_kind_sets_the_selector():
     parsed = parse_channel_config_form(_form(bot_kind="proactive"))
     assert parsed.proactive_enabled is True
     # The model settings still parse: they drive the proactive agent too.
-    assert parsed.model_key == "gemini-3-7-flash"
+    assert parsed.model_key == "gemini-3-8-flash"
 
 
 def test_blank_model_means_server_default():

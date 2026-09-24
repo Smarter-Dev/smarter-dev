@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from skrift.agents.models import ResumeContext
 
 BRAINSTORM_MODEL = os.getenv(
-    "BLOGGING_BRAINSTORM_MODEL", "gemini-3-flash-preview"
+    "BLOGGING_BRAINSTORM_MODEL", "gemini-3.8-flash"
 )
 BRAINSTORM_AGENT_NAME = "blogging.brainstorm"
 _PROMPT = (Path(__file__).parent / "prompts" / "brainstorm.md").read_text(

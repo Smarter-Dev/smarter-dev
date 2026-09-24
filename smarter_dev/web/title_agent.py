@@ -1,6 +1,6 @@
-"""Gemini-backed title generator for `agent_conversations`.
+"""GPT-6 Luna title generator for `agent_conversations`.
 
-Cheap, one-shot Skrift agent (Gemini 3 Flash Lite by default) that turns a
+Cheap, one-shot Skrift agent (GPT-6 Luna by default) that turns a
 user's first question into a short, topic-style title. Used by the
 ``/v2/api/resources/ask`` endpoint via a fire-and-forget background task — it
 patches ``agent_conversations.title`` and notifies the owner via Skrift's
@@ -23,7 +23,9 @@ import skrift
 
 logger = logging.getLogger(__name__)
 
-TITLE_MODEL = os.getenv("TITLE_AGENT_MODEL", "gemini-3.1-flash-lite")
+# GPT-6 Luna since 2026-09-24, replacing Gemini 3.1 Flash Lite. An OpenAI wire
+# id, served by OpenAI directly.
+TITLE_MODEL = os.getenv("TITLE_AGENT_MODEL", "gpt-6-luna")
 AGENT_NAME = "smarter.dev.title.generator"
 
 _SYSTEM_PROMPT = """\
@@ -43,14 +45,16 @@ Reply with the title alone. No labels, no explanation.
 _TITLE_MAX_LEN = 80
 
 
-# Model is a plain pydantic-ai model id string ("google-gla:" = Gemini API via
-# GEMINI_API_KEY/GOOGLE_API_KEY from the env). Passing a string (not a
-# GoogleModel object) keeps this module import free of pydantic-ai; Skrift
-# materializes the real model lazily in the worker that runs the agent.
+# Model is a plain pydantic-ai model id string ("openai-responses:" = the OpenAI
+# Responses API via OPENAI_API_KEY from the env). Passing a string (not a
+# Model object) keeps this module import free of pydantic-ai; Skrift
+# materializes the real model lazily in the worker that runs the agent. A title
+# needs no deliberation, so reasoning runs low.
 title_agent = skrift.Agent(
-    f"google-gla:{TITLE_MODEL}",
+    f"openai-responses:{TITLE_MODEL}",
     name=AGENT_NAME,
     system_prompt=_SYSTEM_PROMPT,
+    model_settings={"openai_reasoning_effort": "low"},
 )
 
 
@@ -77,7 +81,7 @@ def _sanitize(raw: str) -> str:
 async def generate_title(
     question: str, *, actor: str | None = None
 ) -> str | None:
-    """Generate a title for ``question`` via Gemini. ``None`` on failure.
+    """Generate a title for ``question`` via GPT-6 Luna. ``None`` on failure.
 
     ``actor`` is the user id this run should be attributed to in Skrift's
     audit trail. Pass the asker's UUID as a string so cost/usage rolls up
@@ -85,9 +89,9 @@ async def generate_title(
     """
     if not (question or "").strip():
         return None
-    # Local debug short-circuit: skip the Gemini call and return a synthetic
+    # Local debug short-circuit: skip the model call and return a synthetic
     # title derived from the question's first 6 words so we can iterate on
-    # the live UI without burning Flash Lite tokens.
+    # the live UI without burning tokens.
     if os.getenv("TITLE_AGENT_STUB", "").strip().lower() in {"1", "true", "yes"}:
         words = question.strip().split()[:6]
         return _sanitize(" ".join(w.capitalize() for w in words)) or "Synthetic Title"
@@ -101,7 +105,7 @@ async def generate_title(
         )
         # Skrift's Agent.run returns a Session; poll until completion to
         # collect the final text. With `workers.preset: local` the run
-        # executes inline on this node, so this awaits ~Gemini-latency.
+        # executes inline on this node, so this awaits ~model latency.
         raw = await session.result()
     except Exception:  # noqa: BLE001
         logger.exception("Title generation failed")
