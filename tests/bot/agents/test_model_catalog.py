@@ -139,7 +139,6 @@ def test_proactive_agent_model_resolves_through_the_catalog():
 
 def test_gpt_6_lineup_is_selectable():
     expected = {
-        "gpt-5-4-nano": "gpt-5.4-nano",
         "gpt-6-luna": "gpt-6-luna",
         "gpt-6-sol": "gpt-6-sol",
     }
@@ -189,7 +188,7 @@ def test_retired_gpt_5_x_keys_read_as_their_gpt_6_successors():
     assert successor_key("gpt-5-4") == "gpt-6-sol"
     assert successor_key("gpt-5-5") == "gpt-6-sol"
     assert successor_key("gpt-5-6-sol") == "gpt-6-sol"
-    assert successor_key("gpt-5-4-nano") == "gpt-5-4-nano"
+    assert successor_key("gpt-5-4-nano") == "gpt-6-luna"
     assert successor_key("gpt-6-sol") == "gpt-6-sol"
     assert successor_key("no-such-model") == "no-such-model"
     # Every successor is a live catalog model, and no retired key still is.

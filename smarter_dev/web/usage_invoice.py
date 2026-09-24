@@ -60,7 +60,8 @@ _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gpt-5.6-luna", "openai")
 # Terra's direct-OpenAI id.
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("openai/gpt-5.6-luna", "openrouter")
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gpt-5.6-terra", "openai")
-# Also 2026-09-24: the rest of the direct-OpenAI GPT line except 5.4 Nano.
+# Also 2026-09-24: the rest of the direct-OpenAI GPT line.
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("gpt-5.4-nano", "openai")
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gpt-5.4-mini", "openai")
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gpt-5.4", "openai")
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gpt-5.5", "openai")

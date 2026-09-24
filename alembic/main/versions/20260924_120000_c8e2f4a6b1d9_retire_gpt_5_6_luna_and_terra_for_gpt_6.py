@@ -6,7 +6,8 @@ Luna ($0.10/$0.50 per M) takes 5.6 Luna's cheap, fast slot — the server defaul
 directly; 5.6 Luna went through OpenRouter, and 6 Luna costs no more direct than
 that did, so the OpenRouter hop and its fee go with it. The same day GPT-5.4,
 5.4 Mini, 5.5 and 5.6 Sol retire too: Mini onto 6 Luna, the three flagships
-onto 6 Sol, which undercuts all of them. 5.4 Nano stays.
+onto 6 Sol, which undercuts all of them, and 5.4 Nano onto 6 Luna, since the
+production OpenAI key now admits only the two GPT-6 models.
 
 This revision only adds. It runs before the deploy rolls the pods, so for a
 few minutes pods on the previous build — which know neither GPT-6 key — read
@@ -71,6 +72,7 @@ _SUCCESSORS: tuple[tuple[str, str], ...] = (
     ("gpt-5-4", "gpt-6-sol"),
     ("gpt-5-5", "gpt-6-sol"),
     ("gpt-5-6-sol", "gpt-6-sol"),
+    ("gpt-5-4-nano", "gpt-6-luna"),
 )
 
 

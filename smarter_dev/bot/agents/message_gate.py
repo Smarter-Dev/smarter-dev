@@ -1,12 +1,12 @@
-"""Pre-turn relevance gate (GPT-5.4 Nano) for admin-restricted channels.
+"""Pre-turn relevance gate (GPT-6 Luna) for admin-restricted channels.
 
 An admin can restrict a channel so the bot only replies to messages matching a
 written response filter. Before the chat engine spends a turn on an expensive
-model, it asks this cheap Nano classifier which of the pending messages the
+model, it asks cheap GPT-6 Luna which of the pending messages the
 filter actually allows — so clearly off-topic chatter never reaches the pricey
 model.
 
-The gate is deliberately fail-open: a Nano outage returns every candidate
+The gate is deliberately fail-open: a Luna outage returns every candidate
 rather than silencing the bot, since a wasted expensive reply is far cheaper
 than a channel that stops answering. It also short-circuits (no model call) when
 there is nothing to judge or no filter to apply.
@@ -25,7 +25,9 @@ from smarter_dev.shared.model_catalog import ReasoningLevel, get_model
 
 logger = logging.getLogger(__name__)
 
-GATE_MODEL_KEY = "gpt-5-4-nano"
+# GPT-5.4 Nano until 2026-09-24, when the production OpenAI key was limited to
+# GPT-6 Luna and Sol.
+GATE_MODEL_KEY = "gpt-6-luna"
 
 SYSTEM_PROMPT = """\
 You are a fast, cheap relevance gate for a Discord bot. An admin has restricted \
@@ -144,7 +146,7 @@ async def filter_messages(
     allows every candidate without a model call. ``channel_name`` — for a forum
     post or thread, its title — is extra interpretive context and may be None.
     Any exception from the model is logged and fails open — every candidate id
-    is returned — so a Nano outage never silences the bot. The model's answer
+    is returned — so a model outage never silences the bot. The model's answer
     is intersected with the real candidate ids, since it may hallucinate ids
     that were never offered.
     """
