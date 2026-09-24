@@ -16,7 +16,7 @@ spec:
         matchLabels:
             app: smarter-dev-website
             tier: frontend
-    replicas: 1
+    replicas: 2  # Fixed; the site has no HPA
     template:
         metadata:
             labels:
