@@ -29,7 +29,9 @@ from smarter_dev.shared.observability import record_llm_failover
 logger = logging.getLogger(__name__)
 
 PRIMARY_MODEL_KEY = "gpt-6-luna"
-FALLBACK_MODEL_KEY = "gemini-3-5-flash-lite"
+# 3.8 Flash since 2026-09-24, when 3.5 Flash Lite left the catalog. Still a
+# different vendor from the primary, which is the point of a fallback.
+FALLBACK_MODEL_KEY = "gemini-3-8-flash"
 
 SYSTEM_PROMPT = """\
 You summarize fetched web content to satisfy a specific INSTRUCTION from \
@@ -106,7 +108,7 @@ def get_web_summarizer_fallback_agent() -> Agent[None, str]:
 async def summarize_web_content(
     *, instruction: str, content: str, title: str, url: str
 ) -> str:
-    """Summarize with GPT-6 Luna, failing over loudly to Gemini Flash Lite."""
+    """Summarize with GPT-6 Luna, failing over loudly to Gemini 3.8 Flash."""
     agent = get_web_summarizer_agent()
     prompt = (
         f"URL: {url}\n"
@@ -118,8 +120,8 @@ async def summarize_web_content(
         result = await agent.run(prompt)
     except Exception as exc:
         logger.critical(
-            "WEB SUMMARIZER FAILOVER: GPT-6 Luna failed; using Gemini 3.1 "
-            "Flash Lite for url=%s title=%r",
+            "WEB SUMMARIZER FAILOVER: GPT-6 Luna failed; using Gemini 3.8 "
+            "Flash for url=%s title=%r",
             url,
             title,
             exc_info=True,
@@ -127,7 +129,7 @@ async def summarize_web_content(
         record_llm_failover(
             operation="web_summarizer",
             primary_model=get_model(PRIMARY_MODEL_KEY).model_id,
-            fallback_model="gemini-3.1-flash-lite",
+            fallback_model=get_model(FALLBACK_MODEL_KEY).model_id,
             error=exc,
         )
         result = await get_web_summarizer_fallback_agent().run(prompt)

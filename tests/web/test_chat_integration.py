@@ -305,7 +305,7 @@ async def test_reservation_settlement_is_idempotent_and_attributes_actual_overag
         conversation_id=conversation.id,
     )
     assert reservation is not None and decision.allowed and decision.in_overage
-    model = get_model("gemini-3-5-flash-lite")
+    model = get_model("gemini-3-8-flash")
 
     first = await record_settled_chat_usage(
         db_session,
@@ -313,10 +313,10 @@ async def test_reservation_settlement_is_idempotent_and_attributes_actual_overag
         operation_type="primary",
         model=model,
         tier="r",
-        # 4M input at 3.5 Flash Lite's $0.30/M settles at $1.20 — deliberately
+        # 1.6M input at 3.8 Flash's $0.75/M settles at $1.20 — deliberately
         # NOT the $1.10 reserved above, so the assertions below can only pass if
         # settlement uses the ACTUAL cost rather than the estimate.
-        input_tokens=4_000_000,
+        input_tokens=1_600_000,
         output_tokens=0,
         cache_read_tokens=0,
         cache_write_tokens=0,

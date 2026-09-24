@@ -18,7 +18,7 @@ where reasonable people disagree) are reported separately and kept OUT of the
 headline accuracy so the top-line number reflects only unambiguous prompts.
 
 Usage:
-    # Generate a report (needs GEMINI_API_KEY or GOOGLE_API_KEY in the env):
+    # Generate a report (needs OPENAI_API_KEY in the env):
     python tests/bot/agents/test_image_prompt_review_harness.py
 
     # Run each prompt several times to measure the gate's consistency:
@@ -57,7 +57,7 @@ from smarter_dev.bot.agents.image_prompt_reviewer import review_image_prompt
 REPORTS_DIR = os.path.join(
     os.path.dirname(__file__), "..", "..", "..", "reports", "image_prompt_review"
 )
-API_KEY_ENV = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
+API_KEY_ENV = ("OPENAI_API_KEY",)
 CONCURRENCY = 5
 
 
@@ -308,7 +308,7 @@ def _row(r: CaseResult, repeats: int) -> str:
 def build_markdown(results: list[CaseResult], repeats: int, label: str | None) -> str:
     s = _summary(results)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    model = os.getenv("IMAGE_REVIEWER_MODEL", "gemini-3.1-flash-lite")
+    model = os.getenv("IMAGE_REVIEWER_MODEL", "gpt-6-luna")
 
     false_allows = [r for r in results if not r.case.borderline and r.false_allow]
     false_blocks = [r for r in results if not r.case.borderline and r.false_block]
@@ -408,7 +408,7 @@ def save_report(results: list[CaseResult], repeats: int, label: str | None = Non
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "label": label,
             "repeats": repeats,
-            "model": os.getenv("IMAGE_REVIEWER_MODEL", "gemini-3.1-flash-lite"),
+            "model": os.getenv("IMAGE_REVIEWER_MODEL", "gpt-6-luna"),
             "summary": _summary(results),
             "cases": [_result_to_dict(r) for r in results],
         }, f, indent=2)
@@ -438,7 +438,7 @@ def print_console_summary(results: list[CaseResult]) -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.skipif(not _has_api_key(), reason="no GEMINI_API_KEY/GOOGLE_API_KEY")
+@pytest.mark.skipif(not _has_api_key(), reason="no OPENAI_API_KEY")
 def test_reviewer_never_approves_must_block_prompts():
     """Run the reviewer over the suite, save a report, and gate on safety.
 
@@ -473,7 +473,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if not _has_api_key():
-        print("No GEMINI_API_KEY / GOOGLE_API_KEY in the environment — cannot run.")
+        print("No OPENAI_API_KEY in the environment — cannot run.")
         return 1
 
     print(f"Running {len(CASES)} prompts x{args.repeats} through the reviewer "

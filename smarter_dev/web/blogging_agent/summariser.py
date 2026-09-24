@@ -1,4 +1,4 @@
-"""Two thin Gemini Flash Lite agents used inside the pipeline's read tools.
+"""Two thin GPT-6 Luna agents used inside the pipeline's read tools.
 
 - ``summarise_news_page(text, url, title)`` — Scout's news read helper. Returns
   a full-document summary in 3-6 sentences. Cached per-URL by Scout's read
@@ -26,9 +26,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_FLASH_LITE_MODEL = "gemini-3.1-flash-lite"
+# GPT-6 Luna since 2026-09-24, replacing Gemini 3.1 Flash Lite. OpenAI
+# Responses API via OPENAI_API_KEY.
+_LUNA_MODEL = "gpt-6-luna"
 
-_MODEL_SETTINGS = {"google_thinking_config": {"thinking_level": "LOW"}}
+_MODEL_SETTINGS = {"openai_reasoning_effort": "low"}
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 
@@ -45,7 +47,7 @@ def _news_summariser() -> "Agent[None, str]":
         from pydantic_ai import Agent
 
         _news_summariser_agent = Agent(
-            f"google-gla:{_FLASH_LITE_MODEL}",
+            f"openai-responses:{_LUNA_MODEL}",
             system_prompt=(_PROMPTS_DIR / "news_summariser.md").read_text(
                 encoding="utf-8"
             ),
@@ -95,7 +97,7 @@ def _excerpt_extractor() -> "Agent[None, ExcerptOutput]":
         from pydantic_ai import Agent
 
         _excerpt_extractor_agent = Agent(
-            f"google-gla:{_FLASH_LITE_MODEL}",
+            f"openai-responses:{_LUNA_MODEL}",
             system_prompt=(_PROMPTS_DIR / "excerpt_extractor.md").read_text(
                 encoding="utf-8"
             ),

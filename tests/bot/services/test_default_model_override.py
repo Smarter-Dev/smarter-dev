@@ -80,7 +80,7 @@ def _redis_with(raw):
 async def test_set_stores_payload_expiring_at_end_epoch():
     redis = _redis_with(None)
     override = DefaultModelOverride(
-        model_key="gemini-3-6-flash",
+        model_key="gemini-3-8-flash",
         reasoning_level="high",
         expires_at_epoch=1_790_000_000,
     )
@@ -92,7 +92,7 @@ async def test_set_stores_payload_expiring_at_end_epoch():
     assert args[0] == DEFAULT_MODEL_OVERRIDE_KEY
     assert kwargs["exat"] == 1_790_000_000
     assert json.loads(args[1]) == {
-        "model_key": "gemini-3-6-flash",
+        "model_key": "gemini-3-8-flash",
         "reasoning_level": "high",
         "expires_at_epoch": 1_790_000_000,
     }
@@ -102,7 +102,7 @@ async def test_set_stores_payload_expiring_at_end_epoch():
 async def test_read_round_trips_a_stored_override():
     redis = _redis_with(None)
     override = DefaultModelOverride(
-        model_key="gemini-3-5-flash-lite",
+        model_key="gemini-3-8-flash",
         reasoning_level=None,
         expires_at_epoch=1_790_000_000,
     )

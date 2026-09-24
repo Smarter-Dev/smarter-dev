@@ -371,7 +371,7 @@ async def test_turn_prompt_carries_model_identity(fake_memory, fake_redis):
 
 
 def _temporary_default_payload(
-    model_key: str = "gemini-3-6-flash", reasoning_level: str | None = "high"
+    model_key: str = "gemini-3-8-flash", reasoning_level: str | None = "high"
 ) -> str:
     return json.dumps(
         {
@@ -410,8 +410,8 @@ async def test_temporary_default_applies_without_channel_override(
     ):
         await engine._run_once(first_activation=True)
 
-    get_agent_mock.assert_called_once_with("gemini-3.6-flash", "high")
-    assert persist_turn.await_args.kwargs["chat_model_name"] == "gemini-3.6-flash"
+    get_agent_mock.assert_called_once_with("gemini-3.8-flash", "high")
+    assert persist_turn.await_args.kwargs["chat_model_name"] == "gemini-3.8-flash"
 
 
 @pytest.mark.asyncio

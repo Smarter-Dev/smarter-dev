@@ -78,7 +78,7 @@ def test_resolved_reasoning_level_clamps_unsupported_choice():
     # Gemini's thinking_level tops out at "high"; "max" clamps down to it.
     # 3.5 Flash Lite, since 3.1 left the catalog on 2026-08-13 — the wire id is
     # still in service elsewhere, but it no longer resolves to a catalog model.
-    assert resolved_reasoning_level("gemini-3.5-flash-lite", "max") == "high"
+    assert resolved_reasoning_level("gemini-3.8-flash", "max") == "high"
 
 
 def test_resolved_reasoning_level_falls_back_to_model_default():

@@ -17,8 +17,10 @@ import skrift
 from pydantic import BaseModel, Field
 from skrift.agents.models import ResumeContext
 
+# GPT-6 Luna since 2026-09-24, replacing Gemini 3.1 Flash Lite. An OpenAI wire
+# id ("openai-responses:" = the OpenAI Responses API, OPENAI_API_KEY).
 REVIEW_MODEL = os.getenv(
-    "BLOGGING_REVIEW_MODEL", "gemini-3.1-flash-lite"
+    "BLOGGING_REVIEW_MODEL", "gpt-6-luna"
 )
 REVIEW_AGENT_NAME = "blogging.review"
 _PROMPT = (Path(__file__).parent / "prompts" / "review.md").read_text(
@@ -67,11 +69,11 @@ def _build_deps(ctx: ResumeContext) -> ReviewDeps:
 
 
 review_agent = skrift.Agent(
-    f"google-gla:{REVIEW_MODEL}",
+    f"openai-responses:{REVIEW_MODEL}",
     name=REVIEW_AGENT_NAME,
     system_prompt=_PROMPT,
     output_type=ReviewOutput,
-    model_settings={"google_thinking_config": {"thinking_level": "LOW"}},
+    model_settings={"openai_reasoning_effort": "low"},
     deps_type=ReviewDeps,
     deps_factory=_build_deps,
 )
