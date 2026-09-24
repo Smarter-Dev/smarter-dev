@@ -320,6 +320,12 @@ class TurnDecision(BaseModel):
     response_language: str = Field(
         description="Lowercase language name of the highest-scoring NEW message. Exactly `english` for English, including English with incidental foreign text, code, or logs.",
     )
+    # Required fields come before the defaulted ones: Grok (4.6 and 4.7) drops
+    # a required field that follows optional ones from its output tool call,
+    # even on retry, and every turn failed validation (2026-09-24).
+    topic: str = Field(
+        description="1-2 sentence summary of the current conversation topic.",
+    )
     response: ResponseBody | None = Field(
         default=None,
         description="Populate to speak; None to stay silent. Must be None when every ranking scored < 5, and ALWAYS None for continued non-English from a user you already redirected to English — no second warning, no answer.",
@@ -327,9 +333,6 @@ class TurnDecision(BaseModel):
     continue_watching: bool = Field(
         default=True,
         description="Set False only when the engagement is genuinely over.",
-    )
-    topic: str = Field(
-        description="1-2 sentence summary of the current conversation topic.",
     )
     notes: str | None = Field(
         default=None,
@@ -499,6 +502,12 @@ class BriefingDecision(BaseModel):
     rankings: list[MessageScore] = Field(
         description="One MessageScore per NEW <message> this turn.",
     )
+    # Required fields come before the defaulted ones: Grok (4.6 and 4.7) drops
+    # a required field that follows optional ones from its output tool call,
+    # even on retry, and every turn failed validation (2026-09-24).
+    topic: str = Field(
+        description="1-2 sentence summary of the current conversation topic.",
+    )
     brief: WriterBrief | None = Field(
         default=None,
         description=(
@@ -510,9 +519,6 @@ class BriefingDecision(BaseModel):
     continue_watching: bool = Field(
         default=True,
         description="Set False only when the engagement is genuinely over.",
-    )
-    topic: str = Field(
-        description="1-2 sentence summary of the current conversation topic.",
     )
     notes: str | None = Field(
         default=None,
