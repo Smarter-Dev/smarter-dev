@@ -169,9 +169,10 @@ class ScheduledMessageService(BaseService):
 
             # Send the message at exactly the scheduled time. Every process queues it; only the one acting when it fell due sends it.
             if await leadership.should_send(
-                scheduled_time.timestamp(), wait=leadership.HANDOVER_WAIT_SECONDS
+                scheduled_time.timestamp()
             ):
-                await self._send_scheduled_message(message_data)
+                # Tracked, so a process handing over finishes a send it began.
+                await leadership.run_accepted(self._send_scheduled_message(message_data))
 
         except Exception as e:
             logger.error(f"Failed to queue and send message {message_data.get('id', 'unknown')}: {e}")

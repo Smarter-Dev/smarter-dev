@@ -167,9 +167,10 @@ class ChallengeService(BaseService):
 
             # Announce the challenge at exactly the scheduled time. Every process queues it; only the one acting when it fell due sends it.
             if await leadership.should_send(
-                release_time.timestamp(), wait=leadership.HANDOVER_WAIT_SECONDS
+                release_time.timestamp()
             ):
-                await self._announce_challenge(challenge_data)
+                # Tracked, so a process handing over finishes a send it began.
+                await leadership.run_accepted(self._announce_challenge(challenge_data))
 
         except Exception as e:
             logger.error(f"Failed to queue and announce challenge {challenge_data.get('id', 'unknown')}: {e}")

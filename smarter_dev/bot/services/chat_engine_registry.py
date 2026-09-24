@@ -119,6 +119,18 @@ class ChatEngineRegistry:
                 return [engine.channel_id for engine in busy]
             await asyncio.sleep(0.1)
 
+    async def abandon(self, channel_ids: list[int]) -> None:
+        """Cancel turns still running in these channels; their replies are lost.
+
+        ``shutdown`` waits for a running turn without a bound, so a process
+        that has run out of shutdown time must cancel them first.
+        """
+        async with self._lock:
+            engines = [self._engines[c] for c in channel_ids if c in self._engines]
+        for engine in engines:
+            if engine._runner_task and not engine._runner_task.done():
+                engine._runner_task.cancel()
+
     async def shutdown_all(self) -> None:
         async with self._lock:
             engines = list(self._engines.values())

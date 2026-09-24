@@ -132,9 +132,10 @@ class QuestService(BaseService):
 
             # Every process queues it; only the one acting when it fell due sends it.
             if await leadership.should_send(
-                release_time.timestamp(), wait=leadership.HANDOVER_WAIT_SECONDS
+                release_time.timestamp()
             ):
-                await self._announce_quest(quest)
+                # Tracked, so a process handing over finishes a send it began.
+                await leadership.run_accepted(self._announce_quest(quest))
 
         finally:
             if quest_id:

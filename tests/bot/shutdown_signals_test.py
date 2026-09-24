@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+from unittest.mock import Mock
 
 import pytest
 
@@ -69,7 +70,7 @@ class FakeCoordinator:
         self.calls.append("contend")
         await asyncio.Event().wait()
 
-    async def stop_acting(self) -> None:
+    async def stop_acting(self, _handled=()) -> None:
         self.calls.append("stop_acting")
 
 
@@ -108,7 +109,7 @@ def _patch_run_bot(monkeypatch: pytest.MonkeyPatch, bot: FakeBot) -> FakeHealthR
     monkeypatch.setattr(
         client,
         "create_coordination",
-        lambda _bot, _settings: (FakeCoordinator(bot.calls), object()),
+        lambda _bot, _settings: (FakeCoordinator(bot.calls), Mock(recent_handled=list)),
     )
 
     async def fake_drain(_gate, _budget) -> None:
