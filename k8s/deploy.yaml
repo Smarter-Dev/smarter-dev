@@ -10,7 +10,7 @@ spec:
     strategy:
         type: RollingUpdate
         rollingUpdate:
-            maxSurge: 2
+            maxSurge: 1  # One extra pod at a time keeps roll surge to 192Mi
             maxUnavailable: 50%
     selector:
         matchLabels:
