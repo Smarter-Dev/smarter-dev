@@ -374,7 +374,7 @@ async def test_summarise_reads_cache_tokens_from_usage():
         cache_read_tokens=150,
         cache_write_tokens=5,
     )
-    run_result = SimpleNamespace(output="a concise summary", usage=lambda: usage)
+    run_result = SimpleNamespace(output="a concise summary", usage=usage)
     stub_agent = SimpleNamespace(run=AsyncMock(return_value=run_result))
     with patch(
         "smarter_dev.bot.agents.chat_compaction.get_summarizer_agent",
@@ -393,7 +393,7 @@ async def test_summarise_defaults_cache_tokens_when_usage_lacks_them():
     from types import SimpleNamespace
 
     usage = SimpleNamespace(input_tokens=200, output_tokens=20)
-    run_result = SimpleNamespace(output="summary", usage=lambda: usage)
+    run_result = SimpleNamespace(output="summary", usage=usage)
     stub_agent = SimpleNamespace(run=AsyncMock(return_value=run_result))
     with patch(
         "smarter_dev.bot.agents.chat_compaction.get_summarizer_agent",

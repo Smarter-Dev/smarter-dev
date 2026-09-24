@@ -234,7 +234,7 @@ def _patch_engine(
 def _result(output, all_messages=None, new_messages=None):
     return SimpleNamespace(
         output=output,
-        usage=lambda: None,
+        usage=None,
         all_messages=lambda: all_messages or [],
         new_messages=lambda: new_messages or [],
     )

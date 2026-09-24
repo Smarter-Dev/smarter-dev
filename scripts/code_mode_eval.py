@@ -309,7 +309,7 @@ async def run_case(agent: Agent, case: dict, timeout: float) -> dict[str, Any]:
             agent.run(case["prompt"], deps=deps), timeout=timeout
         )
         answer = result.output
-        usage = result.usage()
+        usage = result.usage
         inp = getattr(usage, "input_tokens", 0) or 0
         out = getattr(usage, "output_tokens", 0) or 0
         reqs = getattr(usage, "requests", 0) or 0

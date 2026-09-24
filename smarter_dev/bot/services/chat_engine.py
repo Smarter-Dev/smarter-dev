@@ -912,7 +912,7 @@ class ChannelEngine:
             if two_stage:
                 tokens = writer_extra_input + writer_extra_output
             else:
-                tokens = _extract_tokens(result.usage())
+                tokens = _extract_tokens(result.usage)
             # A reply too long to send in two messages gets rewritten before
             # dispatch, otherwise ``split_for_discord`` would silently drop its
             # tail. Single-stage first asks the agent to shorten its own draft
@@ -967,7 +967,7 @@ class ChannelEngine:
             # the budgets that *enforce* only exist on override channels. In
             # two-stage mode ``tokens`` already excludes the DRAFTER, so only the
             # answering WRITER's spend is metered here. Compaction runs on its own
-            # summarizer model and its tokens are not in ``result.usage()``, so
+            # summarizer model and its tokens are not in ``result.usage``, so
             # they are not counted here. A free-fallback turn meters into
             # display-only windows so its spend still shows in ``/bot-usage`` but
             # never counts toward the enforced budget.
@@ -1009,7 +1009,7 @@ class ChannelEngine:
                     if first_activation
                     else [m.model_dump(mode="json") for m in agent_input.new_messages]
                 )
-                chat_usage = result.usage()
+                chat_usage = result.usage
                 chat_in = (
                     int(getattr(chat_usage, "input_tokens", 0) or 0)
                     + fit_extra_input
@@ -1661,7 +1661,7 @@ class ChannelEngine:
                 build_writer_prompt(brief, long_term=long_term_memory)
             )
             writer_output_body = writer_result.output
-            writer_usage = writer_result.usage()
+            writer_usage = writer_result.usage
             writer_input = int(getattr(writer_usage, "input_tokens", 0) or 0)
             writer_output = int(getattr(writer_usage, "output_tokens", 0) or 0)
             top_ranked = max(briefing.rankings, key=lambda ranking: ranking.score)

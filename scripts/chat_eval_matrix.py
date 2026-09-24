@@ -133,7 +133,7 @@ async def run_one(
         user_prompt=user_prompt, message_history=history, deps=deps
     )
     dt = time.monotonic() - t0
-    usage = result.usage()
+    usage = result.usage
     output = result.output
     ok, note = grade(scenario_path.stem, output)
     inp = getattr(usage, "input_tokens", 0) or 0

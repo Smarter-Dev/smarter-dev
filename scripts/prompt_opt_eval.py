@@ -457,7 +457,7 @@ async def run_one(agent: Agent, stem: str) -> dict[str, Any]:
     output = result.output
     tool_calls = list(deps.tool_calls)
     passed, notes = _grade_deterministic(stem, output, tool_calls)
-    usage = result.usage()
+    usage = result.usage
     resp = output.response
     return {
         "scenario": stem,

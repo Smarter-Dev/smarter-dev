@@ -319,7 +319,7 @@ async def _summarise_conversation(transcript: str) -> _SummariseResult | None:
         logger.warning("Conversation summariser returned empty output; skipping")
         return None
     try:
-        usage = result.usage()
+        usage = result.usage
         if usage is not None:
             tokens_input = int(usage.input_tokens or 0)
             tokens_output = int(usage.output_tokens or 0)

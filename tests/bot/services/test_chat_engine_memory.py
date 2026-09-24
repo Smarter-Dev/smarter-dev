@@ -114,7 +114,7 @@ def _agent_result(output, *, input_tokens: int = 0, output_tokens: int = 0):
     )
     return SimpleNamespace(
         output=output,
-        usage=lambda: usage,
+        usage=usage,
         all_messages=lambda: [],
         new_messages=lambda: [],
     )
