@@ -1,6 +1,6 @@
 """Stage 4 of the blogging pipeline — Research.
 
-The outer Research stage is a Gemini 3.8 Flash agent whose only tool is
+The outer Research stage is a GPT-6 Luna agent whose only tool is
 ``dig_into``. Each call dispatches a GPT-6 Luna sub-agent that runs its
 own multi-turn search/read loop and returns 4-8 verbatim citations.
 
@@ -29,8 +29,10 @@ from smarter_dev.web.research_tools import brave_search, jina_read
 # annotations via get_type_hints at materialization on the worker, so it must
 # be a real module global (pydantic-ai core only; providers stay worker-side).
 
+# GPT-6 Luna since 2026-09-24, replacing the Gemini 3 Flash preview (Zech:
+# "significantly cheaper"). OpenAI Responses API via OPENAI_API_KEY.
 RESEARCH_MODEL = os.getenv(
-    "BLOGGING_RESEARCH_MODEL", "gemini-3.8-flash"
+    "BLOGGING_RESEARCH_MODEL", "gpt-6-luna"
 )
 RESEARCH_AGENT_NAME = "blogging.research"
 RESEARCHER_SUBAGENT_MODEL = os.getenv(
@@ -202,7 +204,7 @@ async def read_page_for_excerpts(
     return {"url": url, "title": title, "excerpts": excerpts}
 
 
-# ── Outer Research stage (Gemini 3.8 Flash) ──────────────────────────
+# ── Outer Research stage (GPT-6 Luna) ────────────────────────────────
 
 
 @dataclass
@@ -215,11 +217,11 @@ def _build_research_deps(ctx: ResumeContext) -> ResearchDeps:
 
 
 research_agent = skrift.Agent(
-    f"google-gla:{RESEARCH_MODEL}",
+    f"openai-responses:{RESEARCH_MODEL}",
     name=RESEARCH_AGENT_NAME,
     system_prompt=_PROMPT,
     output_type=ResearchOutput,
-    model_settings={"google_thinking_config": {"thinking_level": "MEDIUM"}},
+    model_settings={"openai_reasoning_effort": "medium"},
     deps_type=ResearchDeps,
     deps_factory=_build_research_deps,
 )
