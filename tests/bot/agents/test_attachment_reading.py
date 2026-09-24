@@ -146,7 +146,6 @@ async def test_binary_attachment_reports_the_limit_instead_of_guessing():
         "application/x-7z-compressed",
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "application/x-sqlite3",
-        "application/x-msdownload",
         "video/mp4",
     ],
 )

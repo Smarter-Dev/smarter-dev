@@ -371,7 +371,7 @@ def _looks_like_audio(data: bytes) -> bool:
 # look like. Anything else may be text (Discord labels by extension from an
 # undocumented table, so e.g. .ps1 or .tex may carry an application/ type).
 _BINARY_TYPE_PREFIXES = (
-    "image/", "audio/", "video/", "font/", "model/",
+    "image/", "audio/", "video/", "font/",
     "application/vnd.openxmlformats-officedocument.",
     "application/vnd.oasis.opendocument.",
     "application/vnd.ms-",
@@ -381,8 +381,8 @@ _BINARY_TYPES = frozenset({
     "application/x-gzip", "application/x-tar", "application/x-7z-compressed",
     "application/x-rar-compressed", "application/vnd.rar", "application/x-bzip2",
     "application/x-xz", "application/zstd", "application/java-archive",
-    "application/vnd.android.package-archive", "application/x-msdownload",
-    "application/x-executable", "application/x-mach-binary",
+    "application/vnd.android.package-archive", "application/x-executable",
+    "application/x-mach-binary",
     "application/x-sharedlib", "application/x-sqlite3", "application/vnd.sqlite3",
     "application/x-shockwave-flash", "application/wasm", "application/msword",
     "application/x-iso9660-image", "application/x-apple-diskimage",
@@ -436,7 +436,8 @@ async def _read_discord_attachment(url: str, instruction: str) -> dict[str, str]
     Jina cannot be relied on to fetch Discord's signed CDN URLs, so the bytes
     come straight from Discord (size- and time-bounded by ``fetch_bytes``) and
     are routed on the file itself: images and audio to the media reader, PDFs
-    to pdfplumber, UTF-8 text summarized as text. Anything else — video,
+    to pdfplumber, text (UTF-8, BOM-marked UTF-16/32, or Windows-1252 when
+    labelled text/) summarized as text. Anything else — video,
     archives, other binaries — is reported as unsupported rather than guessed.
     """
     fetched = await web_fetch.fetch_bytes(url)
