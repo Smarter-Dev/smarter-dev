@@ -216,6 +216,31 @@ def test_scan_gif_rejects_malformed_gifs():
     assert scan_gif(b"\x89PNG\r\n\x1a\n") is None
 
 
+def _placed(gif: bytes, frame: int, x0: int, y0: int) -> bytes:
+    """``gif`` with its ``frame``-th image descriptor moved to (x0, y0)."""
+    at = -1
+    for _ in range(frame + 1):
+        at = gif.index(b"\x2c", at + 1)
+        while gif[at + 5 : at + 9] != struct.pack("<HH", 10, 10):  # a 10x10 frame
+            at = gif.index(b"\x2c", at + 1)
+    return gif[: at + 1] + struct.pack("<HH", x0, y0) + gif[at + 5 :]
+
+
+def _ten_by_ten(frames: int) -> bytes:
+    images = [Image.new("RGB", (10, 10), (i * 40, 0, 0)) for i in range(frames)]
+    return _encode(images[0], "GIF", save_all=True, append_images=images[1:], duration=50)
+
+
+@pytest.mark.parametrize("frame", [0, 1])
+def test_a_frame_placed_past_the_canvas_grows_it_and_is_not_decoded(frame):
+    # Pillow enlarges the canvas to x0 + width by y0 + height while seeking; the
+    # review's probe: 10 x 10 canvas, a frame at (6000, 6000), +339 MiB decoded.
+    gif = _placed(_ten_by_ten(2), frame, 6000, 6000)
+
+    assert scan_gif(gif) == (2, 6010 * 6010)
+    assert prepare_image(gif, "image/gif") == ([(gif, "image/gif")], "")
+
+
 async def test_conversions_run_one_at_a_time(monkeypatch):
     running = peak = 0
 
@@ -248,7 +273,10 @@ async def test_images_needing_no_work_skip_the_queue(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# Peak memory, measured in a fresh process at the caps. VmHWM, not ru_maxrss:
+# Peak memory, measured in a fresh process at the caps, for these inputs only.
+# The request body here is the base64 JSON built below; the SDK's own
+# serialization (pydantic-ai, the OpenAI client, httpx) makes further copies
+# that this does not include. VmHWM, not ru_maxrss:
 # Linux carries ru_maxrss across exec, so a child of this (large) test process
 # would start at its parent's peak and show no growth at all. tracemalloc misses
 # Pillow's allocations. The baseline is taken before the input is read, and
@@ -358,11 +386,17 @@ def test_reproduced_inputs_are_not_decoded(tmp_path):
 
     refused = _measure(tmp_path, "rev.bmp", bmp, "image/bmp")
     passed = _measure(tmp_path, "rev.gif", _canvas_gif(6000, 6000, 40), "image/gif")
+    # The second review's probe: a 10 x 10 GIF whose later frame sits at
+    # (11000, 11000), which grew an unguarded decode by 1098 MiB.
+    placed = _measure(
+        tmp_path, "placed.gif", _placed(_ten_by_ten(2), 1, 11000, 11000), "image/gif"
+    )
 
     # The input itself is held (18 MB for the BMP); nothing is decoded.
     assert refused["types"] == []
     assert refused["growth_mib"] < refused["input_mb"] + 5
     assert passed["types"] == ["image/gif"] and passed["growth_mib"] < 5
+    assert placed["types"] == ["image/gif"] and placed["growth_mib"] < 5
 
 
 # --------------------------------------------------------------------------- #
