@@ -246,6 +246,8 @@ class Coordinator:
         self._stop_hooks: list[Callable[[], Any]] = []
         self._waiting_logged = False
         self._peers_checked_at: float | None = None
+        # Unix time another bot pod was last seen running, if ever.
+        self.peer_seen_running_at: float | None = None
 
     @property
     def acting(self) -> bool:
@@ -314,6 +316,7 @@ class Coordinator:
         self._peers_checked_at = now
         if await self._predecessor_gone():
             return True
+        self.peer_seen_running_at = time.time()
         if not self._waiting_logged:
             self._waiting_logged = True
             logger.info("lease free without a handover; waiting for the other bot pod to stop")
@@ -391,10 +394,14 @@ class Coordinator:
         if self.acting_since <= due:
             return True
         # We took over after it fell due: send it only if our predecessor had
-        # already stopped by then. Without a handover record it crashed or
-        # never coordinated; sending risks a duplicate, skipping risks a loss,
-        # and a crash rarely lands on the second a message falls due.
-        return self.handover is None or self.handover.stopped_at <= due
+        # already stopped by then.
+        if self.handover is not None:
+            return self.handover.stopped_at <= due
+        # No record: if we saw its pod running after it fell due, it may have
+        # sent it. Otherwise it had crashed; sending risks a duplicate only if
+        # the crash landed on the second the message fell due.
+        seen = self.peer_seen_running_at
+        return seen is None or seen < due
 
     async def stop_acting(self, handled: Iterable[str] = ()) -> None:
         """Stop acting now, leave a handover record, and release the lease."""
