@@ -7,9 +7,10 @@ metadata:
     labels:
         app: smarter-dev-bot
 spec:
-    # RollingUpdate keeps the old bot connected while the new one pulls its
-    # image and starts. Recreate saved the surge memory but took the bot off
-    # Discord for 2m08s on 2026-09-24; availability wins.
+    # RollingUpdate keeps the old bot connected while the new pod pulls its
+    # image, which Recreate did not (2m08s off Discord on 2026-09-24). The
+    # readiness probe only checks the process exists, so the old bot still
+    # stops before the new one reaches Discord; #19 closes that gap.
     strategy:
         type: RollingUpdate
         rollingUpdate:
