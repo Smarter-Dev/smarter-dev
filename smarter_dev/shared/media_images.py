@@ -18,7 +18,8 @@ model. It runs inside the bot's container, which idles ~70 MiB under its 512Mi
 limit, so memory is bounded before any pixel data is decoded:
 
 1. The header alone decides. An image over ``MAX_DECODE_PIXELS``, or a GIF
-   whose canvas or any frame is, is never decoded. A GIF is also refused over
+   whose canvas is once grown to fit every frame's position and size, is
+   never decoded. A GIF is also refused over
    ``MAX_GIF_BYTES``, over ``MAX_GIF_COUNT`` frames, or when every frame up to
    the last sampled one (``seek`` decodes them in order) would pass
    ``MAX_GIF_DECODE_PIXELS``. Frames are counted from the GIF's block
@@ -26,8 +27,10 @@ limit, so memory is bounded before any pixel data is decoded:
 2. A refused GIF goes as it arrived, and the model reads its first frame as it
    always did. A refused BMP cannot (the model refuses BMP), so it raises
    ``ImageTooLarge`` and the reader answers with that message.
-3. Only BMP and GIF ever reach a Pillow decoder (``formats=``), one conversion
-   at a time per process (``prepare_image_bounded``).
+3. Only BMP and GIF ever reach a Pillow decoder (``formats=``), one decode at
+   a time per process (``prepare_image_bounded``). That serializes only the
+   decode: the input, the PNG parts and the request copies stay held through
+   each model call, so concurrent reads still add their retained bytes (#25).
 
 Measured peaks are in PR #99 and ``tests/bot/agents/test_media_image_formats``.
 """
@@ -37,6 +40,7 @@ from __future__ import annotations
 import asyncio
 import io
 import logging
+import struct
 
 from PIL import Image
 
@@ -57,8 +61,9 @@ MAX_SIDE = 2048
 # sniffer and URL extensions admit PNG, JPEG, GIF, WebP and BMP).
 _CONVERTIBLE_FORMATS = {"image/bmp": "BMP"}
 
-# One conversion at a time per process, shared by every caller in it, so two
-# images arriving together cannot add their peaks.
+# One decode at a time per process, shared by every caller in it, so two
+# images arriving together cannot add their decode peaks. What each read keeps
+# for its model call (input, PNG parts, request body) is not bounded here.
 _conversions = asyncio.Semaphore(1)
 
 
@@ -115,19 +120,14 @@ def _prepare_gif(data: bytes) -> tuple[list[tuple[bytes, str]], str]:
     scan = scan_gif(data)
     if scan is None:
         return as_is
-    total, largest_frame = scan
-    if total < 2 or largest_frame > MAX_DECODE_PIXELS:
+    total, canvas = scan
+    # The last frame is always sampled, and seek() decodes every frame before
+    # it onto the (grown) canvas, so all ``total`` frames are decoded at that
+    # size.
+    if total < 2 or canvas > MAX_DECODE_PIXELS or total * canvas > MAX_GIF_DECODE_PIXELS:
         return as_is
     try:
         with Image.open(io.BytesIO(data), formats=["GIF"]) as image:
-            width, height = image.size
-            # The last frame is always sampled, and seek() decodes every frame
-            # before it, so all ``total`` frames are decoded.
-            if (
-                width * height > MAX_DECODE_PIXELS
-                or total * width * height > MAX_GIF_DECODE_PIXELS
-            ):
-                return as_is
             count = min(MAX_GIF_FRAMES, total)
             # First and last always included; the rest spread between them.
             indices = sorted({round(i * (total - 1) / (count - 1)) for i in range(count)})
@@ -147,31 +147,36 @@ def _prepare_gif(data: bytes) -> tuple[list[tuple[bytes, str]], str]:
 
 
 def scan_gif(data: bytes) -> tuple[int, int] | None:
-    """``(frames, largest frame in pixels)`` from a GIF's blocks, decoding none.
+    """``(frames, canvas in pixels)`` from a GIF's blocks, decoding none.
 
-    Returns None for anything that is not a well-formed GIF up to its trailer,
-    and for one of more than ``MAX_GIF_COUNT`` frames (counting stops there).
+    The canvas is the one Pillow will decode into: the logical screen, grown to
+    reach past any frame placed beyond it (``GifImagePlugin`` enlarges it to
+    ``x0 + width`` by ``y0 + height`` while seeking, and only warns). Returns
+    None for anything that is not a well-formed GIF up to its trailer, and for
+    one of more than ``MAX_GIF_COUNT`` frames (counting stops there).
     """
     if len(data) < 13 or data[:6] not in (b"GIF87a", b"GIF89a"):
         return None
+    canvas_w = data[6] | data[7] << 8
+    canvas_h = data[8] | data[9] << 8
     pos = 13
     if data[10] & 0x80:  # global colour table
         pos += 3 << ((data[10] & 0x07) + 1)
-    frames = largest = 0
+    frames = 0
     try:
         while True:
             block = data[pos]
             if block == 0x3B:  # trailer
-                return frames, largest
+                return frames, canvas_w * canvas_h
             if block == 0x21:  # extension: label, then sub-blocks
                 pos += 2
             elif block == 0x2C:  # image descriptor, then optional local table
                 frames += 1
                 if frames > MAX_GIF_COUNT:
                     return None
-                width = data[pos + 5] | data[pos + 6] << 8
-                height = data[pos + 7] | data[pos + 8] << 8
-                largest = max(largest, width * height)
+                x0, y0, width, height = struct.unpack_from("<HHHH", data, pos + 1)
+                canvas_w = max(canvas_w, x0 + width)
+                canvas_h = max(canvas_h, y0 + height)
                 flags = data[pos + 9]
                 pos += 10
                 if flags & 0x80:
@@ -182,7 +187,7 @@ def scan_gif(data: bytes) -> tuple[int, int] | None:
             while (size := data[pos]) != 0:  # sub-blocks up to the terminator
                 pos += size + 1
             pos += 1
-    except IndexError:
+    except (IndexError, struct.error):
         return None
 
 
