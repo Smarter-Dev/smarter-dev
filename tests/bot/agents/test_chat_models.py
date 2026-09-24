@@ -12,6 +12,7 @@ import pytest
 from smarter_dev.bot.agents.chat_models import (
     BriefingDecision,
     MessageScore,
+    TurnDecision,
     WriterBrief,
     WriterOutput,
 )
@@ -176,3 +177,15 @@ def test_writer_output_without_voice_summary():
 def test_writer_output_rejects_empty_message():
     with pytest.raises(ValueError):
         WriterOutput(message="   ")
+
+
+# --------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize("model", [TurnDecision, BriefingDecision])
+def test_required_fields_precede_defaulted_ones(model):
+    """Grok 4.6/4.7 omit a required field that follows optional ones from the
+    output tool call — even after the retry names it — so every Grok turn
+    failed on the missing ``topic`` (2026-09-24)."""
+    required = [field.is_required() for field in model.model_fields.values()]
+    assert required == sorted(required, reverse=True), list(model.model_fields)
