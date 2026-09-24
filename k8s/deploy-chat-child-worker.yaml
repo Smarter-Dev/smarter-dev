@@ -34,7 +34,7 @@ spec:
                 image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
                 # Drain only durable Chat child jobs. Redis fencing remains the
                 # cross-pod hard-five concurrency authority.
-                command: ["uv", "run", "--no-sync", "skrift", "workers", "run", "--queue", "chat-subagents", "--concurrency", "5"]
+                command: ["/app/.venv/bin/skrift", "workers", "run", "--queue", "chat-subagents", "--concurrency", "5"]
                 envFrom:
                   - configMapRef:
                       name: smarter-dev-config
