@@ -1181,7 +1181,7 @@ def _schedule_producer(state: ChannelProducerState) -> None:
             state, time.monotonic(), jev=run.uses_jev_batching
         )
         await asyncio.sleep(delay)
-        task = asyncio.create_task(_run_producer_guarded(state))
+        task = leadership.track(asyncio.create_task(_run_producer_guarded(state)))
         state.producer_tasks.add(task)
         task.add_done_callback(state.producer_tasks.discard)
 
@@ -1666,6 +1666,9 @@ async def on_started(event: hikari.StartedEvent) -> None:
         run.passive_task = asyncio.create_task(_passive_ticker())
         run.recovery_task = asyncio.create_task(_recover_channels(run))
         run.control_task = asyncio.create_task(_control_loop(run))
+        # A process handing over must not take commands it may not finish;
+        # unacked ones are reclaimed by the process that acts next.
+        leadership.on_stop(run.control_task.cancel)
 
 
 @plugin.command

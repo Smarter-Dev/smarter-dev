@@ -16,6 +16,7 @@ import logging
 import hikari
 import lightbulb
 
+from smarter_dev.bot import leadership
 from smarter_dev.bot.agents.mod_tools import build_triage_report_embed
 from smarter_dev.bot.agents.moderation_agent import run_moderation_agent
 from smarter_dev.bot.utils.messages import gather_message_context
@@ -99,10 +100,13 @@ async def on_message_create(event: hikari.GuildMessageCreateEvent) -> None:
         f"({len(event.message.content or '')} chars)"
     )
 
-    # Run moderation in background to not block the event loop
-    asyncio.create_task(
-        _handle_moderation(event, config),
-        name=f"mod_monitor:{event.message.id}",
+    # Run moderation in background to not block the event loop; tracked so a
+    # process handing over finishes it rather than dropping it.
+    leadership.track(
+        asyncio.create_task(
+            _handle_moderation(event, config),
+            name=f"mod_monitor:{event.message.id}",
+        )
     )
 
 

@@ -75,13 +75,16 @@ def ready_to_act(bot: lightbulb.BotApp) -> bool:
 
     Services are set up and plugins loaded before the gateway starts, but
     ``setup_bot_services`` swallows its own failures, so check its result;
-    lightbulb fetches the application on StartedEvent.
+    lightbulb fetches the application on StartedEvent. A standby that cannot
+    reach Redis could not take the lease, so it must not let Kubernetes stop
+    the process that holds it.
     """
     services = getattr(bot, "d", {}).get("_services")
     return (
         gateway_connected(bot)
         and bool(services)
         and getattr(bot, "application", None) is not None
+        and leadership.can_take_over()
     )
 
 
@@ -1429,26 +1432,43 @@ def create_coordination(
     redis = redis_async.from_url(
         settings.effective_redis_url, socket_timeout=2, socket_connect_timeout=2
     )
-    coordinator = leadership.Coordinator(redis, leadership.holder_id())
+    from smarter_dev.bot.peer_pods import predecessor_gone
+
+    coordinator = leadership.Coordinator(
+        redis, leadership.holder_id(), predecessor_gone=predecessor_gone
+    )
     leadership.install(coordinator)
     return coordinator, leadership.EventGate(bot, coordinator)
 
 
 async def drain_accepted_work(gate: leadership.EventGate, budget: float) -> None:
     """Finish what this process accepted before handing over: running
-    listeners, then chat turns queued or running on its engines."""
+    listeners, the background work they started, then chat turns queued or
+    running on its engines."""
     from smarter_dev.bot.services.chat_engine_registry import get_chat_engine_registry
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + budget
+
+    def remaining() -> float:
+        return max(0.0, deadline - loop.time())
+
     listeners = await gate.drain(budget)
+    tracked = await leadership.drain_tracked(remaining())
     registry = get_chat_engine_registry()
-    busy = await registry.drain(max(0.0, deadline - loop.time()))
-    if listeners or busy:
-        logger.warning(
-            f"shutdown budget ran out: {listeners} listeners and chat engines in "
-            f"channels {busy} still busy; their replies are lost"
-        )
+    busy = await registry.drain(remaining())
+    if listeners:
+        logger.warning(f"shutdown budget ran out with {listeners} listeners running")
+    if tracked:
+        names = [task.get_name() for task in tracked]
+        logger.warning(f"shutdown budget ran out; cancelling background work {names}")
+        for task in tracked:
+            task.cancel()
+    if busy:
+        # Cancel rather than wait: closing the gateway cleanly needs the rest
+        # of the grace period.
+        logger.warning(f"shutdown budget ran out; abandoning chat turns in channels {busy}")
+        await registry.abandon(busy)
     await registry.shutdown_all()
     logger.info(f"stopped acting: {gate.summary()}")
 
@@ -2040,7 +2060,7 @@ async def run_bot() -> None:
         logger.info("Shutting down bot...")
         # Hand over first, so the standby acts on every new event while this
         # process finishes what it had already accepted.
-        await coordinator.stop_acting()
+        await coordinator.stop_acting(gate.recent_handled())
         if coordination_task:
             coordination_task.cancel()
         await drain_accepted_work(gate, SHUTDOWN_DRAIN_SECONDS)
