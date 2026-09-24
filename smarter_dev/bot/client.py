@@ -39,7 +39,9 @@ from smarter_dev.shared.config import Settings
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.observability import configure_observability
 
-logger = logging.getLogger(__name__)
+# Named, not __name__: the pod runs this module as __main__, which the bot's
+# logging config (create_bot) leaves at the root WARNING level.
+logger = logging.getLogger("smarter_dev.bot.client")
 
 configure_observability("smarter-dev-bot")
 
