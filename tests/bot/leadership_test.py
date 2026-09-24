@@ -831,6 +831,38 @@ async def test_redis_returning_to_a_sole_holder_hands_it_back_to_the_lease(
     await process.stop()
 
 
+async def test_a_peer_appearing_between_sole_pod_checks_never_acts_beside_the_holder(
+    server, cluster
+) -> None:
+    """The interval after a sole-pod answer: a new pod starts, and Redis
+    returns to the holder before its next check sees the pod."""
+    holder = Process("holder", server, cluster, peer_interval=0.5, sole_pod_seconds=1.5)
+    holder.start()
+    await until(lambda: holder.coordinator.acting)
+    real_eval = holder.redis.eval
+    holder.redis.eval = down
+    await asyncio.sleep(0.9)  # lease expired; acting on the last "only pod" answer
+    assert holder.coordinator.acting
+    assert await holder.redis.get(LEASE_KEY) is None
+
+    newcomer = Process("newcomer", server, cluster)  # reaches Redis, finds it free
+    overlap = Overlap(holder, newcomer)
+    newcomer.start()
+    await asyncio.sleep(0.1)  # before the holder's next check
+    assert not newcomer.coordinator.acting, "no record, and the holder's pod exists"
+    holder.redis.eval = real_eval  # Redis returns inside the interval
+    await until(lambda: not holder.coordinator.degraded, timeout=1)
+    assert await holder.redis.get(LEASE_KEY) == b"holder"
+    await asyncio.sleep(0.5)
+    assert holder.coordinator.acting and not newcomer.coordinator.acting
+
+    await holder.exit()  # the roll: a warm handover with a record
+    await until(lambda: newcomer.coordinator.acting, timeout=1)
+    assert newcomer.coordinator.handover is not None
+    assert not overlap.stop(), "two processes acted at once"
+    await newcomer.stop()
+
+
 async def test_redis_returning_with_the_lease_taken_stands_the_holder_down_at_once(
     server, cluster
 ) -> None:
