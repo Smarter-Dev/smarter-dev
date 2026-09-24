@@ -411,6 +411,15 @@ class WriterBrief(BaseModel):
     verbatim question(s) being answered. The writer — a tool-less large model
     that IS the bot — turns this into a friendly Discord message."""
 
+    # Required before the defaulted lists, as in TurnDecision: Grok drops a
+    # required field that follows optional ones.
+    response_language: str = Field(
+        description=(
+            "Lowercase language name the reply should be written in. Exactly "
+            "`english` for English, including English with incidental foreign "
+            "text, code, or logs."
+        ),
+    )
     message_summaries: list[str] = Field(
         default_factory=list,
         description=(
@@ -431,13 +440,6 @@ class WriterBrief(BaseModel):
     questions: list[str] = Field(
         default_factory=list,
         description="The verbatim question(s) being answered, quoted exactly.",
-    )
-    response_language: str = Field(
-        description=(
-            "Lowercase language name the reply should be written in. Exactly "
-            "`english` for English, including English with incidental foreign "
-            "text, code, or logs."
-        ),
     )
     remembered: list[str] = Field(
         default_factory=list,
