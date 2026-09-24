@@ -102,7 +102,7 @@ def _agent_returning(
     agent.run = AsyncMock(
         return_value=SimpleNamespace(
             output=SimpleNamespace(response=response),
-            usage=lambda: SimpleNamespace(
+            usage=SimpleNamespace(
                 input_tokens=input_tokens, output_tokens=output_tokens
             ),
             new_messages=lambda: list(rerun_messages or []),

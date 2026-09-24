@@ -292,13 +292,13 @@ async def play_two_stage(conversation: Conversation, worker: CatalogModel, write
             play.per_turn.append(TurnRecord(error=f"worker: {type(exc).__name__}: {exc}"))
             print(f"  [two-stage] turn {i + 1} WORKER ERROR: {exc}", file=sys.stderr)
             continue
-        record = TurnRecord(worker=TokenUse.from_usage(worker_run.usage()))
+        record = TurnRecord(worker=TokenUse.from_usage(worker_run.usage))
         briefing: BriefingDecision = worker_run.output
         if briefing.brief is not None:
             try:
                 writer_agent = get_writer_agent(writer.model_id)
                 writer_run = await writer_agent.run(build_writer_prompt(briefing.brief))
-                record.writer = TokenUse.from_usage(writer_run.usage())
+                record.writer = TokenUse.from_usage(writer_run.usage)
                 record.responded = True
             except Exception as exc:  # noqa: BLE001 — keep the worker tokens, note the writer failure
                 record.error = f"writer: {type(exc).__name__}: {exc}"
@@ -329,7 +329,7 @@ async def play_single_stage(conversation: Conversation, large: CatalogModel) -> 
             continue
         decision: TurnDecision = run.output
         record = TurnRecord(
-            worker=TokenUse.from_usage(run.usage()),
+            worker=TokenUse.from_usage(run.usage),
             responded=decision.response is not None,
             silent=decision.response is None,
         )

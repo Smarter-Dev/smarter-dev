@@ -148,7 +148,7 @@ async def test_web_summarizer_quality(model_key: str):
         result = await agent.run(_summary_prompt(case))
         elapsed = round(time.monotonic() - started, 3)
         summary = result.output.strip()
-        usage = result.usage()
+        usage = result.usage
         assert summary, f"{model_key}/{case.case_id} returned an empty summary"
         case_results.append(
             {

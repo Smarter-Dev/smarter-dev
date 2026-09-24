@@ -175,7 +175,7 @@ async def _shorten_with_agent(
     except Exception:
         logger.exception("Shorten re-run failed — falling back to summarizer")
         return _ShortenOutcome(None, 0, 0, [])
-    usage = result.usage()
+    usage = result.usage
     input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
     output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
     response = result.output.response
@@ -192,7 +192,7 @@ async def _summarize_with_luna(message: str) -> str | None:
     except Exception:
         logger.exception("Length summarizer failed — falling back to truncation")
         return None
-    usage = result.usage()
+    usage = result.usage
     logger.info(
         "Length summarizer condensed %d chars -> %d (tokens in=%s out=%s)",
         len(message),

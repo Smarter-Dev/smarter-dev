@@ -369,7 +369,7 @@ async def run_scenario(
         result.worker.error = f"{type(exc).__name__}: {exc}"
         return result
 
-    result.worker.tokens = TokenUse.from_usage(worker_run.usage())
+    result.worker.tokens = TokenUse.from_usage(worker_run.usage)
     briefing: BriefingDecision = worker_run.output
 
     if briefing.brief is None:
@@ -386,7 +386,7 @@ async def run_scenario(
         result.writer.error = f"{type(exc).__name__}: {exc}"
         return result
 
-    result.writer.tokens = TokenUse.from_usage(writer_run.usage())
+    result.writer.tokens = TokenUse.from_usage(writer_run.usage)
     result.writer_message = writer_run.output.message
     result.writer_voice_summary = writer_run.output.voice_summary
     return result
