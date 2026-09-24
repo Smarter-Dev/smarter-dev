@@ -1,47 +1,47 @@
-"""Keep the bot acting exactly once while a deploy overlaps two of them.
+"""Hand the bot over between processes during a deploy, one actor at a time.
 
-A deploy connects the new bot while the old one is still connected, so for a
-while two gateway sessions receive every event. Without coordination both
-would delete the same spam, time out the same member, answer the same command
-and send the same scheduled message; and if the old one stopped before the
-new one connected, nobody would.
+A deploy connects the new bot while the old one is still connected, and for
+a while both gateway sessions receive every event. Only one of them may act,
+or automod deletes, times out and warns twice and every reply doubles. And
+the old one must keep acting until the new one can take over, or nobody acts.
 
-Two mechanisms, both in the Redis the bot already uses:
+One Redis key, the *acting lease*, says which process acts:
 
-- **Gateway events are claimed one by one.** Each connected bot fills its
-  cache from every event as usual, but before running listeners it claims the
-  event in Redis (``SET NX`` on a hash of the event's name and payload). Only
-  the bot that wins runs the listeners, so there is no moment at which an
-  event belongs to nobody, and no event runs twice. A stopping bot claims
-  nothing new and finishes what it claimed. Should two sessions ever receive
-  different payloads for one event, both run it: a duplicate, never a loss.
-- **Timed sends are claimed too.** Scheduled, repeating, challenge and quest
-  messages are queued by every connected bot and claimed (``claim``) at send
-  time, so whichever bot is still alive sends each one, once.
-- **Other background work follows a lease.** Loops that are not keyed sends
-  run only on the leader: ``StartedEvent``, which starts most of them, is
-  held back until the lease is won, and the remaining loops check
-  ``is_leader()`` before each pass. On SIGTERM the old bot releases the lease
-  and the new one takes it on its next poll; a pass skipped in between runs on
-  the next tick.
+- **Standby.** A bot that finds the lease held connects, initializes and
+  reports Ready, but runs no gateway listener and no timed send. Kubernetes
+  stops the old bot once the standby is Ready.
+- **Handover.** On SIGTERM the old bot stops acting and releases the lease at
+  once, and the standby, polling every ``poll_interval``, takes it and acts.
+  The old bot then finishes the work it had already accepted (``run_bot``).
+- **Bootstrap.** A bot that finds the lease free cannot tell a crashed
+  predecessor from one that never coordinates (the first deploy of this code
+  replaces a bot without it). It reports Ready so Kubernetes stops any such
+  predecessor, and takes the lease only after ``bootstrap_delay``.
 
-Redis failures fail open: a bot that cannot claim an event runs it, and a bot
-with no reachable leader takes the lease over once the outage outlasts it. A
-Redis outage during a deploy can therefore duplicate events, but never
-silences the bot.
+Steady state is unchanged: one bot, holding the lease, renewing it every few
+seconds; no Redis call on any event path.
+
+What this does not guarantee, measured or bounded rather than hidden:
+
+- Events that reach either session between the old bot stopping and the new
+  one taking the lease (one poll, plus a Redis round trip) are handled by
+  neither.
+- During bootstrap, events after the predecessor stops and before
+  ``bootstrap_delay`` ends are handled by neither.
+- Work already running on the old bot when it stops (a moderation action, a
+  chat turn) finishes there; if it outlasts the grace period it is cut off.
+- If the acting bot loses Redis it keeps acting, and a standby takes over
+  only after the outage outlasts the lease; the two can then both act until
+  Kubernetes stops the old one. That is logged as degraded coordination.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextvars
-import hashlib
-import json
 import logging
 import os
 import time
 import uuid
-from collections.abc import Awaitable
 from collections.abc import Callable
 from typing import Any
 
@@ -50,13 +50,15 @@ from hikari.events import shard_events
 
 logger = logging.getLogger(__name__)
 
-LEADER_KEY = "smarter-dev:bot:leader"
-CLAIM_PREFIX = "smarter-dev:bot:claim"
-CLAIM_TTL_MS = 10 * 60 * 1000
+LEASE_KEY = "smarter-dev:bot:acting"
+# How long a queued timed send on a standby waits for a handover in progress;
+# covers the bootstrap delay, so nothing due during bootstrap is dropped.
+HANDOVER_WAIT_SECONDS = 30.0
+RELEASED_AT_KEY = "smarter-dev:bot:released-at"
 
 # Only the holder may extend or delete the lease; a bot that lost it must not
-# clobber the new holder's. A leader whose lease lapsed with nobody taking it
-# (a pause, or a Redis outage it led through) takes it back.
+# clobber the new holder's. A holder whose lease lapsed with nobody taking it
+# (a pause, or a Redis outage it acted through) takes it back.
 _RENEW = """
 local holder = redis.call('get', KEYS[1])
 if holder == ARGV[1] then
@@ -75,35 +77,49 @@ end
 return 0
 """
 
-_current: Leadership | None = None
+_current: Coordinator | None = None
 
 
-def is_leader() -> bool:
-    """Whether this process should act. True when no lease is in use."""
-    return _current is None or _current.is_leader
-
-
-async def claim(key: str, ttl_ms: int | None = None) -> bool:
-    """Whether this bot should do the one-off action ``key``; first caller wins.
-
-    For work every connected bot would otherwise do, such as sending a
-    scheduled message at its time. True when no lease is in use, and when
-    Redis fails (duplicates beat silence).
-    """
-    return _current is None or await _current.claim(key, ttl_ms)
-
-
-def install(leadership: Leadership | None) -> None:
+def install(coordinator: Coordinator | None) -> None:
     global _current
-    _current = leadership
+    _current = coordinator
+
+
+def is_acting() -> bool:
+    """Whether this process may act. True when no coordinator is installed."""
+    return _current is None or _current.acting
+
+
+def coordination_degraded() -> bool:
+    """Whether Redis is failing, so a second process could act alongside."""
+    return _current is not None and _current.degraded
+
+
+async def wait_until_acting(timeout: float) -> bool:
+    """Wait up to ``timeout`` for this process to act; False if it never will."""
+    if _current is None:
+        return True
+    return await _current.wait_until_acting(timeout)
+
+
+async def should_send(due: float, *, wait: float) -> bool:
+    """Whether this process sends a timed message that fell due at ``due``.
+
+    ``due`` is a Unix time. Every process queues timed messages, so exactly one
+    must send each: the one that was acting when it fell due. A standby waits
+    up to ``wait`` seconds for a handover in progress before deciding.
+    """
+    if _current is None:
+        return True
+    return await _current.should_send(due, wait=wait)
 
 
 def holder_id() -> str:
     return f"{os.environ.get('HOSTNAME', 'local')}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 
 
-class Leadership:
-    """Hold, renew and release the leader lease in Redis."""
+class Coordinator:
+    """This process's hold on the acting lease."""
 
     def __init__(
         self,
@@ -112,108 +128,152 @@ class Leadership:
         *,
         ttl: float = 15.0,
         renew_interval: float = 5.0,
-        poll_interval: float = 0.5,
+        poll_interval: float = 0.1,
+        bootstrap_delay: float = 20.0,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._redis = redis
         self.holder = holder
-        self._ttl_ms = int(ttl * 1000)
         self._ttl = ttl
+        self._ttl_ms = int(ttl * 1000)
         self._renew_interval = renew_interval
         self._poll_interval = poll_interval
+        self._bootstrap_delay = bootstrap_delay
         self._clock = clock
-        self.is_leader = False
-        self._stepping_down = False
+
+        self.acting = False
+        self.stopping = False
+        self.degraded = False
+        # Unix times: when this process started acting, and when the process
+        # before it stopped (None if unknown: it crashed or never recorded it).
+        self.acting_since: float | None = None
+        self.predecessor_stopped_at: float | None = None
+        self._acting_changed = asyncio.Event()
+        self._on_acting: list[Callable[[], Any]] = []
         self._redis_ok_at = clock()
 
-    async def run(self, on_acquire: Callable[[], Awaitable[None]]) -> None:
-        """Contend for the lease until ``step_down``; call ``on_acquire`` on each win."""
+    def on_acting(self, callback: Callable[[], Any]) -> None:
+        """Call ``callback`` once, when this process first acts."""
+        self._on_acting.append(callback)
+
+    async def run(self) -> None:
+        """Take the lease and keep it; call once the bot is connected and ready."""
         self._redis_ok_at = self._clock()
-        while not self._stepping_down:
+        earliest = self._clock()
+        try:
+            if not await self._redis.exists(LEASE_KEY):
+                earliest += self._bootstrap_delay
+                logger.info(
+                    "no bot holds the lease; taking it in %.0fs", self._bootstrap_delay
+                )
+            else:
+                logger.info("standing by for the lease")
+        except Exception as error:  # noqa: BLE001
+            earliest += self._bootstrap_delay
+            self._set_degraded(True, error)
+
+        while not self.stopping:
+            now = self._clock()
             try:
-                if self.is_leader:
+                if self.acting:
                     await self._renew()
-                elif await self._redis.set(
-                    LEADER_KEY, self.holder, nx=True, px=self._ttl_ms
+                elif now >= earliest and await self._redis.set(
+                    LEASE_KEY, self.holder, nx=True, px=self._ttl_ms
                 ):
-                    await self._become_leader(on_acquire, "took the lease")
-                self._redis_ok_at = self._clock()
+                    stopped_at = await self._redis.get(RELEASED_AT_KEY)
+                    self.predecessor_stopped_at = float(stopped_at) if stopped_at else None
+                    self._start_acting("took the lease")
+                self._redis_ok_at = now
+                self._set_degraded(False)
             except asyncio.CancelledError:
                 raise
             except Exception as error:  # noqa: BLE001 - any Redis failure
-                outage = self._clock() - self._redis_ok_at
-                if not self.is_leader and outage > self._ttl:
-                    await self._become_leader(
-                        on_acquire, f"Redis unreachable for {outage:.0f}s ({error})"
-                    )
-                else:
-                    logger.warning("leader lease check failed: %s", error)
+                self._set_degraded(True, error)
+                outage = now - self._redis_ok_at
+                if not self.acting and now >= earliest and outage > self._ttl:
+                    self._start_acting(f"Redis unreachable for {outage:.0f}s")
             await asyncio.sleep(
-                self._renew_interval if self.is_leader else self._poll_interval
+                self._renew_interval if self.acting else self._poll_interval
             )
 
     async def _renew(self) -> None:
-        if not await self._redis.eval(_RENEW, 1, LEADER_KEY, self.holder, self._ttl_ms):
-            self.is_leader = False
-            logger.error("lost the leader lease to another bot; standing by")
+        if not await self._redis.eval(_RENEW, 1, LEASE_KEY, self.holder, self._ttl_ms):
+            # Another process holds it; it acts now, so we must not.
+            self.acting = False
+            self._acting_changed.set()
+            logger.error("lost the acting lease to another bot; standing by")
 
-    async def _become_leader(
-        self, on_acquire: Callable[[], Awaitable[None]], reason: str
-    ) -> None:
-        if self._stepping_down:
+    def _start_acting(self, reason: str) -> None:
+        if self.stopping:
             return
-        self.is_leader = True
-        logger.info("leader: %s (%s)", reason, self.holder)
-        try:
-            await on_acquire()
-        except Exception:
-            logger.exception("leader start-up hook failed")
+        self.acting = True
+        self.acting_since = time.time()
+        self._acting_changed.set()
+        logger.info("acting: %s (%s)", reason, self.holder)
+        callbacks, self._on_acting = self._on_acting, []
+        for callback in callbacks:
+            try:
+                callback()
+            except Exception:
+                logger.exception("acting start-up hook failed")
 
-    async def claim(self, key: str, ttl_ms: int | None = None) -> bool:
-        try:
-            return bool(
-                await self._redis.set(
-                    f"{CLAIM_PREFIX}:{key}",
-                    self.holder,
-                    nx=True,
-                    px=ttl_ms or CLAIM_TTL_MS,
-                )
-            )
-        except Exception as error:  # noqa: BLE001 - fail open
-            logger.warning("claim for %s failed, acting anyway: %s", key, error)
+    def _set_degraded(self, degraded: bool, error: Exception | None = None) -> None:
+        if degraded and not self.degraded:
+            logger.warning("coordination degraded, Redis unreachable: %s", error)
+        elif not degraded and self.degraded:
+            logger.info("coordination restored")
+        self.degraded = degraded
+
+    async def wait_until_acting(self, timeout: float) -> bool:
+        deadline = self._clock() + timeout
+        while not self.acting:
+            if self.stopping:
+                return False
+            remaining = deadline - self._clock()
+            if remaining <= 0:
+                return False
+            self._acting_changed.clear()
+            try:
+                await asyncio.wait_for(self._acting_changed.wait(), min(remaining, 1.0))
+            except TimeoutError:
+                pass
+        return True
+
+    async def should_send(self, due: float, *, wait: float) -> bool:
+        if self.stopping:
+            return False
+        if not self.acting and not await self.wait_until_acting(wait):
+            return False
+        assert self.acting_since is not None
+        if self.acting_since <= due:
             return True
+        # We took over after it fell due: send it only if our predecessor had
+        # already stopped by then. Unknown means it crashed; sending risks a
+        # duplicate, skipping risks losing it, and a crash rarely lands on the
+        # second a message falls due.
+        stopped = self.predecessor_stopped_at
+        return stopped is None or stopped <= due
 
-    async def step_down(self) -> None:
-        """Stop acting now and hand the lease to whoever polls next."""
-        self._stepping_down = True
-        was_leader = self.is_leader
-        self.is_leader = False
-        if not was_leader:
+    async def stop_acting(self) -> None:
+        """Stop acting now and hand the lease to the standby."""
+        self.stopping = True
+        was_acting = self.acting
+        self.acting = False
+        self._acting_changed.set()
+        if not was_acting:
             return
         try:
-            await self._redis.eval(_RELEASE, 1, LEADER_KEY, self.holder)
-            logger.info("leader: released the lease")
+            # Record when we stopped first, so the successor can never read
+            # the lease free without it.
+            await self._redis.set(RELEASED_AT_KEY, str(time.time()), ex=3600)
+            await self._redis.eval(_RELEASE, 1, LEASE_KEY, self.holder)
+            logger.info("released the acting lease")
         except Exception as error:  # noqa: BLE001
             logger.warning(
-                "could not release the leader lease; it expires in %.0fs: %s",
+                "could not release the acting lease; it expires in %.0fs: %s",
                 self._ttl,
                 error,
             )
-
-
-
-# The raw gateway event the current dispatch task came from. hikari runs each
-# gateway event's handling in its own task, created inside consume_raw_event,
-# which copies this context.
-_raw_event: contextvars.ContextVar[tuple[str, str] | None] = contextvars.ContextVar(
-    "raw_gateway_event", default=None
-)
-
-
-def event_key(name: str, payload: Any) -> str:
-    """Same for every session that receives the same gateway event."""
-    body = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    return "event:" + hashlib.sha256(f"{name}:{body}".encode()).hexdigest()[:32]
 
 
 def _is_gateway_event(event: hikari.Event) -> bool:
@@ -224,92 +284,89 @@ def _is_gateway_event(event: hikari.Event) -> bool:
 
 
 class EventGate:
-    """Run each gateway event's listeners on exactly one connected bot.
+    """Run gateway listeners only while this process acts.
 
-    Wraps ``consume_raw_event`` and ``dispatch`` on the bot's event manager.
-    Cache updates and connection-state events (ready, resumed, disconnected)
-    are never gated, so a bot that loses a claim still has a current cache and
-    a correct connection state.
+    Replaces ``dispatch`` on the bot's event manager. Cache updates happen
+    before dispatch and connection-state events (ready, resumed, disconnected)
+    are never gated, so a standby's cache and connection state stay current.
+
+    ``StartedEvent`` reaches the framework's own listener at once (lightbulb
+    fetches the application and syncs commands there, which a standby needs
+    before it can act), and reaches the app's listeners, which start the
+    background work, only once this process acts.
     """
 
-    def __init__(self, event_manager: Any, leadership: Leadership) -> None:
-        self._leadership = leadership
-        self._held_started: hikari.StartedEvent | None = None
+    def __init__(self, app: Any, coordinator: Coordinator) -> None:
+        self._app = app
+        self._coordinator = coordinator
         self._in_flight: set[asyncio.Future[Any]] = set()
         self._started_task: asyncio.Task[Any] | None = None
-        self._closed = False
-        self.claimed = 0
-        self.left_to_other = 0
+        self.handled = 0
+        self.skipped = 0
 
-        # hikari's event manager uses __slots__, so its methods cannot be
+        # hikari's event manager uses __slots__, so ``dispatch`` cannot be
         # replaced on the instance; swap in a subclass that routes through us.
+        event_manager = app.event_manager
         manager_type = type(event_manager)
         original_dispatch = manager_type.dispatch
-        original_consume = manager_type.consume_raw_event
         gate = self
 
         class _GatedEventManager(manager_type):  # type: ignore[misc, valid-type]
             __slots__ = ()
 
-            def consume_raw_event(self, name: str, shard: Any, payload: Any) -> None:
-                token = _raw_event.set((name, event_key(name, payload)))
-                try:
-                    original_consume(self, name, shard, payload)
-                finally:
-                    _raw_event.reset(token)
-
             def dispatch(self, event: hikari.Event) -> asyncio.Future[Any]:
                 return gate.dispatch(event)
 
+        self._event_manager = event_manager
         self._dispatch = lambda event: original_dispatch(event_manager, event)
         event_manager.__class__ = _GatedEventManager
 
     def dispatch(self, event: hikari.Event) -> asyncio.Future[Any]:
-        if isinstance(event, hikari.StartedEvent) and not self._leadership.is_leader:
-            self._held_started = event
-            return _done()
-        raw = _raw_event.get()
-        if raw is None or not _is_gateway_event(event):
+        if isinstance(event, hikari.StartedEvent) and not self._coordinator.acting:
+            return self._start_framework_only(event)
+        if not _is_gateway_event(event):
             return self._dispatch(event)
-        if self._closed:
+        if not self._coordinator.acting:
+            self.skipped += 1
             return _done()
-        future = asyncio.ensure_future(self._claim_then_dispatch(*raw, event))
+        self.handled += 1
+        future = self._dispatch(event)
         self._in_flight.add(future)
         future.add_done_callback(self._in_flight.discard)
         return future
 
-    async def _claim_then_dispatch(self, name: str, key: str, event: hikari.Event) -> None:
-        if await self._leadership.claim(key):
-            self.claimed += 1
-            await self._dispatch(event)
-        else:
-            # Only happens while another bot is connected, i.e. during a roll.
-            self.left_to_other += 1
-            logger.info("%s handled by the other connected bot", name)
+    def _start_framework_only(self, event: hikari.StartedEvent) -> asyncio.Future[Any]:
+        listeners = self._event_manager.get_listeners(hikari.StartedEvent)
+        framework = [cb for cb in listeners if getattr(cb, "__self__", None) is self._app]
+        app_listeners = [cb for cb in listeners if cb not in framework]
 
-    async def on_acquire(self) -> None:
-        """Start the leader-only work that ``StartedEvent`` listeners own."""
-        event, self._held_started = self._held_started, None
-        if event is not None:
-            # Its listeners can run for minutes; the lease must keep renewing.
-            self._started_task = asyncio.create_task(self._dispatch(event))
+        def start_app_work() -> None:
+            self._started_task = asyncio.ensure_future(
+                asyncio.gather(*(_run_listener(cb, event) for cb in app_listeners))
+            )
 
-    def close(self) -> None:
-        """Claim no more events; the other connected bot takes them all."""
-        self._closed = True
-        logger.info(
-            "stopped claiming events: handled %d, left %d to another bot",
-            self.claimed,
-            self.left_to_other,
+        self._coordinator.on_acting(start_app_work)
+        return asyncio.ensure_future(
+            asyncio.gather(*(_run_listener(cb, event) for cb in framework))
         )
 
     async def drain(self, timeout: float) -> int:
-        """Wait for claimed events still running; return how many outlasted it."""
+        """Wait for listeners already running; return how many outlasted it."""
         pending = set(self._in_flight)
         if not pending:
             return 0
         _, still_running = await asyncio.wait(pending, timeout=timeout)
         return len(still_running)
+
+    def summary(self) -> str:
+        return f"handled {self.handled} events, skipped {self.skipped} while not acting"
+
+
+async def _run_listener(callback: Callable[[Any], Any], event: hikari.Event) -> None:
+    try:
+        await callback(event)
+    except Exception:
+        logger.exception("StartedEvent listener %s failed", getattr(callback, "__name__", callback))
 
 
 def _done() -> asyncio.Future[Any]:

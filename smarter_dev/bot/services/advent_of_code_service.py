@@ -125,7 +125,7 @@ class AdventOfCodeService(BaseService):
         """Main loop for scheduling Advent of Code thread creation."""
         while self._running:
             try:
-                if leadership.is_leader():
+                if leadership.is_acting():
                     await self._check_and_create_threads()
             except asyncio.CancelledError:
                 break

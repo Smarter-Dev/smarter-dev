@@ -167,10 +167,9 @@ class ScheduledMessageService(BaseService):
                 logger.info(f"Queuing message '{title}' to send in {delay_seconds:.1f} seconds")
                 await asyncio.sleep(delay_seconds)
 
-            # Send the message at exactly the scheduled time. Every connected
-            # bot queues it; the first to claim it sends.
-            if await leadership.claim(
-                f"scheduled-message:{message_id}:{scheduled_time_str}"
+            # Send the message at exactly the scheduled time. Every process queues it; only the one acting when it fell due sends it.
+            if await leadership.should_send(
+                scheduled_time.timestamp(), wait=leadership.HANDOVER_WAIT_SECONDS
             ):
                 await self._send_scheduled_message(message_data)
 

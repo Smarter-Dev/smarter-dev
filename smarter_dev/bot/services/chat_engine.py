@@ -265,6 +265,11 @@ class ChannelEngine:
         """
         return datetime.now(UTC) - self.last_sent_at > INACTIVITY_TIMEOUT
 
+    @property
+    def is_idle(self) -> bool:
+        """No turn running, none queued and none about to fire."""
+        return not (self.run_lock.locked() or self.queue or self.fire_event.is_set())
+
     def start(self) -> None:
         """Begin the background runner. Call once after construction."""
         if self._runner_task is None:

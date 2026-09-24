@@ -130,8 +130,10 @@ class QuestService(BaseService):
             if delay > 0:
                 await asyncio.sleep(delay)
 
-            # Every connected bot queues it; the first to claim it announces.
-            if await leadership.claim(f"quest-announcement:{quest_id}"):
+            # Every process queues it; only the one acting when it fell due sends it.
+            if await leadership.should_send(
+                release_time.timestamp(), wait=leadership.HANDOVER_WAIT_SECONDS
+            ):
                 await self._announce_quest(quest)
 
         finally:

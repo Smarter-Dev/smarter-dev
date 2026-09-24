@@ -8,8 +8,9 @@ metadata:
         app: smarter-dev-bot
 spec:
     # RollingUpdate keeps the old bot acting until the new one is connected
-    # (readiness below); Recreate took the bot off Discord for 2m08s on
-    # 2026-09-24. While both are connected, each event runs on one of them.
+    # and set up (readiness below); Recreate took the bot off Discord for
+    # 2m08s on 2026-09-24. While both run, only the one holding the Redis
+    # acting lease acts (smarter_dev/bot/leadership.py).
     strategy:
         type: RollingUpdate
         rollingUpdate:
@@ -158,10 +159,10 @@ spec:
                     periodSeconds: 30
                     timeoutSeconds: 5
                     failureThreshold: 3
-                # Ready means the gateway is connected, so a roll keeps the
-                # old bot until the new one can take its events (see
-                # smarter_dev/bot/leadership.py). Liveness stays process-level:
-                # a Discord outage must not restart the bot.
+                # Ready means connected with services and commands set up, so
+                # a roll keeps the old bot until the new one could act.
+                # Liveness stays process-level: a Discord outage must not
+                # restart the bot.
                 readinessProbe:
                     httpGet:
                         path: /ready
@@ -169,6 +170,6 @@ spec:
                     periodSeconds: 5
                     timeoutSeconds: 3
                     failureThreshold: 2
-            # Covers the 40s drain of claimed events in run_bot.
+            # Covers the 40s drain of accepted work in run_bot.
             terminationGracePeriodSeconds: 60
             restartPolicy: Always

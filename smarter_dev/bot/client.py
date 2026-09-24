@@ -70,6 +70,21 @@ def gateway_connected(bot: lightbulb.BotApp) -> bool:
     )
 
 
+def ready_to_act(bot: lightbulb.BotApp) -> bool:
+    """Connected, and everything a listener needs is set up.
+
+    Services are set up and plugins loaded before the gateway starts, but
+    ``setup_bot_services`` swallows its own failures, so check its result;
+    lightbulb fetches the application on StartedEvent.
+    """
+    services = getattr(bot, "d", {}).get("_services")
+    return (
+        gateway_connected(bot)
+        and bool(services)
+        and getattr(bot, "application", None) is not None
+    )
+
+
 async def start_health_server(bot: lightbulb.BotApp, port: int = 8080) -> web.AppRunner:
     """Start a lightweight HTTP server for health checks.
 
@@ -88,12 +103,15 @@ async def start_health_server(bot: lightbulb.BotApp, port: int = 8080) -> web.Ap
             return web.json_response({"status": "unhealthy", "discord": "disconnected"}, status=503)
 
     async def ready_handler(request: web.Request) -> web.Response:
-        # Kubernetes stops the old bot once this passes, so it must mean the
-        # gateway is up, not that the process exists. A standby bot is ready:
-        # requiring the lease here would deadlock the handoff.
-        if gateway_connected(bot):
-            return web.json_response({"ready": True, "leader": leadership.is_leader()})
-        return web.json_response({"ready": False}, status=503)
+        # Kubernetes stops the old bot once this passes, so it must mean this
+        # process could act right now, not that it exists. A standby is ready
+        # without the lease: requiring it would deadlock the handover.
+        body = {
+            "ready": ready_to_act(bot),
+            "acting": leadership.is_acting(),
+            "coordination": "degraded" if leadership.coordination_degraded() else "ok",
+        }
+        return web.json_response(body, status=200 if body["ready"] else 503)
 
     app = web.Application()
     app.router.add_get("/health", health_handler)
@@ -1402,19 +1420,37 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
         logger.warning("Bot will run without plugins")
 
 
-def create_leadership(
+def create_coordination(
     bot: lightbulb.BotApp, settings: Settings
-) -> tuple[leadership.Leadership, leadership.EventGate]:
-    """Coordinate with any other connected bot; see smarter_dev.bot.leadership."""
+) -> tuple[leadership.Coordinator, leadership.EventGate]:
+    """Act only while holding the lease; see smarter_dev.bot.leadership."""
     import redis.asyncio as redis_async
 
-    # Short timeouts: every event waits on its claim, and failures fail open.
     redis = redis_async.from_url(
         settings.effective_redis_url, socket_timeout=2, socket_connect_timeout=2
     )
-    lease = leadership.Leadership(redis, leadership.holder_id())
-    leadership.install(lease)
-    return lease, leadership.EventGate(bot.event_manager, lease)
+    coordinator = leadership.Coordinator(redis, leadership.holder_id())
+    leadership.install(coordinator)
+    return coordinator, leadership.EventGate(bot, coordinator)
+
+
+async def drain_accepted_work(gate: leadership.EventGate, budget: float) -> None:
+    """Finish what this process accepted before handing over: running
+    listeners, then chat turns queued or running on its engines."""
+    from smarter_dev.bot.services.chat_engine_registry import get_chat_engine_registry
+
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + budget
+    listeners = await gate.drain(budget)
+    registry = get_chat_engine_registry()
+    busy = await registry.drain(max(0.0, deadline - loop.time()))
+    if listeners or busy:
+        logger.warning(
+            f"shutdown budget ran out: {listeners} listeners and chat engines in "
+            f"channels {busy} still busy; their replies are lost"
+        )
+    await registry.shutdown_all()
+    logger.info(f"stopped acting: {gate.summary()}")
 
 
 async def run_bot() -> None:
@@ -1438,7 +1474,7 @@ async def run_bot() -> None:
     # Create bot
     bot = create_bot(settings)
 
-    lease, gate = create_leadership(bot, settings)
+    coordinator, gate = create_coordination(bot, settings)
 
     # Set up event handlers
     @bot.listen()
@@ -1974,7 +2010,7 @@ async def run_bot() -> None:
 
     # Run bot and keep alive
     health_runner = None
-    lease_task = None
+    coordination_task = None
     try:
         # Start the bot and wait for it to be ready
         await bot.start()
@@ -1982,8 +2018,9 @@ async def run_bot() -> None:
         # Start health check server for Kubernetes probes
         health_runner = await start_health_server(bot, get_settings().bot_health_port)
 
-        # Contend for the lease only once connected, so a leader can always act.
-        lease_task = asyncio.create_task(lease.run(gate.on_acquire))
+        # Take the lease only once connected and set up, so whoever holds it
+        # can act.
+        coordination_task = asyncio.create_task(coordinator.run())
 
         # Keep the bot running until interrupted
         logger.info("Bot is now running. Press Ctrl+C to stop.")
@@ -2001,15 +2038,12 @@ async def run_bot() -> None:
         raise
     finally:
         logger.info("Shutting down bot...")
-        # Hand over first so the replacement takes every new event and the
-        # scheduled work while this bot finishes the events it claimed.
-        gate.close()
-        await lease.step_down()
-        if lease_task:
-            lease_task.cancel()
-        still_running = await gate.drain(SHUTDOWN_DRAIN_SECONDS)
-        if still_running:
-            logger.warning(f"{still_running} event handlers still running at shutdown")
+        # Hand over first, so the standby acts on every new event while this
+        # process finishes what it had already accepted.
+        await coordinator.stop_acting()
+        if coordination_task:
+            coordination_task.cancel()
+        await drain_accepted_work(gate, SHUTDOWN_DRAIN_SECONDS)
         if health_runner:
             await health_runner.cleanup()
         await bot.close()

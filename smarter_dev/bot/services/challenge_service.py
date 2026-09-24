@@ -165,9 +165,10 @@ class ChallengeService(BaseService):
                 logger.info(f"Queuing challenge '{title}' to announce in {delay_seconds:.1f} seconds")
                 await asyncio.sleep(delay_seconds)
 
-            # Announce the challenge at exactly the scheduled time. Every
-            # connected bot queues it; the first to claim it announces.
-            if await leadership.claim(f"challenge-announcement:{challenge_id}"):
+            # Announce the challenge at exactly the scheduled time. Every process queues it; only the one acting when it fell due sends it.
+            if await leadership.should_send(
+                release_time.timestamp(), wait=leadership.HANDOVER_WAIT_SECONDS
+            ):
                 await self._announce_challenge(challenge_data)
 
         except Exception as e:

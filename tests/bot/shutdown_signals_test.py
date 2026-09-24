@@ -61,31 +61,16 @@ class FakeBot:
         self.calls.append("close")
 
 
-class FakeLease:
+class FakeCoordinator:
     def __init__(self, calls: list[str]) -> None:
         self.calls = calls
 
-    async def run(self, _on_acquire) -> None:
+    async def run(self) -> None:
         self.calls.append("contend")
         await asyncio.Event().wait()
 
-    async def step_down(self) -> None:
-        self.calls.append("step_down")
-
-
-class FakeGate:
-    def __init__(self, calls: list[str]) -> None:
-        self.calls = calls
-
-    async def on_acquire(self) -> None:
-        return None
-
-    def close(self) -> None:
-        self.calls.append("stop_claiming")
-
-    async def drain(self, _timeout: float) -> int:
-        self.calls.append("drain")
-        return 0
+    async def stop_acting(self) -> None:
+        self.calls.append("stop_acting")
 
 
 class FakeHealthRunner:
@@ -122,9 +107,14 @@ def _patch_run_bot(monkeypatch: pytest.MonkeyPatch, bot: FakeBot) -> FakeHealthR
     monkeypatch.setattr(client, "start_health_server", fake_health)
     monkeypatch.setattr(
         client,
-        "create_leadership",
-        lambda _bot, _settings: (FakeLease(bot.calls), FakeGate(bot.calls)),
+        "create_coordination",
+        lambda _bot, _settings: (FakeCoordinator(bot.calls), object()),
     )
+
+    async def fake_drain(_gate, _budget) -> None:
+        bot.calls.append("drain")
+
+    monkeypatch.setattr(client, "drain_accepted_work", fake_drain)
     return runner
 
 
@@ -155,8 +145,8 @@ async def test_sigterm_while_running_closes_the_bot(
     assert bot.started
     assert runner.cleaned_up
     assert bot.closed
-    # The lease goes first, so the replacement acts while this bot drains.
-    assert bot.calls == ["contend", "stop_claiming", "step_down", "drain", "close"]
+    # Hand over first, so the standby acts while this process drains.
+    assert bot.calls == ["contend", "stop_acting", "drain", "close"]
 
 
 async def test_sigterm_during_startup_still_closes_the_bot(

@@ -1447,7 +1447,7 @@ async def _passive_ticker() -> None:
         run = runtime
         if run is None:
             return
-        if leadership.is_leader():
+        if leadership.is_acting():
             await _passive_sweep(run)
             await _sweep_expired_envelopes(run)
         delay = PASSIVE_SECONDS
