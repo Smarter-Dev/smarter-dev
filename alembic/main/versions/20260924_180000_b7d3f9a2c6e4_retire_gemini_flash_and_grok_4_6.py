@@ -132,6 +132,14 @@ def upgrade() -> None:
                 " WHERE default_model_key = :retired_key))"
             ).bindparams(retired_key=retired_key, successor_key=successor_key)
         )
+    # Zech wants Grok 4.7 offered in the chat (2026-09-24), though 4.6 was
+    # disabled when it retired.
+    op.execute(
+        sa.text(
+            "UPDATE chat_catalog_models SET enabled = true"
+            " WHERE model_key = 'grok-4-7'"
+        )
+    )
 
 
 def downgrade() -> None:
