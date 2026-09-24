@@ -356,6 +356,17 @@ def _looks_like_image(data: bytes) -> bool:
     return data.startswith(_IMAGE_SIGNATURES)
 
 
+def _looks_like_audio(data: bytes) -> bool:
+    """Ogg, MP3 (ID3 or frame sync), WAV, FLAC, MP4/M4A or ADTS AAC."""
+    if data.startswith((b"OggS", b"ID3", b"fLaC")):
+        return True
+    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return True
+    if data[4:8] == b"ftyp":
+        return True
+    return len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0
+
+
 def _decode_text(data: bytes) -> str | None:
     """``data`` as UTF-8 text, or None when it is binary."""
     if b"\x00" in data[:8192]:
@@ -396,6 +407,8 @@ async def _read_discord_attachment(url: str, instruction: str) -> dict[str, str]
     if media_type in _READABLE_IMAGE_TYPES:
         return {"url": url, "kind": "image", "summary": "", "error": "content_mismatch"}
     if media_type.startswith("audio/"):
+        if not _looks_like_audio(data):
+            return {"url": url, "kind": "audio", "summary": "", "error": "content_mismatch"}
         return await _read_media(url, instruction, data, media_type, "audio")
     if ext == ".pdf" or media_type == "application/pdf":
         if not data.startswith(b"%PDF-"):

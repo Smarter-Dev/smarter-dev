@@ -165,6 +165,34 @@ async def test_image_attachment_with_non_image_bytes_is_a_mismatch():
 
 
 @pytest.mark.asyncio
+async def test_audio_attachment_with_non_audio_bytes_is_a_mismatch():
+    url = PNG_URL.replace("shot.png", "voice-message.ogg")
+    with (
+        patch.object(
+            chat_tools.web_fetch, "fetch_bytes", AsyncMock(return_value=(b"<html>", "audio/ogg"))
+        ),
+        patch.object(chat_tools, "describe_media", AsyncMock()) as dm,
+    ):
+        out = await web_read(_ctx(), url, "transcribe")
+    assert out["error"] == "content_mismatch"
+    dm.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_ogg_voice_attachment_goes_to_the_media_reader():
+    url = PNG_URL.replace("shot.png", "voice-message.ogg")
+    with (
+        patch.object(
+            chat_tools.web_fetch, "fetch_bytes", AsyncMock(return_value=(b"OggS\x00rest", "video/ogg"))
+        ),
+        patch.object(chat_tools, "describe_media", AsyncMock(return_value="hello")) as dm,
+    ):
+        out = await web_read(_ctx(), url, "transcribe")
+    assert out == {"url": url, "kind": "audio", "summary": "hello"}
+    assert dm.call_args.kwargs["media_type"] == "audio/ogg"
+
+
+@pytest.mark.asyncio
 async def test_attachment_reads_never_log_the_signature(caplog):
     caplog.set_level(logging.DEBUG)
     with (
