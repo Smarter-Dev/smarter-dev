@@ -41,6 +41,7 @@ _SUCCESSORS: tuple[tuple[str, str], ...] = (
     ("gpt-5-4", "gpt-6-sol"),
     ("gpt-5-5", "gpt-6-sol"),
     ("gpt-5-6-sol", "gpt-6-sol"),
+    ("gpt-5-4-nano", "gpt-6-luna"),
 )
 
 # Live selections only. ``channel_model_overrides`` is excluded on purpose.
