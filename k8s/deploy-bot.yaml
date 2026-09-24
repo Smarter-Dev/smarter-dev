@@ -7,10 +7,9 @@ metadata:
     labels:
         app: smarter-dev-bot
 spec:
-    # RollingUpdate keeps the old bot connected while the new pod pulls its
-    # image, which Recreate did not (2m08s off Discord on 2026-09-24). The
-    # readiness probe only checks the process exists, so the old bot still
-    # stops before the new one reaches Discord; #19 closes that gap.
+    # RollingUpdate keeps the old bot acting until the new one is connected
+    # (readiness below); Recreate took the bot off Discord for 2m08s on
+    # 2026-09-24. While both are connected, each event runs on one of them.
     strategy:
         type: RollingUpdate
         rollingUpdate:
@@ -142,10 +141,9 @@ spec:
                         memory: 384Mi
                     limits:
                         # 200m throttled startup (imports + plugin loading) to
-                        # ~7 min, and the pgrep probes mark the pod Ready at
-                        # process start, so every deploy left the bot offline
-                        # that long (2026-09-24, #88 roll). Startup is the
-                        # burst; steady state sampled at 49m (19:21Z).
+                        # ~7 min, which left the bot offline that long on the
+                        # 2026-09-24 #88 roll. Startup is the burst; steady
+                        # state sampled at 49m (19:21Z).
                         cpu: "1"
                         memory: 512Mi
                 startupProbe:
@@ -160,11 +158,17 @@ spec:
                     periodSeconds: 30
                     timeoutSeconds: 5
                     failureThreshold: 3
+                # Ready means the gateway is connected, so a roll keeps the
+                # old bot until the new one can take its events (see
+                # smarter_dev/bot/leadership.py). Liveness stays process-level:
+                # a Discord outage must not restart the bot.
                 readinessProbe:
-                    exec:
-                        command: ["pgrep", "-f", "smarter_dev.bot.client"]
-                    initialDelaySeconds: 5
-                    periodSeconds: 10
+                    httpGet:
+                        path: /ready
+                        port: 8080
+                    periodSeconds: 5
                     timeoutSeconds: 3
                     failureThreshold: 2
+            # Covers the 40s drain of claimed events in run_bot.
+            terminationGracePeriodSeconds: 60
             restartPolicy: Always

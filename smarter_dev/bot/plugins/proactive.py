@@ -40,6 +40,7 @@ import lightbulb
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 from redis.exceptions import RedisError
 
+from smarter_dev.bot import leadership
 from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
 from smarter_dev.bot.agents.response_fitting import fit_writer_message
 from smarter_dev.bot.agents.response_fitting import split_for_discord
@@ -1446,8 +1447,9 @@ async def _passive_ticker() -> None:
         run = runtime
         if run is None:
             return
-        await _passive_sweep(run)
-        await _sweep_expired_envelopes(run)
+        if leadership.is_leader():
+            await _passive_sweep(run)
+            await _sweep_expired_envelopes(run)
         delay = PASSIVE_SECONDS
 
 
