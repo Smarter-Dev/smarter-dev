@@ -14,6 +14,7 @@ from typing import Any
 
 import hikari
 
+from smarter_dev.bot import leadership
 from smarter_dev.bot.guild_event_recorder import record_guild_event
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.base import BaseService
@@ -166,8 +167,12 @@ class ScheduledMessageService(BaseService):
                 logger.info(f"Queuing message '{title}' to send in {delay_seconds:.1f} seconds")
                 await asyncio.sleep(delay_seconds)
 
-            # Send the message at exactly the scheduled time
-            await self._send_scheduled_message(message_data)
+            # Send the message at exactly the scheduled time. Every connected
+            # bot queues it; the first to claim it sends.
+            if await leadership.claim(
+                f"scheduled-message:{message_id}:{scheduled_time_str}"
+            ):
+                await self._send_scheduled_message(message_data)
 
         except Exception as e:
             logger.error(f"Failed to queue and send message {message_data.get('id', 'unknown')}: {e}")

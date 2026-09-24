@@ -15,6 +15,7 @@ from typing import Any
 
 import hikari
 
+from smarter_dev.bot import leadership
 from smarter_dev.bot.guild_event_recorder import record_guild_event
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.base import BaseService
@@ -163,6 +164,14 @@ class RepeatingMessageService(BaseService):
                     continue
 
                 logger.info(f"Processing due message {message_id}: next_send_time={next_send_time}, current_time={now}")
+
+                # Every connected bot sees it due at the same minute; the first
+                # to claim it sends. The claim lapses before the next minute's
+                # check, so a failed send is retried as before.
+                if not await leadership.claim(
+                    f"repeating-message:{message_id}:{next_send_time}", ttl_ms=50_000
+                ):
+                    continue
 
                 self._processing_messages.add(message_id)
                 processed_message_series.add(message_id)

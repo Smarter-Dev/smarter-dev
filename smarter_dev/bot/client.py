@@ -15,6 +15,7 @@ import hikari
 import lightbulb
 from aiohttp import web
 
+from smarter_dev.bot import leadership
 from smarter_dev.bot.agents.streak_agent import StreakCelebrationAgent
 from smarter_dev.bot.attachment_filter import check_attachment_filter
 from smarter_dev.bot.audit_logger import log_member_ban
@@ -42,6 +43,10 @@ logger = logging.getLogger(__name__)
 
 configure_observability("smarter-dev-bot")
 
+# How long a stopping bot waits for its running event handlers. Must stay
+# below terminationGracePeriodSeconds in k8s/deploy-bot.yaml.
+SHUTDOWN_DRAIN_SECONDS = 40.0
+
 
 def install_shutdown_signals() -> None:
     """Cancel the running bot task on SIGTERM or SIGINT so it closes cleanly.
@@ -55,6 +60,14 @@ def install_shutdown_signals() -> None:
     task = asyncio.current_task()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, task.cancel)
+
+
+def gateway_connected(bot: lightbulb.BotApp) -> bool:
+    """Whether every shard holds a live gateway connection."""
+    shards = getattr(bot, "shards", None) or {}
+    return bool(shards) and all(
+        shard.is_alive and shard.is_connected for shard in shards.values()
+    )
 
 
 async def start_health_server(bot: lightbulb.BotApp, port: int = 8080) -> web.AppRunner:
@@ -74,8 +87,17 @@ async def start_health_server(bot: lightbulb.BotApp, port: int = 8080) -> web.Ap
         else:
             return web.json_response({"status": "unhealthy", "discord": "disconnected"}, status=503)
 
+    async def ready_handler(request: web.Request) -> web.Response:
+        # Kubernetes stops the old bot once this passes, so it must mean the
+        # gateway is up, not that the process exists. A standby bot is ready:
+        # requiring the lease here would deadlock the handoff.
+        if gateway_connected(bot):
+            return web.json_response({"ready": True, "leader": leadership.is_leader()})
+        return web.json_response({"ready": False}, status=503)
+
     app = web.Application()
     app.router.add_get("/health", health_handler)
+    app.router.add_get("/ready", ready_handler)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", port)
@@ -1380,6 +1402,21 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
         logger.warning("Bot will run without plugins")
 
 
+def create_leadership(
+    bot: lightbulb.BotApp, settings: Settings
+) -> tuple[leadership.Leadership, leadership.EventGate]:
+    """Coordinate with any other connected bot; see smarter_dev.bot.leadership."""
+    import redis.asyncio as redis_async
+
+    # Short timeouts: every event waits on its claim, and failures fail open.
+    redis = redis_async.from_url(
+        settings.effective_redis_url, socket_timeout=2, socket_connect_timeout=2
+    )
+    lease = leadership.Leadership(redis, leadership.holder_id())
+    leadership.install(lease)
+    return lease, leadership.EventGate(bot.event_manager, lease)
+
+
 async def run_bot() -> None:
     """Run the Discord bot with Lightbulb v2 syntax."""
     settings = get_settings()
@@ -1400,6 +1437,8 @@ async def run_bot() -> None:
 
     # Create bot
     bot = create_bot(settings)
+
+    lease, gate = create_leadership(bot, settings)
 
     # Set up event handlers
     @bot.listen()
@@ -1935,12 +1974,16 @@ async def run_bot() -> None:
 
     # Run bot and keep alive
     health_runner = None
+    lease_task = None
     try:
         # Start the bot and wait for it to be ready
         await bot.start()
 
         # Start health check server for Kubernetes probes
         health_runner = await start_health_server(bot, get_settings().bot_health_port)
+
+        # Contend for the lease only once connected, so a leader can always act.
+        lease_task = asyncio.create_task(lease.run(gate.on_acquire))
 
         # Keep the bot running until interrupted
         logger.info("Bot is now running. Press Ctrl+C to stop.")
@@ -1958,6 +2001,15 @@ async def run_bot() -> None:
         raise
     finally:
         logger.info("Shutting down bot...")
+        # Hand over first so the replacement takes every new event and the
+        # scheduled work while this bot finishes the events it claimed.
+        gate.close()
+        await lease.step_down()
+        if lease_task:
+            lease_task.cancel()
+        still_running = await gate.drain(SHUTDOWN_DRAIN_SECONDS)
+        if still_running:
+            logger.warning(f"{still_running} event handlers still running at shutdown")
         if health_runner:
             await health_runner.cleanup()
         await bot.close()

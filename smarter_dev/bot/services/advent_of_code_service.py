@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 import hikari
 
+from smarter_dev.bot import leadership
 from smarter_dev.bot.agents.aoc_thread_agent import aoc_thread_agent
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.base import BaseService
@@ -124,7 +125,8 @@ class AdventOfCodeService(BaseService):
         """Main loop for scheduling Advent of Code thread creation."""
         while self._running:
             try:
-                await self._check_and_create_threads()
+                if leadership.is_leader():
+                    await self._check_and_create_threads()
             except asyncio.CancelledError:
                 break
             except Exception as e:

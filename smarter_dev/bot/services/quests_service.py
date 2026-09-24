@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Any
 
 import hikari
+from smarter_dev.bot import leadership
 from smarter_dev.bot.guild_event_recorder import record_guild_event
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.base import BaseService
@@ -129,7 +130,9 @@ class QuestService(BaseService):
             if delay > 0:
                 await asyncio.sleep(delay)
 
-            await self._announce_quest(quest)
+            # Every connected bot queues it; the first to claim it announces.
+            if await leadership.claim(f"quest-announcement:{quest_id}"):
+                await self._announce_quest(quest)
 
         finally:
             if quest_id:
