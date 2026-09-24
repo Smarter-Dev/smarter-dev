@@ -55,10 +55,15 @@ class ChannelEnvironment:
         position = positions[0]
         return self.visible[max(0, position - radius) : position + radius + 1]
 
-    def render(self, messages: list[ChannelMessage]) -> str:
+    def render(
+        self, messages: list[ChannelMessage], *, attachment_urls: bool = True
+    ) -> str:
         """Transcript lines with speaker tags stable across the whole wake."""
         return "\n".join(
-            render_transcript_line(m.to_record(), self._tags) for m in messages
+            render_transcript_line(
+                m.to_record(), self._tags, attachment_urls=attachment_urls
+            )
+            for m in messages
         ) or "(no messages)"
 
 

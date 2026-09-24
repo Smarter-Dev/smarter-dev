@@ -215,8 +215,14 @@ class WatcherProducer:
         else:
             decision, watcher_usage = await self.watcher.decide(
                 instructions=self.instruction_store.current(),
-                context_transcript=env.render(context.history[-self.context_size :]),
-                new_transcript=env.render(context.new_messages),
+                # The watcher only decides whether to wake; it cannot open
+                # files, so it gets attachment names without the signed URLs.
+                context_transcript=env.render(
+                    context.history[-self.context_size :], attachment_urls=False
+                ),
+                new_transcript=env.render(
+                    context.new_messages, attachment_urls=False
+                ),
                 bot_user_id=context.bot_user_id,
                 bot_display_name=self.bot_display_name,
                 new_message_ids=[message.id for message in context.new_messages],

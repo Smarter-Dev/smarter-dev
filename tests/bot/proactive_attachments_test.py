@@ -62,9 +62,17 @@ def test_attachment_only_message_renders_url_type_and_size_in_transcript():
     assert line.endswith(
         f": [attachment: trace.png, image/png, 47 KB, url={SIGNED_URL}]"
     )
-    # The watcher and Jev judge the same rendered lines.
+
+
+def test_watcher_transcript_names_the_file_without_the_signed_url():
+    message = channel_message_from_hikari(_hikari_message(attachments=[_attachment()]))
+    env = ChannelEnvironment(visible=[message], bot_user_id="999")
+
+    line = env.render([message], attachment_urls=False)
     material = build_jev_watcher_material(context_transcript="", new_transcript=line)
-    assert SIGNED_URL in material
+
+    assert line.endswith(": [attachment: trace.png, image/png, 47 KB]")
+    assert "cdn.discordapp.com" not in material
 
 
 def test_every_attachment_on_a_message_is_listed_after_its_text():
