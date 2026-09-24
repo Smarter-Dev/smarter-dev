@@ -79,13 +79,13 @@ def test_priced_catalog_choices_remain_enabled_during_admin_save():
     filtered, skipped = filter_unpriced_catalog_selections(
         {
             "gpt-6-luna": (True, "low"),
-            "gpt-5-4-nano": (True, "medium"),
+            "gemini-3-6-flash": (True, "medium"),
             "gpt-6-sol": (True, "high"),
         }
     )
     assert filtered == {
         "gpt-6-luna": (True, "low"),
-        "gpt-5-4-nano": (True, "medium"),
+        "gemini-3-6-flash": (True, "medium"),
         "gpt-6-sol": (True, "high"),
     }
     assert skipped == []

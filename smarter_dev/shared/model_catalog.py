@@ -536,21 +536,12 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
     # --- GPT via OpenAI ---
-    CatalogModel(
-        key="gpt-5-4-nano",
-        label="GPT-5.4 Nano",
-        family="GPT",
-        provider=ModelProvider.OPENAI,
-        model_id="gpt-5.4-nano",
-        supports_vision=True,
-        reasoning_levels=_OPENAI_5X,
-        default_reasoning=ReasoningLevel.MEDIUM,
-    ),
     # GPT-6 replaced GPT-5.6 Terra and Luna on 2026-09-24: Sol ($2/$10 per M)
     # takes Terra's flagship slot and Luna ($0.10/$0.50) takes 5.6 Luna's cheap,
     # fast one — and the server default. GPT-5.4, 5.4 Mini, 5.5 and 5.6 Sol left
     # the same day: 6 Sol undercuts all three flagships, and 6 Luna takes Mini's
-    # cheap slot. 5.4 Nano stays until evals show 6 Luna can take its jobs. Both are served by OpenAI directly: 6
+    # cheap slot. 5.4 Nano left too: the production OpenAI key admits only 6 Luna
+    # and 6 Sol, so Nano's gate job moved to 6 Luna. Both are served by OpenAI directly: 6
     # Luna costs no more direct than 5.6 Luna did through OpenRouter, so the
     # OpenRouter hop (and its 5% fee) went with it. Same none → max ladder as
     # 5.6. The retired models' price patches stay in llm_pricing for the settled
@@ -655,6 +646,7 @@ RETIRED_SUCCESSORS: dict[str, str] = {
     "gpt-5-4": "gpt-6-sol",
     "gpt-5-5": "gpt-6-sol",
     "gpt-5-6-sol": "gpt-6-sol",
+    "gpt-5-4-nano": "gpt-6-luna",
 }
 
 
