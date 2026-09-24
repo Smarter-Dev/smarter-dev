@@ -13,11 +13,12 @@ metadata:
     labels:
         app: smarter-dev-agent-worker
 spec:
+    # Recreate: no surge pod. On SIGTERM `skrift workers run` cancels its
+    # in-flight jobs at once and leaves them claimed until visibility_timeout,
+    # so a rolling update protects no running job; it only adds 512Mi of
+    # surge. Queued jobs wait in the backend during the restart gap.
     strategy:
-        type: RollingUpdate
-        rollingUpdate:
-            maxSurge: 1
-            maxUnavailable: 0
+        type: Recreate
     selector:
         matchLabels:
             app: smarter-dev-agent-worker
