@@ -1,7 +1,7 @@
 """Discord chat agent — single Pydantic AI agent driving every conversation turn.
 
 Replaces the old classification/evaluation/response trio. One agent, one model
-(GPT-5.6 Luna on medium reasoning by default; override with the
+(GPT-6 Luna on medium reasoning by default; override with the
 CHAT_AGENT_MODEL env var), one
 structured return type.
 
@@ -47,7 +47,7 @@ from smarter_dev.shared.model_catalog import resolve_reasoning_level
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "openai/gpt-5.6-luna"
+DEFAULT_MODEL = "gpt-6-luna"
 MODEL_ENV_VAR = "CHAT_AGENT_MODEL"
 
 SYSTEM_PROMPT = (Path(__file__).parent / "prompts" / "chat_agent.md").read_text(

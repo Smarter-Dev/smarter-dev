@@ -10,7 +10,7 @@ Three tiers, cheapest first:
 3. ``len > 3000`` — :func:`fit_overlong_response` first asks the chat agent
    itself to rewrite the reply shorter (it has the full conversation context);
    if the rewrite is still over 3000 characters (or the run fails), a cheap
-   GPT-5.6 Luna summarizer condenses the original; if even that overruns, the
+   GPT-6 Luna summarizer condenses the original; if even that overruns, the
    text is hard-truncated as a last resort. The result then flows through tier
    1/2 for sending.
 
@@ -47,7 +47,7 @@ SPLIT_TARGET = 1500
 SUMMARIZE_THRESHOLD = 3000
 
 # Catalog key of the model that summarizes as the second resort.
-LENGTH_SUMMARIZER_MODEL_KEY = "gpt-5-6-luna"
+LENGTH_SUMMARIZER_MODEL_KEY = "gpt-6-luna"
 
 _SHORTEN_PROMPT_TEMPLATE = (
     "<length-notice>Your drafted reply could not be sent: it is {length} "

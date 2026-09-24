@@ -120,20 +120,21 @@ class Settings(BaseSettings):
         description="Model that reviews candidate handler scripts (Gemini 3 Flash)",
     )
     handler_admin_author_model: str = Field(
-        default="gpt-5.6-terra",
+        default="gpt-6-sol",
         description="Model that writes ADMIN handler scripts, first draft and fix "
-        "round (GPT-5.6 Terra at high reasoning effort). Admin scripts carry "
+        "round (GPT-6 Sol at high reasoning effort). Admin scripts carry "
         "moderation powers, so they get a stronger author than the member tier.",
     )
     handler_admin_judge_model: str = Field(
-        default="gemini-3.7-flash",
-        description="Primary judge for ADMIN handler scripts (Gemini 3.7 Flash)",
+        default="gpt-6-sol",
+        description="Primary judge for ADMIN handler scripts (GPT-6 Sol)",
     )
     handler_admin_second_judge_model: str = Field(
-        default="gpt-5.6-terra",
-        description="Second judge for ADMIN handlers (GPT-5.6 Terra) — reviews in "
-        "series with the primary judge and either rejection blocks install (their "
-        "observed blind spots don't overlap). Empty string disables the second judge.",
+        default="gpt-6-sol",
+        description="Second judge for ADMIN handlers. Both judges review in "
+        "parallel and either rejection blocks install; a second judge naming the "
+        "same model as the primary is dropped, so the default panel is GPT-6 Sol "
+        "alone. Empty string disables the second judge.",
     )
 
     # Digital Ocean serverless inference (OpenAI-compatible). Hosts the

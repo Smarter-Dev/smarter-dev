@@ -213,8 +213,8 @@ _patch_provider(
 
 # GPT-5.6 Luna DIRECT-OpenAI rates, effective 2026-07-30 after OpenAI's 80%
 # price cut. Luna moved to the OpenRouter route on 2026-08-06 (see
-# _OPENROUTER_PRICES); this patch stays so rows written before the move —
-# and any direct-OpenAI env pin — keep pricing at OpenAI's own rates.
+# _OPENROUTER_PRICES) and was retired for GPT-6 Luna on 2026-09-24; this patch
+# stays so rows written before the move keep pricing at OpenAI's own rates.
 _patch_provider(
     "openai",
     types.ModelInfo(
@@ -247,7 +247,8 @@ _patch_provider(
 )
 
 # GPT-5.6 Terra — not yet in genai-prices. Rates effective 2026-07-30
-# after OpenAI's 20% price cut.
+# after OpenAI's 20% price cut. Retired for GPT-6 Sol on 2026-09-24; kept for
+# the usage rows that carry its wire id.
 _patch_provider(
     "openai",
     types.ModelInfo(
@@ -258,6 +259,44 @@ _patch_provider(
             output_mtok=Decimal("12.00"),
             cache_read_mtok=Decimal("0.20"),
             cache_write_mtok=Decimal("2.50"),
+        ),
+    ),
+)
+
+# GPT-6 Sol — not yet in genai-prices. Cache writes are 1.25x uncached input
+# and cache reads are 10% of uncached input. Prompts above 272K input tokens
+# are billed at 2x input/cache and 1.5x output for the whole request; this is
+# the base rate only — see _LONG_CONTEXT_THRESHOLDS for why, and the warning.
+# https://developers.openai.com/api/docs/models/gpt-6-sol
+_patch_provider(
+    "openai",
+    types.ModelInfo(
+        id="gpt-6-sol",
+        match=types.ClauseStartsWith(starts_with="gpt-6-sol"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("2.00"),
+            output_mtok=Decimal("10.00"),
+            cache_read_mtok=Decimal("0.20"),
+            cache_write_mtok=Decimal("2.50"),
+        ),
+    ),
+)
+
+# GPT-6 Luna — not yet in genai-prices. Served by OpenAI directly, the
+# server-default chat model since 2026-09-24. Same cache ratios and same
+# >272K-input long-context multiplier as GPT-6 Sol; base rate only (see
+# _LONG_CONTEXT_THRESHOLDS).
+# https://developers.openai.com/api/docs/models/gpt-6-luna
+_patch_provider(
+    "openai",
+    types.ModelInfo(
+        id="gpt-6-luna",
+        match=types.ClauseStartsWith(starts_with="gpt-6-luna"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("0.10"),
+            output_mtok=Decimal("0.50"),
+            cache_read_mtok=Decimal("0.01"),
+            cache_write_mtok=Decimal("0.125"),
         ),
     ),
 )
@@ -372,7 +411,8 @@ _DIGITALOCEAN_PRICES: dict[str, types.ModelPrice] = {
 # Rates read from GET https://openrouter.ai/api/v1/models (2026-08).
 _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
     # Luna moved here from direct OpenAI on 2026-08-06: the same OpenAI
-    # upstream at half the rate. OpenRouter's long-context override (>272K
+    # upstream at half the rate. Retired for GPT-6 Luna (direct) on 2026-09-24;
+    # kept for the rows written while it served. OpenRouter's long-context override (>272K
     # prompt tokens: $0.20/$0.90) has no tier here; chat compacts far below
     # 272K, so the base rate is the honest one for our traffic.
     "openai/gpt-5.6-luna": types.ModelPrice(
@@ -576,6 +616,33 @@ _PROVIDER_MAP: dict[str, str] = {
 }
 
 
+# Models whose price rises for the whole request once a single prompt passes a
+# token threshold. Their patches above carry the base rate only, because the
+# token counts priced here are a turn's (or a session's) total across several
+# requests: a tier keyed on that total would surcharge turns whose requests were
+# each well under the threshold. The cost of that choice is an undercharge on a
+# request that really did pass it, so a total over the threshold is logged
+# rather than priced silently. Chat compacts far below it.
+_LONG_CONTEXT_THRESHOLDS: dict[str, int] = {
+    "gpt-6-sol": 272_000,
+    "gpt-6-luna": 272_000,
+}
+
+
+def _warn_if_long_context(model_ref: str, input_tokens: int) -> None:
+    for prefix, threshold in _LONG_CONTEXT_THRESHOLDS.items():
+        if model_ref.startswith(prefix) and input_tokens > threshold:
+            logger.warning(
+                "%s usage of %d input tokens priced at the base rate; if one "
+                "request passed %d tokens, OpenAI bills it at 2x input and "
+                "cache and 1.5x output",
+                model_ref,
+                input_tokens,
+                threshold,
+            )
+            return
+
+
 def calc_session_cost(
     input_tokens: int,
     output_tokens: int,
@@ -641,6 +708,8 @@ def calc_session_cost(
                 cache_write_tokens=cache_write_tokens,
                 price=openrouter_price,
             )
+
+    _warn_if_long_context(model_ref, input_tokens)
 
     usage = types.Usage(
         input_tokens=input_tokens,

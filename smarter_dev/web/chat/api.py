@@ -39,6 +39,7 @@ from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.shared.model_catalog import model_vendor
 from smarter_dev.shared.model_catalog import parse_reasoning_level
 from smarter_dev.shared.model_catalog import resolve_reasoning_level
+from smarter_dev.shared.model_catalog import successor_key
 from smarter_dev.web.chat.attachments import AttachmentError
 from smarter_dev.web.chat.attachments import extract_text_bounded
 from smarter_dev.web.chat.attachments import require_attachment_count
@@ -872,9 +873,12 @@ class ChatApiController(Controller):
             raise HTTPException(
                 status_code=409, detail="Model change confirmation expired."
             )
-        target = await db_session.get(ChatCatalogModel, change.to_model_key)
+        # A change proposed before a model was retired confirms onto its
+        # successor, matching how the conversation's own pick now reads.
+        to_key = successor_key(change.to_model_key)
+        target = await db_session.get(ChatCatalogModel, to_key)
         if (
-            conversation.selected_model_key != change.from_model_key
+            conversation.selected_model_key != successor_key(change.from_model_key)
             or target is None
             or not target.enabled
         ):
@@ -882,8 +886,8 @@ class ChatApiController(Controller):
                 status_code=409,
                 detail="Model selection changed or is no longer available.",
             )
-        conversation.selected_model_key = change.to_model_key
-        model = get_model(change.to_model_key)
+        conversation.selected_model_key = to_key
+        model = get_model(to_key)
         effective = (
             resolve_reasoning_level(
                 model, parse_reasoning_level(conversation.reasoning_level)

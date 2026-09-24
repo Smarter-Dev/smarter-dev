@@ -56,6 +56,10 @@ _PROVIDER_BY_FLAT_MODEL_ID: dict[str, str] = {
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gemini-3.5-flash", "google")
 # Luna's direct-OpenAI id, retired 2026-08-06 when Luna moved to OpenRouter.
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gpt-5.6-luna", "openai")
+# Retired on 2026-09-24 for GPT-6 Luna and Sol: 5.6 Luna's OpenRouter id and
+# Terra's direct-OpenAI id.
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("openai/gpt-5.6-luna", "openrouter")
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("gpt-5.6-terra", "openai")
 # Retired when GLM/DeepSeek moved to OpenCode Zen and Laguna XS left the catalog:
 # the models live on under new ids (or not at all), but rows written before the
 # move still carry the old wire id and would otherwise fall to "unknown" and
