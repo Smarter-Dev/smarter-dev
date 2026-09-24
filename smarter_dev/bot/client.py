@@ -1965,5 +1965,9 @@ async def run_bot() -> None:
 
 if __name__ == "__main__":
     import asyncio
+    import contextlib
 
-    asyncio.run(run_bot())
+    # A SIGTERM during startup cancels run_bot before its own handler can
+    # catch it; that is a requested shutdown, not a crash.
+    with contextlib.suppress(asyncio.CancelledError):
+        asyncio.run(run_bot())
