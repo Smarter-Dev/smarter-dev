@@ -33,7 +33,9 @@ USER app
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
     CMD pgrep -f "smarter_dev.bot.client" || exit 1
 
-# Run the Discord bot against the venv baked at build time. --no-sync keeps
-# `uv run` from re-resolving at startup (which would drop the `bot` group and
-# pull in dev tooling).
-CMD ["uv", "run", "--no-sync", "python", "-m", "smarter_dev.bot.client"]
+# Run straight from the venv baked at build time, the environment `uv run`
+# would set up, without leaving a resident uv parent in the pod. run_bot
+# installs its own SIGTERM handler, so the bot can run as PID 1.
+ENV VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:$PATH"
+CMD ["python", "-m", "smarter_dev.bot.client"]

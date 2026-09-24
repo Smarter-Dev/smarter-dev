@@ -32,7 +32,10 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/api/health || exit 1
 
-# Run the web application against the venv baked at build time. --no-sync keeps
-# `uv run` from re-resolving at startup (which would drop the `web` group and
-# pull in dev tooling, blowing past the liveness probe on a fresh pod).
-CMD ["uv", "run", "--no-sync", "hypercorn", "main:app", "--bind", "0.0.0.0:8000"]
+# Run straight from the venv baked at build time, the environment `uv run`
+# would set up, without leaving a resident uv parent in every pod. hypercorn
+# and `skrift workers run` (the worker Deployments use this image) handle
+# SIGTERM themselves, so they can run as PID 1.
+ENV VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:$PATH"
+CMD ["hypercorn", "main:app", "--bind", "0.0.0.0:8000"]
