@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+import signal
 import uuid
 from dataclasses import dataclass
 from datetime import UTC
@@ -40,6 +41,20 @@ from smarter_dev.shared.observability import configure_observability
 logger = logging.getLogger(__name__)
 
 configure_observability("smarter-dev-bot")
+
+
+def install_shutdown_signals() -> None:
+    """Cancel the running bot task on SIGTERM or SIGINT so it closes cleanly.
+
+    The bot starts with ``bot.start()`` rather than ``bot.run()``, so hikari
+    installs no signal handlers of its own. Without these, SIGTERM kills the
+    process before the gateway closes, and as PID 1 (no ``uv run`` wrapper) it
+    is ignored until Kubernetes SIGKILLs the pod after the grace period.
+    """
+    loop = asyncio.get_running_loop()
+    task = asyncio.current_task()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, task.cancel)
 
 
 async def start_health_server(bot: lightbulb.BotApp, port: int = 8080) -> web.AppRunner:
@@ -1380,6 +1395,8 @@ async def run_bot() -> None:
     if not settings.bot_api_key:
         logger.error("Bot API key not provided")
         return
+
+    install_shutdown_signals()
 
     # Create bot
     bot = create_bot(settings)
