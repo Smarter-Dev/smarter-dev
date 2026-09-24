@@ -171,8 +171,17 @@ class RepeatingMessageService(BaseService):
                 self._processing_messages.add(message_id)
                 processed_message_series.add(message_id)
 
-                # Process message synchronously to avoid race conditions
-                await self._process_repeating_message(message_data)
+                # A process that stopped acting mid-list leaves the rest to
+                # its successor, which finds them still due.
+                if not leadership.is_acting():
+                    self._processing_messages.discard(message_id)
+                    break
+
+                # Process message synchronously to avoid race conditions.
+                # The send and the next_send_time update run as one tracked
+                # unit, so shutdown finishes both rather than leaving a sent
+                # message due again next minute.
+                await leadership.run_accepted(self._process_repeating_message(message_data))
 
         except Exception as e:
             logger.error(f"Error checking for due repeating messages: {e}")

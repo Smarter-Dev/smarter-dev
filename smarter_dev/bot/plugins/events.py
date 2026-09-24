@@ -12,7 +12,6 @@ from typing import Any
 
 import hikari
 
-from smarter_dev.bot import leadership
 from smarter_dev.bot.plugins.model_override import handle_model_budget_fallback
 from smarter_dev.bot.plugins.model_override import handle_model_override_auto_toggle
 from smarter_dev.bot.plugins.model_override import handle_model_override_continue
@@ -1066,7 +1065,7 @@ async def _show_input_generation_confirmation(event: hikari.InteractionCreateEve
             logger.debug(f"Could not auto-delete confirmation message: {e}")
 
     # Start the deletion task in the background
-    leadership.track(asyncio.create_task(delete_after_delay(), name="delete_after_delay"))
+    asyncio.create_task(delete_after_delay())
 
 
 async def _provide_challenge_input_directly(
@@ -1273,7 +1272,7 @@ async def handle_challenge_cancel_get_input_interaction(event: hikari.Interactio
         except Exception:
             pass  # Message may already be deleted
 
-    leadership.track(asyncio.create_task(delete_after_delay(), name="delete_after_delay"))
+    asyncio.create_task(delete_after_delay())
 
 
 async def handle_challenge_submit_solution_interaction(event: hikari.InteractionCreateEvent) -> None:

@@ -1432,10 +1432,10 @@ def create_coordination(
     redis = redis_async.from_url(
         settings.effective_redis_url, socket_timeout=2, socket_connect_timeout=2
     )
-    from smarter_dev.bot.peer_pods import predecessor_gone
+    from smarter_dev.bot.peer_pods import other_bot_pods
 
     coordinator = leadership.Coordinator(
-        redis, leadership.holder_id(), predecessor_gone=predecessor_gone
+        redis, leadership.holder_id(), other_pods=other_bot_pods
     )
     leadership.install(coordinator)
     return coordinator, leadership.EventGate(bot, coordinator)
@@ -1443,22 +1443,44 @@ def create_coordination(
 
 async def drain_accepted_work(gate: leadership.EventGate, budget: float) -> None:
     """Finish what this process accepted before handing over: running
-    listeners, the background work they started, then chat turns queued or
-    running on its engines."""
+    listeners, the background work they started, and chat turns queued or
+    running on its engines, all at once under one budget.
+
+    Queued chat turns fire at once (and again whenever a listener still
+    running queues another), rather than after the other work.
+    """
     from smarter_dev.bot.services.chat_engine_registry import get_chat_engine_registry
 
+    registry = get_chat_engine_registry()
     loop = asyncio.get_running_loop()
     deadline = loop.time() + budget
+    settled = False
+    while True:
+        await registry.fire_queued()
+        pending = gate.in_flight() | leadership.tracked()
+        busy = await registry.busy_channels()
+        if not pending and not busy:
+            if settled:
+                break
+            # A finished turn can refire, and a finished listener can have
+            # queued a turn, just after; look once more before calling it done.
+            settled = True
+            await asyncio.sleep(0.05)
+            continue
+        settled = False
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            break
+        if pending:
+            await asyncio.wait(pending, timeout=min(0.1, remaining))
+        else:
+            await asyncio.sleep(min(0.1, remaining))
 
-    def remaining() -> float:
-        return max(0.0, deadline - loop.time())
-
-    listeners = await gate.drain(budget)
-    tracked = await leadership.drain_tracked(remaining())
-    registry = get_chat_engine_registry()
-    busy = await registry.drain(remaining())
+    listeners = gate.in_flight()
+    tracked = leadership.tracked()
+    busy = await registry.busy_channels()
     if listeners:
-        logger.warning(f"shutdown budget ran out with {listeners} listeners running")
+        logger.warning(f"shutdown budget ran out with {len(listeners)} listeners running")
     if tracked:
         names = [task.get_name() for task in tracked]
         logger.warning(f"shutdown budget ran out; cancelling background work {names}")

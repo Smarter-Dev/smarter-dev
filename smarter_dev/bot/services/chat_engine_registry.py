@@ -90,33 +90,43 @@ class ChatEngineRegistry:
             self._engines.pop(channel_id, None)
         logger.info("Removed chat engine for channel %s", channel_id)
 
+    async def fire_queued(self) -> None:
+        """Answer what every engine has queued now, without its idle timer."""
+        async with self._lock:
+            engines = list(self._engines.values())
+        for engine in engines:
+            if engine.active and engine.queue and not engine.run_lock.locked():
+                engine.fire_now()
+
+    async def busy_channels(self) -> list[int]:
+        """Channels with a turn running, queued or about to fire."""
+        async with self._lock:
+            engines = list(self._engines.values())
+        return [engine.channel_id for engine in engines if engine.active and not engine.is_idle]
+
     async def drain(self, timeout: float) -> list[int]:
         """Run every queued turn now and wait for running ones to finish.
 
         For a process handing over to another: the messages its engines have
         queued were delivered to this process only, so it must answer them
         before it exits. Call before ``shutdown_all``, which drops queued
-        messages. Returns the channels still busy when ``timeout`` ran out.
+        messages. Engines activated meanwhile are included. Returns the
+        channels still busy when ``timeout`` ran out.
         """
-        async with self._lock:
-            engines = [engine for engine in self._engines.values() if engine.active]
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
         while True:
-            for engine in engines:
-                # Don't wait out the idle timer: answer what is queued now.
-                if engine.active and engine.queue and not engine.run_lock.locked():
-                    engine.fire_now()
-            busy = [engine for engine in engines if engine.active and not engine.is_idle]
+            await self.fire_queued()
+            busy = await self.busy_channels()
             if not busy:
                 # A finished turn can refire just after releasing its lock;
                 # look once more before calling it done.
                 await asyncio.sleep(0.05)
-                busy = [e for e in engines if e.active and not e.is_idle]
+                busy = await self.busy_channels()
                 if not busy:
                     return []
             if loop.time() >= deadline:
-                return [engine.channel_id for engine in busy]
+                return busy
             await asyncio.sleep(0.1)
 
     async def abandon(self, channel_ids: list[int]) -> None:

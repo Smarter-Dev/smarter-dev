@@ -65,8 +65,12 @@ spec:
                 # drains still restart it.
                 cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
         spec:
-            # Lets a bot taking a lease nobody handed over confirm that no
-            # other bot pod is still running (smarter_dev/bot/peer_pods.py).
+            # Lets the bot list its own pods: one taking a lease nobody
+            # handed over waits until no other bot pod exists, and one that
+            # lost Redis keeps acting only while it is the only bot pod
+            # (smarter_dev/bot/peer_pods.py, leadership.py). Without this
+            # access a standby is never Ready, so a roll stalls rather than
+            # stopping the old bot.
             serviceAccountName: smarter-dev-bot
             containers:
               - name: discord-bot
@@ -193,8 +197,9 @@ spec:
                     periodSeconds: 30
                     timeoutSeconds: 5
                     failureThreshold: 3
-                # Ready means connected with services and commands set up, so
-                # a roll keeps the old bot until the new one could act.
+                # Ready means connected with services and commands set up,
+                # and able to reach Redis and the Kubernetes API, so a roll
+                # keeps the old bot until the new one could act.
                 # Liveness stays process-level: a Discord outage must not
                 # restart the bot.
                 readinessProbe:
