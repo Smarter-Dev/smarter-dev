@@ -26,6 +26,13 @@ spec:
             labels:
                 app: smarter-dev-bot
                 tier: backend
+            annotations:
+                # The cluster autoscaler must not drain a node to remove the
+                # only bot: a scale-down on 2026-09-24 took it off Discord for
+                # 2m12s. A node the bot sits on can stay up underused until the
+                # next roll moves the bot. Deploys, node failure and manual
+                # drains still restart it.
+                cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
         spec:
             containers:
               - name: discord-bot
