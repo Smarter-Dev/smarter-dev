@@ -292,7 +292,7 @@ async def test_replay_runs_before_later_live_events(server) -> None:
     await new.stop()
 
 
-async def test_stale_interactions_are_not_replayed(server) -> None:
+async def test_stale_interactions_are_not_replayed(server, caplog) -> None:
     old, new = await incumbent_and_standby(server, **STEADY)
     replayed: list[str] = []
     new.gate._dispatch = lambda event: replayed.append(event) or leadership._done()
@@ -307,10 +307,11 @@ async def test_stale_interactions_are_not_replayed(server) -> None:
     await old.stop()
     await until(lambda: new.coordinator.acting)
     assert replayed == ["fresh interaction", "older message"]
+    assert losses(caplog) == {"interactions buffered past the time to acknowledge them": 1}
     await new.stop()
 
 
-async def test_the_standby_buffer_is_bounded(server, monkeypatch) -> None:
+async def test_the_standby_buffer_is_bounded(server, monkeypatch, caplog) -> None:
     monkeypatch.setattr(leadership, "STANDBY_BUFFER_EVENTS", 10)
     old, new = await incumbent_and_standby(server, **STEADY)
     for message_id in range(1, 26):
@@ -318,6 +319,10 @@ async def test_the_standby_buffer_is_bounded(server, monkeypatch) -> None:
     await settle()
     assert len(new.gate._buffer) == 10
     assert new.gate.dropped == 15
+    new.gate.summary()
+    assert losses(caplog) == {
+        "over 10 events buffered on standby; lost only if the handover needs them": 15
+    }
     await old.stop()
     await new.stop()
 
@@ -1020,30 +1025,115 @@ async def test_a_fenced_buffer_past_its_bounds_logs_what_it_drops(
     await process.stop()
 
 
-async def test_acting_again_on_a_sole_pod_answer_drops_what_it_buffered_loudly(
+async def test_the_kubernetes_api_answering_before_redis_replays_what_was_buffered(
     server, cluster, caplog
 ) -> None:
-    """Only a renewal proves the lease was kept; replaying later would also
-    run the buffered events after newer live ones."""
+    """Redis and the API both down; the API recovers first. A fresh sole-pod
+    answer proves nobody else acted (no process takes the lease while this
+    pod exists), so the buffer runs, in order, before the next live event."""
     process = Process("only", server, cluster)
     process.start()
     await until(lambda: process.coordinator.acting)
-    real_eval = process.redis.eval
     process.redis.eval = down
-    cluster.pods.add("new-pending")
+    cluster.api_down.add("only")
+    await until(lambda: process.coordinator.fenced, timeout=1)
+    for message_id in (1, 2, 3):
+        process.receive(message_id)
+    await settle()
+    assert process.handled == []
+
+    cluster.api_down.clear()
+    await until(lambda: process.coordinator.acting, timeout=1)
+    process.receive(4)
+    await settle()
+    assert process.handled == ["1", "2", "3", "4"]
+    assert process.gate.replayed == 3 and losses(caplog) == {}
+    await process.stop()
+
+
+async def test_a_sole_pod_replay_drops_interactions_too_old_to_acknowledge(
+    server, cluster, caplog
+) -> None:
+    process = Process("only", server, cluster)
+    process.start()
+    await until(lambda: process.coordinator.acting)
+    process.redis.eval = down
+    cluster.api_down.add("only")
+    await until(lambda: process.coordinator.fenced, timeout=1)
+    replayed: list[str] = []
+    process.gate._dispatch = lambda event: replayed.append(event) or leadership._done()
+    now = time.monotonic()
+    process.gate._fenced.extend(
+        [
+            (now - 5, "INTERACTION_CREATE:1", "stale interaction"),
+            (now, "MESSAGE_CREATE:2", "message"),
+        ]
+    )
+
+    cluster.api_down.clear()
+    await until(lambda: process.coordinator.acting, timeout=1)
+    assert replayed == ["message"]
+    assert losses(caplog) == {"interactions buffered past the time to acknowledge them": 1}
+    await process.stop()
+
+
+async def test_a_stopping_holder_replays_nothing_on_a_sole_pod_answer(
+    server, cluster, caplog
+) -> None:
+    process = Process("only", server, cluster)
+    process.start()
+    await until(lambda: process.coordinator.acting)
+    process.redis.eval = down
+    cluster.api_down.add("only")
     await until(lambda: process.coordinator.fenced, timeout=1)
     process.receive(1)
     await settle()
 
-    cluster.pods.discard("new-pending")
-    await until(lambda: process.coordinator.acting, timeout=1)  # sole pod again
-    process.receive(2)
+    process.coordinator.stopping = True  # SIGTERM, before its handover call
+    process.coordinator._holding = True
+    cluster.api_down.clear()
+    await process.coordinator._check_peers()  # a sole-pod answer arrives
     await settle()
-    process.redis.eval = real_eval
-    await until(lambda: not process.coordinator.degraded, timeout=1)
+    assert process.handled == []
+    await process.stop()
+    assert losses(caplog) == {"stopping; left to the successor's standby buffer": 1}
+
+
+async def test_a_renewal_after_a_lost_retake_reply_does_not_replay(
+    server, cluster, caplog
+) -> None:
+    """The lease lapsed; a renewal retakes it in Redis but its reply is lost.
+    The next renewal finds the lease this holder's, which proves nothing."""
+    process = Process("only", server, cluster, ttl=3.0, margin=2.7)
+    process.start()
+    await until(lambda: process.coordinator.acting)
+    cluster.api_down.add("only")  # no sole-pod answer either
+    real_eval = process.redis.eval
+    release = asyncio.Event()
+    lost_reply = []
+
+    async def flaky(script, *args, **kwargs):
+        if script == leadership._RENEW:
+            if not lost_reply:
+                lost_reply.append(await real_eval(script, *args, **kwargs))
+                raise RedisConnectionError("reply lost")
+            await release.wait()
+        return await real_eval(script, *args, **kwargs)
+
+    await process.redis.delete(LEASE_KEY)  # lapsed
+    process.redis.eval = flaky
+    await until(lambda: process.coordinator.fenced, timeout=1)
+    assert lost_reply == [leadership._RETAKEN], "the retake ran in Redis"
+    process.receive(1)
     await settle()
-    assert process.handled == ["2"]
-    assert losses(caplog) == {"acting again before a renewal confirmed the lease": 1}
+
+    release.set()
+    await until(lambda: process.coordinator.acting, timeout=1)
+    await settle()
+    assert process.handled == []
+    assert losses(caplog) == {
+        "a renewal failed while the lease was unconfirmed; it may have been retaken": 1
+    }
     await process.stop()
 
 
@@ -1149,7 +1239,9 @@ async def test_a_failing_kubernetes_api_never_lets_a_standby_take_a_free_lease(
     await new.stop()
 
 
-async def test_with_no_handover_record_it_waits_for_the_old_pod(server, cluster) -> None:
+async def test_with_no_handover_record_it_waits_for_the_old_pod(
+    server, cluster, caplog
+) -> None:
     old, new = await incumbent_and_standby(server, cluster)
     old.task.cancel()  # crashed: no release, no record
     await asyncio.sleep(1.0)  # the lease has expired
@@ -1162,6 +1254,7 @@ async def test_with_no_handover_record_it_waits_for_the_old_pod(server, cluster)
     await until(lambda: new.coordinator.acting, timeout=1)
     await settle()
     assert new.handled == [], "without a record nothing is replayed"
+    assert losses(caplog) == {"no handover record; the predecessor may have handled them": 1}
     await new.stop()
 
 
