@@ -39,10 +39,14 @@ One Redis key, the *acting lease*, says which process acts:
   lapsed; if another process holds it, it stops acting in the same step.
 - **Unconfirmed lease.** A holder fenced by time alone (a renewal late, say
   an event-loop stall past the margin) buffers the events it receives, as a
-  standby does, within the same bounds. A renewal that finds the lease still
-  this holder's proves nobody else could have acted, so it replays them, in
-  arrival order before any live event. A lease that lapsed and was taken
-  back, or was lost, proves nothing: the buffer is dropped, and logged.
+  standby does, within the same bounds. Two things prove nobody else could
+  have acted meanwhile, and then it replays them, in arrival order before any
+  live event: a renewal that finds the lease still this holder's with no
+  renewal failing since the last one that did, or a fresh Kubernetes answer
+  that this is the only bot pod (the exclusion rule above). A lease that
+  lapsed and was taken back, was lost, or was renewed after a failed renewal
+  (whose reply may have been a lost retake) proves nothing: the buffer is
+  dropped, and logged.
 
 Steady state is unchanged: one process holding the lease, renewing it every
 few seconds; no Redis or Kubernetes call on any event path. Every event
@@ -71,10 +75,9 @@ What this does not guarantee:
   If the Kubernetes API fails too, so does a sole holder. Its handover record
   gives the last moment it could have acted as its stop time, so timed sends
   that fell due while it was fenced go to the successor.
-- A holder whose lease lapses (an event-loop stall longer than ``ttl``)
-  drops what it buffered in the meantime, logged; so does one fenced longer
-  than the buffer's bounds, or one that acts again on a sole-pod answer
-  before a renewal confirms the lease.
+- A holder whose lease lapses (an event-loop stall longer than ``ttl``), or
+  whose renewal failed while it was unconfirmed, drops what it buffered in
+  the meantime, logged; so does one fenced longer than the buffer's bounds.
 - Work already accepted by the old process when it stops (running listeners,
   work they handed to background tasks registered with ``track``, and chat
   turns) finishes there within the drain budget in ``run_bot``; what is still
@@ -138,8 +141,11 @@ SOLE_POD_SECONDS = 5.0
 # Only the holder may extend or delete the lease; a process that lost it must
 # not clobber the new holder's. A holder whose lease lapsed with nobody taking
 # it (a pause, a Redis outage) takes it back. Only _KEPT shows the lease was
-# this holder's throughout.
-_LOST, _KEPT, _RETAKEN = 0, 1, 2
+# this holder's throughout, and only if no renewal failed since the last
+# answered one: a failed call may have retaken a lapsed lease and lost the
+# reply (_KEPT_UNPROVEN). A fresh answer that no other bot pod exists proves
+# continuity too (_SOLE_POD).
+_LOST, _KEPT, _RETAKEN, _KEPT_UNPROVEN, _SOLE_POD = 0, 1, 2, 3, 4
 _RENEW = """
 local holder = redis.call('get', KEYS[1])
 if holder == ARGV[1] then
@@ -331,6 +337,8 @@ class Coordinator:
         self._hooks: list[tuple[Callable[[], Any], bool]] = []
         self._stop_hooks: list[Callable[[], Any]] = []
         self._renewal_hooks: list[Callable[[int], Any]] = []
+        # A renewal failed since the last one answered.
+        self._renewal_failed = False
         self._waiting_logged = False
         self._watch_logged: str | None = None
         self._takeover_checked_at: float | None = None
@@ -375,7 +383,8 @@ class Coordinator:
         self._stop_hooks.append(callback)
 
     def on_renewed(self, callback: Callable[[int], Any]) -> None:
-        """Call ``callback`` with each renewal's outcome: _KEPT, _RETAKEN or _LOST."""
+        """Call ``callback`` with each renewal's outcome (_KEPT, _KEPT_UNPROVEN,
+        _RETAKEN or _LOST), and with _SOLE_POD on each sole-pod answer."""
         self._renewal_hooks.append(callback)
 
     async def run(self) -> None:
@@ -399,6 +408,7 @@ class Coordinator:
                 raise
             except Exception as error:  # noqa: BLE001 - any Redis failure
                 self._set_degraded(True, error)
+                self._renewal_failed = self._renewal_failed or self._holding
             if self._holding and self._clock() >= self._valid_until and not self._fenced_logged:
                 self._fenced_logged = True
                 logger.error(
@@ -487,6 +497,7 @@ class Coordinator:
         elif self._holding:
             self._sole_until = sent + self._sole_pod_seconds
             self._log_watch(None)
+            self._notify_renewal(_SOLE_POD)
 
     def _log_watch(self, problem: str | None) -> None:
         if problem is None or not self._holding:
@@ -508,6 +519,12 @@ class Coordinator:
             self._fenced_logged = False
             if outcome == _RETAKEN:
                 logger.warning("the acting lease had lapsed unclaimed; took it back")
+            elif self._renewal_failed:
+                outcome = _KEPT_UNPROVEN
+        self._renewal_failed = False
+        self._notify_renewal(outcome)
+
+    def _notify_renewal(self, outcome: int) -> None:
         for callback in self._renewal_hooks:
             try:
                 callback(outcome)
@@ -733,9 +750,9 @@ class EventGate:
         now = self._clock()
         if self._coordinator.acting:
             if self._fenced:
-                # Acting again on a sole-pod answer, not a renewal: nothing
-                # proved the lease was kept, and they would now run out of order.
-                self._discard_fenced("acting again before a renewal confirmed the lease")
+                # Replayed or dropped where acting resumed; left over only if
+                # that failed, and they would now run out of order.
+                self._discard_fenced("acting again before the buffer was replayed")
             if now < self._skip_until and key in self._predecessor_handled:
                 self.already_handled += 1
                 return _done()
@@ -746,9 +763,15 @@ class EventGate:
             # A standby: keep it in case the handover lands before it is handled.
             self._buffer.append((now, key, event))
             self._prune(self._buffer, now - STANDBY_BUFFER_SECONDS)
-            while len(self._buffer) > STANDBY_BUFFER_EVENTS:
+            overflow = len(self._buffer) - STANDBY_BUFFER_EVENTS
+            for _ in range(overflow):
                 self._buffer.popleft()
-                self.dropped += 1
+            if overflow > 0:
+                self._lose(
+                    overflow,
+                    f"over {STANDBY_BUFFER_EVENTS} events buffered on standby; "
+                    "lost only if the handover needs them",
+                )
         elif self._coordinator.stopping:
             self._lose(1, "stopping; left to the successor's standby buffer")
         else:
@@ -773,11 +796,15 @@ class EventGate:
 
     def _after_renewal(self, outcome: int) -> None:
         if self._fenced:
-            if outcome == _KEPT:
+            if outcome in (_KEPT, _SOLE_POD):
                 if self._coordinator.acting:
                     self._replay_fenced()
             elif outcome == _RETAKEN:
                 self._discard_fenced("the lease had lapsed; taking it back does not prove continuity")
+            elif outcome == _KEPT_UNPROVEN:
+                self._discard_fenced(
+                    "a renewal failed while the lease was unconfirmed; it may have been retaken"
+                )
             else:
                 self._discard_fenced("the acting lease was lost to another bot")
         self._flush_losses()
@@ -785,8 +812,8 @@ class EventGate:
     def _replay_fenced(self) -> None:
         """Run what arrived while the lease was unconfirmed, in arrival order.
 
-        Runs inside the coordinator's task right after the renewal, so no
-        live event can interleave.
+        Runs in the same step that resumed acting (a renewal, a sole-pod
+        answer), so no live event can interleave.
         """
         buffered, self._fenced = list(self._fenced), collections.deque()
         now = self._clock()
@@ -806,7 +833,7 @@ class EventGate:
                 self._run(now, key, event)
         self.replayed += replayed
         logger.info(
-            "acting lease confirmed; replayed %d events received while it was unconfirmed",
+            "acting confirmed; replayed %d events received while the lease was unconfirmed",
             replayed,
         )
         if expired:
@@ -864,11 +891,15 @@ class EventGate:
         if handover is None:
             # Crash, or a predecessor that never coordinated: it may have
             # handled any of these, so replaying could double them.
-            self.dropped += len(buffered)
+            if buffered:
+                self._lose(
+                    len(buffered), "no handover record; the predecessor may have handled them"
+                )
             return
         now = self._clock()
         self._predecessor_handled = handover.handled
         self._skip_until = now + HANDOVER_MEMORY_SECONDS
+        late = 0
         # In arrival order, and before any live event: this runs inside the
         # coordinator's task, so no dispatch can interleave.
         for received, key, event in buffered:
@@ -878,10 +909,12 @@ class EventGate:
                 key.startswith("INTERACTION_CREATE:")
                 and now - received > INTERACTION_REPLAY_SECONDS
             ):
-                self.dropped += 1  # too late to acknowledge
+                late += 1
             else:
                 self.replayed += 1
                 self._run(now, key, event)
+        if late:
+            self._lose(late, "interactions buffered past the time to acknowledge them")
 
     def recent_handled(self) -> list[str]:
         """The events this process handled within the handover window."""
