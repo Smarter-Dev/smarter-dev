@@ -34,6 +34,10 @@ dependencies = [
     "asyncpg>=0.30.0",
     "greenlet>=3.2.3",
     "httpx>=0.28.1",
+    # httpx2 (the OpenAI client's transport) decodes brotli with
+    # process(output_buffer_limit=...), which Brotli added in 1.2.0; with 1.1.0
+    # every brotli-encoded OpenAI response raised TypeError (2026-09-24).
+    "brotli>=1.2.0; platform_python_implementation == 'CPython'",
     "redis>=6.2.0",
     "genai-prices>=0.0.55",
     "google-genai>=1.62.0",
