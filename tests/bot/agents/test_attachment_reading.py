@@ -138,6 +138,72 @@ async def test_binary_attachment_reports_the_limit_instead_of_guessing():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "content_type",
+    [
+        "application/zip",
+        "application/gzip",
+        "application/x-7z-compressed",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/x-sqlite3",
+        "video/mp4",
+    ],
+)
+async def test_binary_labels_are_refused_even_when_bytes_decode_as_utf8(content_type):
+    # No NUL and valid UTF-8, but labelled as a binary format: the label wins.
+    fetch = AsyncMock(return_value=(b"PK\x03\x04binary", content_type))
+    with patch.object(chat_tools.web_fetch, "fetch_bytes", fetch), _no_jina():
+        out = await web_read(_ctx(), ZIP_URL, "what's inside?")
+    assert out["error"] == "unsupported_attachment_type"
+    assert content_type in out["detail"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("data", "content_type", "expected"),
+    [
+        # PowerShell `>` writes UTF-16LE with a BOM.
+        ("\ufeffERROR build failed\r\n".encode("utf-16-le"), "text/plain", "ERROR build failed"),
+        # Excel "CSV" export in Windows-1252.
+        ("name,city\nJosé,Montréal\n".encode("cp1252"), "text/csv", "José,Montréal"),
+        # A charset parameter on the label does not change the routing.
+        ("a;b\nMünchen;1\n".encode("cp1252"), "text/csv; charset=windows-1252", "München"),
+        # UTF-32 with a BOM.
+        ("\ufeffhello utf32".encode("utf-32-le"), "text/plain", "hello utf32"),
+        # Unlabelled but clean UTF-8 text is still read.
+        (b"fn main() {}\n", "application/octet-stream", "fn main() {}"),
+        # Text under a non-text/ label Discord may assign by extension.
+        (b'{"ok": true}', "application/json", '"ok"'),
+        (b"Write-Host hi\n", "application/x-powershell", "Write-Host hi"),
+        (b"\\section{Intro}\n", "application/x-tex", "\\section{Intro}"),
+        (b"<svg xmlns='http://www.w3.org/2000/svg'/>", "image/svg+xml", "<svg"),
+    ],
+)
+async def test_text_in_other_encodings_is_decoded(data, content_type, expected):
+    fetch = AsyncMock(return_value=(data, content_type))
+    with patch.object(chat_tools.web_fetch, "fetch_bytes", fetch), _no_jina(), _summarizer() as s:
+        out = await web_read(_ctx(), LOG_URL, "read")
+    assert "error" not in out
+    assert expected in s.call_args.kwargs["content"]
+
+
+@pytest.mark.asyncio
+async def test_non_text_label_does_not_get_the_windows_1252_fallback():
+    fetch = AsyncMock(return_value=("José".encode("cp1252"), "application/x-powershell"))
+    with patch.object(chat_tools.web_fetch, "fetch_bytes", fetch), _no_jina():
+        out = await web_read(_ctx(), LOG_URL, "read")
+    assert out["error"] == "unsupported_attachment_type"
+
+
+@pytest.mark.asyncio
+async def test_unlabelled_non_utf8_bytes_are_refused():
+    fetch = AsyncMock(return_value=(bytes(range(128, 256)), "application/octet-stream"))
+    with patch.object(chat_tools.web_fetch, "fetch_bytes", fetch), _no_jina():
+        out = await web_read(_ctx(), ZIP_URL, "read")
+    assert out["error"] == "unsupported_attachment_type"
+
+
+@pytest.mark.asyncio
 async def test_image_attachment_goes_to_the_media_reader_when_bytes_are_an_image():
     png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
     with (
