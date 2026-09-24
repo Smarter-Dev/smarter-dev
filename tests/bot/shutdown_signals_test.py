@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+from unittest.mock import Mock
 
 import pytest
 
@@ -46,6 +47,7 @@ class FakeBot:
         self.start_blocks = start_blocks
         self.started = False
         self.closed = False
+        self.calls: list[str] = []
 
     def listen(self, *_args, **_kwargs):
         return lambda func: func
@@ -57,6 +59,19 @@ class FakeBot:
 
     async def close(self) -> None:
         self.closed = True
+        self.calls.append("close")
+
+
+class FakeCoordinator:
+    def __init__(self, calls: list[str]) -> None:
+        self.calls = calls
+
+    async def run(self) -> None:
+        self.calls.append("contend")
+        await asyncio.Event().wait()
+
+    async def stop_acting(self, _handled=()) -> None:
+        self.calls.append("stop_acting")
 
 
 class FakeHealthRunner:
@@ -91,6 +106,16 @@ def _patch_run_bot(monkeypatch: pytest.MonkeyPatch, bot: FakeBot) -> FakeHealthR
     monkeypatch.setattr(client, "setup_bot_services", fake_setup)
     monkeypatch.setattr(client, "load_plugins", lambda _bot: None)
     monkeypatch.setattr(client, "start_health_server", fake_health)
+    monkeypatch.setattr(
+        client,
+        "create_coordination",
+        lambda _bot, _settings: (FakeCoordinator(bot.calls), Mock(recent_handled=list)),
+    )
+
+    async def fake_drain(_gate, _budget) -> None:
+        bot.calls.append("drain")
+
+    monkeypatch.setattr(client, "drain_accepted_work", fake_drain)
     return runner
 
 
@@ -121,6 +146,8 @@ async def test_sigterm_while_running_closes_the_bot(
     assert bot.started
     assert runner.cleaned_up
     assert bot.closed
+    # Hand over first, so the standby acts while this process drains.
+    assert bot.calls == ["contend", "stop_acting", "drain", "close"]
 
 
 async def test_sigterm_during_startup_still_closes_the_bot(
@@ -139,3 +166,4 @@ async def test_sigterm_during_startup_still_closes_the_bot(
         await _remove_handlers()
     assert not bot.started
     assert bot.closed
+    assert "contend" not in bot.calls
