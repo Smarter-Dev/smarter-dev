@@ -8,29 +8,38 @@ the old one must keep acting until the new one takes over, or nobody acts.
 One Redis key, the *acting lease*, says which process acts:
 
 - **Standby.** A process that finds the lease held connects, sets up and
-  reports Ready (only while it can reach Redis, so it could take over), but
-  runs no gateway listener and no timed send. It buffers the gateway events
-  it receives. Kubernetes stops the old process once the standby is Ready.
-- **Handover.** On SIGTERM the old process stops acting and writes a handover
-  record, the events it handled in its last ``HANDOVER_WINDOW`` seconds and
-  its stop time, then releases the lease. The standby takes the lease on its
-  next poll and acts. It replays the buffered events the record does not
-  list, and for a minute skips any event the record does list. So an event
+  reports Ready (only while it can reach both Redis and the Kubernetes API,
+  so it could take over), but runs no gateway listener and no timed send. It
+  buffers the gateway events it receives. Kubernetes stops the old process
+  once the standby is Ready.
+- **Handover.** On SIGTERM the old process stops acting and, in one Redis
+  script, writes a handover record (the events it handled in its last
+  ``HANDOVER_WINDOW`` seconds and its stop time) and releases the lease. The
+  standby takes the lease on its next poll and acts. Taking the lease
+  consumes the record in the same script, so a record hands over exactly
+  once. The successor replays the buffered events the record does not list,
+  and for a minute skips any event the record does list. So an event
   delivered to the two sessions at different times, on either side of the
   handover, still runs exactly once (given the identity below).
+- **No handover.** A free lease without a record means the previous holder
+  crashed, failed to hand over, never ran this code (the first deploy of
+  it), or is alive but cut off from Redis. Such a process takes the lease
+  only once the Kubernetes API answers that no other bot pod exists in any
+  phase but Succeeded or Failed (``peer_pods``). An API error or timeout is
+  never taken as that answer: it waits. It replays nothing.
 - **Fencing.** A holder that cannot renew its lease stops acting before the
   lease can expire (``ttl - margin`` after its last renewal was sent),
-  checked on every event, so a paused or partitioned holder never acts
-  beside a successor. A standby never takes over without Redis.
-- **No handover.** A free lease without a fresh handover record means the
-  previous holder crashed, failed to hand over, or never ran this code (the
-  first deploy of it). Such a process reports Ready, so Kubernetes stops any
-  other bot pod, and takes the lease only once ``predecessor_gone`` confirms
-  from the Kubernetes API that no other bot pod has a running container. It
-  replays nothing.
+  checked on every event, unless it is the only bot pod: while Redis fails
+  it keeps acting only as long as a Kubernetes answer sent at most
+  ``SOLE_POD_SECONDS`` ago listed no other bot pod. An API error, a stale
+  answer or any other bot pod (even Pending) fences it. This is safe because
+  of the rule above: no other process can take the lease while this pod
+  exists, except with a record, which only a stopping holder writes.
+  When Redis answers again the holder renews its lease or retakes it if it
+  lapsed; if another process holds it, it stops acting in the same step.
 
 Steady state is unchanged: one process holding the lease, renewing it every
-few seconds; no Redis call on any event path.
+few seconds; no Redis or Kubernetes call on any event path.
 
 Event identity is Discord's id where it has one (messages, deletes,
 interactions, edits) and a hash of the payload otherwise; two sessions are
@@ -43,18 +52,16 @@ What this does not guarantee:
   loses none; the buffer holds ``STANDBY_BUFFER_SECONDS``. A handover that
   takes longer than that (Redis slow to answer) loses the older ones.
 - Warm takeover (a standby is connected) is bounded by the handover: the
-  stopping process's two Redis calls, one poll and the standby's two calls,
-  each call bounded by the client's socket timeout. If the release fails the
-  standby waits for the lease to expire (``ttl``), replaying up to
-  ``STANDBY_BUFFER_SECONDS`` of buffered events. If the whole handover
-  record fails too, it waits until the old pod has stopped and replays
-  nothing.
+  stopping process's Redis call, one poll and the standby's call, each
+  bounded by the client's socket timeout. If the handover call fails, there
+  is no record: the standby waits until the old pod is gone and replays
+  nothing, so events in between are lost.
 - Cold recovery (the only process crashed, no standby) is a restart: the
   container restart backoff, then startup (about 70s at one CPU), then the
   lease. Nothing is replayed; events in between are lost.
-- A holder that loses Redis stops acting after ``ttl - margin`` until Redis
-  returns: an outage over about ten seconds silences the bot rather than risk
-  two actors. Shorter blips change nothing.
+- A holder that loses Redis while another bot pod exists (a deploy under way)
+  stops acting after ``ttl - margin`` until Redis returns or it is replaced.
+  If the Kubernetes API fails too, so does a sole holder.
 - Work already accepted by the old process when it stops (running listeners,
   work they handed to background tasks registered with ``track``, and chat
   turns) finishes there within the drain budget in ``run_bot``; what is still
@@ -97,8 +104,8 @@ HANDED_OVER_KEY = "smarter-dev:bot:handed-over"
 RELEASED_AT_KEY = "smarter-dev:bot:released-at"
 
 # How far back the stopping process lists what it handled, how long and how
-# much the standby buffers (enough to cover a lease expiring after a failed
-# release), and how long the successor honours the list.
+# much the standby buffers, and how long a handover record lives and the
+# successor honours its list.
 HANDOVER_WINDOW = 30.0
 STANDBY_BUFFER_SECONDS = 20.0
 STANDBY_BUFFER_EVENTS = 5000
@@ -106,10 +113,15 @@ HANDOVER_MEMORY_SECONDS = 60.0
 INTERACTION_REPLAY_SECONDS = 2.0
 # How long a queued timed send on a standby waits for a handover in progress.
 HANDOVER_WAIT_SECONDS = 60.0
+# How often to ask Kubernetes for the other bot pods (standing by, or holding
+# the lease without Redis), and how long a "none" answer lets a holder that
+# cannot reach Redis keep acting, counted from when the request was sent.
+PEER_CHECK_SECONDS = 2.0
+SOLE_POD_SECONDS = 5.0
 
 # Only the holder may extend or delete the lease; a process that lost it must
 # not clobber the new holder's. A holder whose lease lapsed with nobody taking
-# it (a pause, a Redis blip) takes it back.
+# it (a pause, a Redis outage) takes it back.
 _RENEW = """
 local holder = redis.call('get', KEYS[1])
 if holder == ARGV[1] then
@@ -121,11 +133,41 @@ if not holder then
 end
 return 0
 """
-_RELEASE = """
-if redis.call('get', KEYS[1]) == ARGV[1] then
-    return redis.call('del', KEYS[1])
+# Take a free lease with the handover record, consuming it, or without one
+# when the caller confirmed no other bot pod exists (ARGV[3] == '1').
+_HELD, _NO_RECORD, _TAKEN = 0, 1, 2
+_TAKE = """
+if redis.call('exists', KEYS[1]) == 1 then
+    return {0}
 end
-return 0
+local stopped = redis.call('get', KEYS[2])
+if not stopped and ARGV[3] ~= '1' then
+    return {1}
+end
+redis.call('set', KEYS[1], ARGV[1], 'PX', ARGV[2])
+local handled = {}
+if stopped then
+    handled = redis.call('smembers', KEYS[3])
+end
+redis.call('del', KEYS[2], KEYS[3])
+return {2, stopped or '', handled}
+"""
+# Write the handover record and release the lease, unless another process
+# holds it. A lapsed lease still gets a record: this process is stopping, so
+# a successor may act at once.
+_HAND_OVER = """
+local holder = redis.call('get', KEYS[1])
+if holder and holder ~= ARGV[1] then
+    return 0
+end
+redis.call('del', KEYS[3])
+for i = 4, #ARGV do
+    redis.call('sadd', KEYS[3], ARGV[i])
+end
+redis.call('pexpire', KEYS[3], ARGV[2])
+redis.call('set', KEYS[2], ARGV[3], 'PX', ARGV[2])
+redis.call('del', KEYS[1])
+return 1
 """
 
 _current: Coordinator | None = None
@@ -165,15 +207,29 @@ async def should_send(due: float, *, wait: float = HANDOVER_WAIT_SECONDS) -> boo
 
 
 def track(task: asyncio.Task[Any]) -> asyncio.Task[Any]:
-    """Register background work a listener started, so shutdown waits for it."""
+    """Register background work a listener started, so shutdown waits for it.
+
+    Track work whose loss or repeat users would notice: moderation actions
+    and triage, sends, replies. Do not track cosmetic clean-up such as
+    deleting an ephemeral confirmation after a delay: shutdown would spend
+    its budget waiting on it.
+    """
     _accepted.add(task)
     task.add_done_callback(_accepted.discard)
     return task
 
 
 async def run_accepted(work: Awaitable[Any]) -> Any:
-    """Run ``work`` as tracked background work and wait for it."""
-    return await track(asyncio.ensure_future(work))
+    """Run ``work`` as tracked background work and wait for it.
+
+    Cancelling the caller does not cancel the work: shutdown drains it.
+    """
+    return await asyncio.shield(track(asyncio.ensure_future(work)))
+
+
+def tracked() -> set[asyncio.Task[Any]]:
+    """Tracked work still running."""
+    return set(_accepted)
 
 
 async def drain_tracked(timeout: float) -> list[asyncio.Task[Any]]:
@@ -191,8 +247,8 @@ def on_stop(callback: Callable[[], Any]) -> None:
         _current.on_stop(callback)
 
 
-async def _no_peers() -> bool:
-    return True
+async def _no_other_pods() -> list[str]:
+    return []
 
 
 def holder_id() -> str:
@@ -207,6 +263,10 @@ class Handover:
         self.handled = handled
 
 
+def _text(value: Any) -> str:
+    return value.decode() if isinstance(value, bytes) else str(value)
+
+
 class Coordinator:
     """This process's hold on the acting lease."""
 
@@ -219,7 +279,9 @@ class Coordinator:
         margin: float = 5.0,
         renew_interval: float = 3.0,
         poll_interval: float = 0.1,
-        predecessor_gone: Callable[[], Awaitable[bool]] = _no_peers,
+        other_pods: Callable[[], Awaitable[list[str]]] = _no_other_pods,
+        peer_interval: float = PEER_CHECK_SECONDS,
+        sole_pod_seconds: float = SOLE_POD_SECONDS,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._redis = redis
@@ -229,7 +291,9 @@ class Coordinator:
         self._margin = margin
         self._renew_interval = renew_interval
         self._poll_interval = poll_interval
-        self._predecessor_gone = predecessor_gone
+        self._other_pods = other_pods
+        self._peer_interval = peer_interval
+        self._sole_pod_seconds = sole_pod_seconds
         self._clock = clock
 
         self.stopping = False
@@ -239,31 +303,43 @@ class Coordinator:
         self.acting_since: float | None = None
         self._holding = False
         self._valid_until = 0.0
+        # Until when Kubernetes vouches that this is the only bot pod.
+        self._sole_until = 0.0
         self._fenced_logged = False
         self._redis_ok_at: float | None = None
+        self._peers_ok_at: float | None = None
         self._acting_changed = asyncio.Event()
         self._hooks: list[tuple[Callable[[], Any], bool]] = []
         self._stop_hooks: list[Callable[[], Any]] = []
         self._waiting_logged = False
-        self._peers_checked_at: float | None = None
-        # Unix time another bot pod was last seen running, if ever.
+        self._watch_logged: str | None = None
+        self._takeover_checked_at: float | None = None
+        # Unix time another bot pod was last seen, or could not be ruled out.
         self.peer_seen_running_at: float | None = None
 
     @property
     def acting(self) -> bool:
-        """Holding the lease, not stopping, and sure the lease has not expired."""
-        return self._holding and not self.stopping and self._clock() < self._valid_until
+        """Holding the lease, not stopping, and sure no other process acts:
+        the lease cannot have expired, or Kubernetes just listed no other
+        bot pod."""
+        if not self._holding or self.stopping:
+            return False
+        now = self._clock()
+        return now < self._valid_until or now < self._sole_until
 
     @property
     def can_take_over(self) -> bool:
         if self.acting:
             return True
-        ok_at = self._redis_ok_at
-        return (
-            not self.stopping
-            and ok_at is not None
-            and self._clock() - ok_at < min(3.0, self._ttl)
+        if self.stopping:
+            return False
+        now = self._clock()
+        redis_ok = self._redis_ok_at is not None and now - self._redis_ok_at < min(3.0, self._ttl)
+        peers_ok = (
+            self._peers_ok_at is not None
+            and now - self._peers_ok_at < 4 * self._peer_interval
         )
+        return redis_ok and peers_ok
 
     def on_acting(self, callback: Callable[[], Any], *, once: bool = True) -> None:
         """Call ``callback`` when this process starts acting (every time if not once)."""
@@ -274,26 +350,29 @@ class Coordinator:
 
     async def run(self) -> None:
         """Take the lease and keep it; call once the bot is connected and set up."""
+        watcher = asyncio.create_task(self._watch_peers())
+        try:
+            await self._hold()
+        finally:
+            watcher.cancel()
+
+    async def _hold(self) -> None:
         while not self.stopping:
-            sent = self._clock()
             try:
                 if self._holding:
-                    await self._renew(sent)
-                elif await self._may_take_free_lease() and await self._redis.set(
-                    LEASE_KEY, self.holder, nx=True, px=self._ttl_ms
-                ):
-                    self._valid_until = sent + self._ttl - self._margin
-                    await self._take_over()
+                    await self._renew(self._clock())
+                else:
+                    await self._try_take()
                 self._redis_ok_at = self._clock()
                 self._set_degraded(False)
             except asyncio.CancelledError:
                 raise
             except Exception as error:  # noqa: BLE001 - any Redis failure
                 self._set_degraded(True, error)
-            if self._holding and not self.acting and not self._fenced_logged:
+            if self._holding and self._clock() >= self._valid_until and not self._fenced_logged:
                 self._fenced_logged = True
                 logger.error(
-                    "acting lease unconfirmed for %.0fs; not acting until Redis answers",
+                    "acting lease unconfirmed for %.0fs; acting only while no other bot pod exists",
                     self._ttl - self._margin,
                 )
             healthy_holder = self._holding and not self.degraded
@@ -301,26 +380,91 @@ class Coordinator:
                 self._renew_interval if healthy_holder else self._poll_interval
             )
 
-    async def _may_take_free_lease(self) -> bool:
-        """Whether nothing but a lease we could take stands between us and acting."""
-        if await self._redis.exists(LEASE_KEY):
-            return False  # held: stand by
-        stopped_at = await self._redis.get(RELEASED_AT_KEY)
-        if stopped_at and time.time() - float(stopped_at) < HANDOVER_MEMORY_SECONDS:
-            return True  # handed over
-        # Nobody handed over: whoever held it last may still be running and
-        # not coordinating. Act only once it is gone (asking at most every 2s).
+    async def _try_take(self) -> None:
+        sent = self._clock()
+        result = await self._take(peers_confirmed=False)
+        if int(result[0]) == _NO_RECORD:
+            if not await self._no_other_pod_now():
+                return
+            sent = self._clock()
+            result = await self._take(peers_confirmed=True)
+        if int(result[0]) != _TAKEN:
+            return
+        self._valid_until = sent + self._ttl - self._margin
+        self._take_over(result[1], result[2])
+
+    async def _take(self, *, peers_confirmed: bool) -> list[Any]:
+        return await self._redis.eval(
+            _TAKE,
+            3,
+            LEASE_KEY,
+            RELEASED_AT_KEY,
+            HANDED_OVER_KEY,
+            self.holder,
+            self._ttl_ms,
+            "1" if peers_confirmed else "0",
+        )
+
+    async def _no_other_pod_now(self) -> bool:
+        """Ask Kubernetes (at most every ``peer_interval``) whether this is the
+        only bot pod. Only a successful answer listing none says yes."""
         now = self._clock()
-        if self._peers_checked_at is not None and now - self._peers_checked_at < 2.0:
+        if (
+            self._takeover_checked_at is not None
+            and now - self._takeover_checked_at < self._peer_interval
+        ):
             return False
-        self._peers_checked_at = now
-        if await self._predecessor_gone():
+        self._takeover_checked_at = now
+        try:
+            others = await self._other_pods()
+        except Exception as error:  # noqa: BLE001 - an error is not an answer
+            self.peer_seen_running_at = time.time()
+            logger.warning("cannot list bot pods (%s); not taking the lease", error)
+            return False
+        if not others:
             return True
         self.peer_seen_running_at = time.time()
         if not self._waiting_logged:
             self._waiting_logged = True
-            logger.info("lease free without a handover; waiting for the other bot pod to stop")
+            logger.info(
+                "lease free without a handover; waiting for bot pods %s to go",
+                ", ".join(others),
+            )
         return False
+
+    async def _watch_peers(self) -> None:
+        """Keep a Kubernetes answer fresh while standing by (readiness needs
+        the API) and while holding the lease without Redis (acting needs it)."""
+        while not self.stopping:
+            if not self._holding or self.degraded:
+                await self._check_peers()
+            await asyncio.sleep(self._peer_interval)
+
+    async def _check_peers(self) -> None:
+        sent = self._clock()
+        try:
+            others = await self._other_pods()
+        except asyncio.CancelledError:
+            raise
+        except Exception as error:  # noqa: BLE001 - an error is not an answer
+            self._sole_until = 0.0
+            self._log_watch(f"cannot list bot pods ({error})")
+            return
+        self._peers_ok_at = sent
+        if others:
+            self._sole_until = 0.0
+            self._log_watch(f"other bot pods exist ({', '.join(others)})")
+        elif self._holding:
+            self._sole_until = sent + self._sole_pod_seconds
+            self._log_watch(None)
+
+    def _log_watch(self, problem: str | None) -> None:
+        if problem is None or not self._holding:
+            self._watch_logged = None
+            return
+        if problem != self._watch_logged:
+            self._watch_logged = problem
+            logger.error("%s; not acting until Redis answers", problem)
 
     async def _renew(self, sent: float) -> None:
         if await self._redis.eval(_RENEW, 1, LEASE_KEY, self.holder, self._ttl_ms):
@@ -328,20 +472,15 @@ class Coordinator:
             self._fenced_logged = False
         else:
             self._holding = False
+            self._sole_until = 0.0
             self._acting_changed.set()
             logger.error("lost the acting lease to another bot; standing by")
 
-    async def _take_over(self) -> None:
-        pipe = self._redis.pipeline()
-        pipe.get(RELEASED_AT_KEY)
-        pipe.smembers(HANDED_OVER_KEY)
-        stopped_at, handled = await pipe.execute()
-        self.handover = None
-        if stopped_at and time.time() - float(stopped_at) < HANDOVER_MEMORY_SECONDS:
-            self.handover = Handover(
-                float(stopped_at),
-                {k.decode() if isinstance(k, bytes) else k for k in handled},
-            )
+    def _take_over(self, stopped_at: Any, handled: Iterable[Any]) -> None:
+        stopped = _text(stopped_at) if stopped_at else ""
+        self.handover = (
+            Handover(float(stopped), {_text(k) for k in handled}) if stopped else None
+        )
         self._holding = True
         self.acting_since = time.time()
         self._fenced_logged = False
@@ -397,9 +536,10 @@ class Coordinator:
         # already stopped by then.
         if self.handover is not None:
             return self.handover.stopped_at <= due
-        # No record: if we saw its pod running after it fell due, it may have
-        # sent it. Otherwise it had crashed; sending risks a duplicate only if
-        # the crash landed on the second the message fell due.
+        # No record: if another pod was seen (or could not be ruled out) after
+        # it fell due, that pod may have sent it. Otherwise it had crashed;
+        # sending risks a duplicate only if the crash landed on the second the
+        # message fell due.
         seen = self.peer_seen_running_at
         return seen is None or seen < due
 
@@ -417,21 +557,28 @@ class Coordinator:
         self._holding = False
         keys = list(handled)
         try:
-            # The record goes first, so a successor never holds the lease
-            # without it.
-            pipe = self._redis.pipeline(transaction=True)
-            pipe.delete(HANDED_OVER_KEY)
-            if keys:
-                pipe.sadd(HANDED_OVER_KEY, *keys)
-            pipe.expire(HANDED_OVER_KEY, int(HANDOVER_MEMORY_SECONDS * 2))
-            pipe.set(RELEASED_AT_KEY, str(time.time()), ex=int(HANDOVER_MEMORY_SECONDS * 2))
-            await pipe.execute()
-            await self._redis.eval(_RELEASE, 1, LEASE_KEY, self.holder)
-            logger.info("released the acting lease (%d recent events handed over)", len(keys))
+            handed = await self._redis.eval(
+                _HAND_OVER,
+                3,
+                LEASE_KEY,
+                RELEASED_AT_KEY,
+                HANDED_OVER_KEY,
+                self.holder,
+                int(HANDOVER_MEMORY_SECONDS * 1000),
+                str(time.time()),
+                *keys,
+            )
         except Exception as error:  # noqa: BLE001
             logger.warning(
-                "could not hand over; the lease expires within %.0fs: %s", self._ttl, error
+                "could not hand over (%s); the successor waits for this pod to go "
+                "and replays nothing",
+                error,
             )
+            return
+        if handed:
+            logger.info("released the acting lease (%d recent events handed over)", len(keys))
+        else:
+            logger.warning("the acting lease was already another bot's; no handover record")
 
 
 # The raw gateway event the current dispatch task came from. hikari runs each
@@ -603,6 +750,10 @@ class EventGate:
         return asyncio.ensure_future(
             asyncio.gather(*(_run_listener(cb, event) for cb in framework))
         )
+
+    def in_flight(self) -> set[asyncio.Future[Any]]:
+        """Listeners this process started that are still running."""
+        return {future for future in self._in_flight if not future.done()}
 
     async def drain(self, timeout: float) -> int:
         """Wait for listeners already running; return how many outlasted it."""

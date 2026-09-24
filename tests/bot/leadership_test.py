@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import time
+import uuid
+from datetime import UTC
+from datetime import datetime
 from unittest.mock import AsyncMock
 from unittest.mock import Mock
 
@@ -27,7 +30,14 @@ from smarter_dev.bot.leadership import LEASE_KEY
 from smarter_dev.bot.leadership import Coordinator
 from smarter_dev.bot.leadership import EventGate
 
-FAST = {"ttl": 0.4, "margin": 0.15, "renew_interval": 0.1, "poll_interval": 0.01}
+FAST = {
+    "ttl": 0.6,
+    "margin": 0.15,
+    "renew_interval": 0.1,
+    "poll_interval": 0.01,
+    "peer_interval": 0.03,
+    "sole_pod_seconds": 0.1,
+}
 
 
 def message_payload(message_id: int) -> dict:
@@ -52,20 +62,50 @@ def message_payload(message_id: int) -> dict:
     }
 
 
-async def _always_gone() -> bool:
-    return True
+# For tests that stream events for a while: a lease that outlasts event-loop
+# stalls on a loaded machine, so only the handover is under test.
+STEADY = {"ttl": 3.0, "margin": 1.0}
+
+class Cluster:
+    """The bot pods Kubernetes would list, and whose API calls fail."""
+
+    def __init__(self) -> None:
+        self.pods: set[str] = set()
+        self.api_down: set[str] = set()
+        self.api_hangs: set[str] = set()
+        self.calls = 0
+
+    def lister(self, me: str):
+        async def other_pods() -> list[str]:
+            self.calls += 1
+            if me in self.api_hangs:
+                await asyncio.Event().wait()
+            if me in self.api_down:
+                raise OSError("kubernetes api unreachable")
+            return sorted(self.pods - {me})
+
+        return other_pods
 
 
 class Process:
-    """One bot process: a real hikari event manager behind the gate."""
+    """One bot process in its own pod: a real hikari event manager behind
+    the gate. Without a cluster, Kubernetes lists no other pod."""
 
-    def __init__(self, name: str, server: fakeredis.FakeServer, **options) -> None:
+    def __init__(
+        self,
+        name: str,
+        server: fakeredis.FakeServer,
+        cluster: Cluster | None = None,
+        **options,
+    ) -> None:
         self.name = name
+        self.cluster = cluster
         self.app = hikari.GatewayBot("x" * 60, banner=None)
         self.redis = fakeredis.aioredis.FakeRedis(server=server)
-        self.coordinator = Coordinator(
-            self.redis, name, **{**FAST, "predecessor_gone": _always_gone, **options}
-        )
+        if cluster is not None:
+            cluster.pods.add(name)
+            options = {"other_pods": cluster.lister(name), **options}
+        self.coordinator = Coordinator(self.redis, name, **{**FAST, **options})
         self.gate = EventGate(self.app, self.coordinator)
         self.handled: list[str] = []
         self.task: asyncio.Task | None = None
@@ -88,6 +128,12 @@ class Process:
         if self.task:
             self.task.cancel()
 
+    async def exit(self) -> None:
+        """SIGTERM, then the container exits and the pod goes."""
+        await self.stop()
+        if self.cluster is not None:
+            self.cluster.pods.discard(self.name)
+
 
 async def settle() -> None:
     for _ in range(10):
@@ -109,6 +155,11 @@ def server() -> fakeredis.FakeServer:
     return fakeredis.FakeServer()
 
 
+@pytest.fixture
+def cluster() -> Cluster:
+    return Cluster()
+
+
 @pytest.fixture(autouse=True)
 def uninstall():
     yield
@@ -116,28 +167,33 @@ def uninstall():
     leadership._accepted.clear()
 
 
-async def incumbent_and_standby(server, **new_options) -> tuple[Process, Process]:
-    old = Process("old", server)
+async def incumbent_and_standby(
+    server, cluster: Cluster | None = None, **options
+) -> tuple[Process, Process]:
+    old = Process("old", server, cluster, **options)
     old.start()
     await until(lambda: old.coordinator.acting)
-    new = Process("new", server, **new_options)
+    new = Process("new", server, cluster, **options)
     new.start()
     await asyncio.sleep(0.05)
     return old, new
 
 
 class Overlap:
-    """Samples both processes and records any moment both act."""
+    """Samples the processes and records any moment two act, and any moment
+    none does."""
 
     def __init__(self, *processes: Process) -> None:
         self.processes = processes
         self.seen = False
+        self.gap = False
         self.task = asyncio.create_task(self._watch())
 
     async def _watch(self) -> None:
         while True:
-            if sum(p.coordinator.acting for p in self.processes) > 1:
-                self.seen = True
+            acting = sum(p.coordinator.acting for p in self.processes)
+            self.seen = self.seen or acting > 1
+            self.gap = self.gap or acting == 0
             await asyncio.sleep(0.002)
 
     def stop(self) -> bool:
@@ -153,7 +209,7 @@ async def down(*_args, **_kwargs):
 
 
 async def test_a_standby_handles_nothing_while_the_incumbent_acts(server) -> None:
-    old, new = await incumbent_and_standby(server)
+    old, new = await incumbent_and_standby(server, **STEADY)
     for message_id in range(1, 31):
         old.receive(message_id)
         new.receive(message_id)
@@ -166,11 +222,14 @@ async def test_a_standby_handles_nothing_while_the_incumbent_acts(server) -> Non
 
 
 async def test_a_handover_mid_stream_runs_every_event_once(server) -> None:
-    old, new = await incumbent_and_standby(server)
+    old, new = await incumbent_and_standby(server, **STEADY)
     overlap = Overlap(old, new)
     for message_id in range(1, 201):
         if message_id == 50:
+            new.task.cancel()  # its next poll comes only after 50-59 arrive
             await old.stop()  # SIGTERM
+        if message_id == 60:
+            new.start()
         old.receive(message_id)
         new.receive(message_id)
         await asyncio.sleep(0.001)
@@ -187,7 +246,7 @@ async def test_a_handover_mid_stream_runs_every_event_once(server) -> None:
 async def test_delivery_skew_across_the_cutoff_neither_doubles_nor_drops(server) -> None:
     """The two sessions see events at different times: the new one 30 events
     behind the old one for the first half, then the old one behind the new."""
-    old, new = await incumbent_and_standby(server)
+    old, new = await incumbent_and_standby(server, **STEADY)
     lagging: list[int] = []
     for message_id in range(1, 121):
         old.receive(message_id)
@@ -214,7 +273,7 @@ async def test_delivery_skew_across_the_cutoff_neither_doubles_nor_drops(server)
 
 
 async def test_handover_takes_about_one_poll(server) -> None:
-    old, new = await incumbent_and_standby(server)
+    old, new = await incumbent_and_standby(server, **STEADY)
     await old.stop()
     gap = await until(lambda: new.coordinator.acting)
     assert gap < 0.1
@@ -222,7 +281,7 @@ async def test_handover_takes_about_one_poll(server) -> None:
 
 
 async def test_replay_runs_before_later_live_events(server) -> None:
-    old, new = await incumbent_and_standby(server)
+    old, new = await incumbent_and_standby(server, **STEADY)
     await old.coordinator.stop_acting([])  # handled nothing recently
     new.receive(1)  # buffered: arrived before the standby acted
     await until(lambda: new.coordinator.acting)
@@ -233,7 +292,7 @@ async def test_replay_runs_before_later_live_events(server) -> None:
 
 
 async def test_stale_interactions_are_not_replayed(server) -> None:
-    old, new = await incumbent_and_standby(server)
+    old, new = await incumbent_and_standby(server, **STEADY)
     replayed: list[str] = []
     new.gate._dispatch = lambda event: replayed.append(event) or leadership._done()
     now = time.monotonic()
@@ -252,7 +311,7 @@ async def test_stale_interactions_are_not_replayed(server) -> None:
 
 async def test_the_standby_buffer_is_bounded(server, monkeypatch) -> None:
     monkeypatch.setattr(leadership, "STANDBY_BUFFER_EVENTS", 10)
-    old, new = await incumbent_and_standby(server)
+    old, new = await incumbent_and_standby(server, **STEADY)
     for message_id in range(1, 26):
         new.receive(message_id)
     await settle()
@@ -270,7 +329,7 @@ async def test_an_identical_repeat_without_an_id_is_skipped_right_after_a_handov
     server,
 ) -> None:
     """The documented cost of the payload-hash fallback."""
-    old, new = await incumbent_and_standby(server)
+    old, new = await incumbent_and_standby(server, **STEADY)
     await old.coordinator.stop_acting(["MESSAGE_REACTION_ADD:#same"])
     await until(lambda: new.coordinator.acting)
     ran: list[int] = []
@@ -293,7 +352,7 @@ async def test_an_identical_repeat_without_an_id_is_skipped_right_after_a_handov
 
 
 async def test_sigterm_during_a_moderation_action_finishes_it_once(server) -> None:
-    old, new = await incumbent_and_standby(server)
+    old, new = await incumbent_and_standby(server, **STEADY)
     started, finish = asyncio.Event(), asyncio.Event()
     actions: list[str] = []
 
@@ -350,7 +409,8 @@ async def test_mod_monitor_triage_started_before_sigterm_is_drained(monkeypatch)
     assert triaged == [5]
 
 
-async def test_a_delayed_delete_is_tracked_for_shutdown() -> None:
+async def test_a_cosmetic_delete_does_not_hold_shutdown() -> None:
+    """Deleting a notice after a delay is clean-up, not accepted work."""
     from smarter_dev.bot.plugins import events
 
     event = Mock()
@@ -362,10 +422,8 @@ async def test_a_delayed_delete_is_tracked_for_shutdown() -> None:
     event.interaction.delete_initial_response = AsyncMock()
 
     await events.handle_challenge_cancel_get_input_interaction(event)  # real handler
-    pending = await leadership.drain_tracked(0.05)
-    assert [task.get_name() for task in pending] == ["delete_after_delay"]
-    for task in pending:
-        task.cancel()
+    assert leadership.tracked() == set()
+    assert await leadership.drain_tracked(0.05) == []
 
 
 async def test_a_timed_send_mid_rest_at_sigterm_finishes(server) -> None:
@@ -426,6 +484,216 @@ async def test_stopping_cancels_the_proactive_control_loop(server, monkeypatch) 
     run.recovery_task.cancel()
 
 
+async def test_a_repeating_message_mid_send_at_sigterm_is_sent_and_marked_once(
+    server,
+) -> None:
+    from smarter_dev.bot.services.repeating_message_service import (
+        RepeatingMessageService,
+    )
+
+    process = Process("old", server)
+    process.start()
+    await until(lambda: process.coordinator.acting)
+    leadership.install(process.coordinator)
+
+    sending, finish = asyncio.Event(), asyncio.Event()
+    sent: list[str] = []
+    due = {"r1"}  # the server's view: due until marked sent
+    service = RepeatingMessageService(Mock(), None, Mock())
+
+    async def due_messages():
+        return [{"id": m, "channel_id": "20", "message_content": "hi"} for m in due]
+
+    async def send(_channel_id, _content) -> None:
+        sending.set()
+        await finish.wait()  # the REST call to Discord
+        sent.append("r1")
+
+    async def mark_sent(message_id) -> None:
+        await asyncio.sleep(0.01)  # the API call moving next_send_time
+        due.discard(message_id)
+
+    service._get_due_repeating_messages = due_messages
+    service._send_message_to_channel = send
+    service._mark_repeating_message_sent = mark_sent
+
+    minute = asyncio.create_task(service._check_and_send_due_messages())
+    await asyncio.wait_for(sending.wait(), 1)
+    await process.stop()  # SIGTERM mid-send
+    minute.cancel()  # shutdown stops the scheduler loop
+    assert len(await leadership.drain_tracked(0.05)) == 1, "shutdown must wait for the send"
+    finish.set()
+    assert await leadership.drain_tracked(1) == []
+    assert sent == ["r1"] and due == set(), "sent, and no longer due next minute"
+
+    await service._check_and_send_due_messages()  # the successor's next minute
+    assert sent == ["r1"]
+
+
+async def test_a_long_background_task_does_not_starve_queued_chat_turns(
+    server, monkeypatch
+) -> None:
+    """Drain runs everything at once under one budget, turns fired first."""
+    from smarter_dev.bot import client
+    from smarter_dev.bot.plugins import events
+    from smarter_dev.bot.services import chat_engine_registry
+
+    registry = chat_engine_registry.ChatEngineRegistry()
+    turn = asyncio.Event()
+    turn.set()  # the model answers at once
+    sent: list[int] = []
+    queued = _Engine(3, turn, sent).engine
+    registry._engines = {3: queued}
+    monkeypatch.setattr(chat_engine_registry, "_registry", registry)
+    queued.queue.append(Mock())  # accepted, waiting on its idle timer
+
+    # A cosmetic 5s delete (untracked) and a slow tracked triage.
+    interaction = Mock(spec=hikari.ComponentInteraction)
+    interaction.guild_id, interaction.user.id = 30, 40
+    interaction.custom_id = "cancel_get_input:abc"
+    interaction.create_initial_response = AsyncMock()
+    interaction.delete_initial_response = AsyncMock()
+    await events.handle_challenge_cancel_get_input_interaction(Mock(interaction=interaction))
+    slow = leadership.track(asyncio.create_task(asyncio.sleep(60), name="slow triage"))
+
+    process = Process("old", server)
+    drain = asyncio.create_task(client.drain_accepted_work(process.gate, budget=0.5))
+    answered = await until(lambda: sent == [3], timeout=0.4)
+    assert answered < 0.2, "the queued turn waited behind other work"
+    await asyncio.wait_for(drain, 2)
+    assert slow.cancelled(), "what outlasts the budget is cancelled"
+
+
+def blocking_reads(commands) -> None:
+    """fakeredis ignores XREADGROUP's block; Redis waits, so the loop yields."""
+    read = commands.xreadgroup
+
+    async def xreadgroup(*args, **kwargs):
+        result = await read(*args, **kwargs)
+        if not result and kwargs.get("block"):
+            await asyncio.sleep(kwargs["block"] / 1000)
+        return result
+
+    commands.xreadgroup = xreadgroup
+
+
+async def test_a_fenced_process_reads_no_proactive_control_command(
+    server, cluster, monkeypatch
+) -> None:
+    from smarter_dev.bot.plugins import proactive
+    from smarter_dev.bot.proactive.contracts import ControlCommand
+
+    process = Process("only", server, cluster)
+    leadership.install(process.coordinator)  # not acting yet
+    applied: list[str] = []
+
+    async def apply(_run, command) -> None:
+        applied.append(str(command.command_id))
+
+    monkeypatch.setattr(proactive, "_apply_control_command", apply)
+    monkeypatch.setattr(proactive, "CONTROL_IDLE_SECONDS", 0.01)
+    monkeypatch.setattr(proactive, "CONTROL_BLOCK_MS", 20)
+    commands = fakeredis.aioredis.FakeRedis(server=server)
+    blocking_reads(commands)
+    run = Mock(bot=Mock(d={"chat_memory_redis": commands}))
+    loop = asyncio.create_task(proactive._control_loop(run))
+    command = ControlCommand(
+        guild_id="30", channel_id="20", mode="active", minutes=5, created_at=datetime.now(UTC)
+    )
+    await commands.xadd(proactive.CONTROL_STREAM_KEY, {"payload": command.model_dump_json()})
+    await asyncio.sleep(0.2)
+    assert applied == []
+    assert (await commands.xpending(proactive.CONTROL_STREAM_KEY, proactive.CONTROL_GROUP))[
+        "pending"
+    ] == 0, "not even read"
+
+    process.start()
+    await until(lambda: applied == [str(command.command_id)], timeout=1)
+
+    # Fenced: Redis gone for the lease and another bot pod exists.
+    cluster.pods.add("new-pending")
+    process.redis.eval = down
+    await until(lambda: not process.coordinator.acting, timeout=1)
+    await commands.xadd(proactive.CONTROL_STREAM_KEY, {"payload": command.model_copy(
+        update={"command_id": uuid.uuid4()}).model_dump_json()})
+    await asyncio.sleep(0.2)
+    assert len(applied) == 1, "a fenced process applied a command"
+    loop.cancel()
+    await process.stop()
+
+
+async def test_a_process_that_stops_mid_batch_leaves_the_rest_of_the_batch(
+    server, monkeypatch
+) -> None:
+    from smarter_dev.bot.plugins import proactive
+    from smarter_dev.bot.proactive.contracts import ControlCommand
+
+    process = Process("only", server)
+    process.start()
+    await until(lambda: process.coordinator.acting)
+    leadership.install(process.coordinator)
+    applied: list[str] = []
+
+    async def apply(_run, command) -> None:
+        applied.append(str(command.command_id))
+        await process.coordinator.stop_acting()  # SIGTERM lands mid-batch
+
+    monkeypatch.setattr(proactive, "_apply_control_command", apply)
+    monkeypatch.setattr(proactive, "CONTROL_BLOCK_MS", 20)
+    commands = fakeredis.aioredis.FakeRedis(server=server)
+    blocking_reads(commands)
+    for _ in range(2):
+        command = ControlCommand(
+            guild_id="30", channel_id="20", mode="active", minutes=5, created_at=datetime.now(UTC)
+        )
+        await commands.xadd(proactive.CONTROL_STREAM_KEY, {"payload": command.model_dump_json()})
+    loop = asyncio.create_task(proactive._control_loop(Mock(bot=Mock(d={"chat_memory_redis": commands}))))
+    await until(lambda: applied, timeout=1)
+    await asyncio.sleep(0.1)
+    loop.cancel()
+    assert len(applied) == 1, "applied a command after it stopped acting"
+    pending = await commands.xpending(proactive.CONTROL_STREAM_KEY, proactive.CONTROL_GROUP)
+    assert pending["pending"] == 1, "left for the process that acts next to reclaim"
+
+
+async def test_a_reclaimed_control_command_already_applied_is_not_applied_again(
+    server, monkeypatch
+) -> None:
+    from smarter_dev.bot.plugins import proactive
+    from smarter_dev.bot.proactive.contracts import ControlCommand
+
+    applied: list[str] = []
+
+    async def apply(_run, command) -> None:
+        applied.append(str(command.command_id))
+
+    monkeypatch.setattr(proactive, "_apply_control_command", apply)
+    monkeypatch.setattr(proactive, "CONTROL_RECLAIM_MS", 0)
+    monkeypatch.setattr(proactive, "CONTROL_BLOCK_MS", 20)
+    commands = fakeredis.aioredis.FakeRedis(server=server)
+    blocking_reads(commands)
+    run = Mock()
+    command = ControlCommand(
+        guild_id="30", channel_id="20", mode="active", minutes=5, created_at=datetime.now(UTC)
+    )
+    await commands.xgroup_create(
+        proactive.CONTROL_STREAM_KEY, proactive.CONTROL_GROUP, id="0", mkstream=True
+    )
+    await commands.xadd(proactive.CONTROL_STREAM_KEY, {"payload": command.model_dump_json()})
+    # A process read it, applied and marked it, then died before acking.
+    await commands.xreadgroup(
+        proactive.CONTROL_GROUP, "dead", {proactive.CONTROL_STREAM_KEY: ">"}, count=1
+    )
+    await commands.set(f"{proactive.CONTROL_PROCESSED_PREFIX}:{command.command_id}", "1")
+
+    run.bot.d = {"chat_memory_redis": commands}
+    loop = asyncio.create_task(proactive._control_loop(run))
+    await asyncio.sleep(0.2)
+    loop.cancel()
+    assert applied == [], "reclaimed, found marked, acked without applying"
+    assert await commands.xlen(proactive.CONTROL_STREAM_KEY) == 0
+
+
 async def test_drain_reports_listeners_that_outlast_the_budget(server) -> None:
     process = Process("old", server)
     process.start()
@@ -444,44 +712,151 @@ async def test_drain_reports_listeners_that_outlast_the_budget(server) -> None:
 # Losing the lease, Redis failures and crashes.
 
 
-async def test_a_partitioned_incumbent_fences_itself_before_a_successor_acts(server) -> None:
-    old, new = await incumbent_and_standby(server)
+async def test_an_incumbent_cut_off_from_redis_is_replaced_only_once_its_pod_is_gone(
+    server, cluster
+) -> None:
+    """Asymmetric: the incumbent loses Redis, the standby still reaches it."""
+    old, new = await incumbent_and_standby(server, cluster)
     overlap = Overlap(old, new)
-    old.redis.eval = down  # only the incumbent loses Redis
+    old.redis.eval = down
 
-    await until(lambda: not old.coordinator.acting, timeout=1)
-    await until(lambda: new.coordinator.acting, timeout=1)
-    assert not overlap.stop(), "two processes acted at once"
+    await until(lambda: not old.coordinator.acting, timeout=1)  # sees the standby
     old.receive(1)
     await settle()
     assert old.handled == [], "a fenced process must not act"
-    await old.stop()
+    await asyncio.sleep(0.9)  # the lease has long expired
+    assert not new.coordinator.acting, "the old pod still exists"
+    assert new.coordinator.can_take_over, "Ready, so Kubernetes stops the old pod"
+
+    await old.exit()  # its handover fails: no Redis
+    await until(lambda: new.coordinator.acting, timeout=1)
+    assert not overlap.stop(), "two processes acted at once"
     await new.stop()
 
 
 async def test_a_standby_without_redis_never_takes_over(server) -> None:
     old, new = await incumbent_and_standby(server)
-    new.redis.set = down
-    new.redis.exists = down
-    await asyncio.sleep(0.8)  # well past the lease
+    new.redis.eval = down
+    await asyncio.sleep(1.0)  # well past the lease
     assert old.coordinator.acting and not new.coordinator.acting
     assert not new.coordinator.can_take_over
     await old.stop()
     await new.stop()
 
 
-async def test_a_redis_outage_fences_the_incumbent_until_redis_returns(server) -> None:
-    process = Process("only", server)
+async def test_the_only_bot_pod_keeps_acting_through_a_redis_outage(server, cluster) -> None:
+    process = Process("only", server, cluster)
+    process.start()
+    await until(lambda: process.coordinator.acting)
+    process.redis.eval = down
+
+    for _ in range(150):  # 1.5s: more than twice the lease
+        assert process.coordinator.acting
+        await asyncio.sleep(0.01)
+    assert process.coordinator.degraded
+    process.receive(1)
+    await settle()
+    assert process.handled == ["1"]
+    await process.stop()
+
+
+@pytest.mark.parametrize("peer", ["new-pending", "old-terminating"])
+async def test_without_redis_another_bot_pod_appearing_fences_the_holder(
+    server, cluster, peer
+) -> None:
+    """Kubernetes lists Pending and Terminating pods alike (peer_pods)."""
+    process = Process("only", server, cluster)
+    process.start()
+    await until(lambda: process.coordinator.acting)
+    process.redis.eval = down
+    await asyncio.sleep(0.8)
+    assert process.coordinator.acting
+
+    cluster.pods.add(peer)
+    await until(lambda: not process.coordinator.acting, timeout=0.5)
+    process.receive(1)
+    await settle()
+    assert process.handled == []
+    await process.stop()
+
+
+async def test_without_redis_a_failing_kubernetes_api_fences_the_holder(server, cluster) -> None:
+    process = Process("only", server, cluster)
+    process.start()
+    await until(lambda: process.coordinator.acting)
+    process.redis.eval = down
+    await asyncio.sleep(0.8)
+    assert process.coordinator.acting
+
+    cluster.api_down.add("only")
+    await until(lambda: not process.coordinator.acting, timeout=0.5)
+    await asyncio.sleep(0.5)
+    assert not process.coordinator.acting, "no amount of failures turns into acting"
+    await process.stop()
+
+
+async def test_without_redis_a_stale_kubernetes_answer_fences_the_holder(server, cluster) -> None:
+    process = Process("only", server, cluster)
+    process.start()
+    await until(lambda: process.coordinator.acting)
+    process.redis.eval = down
+    await asyncio.sleep(0.8)
+
+    cluster.api_hangs.add("only")  # the call never returns
+    elapsed = await until(lambda: not process.coordinator.acting, timeout=0.5)
+    assert elapsed <= FAST["sole_pod_seconds"] + FAST["peer_interval"] + 0.05
+    await process.stop()
+
+
+async def test_redis_returning_to_a_sole_holder_hands_it_back_to_the_lease(
+    server, cluster
+) -> None:
+    process = Process("only", server, cluster)
     process.start()
     await until(lambda: process.coordinator.acting)
     real_eval = process.redis.eval
     process.redis.eval = down
+    await asyncio.sleep(0.9)  # the lease has expired; acting as the sole pod
+    assert await process.redis.get(LEASE_KEY) is None
+    overlap = Overlap(process)
 
-    await until(lambda: not process.coordinator.acting, timeout=1)
-    assert process.coordinator.degraded
     process.redis.eval = real_eval
-    await until(lambda: process.coordinator.acting, timeout=1)
+    await until(lambda: not process.coordinator.degraded, timeout=1)
+    assert await process.redis.get(LEASE_KEY) == b"only", "retook the lapsed lease"
+    cluster.pods.add("new-pending")  # the lease, not Kubernetes, rules again
+    await asyncio.sleep(0.3)
+    assert process.coordinator.acting
+    overlap.stop()
+    assert not overlap.gap, "stopped acting on the way back"
     await process.stop()
+
+
+async def test_redis_returning_with_the_lease_taken_stands_the_holder_down_at_once(
+    server, cluster
+) -> None:
+    process = Process("only", server, cluster)
+    process.start()
+    await until(lambda: process.coordinator.acting)
+    real_eval = process.redis.eval
+    process.redis.eval = down
+    await asyncio.sleep(0.9)
+    assert process.coordinator.acting
+
+    # Cannot happen while this pod exists (a taker needs a record or no other
+    # pod); if it did anyway, the holder must yield on its first renewal.
+    await process.redis.set(LEASE_KEY, "other")
+    renewed = asyncio.Event()
+
+    async def eval_then_note(*args, **kwargs):
+        result = await real_eval(*args, **kwargs)
+        renewed.set()
+        return result
+
+    process.redis.eval = eval_then_note
+    await asyncio.wait_for(renewed.wait(), 1)
+    assert not process.coordinator.acting, "sole-acting must end in the same step"
+    await process.stop()
+    assert await process.redis.get(LEASE_KEY) == b"other"
 
 
 async def test_a_blip_shorter_than_the_margin_changes_nothing(server) -> None:
@@ -497,42 +872,84 @@ async def test_a_blip_shorter_than_the_margin_changes_nothing(server) -> None:
     await process.stop()
 
 
-async def test_a_failed_release_hands_over_when_the_lease_expires(server) -> None:
-    old, new = await incumbent_and_standby(server)
+async def test_a_failed_handover_waits_for_the_old_pod_and_replays_nothing(
+    server, cluster
+) -> None:
+    old, new = await incumbent_and_standby(server, cluster)
     overlap = Overlap(old, new)
-    old.redis.eval = down  # the release fails; the record was written
     for message_id in range(1, 11):
         old.receive(message_id)
     await settle()
+    old.redis.eval = down  # no record, no release
     await old.stop()
-    for message_id in range(11, 21):  # the gap until the lease expires
+    for message_id in range(11, 21):  # the gap
         new.receive(message_id)
         old.receive(message_id)
-    gap = await until(lambda: new.coordinator.acting, timeout=2)
-    await settle()
+    await asyncio.sleep(0.9)  # the lease has expired
+    assert not new.coordinator.acting, "the old pod is still draining"
 
+    cluster.pods.discard("old")
+    await until(lambda: new.coordinator.acting, timeout=1)
+    await settle()
     assert not overlap.stop()
-    assert gap > 0.1, "must wait for the lease to expire"
     assert old.handled == [str(i) for i in range(1, 11)]
-    assert new.handled == [str(i) for i in range(11, 21)], "the gap is replayed"
+    assert new.handled == [], "without a record nothing is replayed: 11-20 are lost"
     await new.stop()
 
 
-async def test_with_no_handover_record_it_waits_for_the_old_pod(server) -> None:
-    gone = False
+async def test_a_handover_record_hands_over_once(server, cluster) -> None:
+    """A later taker, within the record's minute, still needs the pod check."""
+    first, second = await incumbent_and_standby(server, cluster)
+    await first.exit()
+    await until(lambda: second.coordinator.acting)
+    assert second.coordinator.handover is not None
+    assert await second.redis.get(leadership.RELEASED_AT_KEY) is None, "consumed"
 
-    async def predecessor_gone() -> bool:
-        return gone
+    third = Process("third", server, cluster)
+    third.start()
+    await asyncio.sleep(0.05)
+    overlap = Overlap(second, third)
+    second.redis.eval = down  # its lease lapses with the record's minute unspent
+    await asyncio.sleep(0.9)
+    assert not third.coordinator.acting, "no record to take, and second still exists"
+    assert not overlap.stop(), "two processes acted at once"
+    await second.exit()
+    await until(lambda: third.coordinator.acting, timeout=1)
+    assert third.coordinator.handover is None
+    await third.stop()
 
-    old, new = await incumbent_and_standby(server, predecessor_gone=predecessor_gone)
+
+async def test_a_failing_kubernetes_api_never_lets_a_standby_take_a_free_lease(
+    server, cluster
+) -> None:
+    old, new = await incumbent_and_standby(server, cluster)
+    cluster.api_down.add("new")  # only the standby's calls fail
+    old.task.cancel()  # crashed: no record; its pod remains
+    await asyncio.sleep(1.0)
+    assert not new.coordinator.acting
+    assert not new.coordinator.can_take_over, "not Ready: cannot check for other pods"
+
+    cluster.pods.discard("old")  # gone, but the standby cannot tell
+    await asyncio.sleep(0.5)
+    assert not new.coordinator.acting, "an API error is never an answer"
+    calls = cluster.calls
+    cluster.api_down.clear()
+    await until(lambda: new.coordinator.acting, timeout=1)
+    assert cluster.calls > calls
+    await new.stop()
+
+
+async def test_with_no_handover_record_it_waits_for_the_old_pod(server, cluster) -> None:
+    old, new = await incumbent_and_standby(server, cluster)
     old.task.cancel()  # crashed: no release, no record
-    await asyncio.sleep(0.8)  # the lease has expired
+    await asyncio.sleep(1.0)  # the lease has expired
     assert not new.coordinator.acting, "the old pod may still be running"
     assert new.coordinator.can_take_over, "Ready, so Kubernetes stops the old pod"
     new.receive(1)  # arrives while waiting
+    await settle()
 
-    gone = True
-    await until(lambda: new.coordinator.acting, timeout=4)
+    cluster.pods.discard("old")
+    await until(lambda: new.coordinator.acting, timeout=1)
     await settle()
     assert new.handled == [], "without a record nothing is replayed"
     await new.stop()
@@ -563,6 +980,17 @@ async def test_an_incumbent_that_loses_its_lease_stops_acting(server) -> None:
     assert await old.redis.get(LEASE_KEY) == b"other", "must not release another's lease"
 
 
+async def test_a_holder_stopping_after_losing_its_lease_leaves_no_record(server) -> None:
+    """Only a record from the process that held the lease may hand it over."""
+    old = Process("old", server)
+    old.start()
+    await until(lambda: old.coordinator.acting)
+    await old.redis.set(LEASE_KEY, "other")  # before its next renewal notices
+    await old.stop()
+    assert await old.redis.get(LEASE_KEY) == b"other"
+    assert await old.redis.get(leadership.RELEASED_AT_KEY) is None
+
+
 async def test_an_incumbent_retakes_a_lease_that_lapsed_unclaimed(server) -> None:
     old = Process("old", server)
     old.start()
@@ -578,7 +1006,7 @@ async def test_an_incumbent_retakes_a_lease_that_lapsed_unclaimed(server) -> Non
 
 
 async def test_connection_state_events_reach_a_standby(server) -> None:
-    old, new = await incumbent_and_standby(server)
+    old, new = await incumbent_and_standby(server, **STEADY)
     seen: list[str] = []
 
     async def on_ready(_event) -> None:
@@ -592,7 +1020,7 @@ async def test_connection_state_events_reach_a_standby(server) -> None:
 
 
 async def test_a_standby_initializes_the_framework_but_defers_app_start_up(server) -> None:
-    old, new = await incumbent_and_standby(server)
+    old, new = await incumbent_and_standby(server, **STEADY)
     calls: list[str] = []
 
     class FrameworkListener:
@@ -625,7 +1053,7 @@ async def test_a_standby_initializes_the_framework_but_defers_app_start_up(serve
 
 
 async def test_the_acting_process_sends_what_falls_due(server) -> None:
-    old, new = await incumbent_and_standby(server)
+    old, new = await incumbent_and_standby(server, **STEADY)
     leadership.install(old.coordinator)
     assert await leadership.should_send(time.time(), wait=0.2)
     leadership.install(new.coordinator)
@@ -635,7 +1063,7 @@ async def test_the_acting_process_sends_what_falls_due(server) -> None:
 
 
 async def test_a_stopping_process_sends_nothing(server) -> None:
-    old, new = await incumbent_and_standby(server)
+    old, new = await incumbent_and_standby(server, **STEADY)
     await old.stop()
     leadership.install(old.coordinator)
     assert not await leadership.should_send(time.time(), wait=0.2)
@@ -643,7 +1071,7 @@ async def test_a_stopping_process_sends_nothing(server) -> None:
 
 
 async def test_a_message_due_before_the_handover_is_left_to_the_incumbent(server) -> None:
-    old, new = await incumbent_and_standby(server)
+    old, new = await incumbent_and_standby(server, **STEADY)
     due = time.time()
     await asyncio.sleep(0.01)
     await old.stop()  # it was acting when this fell due
@@ -654,7 +1082,7 @@ async def test_a_message_due_before_the_handover_is_left_to_the_incumbent(server
 
 
 async def test_a_message_due_inside_the_gap_goes_to_the_successor(server) -> None:
-    old, new = await incumbent_and_standby(server)
+    old, new = await incumbent_and_standby(server, **STEADY)
     await old.stop()
     due = time.time() + 0.001  # fell due before the successor took over
     leadership.install(new.coordinator)
@@ -663,20 +1091,16 @@ async def test_a_message_due_inside_the_gap_goes_to_the_successor(server) -> Non
 
 
 async def test_without_a_handover_what_fell_due_while_the_old_pod_ran_is_left_to_it(
-    server,
+    server, cluster
 ) -> None:
-    gone = False
-
-    async def predecessor_gone() -> bool:
-        return gone
-
-    process = Process("first", server, predecessor_gone=predecessor_gone)
-    process.start()  # lease free, no record: the first deploy of this code
+    cluster.pods.add("legacy")  # the first deploy of this code
+    process = Process("first", server, cluster)
+    process.start()  # lease free, no record
     await asyncio.sleep(0.05)
     due_while_old_ran = time.time()
-    await asyncio.sleep(2.1)  # the next peer check still sees the old pod
-    gone = True
-    await until(lambda: process.coordinator.acting, timeout=4)
+    await asyncio.sleep(0.1)  # the next peer check still sees the old pod
+    cluster.pods.discard("legacy")
+    await until(lambda: process.coordinator.acting, timeout=1)
     due_after = time.time() - 0.001
     leadership.install(process.coordinator)
     assert not await leadership.should_send(due_while_old_ran, wait=0.1)
@@ -786,8 +1210,7 @@ async def test_a_standby_that_cannot_reach_redis_is_not_ready(server) -> None:
     )
     assert ready_to_act(bot)
 
-    new.redis.exists = down
-    new.redis.set = down
+    new.redis.eval = down
     new.coordinator._redis_ok_at -= 10  # its last answer was a while ago
     await asyncio.sleep(0.05)
     assert not ready_to_act(bot), "Kubernetes must keep the old bot"
