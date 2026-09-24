@@ -25,6 +25,7 @@ from smarter_dev.bot.agents.chat_models import (
     Me,
     MemoryNote,
     Message,
+    MessageAttachment,
 )
 from smarter_dev.bot.agents.url_registry import register_escaped_url
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
@@ -305,20 +306,38 @@ def _render_message(msg: Message, *, me: Me, authors_by_id: dict[str, Author]) -
     if msg.mentions_bot:
         attrs["mentions-bot"] = True
 
-    if not msg.attachments:
+    if not msg.attachments and not msg.reply_to_attachments:
         return _text_tag("message", attrs, msg.body)
 
     # Surface attachment URLs as child tags so the agent can read them with the
-    # web_read tool (images, audio, PDFs, etc.). Record each so web_read can
-    # recover the exact original when the model echoes back the escaped form.
-    for att in msg.attachments:
-        register_escaped_url(att.url)
+    # web_read tool (images, audio, PDFs, etc.). A replied-to message outside
+    # the window contributes its files too, marked with its id.
     attachment_tags = "\n".join(
-        _empty_tag("attachment", {"kind": att.kind, "url": att.url})
-        for att in msg.attachments
+        [_attachment_tag(att) for att in msg.attachments]
+        + [
+            _attachment_tag(att, on_message=msg.reply_to_message_id)
+            for att in msg.reply_to_attachments
+        ]
     )
     inner = f"{xml_escape(msg.body)}\n{attachment_tags}"
     return _xml_tag("message", attrs, inner)
+
+
+def _attachment_tag(att: MessageAttachment, *, on_message: str | None = None) -> str:
+    # Record the URL so web_read can recover the exact original when the model
+    # echoes back the escaped form.
+    register_escaped_url(att.url)
+    return _empty_tag(
+        "attachment",
+        {
+            "kind": att.kind,
+            "filename": att.filename,
+            "type": att.media_type,
+            "size": str(att.size) if att.size else None,
+            "on-message": on_message,
+            "url": att.url,
+        },
+    )
 
 
 def _render_messages(messages: Iterable[Message], *, me: Me, authors_by_id: dict[str, Author]) -> str:

@@ -230,20 +230,25 @@ async def web_search(ctx: RunContext[ChatDeps], query: str) -> list[dict[str, st
 async def web_read(
     ctx: RunContext[ChatDeps], url: str, instruction: str
 ) -> dict[str, str]:
-    """Read a URL — web page, PDF, YouTube, image/audio, or a message <attachment> — and get a summary guided by `instruction`; say what to look for."""
+    """Read a URL — web page, PDF, YouTube, image/audio, or an attachment's url — and get a summary guided by `instruction`; say what to look for."""
     # Attachment URLs are rendered into XML attributes (``&`` -> ``&amp;``), and
     # the model copies them back escaped. Resolve only URLs we actually escaped
     # back to their exact original — URLs from search/users pass through
     # untouched so a legitimate ``&amp;`` in them is never mangled.
     url = resolve_escaped_url(url)
+    # Discord attachment URLs are signed in their query; logs get the path only.
+    log_url = web_fetch.url_for_log(url)
 
     logger.info(
         "web_read: %r instruction=%r (channel=%s)",
-        url,
+        log_url,
         instruction,
         ctx.deps.channel_id,
     )
     await _post_status(ctx, f"Reading <{url}>")
+
+    if web_fetch.is_discord_attachment_url(url):
+        return await _read_discord_attachment(url, instruction)
 
     # Image / audio URLs: download the bytes and read them with the multimodal
     # media reader instead of trying to extract text.
@@ -252,7 +257,7 @@ async def web_read(
         kind = "image" if ext in IMAGE_EXTS else "audio"
         fetched = await web_fetch.fetch_bytes(url)
         if fetched is None:
-            logger.warning("web_read: media fetch_failed for %r", url)
+            logger.warning("web_read: media fetch_failed for %r", log_url)
             return {"url": url, "kind": kind, "summary": "", "error": "fetch_failed"}
         data, content_type = fetched
         # Prefer the extension-derived type; the server's Content-Type is
@@ -265,34 +270,51 @@ async def web_read(
         )
         if not media_type:
             return {"url": url, "kind": kind, "summary": "", "error": "unknown_media_type"}
-        try:
-            summary = await describe_media(
-                instruction=instruction,
-                data=data,
-                media_type=media_type,
-                url=url,
-                kind=kind,
-            )
-        except Exception as e:
-            logger.warning("web_read: could not read %s media %r: %s", kind, url, e)
-            return {"url": url, "kind": kind, "summary": "", "error": "media_read_failed"}
-        return {"url": url, "kind": kind, "summary": summary}
+        return await _read_media(url, instruction, data, media_type, kind)
 
     title = ""
     if web_fetch.is_youtube_url(url):
         meta = await web_fetch.fetch_youtube_metadata(url)
         title = meta.get("title", "")
         content = meta.get("description", "")
-    elif url.lower().endswith(".pdf"):
+    elif ext == ".pdf":
         content = await web_fetch.fetch_pdf_text(url, max_chars=MAX_READ_CHARS) or ""
     else:
         data = await web_fetch.fetch_via_jina(url)
         if data is None:
-            logger.warning("web_read: fetch_failed for %r", url)
+            logger.warning("web_read: fetch_failed for %r", log_url)
             return {"url": url, "title": "", "summary": "", "error": "fetch_failed"}
         title = data.get("title", "")
         content = data.get("content", "")
 
+    return await _summarize_text(url, instruction, content, title)
+
+
+async def _read_media(
+    url: str, instruction: str, data: bytes, media_type: str, kind: str
+) -> dict[str, str]:
+    try:
+        summary = await describe_media(
+            instruction=instruction,
+            data=data,
+            media_type=media_type,
+            url=url,
+            kind=kind,
+        )
+    except Exception as e:
+        logger.warning(
+            "web_read: could not read %s media %r: %s",
+            kind,
+            web_fetch.url_for_log(url),
+            e,
+        )
+        return {"url": url, "kind": kind, "summary": "", "error": "media_read_failed"}
+    return {"url": url, "kind": kind, "summary": summary}
+
+
+async def _summarize_text(
+    url: str, instruction: str, content: str, title: str = ""
+) -> dict[str, str]:
     if not content.strip():
         return {"url": url, "title": title, "summary": "", "error": "no_content"}
 
@@ -302,7 +324,7 @@ async def web_read(
             "web_read: truncating %d chars to %d for %r",
             len(content),
             MAX_READ_CHARS,
-            url,
+            web_fetch.url_for_log(url),
         )
         content = content[:MAX_READ_CHARS]
 
@@ -310,6 +332,106 @@ async def web_read(
         instruction=instruction, content=content, title=title, url=url
     )
     return {"url": url, "title": title, "summary": summary}
+
+
+# Leading bytes of the image formats Discord serves, checked before handing
+# bytes to the media reader so a mislabelled file fails as a mismatch.
+_IMAGE_SIGNATURES = (
+    b"\x89PNG\r\n\x1a\n",
+    b"\xff\xd8\xff",
+    b"GIF87a",
+    b"GIF89a",
+    b"BM",
+)
+
+
+_READABLE_IMAGE_TYPES = frozenset(
+    mt for mt in _EXT_MEDIA_TYPE.values() if mt.startswith("image/")
+)
+
+
+def _looks_like_image(data: bytes) -> bool:
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return True
+    return data.startswith(_IMAGE_SIGNATURES)
+
+
+def _looks_like_audio(data: bytes) -> bool:
+    """Ogg, MP3 (ID3 or frame sync), WAV, FLAC, MP4/M4A or ADTS AAC."""
+    if data.startswith((b"OggS", b"ID3", b"fLaC")):
+        return True
+    if data[:4] == b"RIFF" and data[8:12] == b"WAVE":
+        return True
+    if data[4:8] == b"ftyp":
+        return True
+    return len(data) > 1 and data[0] == 0xFF and data[1] & 0xE0 == 0xE0
+
+
+def _decode_text(data: bytes) -> str | None:
+    """``data`` as UTF-8 text, or None when it is binary."""
+    if b"\x00" in data[:8192]:
+        return None
+    try:
+        return data.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return None
+
+
+async def _read_discord_attachment(url: str, instruction: str) -> dict[str, str]:
+    """Read a Discord attachment by downloading it directly.
+
+    Jina cannot be relied on to fetch Discord's signed CDN URLs, so the bytes
+    come straight from Discord (size- and time-bounded by ``fetch_bytes``) and
+    are routed on the file itself: images and audio to the media reader, PDFs
+    to pdfplumber, UTF-8 text summarized as text. Anything else — video,
+    archives, other binaries — is reported as unsupported rather than guessed.
+    """
+    fetched = await web_fetch.fetch_bytes(url)
+    if fetched is None:
+        logger.warning(
+            "web_read: attachment fetch_failed for %r", web_fetch.url_for_log(url)
+        )
+        return {
+            "url": url,
+            "summary": "",
+            "error": "fetch_failed",
+            "detail": "Could not download the attachment; it may be over 20 MB "
+            "or its link may have expired.",
+        }
+    data, content_type = fetched
+    ext = _url_extension(url)
+    media_type = _EXT_MEDIA_TYPE.get(ext) or content_type
+
+    if media_type.startswith("image/") and _looks_like_image(data):
+        return await _read_media(url, instruction, data, media_type, "image")
+    if media_type in _READABLE_IMAGE_TYPES:
+        return {"url": url, "kind": "image", "summary": "", "error": "content_mismatch"}
+    if media_type.startswith("audio/"):
+        if not _looks_like_audio(data):
+            return {"url": url, "kind": "audio", "summary": "", "error": "content_mismatch"}
+        return await _read_media(url, instruction, data, media_type, "audio")
+    if ext == ".pdf" or media_type == "application/pdf":
+        if not data.startswith(b"%PDF-"):
+            return {"url": url, "kind": "pdf", "summary": "", "error": "content_mismatch"}
+        try:
+            content = web_fetch.pdf_text_from_bytes(data, max_chars=MAX_READ_CHARS)
+        except Exception as e:
+            logger.warning(
+                "web_read: could not parse pdf %r: %s", web_fetch.url_for_log(url), e
+            )
+            return {"url": url, "kind": "pdf", "summary": "", "error": "pdf_read_failed"}
+        return await _summarize_text(url, instruction, content)
+    if not media_type.startswith("video/"):
+        text = _decode_text(data)
+        if text is not None:
+            return await _summarize_text(url, instruction, text)
+    return {
+        "url": url,
+        "summary": "",
+        "error": "unsupported_attachment_type",
+        "detail": f"Cannot read {media_type or 'this file type'} attachments; "
+        "images, audio, PDFs and text files are supported.",
+    }
 
 
 # -- reactions -----------------------------------------------------------
