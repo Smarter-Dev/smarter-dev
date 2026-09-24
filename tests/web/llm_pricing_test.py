@@ -11,8 +11,12 @@ import logging
 from decimal import Decimal
 
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
+from smarter_dev.shared.model_catalog import get_model
+from smarter_dev.web.chat.runtime import request_estimate_usd
+from smarter_dev.web.chat.usage import usage_cost
 from smarter_dev.web.llm_pricing import calc_cost
 from smarter_dev.web.llm_pricing import calc_session_cost
+from smarter_dev.web.llm_pricing import long_context_tier
 from smarter_dev.web.llm_pricing import price_rates_for_model
 
 
@@ -419,6 +423,87 @@ class TestAnthropicPricing:
         )
         # 100k fresh @ $2 + 800k read @ $0.20 + 100k write @ $2.50 + $10 output.
         assert cost == Decimal("10.61")
+
+
+class TestLongContextTier:
+    """One request whose prompt reaches the tier bills whole at the tier rate.
+
+    Only a single request's counts can say whether it did, so the tier is
+    priced with ``per_request=True`` and totals stay at the base rate.
+    """
+
+    def test_grok_4_7_request_at_200k_doubles_input_and_output(self):
+        # 200k @ $3.20 + 1k @ $9.60: xAI's override starts at 200000 exactly.
+        cost = calc_cost(200_000, 1_000, "openrouter:x-ai/grok-4.7", per_request=True)
+        assert cost == Decimal("0.6496")
+
+    def test_grok_4_7_request_under_200k_is_base_rate(self):
+        cost = calc_cost(199_999, 1_000, "openrouter:x-ai/grok-4.7", per_request=True)
+        assert cost == Decimal("0.3247984")
+
+    def test_grok_4_7_tier_doubles_cache_reads(self):
+        cost = calc_session_cost(
+            input_tokens=300_000,
+            output_tokens=0,
+            cache_read_tokens=100_000,
+            cache_write_tokens=0,
+            model_name="openrouter:x-ai/grok-4.7",
+            per_request=True,
+        )
+        # 200k fresh @ $3.20 + 100k read @ $0.80.
+        assert cost == Decimal("0.72")
+
+    def test_gpt_6_request_above_272k_is_2x_input_and_1_5x_output(self):
+        # 300k @ $0.20 + 10k @ $0.75.
+        cost = calc_cost(300_000, 10_000, "openai:gpt-6-luna", per_request=True)
+        assert cost == Decimal("0.0675")
+
+    def test_gpt_6_request_at_exactly_272k_is_base_rate(self):
+        cost = calc_cost(272_000, 0, "openai:gpt-6-luna", per_request=True)
+        assert cost == Decimal("0.0272")
+
+    def test_per_request_pricing_does_not_warn(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="smarter_dev.web.llm_pricing"):
+            calc_cost(300_000, 0, "openrouter:x-ai/grok-4.7", per_request=True)
+        assert "priced at the base rate" not in caplog.text
+
+    def test_grok_4_7_total_over_200k_prices_base_rate_and_says_so(self, caplog):
+        # OpenRouter prices return before genai-prices, and the warning used to
+        # sit after them, so a Grok total never logged.
+        with caplog.at_level(logging.WARNING, logger="smarter_dev.web.llm_pricing"):
+            cost = calc_cost(300_000, 0, "x-ai/grok-4.7")
+        assert cost == Decimal("0.48")
+        assert "priced at the base rate" in caplog.text
+
+    def test_tier_matches_flat_and_prefixed_refs(self):
+        assert long_context_tier("x-ai/grok-4.7", 200_000) is not None
+        assert long_context_tier("openrouter:x-ai/grok-4.7", 200_000) is not None
+        assert long_context_tier("x-ai/grok-4.6", 400_000) is None
+
+    def test_web_chat_settlement_prices_the_tier(self):
+        model = get_model("grok-4-7")
+        assert usage_cost(model, 200_000, 1_000, per_request=True) == Decimal("0.6496")
+        assert usage_cost(model, 200_000, 1_000) == Decimal("0.3248")
+
+    def test_base_rate_lookup_does_not_warn(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="smarter_dev.web.llm_pricing"):
+            rates = price_rates_for_model(get_model("grok-4-7"))
+        assert rates.input_mtok == Decimal("1.60")
+        assert "priced at the base rate" not in caplog.text
+
+    def test_preflight_estimate_prices_the_tier(self):
+        model = get_model("grok-4-7")
+        rates = price_rates_for_model(model)
+        # 250k @ $3.20 + 10k @ $9.60.
+        assert request_estimate_usd(model, rates, 250_000, 10_000) == Decimal("0.896")
+        # 100k @ $1.60 + 10k @ $4.80.
+        assert request_estimate_usd(model, rates, 100_000, 10_000) == Decimal("0.208")
+
+    def test_preflight_estimate_clamps_to_the_context_window(self):
+        model = get_model("grok-4-7")
+        rates = price_rates_for_model(model)
+        # 500k (the window) @ $3.20.
+        assert request_estimate_usd(model, rates, 600_000, 0) == Decimal("1.6")
 
 
 class TestCatalogPricingCompleteness:

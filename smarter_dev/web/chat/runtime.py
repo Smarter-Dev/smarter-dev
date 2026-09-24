@@ -32,6 +32,8 @@ from smarter_dev.web.chat.limits import reserve_operation
 from smarter_dev.web.chat.limits import settle_reservation
 from smarter_dev.web.chat.notifications import notify_chat_user
 from smarter_dev.web.chat.usage import record_settled_chat_usage
+from smarter_dev.web.llm_pricing import ModelPriceRates
+from smarter_dev.web.llm_pricing import long_context_tier
 from smarter_dev.web.llm_pricing import price_rates_for_model
 from smarter_dev.web.models import UsageCostRow
 from smarter_dev.web.models import WebChatConversation
@@ -138,6 +140,25 @@ def _usage_parts(response: ModelResponse) -> tuple[int, int, int, int]:
             or 0
         ),
     )
+
+
+def request_estimate_usd(
+    model: Any, rates: ModelPriceRates, input_tokens: int, max_output: int
+) -> Decimal:
+    """Worst-case spend of one provider request, for the preflight reservation.
+
+    A prompt that reaches the model's long-context tier bills the whole
+    request at the tier rate, output included, so the estimate does too.
+    """
+    prompt_tokens = min(input_tokens, model.context_window)
+    input_rate, output_rate = rates.input_mtok, rates.output_mtok
+    tier = long_context_tier(model.model_id, prompt_tokens)
+    if tier is not None:
+        input_rate *= tier.input_multiplier
+        output_rate *= tier.output_multiplier
+    return (
+        Decimal(prompt_tokens) * input_rate + Decimal(max_output) * output_rate
+    ) / Decimal("1000000")
 
 
 @dataclass(slots=True)
@@ -265,11 +286,9 @@ class SpendMeteredModel(WrapperModel):
             configured_output or self.context.model.max_output_tokens,
             self.context.model.max_output_tokens,
         )
-        estimate = (
-            Decimal(min(input_tokens, self.context.model.context_window))
-            * rates.input_mtok
-            + Decimal(max_output) * rates.output_mtok
-        ) / Decimal("1000000")
+        estimate = request_estimate_usd(
+            self.context.model, rates, input_tokens, max_output
+        )
         async with get_db_session_context() as session:
             from skrift.auth.services import get_user_permissions
             from skrift.db.models.user import User
