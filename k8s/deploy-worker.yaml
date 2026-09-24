@@ -34,7 +34,7 @@ spec:
                 image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
                 # Drain root jobs only. Chat roots may await child jobs, so a separate
                 # deployment drains chat-subagents without queue starvation.
-                command: ["uv", "run", "--no-sync", "skrift", "workers", "run", "--queue", "agents", "--concurrency", "8"]
+                command: ["/app/.venv/bin/skrift", "workers", "run", "--queue", "agents", "--concurrency", "8"]
                 envFrom:
                   - configMapRef:
                       name: smarter-dev-config
