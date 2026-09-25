@@ -92,6 +92,10 @@ at once: it runs in a subshell, so its settings and traps end with it.
   header from a file (`-H @file`).
 - The secret is untouched unless the new key is accepted by
   `/api/auth/validate` and the key names match before and after.
+- The validation prints only the status code. `-q` (first) skips `~/.curlrc`,
+  which could add `-v` or `--trace` and print the request headers; `-o
+  /dev/null` drops the body; `-f` turns any non-2xx into an error that names
+  only the status.
 
 ```bash
 (
@@ -111,7 +115,7 @@ at once: it runs in a subshell, so its settings and traps end with it.
   [[ -s $patch_file ]]
 
   # The new key must authenticate before the secret changes (200, or stop):
-  curl -fsS -o /dev/null -w 'validate: %{http_code}\n' -X POST \
+  curl -q -fsS -o /dev/null -w 'validate: %{http_code}\n' -X POST \
     -H @"$header_file" https://smarter.dev/api/auth/validate
   rm -f "$header_file"
 
