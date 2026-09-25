@@ -148,6 +148,7 @@ async def fetch_bytes(
     ``MAX_IMAGE_DOWNLOAD_BYTES`` and ``data`` is a ``SpooledImage``, which the
     caller must see deleted.
     """
+    body = None
     try:
         async with asyncio.timeout(total_timeout), httpx.AsyncClient(
             timeout=30.0, follow_redirects=True
@@ -175,7 +176,13 @@ async def fetch_bytes(
                     )
                     return None
                 return body, content_type
-    except Exception as e:
+    except BaseException as e:
+        # Closing the stream or client, or the timeout's exit, can still fail
+        # or be cancelled after read_body handed the spool over: it is ours.
+        if isinstance(body, SpooledImage):
+            body.discard()
+        if not isinstance(e, Exception):
+            raise
         logger.debug("fetch_bytes failed for %s: %s", url_for_log(url), e)
         return None
 
