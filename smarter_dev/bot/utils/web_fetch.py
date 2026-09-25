@@ -7,14 +7,17 @@ test-importable while the old agent module gets rewritten.
 from __future__ import annotations
 
 import asyncio
-import io
 import logging
 import os
 import re
 from urllib.parse import urlparse
 
 import httpx
-import pdfplumber
+
+from smarter_dev.shared import pdf_text
+from smarter_dev.shared.media_reads import MAX_DOWNLOAD_BYTES
+from smarter_dev.shared.media_reads import SpooledImage
+from smarter_dev.shared.media_reads import read_body
 
 logger = logging.getLogger(__name__)
 
@@ -91,29 +94,20 @@ async def fetch_youtube_metadata(url: str) -> dict[str, str]:
 async def fetch_pdf_text(url: str, max_chars: int = 20_000) -> str | None:
     """Download a PDF and extract plain text via pdfplumber.
 
-    Returns the extracted text (truncated to ``max_chars``) or ``None`` on failure.
+    Returns the extracted text (truncated to ``max_chars``) or ``None`` on
+    failure, including a PDF over ``MAX_DOWNLOAD_BYTES`` or one too complex to
+    parse within ``pdf_text``'s child-process budget.
     """
+    fetched = await fetch_bytes(url)
+    if fetched is None:
+        return None
+    path = pdf_text.spool(fetched[0])
+    del fetched  # the child parses the file; don't hold the bytes as well
     try:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            resp = await client.get(url, headers={"User-Agent": USER_AGENT})
-            if resp.status_code != 200:
-                return None
-            return pdf_text_from_bytes(resp.content, max_chars=max_chars)
+        return await pdf_text.pdf_text_from_file(path, max_chars)
     except Exception as e:
         logger.debug("PDF fetch failed for %s: %s", url_for_log(url), e)
         return None
-
-
-def pdf_text_from_bytes(data: bytes, max_chars: int = 20_000) -> str:
-    """Plain text of an in-memory PDF via pdfplumber, truncated to ``max_chars``."""
-    with pdfplumber.open(io.BytesIO(data)) as pdf:
-        pages = []
-        for page in pdf.pages:
-            text = page.extract_text() or ""
-            pages.append(text)
-            if sum(len(p) for p in pages) >= max_chars:
-                break
-    return "\n\n".join(pages)[:max_chars]
 
 
 _DISCORD_ATTACHMENT_HOSTS = ("cdn.discordapp.com", "media.discordapp.net")
@@ -135,14 +129,24 @@ def url_for_log(url: str) -> str:
 
 
 async def fetch_bytes(
-    url: str, *, max_bytes: int = 20 * 1024 * 1024, total_timeout: float = 60.0
-) -> tuple[bytes, str] | None:
+    url: str,
+    *,
+    max_bytes: int = MAX_DOWNLOAD_BYTES,
+    total_timeout: float = 60.0,
+    spill_images: bool = False,
+    image_hint: bool = False,
+) -> tuple[bytes | SpooledImage, str] | None:
     """Download raw bytes and content-type for a URL (images / audio / files).
 
     Returns ``(data, content_type)`` or ``None`` on failure, when the body
     exceeds ``max_bytes``, or when the whole download outlasts
     ``total_timeout`` seconds. ``content_type`` is the bare type without params
     (e.g. ``image/png``) and may be empty if the server omitted it.
+
+    With ``spill_images``, an image (``image_hint`` from the URL, or an
+    ``image/`` Content-Type) over ``max_bytes`` streams on to disk up to
+    ``MAX_IMAGE_DOWNLOAD_BYTES`` and ``data`` is a ``SpooledImage``, which the
+    caller must see deleted.
     """
     try:
         async with asyncio.timeout(total_timeout), httpx.AsyncClient(
@@ -153,24 +157,24 @@ async def fetch_bytes(
             ) as resp:
                 if resp.status_code != 200:
                     return None
-                # Stream so an oversized body is abandoned at the cap rather
-                # than held in memory whole.
-                chunks: list[bytes] = []
-                received = 0
-                async for chunk in resp.aiter_bytes():
-                    received += len(chunk)
-                    if received > max_bytes:
-                        logger.debug(
-                            "fetch_bytes: %s is over the %d byte cap",
-                            url_for_log(url),
-                            max_bytes,
-                        )
-                        return None
-                    chunks.append(chunk)
                 content_type = (
                     resp.headers.get("content-type", "").split(";")[0].strip()
                 )
-                return b"".join(chunks), content_type
+                # Streamed so an oversized body is abandoned at the cap rather
+                # than held in memory whole.
+                body = await read_body(
+                    resp.aiter_bytes(),
+                    resp.headers.get("content-length", ""),
+                    max_bytes=max_bytes,
+                    spill_image=spill_images
+                    and (image_hint or content_type.startswith("image/")),
+                )
+                if body is None:
+                    logger.debug(
+                        "fetch_bytes: %s is over the download cap", url_for_log(url)
+                    )
+                    return None
+                return body, content_type
     except Exception as e:
         logger.debug("fetch_bytes failed for %s: %s", url_for_log(url), e)
         return None
@@ -193,7 +197,6 @@ __all__ = [
     "fetch_youtube_metadata",
     "is_discord_attachment_url",
     "is_youtube_url",
-    "pdf_text_from_bytes",
     "strip_html",
     "url_for_log",
 ]
