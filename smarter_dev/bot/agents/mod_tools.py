@@ -52,6 +52,9 @@ class ActionTracker:
     deletions: list[dict] = field(default_factory=list)  # {message_id, reason}
     flags: list[str] = field(default_factory=list)  # user_ids flagged for review
     channel_message: str | None = None  # message the agent wants posted in the channel
+    # Error class when the run stopped on an exception. Actions above had
+    # already executed; nothing else was reviewed.
+    failure: str | None = None
 
     @property
     def all_impacted_user_ids(self) -> set[str]:
@@ -81,10 +84,11 @@ def build_triage_report_embed(
     trigger_message_id: str | None = None,
 ) -> hikari.Embed:
     """Build the summary embed posted to the mod channel after triage."""
+    failed = tracker.failure is not None
     embed = hikari.Embed(
-        title="Moderation Triage Report",
+        title="Moderation Triage Failed" if failed else "Moderation Triage Report",
         description=assessment[:300] + "..." if len(assessment) > 300 else assessment,
-        color=hikari.Color(0xFFA500),
+        color=hikari.Color(0xE74C3C if failed else 0xFFA500),
         timestamp=datetime.now(timezone.utc),
     )
 
@@ -125,14 +129,35 @@ def build_triage_report_embed(
             inline=False,
         )
 
-    if not tracker.has_actions:
+    if failed:
+        if tracker.has_actions:
+            status = (
+                f"Triage stopped partway ({tracker.failure}). The actions listed "
+                "here were already taken; nothing else was reviewed."
+            )
+            if not tracker.channel_message:
+                status += " No notice was posted in the channel."
+        else:
+            status = (
+                f"Triage did not finish ({tracker.failure}). The situation was "
+                "not reviewed and no action was taken."
+            )
+        embed.add_field(
+            name="Manual Review Required",
+            value=status,
+            inline=False,
+        )
+    elif not tracker.has_actions:
         embed.add_field(
             name="No Action Taken",
             value="Situation reviewed, no immediate action required.",
             inline=False,
         )
 
-    embed.set_footer(text="Automated triage \u2014 human review required")
+    if failed:
+        embed.set_footer(text="Automated triage failed \u2014 a moderator must review this")
+    else:
+        embed.set_footer(text="Automated triage \u2014 human review required")
     return embed
 
 

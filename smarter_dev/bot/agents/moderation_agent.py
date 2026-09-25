@@ -233,4 +233,7 @@ async def run_moderation_agent(
 
     except Exception as e:
         logger.exception(f"Moderation triage failed for guild {guild_id}: {e}")
-        return f"Moderation triage failed: {e}", tracker
+        # Only the error class reaches the mod channel; the message can carry
+        # provider internals. Not retried: actions may already have run.
+        tracker.failure = type(e).__name__
+        return f"Moderation triage failed ({tracker.failure}).", tracker
