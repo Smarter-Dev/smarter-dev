@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import zlib
 from pathlib import Path
 from types import SimpleNamespace
@@ -530,6 +531,64 @@ async def test_a_cancelled_spooling_download_leaves_no_file(monkeypatch, tmp_pat
     assert _spool_files(tmp_path) == []
 
 
+async def test_a_spool_is_written_back_and_dropped_from_the_page_cache(monkeypatch, tmp_path):
+    # Its cache counts against the container's memory limit: a 50 MiB spool
+    # held 48 MiB of it (cgroup memory.stat, 2026-09-25) before this.
+    monkeypatch.setattr(media_reads.tempfile, "tempdir", str(tmp_path))
+    written_at: list[int] = []
+
+    def drop_cache(fd, *, written=False):
+        assert written
+        written_at.append(os.fstat(fd).st_size)
+
+    monkeypatch.setattr(media_reads, "drop_cache", drop_cache)
+    body = os.urandom(media_reads.MAX_IMAGE_DOWNLOAD_BYTES)
+
+    spooled = await media_reads.read_body(_chunks(body), "", spill_image=True)
+
+    spooled.discard()
+    assert written_at[-1] == len(body)
+    gaps = [b - a for a, b in zip([MAX_DOWNLOAD_BYTES, *written_at], written_at)]
+    assert max(gaps) <= media_reads.SPOOL_CACHE_BYTES + 65536, gaps
+
+
+async def test_a_read_cancelled_while_writing_back_leaves_no_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(media_reads.tempfile, "tempdir", str(tmp_path))
+    syncing, release = threading.Event(), threading.Event()
+
+    def drop_cache(fd, *, written=False):
+        syncing.set()
+        release.wait(10)
+
+    monkeypatch.setattr(media_reads, "drop_cache", drop_cache)
+    read = asyncio.create_task(
+        media_reads.read_body(
+            _chunks(b"\0" * (MAX_DOWNLOAD_BYTES * 2)), "", spill_image=True
+        )
+    )
+    await asyncio.to_thread(syncing.wait, 10)
+    read.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await read
+    assert _spool_files(tmp_path) == []
+    release.set()
+
+
+def test_the_image_child_reads_a_spool_without_caching_it(monkeypatch, tmp_path):
+    path = tmp_path / "large.png"
+    path.write_bytes(_encode(_noise((2560, 2590)), "PNG"))
+    read_to: list[int] = []
+    monkeypatch.setattr(image_child, "drop_cache", lambda fd: read_to.append(os.lseek(fd, 0, 1)))
+
+    image_child.downsample(str(path), "image/png")
+
+    size = path.stat().st_size
+    assert size > 4 * media_reads.SPOOL_CACHE_BYTES
+    gaps = [b - a for a, b in zip([0, *read_to], read_to)]
+    assert gaps and max(gaps) <= 2 * media_reads.SPOOL_CACHE_BYTES, gaps
+    assert size - read_to[-1] <= 2 * media_reads.SPOOL_CACHE_BYTES
+
+
 async def test_non_images_keep_the_memory_cap_when_spilling_is_on():
     body = b"%PDF-" + b"\0" * MAX_DOWNLOAD_BYTES
 
@@ -753,9 +812,12 @@ PEAK_BUDGET_MIB = 40
 # A PDF read's parent and parser child at the same instant. The child alone
 # is ~35 MiB once pdfplumber is imported.
 PDF_COMBINED_BUDGET_MIB = 60
-# An image read that decodes in image_child: the child is capped ~120 MiB
-# (Pillow's ~23 MiB plus IMAGE_CHILD_EXTRA_BYTES) and the parent holds at
-# most a MAX_DOWNLOAD_BYTES input beside it.
+# An image read that decodes in image_child, from measured RSS (worst 109.5
+# MiB, a 4.7 MP WebP), not the child's hard cap: its address space is
+# limited to its post-import size (~53 MiB) plus IMAGE_CHILD_EXTRA_BYTES,
+# ~149 MiB. The parent holds at most a MAX_DOWNLOAD_BYTES input beside it.
+# Not counted: the spool's page cache, dropped every SPOOL_CACHE_BYTES
+# (11 MiB peak for a 50 MB PNG, cgroup memory.stat, 2026-09-25).
 IMAGE_CHILD_COMBINED_BUDGET_MIB = 135
 # Reads queued behind one another: each runs alone, but what the first leaves
 # fragmented in the heap is not all returned, so the peak sits a few MiB above

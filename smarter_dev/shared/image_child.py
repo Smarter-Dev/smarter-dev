@@ -40,6 +40,8 @@ from smarter_dev.shared.media_images import REDUCIBLE_MODES
 from smarter_dev.shared.media_images import ImageTooLarge
 from smarter_dev.shared.media_images import jpeg_coefficient_buffer
 from smarter_dev.shared.media_reads import MAX_SEND_BYTES
+from smarter_dev.shared.media_reads import SPOOL_CACHE_BYTES
+from smarter_dev.shared.media_reads import drop_cache
 
 _FORMATS = {
     "image/jpeg": "JPEG",
@@ -53,6 +55,26 @@ _MODEL_SHORT_SIDE = 768
 _JPEG_HEAD_BYTES = 4 * 1024 * 1024
 # Counting a GIF's frames (n_frames) would decode every one of them.
 _GIF_NOTE = "Only this GIF's first frame is attached; it was too large to send whole."
+
+
+class _Uncached(io.FileIO):
+    """The spool, read without keeping it in the page cache as it goes.
+
+    The container's memory limit is charged for the cache too, and this child
+    reads files of up to ``MAX_IMAGE_DOWNLOAD_BYTES``.
+    """
+
+    def __init__(self, path: str) -> None:
+        super().__init__(path, "rb")
+        self._cached = 0
+
+    def read(self, size: int = -1) -> bytes:
+        data = super().read(size)
+        self._cached += len(data)
+        if self._cached >= SPOOL_CACHE_BYTES:
+            drop_cache(self.fileno())
+            self._cached = 0
+        return data
 
 
 def webp_size(head: bytes) -> tuple[int, int] | None:
@@ -90,11 +112,16 @@ def downsample(path: str, media_type: str) -> tuple[bytes, str, str]:
             raise ImageTooLarge(
                 f"The image is {size[0]}x{size[1]} pixels, too large to read."
             )
-    try:
-        image = Image.open(path, formats=[pillow_format])
-    except Image.DecompressionBombError as bomb:
-        # Pillow's own guard: over twice its MAX_IMAGE_PIXELS, from the header.
-        raise ImageTooLarge("The image declares too many pixels to read.") from bomb
+    with _Uncached(path) as file:
+        try:
+            image = Image.open(file, formats=[pillow_format])
+        except Image.DecompressionBombError as bomb:
+            # Pillow's own guard: over twice its MAX_IMAGE_PIXELS, from the header.
+            raise ImageTooLarge("The image declares too many pixels to read.") from bomb
+        return _downsample(image, path, pillow_format)
+
+
+def _downsample(image: Image.Image, path: str, pillow_format: str) -> tuple[bytes, str, str]:
     with image:
         width, height = image.size
         too_large = ImageTooLarge(f"The image is {width}x{height} pixels, too large to read.")
