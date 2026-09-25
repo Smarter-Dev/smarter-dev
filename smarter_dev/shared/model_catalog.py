@@ -459,13 +459,14 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
     # --- Gemini via Google ---
     # Gemini 3 Flash left the catalog on 2026-08-13 — the oldest Flash we
     # carried, and still on a *preview* wire id — to make room for 3.7 Flash.
-    # 3.5 Flash Lite, 3.6 Flash and 3.7 Flash left on 2026-09-24, so 3.8 Flash
-    # is the one Gemini Flash in the catalog and in use: the selections on the
-    # three retired keys read as 3.8 Flash (``RETIRED_SUCCESSORS``), and the
-    # agents that pinned Gemini Flash wire ids directly — the rule matcher, the
-    # summarizer fallback, the resources agent, the blogging agents and the
-    # handler author/judge — moved to it the same day. Their price patches and
-    # provider mappings stay for the usage rows that carry their wire ids.
+    # 3.6 Flash and 3.7 Flash left on 2026-09-24, so 3.8 Flash is the one
+    # full Gemini Flash in the catalog: the selections on the retired keys read
+    # as 3.8 Flash (``RETIRED_SUCCESSORS``), and the agents that pinned Gemini
+    # Flash wire ids directly — the rule matcher, the summarizer fallback, the
+    # resources agent, the blogging agents and the handler author/judge — moved
+    # to it the same day. Their price patches and provider mappings stay for the
+    # usage rows that carry their wire ids. 3.5 Flash Lite was retired with them
+    # by mistake and came back on 2026-09-25 (below).
     #
     # Gemini 3.8 Flash joined on 2026-09-03 when it became the proactive
     # agent's model. It is in the catalog for the usage ledger's benefit as much
@@ -502,6 +503,19 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         supports_vision=True,
         reasoning_levels=_GEMINI_THINKING,
         default_reasoning=ReasoningLevel.HIGH,
+    ),
+    # 3.5 Flash Lite left on 2026-09-24 alongside 3.6 and 3.7 Flash, but only
+    # 3.5 Flash (``gemini-3-5-flash``, gone since 2026-07-21) was meant to go;
+    # it is back on 2026-09-25 as it was, and is no longer read as 3.8 Flash.
+    CatalogModel(
+        key="gemini-3-5-flash-lite",
+        label="Gemini 3.5 Flash Lite",
+        family="Gemini",
+        provider=ModelProvider.GOOGLE,
+        model_id="gemini-3.5-flash-lite",
+        supports_vision=True,
+        reasoning_levels=_GEMINI_THINKING,
+        default_reasoning=ReasoningLevel.MEDIUM,
     ),
     # --- GPT via OpenAI ---
     # GPT-6 replaced GPT-5.6 Terra and Luna on 2026-09-24: Sol ($2/$10 per M)
@@ -616,9 +630,9 @@ RETIRED_SUCCESSORS: dict[str, str] = {
     "gpt-5-5": "gpt-6-sol",
     "gpt-5-6-sol": "gpt-6-sol",
     "gpt-5-4-nano": "gpt-6-luna",
-    # 2026-09-24: 3.8 Flash is the only Gemini Flash left, and Grok 4.7
-    # replaced 4.6.
-    "gemini-3-5-flash-lite": "gemini-3-8-flash",
+    # 2026-09-24: 3.8 Flash is the only full Gemini Flash left, and Grok 4.7
+    # replaced 4.6. (3.5 Flash Lite, retired the same day by mistake, was
+    # restored on 2026-09-25 and is no longer mapped.)
     "gemini-3-6-flash": "gemini-3-8-flash",
     "gemini-3-7-flash": "gemini-3-8-flash",
     "grok-4-6": "grok-4-7",
