@@ -58,12 +58,8 @@ class _FakeSessionCtx:
 
 @pytest.fixture(autouse=True)
 def _target_is_a_plain_member(monkeypatch):
-    # Purge checks the target's permissions before deleting anything.
-    import hikari
-
-    monkeypatch.setattr(
-        mod_tools.lightbulb.utils, "permissions_for", lambda member: hikari.Permissions.NONE
-    )
+    # Purge checks the target (target_refusal, tested on its own) first.
+    monkeypatch.setattr(mod_tools, "target_refusal", AsyncMock(return_value=None))
 
 
 @pytest.mark.asyncio

@@ -50,9 +50,7 @@ _MESSAGE_BY_MEMBER = SimpleNamespace(author=SimpleNamespace(id=222))
 
 @pytest.fixture(autouse=True)
 def _author_is_a_plain_member(monkeypatch):
-    monkeypatch.setattr(
-        mod_tools.lightbulb.utils, "permissions_for", lambda member: hikari.Permissions.NONE
-    )
+    monkeypatch.setattr(mod_tools, "target_refusal", AsyncMock(return_value=None))
 
 
 @pytest.mark.asyncio
@@ -120,11 +118,7 @@ async def test_triage_timeout_dispatches_with_the_bot_for_the_event_log(monkeypa
         "create_action",
         AsyncMock(return_value=SimpleNamespace()),
     )
-    monkeypatch.setattr(
-        mod_tools.lightbulb.utils,
-        "permissions_for",
-        lambda member: hikari.Permissions.NONE,
-    )
+    monkeypatch.setattr(mod_tools, "target_refusal", AsyncMock(return_value=None))
 
     bot = Mock()
     bot.rest = Mock()
