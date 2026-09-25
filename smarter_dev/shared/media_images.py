@@ -67,9 +67,19 @@ MAX_JPEG_DRAFT_PIXELS = 64_000_000
 MAX_DOWNSCALE_PIXELS = 4_096_000
 _DOWNSCALABLE_FORMATS = {"image/png": "PNG", "image/webp": "WEBP"}
 _MODEL_SHORT_SIDE = 768
-_DRAFT_SIDE = 1024
 # What a drafted JPEG may decode to: ~12 MB as RGB.
 _MAX_DRAFTED_PIXELS = 4_000_000
+# A progressive JPEG, or one whose first scan lacks a component, makes libjpeg
+# hold every DCT coefficient of the whole image at once (2 bytes each, at full
+# size whatever the draft scale): an 8000 x 8000 one grew a read by 199 MiB
+# (measured 2026-09-25). Such a JPEG is refused over this buffer size, which
+# admits a 7 MP 4:2:0 photo.
+MAX_JPEG_BUFFERED_BYTES = 20 * 1024 * 1024
+# Start-of-frame markers; the rest of 0xC0..0xCF are tables (DHT, JPG, DAC).
+_JPEG_SOF = frozenset(range(0xC0, 0xD0)) - {0xC4, 0xC8, 0xCC}
+# Frames libjpeg can decode one MCU row at a time: baseline, extended
+# sequential and arithmetic sequential, when the first scan has every component.
+_JPEG_SEQUENTIAL_SOF = frozenset({0xC0, 0xC1, 0xC9})
 
 # The one type the readers receive that the model refuses (the attachment
 # sniffer and URL extensions admit PNG, JPEG, GIF, WebP and BMP).
@@ -193,10 +203,18 @@ def _downscaled_jpeg(data: bytes) -> bytes:
                 raise ImageTooLarge(
                     f"The image is {width}x{height} pixels, too large to read."
                 )
+            # Progressive and multi-scan JPEGs are decoded from a buffer of
+            # the whole image's coefficients, whatever the draft scale.
+            buffered = jpeg_coefficient_buffer(data)
+            if buffered is None or buffered > MAX_JPEG_BUFFERED_BYTES:
+                raise ImageTooLarge(
+                    f"The image is {width}x{height} pixels and "
+                    f"{len(data) / 1_048_576:.1f} MB, too large to read."
+                )
             # draft() makes the decoder itself scale by 1/2..1/8, so the full
-            # size is never allocated. It keeps at least the size asked for,
-            # so asking for 1024 lands between 1024 and 2048 px a side.
-            image.draft("RGB", (_DRAFT_SIDE, _DRAFT_SIDE))
+            # pixels are never allocated. It keeps both sides at least the size
+            # asked for, so asking for the model's short side loses nothing.
+            image.draft("RGB", (_MODEL_SHORT_SIDE, _MODEL_SHORT_SIDE))
             if image.size[0] * image.size[1] > _MAX_DRAFTED_PIXELS:
                 raise ImageTooLarge(
                     f"The image is {width}x{height} pixels, too large to read."
@@ -210,6 +228,71 @@ def _downscaled_jpeg(data: bytes) -> bytes:
     out = io.BytesIO()
     frame.save(out, "JPEG", quality=85)
     return out.getvalue()
+
+
+def jpeg_coefficient_buffer(data: bytes) -> int | None:
+    """Bytes of whole-image coefficient buffer libjpeg will allocate to decode.
+
+    0 for a JPEG it decodes one MCU row at a time; ``None`` when the markers up
+    to the first scan cannot be read. Follows libjpeg: the buffer is used when
+    the frame is progressive (or lossless/hierarchical) or the first scan has
+    fewer components than the frame, and holds every component's blocks,
+    rounded up to its sampling factors, at 64 two-byte coefficients each.
+    """
+    if data[:2] != b"\xff\xd8":
+        return None
+    frame: tuple[int, int, int, list[tuple[int, int]]] | None = None
+    pos = 2
+    while pos + 4 <= len(data):
+        if data[pos] != 0xFF:
+            return None
+        marker = data[pos + 1]
+        if marker == 0xFF:  # fill byte
+            pos += 1
+            continue
+        if marker == 0x01 or 0xD0 <= marker <= 0xD7:  # no length
+            pos += 2
+            continue
+        length = int.from_bytes(data[pos + 2 : pos + 4], "big")
+        segment = data[pos + 4 : pos + 2 + length]
+        if length < 2 or len(segment) != length - 2:
+            return None
+        if marker in _JPEG_SOF:
+            if len(segment) < 6:
+                return None
+            height = int.from_bytes(segment[1:3], "big")
+            width = int.from_bytes(segment[3:5], "big")
+            count = segment[5]
+            if len(segment) < 6 + 3 * count or count == 0:
+                return None
+            sampling = [
+                (segment[6 + 3 * i + 1] >> 4, segment[6 + 3 * i + 1] & 0x0F)
+                for i in range(count)
+            ]
+            frame = (marker, width, height, sampling)
+        elif marker == 0xDA:  # first scan: everything needed is known
+            if frame is None or not segment:
+                return None
+            sof, width, height, sampling = frame
+            if sof in _JPEG_SEQUENTIAL_SOF and segment[0] == len(sampling):
+                return 0
+            if not all(h and v for h, v in sampling):
+                return None
+            h_max = max(h for h, _ in sampling)
+            v_max = max(v for _, v in sampling)
+            total = 0
+            for h, v in sampling:
+                blocks_wide = _ceil_div(_ceil_div(width * h, h_max), 8)
+                blocks_high = _ceil_div(_ceil_div(height * v, v_max), 8)
+                padded = _ceil_div(blocks_wide, h) * h * _ceil_div(blocks_high, v) * v
+                total += padded * 64 * 2
+            return total
+        pos += 2 + length
+    return None
+
+
+def _ceil_div(numerator: int, denominator: int) -> int:
+    return -(numerator // -denominator)
 
 
 def _prepare_gif(data: bytes) -> tuple[list[tuple[bytes, str]], str]:

@@ -23,6 +23,7 @@ from unittest.mock import MagicMock
 import pytest
 from PIL import Image
 from PIL import ImageDraw
+from PIL import ImageFile
 
 from smarter_dev.bot.agents import chat_tools
 from smarter_dev.bot.agents import media_reader
@@ -42,7 +43,13 @@ MiB = 1024 * 1024
 
 def _encode(image: Image.Image, fmt: str, **kwargs) -> bytes:
     out = io.BytesIO()
-    image.save(out, fmt, **kwargs)
+    block = ImageFile.MAXBLOCK
+    # A progressive JPEG of noise needs a larger encoder buffer than the default.
+    ImageFile.MAXBLOCK = max(block, 64 * MiB)
+    try:
+        image.save(out, fmt, **kwargs)
+    finally:
+        ImageFile.MAXBLOCK = block
     return out.getvalue()
 
 
@@ -92,6 +99,66 @@ def _pdf_bomb(megabytes: float) -> bytes:
     return _text_pdf(op * int(megabytes * MiB / len(op)))
 
 
+def _long_pdf(pages: int) -> bytes:
+    """An ordinary PDF of ``pages`` short pages: slow to parse, cheap to hold."""
+    ops = b"BT /F1 12 Tf 72 720 Td (" + b"page text " * 20 + b") Tj ET"
+    first_page = 5
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [%s] /Count %d >>"
+        % (b" ".join(b"%d 0 R" % (first_page + i) for i in range(pages)), pages),
+        b"<< /Length %d >>\nstream\n" % len(ops) + ops + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ] + [
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 3 0 R "
+        b"/Resources << /Font << /F1 4 0 R >> >> >>"
+    ] * pages
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n" % number + body + b"\nendobj\n"
+    xref = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    for offset in offsets:
+        out += b"%010d 00000 n \n" % offset
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (
+        len(objects) + 1,
+        xref,
+    )
+    return bytes(out)
+
+
+def _with_frame_size(jpeg: bytes, width: int, height: int) -> bytes:
+    """``jpeg`` with its SOF header claiming ``width`` x ``height``.
+
+    Everything up to the first scan is what the header checks read; the
+    scan data after it is never decoded when the image is refused.
+    """
+    for sof in (b"\xff\xc0", b"\xff\xc2"):
+        at = jpeg.find(sof)
+        if at != -1:
+            break
+    head = bytearray(jpeg)
+    head[at + 5 : at + 7] = height.to_bytes(2, "big")
+    head[at + 7 : at + 9] = width.to_bytes(2, "big")
+    return bytes(head)
+
+
+def _first_scan_of_one_component(jpeg: bytes) -> bytes:
+    """A baseline ``jpeg`` whose first scan carries only its first component.
+
+    That is a multi-scan sequential JPEG, which libjpeg buffers whole like a
+    progressive one. (jpegtran -scans writes real ones; this rewrites only the
+    scan header, which is all the checks read.)
+    """
+    at = jpeg.find(b"\xff\xda")
+    component = jpeg[at + 5 : at + 7]
+    scan = b"\xff\xda\x00\x08\x01" + component + b"\x00\x3f\x00"
+    length = int.from_bytes(jpeg[at + 2 : at + 4], "big")
+    return jpeg[:at] + scan + jpeg[at + 2 + length :]
+
+
 # --------------------------------------------------------------------------- #
 # What one model call may carry
 # --------------------------------------------------------------------------- #
@@ -107,6 +174,49 @@ def test_large_jpeg_is_drafted_down_not_decoded_whole():
     assert len(data) <= MAX_SEND_BYTES
     with Image.open(io.BytesIO(data)) as image:
         assert max(image.size) <= 2048
+
+
+def test_jpeg_coefficient_buffer_is_read_from_the_markers():
+    small = _noise((64, 48))
+    baseline = _encode(small, "JPEG", quality=85)
+    progressive = _encode(small, "JPEG", quality=85, progressive=True)
+
+    assert media_images.jpeg_coefficient_buffer(baseline) == 0
+    assert media_images.jpeg_coefficient_buffer(_first_scan_of_one_component(baseline)) > 0
+    # 8000 x 8000 at 4:2:0: luma 1000 x 1000 blocks, chroma 500 x 500 each,
+    # 64 two-byte coefficients per block.
+    assert media_images.jpeg_coefficient_buffer(
+        _with_frame_size(progressive, 8000, 8000)
+    ) == (1000 * 1000 + 2 * 500 * 500) * 128
+    assert media_images.jpeg_coefficient_buffer(b"not a jpeg") is None
+    assert media_images.jpeg_coefficient_buffer(progressive[:20]) is None
+
+
+@pytest.mark.parametrize("layout", ["progressive", "multi-scan"])
+def test_large_buffered_jpeg_is_refused_before_decoding(monkeypatch, layout):
+    # libjpeg holds every coefficient of such a JPEG whatever the draft
+    # scale: an 8000 x 8000 one grew a read by 199 MiB.
+    monkeypatch.setattr(media_images, "MAX_SEND_BYTES", 1000)
+    small = _noise((64, 48))
+    if layout == "progressive":
+        jpeg = _with_frame_size(_encode(small, "JPEG", progressive=True), 8000, 8000)
+    else:
+        jpeg = _first_scan_of_one_component(
+            _with_frame_size(_encode(small, "JPEG"), 8000, 8000)
+        )
+
+    with pytest.raises(ImageTooLarge, match="8000x8000 pixels"):
+        prepare_image(jpeg, "image/jpeg")
+
+
+def test_buffered_jpeg_within_the_cap_is_still_read():
+    jpeg = _encode(_noise((2400, 1800)), "JPEG", quality=95, progressive=True)
+    assert len(jpeg) > MAX_SEND_BYTES
+    assert 0 < media_images.jpeg_coefficient_buffer(jpeg) <= media_images.MAX_JPEG_BUFFERED_BYTES
+
+    [(data, media_type)], _ = prepare_image(jpeg, "image/jpeg")
+
+    assert media_type == "image/jpeg" and len(data) <= MAX_SEND_BYTES
 
 
 def test_large_png_screenshot_is_reduced_within_the_pixel_cap():
@@ -336,6 +446,99 @@ async def test_pdf_child_is_killed_at_its_time_limit(monkeypatch):
     assert not os.path.exists(path)
 
 
+def _capture_children(monkeypatch) -> list:
+    spawned: list = []
+    spawn = asyncio.create_subprocess_exec
+
+    async def capture(*args, **kwargs):
+        child = await spawn(*args, **kwargs)
+        spawned.append(child)
+        return child
+
+    monkeypatch.setattr(pdf_text.asyncio, "create_subprocess_exec", capture)
+    return spawned
+
+
+def _alive(pid: int) -> bool:
+    try:
+        with open(f"/proc/{pid}/status") as status:
+            return "zombie" not in status.read()
+    except FileNotFoundError:
+        return False
+
+
+async def _parsing(spawned: list) -> None:
+    for _ in range(500):
+        if spawned:
+            await asyncio.sleep(0.5)  # well into the parse
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError("the PDF child never started")
+
+
+async def test_cancelling_a_pdf_read_kills_and_reaps_its_child(monkeypatch):
+    spawned = _capture_children(monkeypatch)
+    path = pdf_text.spool(_long_pdf(1500))
+    read = asyncio.create_task(pdf_text.pdf_text_from_file(path, 10_000_000))
+    await _parsing(spawned)
+
+    read.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await read
+
+    [child] = spawned
+    assert child.returncode is not None
+    assert not _alive(child.pid)
+    assert not os.path.exists(path)
+
+
+async def test_a_second_cancel_during_the_kill_still_reaps_the_child(monkeypatch):
+    spawned = _capture_children(monkeypatch)
+    path = pdf_text.spool(_long_pdf(1500))
+    read = asyncio.create_task(pdf_text.pdf_text_from_file(path, 10_000_000))
+    await _parsing(spawned)
+    [child] = spawned
+    wait = child.wait
+    reaping = asyncio.Event()
+    reaped: list[int] = []
+
+    async def slow_wait():
+        reaping.set()
+        await asyncio.sleep(0.3)  # the window for a second cancel
+        reaped.append(await wait())
+        return reaped[-1]
+
+    child.wait = slow_wait
+
+    read.cancel()
+    await asyncio.wait_for(reaping.wait(), 10)  # the kill has begun
+    read.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await read
+
+    assert reaped, "the read ended before its child was reaped"
+    assert child.returncode is not None
+    assert not _alive(child.pid)
+    assert not os.path.exists(path)
+
+
+async def test_the_slot_is_not_released_before_the_pdf_child_is_gone(monkeypatch):
+    spawned = _capture_children(monkeypatch)
+    path = pdf_text.spool(_long_pdf(1500))
+
+    async def read():
+        async with media_reads.media_read_slot():
+            await pdf_text.pdf_text_from_file(path, 10_000_000)
+
+    task = asyncio.create_task(read())
+    await _parsing(spawned)
+    task.cancel()
+    async with media_reads.media_read_slot(wait=30):
+        assert not _alive(spawned[0].pid)
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
 # --------------------------------------------------------------------------- #
 # Whole reads, measured in a fresh process (media_read_harness): VmHWM from
 # before the download, with the real SDK serializing the request. These cover
@@ -343,6 +546,10 @@ async def test_pdf_child_is_killed_at_its_time_limit(monkeypatch):
 # --------------------------------------------------------------------------- #
 
 PEAK_BUDGET_MIB = 40
+# A PDF read's parent and parser child at the same instant. The child alone
+# is ~35 MiB once pdfplumber is imported; this leaves >10 MiB of the bot's
+# ~70 MiB headroom.
+PDF_COMBINED_BUDGET_MIB = 60
 
 
 def _read(tmp_path, name: str, data: bytes, concurrency: int = 1) -> dict:
@@ -361,7 +568,20 @@ def _read(tmp_path, name: str, data: bytes, concurrency: int = 1) -> dict:
 @pytest.mark.skipif(not Path("/proc/self/status").exists(), reason="needs Linux VmHWM")
 def test_whole_reads_fit_the_headroom(tmp_path):
     big = [_noise((1000, 1000), "L") for _ in range(7)]  # over the sampling cap
+    # 8000 x 8000 progressive and multi-scan JPEGs over the send cap. Their
+    # scan data is noise nobody decodes: the header check refuses them first.
+    buffered = _with_frame_size(_encode(_noise((64, 48)), "JPEG"), 8000, 8000)
+    buffered += os.urandom(4 * MiB)
+    progressive = _with_frame_size(
+        _encode(_noise((64, 48)), "JPEG", progressive=True), 8000, 8000
+    ) + os.urandom(4 * MiB)
     cases = {
+        "progressive.jpg": progressive,
+        "multiscan.jpg": _first_scan_of_one_component(buffered),
+        # At the coefficient cap (19.3 MiB) with a ~9 MB input: the most a
+        # progressive JPEG that is read can cost.
+        "buffered.jpg": _encode(_noise((3200, 2112)), "JPEG", quality=99, progressive=True),
+        "long.pdf": _long_pdf(300),
         "screenshot.png": _encode(_screenshot((2560, 1600)), "PNG"),
         "photo.jpg": _encode(_noise((4000, 3000)), "JPEG", quality=85),
         "big.gif": _encode(big[0], "GIF", save_all=True, append_images=big[1:]),
@@ -374,6 +594,12 @@ def test_whole_reads_fit_the_headroom(tmp_path):
     assert results["photo.jpg"]["result"] == "described"
     assert results["big.gif"]["result"] == "described"
     assert results["bomb.pdf"]["error"] == "pdf_read_failed"
+    assert results["long.pdf"]["error"] == ""
+    assert "too large to read" in results["progressive.jpg"]["result"]
+    assert "too large to read" in results["multiscan.jpg"]["result"]
+    assert results["buffered.jpg"]["result"] == "described"
+    for pdf in ("bomb.pdf", "long.pdf"):
+        assert results[pdf]["combined_mib"] <= PDF_COMBINED_BUDGET_MIB, results[pdf]
     # Only the usable prefix is decoded (the summarizer, stubbed here, then
     # keeps MAX_READ_CHARS of it).
     assert results["notes.txt"]["result"] == (
@@ -381,6 +607,8 @@ def test_whole_reads_fit_the_headroom(tmp_path):
     )
     for name, result in results.items():
         assert result["growth_mib"] <= PEAK_BUDGET_MIB, (name, result)
+        if not name.endswith(".pdf"):  # nothing else starts a process
+            assert result["combined_mib"] <= PEAK_BUDGET_MIB, (name, result)
 
 
 @pytest.mark.slow
