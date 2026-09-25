@@ -161,10 +161,11 @@ revoked.
 
 ```bash
 kubectl -n smarter-dev logs deploy/smarter-dev-bot --since=30m \
-  | grep -E 'AuthenticationError| 401' || echo "no auth errors"
+  | grep -E 'AuthenticationError|Authentication failed|AUTH_FAILED| 401' || echo "no auth errors"
 ```
 
-- No `AuthenticationError` or 401. The `… service health: healthy` lines do
+- No `AuthenticationError`, "Authentication failed" (its message, code
+  `AUTH_FAILED`) or 401. The `… service health: healthy` lines do
   not prove the key: `/api/health` is unauthenticated.
 - A bot command that calls an authenticated endpoint (e.g. `/bytes balance`)
   succeeds.
