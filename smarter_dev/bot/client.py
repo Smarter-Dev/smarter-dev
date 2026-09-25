@@ -553,6 +553,9 @@ def create_bot(settings: Settings | None = None) -> lightbulb.BotApp:
                 "smarter_dev": {
                     "level": "DEBUG"
                 },  # Enable DEBUG logging for the application
+                # Its debug lines (one per guild message) were never shown
+                # while it logged as __main__; keep them off.
+                "smarter_dev.bot.client": {"level": "INFO"},
             },
         },
         banner=None,  # Disable banner for cleaner logs
