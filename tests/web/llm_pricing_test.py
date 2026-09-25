@@ -10,8 +10,11 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
+from genai_prices.data_snapshot import find_provider_by_id
+
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import get_model
+from smarter_dev.web import llm_pricing
 from smarter_dev.web.chat.runtime import request_estimate_usd
 from smarter_dev.web.chat.usage import usage_cost
 from smarter_dev.web.llm_pricing import calc_cost
@@ -318,51 +321,95 @@ class TestGooglePricing:
 
 
 class TestOpenAIPricing:
+    """Retired GPT-5.x ids are priced by genai-prices' own entries (#5).
+
+    Our patches for these ids are appended after the library's entries, so the
+    library prices each id itself: at the documented base rate below 272K
+    input tokens, and at its long-context tier (2x input, 1.5x output) on a
+    total at or above it. These pin what the code charges for rows that carry
+    these ids; all were retired on 2026-09-24 and settled rows keep the cost
+    persisted at ingest.
+    """
+
     def test_gpt_55_rates(self):
-        assert calc_cost(1_000_000, 1_000_000, "gpt-5.5") == Decimal("35.00")
+        # $5/M input + $30/M output below the tier.
+        assert calc_cost(100_000, 100_000, "gpt-5.5") == Decimal("3.50")
+        # 1M input reaches the library's tier: $10 + $45.
+        assert calc_cost(1_000_000, 1_000_000, "gpt-5.5") == Decimal("55.00")
 
     def test_sol_cache_read_and_write_rates(self):
-        cost = calc_session_cost(
+        # The library carries OpenAI's 2026-08-21 cut to $4/$20; our $5/$30
+        # patch never applied to this id.
+        # 10k fresh @ $4 + 80k read @ $0.40 + 10k write @ $5.
+        assert calc_session_cost(
+            input_tokens=100_000,
+            output_tokens=0,
+            cache_read_tokens=80_000,
+            cache_write_tokens=10_000,
+            model_name="openai:gpt-5.6-sol",
+        ) == Decimal("0.122")
+        # The same mix at 1M input bills at the tier, twice the rate.
+        assert calc_session_cost(
             input_tokens=1_000_000,
             output_tokens=0,
             cache_read_tokens=800_000,
             cache_write_tokens=100_000,
             model_name="openai:gpt-5.6-sol",
-        )
-        # 100k fresh @ $5 + 800k read @ $0.50 + 100k write @ $6.25.
-        assert cost == Decimal("1.525")
+        ) == Decimal("2.44")
 
     def test_luna_direct_openai_rates_for_historical_rows(self):
         # Luna moved to OpenRouter 2026-08-06; rows written before the move
-        # carry the flat direct-OpenAI id and must keep pricing at OpenAI's
-        # $0.20/$1.20 rate (effective 2026-07-30).
-        assert calc_cost(1_000_000, 1_000_000, "gpt-5.6-luna") == Decimal("1.40")
+        # carry the flat direct-OpenAI id and price at OpenAI's $0.20/$1.20
+        # rate (effective 2026-07-30) below the tier.
+        assert calc_cost(100_000, 100_000, "gpt-5.6-luna") == Decimal("0.14")
+        assert calc_cost(1_000_000, 1_000_000, "gpt-5.6-luna") == Decimal("2.20")
 
     def test_luna_cache_read_and_write_rates(self):
-        cost = calc_session_cost(
+        # 10k fresh @ $0.20 + 80k read @ $0.02 + 10k write @ $0.25.
+        assert calc_session_cost(
+            input_tokens=100_000,
+            output_tokens=0,
+            cache_read_tokens=80_000,
+            cache_write_tokens=10_000,
+            model_name="openai:gpt-5.6-luna",
+        ) == Decimal("0.0061")
+        assert calc_session_cost(
             input_tokens=1_000_000,
             output_tokens=0,
             cache_read_tokens=800_000,
             cache_write_tokens=100_000,
             model_name="openai:gpt-5.6-luna",
-        )
-        # 100k fresh @ $0.20 + 800k read @ $0.02 + 100k write @ $0.25.
-        assert cost == Decimal("0.061")
+        ) == Decimal("0.122")
 
     def test_terra_reduced_rates(self):
-        # Effective 2026-07-30: $2/M input + $12/M output.
-        assert calc_cost(1_000_000, 1_000_000, "gpt-5.6-terra") == Decimal("14.00")
+        # Effective 2026-07-30: $2/M input + $12/M output below the tier.
+        assert calc_cost(100_000, 100_000, "gpt-5.6-terra") == Decimal("1.40")
+        assert calc_cost(1_000_000, 1_000_000, "gpt-5.6-terra") == Decimal("22.00")
 
     def test_terra_cache_read_and_write_rates(self):
-        cost = calc_session_cost(
+        # 10k fresh @ $2 + 80k read @ $0.20 + 10k write @ $2.50.
+        assert calc_session_cost(
+            input_tokens=100_000,
+            output_tokens=0,
+            cache_read_tokens=80_000,
+            cache_write_tokens=10_000,
+            model_name="openai:gpt-5.6-terra",
+        ) == Decimal("0.061")
+        assert calc_session_cost(
             input_tokens=1_000_000,
             output_tokens=0,
             cache_read_tokens=800_000,
             cache_write_tokens=100_000,
             model_name="openai:gpt-5.6-terra",
+        ) == Decimal("1.22")
+
+    def test_dated_variants_still_price_at_our_patched_rate(self):
+        # Ids the library's exact-id clauses miss fall through to our patch,
+        # so it is still live for them and stays.
+        assert calc_cost(100_000, 100_000, "gpt-5.6-sol-latest") == Decimal("3.50")
+        assert calc_cost(1_000_000, 1_000_000, "gpt-5.5-2026-05-01") == Decimal(
+            "35.00"
         )
-        # 100k fresh @ $2 + 800k read @ $0.20 + 100k write @ $2.50.
-        assert cost == Decimal("0.61")
 
     def test_gpt_6_over_272k_prices_base_rate_and_says_so(self, caplog):
         # Totals span a turn's requests, so no tier applies; a total over the
@@ -423,6 +470,54 @@ class TestAnthropicPricing:
         )
         # 100k fresh @ $2 + 800k read @ $0.20 + 100k write @ $2.50 + $10 output.
         assert cost == Decimal("10.61")
+
+
+class TestPatchShadowing:
+    """A patch appended behind a library entry for the same id never applies.
+
+    genai-prices can add a model we patched in any release. Its entry then
+    matches first, and our patch (or a later rate edit to it) silently stops
+    applying. These fail when that happens, so the patch is either removed or
+    its id listed, knowingly, in _LIBRARY_PRICES_OWN_ID (#5).
+    """
+
+    @staticmethod
+    def _resolve(provider_id, model_ref):
+        return find_provider_by_id(llm_pricing._snapshot.providers, provider_id).find_model(
+            model_ref
+        )
+
+    def test_each_patch_prices_its_own_id_unless_listed(self):
+        shadowed = sorted(
+            model.id
+            for provider_id, model in llm_pricing._PATCHES
+            if model.id not in llm_pricing._LIBRARY_PRICES_OWN_ID
+            and self._resolve(provider_id, model.id) is not model
+        )
+        assert shadowed == []
+
+    def test_listed_ids_are_still_priced_by_the_library(self):
+        patched = {model.id for _, model in llm_pricing._PATCHES}
+        assert llm_pricing._LIBRARY_PRICES_OWN_ID <= patched
+        own = sorted(
+            model.id
+            for provider_id, model in llm_pricing._PATCHES
+            if model.id in llm_pricing._LIBRARY_PRICES_OWN_ID
+            and self._resolve(provider_id, model.id) is model
+        )
+        assert own == []
+
+    def test_every_listed_patch_still_prices_some_id(self):
+        # A listed patch must still catch ids under its prefix; one the
+        # library covers outright is dead and should be deleted.
+        dead = sorted(
+            model.id
+            for provider_id, model in llm_pricing._PATCHES
+            if model.id in llm_pricing._LIBRARY_PRICES_OWN_ID
+            and self._resolve(provider_id, f"{model.match.starts_with}-variant")
+            is not model
+        )
+        assert dead == []
 
 
 class TestLongContextTier:

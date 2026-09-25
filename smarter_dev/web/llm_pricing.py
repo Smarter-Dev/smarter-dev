@@ -28,15 +28,47 @@ logger = logging.getLogger(__name__)
 _snapshot = get_snapshot()
 
 
+# Every patch applied, so tests can check each one still prices something.
+_PATCHES: list[tuple[str, types.ModelInfo]] = []
+
+
 def _patch_provider(provider_id: str, model: types.ModelInfo) -> None:
     provider = find_provider_by_id(_snapshot.providers, provider_id)
     if provider is not None:
         provider.models.append(model)
+        _PATCHES.append((provider_id, model))
 
 
-# Gemini 3.1 Flash Lite (GA + preview prefix) — not yet in genai-prices. Its
+# Patched ids that genai-prices also ships. A patch is APPENDED after the
+# library's own entries, so the library's entry is found first and prices the
+# id itself (and the dated snapshots its clause lists), long-context tier and
+# all. These patches still price the other ids under their prefix, which the
+# library's exact-id clauses miss, so they stay. All are retired or priced the
+# same by the library, and usage costs are persisted at ingest, so no settled
+# row changes. A guard test fails when this set drifts from the snapshot or a
+# patch no longer prices anything (#5).
+_LIBRARY_PRICES_OWN_ID = frozenset(
+    {
+        "gemini-3-flash-preview",
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash",
+        "gemini-2.5-flash-preview-tts",
+        "gpt-5.4-nano",
+        "gpt-5.4-mini",
+        "gpt-5.4",
+        "gpt-5.5",
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+    }
+)
+
+
+# Gemini 3.1 Flash Lite (GA + preview prefix). Its
 # direct pins moved to GPT-6 Luna on 2026-09-24; kept for the usage rows it
 # wrote.
+# genai-prices prices the id itself; this patch prices only other ids under
+# its prefix (see _LIBRARY_PRICES_OWN_ID).
 _patch_provider(
     "google",
     types.ModelInfo(
@@ -50,8 +82,10 @@ _patch_provider(
     ),
 )
 
-# Gemini 3 Flash Preview — not yet in genai-prices. Its direct pins moved to
+# Gemini 3 Flash Preview. Its direct pins moved to
 # Gemini 3.8 Flash on 2026-09-24; kept for the usage rows it wrote.
+# genai-prices prices the id itself; this patch prices only other ids under
+# its prefix (see _LIBRARY_PRICES_OWN_ID).
 _patch_provider(
     "google",
     types.ModelInfo(
@@ -65,24 +99,9 @@ _patch_provider(
     ),
 )
 
-# Gemini 3.5 Flash Lite — not yet in genai-prices. Retired for Gemini 3.8
-# Flash on 2026-09-24; kept for the usage rows it wrote.
-# NOTE: must come before gemini-3.5-flash so the more specific match wins
-_patch_provider(
-    "google",
-    types.ModelInfo(
-        id="gemini-3.5-flash-lite",
-        match=types.ClauseStartsWith(starts_with="gemini-3.5-flash-lite"),
-        prices=types.ModelPrice(
-            input_mtok=Decimal("0.30"),
-            output_mtok=Decimal("2.50"),
-            cache_read_mtok=Decimal("0.03"),
-        ),
-    ),
-)
-
-# Gemini 3.5 Flash — not yet in genai-prices. Retired as a selectable model
-# (replaced by 3.6 Flash) but historical turns still price against it.
+# Gemini 3.5 Flash. Retired as a selectable model (replaced by 3.6 Flash).
+# genai-prices prices the id itself; this patch prices only other ids under
+# its prefix (see _LIBRARY_PRICES_OWN_ID).
 _patch_provider(
     "google",
     types.ModelInfo(
@@ -96,60 +115,12 @@ _patch_provider(
     ),
 )
 
-# Gemini 3.6, 3.7 and 3.8 Flash — not yet in genai-prices. All three carry the
-# SAME promotional rate, $0.75/$3.75/$0.075, through 2026-12-31; on 2027-01-01
-# all three revert to $1.50/$7.50/$0.15. Read from the live pricing page on
-# 2026-08-13, and confirmed unchanged for 3.8 Flash on 2026-09-03.
-#
-# The $1.50/$7.50 recorded here until now was NOT wrong — it was Google's rate
-# until they announced this 50% promotion on 2026-08-13, part of a broader round
-# of mid/low-tier cuts (Luna 80% off, Sonnet 33% off). This module holds the rate
-# in force today (see Claude Sonnet 5's introductory rate above) and per-turn
-# costs are persisted at ingest, so this changes new usage only and leaves
-# settled rows correctly priced at what they actually cost. The reversion on
-# 2027-01-01 is a scheduled edit, not a surprise — revisit both entries then.
-#
-# NOTE the match ordering trap: "gemini-3.7-flash" must not be matched by a
-# broader prefix, so keep each id exact-versioned as below. The reversion on
-# 2027-01-01 is one edit per entry — 3.8 Flash is the third. 3.6 and 3.7 Flash
-# were retired for 3.8 Flash on 2026-09-24 and are kept for the usage rows they
-# wrote, so only the 3.8 entry is live.
-_patch_provider(
-    "google",
-    types.ModelInfo(
-        id="gemini-3.6-flash",
-        match=types.ClauseStartsWith(starts_with="gemini-3.6-flash"),
-        prices=types.ModelPrice(
-            input_mtok=Decimal("0.75"),
-            output_mtok=Decimal("3.75"),
-            cache_read_mtok=Decimal("0.075"),
-        ),
-    ),
-)
-_patch_provider(
-    "google",
-    types.ModelInfo(
-        id="gemini-3.7-flash",
-        match=types.ClauseStartsWith(starts_with="gemini-3.7-flash"),
-        prices=types.ModelPrice(
-            input_mtok=Decimal("0.75"),
-            output_mtok=Decimal("3.75"),
-            cache_read_mtok=Decimal("0.075"),
-        ),
-    ),
-)
-_patch_provider(
-    "google",
-    types.ModelInfo(
-        id="gemini-3.8-flash",
-        match=types.ClauseStartsWith(starts_with="gemini-3.8-flash"),
-        prices=types.ModelPrice(
-            input_mtok=Decimal("0.75"),
-            output_mtok=Decimal("3.75"),
-            cache_read_mtok=Decimal("0.075"),
-        ),
-    ),
-)
+# Gemini 3.5 Flash Lite and 3.6, 3.7 and 3.8 Flash are priced by genai-prices
+# itself, at the rates this module used to patch in: 3.6-3.8 Flash at the
+# $0.75/$3.75/$0.075 promotional rate through 2026-12-31, and the library
+# already carries 3.8 Flash's 2027-01-01 reversion to $1.50/$7.50/$0.15. Their
+# patches never applied (the library's identical prefixes match first) and were
+# removed in #5. Only 3.8 Flash is live.
 
 # Gemini 3.1 Pro — base tier (up to 200K input tokens). Google applies
 # $4/$18 long-context pricing above 200K; the current usage ledger does not
@@ -168,7 +139,9 @@ _patch_provider(
     ),
 )
 
-# GPT-5.4 Nano — not yet in genai-prices
+# GPT-5.4 Nano
+# genai-prices prices the id itself; this patch prices only other ids under
+# its prefix (see _LIBRARY_PRICES_OWN_ID).
 _patch_provider(
     "openai",
     types.ModelInfo(
@@ -182,12 +155,14 @@ _patch_provider(
     ),
 )
 
-# Gemini 2.5 Flash Preview TTS — not yet in genai-prices.
+# Gemini 2.5 Flash Preview TTS.
 # Pricing per Google's docs (Gemini 2.5 Flash TTS preview tier):
 #   text input  ~$0.50/M tokens
 #   audio output ~$10.00/M tokens (1M tokens ≈ ~700-1k seconds @ 24kHz)
 # These are approximations — the operator should true up against real bills
 # if needed.
+# genai-prices prices the id itself; this patch prices only other ids under
+# its prefix (see _LIBRARY_PRICES_OWN_ID).
 _patch_provider(
     "google",
     types.ModelInfo(
@@ -205,6 +180,8 @@ _patch_provider(
 # tokens receive a 2x input / 1.5x output multiplier that cannot be separated
 # from aggregate provider usage, so this is the documented base rate.
 # https://developers.openai.com/api/docs/models/gpt-5.5
+# genai-prices prices the id itself; this patch prices only other ids under
+# its prefix (see _LIBRARY_PRICES_OWN_ID).
 _patch_provider(
     "openai",
     types.ModelInfo(
@@ -222,6 +199,8 @@ _patch_provider(
 # price cut. Luna moved to the OpenRouter route on 2026-08-06 (see
 # _OPENROUTER_PRICES) and was retired for GPT-6 Luna on 2026-09-24; this patch
 # stays so rows written before the move keep pricing at OpenAI's own rates.
+# genai-prices prices the id itself; this patch prices only other ids under
+# its prefix (see _LIBRARY_PRICES_OWN_ID).
 _patch_provider(
     "openai",
     types.ModelInfo(
@@ -240,6 +219,8 @@ _patch_provider(
 # it wrote. Explicit cache writes are 1.25x
 # uncached input and cache reads are 10% of uncached input.
 # https://developers.openai.com/api/docs/models/gpt-5.6-sol
+# genai-prices prices the id itself; this patch prices only other ids under
+# its prefix (see _LIBRARY_PRICES_OWN_ID).
 _patch_provider(
     "openai",
     types.ModelInfo(
@@ -254,9 +235,11 @@ _patch_provider(
     ),
 )
 
-# GPT-5.6 Terra — not yet in genai-prices. Rates effective 2026-07-30
+# GPT-5.6 Terra. Rates effective 2026-07-30
 # after OpenAI's 20% price cut. Retired for GPT-6 Sol on 2026-09-24; kept for
 # the usage rows that carry its wire id.
+# genai-prices prices the id itself; this patch prices only other ids under
+# its prefix (see _LIBRARY_PRICES_OWN_ID).
 _patch_provider(
     "openai",
     types.ModelInfo(
@@ -311,6 +294,8 @@ _patch_provider(
 
 # GPT-5.4 Mini — keep this more-specific prefix ahead of standard GPT-5.4.
 # Retired for GPT-6 Luna on 2026-09-24; kept for the usage rows it wrote.
+# genai-prices prices the id itself; this patch prices only other ids under
+# its prefix (see _LIBRARY_PRICES_OWN_ID).
 _patch_provider(
     "openai",
     types.ModelInfo(
@@ -324,9 +309,11 @@ _patch_provider(
     ),
 )
 
-# GPT-5.4 (standard) — not yet in genai-prices. Retired for GPT-6 Sol on
+# GPT-5.4 (standard). Retired for GPT-6 Sol on
 # 2026-09-24; kept for the usage rows it wrote.
 # NOTE: must come after mini/nano so the more specific matches win.
+# genai-prices prices the id itself; this patch prices only other ids under
+# its prefix (see _LIBRARY_PRICES_OWN_ID).
 _patch_provider(
     "openai",
     types.ModelInfo(
@@ -341,36 +328,10 @@ _patch_provider(
 )
 
 
-# Claude 5 pricing. Anthropic's standard five-minute cache writes are 1.25x
-# input and reads are 10% of input. Sonnet 5 uses its introductory rate through
-# 2026-08-31; changing that future rate must not reprice settled usage rows.
-# https://platform.claude.com/docs/en/about-claude/pricing
-_patch_provider(
-    "anthropic",
-    types.ModelInfo(
-        id="claude-opus-5",
-        match=types.ClauseStartsWith(starts_with="claude-opus-5"),
-        prices=types.ModelPrice(
-            input_mtok=Decimal("5.00"),
-            output_mtok=Decimal("25.00"),
-            cache_read_mtok=Decimal("0.50"),
-            cache_write_mtok=Decimal("6.25"),
-        ),
-    ),
-)
-_patch_provider(
-    "anthropic",
-    types.ModelInfo(
-        id="claude-sonnet-5",
-        match=types.ClauseStartsWith(starts_with="claude-sonnet-5"),
-        prices=types.ModelPrice(
-            input_mtok=Decimal("2.00"),
-            output_mtok=Decimal("10.00"),
-            cache_read_mtok=Decimal("0.20"),
-            cache_write_mtok=Decimal("2.50"),
-        ),
-    ),
-)
+# Claude Opus 5 and Sonnet 5 are priced by genai-prices itself, at the rates
+# this module used to patch in ($5/$25 and Sonnet's $2/$10 introductory rate,
+# 1.25x cache writes, 10% cache reads). Their patches never applied and were
+# removed in #5; settled rows keep the cost persisted at ingest.
 
 
 # ---------------------------------------------------------------------------
