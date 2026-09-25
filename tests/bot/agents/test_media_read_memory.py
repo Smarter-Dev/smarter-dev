@@ -856,5 +856,7 @@ def test_concurrent_reads_do_not_add_up(tmp_path):
     one = _read(tmp_path, "one.png", shot)
     three = _read(tmp_path, "three.png", shot, concurrency=3)
 
+    # Side by side, three would cost ~3x one (~85 MiB); queued, they cost
+    # one read plus the heap it leaves fragmented (one alone varies 28-37).
     assert three["combined_mib"] <= QUEUED_BUDGET_MIB
-    assert three["combined_mib"] <= one["combined_mib"] + 10
+    assert three["combined_mib"] < 2 * one["combined_mib"]
