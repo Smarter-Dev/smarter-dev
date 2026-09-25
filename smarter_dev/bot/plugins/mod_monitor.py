@@ -44,7 +44,7 @@ async def _load_configs() -> None:
                 _guild_configs[config.guild_id] = {
                     "monitored_role_ids": set(config.monitored_role_ids or []),
                     "instructions": config.instructions or "",
-                    "enabled_tools": config.enabled_tools or ["timeout", "purge", "delete"],
+                    "enabled_tools": list(config.enabled_tools or []),  # none named, none offered
                     "context_message_limit": config.context_message_limit or 25,
                     "response_channel_id": config.response_channel_id,
                 }
@@ -65,7 +65,7 @@ async def refresh_config(guild_id: str) -> None:
                 _guild_configs[guild_id] = {
                     "monitored_role_ids": set(config.monitored_role_ids or []),
                     "instructions": config.instructions or "",
-                    "enabled_tools": config.enabled_tools or ["timeout", "purge", "delete"],
+                    "enabled_tools": list(config.enabled_tools or []),  # none named, none offered
                     "context_message_limit": config.context_message_limit or 25,
                     "response_channel_id": config.response_channel_id,
                 }
