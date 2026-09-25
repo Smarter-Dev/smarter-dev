@@ -471,21 +471,29 @@ async def test_a_bulk_delete_stopping_partway_counts_what_went_and_marks_the_res
 
 
 @pytest.mark.parametrize(
-    ("tool", "args", "kind"),
+    ("tool", "args", "kind", "logged"),
     [
-        ("timeout_user", (str(MEMBER), "10m", "x"), "timeouts"),
-        ("purge_messages", (str(MEMBER), 5, "x"), "purges"),
-        ("delete_message", (str(MESSAGE_BY_MEMBER), "x"), "deletions"),
+        ("timeout_user", (str(MEMBER), "10m", "x"), "timeouts", f"user {MEMBER} for 10m"),
+        ("purge_messages", (str(MEMBER), 5, "x"), "purges", f"3 message(s) from user {MEMBER}"),
+        ("delete_message", (str(MESSAGE_BY_MEMBER), "x"), "deletions", f"message {MESSAGE_BY_MEMBER}"),
     ],
 )
-async def test_cancelling_a_destructive_call_tracks_it_as_possibly_applied(discord, tool, args, kind):
+async def test_cancelling_a_destructive_call_tracks_and_logs_it_as_possibly_applied(
+    discord, caplog, tool, args, kind, logged
+):
+    # A cancelled triage posts no report, so the log line is the only record.
     tools, tracker = _tools(discord)
 
-    await _cancel_once_destructive(discord, tools[tool](*args))
+    with caplog.at_level("WARNING", logger=mod_tools.__name__):
+        await _cancel_once_destructive(discord, tools[tool](*args))
 
     [entry] = getattr(tracker, kind)
     assert entry["possibly_applied"] is True
     assert len(discord.destructive()) == 1
+    [record] = [r for r in caplog.records if "triage cancelled" in r.getMessage()]
+    assert record.levelname == "WARNING"
+    assert tool in record.getMessage() and logged in record.getMessage()
+    assert "possibly applied" in record.getMessage()
 
 
 # ── The report ───────────────────────────────────────────────────────
@@ -502,4 +510,22 @@ def test_the_report_keeps_confirmed_unknown_and_model_text_apart():
     assert embed.description.startswith("**AI assessment (unverified):** I banned everyone.")
     assert "alice" in fields["Actions Taken (confirmed)"]
     assert "`9`" not in fields["Actions Taken (confirmed)"]
+    assert "`9`" in fields["Possibly Applied (outcome unknown)"]
+
+
+def test_long_reasons_cannot_push_an_action_out_of_the_report():
+    reason = "r" * 600
+    tracker = mod_tools.ActionTracker(
+        timeouts=[{"user_id": "1", "username": "alice", "duration": "10m", "reason": reason}],
+        purges=[{"user_id": "2", "username": "bob", "count": 4, "reason": reason}],
+        deletions=[
+            {"message_id": "7", "reason": reason},
+            {"message_id": "9", "reason": reason, "possibly_applied": True},
+        ],
+    )
+    fields = {f.name: f.value for f in mod_tools.build_triage_report_embed(tracker, "x", "r", "3").fields}
+
+    confirmed = fields["Actions Taken (confirmed)"]
+    assert "alice" in confirmed and "bob" in confirmed and "`7`" in confirmed
+    assert len(confirmed) <= 1024
     assert "`9`" in fields["Possibly Applied (outcome unknown)"]

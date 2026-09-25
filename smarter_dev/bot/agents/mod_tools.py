@@ -43,6 +43,10 @@ mod_action_ops = ModerationActionOperations()
 # additional application-level retry.
 MAX_ACTIONS_PER_INVOCATION = 3
 
+# Longest model-written reason a report line carries: 3 actions of this size
+# plus their prefixes fit Discord's 1024-character field.
+REPORT_REASON_CHARS = 150
+
 # Anyone holding one of these, through any role, is staff and never a
 # triage target.
 STAFF_PERMISSIONS = (
@@ -139,14 +143,19 @@ def build_triage_report_embed(
     # from the tracker, never from the model's assessment.
     confirmed: list[str] = []
     unknown: list[str] = []
+
+    def _short(reason: str) -> str:
+        # The model writes reasons; cap each so every action keeps its line.
+        return reason if len(reason) <= REPORT_REASON_CHARS else reason[: REPORT_REASON_CHARS - 1] + "\u2026"
+
     for t in tracker.timeouts:
-        line = f"Timeout **{t['username']}** for {t['duration']}: {t['reason']}"
+        line = f"Timeout **{t['username']}** for {t['duration']}: {_short(t['reason'])}"
         (unknown if t.get("possibly_applied") else confirmed).append(line)
     for p in tracker.purges:
-        line = f"Purge {p['count']} message(s) from **{p['username']}**: {p['reason']}"
+        line = f"Purge {p['count']} message(s) from **{p['username']}**: {_short(p['reason'])}"
         (unknown if p.get("possibly_applied") else confirmed).append(line)
     for d in tracker.deletions:
-        line = f"Delete msg `{d['message_id']}`: {d['reason']}"
+        line = f"Delete msg `{d['message_id']}`: {_short(d['reason'])}"
         (unknown if d.get("possibly_applied") else confirmed).append(line)
     if confirmed or unknown:
         embed.add_field(
@@ -165,7 +174,7 @@ def build_triage_report_embed(
         if tracker.has_actions:
             status = (
                 f"Triage stopped partway ({tracker.failure}). The actions listed "
-                "here were already taken; nothing else was reviewed."
+                "here were already taken or possibly applied; nothing else was reviewed."
             )
             if not tracker.channel_message:
                 status += " No notice was posted in the channel."
@@ -382,6 +391,10 @@ def create_moderation_tools(
             )
         except asyncio.CancelledError:
             tracker.timeouts.append({**entry, "possibly_applied": True})
+            logger.warning(
+                f"[ModTool] timeout_user of user {user_id} for {duration} possibly applied; "
+                "triage cancelled"
+            )
             raise
         except Exception as e:
             logger.error(f"[ModTool] timeout_user failed: {e!r}")
@@ -460,6 +473,10 @@ def create_moderation_tools(
             deleted_count = selected
         except asyncio.CancelledError:
             tracker.purges.append({**entry, "count": selected, "possibly_applied": True})
+            logger.warning(
+                f"[ModTool] purge_messages of {selected} message(s) from user {user_id} "
+                "possibly applied; triage cancelled"
+            )
             raise
         except Exception as e:
             logger.error(f"[ModTool] purge_messages failed: {e!r}")
@@ -526,6 +543,10 @@ def create_moderation_tools(
             await bot.rest.delete_message(int(channel_id), int(message_id))
         except asyncio.CancelledError:
             tracker.deletions.append({**entry, "possibly_applied": True})
+            logger.warning(
+                f"[ModTool] delete_message of message {message_id} possibly applied; "
+                "triage cancelled"
+            )
             raise
         except Exception as e:
             logger.error(f"[ModTool] delete_message failed: {e!r}")
