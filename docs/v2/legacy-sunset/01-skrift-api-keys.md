@@ -153,9 +153,10 @@ Harness: add `/admin/api-keys` to `SKRIFT_ADMIN_PAGES` in
    service_name="discord-bot", scoped_roles=/permissions per 04 scoping)`.
    Record the raw `sk_...` once — it is not recoverable.
 3. Rotate the secret:
-   `kubectl -n smarter-dev create secret generic smarter-dev-secrets --from-literal=bot-api-key=sk_... --dry-run=client -o yaml | kubectl apply -f -`
-   (patch only that key; do not touch other values), then restart the bot
-   deployment. Verify bot auth in logs.
+   patch only the `bot-api-key` entry, without putting the key on a command
+   line, then roll the bot and verify (steps 3–5 of
+   `runbooks/01-rotate-bot-key.md`). Do not pipe `kubectl create secret …
+   --from-literal` into `kubectl apply`: it can drop the Secret's other keys.
 4. Soak ≥ 1 week, watching for any legacy-branch auth in logs (add a counter
    log line in the fallback branch to make this observable).
 5. Remove the legacy fallback: delete the `sk-` branch in

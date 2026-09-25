@@ -53,14 +53,10 @@ A key without both of these answers 401 on every guarded `/api` route.
 
 ## 3. Rotate the k8s secret
 
-Patch only the `bot-api-key` entry of `smarter-dev-secrets`; do not touch
-other values:
-
-```bash
-kubectl -n smarter-dev create secret generic smarter-dev-secrets \
-  --from-literal=bot-api-key=sk_... --dry-run=client -o yaml | kubectl apply -f -
-kubectl -n smarter-dev rollout restart deployment smarter-dev-bot
-```
+Patch only the `bot-api-key` entry of `smarter-dev-secrets`, without putting
+the key on a command line, then roll the bot. Follow steps 3–5 of
+`01-rotate-bot-key.md`; do not pipe `kubectl create secret … --from-literal`
+into `kubectl apply`, which can drop the Secret's other keys.
 
 Verify bot auth succeeds in logs and the `legacy-api-key-auth` line stops
 appearing.

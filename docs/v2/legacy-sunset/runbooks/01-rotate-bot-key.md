@@ -68,28 +68,70 @@ set rather than a full-admin role.
 
 ## 3. Update the `bot-api-key` k8s secret
 
-Patch **only** the `bot-api-key` entry of `smarter-dev-secrets`. Do not touch
-any other value in the secret:
+Replace **only** the `bot-api-key` entry of `smarter-dev-secrets`. Keep the
+old key active in `/admin/api-keys` until step 5 passes: the outgoing bot pod
+keeps the old key until it exits, and the old key is the rollback.
+
+Do not use `kubectl create secret generic … --from-literal=… | kubectl apply`.
+It builds a Secret holding only `bot-api-key`, and applying that over the live
+Secret can drop or replace its other keys (Discord token, media key, Logfire
+token, …). It also puts the raw key on a command line, where shell history and
+the process list can see it.
+
+Instead, read the key without echoing it, write a merge patch to a private
+file, and patch that one field. The key never appears in an argument list or
+on screen (`printf` is a shell builtin; `base64` reads it from a pipe):
 
 ```bash
-kubectl -n smarter-dev create secret generic smarter-dev-secrets \
-  --from-literal=bot-api-key=sk_... --dry-run=client -o yaml | kubectl apply -f -
+umask 077
+patch_file=$(mktemp)
+trap 'rm -f "$patch_file"' EXIT
+IFS= read -rs -p 'New bot key (sk_...): ' key; echo
+printf '{"data":{"bot-api-key":"%s"}}' "$(printf '%s' "$key" | base64 -w0)" > "$patch_file"
+unset key
+
+# Key names before (names only, never values):
+kubectl -n smarter-dev get secret smarter-dev-secrets \
+  -o go-template='{{range $k, $v := .data}}{{$k}}{{"\n"}}{{end}}' > /tmp/secret-keys.before
+
+kubectl -n smarter-dev patch secret smarter-dev-secrets --type merge --patch-file "$patch_file"
+rm -f "$patch_file"
+
+# Every key must still be there:
+kubectl -n smarter-dev get secret smarter-dev-secrets \
+  -o go-template='{{range $k, $v := .data}}{{$k}}{{"\n"}}{{end}}' | diff /tmp/secret-keys.before - && echo "keys unchanged"
 ```
 
+On macOS use `base64` without `-w0`. Keep the old key's value in a password
+manager until step 5 passes, for rollback.
+
 ## 4. Roll the bot deployment
+
+The bot reads the key at startup, so it needs a new pod. Prefer the next
+planned bot deploy over a dedicated restart: the rolling handover replaces the
+pod once, and the old pod keeps working on the old key until it exits. The
+new pod must run code that no longer logs part of the key (PR #103).
+
+If no deploy is planned and the rotation cannot wait:
 
 ```bash
 kubectl -n smarter-dev rollout restart deployment smarter-dev-bot
 kubectl -n smarter-dev rollout status deployment smarter-dev-bot
 ```
 
+The `smarter-dev-sudo-sweep` CronJob reads the same `bot-api-key`; its next
+run picks up the new key with no action.
+
 ## 5. Verify
 
-- Bot startup logs show it loaded a key (`api_client` accepts the `sk_` shape;
-  a bad key raises `ValueError: Invalid API key format` at startup).
+- The new bot pod logs `… service health: healthy` for each service and no
+  `AuthenticationError` or 401 from the API client.
 - A bot command that hits the API (e.g. `/bytes balance`) succeeds.
-- Web logs show Skrift-key auth succeeding and the `legacy-api-key-auth` line
-  **stops** appearing for the bot.
+- The next `smarter-dev-sudo-sweep` run completes.
+
+Then revoke the old key in `/admin/api-keys`. Revoke last: until then,
+rollback is to patch the old value back the same way and roll the bot. After
+revocation, rollback means minting another key.
 
 ## 6. Soak
 
