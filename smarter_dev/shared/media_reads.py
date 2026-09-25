@@ -46,6 +46,11 @@ MAX_DOWNLOAD_BYTES = 10 * 1024 * 1024
 MAX_IMAGE_DOWNLOAD_BYTES = 50 * 1024 * 1024
 MAX_SEND_BYTES = 3 * 1024 * 1024
 SLOT_WAIT_SECONDS = 120.0
+# A spool's pages sit in the page cache, which counts against the container's
+# memory limit (dirty ones until written back). Whoever writes or reads a
+# spool drops them every this many bytes, so a 50 MiB download holds a few MiB
+# of cache rather than its whole size (48 MiB measured without, 2026-09-25).
+SPOOL_CACHE_BYTES = 4 * 1024 * 1024
 
 # One slot per event loop (the bot and the worker each run one); keyed so a
 # semaphore is never shared across loops, which asyncio refuses.
@@ -137,6 +142,27 @@ class SpooledImage:
             pass
 
 
+def drop_cache(fd: int, *, written: bool = False) -> None:
+    """Evict ``fd``'s file from the page cache, writing it back first if ``written``."""
+    if written:
+        os.fdatasync(fd)
+    os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)
+
+
+async def _drop_written(spool) -> None:
+    spool.flush()
+    # The thread's own descriptor: a cancelled read closes the spool's at once.
+    fd = os.dup(spool.fileno())
+
+    def drop() -> None:
+        try:
+            drop_cache(fd, written=True)
+        finally:
+            os.close(fd)
+
+    await asyncio.to_thread(drop)
+
+
 def spool_image(data: bytes) -> SpooledImage:
     """Write ``data`` to a private temp file, for a child process to decode."""
     handle, path = tempfile.mkstemp(suffix=".image")
@@ -156,7 +182,8 @@ async def read_body(
 
     Held in memory up to ``max_bytes``. With ``spill_image`` (the response is
     an image) a longer body continues to a temp file, up to
-    ``MAX_IMAGE_DOWNLOAD_BYTES``, and comes back as a ``SpooledImage``. A
+    ``MAX_IMAGE_DOWNLOAD_BYTES``, and comes back as a ``SpooledImage``; its
+    page cache is written back and dropped every ``SPOOL_CACHE_BYTES``. A
     ``declared`` Content-Length over the applicable cap is refused unread.
     """
     ceiling = MAX_IMAGE_DOWNLOAD_BYTES if spill_image else max_bytes
@@ -166,6 +193,7 @@ async def read_body(
     received = 0
     spool = None
     path = ""
+    uncached = 0  # bytes written since the spool's cache was last dropped
     try:
         async for chunk in chunks:
             received += len(chunk)
@@ -175,13 +203,19 @@ async def read_body(
                 handle, path = tempfile.mkstemp(suffix=".image")
                 spool = os.fdopen(handle, "wb")
                 spool.writelines(held)
+                uncached = received - len(chunk)
                 held.clear()
-            if spool is not None:
-                spool.write(chunk)
-            else:
+            if spool is None:
                 held.append(chunk)
+                continue
+            spool.write(chunk)
+            uncached += len(chunk)
+            if uncached >= SPOOL_CACHE_BYTES:
+                await _drop_written(spool)
+                uncached = 0
         if spool is None:
             return b"".join(held)
+        await _drop_written(spool)
         spool.close()
         spooled, path = SpooledImage(path, received), ""
         return spooled

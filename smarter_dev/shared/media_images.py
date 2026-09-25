@@ -98,10 +98,12 @@ MAX_JPEG_BUFFERED_BYTES = 20 * 1024 * 1024
 MAX_CHILD_DECODE_PIXELS = 4096 * 4096
 MAX_CHILD_WEBP_PIXELS = 5_000_000
 MAX_CHILD_JPEG_BUFFERED_BYTES = 48 * 1024 * 1024
-# The child's address space over its size after importing Pillow (~23 MiB
-# resident), so the child stays under ~120 MiB. Measured decodes within the
-# caps: RGB PNG 4096 x 4096 +70 MiB, 16 MP progressive JPEG +52, 48 MP
-# baseline JPEG +25. Anything needing more fails in the child: "too large".
+# The child's address space (RLIMIT_AS) over its size after importing Pillow:
+# 53 MiB mapped, 24 MiB of it resident (2026-09-25), so a hard cap of ~149 MiB
+# that its RSS cannot pass. That cap is not what reads use: measured decodes
+# within the caps grew it by RGB PNG 4096 x 4096 +70 MiB, 16 MP progressive
+# JPEG +52, 48 MP baseline JPEG +25 (child RSS peak ~100 MiB, a 4.7 MP WebP).
+# Anything needing more fails in the child: "too large".
 IMAGE_CHILD_EXTRA_BYTES = 96 * 1024 * 1024
 # Modes Pillow can reduce(); others (palette, 1-bit, 16-bit) convert first.
 REDUCIBLE_MODES = frozenset({"L", "LA", "RGB", "RGBA", "CMYK", "PA"})
