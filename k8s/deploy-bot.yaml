@@ -184,7 +184,13 @@ spec:
                         # 2026-09-24 #88 roll. Startup is the burst; steady
                         # state sampled at 49m (19:21Z).
                         cpu: "1"
-                        memory: 512Mi
+                        # +100Mi approved by Zech on #25 for media reads. One
+                        # kubectl top sample (2026-09-25 01:00Z) read 425Mi, so
+                        # ~187 MiB nominal headroom then; not a per-read budget.
+                        # The request stays 384Mi, so scheduling is unchanged;
+                        # use above it ranks the pod higher for eviction under
+                        # node memory pressure.
+                        memory: 612Mi
                 startupProbe:
                     exec:
                         command: ["pgrep", "-f", "smarter_dev.bot.client"]

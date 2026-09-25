@@ -39,7 +39,9 @@ from smarter_dev.shared.config import Settings
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.observability import configure_observability
 
-logger = logging.getLogger(__name__)
+# Named, not __name__: the pod runs this module as __main__, which the bot's
+# logging config (create_bot) leaves at the root WARNING level.
+logger = logging.getLogger("smarter_dev.bot.client")
 
 configure_observability("smarter-dev-bot")
 
@@ -551,6 +553,9 @@ def create_bot(settings: Settings | None = None) -> lightbulb.BotApp:
                 "smarter_dev": {
                     "level": "DEBUG"
                 },  # Enable DEBUG logging for the application
+                # Its debug lines (one per guild message) were never shown
+                # while it logged as __main__; keep them off.
+                "smarter_dev.bot.client": {"level": "INFO"},
             },
         },
         banner=None,  # Disable banner for cleaner logs
