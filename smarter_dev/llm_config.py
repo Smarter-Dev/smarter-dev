@@ -86,7 +86,15 @@ def get_llm_model(model_type: str = "fast") -> dspy.LM:
         kwargs["temperature"] = 1.0
         kwargs["max_tokens"] = 25000  # High limit for reasoning models
 
-    return dspy.LM(formatted_model_name, **kwargs)
+    lm = dspy.LM(formatted_model_name, **kwargs)
+    # DSPy sends the limit as max_completion_tokens only for the o-series and
+    # gpt-5 names it knows, and litellm passes max_tokens through for names it
+    # does not. OpenAI itself rejects max_tokens on every reasoning model, so
+    # gpt-6 served directly failed every call (moderation triage, 2026-09-25).
+    # OpenRouter takes max_tokens and keeps it.
+    if provider == "openai" and _is_reasoning_model(model_name) and "max_tokens" in lm.kwargs:
+        lm.kwargs["max_completion_tokens"] = lm.kwargs.pop("max_tokens")
+    return lm
 
 
 def get_model_info(model_type: str = "fast") -> dict:
