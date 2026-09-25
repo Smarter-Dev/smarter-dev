@@ -184,7 +184,12 @@ spec:
                         # 2026-09-24 #88 roll. Startup is the burst; steady
                         # state sampled at 49m (19:21Z).
                         cpu: "1"
-                        memory: 512Mi
+                        # 512Mi left ~70-90 MiB over the idle bot (425Mi in use by
+                        # kubectl top, 2026-09-25 01:00Z) for media reads (#25).
+                        # +100Mi approved by Zech on #25. The request stays
+                        # 384Mi: scheduling is unchanged, but use above it is
+                        # what the node evicts first under memory pressure.
+                        memory: 612Mi
                 startupProbe:
                     exec:
                         command: ["pgrep", "-f", "smarter_dev.bot.client"]
