@@ -87,13 +87,13 @@ def test_resolve_reasoning_level_none_for_models_without_reasoning():
 
 
 def test_gemini_lineup_reflects_current_releases():
-    # 3.8 Flash is the only Gemini Flash since 2026-09-24: 3.5 Flash Lite, 3.6
-    # Flash and 3.7 Flash all retired onto it. 3.1 Pro stays — not a Flash.
+    # 3.6 Flash and 3.7 Flash retired onto 3.8 Flash on 2026-09-24. 3.5 Flash
+    # Lite went with them by mistake — only 3.5 Flash, gone since 2026-07-21,
+    # was meant to — and is back. 3.1 Pro stays — not a Flash.
     for retired in (
         "gemini-3-5-flash",
         "gemini-3-1-flash-lite",
         "gemini-3-flash",
-        "gemini-3-5-flash-lite",
         "gemini-3-6-flash",
         "gemini-3-7-flash",
     ):
@@ -101,7 +101,11 @@ def test_gemini_lineup_reflects_current_releases():
     flash = [
         m for m in MODEL_CATALOG if m.family == "Gemini" and "Flash" in m.label
     ]
-    assert [m.key for m in flash] == ["gemini-3-8-flash"]
+    assert [m.key for m in flash] == ["gemini-3-8-flash", "gemini-3-5-flash-lite"]
+    lite = get_model("gemini-3-5-flash-lite")
+    assert lite.model_id == "gemini-3.5-flash-lite"
+    assert lite.provider is ModelProvider.GOOGLE
+    assert lite.supports_vision is True
     flash_3_8 = get_model("gemini-3-8-flash")
     assert flash_3_8.model_id == "gemini-3.8-flash"
     assert flash_3_8.provider is ModelProvider.GOOGLE
@@ -113,10 +117,16 @@ def test_gemini_lineup_reflects_current_releases():
 
 
 def test_retired_gemini_flash_keys_read_as_3_8_flash():
-    assert successor_key("gemini-3-5-flash-lite") == "gemini-3-8-flash"
     assert successor_key("gemini-3-6-flash") == "gemini-3-8-flash"
     assert successor_key("gemini-3-7-flash") == "gemini-3-8-flash"
     assert successor_key("gemini-3-8-flash") == "gemini-3-8-flash"
+
+
+def test_restored_flash_lite_is_live_and_no_longer_read_as_3_8_flash():
+    # Restored 2026-09-25: a selection or pin on it means 3.5 Flash Lite again.
+    assert "gemini-3-5-flash-lite" not in RETIRED_SUCCESSORS
+    assert successor_key("gemini-3-5-flash-lite") == "gemini-3-5-flash-lite"
+    assert get_model("gemini-3-5-flash-lite") is not None
 
 
 def test_retired_keys_resolve_to_a_live_model_in_one_step():

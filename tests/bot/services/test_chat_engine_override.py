@@ -1124,3 +1124,22 @@ async def test_budget_exhausted_notice_has_no_button_without_fallback(
     engine.bot.rest.create_message.assert_awaited_once()
     kwargs = engine.bot.rest.create_message.await_args.kwargs
     assert "components" not in kwargs
+
+
+def test_channel_pins_on_restored_flash_lite_resolve_again(fake_redis):
+    # 3.5 Flash Lite came back on 2026-09-25. Pins on it were never rewritten,
+    # so its model, fallback and drafter pins serve it again; 3.6 Flash, still
+    # retired, keeps stopping the channel.
+    lite = _override("gemini-3-5-flash-lite", fallback_model_key="gemini-3-5-flash-lite")
+    lite.drafter_model = "gemini-3-5-flash-lite"
+    engine, _ = _make_engine(lite, fake_redis)
+
+    assert engine._unavailable_model_key(lite, fallback_active=False) is None
+    assert engine._unavailable_model_key(lite, fallback_active=True) is None
+    assert engine._resolve_override_model_id(lite) == "gemini-3.5-flash-lite"
+    assert engine._resolve_drafter_model_id(lite) == "gemini-3.5-flash-lite"
+
+    retired = _override("gemini-3-6-flash")
+    assert engine._unavailable_model_key(retired, fallback_active=False) == (
+        "gemini-3-6-flash"
+    )
