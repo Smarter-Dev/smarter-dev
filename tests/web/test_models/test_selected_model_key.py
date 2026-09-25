@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy import text
 
@@ -242,3 +243,146 @@ async def test_restored_flash_lite_is_selectable_and_3_6_flash_is_not(db_session
         await resolved_conversation_settings(
             db_session, permissions=frozenset(), model_key="gemini-3-6-flash"
         )
+
+
+# c3e8a1d5f7b2 returns one production conversation, by id, to 3.5 Flash Lite.
+_LITE_CONVERSATION = "458f2c0e-493c-4f6c-bb54-60d4c022fb14"
+
+
+def _conversation_return_statement():
+    module = _load_migration("c3e8a1d5f7b2")
+    executed: list = []
+
+    class _Op:
+        @staticmethod
+        def execute(statement):
+            executed.append(statement)
+
+    module.op = _Op
+    module.upgrade()
+    [statement] = executed
+    return statement
+
+
+async def _conversation(db_session, *, conversation_id=_LITE_CONVERSATION,
+                        selected="gemini-3-8-flash", reasoning="medium",
+                        turn_keys=("gemini-3-1-flash-lite",), change=None):
+    # ``change``: None, "pending" or "confirmed" model change on the conversation.
+    from datetime import UTC
+    from datetime import datetime
+    from datetime import timedelta
+    from uuid import UUID
+    from uuid import uuid4
+
+    from smarter_dev.web.models import WebChatConversation
+    from smarter_dev.web.models import WebChatModelChange
+    from smarter_dev.web.models import WebChatTurn
+
+    owner = uuid4()
+    conversation = WebChatConversation(
+        id=UUID(conversation_id), owner_user_id=owner, intelligence_mode="efficient",
+        selected_model_key=selected, reasoning_level=reasoning, status="idle",
+    )
+    db_session.add(conversation)
+    await db_session.flush()
+    for sequence, key in enumerate(turn_keys, start=1):
+        db_session.add(WebChatTurn(
+            conversation_id=conversation.id, sequence=sequence,
+            submission_key=f"s{sequence}", response_version_group=uuid4(),
+            response_sequence=sequence * 2, model_key=key, status="complete",
+        ))
+    if change is not None:
+        now = datetime.now(UTC)
+        db_session.add(WebChatModelChange(
+            conversation_id=conversation.id, owner_user_id=owner,
+            from_model_key="gemini-3-5-flash-lite", to_model_key="gemini-3-8-flash",
+            warning="", expires_at=now + timedelta(minutes=5),
+            confirmed_at=now if change == "confirmed" else None,
+        ))
+    await db_session.commit()
+    return conversation.id
+
+
+async def _selection(db_session, conversation_id):
+    row = (await db_session.execute(
+        text("SELECT selected_model_key, reasoning_level FROM web_chat_conversations WHERE id = :id"),
+        {"id": conversation_id.hex},
+    )).one()
+    return tuple(row)
+
+
+async def test_conversation_return_moves_the_one_migrated_conversation_to_flash_lite(db_session):
+    # An earlier turn on another model and an unconfirmed change do not matter:
+    # the latest turn ran on 3.1 Flash Lite and nothing was confirmed.
+    conversation_id = await _conversation(
+        db_session, turn_keys=("gpt-6-sol", "gemini-3-1-flash-lite"), change="pending"
+    )
+    statement = _conversation_return_statement()
+    for _ in range(2):  # a rerun finds it already on Lite
+        await db_session.execute(statement)
+    await db_session.commit()
+
+    assert await _selection(db_session, conversation_id) == ("gemini-3-5-flash-lite", "medium")
+
+
+async def test_conversation_return_keeps_reasoning_lite_offers_and_else_uses_its_default(db_session):
+    from smarter_dev.shared.model_catalog import get_model
+
+    lite = get_model("gemini-3-5-flash-lite")
+    module = _load_migration("c3e8a1d5f7b2")
+    assert module._TO_LEVELS == tuple(level.value for level in lite.reasoning_levels)
+    assert module._TO_DEFAULT == lite.default_reasoning.value
+
+    for reasoning, expected in (("low", "low"), (None, None), ("xhigh", "medium")):
+        await db_session.execute(text("DELETE FROM web_chat_turns"))
+        await db_session.execute(text("DELETE FROM web_chat_conversations"))
+        conversation_id = await _conversation(db_session, reasoning=reasoning)
+        await db_session.execute(_conversation_return_statement())
+        await db_session.commit()
+        assert await _selection(db_session, conversation_id) == ("gemini-3-5-flash-lite", expected)
+
+
+
+@pytest.mark.parametrize(
+    ("changed", "fields"),
+    [
+        ("owner confirmed a change since", {"change": "confirmed"}),
+        ("owner picked another model since", {"selected": "gpt-6-sol"}),
+        ("owner already went back to Lite", {"selected": "gemini-3-5-flash-lite", "reasoning": "high"}),
+        ("latest turn ran on another model", {"turn_keys": ("gemini-3-1-flash-lite", "gemini-3-8-flash")}),
+        ("no turns", {"turn_keys": ()}),
+    ],
+)
+async def test_conversation_return_leaves_it_alone_once_anything_changed(db_session, changed, fields):
+    conversation_id = await _conversation(db_session, **fields)
+    before = await _selection(db_session, conversation_id)
+
+    await db_session.execute(_conversation_return_statement())
+    await db_session.commit()
+
+    assert await _selection(db_session, conversation_id) == before, changed
+
+
+async def test_conversation_return_touches_no_other_3_8_conversation(db_session):
+    # Same shape as the migrated one, different id: left on 3.8 Flash.
+    other = await _conversation(db_session, conversation_id="0f1e2d3c-4b5a-4968-8776-655443322110")
+
+    await db_session.execute(_conversation_return_statement())
+    await db_session.commit()
+
+    assert await _selection(db_session, other) == ("gemini-3-8-flash", "medium")
+
+
+def test_conversation_return_follows_the_restore_and_downgrades_to_nothing():
+    module = _load_migration("c3e8a1d5f7b2")
+    assert module.down_revision == "479f5fca562d"
+    executed: list = []
+
+    class _Op:
+        @staticmethod
+        def execute(statement):
+            executed.append(statement)
+
+    module.op = _Op
+    module.downgrade()
+    assert executed == []
