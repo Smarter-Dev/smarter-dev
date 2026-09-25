@@ -11,7 +11,7 @@ no-op that keeps the text. Growth is VmHWM from before the download.
 
 ``combined_mib`` is what the container sees: a 2 ms sampler adds this
 process's RSS growth to the RSS of every child it has (the PDF parser), at the
-same instant, counted from the RSS before the read (so it can exceed the VmHWM
+same instant (the PDF parser or image child), counted from the RSS before the read (so it can exceed the VmHWM
 figure when the high-water mark was already above RSS). Sampling can miss a
 peak between samples, so it is a lower bound; ``child_peak_mib`` is the children's own sampled peak. (Not
 ``RUSAGE_CHILDREN``: a forked child's ru_maxrss starts at this process's size.)
@@ -93,13 +93,14 @@ def children(pid: int) -> list[int]:
     return found + [grand for child in found for grand in children(child)]
 
 
-def is_parser(pid: int) -> bool:
-    # Only the PDF parser child is memory a read adds. Libraries also shell
+def is_bounded_child(pid: int) -> bool:
+    # Only the parser and image children are memory a read adds. Libraries also shell
     # out (platform's `uname -p` and `file -b`), and a child caught between
     # fork and exec reports this process's shared pages as its own RSS.
     try:
         with open(f"/proc/{pid}/cmdline", "rb") as cmdline:
-            return b"smarter_dev.shared.pdf_text" in cmdline.read()
+            args = cmdline.read()
+        return b"smarter_dev.shared.pdf_text" in args or b"smarter_dev.shared.image_child" in args
     except OSError:
         return False
 
@@ -117,7 +118,7 @@ class Sampler(threading.Thread):
     def run(self) -> None:
         me = os.getpid()
         while self.running:
-            child = sum(rss_kib(c) for c in children(me) if is_parser(c))
+            child = sum(rss_kib(c) for c in children(me) if is_bounded_child(c))
             self.child_peak = max(self.child_peak, child)
             self.peak = max(self.peak, rss_kib() - self.base + child)
             time.sleep(0.002)

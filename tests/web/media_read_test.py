@@ -40,7 +40,7 @@ def no_network(monkeypatch):
 async def test_image_url_describes_then_caches(monkeypatch):
     calls: list[bytes] = []
 
-    async def fake_fetch(url):
+    async def fake_fetch(url, **kwargs):
         return b"PNGDATA", "image/png"
 
     async def fake_describe(*, instruction, data, media_type, url, kind):
@@ -69,7 +69,7 @@ async def test_image_url_describes_then_caches(monkeypatch):
 async def test_same_file_different_instruction_redescribes(monkeypatch):
     calls: list[str] = []
 
-    async def fake_fetch(url):
+    async def fake_fetch(url, **kwargs):
         return b"PNGDATA", "image/png"
 
     async def fake_describe(*, instruction, data, media_type, url, kind):
@@ -88,7 +88,7 @@ async def test_same_file_different_instruction_redescribes(monkeypatch):
 
 
 async def test_audio_url_routed_to_describe(monkeypatch):
-    async def fake_fetch(url):
+    async def fake_fetch(url, **kwargs):
         return b"OGGDATA", "audio/ogg"
 
     seen = {}
@@ -109,7 +109,7 @@ async def test_audio_url_routed_to_describe(monkeypatch):
 async def test_pdf_url_extracts_text_and_caches(monkeypatch):
     extract_calls: list[bytes] = []
 
-    async def fake_fetch(url):
+    async def fake_fetch(url, **kwargs):
         return b"%PDF-bytes", "application/pdf"
 
     async def fake_extract(path):
@@ -144,7 +144,7 @@ async def test_html_url_uses_jina(monkeypatch, no_network):
 
 
 async def test_fetch_failure_returns_error(monkeypatch):
-    async def fake_fetch(url):
+    async def fake_fetch(url, **kwargs):
         return None
 
     monkeypatch.setattr(media_read, "_fetch_bytes", fake_fetch)
@@ -163,7 +163,7 @@ async def test_cache_key_combines_file_and_instruction():
 
 
 async def test_read_works_without_redis(monkeypatch):
-    async def fake_fetch(url):
+    async def fake_fetch(url, **kwargs):
         return b"PNGDATA", "image/png"
 
     async def fake_describe(*, instruction, data, media_type, url, kind):
