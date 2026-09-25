@@ -178,12 +178,14 @@ def create_moderation_tools(
         guild_id: Guild where moderation was triggered
         channel_id: Channel where moderation was triggered (incident channel)
         trigger_message_id: Message that triggered the moderation review
-        enabled_tools: List of tool names to enable (timeout, purge)
+        enabled_tools: Action tools to enable (timeout, purge, delete); None or []
+            enables none. The utility tools are always included.
 
     Returns:
         Tuple of (tools list, ActionTracker)
     """
-    enabled = set(enabled_tools or ["timeout", "purge"])
+    # Only the action tools a guild names are offered; None or [] offers none.
+    enabled = set(enabled_tools or ())
     tracker = ActionTracker()
     action_count = 0
 
@@ -341,6 +343,10 @@ def create_moderation_tools(
 
         count = min(count, 50)  # Cap at 50
 
+        perm_msg = await _check_target_permissions(user_id)
+        if perm_msg:
+            return {"success": False, "error": perm_msg}
+
         try:
             member = await bot.rest.fetch_member(int(guild_id), int(user_id))
             username = member.display_name or member.username
@@ -403,6 +409,11 @@ def create_moderation_tools(
             return {"success": False, "error": limit_msg}
 
         try:
+            message = await bot.rest.fetch_message(int(channel_id), int(message_id))
+            perm_msg = await _check_target_permissions(str(message.author.id))
+            if perm_msg:
+                return {"success": False, "error": perm_msg}
+
             await bot.rest.delete_message(int(channel_id), int(message_id))
             action_count += 1
 

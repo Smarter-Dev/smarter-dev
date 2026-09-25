@@ -44,10 +44,23 @@ def recorded_events(monkeypatch) -> list:
     return events
 
 
+# The delete tool checks the message author's permissions first.
+_MESSAGE_BY_MEMBER = SimpleNamespace(author=SimpleNamespace(id=222))
+
+
+@pytest.fixture(autouse=True)
+def _author_is_a_plain_member(monkeypatch):
+    monkeypatch.setattr(
+        mod_tools.lightbulb.utils, "permissions_for", lambda member: hikari.Permissions.NONE
+    )
+
+
 @pytest.mark.asyncio
 async def test_single_delete_is_written_to_the_event_log(recorded_events):
     bot = Mock()
     bot.rest = Mock()
+    bot.rest.fetch_message = AsyncMock(return_value=_MESSAGE_BY_MEMBER)
+    bot.rest.fetch_member = AsyncMock(return_value=SimpleNamespace())
     bot.rest.delete_message = AsyncMock()
 
     delete_message, _ = _delete_tool(bot)
@@ -68,6 +81,8 @@ async def test_single_delete_is_written_to_the_event_log(recorded_events):
 async def test_a_delete_that_never_happened_is_never_remembered(recorded_events):
     bot = Mock()
     bot.rest = Mock()
+    bot.rest.fetch_message = AsyncMock(return_value=_MESSAGE_BY_MEMBER)
+    bot.rest.fetch_member = AsyncMock(return_value=SimpleNamespace())
     bot.rest.delete_message = AsyncMock(
         side_effect=hikari.NotFoundError(
             url="url", headers={}, raw_body=b"", message="gone"
@@ -125,7 +140,8 @@ async def test_triage_timeout_dispatches_with_the_bot_for_the_event_log(monkeypa
     bot.get_me = Mock(return_value=SimpleNamespace(id=1))
 
     tools, _ = mod_tools.create_moderation_tools(
-        bot, guild_id=GUILD_ID, channel_id=CHANNEL_ID, trigger_message_id=None
+        bot, guild_id=GUILD_ID, channel_id=CHANNEL_ID, trigger_message_id=None,
+        enabled_tools=["timeout"],
     )
     timeout_user = next(t for t in tools if t.__name__ == "timeout_user")
 
