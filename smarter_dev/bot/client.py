@@ -585,9 +585,6 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         api_base_url = settings.api_base_url
         api_key = settings.bot_api_key
         logger.info(f"Connecting to API at: {api_base_url}")
-        logger.info(
-            f"Using API key: {api_key[:12]}...{api_key[-10:] if len(api_key) > 20 else api_key}"
-        )
         api_client = APIClient(
             base_url=api_base_url,  # Web API base URL from settings
             api_key=api_key,  # Use secure API key for auth
