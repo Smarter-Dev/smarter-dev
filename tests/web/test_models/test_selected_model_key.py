@@ -82,9 +82,8 @@ async def test_channel_pins_keep_the_retired_key(db_session):
 
 
 async def test_retired_gemini_flash_and_grok_selections_read_as_successors(db_session):
-    # Production on 2026-09-24: both fallbacks name 3.5 Flash Lite.
     settings = _settings()
-    settings.summarizer_fallback_model_key = "gemini-3-5-flash-lite"
+    settings.summarizer_fallback_model_key = "gemini-3-6-flash"
     settings.compaction_fallback_model_key = "gemini-3-5-flash-lite"
     settings.thread_evaluator_fallback_model_key = "gemini-3-7-flash"
     settings.summarizer_model_key = "grok-4-6"
@@ -95,7 +94,8 @@ async def test_retired_gemini_flash_and_grok_selections_read_as_successors(db_se
     settings = await db_session.get(ChatSettings, 1)
 
     assert settings.summarizer_fallback_model_key == "gemini-3-8-flash"
-    assert settings.compaction_fallback_model_key == "gemini-3-8-flash"
+    # 3.5 Flash Lite was restored on 2026-09-25: it reads as itself again.
+    assert settings.compaction_fallback_model_key == "gemini-3-5-flash-lite"
     assert settings.thread_evaluator_fallback_model_key == "gemini-3-8-flash"
     assert settings.summarizer_model_key == "grok-4-7"
 
@@ -132,14 +132,26 @@ def _load_migration(revision: str):
 def test_migration_successors_match_the_catalog_map():
     from smarter_dev.shared.model_catalog import RETIRED_SUCCESSORS
 
-    # Each add-only revision admits its own successors; together they cover
-    # the catalog's map exactly.
+    # Each add-only revision admits its own successors; together, less the
+    # keys restored since, they cover the catalog's map exactly.
     combined: dict[str, str] = {}
     for revision in ("c8e2f4a6b1d9", "b7d3f9a2c6e4"):
         for retired, successor in _load_migration(revision)._SUCCESSORS:
             assert retired not in combined, retired
             combined[retired] = successor
+    restored = _load_migration("479f5fca562d")._KEY
+    assert restored in combined
+    del combined[restored]
     assert combined == RETIRED_SUCCESSORS
+
+
+def test_flash_lite_restore_follows_the_contract_step():
+    from smarter_dev.shared.model_catalog import get_model
+
+    module = _load_migration("479f5fca562d")
+    assert module.down_revision == "7a18ff6495e1"
+    assert module._KEY == "gemini-3-5-flash-lite"
+    assert get_model(module._KEY) is not None
 
 
 def test_gemini_flash_and_grok_migration_copies_the_slot_holders():
@@ -163,3 +175,70 @@ def test_gemini_flash_and_grok_contract_step_follows_its_add_step():
     assert contract._SUCCESSORS == add._SUCCESSORS
     assert contract._SELECTION_COLUMNS == _load_migration("e5a9c3f7d2b8")._SELECTION_COLUMNS
     assert all(table != "channel_model_overrides" for table, _ in contract._SELECTION_COLUMNS)
+
+
+async def test_flash_lite_restore_puts_back_its_row_as_it_was(db_session):
+    # What 7a18ff6495e1 left: no row for 3.5 Flash Lite. The restore puts its
+    # pre-retirement row back and leaves an existing row (an admin's) alone.
+    from sqlalchemy import text
+
+    from smarter_dev.web.models import ChatCatalogModel
+
+    upgrade_sql = (
+        "INSERT INTO chat_catalog_models (model_key, enabled, cost_tier, sort_order)"
+        " VALUES (:key, true, 'low', 8) ON CONFLICT (model_key) DO NOTHING"
+    )
+    module = _load_migration("479f5fca562d")
+    executed: list = []
+
+    class _Op:
+        @staticmethod
+        def execute(statement):
+            executed.append(statement)
+
+    module.op = _Op
+    module.upgrade()
+    [statement] = executed
+    assert " ".join(str(statement).split()) == upgrade_sql
+    assert statement.compile().params == {"key": "gemini-3-5-flash-lite"}
+
+    for _ in range(2):  # idempotent
+        await db_session.execute(text(upgrade_sql), {"key": module._KEY})
+    await db_session.commit()
+    row = await db_session.get(ChatCatalogModel, "gemini-3-5-flash-lite")
+    assert (row.enabled, row.cost_tier, row.sort_order) == (True, "low", 8)
+
+    row.enabled = False
+    await db_session.commit()
+    await db_session.execute(text(upgrade_sql), {"key": module._KEY})
+    await db_session.commit()
+    await db_session.refresh(row)
+    assert row.enabled is False
+
+
+async def test_restored_flash_lite_is_selectable_and_3_6_flash_is_not(db_session):
+    # With its row back, a new web conversation can start on 3.5 Flash Lite;
+    # 3.6 Flash, still retired, is refused even with a leftover enabled row.
+    import pytest
+
+    from smarter_dev.web.chat.api import HTTPException
+    from smarter_dev.web.chat.api import resolved_conversation_settings
+    from smarter_dev.web.chat.settings import ensure_settings
+    from smarter_dev.web.models import ChatCatalogModel
+
+    await ensure_settings(db_session)
+    lite = await db_session.get(ChatCatalogModel, "gemini-3-5-flash-lite")
+    lite.enabled = True
+    db_session.add(
+        ChatCatalogModel(model_key="gemini-3-6-flash", enabled=True, cost_tier="low", sort_order=9)
+    )
+    await db_session.commit()
+
+    _, key, _ = await resolved_conversation_settings(
+        db_session, permissions=frozenset(), model_key="gemini-3-5-flash-lite"
+    )
+    assert key == "gemini-3-5-flash-lite"
+    with pytest.raises(HTTPException):
+        await resolved_conversation_settings(
+            db_session, permissions=frozenset(), model_key="gemini-3-6-flash"
+        )
