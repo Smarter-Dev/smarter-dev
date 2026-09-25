@@ -613,6 +613,47 @@ async def test_both_fetchers_spool_a_large_image(monkeypatch, module):
     spooled.discard()
 
 
+@pytest.mark.parametrize("module", ["bot", "worker"])
+@pytest.mark.parametrize("closing", [asyncio.CancelledError, TimeoutError, OSError])
+async def test_a_spool_is_deleted_when_closing_the_stream_fails(
+    monkeypatch, tmp_path, module, closing
+):
+    # read_body has handed the spool over; the stream's close then raises
+    # (a cancel, the total timeout, a dropped connection) before it is returned.
+    monkeypatch.setattr(media_reads.tempfile, "tempdir", str(tmp_path))
+    body = os.urandom(MAX_DOWNLOAD_BYTES + 65536)
+    headers = {"content-length": str(len(body)), "content-type": "image/jpeg"}
+    opened = _client(200, headers, body, [])
+
+    class Stream:
+        def __init__(self, inner):
+            self.inner = inner
+
+        async def __aenter__(self):
+            return await self.inner.__aenter__()
+
+        async def __aexit__(self, *exc):
+            raise closing
+
+    class Client(opened):
+        def stream(self, *args, **kwargs):
+            return Stream(super().stream(*args, **kwargs))
+
+    if module == "bot":
+        monkeypatch.setattr(web_fetch, "httpx", SimpleNamespace(AsyncClient=Client))
+        fetch = web_fetch.fetch_bytes("https://x/big.jpg", spill_images=True)
+    else:
+        monkeypatch.setattr(media_read.httpx, "AsyncClient", Client)
+        fetch = media_read._fetch_bytes("https://x/big.jpg", image=True)
+
+    if closing is asyncio.CancelledError:
+        with pytest.raises(asyncio.CancelledError):
+            await fetch
+    else:
+        assert await fetch is None
+    assert _spool_files(tmp_path) == []
+
+
 # --------------------------------------------------------------------------- #
 # One read at a time, and freed memory handed back
 # --------------------------------------------------------------------------- #

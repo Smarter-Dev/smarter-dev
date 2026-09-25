@@ -111,6 +111,7 @@ async def _fetch_bytes(
     An ``image`` over it streams on to disk instead (``SpooledImage``, up to
     ``MAX_IMAGE_DOWNLOAD_BYTES``), to be downsampled from there.
     """
+    body = None
     try:
         async with (
             httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client,
@@ -127,7 +128,13 @@ async def _fetch_bytes(
             if body is None:
                 return None
             return body, resp.headers.get("content-type", "")
-    except Exception:  # noqa: BLE001
+    except BaseException as e:
+        # Closing the stream or client can still fail or be cancelled after
+        # read_body handed the spool over: it is ours to delete.
+        if isinstance(body, SpooledImage):
+            body.discard()
+        if not isinstance(e, Exception):
+            raise
         logger.debug("media fetch failed for %s", url, exc_info=True)
         return None
 
