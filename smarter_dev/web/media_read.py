@@ -26,7 +26,9 @@ from smarter_dev.shared.media_images import prepare_image_bounded
 from smarter_dev.shared.media_reads import MAX_DOWNLOAD_BYTES
 from smarter_dev.shared.media_reads import MAX_SEND_BYTES
 from smarter_dev.shared.media_reads import MediaReaderBusy
+from smarter_dev.shared.media_reads import SpooledImage
 from smarter_dev.shared.media_reads import media_read_slot
+from smarter_dev.shared.media_reads import read_body
 from smarter_dev.shared.media_reads import too_large_to_send
 from smarter_dev.web.research_tools import jina_read
 
@@ -68,8 +70,15 @@ def _url_extension(url: str) -> str:
     return last[dot:].lower() if dot != -1 else ""
 
 
-def _cache_key(data: bytes, instruction: str) -> str:
-    file_hash = hashlib.sha256(data).hexdigest()
+def _cache_key(data: bytes | SpooledImage, instruction: str) -> str:
+    if isinstance(data, SpooledImage):
+        digest = hashlib.sha256()
+        with open(data.path, "rb") as file:
+            while chunk := file.read(1024 * 1024):
+                digest.update(chunk)
+        file_hash = digest.hexdigest()
+    else:
+        file_hash = hashlib.sha256(data).hexdigest()
     instr_hash = hashlib.sha256(instruction.encode("utf-8")).hexdigest()[:16]
     return f"mediaread:{file_hash}:{instr_hash}"
 
@@ -92,11 +101,15 @@ async def _cache_set(redis, key: str, value: str) -> None:
         logger.debug("media read cache set failed", exc_info=True)
 
 
-async def _fetch_bytes(url: str) -> tuple[bytes, str] | None:
+async def _fetch_bytes(
+    url: str, *, image: bool = False
+) -> tuple[bytes | SpooledImage, str] | None:
     """Download a URL's bytes (capped). Returns (data, content_type) or None.
 
     Streamed, so a body over ``MAX_FETCH_BYTES`` is abandoned at the cap (or
     refused from its Content-Length) instead of being downloaded whole first.
+    An ``image`` over it streams on to disk instead (``SpooledImage``, up to
+    ``MAX_IMAGE_DOWNLOAD_BYTES``), to be downsampled from there.
     """
     try:
         async with (
@@ -105,17 +118,15 @@ async def _fetch_bytes(url: str) -> tuple[bytes, str] | None:
         ):
             if resp.status_code >= 400:
                 return None
-            declared = resp.headers.get("content-length", "")
-            if declared.isdigit() and int(declared) > MAX_FETCH_BYTES:
+            body = await read_body(
+                resp.aiter_bytes(),
+                resp.headers.get("content-length", ""),
+                max_bytes=MAX_FETCH_BYTES,
+                spill_image=image,
+            )
+            if body is None:
                 return None
-            chunks: list[bytes] = []
-            received = 0
-            async for chunk in resp.aiter_bytes():
-                received += len(chunk)
-                if received > MAX_FETCH_BYTES:
-                    return None
-                chunks.append(chunk)
-            return b"".join(chunks), resp.headers.get("content-type", "")
+            return body, resp.headers.get("content-type", "")
     except Exception:  # noqa: BLE001
         logger.debug("media fetch failed for %s", url, exc_info=True)
         return None
@@ -166,7 +177,12 @@ def _get_audio_agent():
 
 
 async def _describe_media(
-    *, instruction: str, data: bytes, media_type: str, url: str, kind: str
+    *,
+    instruction: str,
+    data: bytes | SpooledImage,
+    media_type: str,
+    url: str,
+    kind: str,
 ) -> str:
     from pydantic_ai import BinaryContent
 
@@ -221,23 +237,28 @@ async def read_url(url: str, instruction: str, *, redis=None) -> str:
 
 async def _read_downloaded(url: str, instruction: str, ext: str, redis) -> str:
     if ext in IMAGE_EXTS or ext in AUDIO_EXTS:
-        fetched = await _fetch_bytes(url)
+        kind = "image" if ext in IMAGE_EXTS else "audio"
+        # An image over MAX_FETCH_BYTES arrives on disk, to be downsampled.
+        fetched = await _fetch_bytes(url, image=kind == "image")
         if fetched is None:
             return f"error: could not fetch {url}"
         data, content_type = fetched
-        media_type = _EXT_MEDIA_TYPE.get(ext) or content_type
-        if not media_type:
-            return f"error: unknown media type for {url}"
-        kind = "image" if ext in IMAGE_EXTS else "audio"
-        key = _cache_key(data, instruction)
-        cached = await _cache_get(redis, key)
-        if cached is not None:
-            return cached
-        desc = await _describe_media(
-            instruction=instruction, data=data, media_type=media_type, url=url, kind=kind
-        )
-        await _cache_set(redis, key, desc)
-        return desc
+        try:
+            media_type = _EXT_MEDIA_TYPE.get(ext) or content_type
+            if not media_type:
+                return f"error: unknown media type for {url}"
+            key = _cache_key(data, instruction)
+            cached = await _cache_get(redis, key)
+            if cached is not None:
+                return cached
+            desc = await _describe_media(
+                instruction=instruction, data=data, media_type=media_type, url=url, kind=kind
+            )
+            await _cache_set(redis, key, desc)
+            return desc
+        finally:
+            if isinstance(data, SpooledImage):
+                data.discard()
 
     if ext == ".pdf":
         fetched = await _fetch_bytes(url)

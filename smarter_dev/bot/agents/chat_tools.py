@@ -32,7 +32,9 @@ from smarter_dev.shared import pdf_text
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.guild_event_log import chat_memory_enabled
 from smarter_dev.shared.media_reads import MAX_DOWNLOAD_BYTES
+from smarter_dev.shared.media_reads import MAX_IMAGE_DOWNLOAD_BYTES
 from smarter_dev.shared.media_reads import MediaReaderBusy
+from smarter_dev.shared.media_reads import SpooledImage
 from smarter_dev.shared.media_reads import media_read_slot
 from smarter_dev.web.models import MAX_MEMORY_NOTE_CHARS
 from smarter_dev.web.research_tools import brave_search
@@ -292,11 +294,16 @@ async def _read_downloaded(
     # media reader instead of trying to extract text.
     if ext in IMAGE_EXTS or ext in AUDIO_EXTS:
         kind = "image" if ext in IMAGE_EXTS else "audio"
-        fetched = await web_fetch.fetch_bytes(url)
+        # An image over MAX_DOWNLOAD_BYTES arrives on disk, to be downsampled.
+        fetched = await web_fetch.fetch_bytes(
+            url, spill_images=kind == "image", image_hint=kind == "image"
+        )
         if fetched is None:
             logger.warning("web_read: media fetch_failed for %r", log_url)
             return {"url": url, "kind": kind, "summary": "", "error": "fetch_failed"}
         data, content_type = fetched
+        if isinstance(data, SpooledImage):
+            return await _read_spooled_image(url, instruction, data)
         # Prefer the extension-derived type; the server's Content-Type is
         # unreliable for media (e.g. .ogg served as video/ogg).
         media_type = (
@@ -311,8 +318,29 @@ async def _read_downloaded(
     raise AssertionError(f"not a downloaded read: {ext!r}")
 
 
+async def _read_spooled_image(
+    url: str, instruction: str, image: SpooledImage
+) -> dict[str, str]:
+    """Read an image downloaded to disk (over MAX_DOWNLOAD_BYTES).
+
+    Typed by its own bytes, since it is decoded as that format; the file is
+    deleted however the read ends.
+    """
+    try:
+        media_type = _sniffed_image_type(image.head())
+        if not media_type:
+            return {"url": url, "kind": "image", "summary": "", "error": "content_mismatch"}
+        return await _read_media(url, instruction, image, media_type, "image")
+    finally:
+        image.discard()
+
+
 async def _read_media(
-    url: str, instruction: str, data: bytes, media_type: str, kind: str
+    url: str,
+    instruction: str,
+    data: bytes | SpooledImage,
+    media_type: str,
+    kind: str,
 ) -> dict[str, str]:
     try:
         summary = await describe_media(
@@ -375,6 +403,22 @@ def _looks_like_image(data: bytes) -> bool:
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return True
     return data.startswith(_IMAGE_SIGNATURES)
+
+
+def _sniffed_image_type(head: bytes) -> str:
+    """The image type ``head`` starts with, or "" for anything else."""
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    for signature, media_type in (
+        (b"\x89PNG\r\n\x1a\n", "image/png"),
+        (b"\xff\xd8\xff", "image/jpeg"),
+        (b"GIF87a", "image/gif"),
+        (b"GIF89a", "image/gif"),
+        (b"BM", "image/bmp"),
+    ):
+        if head.startswith(signature):
+            return media_type
+    return ""
 
 
 def _looks_like_audio(data: bytes) -> bool:
@@ -474,7 +518,11 @@ async def _read_discord_attachment(url: str, instruction: str) -> dict[str, str]
     labelled text/) summarized as text. Anything else — video,
     archives, other binaries — is reported as unsupported rather than guessed.
     """
-    fetched = await web_fetch.fetch_bytes(url)
+    ext = _url_extension(url)
+    # An image over MAX_DOWNLOAD_BYTES arrives on disk, to be downsampled.
+    fetched = await web_fetch.fetch_bytes(
+        url, spill_images=True, image_hint=ext in IMAGE_EXTS
+    )
     if fetched is None:
         logger.warning(
             "web_read: attachment fetch_failed for %r", web_fetch.url_for_log(url)
@@ -484,10 +532,13 @@ async def _read_discord_attachment(url: str, instruction: str) -> dict[str, str]
             "summary": "",
             "error": "fetch_failed",
             "detail": "Could not download the attachment; it may be over "
-            f"{MAX_DOWNLOAD_BYTES // 1_048_576} MB or its link may have expired.",
+            f"{MAX_DOWNLOAD_BYTES // 1_048_576} MB "
+            f"({MAX_IMAGE_DOWNLOAD_BYTES // 1_048_576} MB for images) "
+            "or its link may have expired.",
         }
     data, content_type = fetched
-    ext = _url_extension(url)
+    if isinstance(data, SpooledImage):
+        return await _read_spooled_image(url, instruction, data)
     media_type = _EXT_MEDIA_TYPE.get(ext) or content_type
 
     if media_type.startswith("image/") and _looks_like_image(data):

@@ -26,6 +26,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from smarter_dev.shared.media_images import ImageTooLarge
 from smarter_dev.shared.media_images import prepare_image_bounded
 from smarter_dev.shared.media_reads import MAX_SEND_BYTES
+from smarter_dev.shared.media_reads import SpooledImage
 from smarter_dev.shared.media_reads import too_large_to_send
 
 logger = logging.getLogger(__name__)
@@ -108,9 +109,18 @@ def get_audio_reader_agent() -> Agent[None, str]:
 
 
 async def describe_media(
-    *, instruction: str, data: bytes, media_type: str, url: str, kind: str
+    *,
+    instruction: str,
+    data: bytes | SpooledImage,
+    media_type: str,
+    url: str,
+    kind: str,
 ) -> str:
-    """Describe an image (GPT-6 Luna) or audio clip (Gemini) per ``instruction``."""
+    """Describe an image (GPT-6 Luna) or audio clip (Gemini) per ``instruction``.
+
+    An image may come as a ``SpooledImage`` (over MAX_DOWNLOAD_BYTES, on disk),
+    downsampled in a bounded child and deleted by ``prepare_image_bounded``.
+    """
     is_audio = kind == "audio" or media_type.startswith("audio/")
     agent = get_audio_reader_agent() if is_audio else get_media_reader_agent()
     prompt = (

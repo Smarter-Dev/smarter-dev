@@ -14,8 +14,9 @@ GIF. Checked against the live API on 2026-09-24:
   frame of them, as it did before.
 
 Used by both the bot's and the web app's media readers; nothing here calls a
-model. It runs inside the bot's container, which idles ~70 MiB under its 512Mi
-limit, so memory is bounded before any pixel data is decoded:
+model. It runs inside the bot's container, which idles ~180 MiB under its 612Mi
+limit (425Mi in use, one sample on 2026-09-25), so memory is bounded before any
+pixel data is decoded:
 
 1. The header alone decides. An image over ``MAX_DECODE_PIXELS``, or a GIF
    whose canvas is once grown to fit every frame's position and size, is
@@ -32,7 +33,16 @@ limit, so memory is bounded before any pixel data is decoded:
    decode: the input, the PNG parts and the request copies stay held through
    each model call, so concurrent reads still add their retained bytes (#25).
 
-Measured peaks are in PR #99 and ``tests/bot/agents/test_media_image_formats``.
+Images the bot's own process should not decode go to a bounded child
+instead of being refused (#25): one over ``MAX_DOWNLOAD_BYTES`` (10 MiB),
+which arrives on disk as a ``SpooledImage``, and one over the in-process caps
+above (``NeedsIsolation``: a 4K PNG screenshot, a large progressive JPEG, a
+BMP or GIF canvas over ``MAX_DECODE_PIXELS``). ``image_child`` decodes it from
+the file with its address space capped ``IMAGE_CHILD_EXTRA_BYTES`` over its
+imports, after the same kind of header checks, so a small compressed bomb is
+still refused unread.
+
+Measured peaks are in PRs #99 and #101 and ``tests/bot/agents``.
 """
 
 from __future__ import annotations
@@ -44,7 +54,10 @@ import struct
 
 from PIL import Image
 
+from smarter_dev.shared import bounded_child
 from smarter_dev.shared.media_reads import MAX_SEND_BYTES
+from smarter_dev.shared.media_reads import SpooledImage
+from smarter_dev.shared.media_reads import spool_image
 from smarter_dev.shared.media_reads import too_large_to_send
 
 logger = logging.getLogger(__name__)
@@ -62,10 +75,12 @@ MAX_SIDE = 2048
 # A JPEG over the send cap is decoded at 1/2 to 1/8 scale (``draft``), so its
 # header may be this large and still decode near 2048 px.
 MAX_JPEG_DRAFT_PIXELS = 64_000_000
-# A PNG or WebP over the send cap is decoded whole to be scaled down: ~16 MB
+# A PNG over the send cap is decoded whole to be scaled down: ~16 MB
 # as RGBA at this size.
 MAX_DOWNSCALE_PIXELS = 4_096_000
-_DOWNSCALABLE_FORMATS = {"image/png": "PNG", "image/webp": "WEBP"}
+# WebP is not among them: Pillow decodes it at ~17 bytes a pixel, so one over
+# the send cap always goes to ``image_child``.
+_DOWNSCALABLE_FORMATS = {"image/png": "PNG"}
 _MODEL_SHORT_SIDE = 768
 # What a drafted JPEG may decode to: ~12 MB as RGB.
 _MAX_DRAFTED_PIXELS = 4_000_000
@@ -75,6 +90,22 @@ _MAX_DRAFTED_PIXELS = 4_000_000
 # (measured 2026-09-25). Such a JPEG is refused over this buffer size, which
 # admits a 7 MP 4:2:0 photo.
 MAX_JPEG_BUFFERED_BYTES = 20 * 1024 * 1024
+# What the bounded child (``image_child``) may decode, checked from the header.
+# Whole, for PNG, BMP and a GIF's first frame: 4096 x 4096 (a 5K screenshot
+# fits, 8K does not). WebP costs ~17 bytes a pixel to decode through Pillow
+# (measured 2026-09-25: +200 MiB for 12 MP), so less of it. A JPEG's
+# coefficient buffer: a 16 MP 4:2:0 progressive photo.
+MAX_CHILD_DECODE_PIXELS = 4096 * 4096
+MAX_CHILD_WEBP_PIXELS = 5_000_000
+MAX_CHILD_JPEG_BUFFERED_BYTES = 48 * 1024 * 1024
+# The child's address space over its size after importing Pillow (~23 MiB
+# resident), so the child stays under ~120 MiB. Measured decodes within the
+# caps: RGB PNG 4096 x 4096 +70 MiB, 16 MP progressive JPEG +52, 48 MP
+# baseline JPEG +25. Anything needing more fails in the child: "too large".
+IMAGE_CHILD_EXTRA_BYTES = 96 * 1024 * 1024
+# Modes Pillow can reduce(); others (palette, 1-bit, 16-bit) convert first.
+REDUCIBLE_MODES = frozenset({"L", "LA", "RGB", "RGBA", "CMYK", "PA"})
+CHILD_TIMEOUT_SECONDS = 60.0
 # Start-of-frame markers; the rest of 0xC0..0xCF are tables (DHT, JPG, DAC).
 _JPEG_SOF = frozenset(range(0xC0, 0xD0)) - {0xC4, 0xC8, 0xCC}
 # Frames libjpeg can decode one MCU row at a time: baseline, extended
@@ -95,14 +126,65 @@ class ImageTooLarge(ValueError):
     """An image that would have to be decoded to be read, and is too big to."""
 
 
+class NeedsIsolation(ImageTooLarge):
+    """Too big to decode in this process; ``image_child`` may still read it."""
+
+
 async def prepare_image_bounded(
-    data: bytes, media_type: str
+    data: bytes | SpooledImage, media_type: str
 ) -> tuple[list[tuple[bytes, str]], str]:
-    """``prepare_image`` in a worker thread, one conversion at a time."""
+    """``prepare_image`` in a worker thread, one conversion at a time.
+
+    An image on disk, or one ``prepare_image`` finds too big to decode here,
+    is downsampled in ``image_child`` instead. A ``SpooledImage`` is deleted
+    before this returns or raises.
+    """
+    if isinstance(data, SpooledImage):
+        try:
+            async with _conversions:
+                return await _prepare_in_child(data, media_type)
+        finally:
+            data.discard()
     if not _needs_work(data, media_type):
         return [(data, media_type)], ""
     async with _conversions:
-        return await asyncio.to_thread(prepare_image, data, media_type)
+        try:
+            return await asyncio.to_thread(prepare_image, data, media_type)
+        except NeedsIsolation:
+            pass
+        # The caller still holds ``data`` (at most MAX_DOWNLOAD_BYTES) while
+        # the child runs.
+        spooled = spool_image(data)
+        try:
+            return await _prepare_in_child(spooled, media_type)
+        finally:
+            spooled.discard()
+
+
+async def _prepare_in_child(
+    image: SpooledImage, media_type: str
+) -> tuple[list[tuple[bytes, str]], str]:
+    try:
+        code, out = await bounded_child.run(
+            "smarter_dev.shared.image_child",
+            image.path,
+            media_type,
+            str(IMAGE_CHILD_EXTRA_BYTES),
+            timeout=CHILD_TIMEOUT_SECONDS,
+        )
+    except bounded_child.ChildTimedOut as timed_out:
+        raise ImageTooLarge("The image took too long to read.") from timed_out
+    if code == 2:
+        raise ImageTooLarge(out.decode("utf-8", "replace"))
+    if code != 0:
+        raise ImageTooLarge(
+            f"The image is {image.size / 1_048_576:.1f} MB, too large to decode "
+            "within the memory limit."
+        )
+    sent_type, note, data = out.split(b"\n", 2)
+    if len(data) > MAX_SEND_BYTES:
+        raise ImageTooLarge(too_large_to_send(len(data), "image"))
+    return [(data, sent_type.decode())], note.decode()
 
 
 def prepare_image(data: bytes, media_type: str) -> tuple[list[tuple[bytes, str]], str]:
@@ -124,11 +206,13 @@ def prepare_image(data: bytes, media_type: str) -> tuple[list[tuple[bytes, str]]
         parts, note = [(_downscaled_jpeg(data), "image/jpeg")], ""
     elif media_type in _DOWNSCALABLE_FORMATS:
         parts, note = [_downscaled(data, _DOWNSCALABLE_FORMATS[media_type])], ""
+    elif media_type == "image/webp":
+        raise NeedsIsolation(too_large_to_send(len(data), "image"))
     else:
         raise ImageTooLarge(too_large_to_send(len(data), "image"))
     size = sum(len(part) for part, _ in parts)
     if size > MAX_SEND_BYTES:
-        raise ImageTooLarge(too_large_to_send(size, "image"))
+        raise NeedsIsolation(too_large_to_send(size, "image"))
     return parts, note
 
 
@@ -137,7 +221,7 @@ def _prepare_convertible(data: bytes, media_type: str) -> tuple[list[tuple[bytes
         with Image.open(io.BytesIO(data), formats=[_CONVERTIBLE_FORMATS[media_type]]) as image:
             width, height = image.size
             if width * height > MAX_DECODE_PIXELS:
-                raise ImageTooLarge(
+                raise NeedsIsolation(
                     f"The image is {width}x{height} pixels, too large to read "
                     f"(the limit is {MAX_DECODE_PIXELS:,} pixels)."
                 )
@@ -158,19 +242,22 @@ def _needs_work(data: bytes, media_type: str) -> bool:
 
 
 def _downscaled(data: bytes, pillow_format: str) -> tuple[bytes, str]:
-    """A PNG or WebP over the send cap, decoded whole and scaled down.
+    """A PNG over the send cap, decoded whole and scaled down.
 
-    Neither format can decode at reduced scale, so the header must be within
+    PNG cannot be decoded at reduced scale, so the header must be within
     ``MAX_DOWNSCALE_PIXELS``: a 2560 x 1600 screenshot is, a 4K one is not.
     """
     try:
         with Image.open(io.BytesIO(data), formats=[pillow_format]) as image:
             width, height = image.size
             if width * height > MAX_DOWNSCALE_PIXELS:
-                raise ImageTooLarge(
+                raise NeedsIsolation(
                     f"The image is {width}x{height} pixels and "
                     f"{len(data) / 1_048_576:.1f} MB, too large to read."
                 )
+            if image.mode not in REDUCIBLE_MODES:
+                # A palette screenshot would have to convert whole first.
+                raise NeedsIsolation(too_large_to_send(len(data), "image"))
             has_alpha = image.mode in ("RGBA", "LA", "PA") or "transparency" in image.info
             image.load()
             # OpenAI scales an image's short side to 768 px before the model
@@ -206,8 +293,10 @@ def _downscaled_jpeg(data: bytes) -> bytes:
             # Progressive and multi-scan JPEGs are decoded from a buffer of
             # the whole image's coefficients, whatever the draft scale.
             buffered = jpeg_coefficient_buffer(data)
-            if buffered is None or buffered > MAX_JPEG_BUFFERED_BYTES:
-                raise ImageTooLarge(
+            if buffered is None:
+                raise ImageTooLarge(too_large_to_send(len(data), "image"))
+            if buffered > MAX_JPEG_BUFFERED_BYTES:
+                raise NeedsIsolation(
                     f"The image is {width}x{height} pixels and "
                     f"{len(data) / 1_048_576:.1f} MB, too large to read."
                 )
@@ -216,7 +305,7 @@ def _downscaled_jpeg(data: bytes) -> bytes:
             # asked for, so asking for the model's short side loses nothing.
             image.draft("RGB", (_MODEL_SHORT_SIDE, _MODEL_SHORT_SIDE))
             if image.size[0] * image.size[1] > _MAX_DRAFTED_PIXELS:
-                raise ImageTooLarge(
+                raise NeedsIsolation(
                     f"The image is {width}x{height} pixels, too large to read."
                 )
             frame = image.convert("RGB")
@@ -344,7 +433,7 @@ def _gif_as_is(
     if len(data) <= MAX_SEND_BYTES:
         return [(data, "image/gif")], ""
     if scan is None or scan[1] > MAX_DECODE_PIXELS:
-        raise ImageTooLarge(too_large_to_send(len(data), "image"))
+        raise NeedsIsolation(too_large_to_send(len(data), "image"))
     try:
         with Image.open(io.BytesIO(data), formats=["GIF"]) as image:
             first = _png(image)

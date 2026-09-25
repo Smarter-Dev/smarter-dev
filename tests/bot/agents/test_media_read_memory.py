@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import zlib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -28,6 +29,8 @@ from PIL import ImageFile
 from smarter_dev.bot.agents import chat_tools
 from smarter_dev.bot.agents import media_reader
 from smarter_dev.bot.utils import web_fetch
+from smarter_dev.shared import bounded_child
+from smarter_dev.shared import image_child
 from smarter_dev.shared import media_images
 from smarter_dev.shared import media_reads
 from smarter_dev.shared import pdf_text
@@ -231,12 +234,116 @@ def test_large_png_screenshot_is_reduced_within_the_pixel_cap():
         assert min(image.size) >= 768 and max(image.size) <= 2048
 
 
-def test_png_over_the_downscale_cap_is_refused_from_its_header():
+def test_png_over_the_downscale_cap_is_downsampled_in_the_child():
     png = _encode(_screenshot((3840, 2160)), "PNG")
     png += b"\0" * max(0, MAX_SEND_BYTES + 1 - len(png))
 
-    with pytest.raises(ImageTooLarge, match="3840x2160 pixels"):
+    # Too big to decode in this process, from its header alone...
+    with pytest.raises(media_images.NeedsIsolation, match="3840x2160 pixels"):
         prepare_image(png, "image/png")
+    # ...so the bounded path decodes it in image_child instead of refusing.
+    [(data, media_type)], _ = asyncio.run(
+        media_images.prepare_image_bounded(png, "image/png")
+    )
+
+    assert media_type == "image/jpeg" and len(data) <= MAX_SEND_BYTES
+    with Image.open(io.BytesIO(data)) as image:
+        assert min(image.size) >= 768 and max(image.size) <= 2048
+
+
+def _png_header_bomb(width: int, height: int, size: int) -> bytes:
+    """A PNG declaring ``width`` x ``height``, padded to ``size`` bytes.
+
+    Its pixel data is never read: the header alone must get it refused.
+    """
+    def chunk(kind: bytes, body: bytes) -> bytes:
+        crc = zlib.crc32(kind + body) & 0xFFFFFFFF
+        return len(body).to_bytes(4, "big") + kind + body + crc.to_bytes(4, "big")
+
+    header = width.to_bytes(4, "big") + height.to_bytes(4, "big") + bytes([8, 2, 0, 0, 0])
+    idat = zlib.compress(b"\0" * 1024 * 1024, 9)
+    idat += b"\0" * max(0, size - len(idat) - 64)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", idat) + chunk(
+        b"IEND", b""
+    )
+
+
+def _spooled(data: bytes) -> media_reads.SpooledImage:
+    return media_reads.spool_image(data)
+
+
+async def test_a_spooled_jpeg_is_downsampled_and_deleted():
+    image = _spooled(_encode(_noise((4000, 3000)), "JPEG", quality=100))
+    assert image.size > MAX_DOWNLOAD_BYTES
+
+    [(data, media_type)], note = await media_images.prepare_image_bounded(
+        image, "image/jpeg"
+    )
+
+    assert media_type == "image/jpeg" and note == "" and len(data) <= MAX_SEND_BYTES
+    assert not os.path.exists(image.path)
+
+
+@pytest.mark.parametrize(
+    ("data", "media_type", "message"),
+    [
+        # A few MB declaring 2.5 billion pixels: Pillow's own bomb guard.
+        (_png_header_bomb(50_000, 50_000, 12 * MiB), "image/png", "too many pixels"),
+        # Within Pillow's guard, over the child's whole-decode cap.
+        (_png_header_bomb(8000, 8000, 12 * MiB), "image/png", "8000x8000 pixels"),
+        # An 8000 x 8000 progressive JPEG: a 183 MiB coefficient buffer.
+        (
+            _with_frame_size(_encode(_noise((64, 48)), "JPEG", progressive=True), 8000, 8000)
+            + b"\0" * (11 * MiB),
+            "image/jpeg",
+            "8000x8000 pixels",
+        ),
+    ],
+    ids=["png-bomb", "png-over-cap", "progressive-jpeg"],
+)
+async def test_the_child_refuses_a_bomb_from_its_header(data, media_type, message):
+    image = _spooled(data)
+
+    with pytest.raises(ImageTooLarge, match=message):
+        await media_images.prepare_image_bounded(image, media_type)
+    assert not os.path.exists(image.path)
+
+
+async def test_a_decode_over_the_child_allowance_fails_in_the_child():
+    # Within the header caps (4096 x 4096), but RGBA through Pillow's PNG
+    # decoder needs ~130 MiB: more than IMAGE_CHILD_EXTRA_BYTES allows.
+    rows = Image.frombytes("RGBA", (4096, 1024), os.urandom(4096 * 1024 * 4))
+    image = Image.new("RGBA", (4096, 4096), (0, 0, 0, 255))
+    image.paste(rows, (0, 0))
+    spooled = _spooled(_encode(image, "PNG", compress_level=1))
+    del image, rows
+
+    with pytest.raises(ImageTooLarge, match="within the memory limit"):
+        await media_images.prepare_image_bounded(spooled, "image/png")
+    assert not os.path.exists(spooled.path)
+
+
+def test_webp_size_is_read_from_the_riff_header():
+    for kwargs in ({"quality": 80}, {"lossless": True}):
+        webp = _encode(Image.new("RGB", (1234, 567), "red"), "WEBP", **kwargs)
+        assert image_child.webp_size(webp[:32]) == (1234, 567)
+    animated = _encode(
+        Image.new("RGB", (321, 123)), "WEBP", save_all=True,
+        append_images=[Image.new("RGB", (321, 123), "blue")],
+    )
+    assert image_child.webp_size(animated[:32]) == (321, 123)
+    assert image_child.webp_size(b"RIFF\0\0\0\0WEBP") is None
+
+
+async def test_large_webp_is_refused_before_pillow_opens_it():
+    # Pillow sets up libwebp's decoder, and reserves its buffers, in open():
+    # under the child's limit a 12 MP one fails there, before any size check
+    # after open could answer. So the size is read from the header first.
+    webp = _encode(_noise((4000, 3000)), "WEBP", quality=50)
+    assert len(webp) > MAX_SEND_BYTES
+
+    with pytest.raises(ImageTooLarge, match="4000x3000 pixels"):
+        await media_images.prepare_image_bounded(webp, "image/webp")
 
 
 def test_oversized_gif_goes_as_its_first_frame():
@@ -350,6 +457,103 @@ async def test_an_undeclared_oversized_body_is_abandoned_at_the_cap(monkeypatch,
     assert len(pulled) <= MAX_DOWNLOAD_BYTES // 65536 + 1
 
 
+async def _chunks(body: bytes, pulled: list[int] | None = None):
+    for start in range(0, len(body), 65536):
+        if pulled is not None:
+            pulled.append(start)
+        yield body[start : start + 65536]
+
+
+def _spool_files(directory) -> list:
+    return sorted(Path(directory).glob("*.image"))
+
+
+async def test_an_image_over_the_memory_cap_streams_to_disk(monkeypatch, tmp_path):
+    monkeypatch.setattr(media_reads.tempfile, "tempdir", str(tmp_path))
+    body = os.urandom(MAX_DOWNLOAD_BYTES + 3 * 65536)
+
+    spooled = await media_reads.read_body(_chunks(body), "", spill_image=True)
+
+    assert isinstance(spooled, media_reads.SpooledImage)
+    assert spooled.size == len(body) and Path(spooled.path).read_bytes() == body
+    spooled.discard()
+    assert _spool_files(tmp_path) == []
+
+
+async def test_a_body_under_the_cap_stays_in_memory_even_as_an_image():
+    body = os.urandom(MAX_DOWNLOAD_BYTES)
+
+    assert await media_reads.read_body(_chunks(body), "", spill_image=True) == body
+
+
+async def test_an_image_declared_over_the_image_ceiling_is_refused_unread():
+    pulled: list[int] = []
+    declared = str(media_reads.MAX_IMAGE_DOWNLOAD_BYTES + 1)
+
+    body = await media_reads.read_body(_chunks(b"x", pulled), declared, spill_image=True)
+
+    assert body is None and pulled == []
+
+
+async def test_an_image_over_the_ceiling_mid_stream_leaves_no_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(media_reads, "MAX_IMAGE_DOWNLOAD_BYTES", MAX_DOWNLOAD_BYTES + 4 * 65536)
+    monkeypatch.setattr(media_reads.tempfile, "tempdir", str(tmp_path))
+    pulled: list[int] = []
+    body = b"\0" * (MAX_DOWNLOAD_BYTES + 8 * 65536)
+
+    assert await media_reads.read_body(_chunks(body, pulled), "", spill_image=True) is None
+    assert _spool_files(tmp_path) == []
+    assert len(pulled) <= (MAX_DOWNLOAD_BYTES + 4 * 65536) // 65536 + 1
+
+
+async def test_a_cancelled_spooling_download_leaves_no_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(media_reads.tempfile, "tempdir", str(tmp_path))
+    spilling = asyncio.Event()
+
+    async def stalls_once_spilling():
+        sent = 0
+        while True:
+            if sent > MAX_DOWNLOAD_BYTES + 65536:  # on disk by now
+                spilling.set()
+                await asyncio.Event().wait()  # the server goes quiet
+            sent += 65536
+            yield b"\0" * 65536
+
+    read = asyncio.create_task(
+        media_reads.read_body(stalls_once_spilling(), "", spill_image=True)
+    )
+    await asyncio.wait_for(spilling.wait(), 10)
+    assert len(_spool_files(tmp_path)) == 1
+    read.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await read
+    assert _spool_files(tmp_path) == []
+
+
+async def test_non_images_keep_the_memory_cap_when_spilling_is_on():
+    body = b"%PDF-" + b"\0" * MAX_DOWNLOAD_BYTES
+
+    assert await media_reads.read_body(_chunks(body), "", spill_image=False) is None
+
+
+@pytest.mark.parametrize("module", ["bot", "worker"])
+async def test_both_fetchers_spool_a_large_image(monkeypatch, module):
+    pulled: list[int] = []
+    body = os.urandom(MAX_DOWNLOAD_BYTES + 65536)
+    headers = {"content-length": str(len(body)), "content-type": "image/jpeg"}
+    client = _client(200, headers, body, pulled)
+    if module == "bot":
+        monkeypatch.setattr(web_fetch, "httpx", SimpleNamespace(AsyncClient=client))
+        fetched = await web_fetch.fetch_bytes("https://x/big.jpg", spill_images=True)
+    else:
+        monkeypatch.setattr(media_read.httpx, "AsyncClient", client)
+        fetched = await media_read._fetch_bytes("https://x/big.jpg", image=True)
+
+    spooled, _ = fetched
+    assert isinstance(spooled, media_reads.SpooledImage) and spooled.size == len(body)
+    spooled.discard()
+
+
 # --------------------------------------------------------------------------- #
 # One read at a time, and freed memory handed back
 # --------------------------------------------------------------------------- #
@@ -455,7 +659,7 @@ def _capture_children(monkeypatch) -> list:
         spawned.append(child)
         return child
 
-    monkeypatch.setattr(pdf_text.asyncio, "create_subprocess_exec", capture)
+    monkeypatch.setattr(bounded_child.asyncio, "create_subprocess_exec", capture)
     return spawned
 
 
@@ -547,21 +751,34 @@ async def test_the_slot_is_not_released_before_the_pdf_child_is_gone(monkeypatch
 
 PEAK_BUDGET_MIB = 40
 # A PDF read's parent and parser child at the same instant. The child alone
-# is ~35 MiB once pdfplumber is imported; this leaves >10 MiB of the bot's
-# ~70 MiB headroom.
+# is ~35 MiB once pdfplumber is imported.
 PDF_COMBINED_BUDGET_MIB = 60
+# An image read that decodes in image_child: the child is capped ~120 MiB
+# (Pillow's ~23 MiB plus IMAGE_CHILD_EXTRA_BYTES) and the parent holds at
+# most a MAX_DOWNLOAD_BYTES input beside it.
+IMAGE_CHILD_COMBINED_BUDGET_MIB = 135
+# Reads queued behind one another: each runs alone, but what the first leaves
+# fragmented in the heap is not all returned, so the peak sits a few MiB above
+# one read's (39-45 MiB for 2 to 20 noisy GIF reads, measured 2026-09-25) and
+# does not grow with the count.
+QUEUED_BUDGET_MIB = 48
 
 
 def _read(tmp_path, name: str, data: bytes, concurrency: int = 1) -> dict:
     path = tmp_path / name
     path.write_bytes(data)
+    scratch = tmp_path / "scratch"  # the harness's TMPDIR: spools land here
+    scratch.mkdir(exist_ok=True)
     done = subprocess.run(
         [sys.executable, "-W", "ignore", str(Path(__file__).with_name("media_read_harness.py")),
          str(path), name, str(concurrency)],
         capture_output=True, text=True, check=True, cwd=REPO,
-        env={**os.environ, "PYTHONPATH": str(REPO), "PYDANTIC_AI_NO_BANNER": "1"},
+        env={**os.environ, "PYTHONPATH": str(REPO), "PYDANTIC_AI_NO_BANNER": "1",
+             "TMPDIR": str(scratch)},
     )
-    return json.loads(done.stdout.strip().splitlines()[-1])
+    result = json.loads(done.stdout.strip().splitlines()[-1])
+    result["left_behind"] = sorted(p.name for p in scratch.iterdir())
+    return result
 
 
 @pytest.mark.slow
@@ -587,8 +804,16 @@ def test_whole_reads_fit_the_headroom(tmp_path):
         "big.gif": _encode(big[0], "GIF", save_all=True, append_images=big[1:]),
         "bomb.pdf": _pdf_bomb(9.5),
         "notes.txt": b"lorem ipsum dolor sit amet " * (9 * MiB // 27),
+        # Over MAX_DOWNLOAD_BYTES: streamed to disk and downsampled in the child.
+        "large.jpg": _encode(_noise((4000, 3000)), "JPEG", quality=100),
+        # Within the download cap but over the in-process pixel cap.
+        "screenshot4k.png": _encode(_screenshot((3840, 2160)), "PNG") + b"\0" * (3 * MiB),
+        # Compressed bombs: refused from the header, in the child.
+        "bomb.png": _png_header_bomb(50_000, 50_000, 12 * MiB),
+        "huge.png": _png_header_bomb(8000, 8000, 12 * MiB),
     }
     results = {name: _read(tmp_path, name, data) for name, data in cases.items()}
+    assert results["large.jpg"]["input_mb"] * 1e6 > MAX_DOWNLOAD_BYTES
 
     assert results["screenshot.png"]["result"] == "described"
     assert results["photo.jpg"]["result"] == "described"
@@ -605,10 +830,22 @@ def test_whole_reads_fit_the_headroom(tmp_path):
     assert results["notes.txt"]["result"] == (
         f"text {chat_tools.MAX_TEXT_DECODE_BYTES} chars"
     )
+    assert results["large.jpg"]["result"] == "described"
+    assert results["screenshot4k.png"]["result"] == "described"
+    assert "too many pixels" in results["bomb.png"]["result"]
+    assert "8000x8000 pixels" in results["huge.png"]["result"]
     for name, result in results.items():
+        assert result["left_behind"] == [], (name, result)
         assert result["growth_mib"] <= PEAK_BUDGET_MIB, (name, result)
-        if not name.endswith(".pdf"):  # nothing else starts a process
-            assert result["combined_mib"] <= PEAK_BUDGET_MIB, (name, result)
+        if name.endswith(".pdf"):
+            budget = PDF_COMBINED_BUDGET_MIB
+        elif result["child_peak_mib"] > 0:  # decoded (or refused) in image_child
+            budget = IMAGE_CHILD_COMBINED_BUDGET_MIB
+        else:
+            budget = PEAK_BUDGET_MIB
+        assert result["combined_mib"] <= budget, (name, result)
+    for name in ("large.jpg", "screenshot4k.png"):
+        assert results[name]["child_peak_mib"] > 0, results[name]
 
 
 @pytest.mark.slow
@@ -619,5 +856,5 @@ def test_concurrent_reads_do_not_add_up(tmp_path):
     one = _read(tmp_path, "one.png", shot)
     three = _read(tmp_path, "three.png", shot, concurrency=3)
 
-    assert three["growth_mib"] <= PEAK_BUDGET_MIB
-    assert three["growth_mib"] <= one["growth_mib"] + 10
+    assert three["combined_mib"] <= QUEUED_BUDGET_MIB
+    assert three["combined_mib"] <= one["combined_mib"] + 10
