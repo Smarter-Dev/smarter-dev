@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import asyncio
 import ctypes
-import ctypes.util
 import gc
 import weakref
 from collections.abc import AsyncIterator
@@ -52,8 +51,9 @@ def _slot() -> asyncio.Semaphore:
 
 
 def _load_malloc_trim():
+    # By soname: ctypes.util.find_library would spawn ldconfig (or gcc) to look.
     try:
-        return ctypes.CDLL(ctypes.util.find_library("c") or "libc.so.6").malloc_trim
+        return ctypes.CDLL("libc.so.6").malloc_trim
     except (OSError, AttributeError):  # not glibc: nothing to trim
         return None
 
