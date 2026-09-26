@@ -2092,8 +2092,11 @@
   // The notice's own way out: open the settings pop-over on the model select.
   var chooseModel = document.querySelector('[data-model-unavailable-choose]');
   if (chooseModel) {
-    chooseModel.addEventListener('click', function () {
+    chooseModel.addEventListener('click', function (event) {
       if (!settingsDisclosure) return;
+      // The button sits outside the pop-over, so the document's click-away
+      // handler would shut it again as this same click bubbles up.
+      event.stopPropagation();
       settingsDisclosure.hidden = false;
       settingsDisclosure.open = true;
       var select = document.querySelector('[data-chat-model]');
