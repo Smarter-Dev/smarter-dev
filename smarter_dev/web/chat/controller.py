@@ -25,6 +25,7 @@ from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.shared.model_catalog import model_vendor
 from smarter_dev.web.agent_api import resources_quota_state
+from smarter_dev.web.chat.api import available_model
 from smarter_dev.web.chat.api import require_user_id
 from smarter_dev.web.chat.api import resolved_conversation_settings
 from smarter_dev.web.chat.api import turn_meta
@@ -397,6 +398,10 @@ async def _web_chat_page(
     context = await _chat_context(session, conversation)
     settings = await ensure_settings(session)
     selected_model = get_model(conversation.selected_model_key)
+    # Rendered locked, not only locked by chat.js after the catalog loads.
+    model_unavailable = (
+        await available_model(session, conversation.selected_model_key) is None
+    )
     return Template(
         "chat/index.html",
         context={
@@ -405,6 +410,7 @@ async def _web_chat_page(
             "quick_chat": conversation.chat_mode == QUICK_CHAT_MODE,
             **await _rail_context(session, user_id),
             "model": selected_model,
+            "model_unavailable": model_unavailable,
             "model_reasoning_levels": [
                 level.value for level in selected_model.reasoning_levels
             ]
