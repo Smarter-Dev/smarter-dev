@@ -183,6 +183,11 @@ async def run_authoring_pipeline(payload: PipelineRunPayload) -> dict:
             if run is None:
                 logger.error("pipeline run %s missing — aborting", run_id)
                 return {"status": "missing"}
+            if run.status in ("completed", "failed"):
+                # A retry or reclaim of a run that already ended: running the
+                # stages again would pay for them twice (#27).
+                logger.warning("pipeline run %s already %s — not rerunning", run_id, run.status)
+                return {"status": run.status, "reason": "already finished"}
             run.status = "running"
             run.started_at = datetime.now(timezone.utc)
             await db.commit()
@@ -352,8 +357,7 @@ async def run_authoring_pipeline(payload: PipelineRunPayload) -> dict:
         synthesis_out = _typed(synthesis_raw, SynthesisOutput)
 
         # ── Write the page row ───────────────────────────────────────
-        page_id = await _write_blog_post(Session, synthesis_out)
-        await _finalise_completed(Session, run_id, page_id, root_session_id)
+        page_id = await _publish_once(Session, run_id, synthesis_out)
         return {"status": "completed", "page_id": str(page_id)}
 
     except Exception as exc:  # noqa: BLE001
@@ -368,23 +372,39 @@ async def run_authoring_pipeline(payload: PipelineRunPayload) -> dict:
 # ── Persistence helpers ──────────────────────────────────────────────
 
 
-async def _finalise_completed(
-    Session, run_id: UUID, page_id: UUID, root_session_id: str
-) -> None:
+async def _publish_once(Session, run_id: UUID, out: SynthesisOutput) -> UUID | None:
+    """Publish the run's post unless an attempt of this run already did.
+
+    Two attempts of one run can overlap (a stalled worker's claim expires and
+    another worker takes the job), so the page insert and the run's
+    completion commit together under a lock on the run row (#27).
+    """
     async with Session() as db:
-        run = await db.get(AuthoringPipelineRun, run_id)
+        run = (
+            await db.execute(
+                select(AuthoringPipelineRun)
+                .where(AuthoringPipelineRun.id == run_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
         if run is None:
-            return
+            return None
+        if run.result_page_id is not None:
+            logger.warning("pipeline run %s already published; not publishing again", run_id)
+            return run.result_page_id
+        page_id = await _insert_blog_post(db, out)
         run.status = "completed"
         run.result_page_id = page_id
         run.completed_at = datetime.now(timezone.utc)
         await db.commit()
+        return page_id
 
 
 async def _finalise_failed(Session, run_id: UUID, reason: str) -> None:
     async with Session() as db:
         run = await db.get(AuthoringPipelineRun, run_id)
-        if run is None:
+        if run is None or run.status == "completed":
+            # An overlapping attempt already published; its outcome stands.
             return
         run.status = "failed"
         run.error = reason
@@ -392,55 +412,57 @@ async def _finalise_failed(Session, run_id: UUID, reason: str) -> None:
         await db.commit()
 
 
-async def _write_blog_post(Session, out: SynthesisOutput) -> UUID:
-    """Insert a `pages` row + `blog_post_meta` row for the agent-authored post."""
-    async with Session() as db:
-        # Look up the Smarter Dev agent user.
-        result = await db.execute(
-            text("SELECT id FROM users WHERE email = :email").bindparams(
-                email=SMARTER_DEV_AGENT_EMAIL
-            )
-        )
-        row = result.first()
-        if row is None:
-            raise RuntimeError(
-                f"Smarter Dev agent user ({SMARTER_DEV_AGENT_EMAIL}) is "
-                "missing; migration may not have run."
-            )
-        author_id: UUID = row[0]
+async def _insert_blog_post(db: AsyncSession, out: SynthesisOutput) -> UUID:
+    """Insert a `pages` row + `blog_post_meta` row for the agent-authored post.
 
-        slug = await _unique_slug(db, _slugify(out.slug or out.title))
-        page_id = uuid4()
-        now = datetime.now(timezone.utc)
-        body = out.content.rstrip()
-        if out.limits_paragraph.strip():
-            body = (
-                f"{body}\n\n"
-                "## What this post doesn't cover\n\n"
-                f"{out.limits_paragraph.strip()}\n"
-            )
-        await db.execute(
-            text(
-                """
-                INSERT INTO pages
-                    (id, slug, title, type, content, user_id, is_published,
-                     published_at, meta_robots, "order", created_at, updated_at)
-                VALUES
-                    (:id, :slug, :title, 'blog', :content, :uid, true,
-                     :published_at, 'noindex, nofollow', 0,
-                     :created_at, :updated_at)
-                """
-            ).bindparams(
-                id=page_id,
-                slug=slug,
-                title=out.title,
-                content=body,
-                uid=author_id,
-                published_at=now,
-                created_at=now,
-                updated_at=now,
-            )
+    The caller commits, together with the run's completion.
+    """
+    # Look up the Smarter Dev agent user.
+    result = await db.execute(
+        text("SELECT id FROM users WHERE email = :email").bindparams(
+            email=SMARTER_DEV_AGENT_EMAIL
         )
-        db.add(BlogPostMeta(page_id=page_id))
-        await db.commit()
-        return page_id
+    )
+    row = result.first()
+    if row is None:
+        raise RuntimeError(
+            f"Smarter Dev agent user ({SMARTER_DEV_AGENT_EMAIL}) is "
+            "missing; migration may not have run."
+        )
+    author_id: UUID = row[0]
+
+    slug = await _unique_slug(db, _slugify(out.slug or out.title))
+    page_id = uuid4()
+    now = datetime.now(timezone.utc)
+    body = out.content.rstrip()
+    if out.limits_paragraph.strip():
+        body = (
+            f"{body}\n\n"
+            "## What this post doesn't cover\n\n"
+            f"{out.limits_paragraph.strip()}\n"
+        )
+    await db.execute(
+        text(
+            """
+            INSERT INTO pages
+                (id, slug, title, type, content, user_id, is_published,
+                 published_at, meta_robots, "order", created_at, updated_at)
+            VALUES
+                (:id, :slug, :title, 'blog', :content, :uid, true,
+                 :published_at, 'noindex, nofollow', 0,
+                 :created_at, :updated_at)
+            """
+        ).bindparams(
+            id=page_id,
+            slug=slug,
+            title=out.title,
+            content=body,
+            uid=author_id,
+            published_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+    )
+    db.add(BlogPostMeta(page_id=page_id))
+    await db.flush()
+    return page_id

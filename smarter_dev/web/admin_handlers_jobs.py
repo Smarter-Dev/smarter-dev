@@ -159,6 +159,7 @@ async def run_admin_handler_fire(
             trigger_type=trigger_type,
             trigger_context=payload.trigger_context,
             handler_settings=handler_settings,
+            fire_job_id=context.job.id,
         )
         return {"status": "skipped"}
 
@@ -238,6 +239,7 @@ async def run_admin_handler_fire(
         trigger_type=trigger_type,
         trigger_context=payload.trigger_context,
         handler_settings=handler_settings,
+        fire_job_id=context.job.id,
     )
 
     return {"status": result.outcome, "cap": result.cap}
