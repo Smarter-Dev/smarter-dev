@@ -84,7 +84,7 @@ _USAGE = {
 
 
 class _FakeSession:
-    async def get(self, model, id_):
+    async def get(self, model, id_, **options):
         return _FakeSession.record
 
     def add(self, obj):
@@ -725,6 +725,8 @@ async def test_schedule_row_scheduled_fire_reschedules(monkeypatch):
             "start_at": "2099-01-01T00:00:00Z",
         },
         memory={},
+        # The occurrence firing now is the one stamped on the row.
+        scheduled_job_id="this-fire",
     )
     submits, limiter_kwargs = [], []
 
@@ -738,7 +740,8 @@ async def test_schedule_row_scheduled_fire_reschedules(monkeypatch):
     await _fire(
         HandlerFirePayload(
             handler_id=str(uuid4()), trigger_context={"trigger_type": "schedule"}
-        )
+        ),
+        context=_ctx("this-fire"),
     )
     assert len(submits) == 1
     payload, scheduled_for, _ = submits[0]
@@ -826,6 +829,7 @@ async def test_admin_schedule_row_scheduled_fire_reschedules(monkeypatch):
             "start_at": "2099-01-01T00:00:00Z",
         },
         memory={},
+        scheduled_job_id="this-fire",
     )
     submits: list = []
     _patch_admin_reschedule_job(monkeypatch, record, submits)
@@ -833,7 +837,8 @@ async def test_admin_schedule_row_scheduled_fire_reschedules(monkeypatch):
         AdminHandlerFirePayload(
             admin_handler_id=str(uuid4()), channel_id="C1",
             trigger_context={"trigger_type": "schedule"},
-        )
+        ),
+        context=_ctx("this-fire"),
     )
     assert len(submits) == 1
     payload, scheduled_for, _ = submits[0]
