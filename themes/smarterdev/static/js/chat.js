@@ -25,6 +25,11 @@
   var conversationPromise = null;
   var catalog = null;
   var pendingChange = null;
+  // A conversation whose model was retired (or disabled) keeps that selection
+  // and its history; it just cannot send until its owner confirms a new model.
+  var modelUnavailable = shell.dataset.modelAvailable === 'false';
+  var unavailableNotice = document.querySelector('[data-model-unavailable]');
+  var UNAVAILABLE_HINT = 'Choose an available model to continue';
   var agentPanel = document.querySelector('[data-chat-agent-panel]');
   var subagentList = document.querySelector('[data-chat-subagents]');
   var notificationStreamStatus = null;
@@ -568,6 +573,19 @@
     };
   }
 
+  // Shows or clears the retired-model notice and re-derives the composer lock.
+  // The notice names the stored key: a retired model has no catalog label.
+  function setModelAvailability(available, modelKey) {
+    modelUnavailable = !available;
+    shell.dataset.modelAvailable = available ? 'true' : 'false';
+    if (unavailableNotice) {
+      unavailableNotice.hidden = Boolean(available);
+      var name = unavailableNotice.querySelector('[data-model-unavailable-key]');
+      if (name && modelKey) name.textContent = modelKey;
+    }
+    setBusy(Boolean(activeTurn));
+  }
+
   function showError(message) {
     if (!errorEl) return;
     errorEl.textContent = message || '';
@@ -586,21 +604,28 @@
 
   function setBusy(busy) {
     var locked = Boolean(busy);
-    var blocked = Boolean(locked || uploadCount);
+    var blocked = Boolean(locked || uploadCount || modelUnavailable);
     if (submitBtn) submitBtn.disabled = blocked;
+    if (input) input.disabled = modelUnavailable;
     // Say why Send is off rather than leaving a greyed-out button unexplained.
     if (form) form.dataset.busy = blocked ? 'true' : 'false';
     if (hintEl) {
-      hintEl.textContent = uploadCount
+      hintEl.textContent = modelUnavailable
+        ? UNAVAILABLE_HINT
+        : uploadCount
         ? 'Uploading attachments — Send unlocks when they finish'
         : (locked ? 'Working — Send unlocks when this turn finishes' : IDLE_HINT);
     }
     if (stopBtn) stopBtn.hidden = !activeTurn;
     document.querySelectorAll('[data-regenerate]').forEach(function (button) {
-      button.disabled = locked;
+      button.disabled = Boolean(locked || modelUnavailable);
     });
-    document.querySelectorAll('[data-chat-model], [data-chat-reasoning]').forEach(function (control) {
+    // The model select stays usable: choosing a new model is the way out.
+    document.querySelectorAll('[data-chat-model]').forEach(function (control) {
       control.disabled = Boolean(locked || !conversationId);
+    });
+    document.querySelectorAll('[data-chat-reasoning]').forEach(function (control) {
+      control.disabled = Boolean(locked || !conversationId || modelUnavailable);
     });
     document.querySelectorAll('[data-chat-new-intelligence], [data-chat-new-model], [data-chat-new-reasoning]').forEach(function (control) {
       // Intelligence is immutable and attachment-first creation already fixes
@@ -1574,7 +1599,7 @@
       actions.appendChild(regenerate);
     }
     regenerate.dataset.turnId = message.turn_id;
-    regenerate.disabled = Boolean(locked);
+    regenerate.disabled = Boolean(locked || modelUnavailable);
     var select = actions.querySelector('[data-version-group]');
     if ((choices || []).length < 2) {
       if (select) select.remove();
@@ -1942,9 +1967,9 @@
       if (!catalog.models.some(function (item) { return item.key === persistedModel; })) {
         var unavailable = document.createElement('option');
         unavailable.value = persistedModel;
+        unavailable.dataset.unavailable = '';
         unavailable.textContent = persistedModel + ' · unavailable (select a new model)';
         current.appendChild(unavailable);
-        showError('The selected model is unavailable. Select and confirm a new model.');
       }
       current.value = persistedModel;
       current.dataset.original = current.value;
@@ -1973,7 +1998,11 @@
         reasoning.dataset.bound = 'true';
       }
     }
-    setBusy(Boolean(activeTurn));
+    // The catalog lists exactly the models a turn may run on.
+    setModelAvailability(
+      catalog.models.some(function (item) { return item.key === persistedModel; }),
+      persistedModel
+    );
   }
 
   function loadCatalog() {
@@ -2041,6 +2070,13 @@
         shell.dataset.modelKey = data.model_key;
         shell.dataset.reasoningLevel = data.reasoning_level || '';
         fillReasoning(data.model_key, document.querySelector('[data-chat-reasoning]'), data.reasoning_level);
+        // The server only confirms onto an available model.
+        // The retired key's placeholder option has nothing left to select.
+        Array.prototype.forEach.call(select.querySelectorAll('option[data-unavailable]'), function (option) {
+          option.remove();
+        });
+        showError('');
+        setModelAvailability(true, data.model_key);
         dialog.hidden = true;
         pendingChange = null;
       }).catch(function (error) {
@@ -2050,6 +2086,21 @@
         pendingChange = null;
         showError(error.message);
       });
+    });
+  }
+
+  // The notice's own way out: open the settings pop-over on the model select.
+  var chooseModel = document.querySelector('[data-model-unavailable-choose]');
+  if (chooseModel) {
+    chooseModel.addEventListener('click', function (event) {
+      if (!settingsDisclosure) return;
+      // The button sits outside the pop-over, so the document's click-away
+      // handler would shut it again as this same click bubbles up.
+      event.stopPropagation();
+      settingsDisclosure.hidden = false;
+      settingsDisclosure.open = true;
+      var select = document.querySelector('[data-chat-model]');
+      if (select) select.focus();
     });
   }
 
@@ -2214,6 +2265,7 @@
   // rejected, so a caller can leave the reader's text where it is.
   function sendMessage(text, build) {
     showError('');
+    if (modelUnavailable) { showError('Choose an available model to continue this conversation.'); return false; }
     if (uploadCount) { showError('Wait for attachments to finish uploading.'); return false; }
     text = (text || '').trim();
     if (!text) { showError('Type a message first.'); return false; }
@@ -2311,7 +2363,7 @@
       return;
     }
     var button = event.target.closest('[data-regenerate]');
-    if (!button) return;
+    if (!button || modelUnavailable) return;
     setBusy(true);
     api('/v2/api/chat/conversations/' + conversationId + '/turns/' + button.dataset.turnId + '/regenerate', json('POST', {})).then(function (data) {
       activeTurn = data.turn_id;
@@ -2469,6 +2521,11 @@
       // The agent may have named the conversation while the notification that
       // said so was missed; the snapshot is the one that always arrives.
       if (snapshot.title) applyTitle(snapshot.id, snapshot.title);
+      // A turn refused because its model was retired mid-conversation ends here;
+      // the snapshot is what says so.
+      if (snapshot.model_available === false && !modelUnavailable) {
+        setModelAvailability(false, snapshot.model_key);
+      }
       syncThread(snapshot);
       if (active) {
         activeTurn = active.id;
