@@ -628,9 +628,14 @@ def generate_icon():
         if (f + 1) % 20 == 0 or f == total_frames - 1:
             print(f"  Frame {f + 1}/{total_frames}")
 
-    # Quantize frames to a reduced palette for smaller file size
-    quantized = [fr.quantize(colors=64, method=Image.Quantize.MEDIANCUT)
-                 for fr in frames]
+    # Build a single palette from all frames combined
+    combined = Image.new("RGB", (frames[0].width, len(frames) * frames[0].height))
+    for i, fr in enumerate(frames):
+        combined.paste(fr, (0, i * fr.height))
+    palette_source = combined.quantize(colors=64, method=Image.Quantize.MEDIANCUT)
+
+    # Quantize each frame using the shared palette
+    quantized = [fr.quantize(palette=palette_source, dither=Image.Dither.NONE) for fr in frames]
 
     # Save GIF
     frame_duration = int(1000 / ICON_FPS)
@@ -641,6 +646,17 @@ def generate_icon():
         duration=frame_duration,
         loop=0,
         optimize=True,
+
+        # Fixes a discord gif optimizer bug that happens with downscaled
+        #  gifs that use optimize and disposal modes 0/1.
+        # Disposal=1 would have a smaller file, however that requires optimize
+        #  to remove ghosting, which combined with disposal=1 is the cause of
+        #  buggy downscales by discord.
+        # Disposal=2 forces a new frame every draw, which is only a few KiB extra,
+        #  and evades the oddities with optimize and disposal=1.
+        disposal=2,
+        palette=palette_source,
+        include_color_table=False
     )
     print(f"  Saved icon: {ICON_OUTPUT}")
     print(f"  Size: {ICON_OUTPUT.stat().st_size / 1024:.1f} KB")
