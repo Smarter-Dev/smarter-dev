@@ -16,6 +16,8 @@ Nothing outside this module names the model. The time arithmetic stays in
 
 from __future__ import annotations
 
+import logging
+
 from collections.abc import Callable
 from datetime import UTC
 from datetime import datetime
@@ -33,6 +35,8 @@ from smarter_dev.web.handler_fire_payloads import HandlerFirePayload
 from smarter_dev.web.handler_schedule import next_fire_at
 from smarter_dev.web.models import AdminHandler
 from smarter_dev.web.models import ChannelHandler
+
+logger = logging.getLogger(__name__)
 
 HandlerRecord = ChannelHandler | AdminHandler
 
@@ -86,14 +90,22 @@ class RecurringFireChain:
         )
 
     async def load_enabled_handler(
-        self, session: AsyncSession, handler_id: UUID
+        self, session: AsyncSession, handler_id: UUID, *, lock: bool = False
     ) -> HandlerRecord | None:
         """This tier's row for ``handler_id`` if it may still fire, else None.
 
         A row that is gone or disabled reads as None: nothing downstream should
-        arm, stamp or audit a fire for it.
+        arm, stamp or audit a fire for it. ``lock`` holds the row until the
+        caller's transaction ends.
         """
-        record = await session.get(self._handler_model, handler_id)
+        if lock:
+            # populate_existing: a row this session already loaded is re-read
+            # under the lock, not served stale from the identity map.
+            record = await session.get(
+                self._handler_model, handler_id, with_for_update=True, populate_existing=True
+            )
+        else:
+            record = await session.get(self._handler_model, handler_id)
         if record is None or not record.enabled:
             return None
         return record
@@ -136,12 +148,19 @@ class RecurringFireChain:
         trigger_type: str,
         trigger_context: dict,
         handler_settings: dict,
+        fire_job_id: str,
     ) -> None:
         """Enqueue this handler's next occurrence, if this fire owns the chain.
 
         The row is re-read in a fresh session because the fire may have taken
         long enough for someone to disable or delete the handler meanwhile;
         such a chain ends here rather than leaving an orphan job queued.
+
+        Only the occurrence stamped on the row re-arms. Once this fire has
+        re-armed, the row names its successor, so a retry or an overlapping
+        run of the same fire (a reclaimed job) finds another id and stops
+        instead of forking a second chain (#27). The same holds after the
+        sweep or an edit has re-armed the chain meanwhile.
         """
         if not _fire_owns_rearming(trigger_type, trigger_context):
             return
@@ -149,8 +168,16 @@ class RecurringFireChain:
         if next_occurrence is None:
             return
         async with get_db_session_context() as session:
-            record = await self.load_enabled_handler(session, handler_id)
+            record = await self.load_enabled_handler(session, handler_id, lock=True)
             if record is None:
+                return
+            if record.scheduled_job_id != fire_job_id:
+                logger.info(
+                    "fire %s no longer owns handler %s's chain (now %s); not re-arming",
+                    fire_job_id,
+                    handler_id,
+                    record.scheduled_job_id,
+                )
                 return
             await self.arm_occurrence(record, next_occurrence)
             await session.commit()

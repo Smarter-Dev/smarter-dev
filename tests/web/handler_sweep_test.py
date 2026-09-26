@@ -370,3 +370,33 @@ async def test_a_disabled_handler_is_not_re_armed(monkeypatch, test_engine):
     assert next_occurrence is None
     assert submits == []
     assert runs == []
+
+
+async def test_a_fire_re_arming_as_the_sweep_runs_leaves_one_chain(monkeypatch, test_engine):
+    """The sweep read the row before a fire re-armed it; it must act on the fresh row (#27).
+
+    With the stale read it would cancel the long-dead job and stamp its own,
+    orphaning the fire's live successor: one extra fire. Re-read under the
+    lock, it cancels that successor instead, so exactly one chain remains.
+    """
+    submits = _patch_rearm(monkeypatch)
+    record = await _seed(
+        test_engine,
+        ChannelHandler,
+        **_channel_handler_fields(scheduled_job_id="dead-job"),
+    )
+    async with async_sessionmaker(test_engine, expire_on_commit=False)() as sweep:
+        seen = await sweep.get(ChannelHandler, record.id)  # held, as a stale identity-map entry
+        assert seen.scheduled_job_id == "dead-job"
+        async with async_sessionmaker(test_engine, expire_on_commit=False)() as fire:
+            row = await fire.get(ChannelHandler, record.id)
+            row.scheduled_job_id = "fire-successor"
+            await fire.commit()
+
+        await rearm_chain(sweep, _stalled(record, "standard"), NOW)
+        await sweep.commit()
+
+    assert _Handle.cancelled == ["fire-successor"]
+    (_, _, job_id), = submits
+    async with async_sessionmaker(test_engine, expire_on_commit=False)() as session:
+        assert (await session.get(ChannelHandler, record.id)).scheduled_job_id == job_id

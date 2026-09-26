@@ -165,11 +165,13 @@ jobs:
         echo "migrations applied"
 
     # Workers must know every new job payload before web pods can enqueue it.
+    # One at a time: each surges a 512Mi-request pod, and the nodes have had
+    # room for only one (#27).
     - name: Deploy and verify workers
       run: |
         kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy-worker.yaml
-        kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy-chat-child-worker.yaml
         kubectl rollout status deployment/smarter-dev-agent-worker
+        kubectl apply -f $GITHUB_WORKSPACE/k8s/deploy-chat-child-worker.yaml
         kubectl rollout status deployment/smarter-dev-chat-child-worker
 
     - name: Deploy web, bot, and scheduled services

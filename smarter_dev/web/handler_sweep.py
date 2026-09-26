@@ -187,7 +187,10 @@ async def rearm_chain(
     """
     now = now or datetime.now(timezone.utc)
     tier_chain = RECURRING_CHAINS[chain.kind]
-    record = await tier_chain.load_enabled_handler(session, chain.handler_id)
+    # Locked until the sweep commits, so a fire re-arming this chain right now
+    # either finishes first (and its successor is what gets cancelled below)
+    # or waits and then finds the sweep's job stamped instead of its own (#27).
+    record = await tier_chain.load_enabled_handler(session, chain.handler_id, lock=True)
     if record is None:
         return None
 
