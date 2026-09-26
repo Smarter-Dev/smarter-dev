@@ -34,12 +34,21 @@ class _HandlerModel:
     """Stand-in for the tier's ORM model — only its identity is used."""
 
 
+FIRE_JOB_ID = "fire-job"
+
+
 class _Record:
-    def __init__(self, enabled: bool = True, trigger_type: str = "schedule"):
+    def __init__(
+        self,
+        enabled: bool = True,
+        trigger_type: str = "schedule",
+        scheduled_job_id: str | None = FIRE_JOB_ID,
+    ):
         self.id = uuid4()
         self.enabled = enabled
         self.trigger_type = trigger_type
-        self.scheduled_job_id = None
+        # The occurrence now firing is the one armed and stamped on the row.
+        self.scheduled_job_id = scheduled_job_id
 
 
 class _Session:
@@ -48,8 +57,9 @@ class _Session:
         self.committed = False
         self.asked_for = None
 
-    async def get(self, model, id_):
+    async def get(self, model, id_, **options):
         self.asked_for = (model, id_)
+        self.options = options
         return self._record
 
     async def commit(self):
@@ -122,6 +132,7 @@ async def test_only_a_genuine_scheduled_fire_re_arms(
         trigger_type=trigger_type,
         trigger_context=trigger_context,
         handler_settings=RECURRING_SETTINGS,
+        fire_job_id=FIRE_JOB_ID,
     )
     assert bool(submits) is rearms
 
@@ -134,6 +145,7 @@ async def test_a_re_arm_enqueues_the_tier_payload_at_the_next_occurrence(monkeyp
         trigger_type="schedule",
         trigger_context={"trigger_type": "schedule"},
         handler_settings=RECURRING_SETTINGS,
+        fire_job_id=FIRE_JOB_ID,
     )
     payload, scheduled_for, job_id = submits[0]
     assert payload == {
@@ -159,6 +171,7 @@ async def test_a_one_shot_schedule_ends_the_chain(monkeypatch):
         trigger_type="schedule",
         trigger_context={"trigger_type": "schedule"},
         handler_settings={},
+        fire_job_id=FIRE_JOB_ID,
     )
     assert submits == []
     assert session_ctx.session.asked_for is None
@@ -174,9 +187,10 @@ async def test_a_handler_disabled_mid_fire_is_not_re_armed(monkeypatch):
         trigger_type="schedule",
         trigger_context={"trigger_type": "schedule"},
         handler_settings=RECURRING_SETTINGS,
+        fire_job_id=FIRE_JOB_ID,
     )
     assert submits == []
-    assert record.scheduled_job_id is None
+    assert record.scheduled_job_id == FIRE_JOB_ID
 
 
 async def test_a_deleted_handler_is_not_re_armed(monkeypatch):
@@ -186,8 +200,42 @@ async def test_a_deleted_handler_is_not_re_armed(monkeypatch):
         trigger_type="schedule",
         trigger_context={"trigger_type": "schedule"},
         handler_settings=RECURRING_SETTINGS,
+        fire_job_id=FIRE_JOB_ID,
     )
     assert submits == []
+
+
+async def test_a_retried_fire_does_not_re_arm_a_second_time(monkeypatch):
+    # The fire re-armed, then its job was retried or reclaimed before its ack:
+    # the row now names the successor, so the retry must not fork a chain.
+    record = _Record()
+    chain, submits, session_ctx = _chain_under_test(monkeypatch, record)
+    for _ in range(2):
+        await chain.rearm_after_fire(
+            handler_id=record.id,
+            trigger_type="schedule",
+            trigger_context={"trigger_type": "schedule"},
+            handler_settings=RECURRING_SETTINGS,
+            fire_job_id=FIRE_JOB_ID,
+        )
+    assert len(submits) == 1
+    assert record.scheduled_job_id == submits[0][2]
+    assert session_ctx.session.options == {"with_for_update": True, "populate_existing": True}
+
+
+async def test_a_fire_whose_chain_was_re_armed_elsewhere_does_not_re_arm(monkeypatch):
+    # The sweep or an edit armed a new occurrence while this fire ran.
+    record = _Record(scheduled_job_id="armed-by-the-sweep")
+    chain, submits, _ = _chain_under_test(monkeypatch, record)
+    await chain.rearm_after_fire(
+        handler_id=record.id,
+        trigger_type="schedule",
+        trigger_context={"trigger_type": "schedule"},
+        handler_settings=RECURRING_SETTINGS,
+        fire_job_id=FIRE_JOB_ID,
+    )
+    assert submits == []
+    assert record.scheduled_job_id == "armed-by-the-sweep"
 
 
 # -- load_enabled_handler: the chain owns its tier's row ----------------------
