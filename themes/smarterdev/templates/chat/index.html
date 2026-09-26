@@ -59,6 +59,7 @@
      data-mode="{{ mode }}"
      data-conversation-id="{{ conversation.id if conversation else '' }}"
      data-model-key="{{ conversation.selected_model_key if mode == 'chat' and conversation else '' }}"
+     data-model-available="{{ 'false' if model_unavailable|default(false) else 'true' }}"
      data-reasoning-level="{{ conversation.reasoning_level if mode == 'chat' and conversation and conversation.reasoning_level else '' }}"
      data-default-intelligence="{{ settings.default_intelligence_mode if settings else 'efficient' }}"
      data-active-turn-id="{{ active_turn.id if active_turn else '' }}"
@@ -122,12 +123,12 @@
           <label class="p-label">Model
             <select class="p-select" data-chat-model {% if not conversation %}disabled{% endif %}>
               {% for item in models %}<option value="{{ item.key }}" {% if conversation and item.key == conversation.selected_model_key %}selected{% endif %}>{{ item.label }} · {{ item.cost_tier }}</option>{% endfor %}
-              {% if conversation and conversation.selected_model_key not in model_keys %}<option value="{{ conversation.selected_model_key }}" selected>{{ conversation.selected_model_key }} · unavailable (pick a new model)</option>{% endif %}
+              {% if conversation and conversation.selected_model_key not in model_keys %}<option value="{{ conversation.selected_model_key }}" selected data-unavailable>{{ conversation.selected_model_key }} · unavailable (pick a new model)</option>{% endif %}
               {% if not models %}<option value="">No models enabled</option>{% endif %}
             </select>
           </label>
           <label class="p-label">Reasoning
-            <select class="p-select" data-chat-reasoning {% if not conversation %}disabled{% endif %}>
+            <select class="p-select" data-chat-reasoning {% if not conversation or model_unavailable|default(false) %}disabled{% endif %}>
               <option value="" {% if not (conversation and conversation.reasoning_level) %}selected{% endif %}>Model default</option>
               {% for level in model_reasoning_levels|default([]) %}<option value="{{ level }}" {% if conversation and conversation.reasoning_level == level %}selected{% endif %}>{{ level }}</option>{% endfor %}
             </select>
@@ -199,7 +200,7 @@
           {% if mode == 'resources' and message.role == 'assistant' and message.sdanswer_blocks %}<script type="application/json" class="sdanswer-payload">{{ message.sdanswer_blocks|tojson }}</script>{% endif %}
           {% if message.stopped %}<span class="chat-stopped">Stopped</span>{% endif %}
           {% if message.role == 'assistant' and mode == 'chat' %}<div class="chat-response-actions">
-            <button type="button" class="p-btn is-bare" data-regenerate data-turn-id="{{ message.turn_id }}" {% if active_turn %}disabled{% endif %}>Regenerate</button>
+            <button type="button" class="p-btn is-bare" data-regenerate data-turn-id="{{ message.turn_id }}" {% if active_turn or model_unavailable|default(false) %}disabled{% endif %}>Regenerate</button>
             {% set choices = versions.get(message.version_group, []) %}
             {% if choices|length > 1 %}<select class="p-select" data-version-group aria-label="Response version">{% for choice in choices %}<option value="{{ choice.id }}" {% if choice.is_active %}selected{% endif %}>Response {{ choice.version_number }}</option>{% endfor %}</select>{% endif %}
           </div>{% endif %}
@@ -212,6 +213,14 @@
 
     {% if mode == 'chat' %}<details class="p-disclosure chat-agent-panel" data-chat-agent-panel hidden><summary><span data-chat-subagent-summary>Sub-agents</span></summary><div data-chat-subagents></div></details>{% endif %}
     <p class="chat-error p-notice is-bad" data-chat-error role="alert" hidden></p>
+    {# Retirements do not migrate chats: a conversation keeps the model it was
+       on, and this says why the composer is locked until a new one is chosen. #}
+    {% if mode == 'chat' and conversation %}
+    <div class="chat-model-unavailable p-notice is-warn" data-model-unavailable role="status" {% if not model_unavailable|default(false) %}hidden{% endif %}>
+      <p><b data-model-unavailable-key>{{ conversation.selected_model_key }}</b> is no longer available. This conversation and its history are kept; choose an available model to continue.</p>
+      <button type="button" class="p-btn is-primary" data-model-unavailable-choose>Choose a model</button>
+    </div>
+    {% endif %}
 
     {% if mode == 'chat' or (is_owner and not resource_running and quota_state and quota_state.followups_remaining > 0) %}
     <form class="chat-composer" data-chat-composer>
@@ -231,10 +240,10 @@
           <span class="p-sr">Attach files</span>
         </label>
         {% endif %}
-        <textarea data-chat-input maxlength="5000" required rows="1" aria-label="Message" aria-describedby="chat-composer-hint" placeholder="Message Smarter.Dev…"></textarea>
+        <textarea data-chat-input maxlength="5000" required rows="1" aria-label="Message" aria-describedby="chat-composer-hint" placeholder="Message Smarter.Dev…" {% if model_unavailable|default(false) %}disabled{% endif %}></textarea>
         <div class="chat-composer-actions">
           <button type="button" class="p-btn is-danger" data-chat-stop {% if not active_turn %}hidden{% endif %}>Stop</button>
-          <button type="submit" class="p-btn is-primary" {% if active_turn %}disabled{% endif %}>Send</button>
+          <button type="submit" class="p-btn is-primary" {% if active_turn or model_unavailable|default(false) %}disabled{% endif %}>Send</button>
         </div>
       </div>
       {# The composer's own status strip: budget on the left, the one keyboard
@@ -249,7 +258,7 @@
           </div>
         </details>
         {% else %}<span></span>{% endif %}
-        <p class="chat-composer-hint p-meta" id="chat-composer-hint" data-chat-hint>shift+enter · newline</p>
+        <p class="chat-composer-hint p-meta" id="chat-composer-hint" data-chat-hint>{{ 'Choose an available model to continue' if model_unavailable|default(false) else 'shift+enter · newline' }}</p>
       </div>
     </form>
     {% elif mode == 'resources' and is_owner %}<p class="chat-resource-quota p-notice is-warn">No follow-ups remain for this answer. <a href="/resources">Start a new question</a>.</p>{% endif %}

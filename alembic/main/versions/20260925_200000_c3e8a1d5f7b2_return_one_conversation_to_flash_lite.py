@@ -15,6 +15,11 @@ owner has since confirmed a change, sent a turn on another model, or it has
 been deleted, this does nothing. Its reasoning level stays if 3.5 Flash Lite
 offers it and becomes "medium", Lite's default, if not.
 
+This corrects one past mistake; it is not how a retirement works. Retirements
+do not migrate chats: a conversation keeps a retired selection and its page
+asks the owner to choose an available model (``RETIRED_SUCCESSORS`` in
+``smarter_dev/shared/model_catalog.py``).
+
 The downgrade does nothing. The previous build reads 3.5 Flash Lite as a live
 key, and moving the conversation back to 3.8 Flash could overwrite a choice
 its owner made after the upgrade.

@@ -615,13 +615,26 @@ _MODEL_BY_KEY: dict[str, CatalogModel] = {
 }
 
 
-# Retired key -> the model that took its place, for *selections* only: the
-# server-wide chat settings, a web conversation's picked model, a queued turn and
-# the temporary default override. Channel pins never read through this — a
-# channel that advertises its model stops with a notice until an admin repins
-# (Zech, 2026-09-24). It exists so the deploy that retires a key can leave the
-# stored selections alone while pods on the previous build are still serving;
-# the stored keys are rewritten by a later migration, once no old pod remains.
+# Retiring a model does not migrate chats (Zech, 2026-09-26). A web
+# conversation keeps the key its owner picked, its turns keep the keys they ran
+# on, and the chat page shows a notice and locks the composer until the owner
+# confirms an available model. A queued or regenerated turn on a retired key is
+# refused, never run on something else. So a retirement is: drop the entry here
+# and its ``chat_catalog_models`` row — no migration touches
+# ``web_chat_conversations.selected_model_key``. Channel pins likewise stop with
+# a notice until an admin repins (Zech, 2026-09-24).
+#
+# The two 2026-09-25 migrations that rewrote conversation selections onto
+# successors (e5a9c3f7d2b8, 7a18ff6495e1) predate this rule and are applied
+# history; c3e8a1d5f7b2 returns the one conversation a mistaken retirement
+# moved. None of them is a pattern for the next retirement.
+#
+# Retired key -> the model that took its place, for administrator settings only:
+# the server-wide chat settings (``SelectedModelKey``) and the bot's temporary
+# default override. Those are defaults nobody is mid-conversation with, and this
+# lets the deploy that retires a key leave their stored values alone while pods
+# on the previous build still read them. Web conversations, turns and channel
+# pins never read through it.
 RETIRED_SUCCESSORS: dict[str, str] = {
     "gpt-5-6-luna": "gpt-6-luna",
     "gpt-5-6-terra": "gpt-6-sol",

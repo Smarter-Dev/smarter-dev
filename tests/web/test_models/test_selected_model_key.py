@@ -1,4 +1,4 @@
-"""A selected model key reads back as its successor once the model retires."""
+"""Admin settings read a retired key as its successor; channel pins and chats keep it."""
 
 from __future__ import annotations
 
