@@ -12,9 +12,12 @@ from pathlib import Path
 
 import yaml
 
+from tests.integration.test_message_gate_quality_eval import UNCERTAIN_LABEL_CASES
+from tests.integration.test_message_gate_quality_eval import ArmCaseResult
 from tests.integration.test_message_gate_quality_eval import load_cases
 from tests.integration.test_message_gate_quality_eval import percentile
 from tests.integration.test_message_gate_quality_eval import score_case
+from tests.integration.test_message_gate_quality_eval import summarize_arm
 
 CASES_PATH = Path(__file__).parents[2] / "fixtures" / "message_gate" / "cases.yaml"
 CASE_KEYS = {
@@ -139,3 +142,25 @@ def test_percentile_nearest_rank():
     values = [float(v) for v in range(1, 21)]  # 1..20
     assert percentile(values, 50) == 10.0
     assert percentile(values, 95) == 19.0
+
+
+def test_failed_open_calls_count_as_errors_not_verdicts():
+    cases = {case.case_id: case for case in load_cases()}
+    case = cases["python_plain_on_topic"]
+    every_id = [m.message_id for m in case.candidates]
+    answered = ArmCaseResult(
+        score=score_case(case, sorted(case.expected_allowed)), latency_seconds=0.2
+    )
+    # A failed-open call allows everything; it must not be scored as the model's answer.
+    failed = ArmCaseResult(
+        score=score_case(case, every_id), latency_seconds=10.0, error="timeout"
+    )
+    summary = summarize_arm("jev", "typesafe:jev-1.13.0", [answered, failed], None)
+    assert summary.errors == 1
+    assert (summary.exact, summary.cases) == (1, 1)
+    assert summary.false_allows == 0
+    assert summary.p95_latency == 0.2
+
+
+def test_uncertain_label_cases_exist_in_the_fixture():
+    assert UNCERTAIN_LABEL_CASES <= {case.case_id for case in load_cases()}

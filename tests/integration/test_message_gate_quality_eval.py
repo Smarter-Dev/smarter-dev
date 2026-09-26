@@ -3,14 +3,13 @@
 Compares gate arms on the frozen, labeled cases in
 ``tests/fixtures/message_gate/cases.yaml``:
 
-- ``gpt-5-4-nano`` (production) and ``gpt-6-luna``: each runs through an Agent
-  built exactly like ``message_gate.get_message_gate_agent()`` (same
-  SYSTEM_PROMPT, ``output_type=GateDecision``, same model settings at
-  ``ReasoningLevel.NONE``) on the prompt from ``message_gate._render_prompt``.
-  Any catalog key works.
-- ``jev``: TypeSafe's classifier through the eval-only adapter in
-  ``message_gate_jev.py`` (one bool question per candidate, one request per
-  call).
+- ``jev`` (production): the gate's own ``message_gate.judge_messages`` — one
+  bool question per candidate, one request per call — through
+  ``message_gate_jev.py``.
+- any catalog key (default ``gpt-6-luna``, the gate before Jev): an Agent
+  built as that gate was (``message_gate_llm.SYSTEM_PROMPT``,
+  ``output_type=GateDecision``, model settings at ``ReasoningLevel.NONE``) on
+  the prompt from ``message_gate_llm.render_prompt``.
 
 Each arm is scored per case: exact match (after removing ``either`` ids from
 both sides), false allows, false drops, context-id leaks and hallucinated ids.
@@ -24,7 +23,7 @@ Run (arms whose provider key is missing are skipped):
         tests/integration/test_message_gate_quality_eval.py -m llm -q -s
 
 Environment:
-    MESSAGE_GATE_EVAL_MODELS   comma-separated arms (default: gpt-5-4-nano,gpt-6-luna,jev)
+    MESSAGE_GATE_EVAL_MODELS   comma-separated arms (default: gpt-6-luna,jev)
     MESSAGE_GATE_EVAL_CASES    comma-separated case ids to run (default: all)
     MESSAGE_GATE_EVAL_REPORT=1 also write reports/message_gate_eval_<timestamp>.json
     MESSAGE_GATE_JEV_MODEL     Jev model id (default typesafe:jev-1.13.0)
@@ -54,10 +53,7 @@ import pytest
 import yaml
 from pydantic_ai import Agent
 
-from smarter_dev.bot.agents.message_gate import SYSTEM_PROMPT
-from smarter_dev.bot.agents.message_gate import GateDecision
 from smarter_dev.bot.agents.message_gate import GateMessage
-from smarter_dev.bot.agents.message_gate import _render_prompt
 from smarter_dev.bot.agents.model_router import build_model_for
 from smarter_dev.bot.agents.model_router import model_settings_for
 from smarter_dev.shared.model_catalog import CatalogModel
@@ -69,11 +65,17 @@ from tests.integration.message_gate_jev import JevGate
 from tests.integration.message_gate_jev import build_jev_model
 from tests.integration.message_gate_jev import jev_boolean_threshold
 from tests.integration.message_gate_jev import jev_model_id
+from tests.integration.message_gate_llm import SYSTEM_PROMPT
+from tests.integration.message_gate_llm import GateDecision
+from tests.integration.message_gate_llm import render_prompt
 
 CASES_PATH = Path(__file__).parents[1] / "fixtures" / "message_gate" / "cases.yaml"
 REPORTS_DIR = Path(__file__).parents[2] / "reports"
 JEV_ARM = "jev"
-MODEL_KEYS = ("gpt-5-4-nano", "gpt-6-luna", JEV_ARM)
+MODEL_KEYS = ("gpt-6-luna", JEV_ARM)
+# Cases whose label is itself uncertain. Their labels stay as written; the
+# report scores the arms with and without them and shows their verdicts apart.
+UNCERTAIN_LABEL_CASES = frozenset({"redirect_no_topic_available"})
 
 pytestmark = pytest.mark.llm
 
@@ -256,27 +258,33 @@ def summarize_arm(
     cost: Callable[[int, int, int], object] | None,
     low_confidence_threshold: float | None = None,
 ) -> ArmSummary:
-    """Aggregate one arm. ``cost(input, output, cache_read)`` or None for n/a."""
+    """Aggregate one arm. ``cost(input, output, cache_read)`` or None for n/a.
+
+    Quality (exact, accuracy, false allows/drops, leaks, latency) is scored
+    only on cases the model answered: a failed-open call is counted under
+    ``errors`` and never as a model verdict.
+    """
+    answered = [r for r in results if r.error is None]
     input_tokens = sum(r.input_tokens for r in results)
     output_tokens = sum(r.output_tokens for r in results)
     cache_read = sum(r.cache_read_tokens for r in results)
-    scored = sum(r.score.candidates_scored for r in results)
-    correct = sum(r.score.candidates_correct for r in results)
-    exact = sum(r.score.exact for r in results)
-    latencies = [r.latency_seconds for r in results]
+    scored = sum(r.score.candidates_scored for r in answered)
+    correct = sum(r.score.candidates_correct for r in answered)
+    exact = sum(r.score.exact for r in answered)
+    latencies = [r.latency_seconds for r in answered]
     summary = ArmSummary(
         arm=arm,
         model_id=model_id,
-        cases=len(results),
+        cases=len(answered),
         exact=exact,
-        accuracy=exact / len(results) if results else 0.0,
+        accuracy=exact / len(answered) if answered else 0.0,
         candidates_scored=scored,
         candidates_correct=correct,
         candidate_accuracy=correct / scored if scored else 0.0,
-        false_allows=sum(len(r.score.false_allows) for r in results),
-        false_drops=sum(len(r.score.false_drops) for r in results),
-        leaks=sum(len(r.score.leaks) for r in results),
-        hallucinated=sum(len(r.score.hallucinated) for r in results),
+        false_allows=sum(len(r.score.false_allows) for r in answered),
+        false_drops=sum(len(r.score.false_drops) for r in answered),
+        leaks=sum(len(r.score.leaks) for r in answered),
+        hallucinated=sum(len(r.score.hallucinated) for r in answered),
         errors=sum(r.error is not None for r in results),
         input_tokens=input_tokens,
         output_tokens=output_tokens,
@@ -433,7 +441,7 @@ def _jev_has_key() -> bool:
 
 
 def gate_agent_for(model: CatalogModel) -> Agent[None, GateDecision]:
-    """The gate agent for ``model``, built as ``get_message_gate_agent`` does."""
+    """The generative gate agent for ``model``, built as the pre-Jev gate was."""
     return Agent(
         build_model_for(model),
         output_type=GateDecision,
@@ -444,7 +452,7 @@ def gate_agent_for(model: CatalogModel) -> Agent[None, GateDecision]:
 
 def llm_case_runner(agent: Agent[None, GateDecision]) -> CaseRunner:
     async def run(case: GateCase) -> ArmCaseResult:
-        prompt = _render_prompt(
+        prompt = render_prompt(
             case.instructions,
             list(case.candidates),
             list(case.grounding),
@@ -585,7 +593,36 @@ async def test_message_gate_quality():
     for key, reason in skipped.items():
         print(f"  {key}: SKIPPED ({reason})")
     print()
+    print("All cases (quality scored on answered cases; errors failed open):")
     print(format_summary_table(summaries))
+    uncertain = [c for c in cases if c.case_id in UNCERTAIN_LABEL_CASES]
+    if uncertain:
+        certain_summaries = [
+            summarize_arm(
+                arm.key,
+                arm.model_id,
+                [
+                    r
+                    for case_id, r in results[arm.key].items()
+                    if case_id not in UNCERTAIN_LABEL_CASES
+                ],
+                arm.cost,
+                arm.low_confidence_threshold,
+            )
+            for arm in arms
+        ]
+        print("\nExcluding uncertain-label cases:")
+        print(format_summary_table(certain_summaries))
+        print("\nUncertain-label cases (label kept as written):")
+        for case in uncertain:
+            for arm in arms:
+                r = results[arm.key][case.case_id]
+                verdicts = ", ".join(
+                    f"{c.message_id}={_verdict(r, c.message_id)} (label {_label(case, c.message_id)})"
+                    for c in case.candidates
+                )
+                status = f"error: {r.error}" if r.error else verdicts
+                print(f"  {case.case_id} / {arm.key}: {status}")
     if any(arm.low_confidence_threshold is not None for arm in arms):
         print(
             f"low conf = judgments with confidence < {JEV_LOW_CONFIDENCE} / judgments; "
