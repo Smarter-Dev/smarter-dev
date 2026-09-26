@@ -499,3 +499,113 @@ def test_chat_js_reads_availability_from_the_catalog_and_the_snapshot():
     assert "setModelAvailability(" in activate
     assert "snapshot.model_available === false" in _function(source, "reconcile")
     assert "if (modelUnavailable)" in _function(source, "sendMessage")
+
+
+# ── A turn caught by a retirement ─────────────────────────
+
+
+async def test_a_turn_queued_before_a_retirement_ends_cleanly_and_recovery_follows(
+    db_session, entitled, monkeypatch
+):
+    """Queued on a live model, which is retired before the worker gets to it.
+
+    The worker ends the turn as ``selection_required`` without a model call,
+    leaves nothing active, and the conversation goes on once its owner
+    confirms an available model.
+    """
+    from smarter_dev.web.chat import runtime as chat_runtime
+    from smarter_dev.web.chat.jobs import ChatTurnPayload
+
+    @asynccontextmanager
+    async def fake_session_context():
+        yield db_session
+
+    async def permissions(*_args, **_kwargs):
+        return {"sudo-r"}
+
+    events: list = []
+
+    async def record_event(turn_id, kind, data):
+        events.append((kind, data))
+
+    async def ignore(*_args, **_kwargs):
+        return None
+
+    async def no_heartbeat(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(chat_jobs, "get_db_session_context", fake_session_context)
+    monkeypatch.setattr(chat_runtime, "get_db_session_context", fake_session_context)
+    monkeypatch.setattr(chat_jobs, "get_user_permissions", permissions)
+    monkeypatch.setattr(chat_jobs, "_event", record_event)
+    monkeypatch.setattr(chat_jobs, "_notify_safe", ignore)
+    monkeypatch.setattr(chat_jobs, "_heartbeat_turn", no_heartbeat)
+
+    user, conversation, _ = await _seed(db_session, selected=AVAILABLE)
+    conversation_id = conversation.id
+    controller = _controller()
+    created = await ChatApiController.submit_turn.fn(
+        controller,
+        conversation_id,
+        TurnBody(content="Queued just before the deploy", submission_key="queued"),
+        _request(user.id),
+        db_session,
+    )
+    turn_id = UUID(created["turn_id"])
+    # The deploy retires the model: its key leaves the catalog. Stand in for
+    # that by moving the stored keys onto one the catalog no longer has.
+    await db_session.execute(
+        text("UPDATE web_chat_turns SET model_key = :k WHERE id = :id"),
+        {"k": RETIRED, "id": turn_id.hex},
+    )
+    await db_session.execute(
+        text("UPDATE web_chat_conversations SET selected_model_key = :k WHERE id = :id"),
+        {"k": RETIRED, "id": conversation_id.hex},
+    )
+    await db_session.commit()
+    db_session.expunge_all()
+
+    outcome = await chat_jobs.run_chat_turn(ChatTurnPayload(turn_id=str(turn_id)))
+
+    assert outcome == {"status": "selection_required"}
+    db_session.expunge_all()
+    turn = await db_session.get(WebChatTurn, turn_id)
+    assert turn.status == "selection_required"
+    assert turn.model_key == RETIRED
+    assert turn.worker_lease_token is None
+    assert turn.finished_at is not None
+    placeholder = await db_session.scalar(
+        select(WebChatMessage).where(
+            WebChatMessage.turn_id == turn_id, WebChatMessage.role == "assistant"
+        )
+    )
+    assert placeholder.content == "The selected model is unavailable. Choose another model."
+    assert [kind for kind, _ in events] == ["chat_turn_error"]
+    assert events[0][1]["status"] == "selection_required"
+
+    snapshot = await ChatApiController.get_conversation.fn(
+        controller, conversation_id, _request(user.id), db_session
+    )
+    assert snapshot["active_turn"] is None
+    assert snapshot["model_available"] is False
+    assert snapshot["model_key"] == RETIRED
+
+    proposed = await ChatApiController.propose_model.fn(
+        controller,
+        conversation_id,
+        ModelChangeBody(model_key=OTHER),
+        _request(user.id),
+        db_session,
+    )
+    await ChatApiController.confirm_model.fn(
+        controller, conversation_id, UUID(proposed["id"]), _request(user.id), db_session
+    )
+    again = await ChatApiController.submit_turn.fn(
+        controller,
+        conversation_id,
+        TurnBody(content="Trying again", submission_key="again"),
+        _request(user.id),
+        db_session,
+    )
+    assert again["status"] == "submitted"
+    assert (await db_session.get(WebChatTurn, UUID(again["turn_id"]))).model_key == OTHER
