@@ -726,10 +726,18 @@
 .chat-live-status[hidden] { display: none }
 
 .chat-error,
+.chat-model-unavailable,
 .chat-resource-quota {
   width: min(var(--chat-frame), calc(100% - 2 * var(--p-pad)));
   margin: 0 auto .7rem;
 }
+.chat-model-unavailable:not([hidden]) {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+.chat-model-unavailable p { margin: 0; flex: 1 }
+.chat-model-unavailable .p-btn { flex: none }
 .chat-resource-quota {
   font-family: var(--mono);
   font-size: .74rem;

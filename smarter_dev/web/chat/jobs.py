@@ -31,7 +31,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.shared.model_catalog import parse_reasoning_level
-from smarter_dev.shared.model_catalog import successor_key
 from smarter_dev.shared.model_router import build_model_for
 from smarter_dev.shared.model_router import model_settings_for
 from smarter_dev.shared.redis_client import get_redis_client
@@ -622,13 +621,12 @@ async def _preflight(
             and not has_ultra_chat(permissions)
         ):
             raise PermissionError("Chat permission is no longer available.")
-        # A turn queued under a key retired since runs on its successor; the
-        # turn row keeps the key it was queued under.
-        live_key = successor_key(turn.model_key)
-        enabled = await session.get(ChatCatalogModel, live_key)
-        model = get_model(live_key)
+        # A turn queued under a key retired since is refused, never run on a
+        # successor: retirements do not migrate chats (``RETIRED_SUCCESSORS``).
+        enabled = await session.get(ChatCatalogModel, turn.model_key)
+        model = get_model(turn.model_key)
         if enabled is None or not enabled.enabled or model is None:
-            raise LookupError("The selected model is disabled. Choose another model.")
+            raise LookupError("The selected model is unavailable. Choose another model.")
         tier = resolve_spend_tier(permissions)
         if tier is None:
             raise PermissionError("Chat permission is no longer available.")
@@ -3255,7 +3253,7 @@ async def run_chat_subagent(payload: ChatSubagentPayload) -> dict:
             from skrift.db.models.user import User
 
             owner = await session.get(User, owner_id)
-            model = get_model(successor_key(turn.model_key))
+            model = get_model(turn.model_key)
             if (
                 owner is None
                 or not owner.is_active

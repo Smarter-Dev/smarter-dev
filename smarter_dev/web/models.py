@@ -4267,8 +4267,9 @@ class AgentMessage(Base):
 class SelectedModelKey(TypeDecorator):
     """A catalog key somebody selected, read back as its successor if retired.
 
-    Only the server-wide chat settings and a web conversation's picked model use
-    it — never a channel pin, never history. Reading through
+    Only the server-wide chat settings use it — never a web conversation's
+    picked model (retirements do not migrate chats; see ``RETIRED_SUCCESSORS``),
+    never a channel pin, never history. Reading through
     :func:`successor_key` lets a deploy retire a model without rewriting these
     columns while pods on the previous build still read them; the ORM loads the
     successor as the committed value, so a read alone never writes it back.
@@ -4377,7 +4378,10 @@ class WebChatConversation(Base):
     chat_mode: Mapped[str] = mapped_column(
         String(16), nullable=False, default="standard", server_default=text("'standard'")
     )
-    selected_model_key: Mapped[str] = mapped_column(SelectedModelKey(), nullable=False)
+    # Stored and read back exactly as picked. A retired key stays here, and the
+    # chat page asks the owner to choose an available model; nothing maps it to
+    # a successor (``RETIRED_SUCCESSORS``).
+    selected_model_key: Mapped[str] = mapped_column(String(100), nullable=False)
     reasoning_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     # A title nobody chose is fair game to overwrite: the first message's opening

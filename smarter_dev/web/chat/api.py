@@ -39,7 +39,6 @@ from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.shared.model_catalog import model_vendor
 from smarter_dev.shared.model_catalog import parse_reasoning_level
 from smarter_dev.shared.model_catalog import resolve_reasoning_level
-from smarter_dev.shared.model_catalog import successor_key
 from smarter_dev.web.chat.attachments import AttachmentError
 from smarter_dev.web.chat.attachments import extract_text_bounded
 from smarter_dev.web.chat.attachments import require_attachment_count
@@ -181,6 +180,24 @@ async def resolved_conversation_settings(
     requested = parse_reasoning_level(reasoning_level or settings.default_reasoning)
     effective = resolve_reasoning_level(model, requested)
     return mode.value, model.key, effective.value if effective else None
+
+
+async def available_model(session: AsyncSession, key: str):
+    """The catalog model for ``key`` if a new turn may run on it, else ``None``.
+
+    ``None`` covers a key retired from the catalog and one an administrator has
+    disabled. A conversation whose selection is unavailable keeps it (retirements
+    do not migrate chats, see ``RETIRED_SUCCESSORS``): the page shows a notice
+    and the owner confirms an available model before sending again.
+    """
+    model = get_model(key)
+    if model is None:
+        return None
+    row = await session.get(ChatCatalogModel, key)
+    return model if row is not None and row.enabled else None
+
+
+UNAVAILABLE_MODEL_DETAIL = "The selected model is unavailable; choose a new model."
 
 
 async def require_between_turns(session: AsyncSession, conversation_id: UUID) -> None:
@@ -565,6 +582,13 @@ class ChatApiController(Controller):
             "archived": conversation.archived_at is not None,
             "intelligence_mode": conversation.intelligence_mode,
             "model_key": conversation.selected_model_key,
+            # False when the selection was retired or disabled: the page shows
+            # its notice and keeps the composer locked until a new model is
+            # confirmed. The key above is still the one the owner picked.
+            "model_available": await available_model(
+                db_session, conversation.selected_model_key
+            )
+            is not None,
             "reasoning_level": conversation.reasoning_level,
             "status": conversation.status,
             "active_turn": (
@@ -788,11 +812,13 @@ class ChatApiController(Controller):
             db_session, conversation_id, user_id, lock=True
         )
         await require_between_turns(db_session, conversation.id)
-        model = get_model(conversation.selected_model_key)
-        effective = (
-            resolve_reasoning_level(model, parse_reasoning_level(data.reasoning_level))
-            if model
-            else None
+        model = await available_model(db_session, conversation.selected_model_key)
+        if model is None:
+            # Resolving against nothing would clear the stored level; leave the
+            # retired selection exactly as it was until a model is chosen.
+            raise HTTPException(status_code=409, detail=UNAVAILABLE_MODEL_DETAIL)
+        effective = resolve_reasoning_level(
+            model, parse_reasoning_level(data.reasoning_level)
         )
         conversation.reasoning_level = effective.value if effective else None
         await db_session.commit()
@@ -814,22 +840,26 @@ class ChatApiController(Controller):
         await require_entitled(db_session, user_id)
         conversation = await owned_conversation(db_session, conversation_id, user_id)
         await require_between_turns(db_session, conversation.id)
-        target_setting = await db_session.get(ChatCatalogModel, data.model_key)
-        old, new = get_model(conversation.selected_model_key), get_model(data.model_key)
-        if (
-            old is None
-            or new is None
-            or target_setting is None
-            or not target_setting.enabled
-        ):
+        new = await available_model(db_session, data.model_key)
+        if new is None:
             raise HTTPException(
                 status_code=422, detail="Select an available Chat model."
             )
-        warning = model_change_warning(old, new)
+        # A retired selection is the case this flow exists to recover from, so
+        # an unknown current key is allowed; only the target must be available.
+        old = get_model(conversation.selected_model_key)
+        warning = (
+            model_change_warning(old, new)
+            if old is not None
+            else (
+                f"{conversation.selected_model_key} is no longer available. "
+                f"Continue this conversation on {new.label}? Its history is kept."
+            )
+        )
         change = WebChatModelChange(
             conversation_id=conversation.id,
             owner_user_id=user_id,
-            from_model_key=old.key,
+            from_model_key=conversation.selected_model_key,
             to_model_key=new.key,
             warning=warning,
             expires_at=datetime.now(UTC) + timedelta(minutes=15),
@@ -873,27 +903,17 @@ class ChatApiController(Controller):
             raise HTTPException(
                 status_code=409, detail="Model change confirmation expired."
             )
-        # A change proposed before a model was retired confirms onto its
-        # successor, matching how the conversation's own pick now reads.
-        to_key = successor_key(change.to_model_key)
-        target = await db_session.get(ChatCatalogModel, to_key)
-        if (
-            conversation.selected_model_key != successor_key(change.from_model_key)
-            or target is None
-            or not target.enabled
-        ):
+        # Exactly the proposed pair: a target retired since the proposal is
+        # refused rather than confirmed onto whatever replaced it.
+        model = await available_model(db_session, change.to_model_key)
+        if conversation.selected_model_key != change.from_model_key or model is None:
             raise HTTPException(
                 status_code=409,
                 detail="Model selection changed or is no longer available.",
             )
-        conversation.selected_model_key = to_key
-        model = get_model(to_key)
-        effective = (
-            resolve_reasoning_level(
-                model, parse_reasoning_level(conversation.reasoning_level)
-            )
-            if model
-            else None
+        conversation.selected_model_key = model.key
+        effective = resolve_reasoning_level(
+            model, parse_reasoning_level(conversation.reasoning_level)
         )
         conversation.reasoning_level = effective.value if effective else None
         change.confirmed_at = now
@@ -1337,14 +1357,8 @@ class ChatApiController(Controller):
             raise HTTPException(
                 status_code=409, detail="Wait for the active turn to finish or stop it."
             )
-        enabled = await db_session.get(
-            ChatCatalogModel, conversation.selected_model_key
-        )
-        if enabled is None or not enabled.enabled:
-            raise HTTPException(
-                status_code=409,
-                detail="The selected model is unavailable; choose a new model.",
-            )
+        if await available_model(db_session, conversation.selected_model_key) is None:
+            raise HTTPException(status_code=409, detail=UNAVAILABLE_MODEL_DETAIL)
         if (
             conversation.intelligence_mode == IntelligenceMode.ULTRA_INTELLIGENCE.value
             and not has_ultra_chat(permissions)
@@ -1564,6 +1578,10 @@ class ChatApiController(Controller):
             )
         ):
             raise HTTPException(status_code=409, detail="Another turn is active.")
+        # A regenerate runs on the conversation's current pick, never on a
+        # successor of a retired one.
+        if await available_model(db_session, conversation.selected_model_key) is None:
+            raise HTTPException(status_code=409, detail=UNAVAILABLE_MODEL_DETAIL)
         root_turn_id = original.regenerates_turn_id or original.id
         root_turn = await db_session.get(WebChatTurn, root_turn_id)
         if root_turn is None:
