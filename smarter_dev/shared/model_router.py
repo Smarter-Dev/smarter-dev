@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 
+from pydantic_ai import AgentRetries
 from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.anthropic import AnthropicModelSettings
@@ -49,6 +50,12 @@ OPENROUTER_API_KEY_ENV_VAR = "OPENROUTER_API_KEY"
 OPENROUTER_API_KEY_LEGACY_ENV_VAR = "OPEN_ROUTER"
 OPENCODE_ZEN_API_KEY_ENV_VAR = "OPENCODE_ZEN_API_KEY"
 
+# Output retries for a model offered its output tool on "auto" (see
+# ``CatalogModel.supports_forced_tool_choice``). Such a model can answer in
+# plain text; pydantic-ai spends one output retry re-prompting it for the tool
+# call. The default budget is one, so a second slip would fail the turn.
+UNFORCED_OUTPUT_RETRIES = 3
+
 
 def build_model_for(model: CatalogModel) -> Model:
     """Return a configured Pydantic AI ``Model`` for ``model``."""
@@ -70,11 +77,10 @@ def build_model_for(model: CatalogModel) -> Model:
             OPENROUTER_API_KEY_LEGACY_ENV_VAR
         )
         provider = OpenRouterProvider(api_key=api_key or "")
-        if model.model_id.startswith("anthropic/"):
-            # OpenRouter's Claude endpoints list tool_choice "required" as
-            # unsupported, and Claude's reasoning cannot be turned off, so a
-            # forced output tool would either be refused or silently lose its
-            # reasoning. Let the model call the output tool on "auto" instead.
+        if not model.supports_forced_tool_choice:
+            # e.g. Claude Sonnet 5.5: its endpoints list tool_choice "required"
+            # as unsupported, so offer the output tool on "auto". Only this
+            # flag changes; the rest of OpenRouter's profile for the id stays.
             return OpenAIChatModel(
                 model.model_id,
                 provider=provider,
@@ -128,6 +134,19 @@ def build_model_for(model: CatalogModel) -> Model:
             ),
         )
     raise ValueError(f"Unhandled provider: {model.provider!r}")
+
+
+def agent_retries_for(model: CatalogModel | None) -> AgentRetries | None:
+    """Retry budget for a structured-output agent on ``model``.
+
+    ``None`` keeps pydantic-ai's defaults. Only a model whose output tool
+    cannot be forced gets more output retries, because only it can end a turn
+    with plain text; when those run out the run raises and the caller's usual
+    error reply applies, so the turn is never dropped silently.
+    """
+    if model is not None and not model.supports_forced_tool_choice:
+        return AgentRetries(output=UNFORCED_OUTPUT_RETRIES)
+    return None
 
 
 def model_settings_for(
