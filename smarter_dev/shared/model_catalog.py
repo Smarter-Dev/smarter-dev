@@ -170,6 +170,10 @@ class CatalogModel:
     max_output_tokens: int = 16_384
     supports_vision: bool = False
     supports_tools: bool = True
+    # False when no endpoint serving the model accepts tool_choice "required",
+    # so structured output cannot force the output tool and the model is
+    # offered it on "auto" instead (see ``model_router.build_model_for``).
+    supports_forced_tool_choice: bool = True
     # Only meaningful for OPENROUTER models — every other provider serves one
     # endpoint, so there is nothing to choose between.
     openrouter_routing: OpenRouterRouting | None = None
@@ -570,8 +574,8 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
     # mandatory reasoning with efforts low → max, default high. All three
     # endpoints (anthropic, claude-on-aws, amazon-bedrock) serve Anthropic's
     # own build at the same $2/$10, so the only constraint is a ceiling at
-    # that rate. None of them accepts tool_choice "required"; the router
-    # accounts for that (``model_router.build_model_for``).
+    # that rate. None of them accepts tool_choice "required", hence
+    # ``supports_forced_tool_choice=False``.
     CatalogModel(
         key="claude-sonnet-5-5",
         label="Claude Sonnet 5.5",
@@ -581,6 +585,7 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         supports_vision=True,
         context_window=1_000_000,
         max_output_tokens=128_000,
+        supports_forced_tool_choice=False,
         reasoning_levels=_CLAUDE_EFFORT,
         default_reasoning=ReasoningLevel.HIGH,
         openrouter_routing=OpenRouterRouting(

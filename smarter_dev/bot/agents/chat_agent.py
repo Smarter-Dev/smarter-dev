@@ -44,6 +44,7 @@ from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import parse_reasoning_level
 from smarter_dev.shared.model_catalog import resolve_reasoning_level
+from smarter_dev.shared.model_router import agent_retries_for
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +197,7 @@ def get_chat_agent(
             output_type=_output_type_for(resolved_id),
             deps_type=ChatDeps,
             system_prompt=SYSTEM_PROMPT,
+            retries=agent_retries_for(_catalog_model_for_id(resolved_id)),
             toolsets=[
                 budgeted_toolset(chat_tool_functions() + handler_tool_functions())
             ],
@@ -238,6 +240,7 @@ def get_worker_agent(
             output_type=_output_type_for(resolved_id, BriefingDecision),
             deps_type=ChatDeps,
             system_prompt=WORKER_SYSTEM_PROMPT,
+            retries=agent_retries_for(_catalog_model_for_id(resolved_id)),
             toolsets=[
                 budgeted_toolset(chat_tool_functions() + handler_tool_functions())
             ],
