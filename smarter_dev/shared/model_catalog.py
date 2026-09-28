@@ -170,6 +170,10 @@ class CatalogModel:
     max_output_tokens: int = 16_384
     supports_vision: bool = False
     supports_tools: bool = True
+    # False when no endpoint serving the model accepts tool_choice "required",
+    # so structured output cannot force the output tool and the model is
+    # offered it on "auto" instead (see ``model_router.build_model_for``).
+    supports_forced_tool_choice: bool = True
     # Only meaningful for OPENROUTER models — every other provider serves one
     # endpoint, so there is nothing to choose between.
     openrouter_routing: OpenRouterRouting | None = None
@@ -237,6 +241,7 @@ MODEL_FAMILIES: tuple[str, ...] = (
     "MiniMax",
     "Gemini",
     "GPT",
+    "Claude",
     "Grok",
 )
 
@@ -255,6 +260,7 @@ MODEL_VENDORS: dict[str, str] = {
     "MiniMax": "MiniMax",
     "Gemini": "Google",
     "GPT": "OpenAI",
+    "Claude": "Anthropic",
     "Grok": "xAI",
 }
 
@@ -283,11 +289,14 @@ _GEMINI_THINKING = (
     ReasoningLevel.HIGH,
 )
 _OPEN_EFFORT = (ReasoningLevel.LOW, ReasoningLevel.MEDIUM, ReasoningLevel.HIGH)
+# Claude Sonnet 5.5 on OpenRouter: reasoning is mandatory (no "none") and its
+# supported efforts run low → max.
+_CLAUDE_EFFORT = _OPEN_EFFORT + (ReasoningLevel.XHIGH, ReasoningLevel.MAX)
 
 
 # Curated catalog. Kept <= 24 entries so the whole set fits in one Discord
 # string-select (25-option limit, leaving room for a "server default" sentinel).
-# Gemini -> Google, GPT -> OpenAI, Grok -> OpenRouter, and the open weights ->
+# Gemini -> Google, GPT -> OpenAI, Claude and Grok -> OpenRouter, and the open weights ->
 # Digital Ocean / OpenCode Zen / OpenRouter, all OpenAI-compatible. Model ids reflect the latest releases as of mid-2026
 # (verified against provider model listings); they are wire ids and can be
 # re-verified without a migration.
@@ -554,6 +563,36 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
     # stay — they remain the vocabulary for the provider key on settled usage
     # rows — as do the Claude price patches in llm_pricing, which those rows
     # price against.
+    #
+    # --- Claude via OpenRouter ---
+    # Sonnet 5.5 joined on 2026-09-28, through OpenRouter at the user's
+    # request rather than the direct Anthropic branch the retired Claude models
+    # used. Only this key was added: Sonnet 5 stays retired, and no selection
+    # moves onto 5.5 — people choose it themselves. Capabilities from GET
+    # /api/v1/models and /api/v1/models/anthropic/claude-sonnet-5.5/endpoints
+    # (2026-09-28): 1M context, 128K output, text+image+file input, tools, and
+    # mandatory reasoning with efforts low → max, default high. All three
+    # endpoints (anthropic, claude-on-aws, amazon-bedrock) serve Anthropic's
+    # own build at the same $2/$10, so the only constraint is a ceiling at
+    # that rate. None of them accepts tool_choice "required", hence
+    # ``supports_forced_tool_choice=False``.
+    CatalogModel(
+        key="claude-sonnet-5-5",
+        label="Claude Sonnet 5.5",
+        family="Claude",
+        provider=ModelProvider.OPENROUTER,
+        model_id="anthropic/claude-sonnet-5.5",
+        supports_vision=True,
+        context_window=1_000_000,
+        max_output_tokens=128_000,
+        supports_forced_tool_choice=False,
+        reasoning_levels=_CLAUDE_EFFORT,
+        default_reasoning=ReasoningLevel.HIGH,
+        openrouter_routing=OpenRouterRouting(
+            max_price_input_mtok=2.00,
+            max_price_output_mtok=10.00,
+        ),
+    ),
     # --- Qwen3.8 via OpenRouter ---
     # The 2.4T A95B weights are NOT on our Digital Ocean account — GET
     # /v1/models lists qwen3.8-max but no A95B, and an unknown DO id 403s — so

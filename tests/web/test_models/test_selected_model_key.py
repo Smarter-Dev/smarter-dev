@@ -386,3 +386,130 @@ def test_conversation_return_follows_the_restore_and_downgrades_to_nothing():
     module.op = _Op
     module.downgrade()
     assert executed == []
+
+
+# d4a7c1e9f3b5 admits Claude Sonnet 5.5 as a new key and changes nothing else.
+
+
+def _sonnet_5_5_statements(direction: str = "upgrade"):
+    module = _load_migration("d4a7c1e9f3b5")
+    executed: list = []
+
+    class _Op:
+        @staticmethod
+        def execute(statement):
+            executed.append(statement)
+
+    module.op = _Op
+    getattr(module, direction)()
+    return executed
+
+
+def test_sonnet_5_5_admission_follows_the_conversation_return():
+    from smarter_dev.shared.model_catalog import RETIRED_SUCCESSORS
+    from smarter_dev.shared.model_catalog import get_model
+
+    module = _load_migration("d4a7c1e9f3b5")
+    assert module.down_revision == "c3e8a1d5f7b2"
+    assert module._KEY == "claude-sonnet-5-5"
+    assert get_model(module._KEY) is not None
+    # Its cost-tier peer is the catalog model at the same $2/$10.
+    assert get_model(module._PRICE_PEER) is not None
+    # Additive: it takes over no retired key's selections.
+    assert module._KEY not in RETIRED_SUCCESSORS.values()
+
+
+async def _catalog_rows(db_session):
+    rows = await db_session.execute(
+        text(
+            "SELECT model_key, enabled, cost_tier, sort_order"
+            " FROM chat_catalog_models ORDER BY model_key"
+        )
+    )
+    return {key: (enabled, tier, order) for key, enabled, tier, order in rows}
+
+
+async def test_sonnet_5_5_admission_is_enabled_at_sol_tier_and_sorts_last(db_session):
+    from smarter_dev.web.chat.settings import ensure_settings
+    from smarter_dev.web.models import ChatCatalogModel
+
+    # The row set the previous build leaves: every catalog key but 5.5, with
+    # an admin's choices on Sol and on the server default.
+    await ensure_settings(db_session)
+    seeded = await db_session.get(ChatCatalogModel, "claude-sonnet-5-5")
+    await db_session.delete(seeded)
+    sol = await db_session.get(ChatCatalogModel, "gpt-6-sol")
+    sol.cost_tier = "high"
+    sol.enabled = False
+    await db_session.commit()
+    before = await _catalog_rows(db_session)
+    settings_before = (
+        await db_session.execute(text("SELECT * FROM chat_settings"))
+    ).all()
+
+    [statement] = _sonnet_5_5_statements()
+    for _ in range(2):  # idempotent
+        await db_session.execute(statement)
+    await db_session.commit()
+
+    after = await _catalog_rows(db_session)
+    max_order = max(order for _, _, order in before.values())
+    # Enabled regardless of Sol, at Sol's tier, after every existing row.
+    assert after.pop("claude-sonnet-5-5") == (True, "high", max_order + 1)
+    assert after == before
+    assert (
+        await db_session.execute(text("SELECT * FROM chat_settings"))
+    ).all() == settings_before
+
+
+async def test_sonnet_5_5_admission_defaults_to_medium_without_sol(db_session):
+    [statement] = _sonnet_5_5_statements()
+    await db_session.execute(statement)
+    await db_session.commit()
+    assert await _catalog_rows(db_session) == {
+        "claude-sonnet-5-5": (True, "medium", 0)
+    }
+
+
+async def test_sonnet_5_5_admission_leaves_an_existing_row_alone(db_session):
+    from smarter_dev.web.models import ChatCatalogModel
+
+    db_session.add(
+        ChatCatalogModel(
+            model_key="claude-sonnet-5-5", enabled=False, cost_tier="ultra", sort_order=3
+        )
+    )
+    await db_session.commit()
+    [statement] = _sonnet_5_5_statements()
+    await db_session.execute(statement)
+    await db_session.commit()
+    assert await _catalog_rows(db_session) == {
+        "claude-sonnet-5-5": (False, "ultra", 3)
+    }
+
+
+async def test_sonnet_5_5_is_selectable_once_admitted(db_session):
+    from smarter_dev.web.chat.api import resolved_conversation_settings
+    from smarter_dev.web.chat.settings import ensure_settings
+    from smarter_dev.web.models import ChatCatalogModel
+
+    await ensure_settings(db_session)
+    seeded = await db_session.get(ChatCatalogModel, "claude-sonnet-5-5")
+    await db_session.delete(seeded)
+    await db_session.commit()
+    [statement] = _sonnet_5_5_statements()
+    await db_session.execute(statement)
+    await db_session.commit()
+
+    _, key, reasoning = await resolved_conversation_settings(
+        db_session, permissions=frozenset(), model_key="claude-sonnet-5-5"
+    )
+    assert key == "claude-sonnet-5-5"
+
+
+def test_sonnet_5_5_downgrade_deletes_only_its_row():
+    [statement] = _sonnet_5_5_statements("downgrade")
+    assert " ".join(str(statement).split()) == (
+        "DELETE FROM chat_catalog_models WHERE model_key = :key"
+    )
+    assert statement.compile().params == {"key": "claude-sonnet-5-5"}

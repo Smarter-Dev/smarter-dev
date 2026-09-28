@@ -10,6 +10,7 @@ import pytest
 # The bot-side module is a re-export shim; patch the real implementation or
 # the rebinding lands on the alias and the router keeps its own globals.
 from smarter_dev.shared import model_router
+from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ModelProvider
 from smarter_dev.shared.model_catalog import ReasoningLevel
@@ -208,6 +209,133 @@ def test_openrouter_reasoning_model_builds_a_chat_model(monkeypatch):
     chat_model.assert_called_once_with(
         _OPENROUTER_REASONING_MODEL.model_id, provider=provider.return_value
     )
+
+
+def test_only_sonnet_5_5_opts_out_of_forced_tool_choice():
+    # The opt-out is explicit catalog data, not inferred from the wire id, so
+    # no other current model changes how its output tool is requested.
+    assert [m.key for m in MODEL_CATALOG if not m.supports_forced_tool_choice] == [
+        "claude-sonnet-5-5"
+    ]
+
+
+def test_unforced_openrouter_model_offers_the_output_tool_on_auto(monkeypatch):
+    # OpenRouter's Sonnet 5.5 endpoints reject tool_choice "required", so the
+    # output tool is offered on "auto". Everything else OpenRouter's own
+    # profile sets for Claude stays.
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-secret")
+    claude = build_model_for(get_model("claude-sonnet-5-5"))
+    assert claude.profile["openai_supports_tool_choice_required"] is False
+    assert claude.profile["openai_chat_thinking_field"] == "reasoning"
+    assert claude.profile["openrouter_supports_cache_control"] is True
+    # Grok keeps OpenRouter's default profile.
+    grok = build_model_for(_OPENROUTER_REASONING_MODEL)
+    assert "openai_supports_tool_choice_required" not in grok.profile
+
+
+def test_forced_tool_choice_follows_the_flag_not_the_vendor(monkeypatch):
+    # A future anthropic/ id that has not opted out keeps OpenRouter's default
+    # profile; the router keys on the flag alone.
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-secret")
+    future = CatalogModel(
+        key="claude-future",
+        label="Claude Future",
+        family="Claude",
+        provider=ModelProvider.OPENROUTER,
+        model_id="anthropic/claude-future",
+    )
+    assert "openai_supports_tool_choice_required" not in (
+        build_model_for(future).profile
+    )
+
+
+def test_agent_retries_only_widen_for_unforced_models():
+    assert model_router.agent_retries_for(get_model("claude-sonnet-5-5")) == {
+        "output": model_router.UNFORCED_OUTPUT_RETRIES
+    }
+    assert model_router.agent_retries_for(_OPENROUTER_REASONING_MODEL) is None
+    assert model_router.agent_retries_for(_OPENAI_MODEL) is None
+    assert model_router.agent_retries_for(None) is None
+
+
+async def test_openrouter_claude_request_on_the_wire(monkeypatch):
+    """One structured-output request to Sonnet 5.5, as OpenRouter receives it.
+
+    Unmocked below the HTTP transport, so the router, the catalog settings and
+    pydantic-ai's request building are all real.
+    """
+    import json
+
+    import httpx
+    from pydantic import BaseModel
+    from pydantic_ai import Agent
+
+    class Reply(BaseModel):
+        text: str
+
+    sent: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "id": "gen-1",
+                "object": "chat.completion",
+                "created": 1790618686,
+                "model": "anthropic/claude-sonnet-5.5",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "final_result",
+                                        "arguments": '{"text": "hi"}',
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
+            },
+        )
+
+    real_provider = model_router.OpenRouterProvider
+
+    def provider_with_transport(**kwargs):
+        return real_provider(
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+            **kwargs,
+        )
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-secret")
+    monkeypatch.setattr(model_router, "OpenRouterProvider", provider_with_transport)
+    model = get_model("claude-sonnet-5-5")
+    agent = Agent(
+        build_model_for(model),
+        output_type=Reply,
+        model_settings=model_settings_for(model),
+    )
+    result = await agent.run("hello")
+
+    assert result.output == Reply(text="hi")
+    (body,) = sent
+    assert body["model"] == "anthropic/claude-sonnet-5.5"
+    assert body["tool_choice"] == "auto"
+    assert body["reasoning_effort"] == "high"
+    assert body["provider"] == {"max_price": {"prompt": 2.0, "completion": 10.0}}
 
 
 def test_openrouter_routing_constraints_ride_on_every_request():

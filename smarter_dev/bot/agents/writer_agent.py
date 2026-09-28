@@ -32,6 +32,7 @@ from smarter_dev.bot.agents.model_router import model_settings_for
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import parse_reasoning_level
+from smarter_dev.shared.model_router import agent_retries_for
 
 WRITER_SYSTEM_PROMPT = (
     Path(__file__).parent / "prompts" / "writer_agent.md"
@@ -179,6 +180,7 @@ def get_writer_agent(
             output_type=_output_type_for(model_id),
             system_prompt=WRITER_SYSTEM_PROMPT + _identity_directive(model_id),
             model_settings=_writer_settings_for(model_id, reasoning_level),
+            retries=agent_retries_for(_catalog_model_for_id(model_id)),
         )
         _writer_agents[cache_key] = agent
     return agent

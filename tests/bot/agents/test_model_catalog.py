@@ -11,6 +11,7 @@ from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import catalog_by_key
 from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.shared.model_catalog import is_valid_model_key
+from smarter_dev.shared.model_catalog import model_vendor
 from smarter_dev.shared.model_catalog import models_by_family
 from smarter_dev.shared.model_catalog import parse_reasoning_level
 from smarter_dev.shared.model_catalog import resolve_reasoning_level
@@ -217,12 +218,52 @@ def test_retired_gpt_5_x_keys_read_as_their_gpt_6_successors():
 def test_claude_left_the_catalog():
     # The whole Claude family was retired on 2026-09-03 for lack of traffic,
     # freeing three select slots. Its pricing stays in llm_pricing and its
-    # provider mapping in usage_invoice, both for settled usage rows.
+    # provider mapping in usage_invoice, both for settled usage rows. Sonnet
+    # 5.5 came back on 2026-09-28 as a new key through OpenRouter; the retired
+    # keys stay retired and nothing reads them as 5.5.
     assert get_model("claude-opus-5") is None
     assert get_model("claude-sonnet-5") is None
     assert get_model("claude-haiku-4-5") is None
-    assert "Claude" not in MODEL_FAMILIES
+    for key in ("claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"):
+        assert successor_key(key) == key
     assert all(m.provider is not ModelProvider.ANTHROPIC for m in MODEL_CATALOG)
+
+
+def test_claude_sonnet_5_5_routes_through_openrouter_with_verified_capabilities():
+    # Verified against OpenRouter's models and endpoints APIs (2026-09-28):
+    # 1M context, 128K output, image input, tools, mandatory reasoning with
+    # efforts low → max defaulting to high, and $2/$10 on every endpoint.
+    model = get_model("claude-sonnet-5-5")
+    assert model is not None
+    assert model.label == "Claude Sonnet 5.5"
+    assert model.model_id == "anthropic/claude-sonnet-5.5"
+    assert model.family == "Claude"
+    assert model_vendor(model) == "Anthropic"
+    assert model.provider is ModelProvider.OPENROUTER
+    assert model.supports_vision is True
+    assert model.supports_tools is True
+    assert model.context_window == 1_000_000
+    assert model.max_output_tokens == 128_000
+    assert model.reasoning_levels == (
+        ReasoningLevel.LOW,
+        ReasoningLevel.MEDIUM,
+        ReasoningLevel.HIGH,
+        ReasoningLevel.XHIGH,
+        ReasoningLevel.MAX,
+    )
+    assert model.default_reasoning is ReasoningLevel.HIGH
+    # Reasoning cannot be turned off, so "none" clamps to the lowest effort.
+    assert resolve_reasoning_level(model, ReasoningLevel.NONE) is ReasoningLevel.LOW
+    # Proprietary: structured output stays on tool calls, not prompted JSON.
+    assert model.needs_prompted_output is False
+    assert model.openrouter_routing.as_provider_block() == {
+        "max_price": {"prompt": 2.00, "completion": 10.00}
+    }
+    assert [m.key for m in MODEL_CATALOG if m.family == "Claude"] == [
+        "claude-sonnet-5-5"
+    ]
+    # Additive: no retired key is read as Sonnet 5.5.
+    assert "claude-sonnet-5-5" not in RETIRED_SUCCESSORS.values()
 
 
 def test_poolside_left_the_catalog():
@@ -360,7 +401,7 @@ def test_provider_routing_by_family():
                 ModelProvider.OPENAI,
                 ModelProvider.OPENROUTER,
             )
-        elif model.family == "Grok":
+        elif model.family in ("Grok", "Claude"):
             assert model.provider is ModelProvider.OPENROUTER
         elif model.family in _OPEN_WEIGHTS_FAMILIES:
             # Open weights normally ride DO or Zen, but Qwen3.8 2.4T A95B is on

@@ -612,3 +612,19 @@ async def test_available_months_defaults_to_current_month_when_empty(db_session)
     months = await available_months(db_session)
     now = datetime.now(timezone.utc)
     assert months == [f"{now.year:04d}-{now.month:02d}"]
+
+
+def test_claude_sonnet_5_5_bills_under_openrouter():
+    # Served through OpenRouter, not the direct Anthropic key the retired
+    # Claude models used, so its spend belongs in the OpenRouter line.
+    from smarter_dev.web.api_native.chat_conversations import _normalized_model_identity
+
+    assert provider_key_from_model_name("anthropic/claude-sonnet-5.5") == "openrouter"
+    # Usage rows are filed under the flat wire id this resolves to.
+    assert _normalized_model_identity("openrouter:anthropic/claude-sonnet-5.5") == (
+        "openrouter",
+        "claude-sonnet-5-5",
+        "anthropic/claude-sonnet-5.5",
+    )
+    # The retired direct-Anthropic Sonnet 5 keeps its own line.
+    assert provider_key_from_model_name("claude-sonnet-5") == "anthropic"
