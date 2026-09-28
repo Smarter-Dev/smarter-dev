@@ -431,6 +431,19 @@ _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
         output_mtok=Decimal("4.80"),
         cache_read_mtok=Decimal("0.40"),
     ),
+    # Claude Sonnet 5.5, added 2026-09-28. Read from GET
+    # https://openrouter.ai/api/v1/models and its /endpoints on 2026-09-28:
+    # every endpoint (anthropic, claude-on-aws, amazon-bedrock) quotes
+    # $2/$10, $0.20 cache reads and $2.50 five-minute cache writes — the same
+    # as Anthropic's own price list — with no long-context tier across the 1M
+    # window. One-hour writes ($4) and batch rates have no column here; chat
+    # sends no one-hour cache breakpoints and never batches.
+    "anthropic/claude-sonnet-5.5": types.ModelPrice(
+        input_mtok=Decimal("2.00"),
+        output_mtok=Decimal("10.00"),
+        cache_read_mtok=Decimal("0.20"),
+        cache_write_mtok=Decimal("2.50"),
+    ),
     # Qwen3.8 2.4T A95B. Every OpenRouter endpoint quotes the same rate, so
     # there is no route-dependent price to model here.
     "qwen/qwen3.8-2.4t-a95b": types.ModelPrice(

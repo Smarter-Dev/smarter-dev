@@ -30,6 +30,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.openai import OpenAIChatModelSettings
 from pydantic_ai.models.openai import OpenAIResponsesModel
 from pydantic_ai.models.openai import OpenAIResponsesModelSettings
+from pydantic_ai.profiles import merge_profile
 from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.anthropic import AnthropicProvider
 from pydantic_ai.providers.google import GoogleProvider
@@ -68,10 +69,21 @@ def build_model_for(model: CatalogModel) -> Model:
         api_key = os.getenv(OPENROUTER_API_KEY_ENV_VAR) or os.getenv(
             OPENROUTER_API_KEY_LEGACY_ENV_VAR
         )
-        return OpenAIChatModel(
-            model.model_id,
-            provider=OpenRouterProvider(api_key=api_key or ""),
-        )
+        provider = OpenRouterProvider(api_key=api_key or "")
+        if model.model_id.startswith("anthropic/"):
+            # OpenRouter's Claude endpoints list tool_choice "required" as
+            # unsupported, and Claude's reasoning cannot be turned off, so a
+            # forced output tool would either be refused or silently lose its
+            # reasoning. Let the model call the output tool on "auto" instead.
+            return OpenAIChatModel(
+                model.model_id,
+                provider=provider,
+                profile=merge_profile(
+                    provider.model_profile(model.model_id),
+                    OpenAIModelProfile(openai_supports_tool_choice_required=False),
+                ),
+            )
+        return OpenAIChatModel(model.model_id, provider=provider)
     if model.provider is ModelProvider.OPENCODE_ZEN:
         settings = get_settings()
         # Zen routes by model family: Claude ids go to /messages, GPT to
