@@ -213,6 +213,36 @@ class TestOpenRouterPricing:
         # 400K uncached at $1.60/M + 600K cached reads at $0.40/M.
         assert cost == Decimal("0.88")
 
+    def test_claude_sonnet_5_5_rates(self):
+        # OpenRouter quotes $2/$10 per M on every endpoint (2026-09-28).
+        assert calc_cost(
+            1_000_000, 1_000_000, "openrouter:anthropic/claude-sonnet-5.5"
+        ) == Decimal("12.00")
+
+    def test_claude_sonnet_5_5_cache_rates(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=500_000,
+            cache_write_tokens=200_000,
+            model_name="openrouter:anthropic/claude-sonnet-5.5",
+        )
+        # 300K uncached at $2/M + 500K reads at $0.20/M + 200K five-minute
+        # writes at $2.50/M.
+        assert cost == Decimal("1.20")
+
+    def test_claude_sonnet_5_5_has_no_long_context_tier(self, caplog):
+        # Full 1M context at standard pricing: a 900K request is base rate.
+        with caplog.at_level(logging.WARNING, logger="smarter_dev.web.llm_pricing"):
+            cost = calc_cost(
+                900_000,
+                0,
+                "openrouter:anthropic/claude-sonnet-5.5",
+                per_request=True,
+            )
+        assert cost == Decimal("1.80")
+        assert "priced at the base rate" not in caplog.text
+
     def test_author_precision_routes_priced_at_their_measured_endpoint(self):
         # Moved off Zen/DO on 2026-08-13. Rates are measured from what actually
         # served a sample, not quoted from the endpoint we would prefer —
