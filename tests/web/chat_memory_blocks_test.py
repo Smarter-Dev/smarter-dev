@@ -252,6 +252,7 @@ async def test_revision_records_both_blocks(db_session):
 def test_omitted_blocks_are_kept_verbatim():
     blocks = compose_blocks(DreamOutput(memory=_MEMORY), _context(), retries_left=2)
     assert (blocks.behavior, blocks.personality) == (_BEHAVIOR, _PERSONALITY)
+    assert blocks.refusals == ()
     assert blocks.memory == _MEMORY
 
 
@@ -267,7 +268,9 @@ def test_behavior_one_over_its_limit_is_retried_then_refused():
     output = DreamOutput(memory=_MEMORY, behavior="b" * (MAX_BEHAVIOR_CHARS + 1))
     with pytest.raises(ModelRetry, match="750"):
         compose_blocks(output, _context(), retries_left=1)
-    assert compose_blocks(output, _context(), retries_left=0).behavior == _BEHAVIOR
+    blocks = compose_blocks(output, _context(), retries_left=0)
+    assert blocks.behavior == _BEHAVIOR
+    assert blocks.refusals == ("behavior",)
 
 
 def test_personality_is_accepted_at_exactly_its_limit_on_a_first_night():
@@ -364,12 +367,69 @@ def test_identity_trait_cannot_move_into_an_unchanged_block():
     assert compose_blocks(output, context, retries_left=0).memory.startswith(_IDENTITY)
 
 
+def test_identity_moves_need_the_trait_itself_in_the_revised_block():
+    # An unrelated behavior edit is not somewhere for either trait to go.
+    output = DreamOutput(
+        memory=_MEMORY,
+        behavior="Keep jokes out of #help.",
+        identity_moves=["I use dry humor.", "I let others finish."],
+    )
+    context = _context(previous_blob=_IDENTITY + "\n\n" + _MEMORY)
+    with pytest.raises(ModelRetry, match="I use dry humor"):
+        compose_blocks(output, context, retries_left=1)
+    blocks = compose_blocks(output, context, retries_left=0)
+    assert blocks.memory.startswith(_IDENTITY)
+    assert blocks.refusals == ("identity_moves", "identity_moves")
+
+
+def test_identity_moves_are_judged_one_trait_at_a_time():
+    blocks = compose_blocks(
+        DreamOutput(
+            memory=_MEMORY,
+            behavior=_BEHAVIOR + " i LET others   finish.",
+            identity_moves=["I let others finish.", "I use dry humor."],
+        ),
+        _context(previous_blob=_IDENTITY + "\n\n" + _MEMORY),
+        retries_left=0,
+    )
+    assert blocks.memory.startswith("## Identity & Voice\n- I use dry humor.\n\n")
+    assert "I let others finish." not in blocks.memory
+    assert blocks.refusals == ("identity_moves",)
+
+
+def test_a_trait_cannot_move_into_a_personality_that_was_refused():
+    output = DreamOutput(
+        memory=_MEMORY,
+        behavior=_BEHAVIOR + " Keep jokes out of #help.",
+        personality="I use dry humor.",
+        identity_moves=["I use dry humor."],
+    )
+    context = _context(previous_blob=_IDENTITY + "\n\n" + _MEMORY)
+    blocks = compose_blocks(output, context, retries_left=0)
+    assert blocks.personality == _PERSONALITY
+    assert blocks.memory.startswith(_IDENTITY)
+    assert blocks.refusals == ("personality", "identity_moves")
+
+
+def test_a_trait_already_in_the_block_has_not_moved():
+    output = DreamOutput(
+        memory=_MEMORY,
+        behavior="I let others finish. Keep jokes out of #help.",
+        identity_moves=["I let others finish."],
+    )
+    context = _context(
+        previous_blob=_IDENTITY + "\n\n" + _MEMORY,
+        previous_behavior="I let others finish.",
+    )
+    assert compose_blocks(output, context, retries_left=0).memory.startswith(_IDENTITY)
+
+
 def test_identity_trait_that_does_not_exist_cannot_move():
     with pytest.raises(ModelRetry):
         compose_blocks(
             DreamOutput(
                 memory=_MEMORY,
-                behavior=_BEHAVIOR + " New.",
+                behavior=_BEHAVIOR + " I never said this.",
                 identity_moves=["I never said this."],
             ),
             _context(previous_blob=_IDENTITY),
@@ -456,9 +516,11 @@ async def test_dream_that_omits_the_blocks_keeps_them(db_session):
     assert await db_session.get(ChatAgentMemoryNote, note.id) is None
 
 
-async def test_invalid_block_revisions_keep_the_blocks_and_still_save_memory(db_session):
+async def test_refused_block_revisions_keep_everything_and_the_notes(db_session):
+    # The memory half may assume the refused edit: a lesson taken out of memory
+    # for a behavior block that never took it would be lost from both.
     await _seed(db_session)
-    await _write_note(db_session)
+    note = await _write_note(db_session)
 
     result, _ = await _dream(
         db_session,
@@ -469,10 +531,32 @@ async def test_invalid_block_revisions_keep_the_blocks_and_still_save_memory(db_
         ),
     )
 
-    assert result.outcome is DreamOutcome.DREAMED
+    assert result.outcome is DreamOutcome.KEPT_PREVIOUS
     row = await get_guild_memory_blob(db_session, _GUILD)
-    assert row.content.endswith("New line.")
+    assert row.content == _MEMORY
     assert (row.behavior, row.personality) == (_BEHAVIOR, _PERSONALITY)
+    assert row.revision == 1
+    assert await db_session.get(ChatAgentMemoryNote, note.id) is not None
+
+
+async def test_an_identity_move_with_nowhere_to_go_keeps_everything(db_session):
+    await _seed(db_session, content=_IDENTITY + "\n\n" + _MEMORY)
+    note = await _write_note(db_session)
+
+    result, _ = await _dream(
+        db_session,
+        DreamOutput(
+            memory=_MEMORY,
+            behavior=_BEHAVIOR + " Keep jokes out of #help.",
+            identity_moves=["I use dry humor."],
+        ),
+    )
+
+    assert result.outcome is DreamOutcome.KEPT_PREVIOUS
+    row = await get_guild_memory_blob(db_session, _GUILD)
+    assert row.content == _IDENTITY + "\n\n" + _MEMORY
+    assert row.behavior == _BEHAVIOR
+    assert await db_session.get(ChatAgentMemoryNote, note.id) is not None
 
 
 async def test_degenerate_memory_keeps_every_block_and_every_note(db_session):
@@ -526,5 +610,6 @@ async def test_agent_retries_an_over_limit_behavior_then_keeps_the_old_one(monke
         if part.part_kind == "retry-prompt"
     ]
     assert len(retries) == chat_memory_dream.DREAM_OUTPUT_RETRIES
-    assert compose_blocks(result.output, _context(), retries_left=0).behavior == _BEHAVIOR
+    blocks = compose_blocks(result.output, _context(), retries_left=0)
+    assert (blocks.behavior, blocks.refusals) == (_BEHAVIOR, ("behavior",))
     monkeypatch.setattr(chat_memory_dream, "_dream_agent", None)
