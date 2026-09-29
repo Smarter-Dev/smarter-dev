@@ -5,12 +5,12 @@ in the live user-interaction context — so a *triggered* execution, which runs 
 the worker, structurally has no path to this code. That is the "triggered
 executions can't author" invariant, enforced by where the code lives.
 
-Pipeline: the Author (member tier GPT-6 Luna; admin tier GPT-6 Sol at
+Pipeline: the Author (member tier GPT-6 Luna; admin tier GPT-6.1 Sol at
 high reasoning) sees the existing named handlers and returns a structured plan
 — edit one of them or create a new, named one — or marks the request
 infeasible; the host-side :mod:`~smarter_dev.web.handler_lint` rejects opaque
 blobs / dynamic execution; the Judge (member tier GPT-6 Luna; admin tier
-GPT-6 Sol, with an optional second judge, any-reject-wins) reviews the script as inert
+GPT-6.1 Sol, with an optional second judge, any-reject-wins) reviews the script as inert
 data and APPROVEs or REJECTs. The author and judge callables are injectable so
 the orchestration is unit-testable without any model calls.
 """
@@ -581,7 +581,7 @@ def _build_configured_model(model_id: str) -> Model:
     """Build a configured author/judge model, honoring the catalog's routing.
 
     These models are configured by wire id. A catalog id routes through the
-    shared model router (GPT-6 Sol, the admin author and judge default, is
+    shared model router (GPT-6.1 Sol, the admin author and judge default, is
     served via OpenAI); anything else is assumed to be a Gemini id, matching the
     member-tier author/judge defaults.
     """
