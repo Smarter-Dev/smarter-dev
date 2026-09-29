@@ -23,11 +23,14 @@ spec:
         - name: migrate
           image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
           workingDir: /app
-          # Apply this project's app-schema migrations on the single database
-          # (smarter-dev, skrift schema). The Skrift-core step stays excluded —
-          # it loads Skrift's app.yaml (which interpolates many env vars) and
-          # changes only on a Skrift upgrade; run that manually when needed.
-          command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/migrate.py --only main"]
+          # Apply Skrift-core migrations (from the skrift installed in this
+          # image), then this project's app-schema migrations, on the single
+          # database (smarter-dev, skrift schema). Core runs first: a Skrift
+          # upgrade can add worker columns that the new code needs before any
+          # pod starts (0.2.1a1 adds worker_queue.claim_generation). The core
+          # step loads Skrift's app.yaml, so every variable it interpolates is
+          # set below.
+          command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/migrate.py --only skrift-main --only main"]
           envFrom:
             - configMapRef:
                 name: smarter-dev-config
@@ -59,3 +62,44 @@ spec:
                 secretKeyRef:
                   name: smarter-dev-secrets
                   key: secret-key
+            # Interpolated by Skrift's app.yaml, which the core step loads.
+            - name: DISCORD_APPLICATION_ID
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: discord-application-id
+            - name: DISCORD_APPLICATION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: discord-client-secret
+            - name: GITHUB_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: github-client-id
+            - name: GITHUB_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: github-client-secret
+            - name: GOOGLE_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: google-client-id
+            - name: GOOGLE_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: google-client-secret
+            - name: SPACES_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: spaces-access-key
+            - name: SPACES_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: spaces-secret-key

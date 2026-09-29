@@ -143,7 +143,7 @@ jobs:
     - name: Apply ConfigMap
       run: kubectl apply -f $GITHUB_WORKSPACE/k8s/configmap.yaml
 
-    # Apply this project's app-schema migrations before rolling the new images,
+    # Apply Skrift-core, then this project's app-schema, migrations before rolling the new images,
     # so the new code never starts against an old schema. Runs in-cluster (the
     # DB's only trusted source) as a one-shot Job with admin creds. A failed
     # migration fails this step and halts the deploy (Jobs use backoffLimit 0).
