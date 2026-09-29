@@ -539,10 +539,11 @@ def _carried_by_a_block(trait: str, blocks: tuple[str, ...]) -> bool:
     """Whether ``trait`` survives in one of tonight's final blocks.
 
     Already being there counts: dropping a duplicate from Identity & Voice
-    loses nothing.
+    loses nothing. The match is on whole words, so "Dry." is not carried by
+    "sundry."; a near miss just keeps the trait where it was.
     """
-    wanted = _normalized(trait)
-    return any(wanted in _normalized(block) for block in blocks)
+    wanted = f" {_normalized(trait)} "
+    return any(wanted in f" {_normalized(block)} " for block in blocks)
 
 
 def compose_blocks(
@@ -571,6 +572,8 @@ def compose_blocks(
     moved_traits: list[str] = []
     # A trait listed twice is one move; removing it twice would fail the dream.
     for trait in dict.fromkeys(output.identity_moves):
+        if not trait.strip():
+            continue
         if _carried_by_a_block(trait, (behavior, personality)):
             moved_traits.append(trait)
             continue

@@ -440,6 +440,20 @@ def test_a_trait_listed_twice_moves_once():
     assert blocks.memory.startswith("## Identity & Voice\n- I use dry humor.")
 
 
+def test_blank_moves_are_ignored_and_moves_match_whole_words():
+    blocks = compose_blocks(
+        DreamOutput(
+            memory=_MEMORY,
+            behavior=_BEHAVIOR + " Keep things sundry.",
+            identity_moves=["", "  ", "dry."],
+        ),
+        _context(previous_blob="## Identity & Voice\n- Dry.\n\n" + _MEMORY),
+        retries_left=0,
+    )
+    assert blocks.memory.startswith("## Identity & Voice\n- Dry.\n\n")
+    assert blocks.refusals == ()
+
+
 def test_identity_trait_that_does_not_exist_cannot_move():
     with pytest.raises(ModelRetry):
         compose_blocks(
