@@ -513,3 +513,100 @@ def test_sonnet_5_5_downgrade_deletes_only_its_row():
         "DELETE FROM chat_catalog_models WHERE model_key = :key"
     )
     assert statement.compile().params == {"key": "claude-sonnet-5-5"}
+
+
+# 5cd5d3b96544 admits GPT-6.1 Sol beside GPT-6 Sol and moves nothing (#37).
+
+
+def _gpt_6_1_sol_statements(direction: str = "upgrade"):
+    module = _load_migration("5cd5d3b96544")
+    executed: list = []
+
+    class _Op:
+        @staticmethod
+        def execute(statement):
+            executed.append(statement)
+
+    module.op = _Op
+    getattr(module, direction)()
+    return executed
+
+
+def test_gpt_6_1_sol_admission_follows_sonnet_5_5():
+    from smarter_dev.shared.model_catalog import get_model
+
+    module = _load_migration("5cd5d3b96544")
+    assert module.down_revision == "d4a7c1e9f3b5"
+    assert get_model(module._KEY).model_id == "gpt-6.1-sol"
+    # 6 Sol stays in the catalog for this deploy, so old and new pods alike
+    # keep serving the selections still on it.
+    assert get_model(module._PREDECESSOR) is not None
+
+
+async def test_gpt_6_1_sol_admission_takes_6_sol_slot_and_moves_nothing(db_session):
+    from smarter_dev.web.chat.settings import ensure_settings
+    from smarter_dev.web.models import ChatCatalogModel
+
+    await ensure_settings(db_session)
+    seeded = await db_session.get(ChatCatalogModel, "gpt-6-1-sol")
+    await db_session.delete(seeded)
+    sol = await db_session.get(ChatCatalogModel, "gpt-6-sol")
+    sol.enabled = False
+    sol.cost_tier = "high"
+    sol.sort_order = 7
+    db_session.add(
+        ChannelModelOverride(guild_id="1", channel_id="2", model_key="gpt-6-sol")
+    )
+    await db_session.commit()
+    before = await _catalog_rows(db_session)
+    settings_before = (
+        await db_session.execute(text("SELECT * FROM chat_settings"))
+    ).all()
+
+    [statement] = _gpt_6_1_sol_statements()
+    for _ in range(2):  # idempotent
+        await db_session.execute(statement)
+    await db_session.commit()
+
+    after = await _catalog_rows(db_session)
+    assert after.pop("gpt-6-1-sol") == (False, "high", 7)
+    assert after == before
+    assert (
+        await db_session.execute(text("SELECT * FROM chat_settings"))
+    ).all() == settings_before
+    pin = (await db_session.execute(select(ChannelModelOverride))).scalar_one()
+    assert pin.model_key == "gpt-6-sol"
+
+
+async def test_gpt_6_1_sol_admission_without_6_sol_is_enabled_and_last(db_session):
+    from smarter_dev.web.models import ChatCatalogModel
+
+    db_session.add(
+        ChatCatalogModel(model_key="gpt-6-luna", enabled=True, cost_tier="low", sort_order=4)
+    )
+    await db_session.commit()
+    [statement] = _gpt_6_1_sol_statements()
+    await db_session.execute(statement)
+    await db_session.commit()
+    assert (await _catalog_rows(db_session))["gpt-6-1-sol"] == (True, "medium", 5)
+
+
+async def test_gpt_6_1_sol_admission_leaves_an_existing_row_alone(db_session):
+    from smarter_dev.web.models import ChatCatalogModel
+
+    db_session.add(
+        ChatCatalogModel(model_key="gpt-6-1-sol", enabled=False, cost_tier="ultra", sort_order=3)
+    )
+    await db_session.commit()
+    [statement] = _gpt_6_1_sol_statements()
+    await db_session.execute(statement)
+    await db_session.commit()
+    assert await _catalog_rows(db_session) == {"gpt-6-1-sol": (False, "ultra", 3)}
+
+
+def test_gpt_6_1_sol_admission_downgrade_deletes_only_its_row():
+    [statement] = _gpt_6_1_sol_statements("downgrade")
+    assert " ".join(str(statement).split()) == (
+        "DELETE FROM chat_catalog_models WHERE model_key = :key"
+    )
+    assert statement.compile().params == {"key": "gpt-6-1-sol"}

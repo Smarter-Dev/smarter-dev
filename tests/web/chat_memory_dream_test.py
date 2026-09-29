@@ -705,12 +705,12 @@ async def test_script_exits_one_when_any_guild_failed(monkeypatch):
     assert await dream_session.main() == 1
 
 
-def test_default_dream_model_is_gpt_6_sol_and_resolves_through_the_catalog(
+def test_default_dream_model_is_gpt_6_1_sol_and_resolves_through_the_catalog(
     monkeypatch,
 ):
     # An uncatalogued default would raise every night, silently skipping the
     # dream, so the default must stay a catalog wire id.
     monkeypatch.delenv(chat_memory_dream.DREAM_MODEL_ENV_VAR, raising=False)
     model = chat_memory_dream._dream_catalog_model()
-    assert model.model_id == "gpt-6-sol"
+    assert model.model_id == "gpt-6.1-sol"
     assert chat_memory_dream.DREAM_REASONING_LEVEL in model.reasoning_levels

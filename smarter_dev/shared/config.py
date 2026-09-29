@@ -120,20 +120,20 @@ class Settings(BaseSettings):
         description="Model that reviews candidate handler scripts (GPT-6 Luna)",
     )
     handler_admin_author_model: str = Field(
-        default="gpt-6-sol",
+        default="gpt-6.1-sol",
         description="Model that writes ADMIN handler scripts, first draft and fix "
-        "round (GPT-6 Sol at high reasoning effort). Admin scripts carry "
+        "round (GPT-6.1 Sol at high reasoning effort). Admin scripts carry "
         "moderation powers, so they get a stronger author than the member tier.",
     )
     handler_admin_judge_model: str = Field(
-        default="gpt-6-sol",
-        description="Primary judge for ADMIN handler scripts (GPT-6 Sol)",
+        default="gpt-6.1-sol",
+        description="Primary judge for ADMIN handler scripts (GPT-6.1 Sol)",
     )
     handler_admin_second_judge_model: str = Field(
-        default="gpt-6-sol",
+        default="gpt-6.1-sol",
         description="Second judge for ADMIN handlers. Both judges review in "
         "parallel and either rejection blocks install; a second judge naming the "
-        "same model as the primary is dropped, so the default panel is GPT-6 Sol "
+        "same model as the primary is dropped, so the default panel is GPT-6.1 Sol "
         "alone. Empty string disables the second judge.",
     )
 

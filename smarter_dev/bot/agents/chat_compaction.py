@@ -125,6 +125,7 @@ _PRICES: dict[str, tuple[float, float, float]] = {
     "gpt-5.6-terra": (2.00, 0.20, 12.00),
     "gpt-6-luna": (0.10, 0.01, 0.50),
     "gpt-6-sol": (2.00, 0.20, 10.00),
+    "gpt-6.1-sol": (2.00, 0.10, 10.00),
     "gpt-5.4-nano": (0.20, 0.02, 1.25),
 }
 _DEFAULT_PRICES = (0.50, 0.05, 2.00)

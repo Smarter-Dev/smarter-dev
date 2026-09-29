@@ -483,6 +483,29 @@ class TestOpenAIPricing:
         # 100k fresh @ $2 + 800k read @ $0.20 + 100k write @ $2.50.
         assert cost == Decimal("0.61")
 
+    def test_gpt_6_1_sol_rates(self):
+        # $2/M input + $10/M output, as 6 Sol.
+        assert calc_cost(1_000_000, 1_000_000, "gpt-6.1-sol") == Decimal("12.00")
+
+    def test_gpt_6_1_sol_cache_read_is_half_6_sol(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=800_000,
+            cache_write_tokens=100_000,
+            model_name="openai:gpt-6.1-sol",
+        )
+        # 100k fresh @ $2 + 800k read @ $0.10 + 100k write @ $2.50.
+        assert cost == Decimal("0.53")
+
+    def test_gpt_6_1_sol_long_context_tier_per_request(self):
+        # >272K prompt: 2x input, 1.5x output for the whole request.
+        cost = calc_cost(300_000, 10_000, "openai:gpt-6.1-sol", per_request=True)
+        assert cost == Decimal("1.35")
+        assert calc_cost(272_000, 0, "openai:gpt-6.1-sol", per_request=True) == (
+            Decimal("0.544")
+        )
+
 
 class TestAnthropicPricing:
     def test_opus_5_rates(self):
