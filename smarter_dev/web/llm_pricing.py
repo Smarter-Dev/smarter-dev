@@ -254,7 +254,8 @@ _patch_provider(
     ),
 )
 
-# GPT-6 Sol — not yet in genai-prices. Cache writes are 1.25x uncached input
+# GPT-6 Sol — retired for GPT-6.1 Sol on 2026-09-29; kept for the usage rows
+# it wrote. Not yet in genai-prices. Cache writes are 1.25x uncached input
 # and cache reads are 10% of uncached input. Prompts above 272K input tokens
 # are billed at 2x input/cache and 1.5x output for the whole request; this is
 # the base rate, and _LONG_CONTEXT_TIERS carries the tier.
