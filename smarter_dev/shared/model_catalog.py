@@ -282,6 +282,16 @@ _OPENAI_5X = (
     ReasoningLevel.XHIGH,
 )
 _OPENAI_56 = _OPENAI_5X + (ReasoningLevel.MAX,)
+# GPT-6.1 Sol reasons on every request: OpenAI rejects "none" and "minimal"
+# with unsupported_value, so its ladder starts at "low". A stored "none" pick
+# clamps to "low" through resolve_reasoning_level.
+_OPENAI_61_SOL = (
+    ReasoningLevel.LOW,
+    ReasoningLevel.MEDIUM,
+    ReasoningLevel.HIGH,
+    ReasoningLevel.XHIGH,
+    ReasoningLevel.MAX,
+)
 _GEMINI_THINKING = (
     ReasoningLevel.MINIMAL,
     ReasoningLevel.LOW,
@@ -555,6 +565,26 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         model_id="gpt-6-sol",
         supports_vision=True,
         reasoning_levels=_OPENAI_56,
+        default_reasoning=ReasoningLevel.MEDIUM,
+    ),
+    # GPT-6.1 Sol joined on 2026-09-29 to replace 6 Sol, at the user's request
+    # (#37). From https://developers.openai.com/api/docs/models/gpt-6.1-sol and
+    # a call on the production key: 1.05M context, 128K output, text+image
+    # input, low → max reasoning (default medium), $2/$10 per M with cached
+    # input at $0.10 (6 Sol: $0.20). Tools only through the Responses API,
+    # which is the only API this provider branch speaks. 6 Sol stays beside it
+    # for one deploy so the pods still on the previous build keep serving its
+    # selections while the next revision moves them here. Budgets stay at
+    # 6 Sol's catalog defaults, so the move changes no chat's compaction point,
+    # output cap or long-context (>272K) billing exposure.
+    CatalogModel(
+        key="gpt-6-1-sol",
+        label="GPT-6.1 Sol",
+        family="GPT",
+        provider=ModelProvider.OPENAI,
+        model_id="gpt-6.1-sol",
+        supports_vision=True,
+        reasoning_levels=_OPENAI_61_SOL,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
     # The whole Claude family left on 2026-09-03: nobody on the server talked
