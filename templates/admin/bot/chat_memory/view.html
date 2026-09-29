@@ -12,14 +12,32 @@
         </hgroup>
 
         <p class="sk-text-muted">
-            The chat agent's three memory layers for this guild. Short-term memory is the
+            The chat agent's three memory layers for this guild. The long-term layer is three
+            blocks the nightly dream edits: personality, behavior and memory. Short-term memory is the
             conversation itself &mdash; see
             <a href="/admin/chat-conversations?guild_id={{ guild.id }}">its conversations</a>.
         </p>
 
+        {% for label, role, text, limit in [
+            ("Personality", "Who the agent is here and how it wants people to feel about it. Changed sparingly.", blob.personality if blob else "", 250),
+            ("Behavior", "What the agent has learned about how to act here. Generally retained.", blob.behavior if blob else "", 750),
+        ] %}
+        <div class="sk-panel" style="margin-bottom:1.5rem;">
+            <div class="sk-panel-head">{{ label }} <span class="sk-text-muted" style="font-size:0.85rem;">{{ (text or "")|length }} / {{ limit }}</span></div>
+            <div class="sk-panel-body">
+                <p class="sk-text-muted" style="font-size:0.85rem;">{{ role }}</p>
+                {% if text %}
+                <div style="border:1px solid var(--sk-border-color, #e0e0e0); border-radius:6px; padding:1rem; white-space:pre-wrap;">{{ text }}</div>
+                {% else %}
+                <p class="sk-text-muted">Empty &mdash; the dream has not written one yet.</p>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+
         <div class="sk-panel" style="margin-bottom:1.5rem;">
             <div class="sk-panel-head">
-                Long-term memory
+                Memory
                 {% if blob and not blob.memory_enabled %}
                 <span class="sk-badge sk-badge-danger" style="margin-left:0.5rem;">disabled &mdash; hidden from the bot</span>
                 {% endif %}
@@ -96,7 +114,16 @@
                             {% if rev.model_name %}&middot; {{ rev.model_name }}{% endif %}
                         </span>
                     </summary>
-                    <div style="border:1px solid var(--sk-border-color, #e0e0e0); border-radius:6px; padding:1rem; margin-top:0.5rem;">
+                    {% if rev.personality %}
+                    <p style="margin:0.5rem 0 0;"><strong>Personality</strong></p>
+                    <div style="border:1px solid var(--sk-border-color, #e0e0e0); border-radius:6px; padding:1rem; margin-top:0.25rem; white-space:pre-wrap;">{{ rev.personality }}</div>
+                    {% endif %}
+                    {% if rev.behavior %}
+                    <p style="margin:0.5rem 0 0;"><strong>Behavior</strong></p>
+                    <div style="border:1px solid var(--sk-border-color, #e0e0e0); border-radius:6px; padding:1rem; margin-top:0.25rem; white-space:pre-wrap;">{{ rev.behavior }}</div>
+                    {% endif %}
+                    <p style="margin:0.5rem 0 0;"><strong>Memory</strong></p>
+                    <div style="border:1px solid var(--sk-border-color, #e0e0e0); border-radius:6px; padding:1rem; margin-top:0.25rem;">
                         {{ rev.content | markdown }}
                     </div>
                 </details>

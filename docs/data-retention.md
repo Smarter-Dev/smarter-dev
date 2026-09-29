@@ -181,8 +181,8 @@ allowed — that is a keyword watch, not a command.
 
   | Table | What it holds | Why it is exempt |
   | --- | --- | --- |
-  | `chat_agent_guild_memory` | One ≤2000-character markdown document per guild: who the people here are to the bot, the running jokes, the opinions it has formed. | Prose the bot wrote about itself, not message text it read. |
-  | `chat_agent_memory_revisions` | The last five nights of that document, per guild. | Same — it is the history of the bot's own writing. |
+  | `chat_agent_guild_memory` | One ≤2000-character markdown document per guild: who the people here are to the bot, the running jokes, the opinions it has formed. Beside it, a ≤750-character behavior block (how the bot has learned to act there) and a ≤250-character personality block (who it is there). | Prose the bot wrote about itself, not message text it read. |
+  | `chat_agent_memory_revisions` | The last five nights of that document and its two blocks, per guild. | Same — it is the history of the bot's own writing. |
   | `chat_agent_memory_notes` | Notes the bot keeps mid-conversation, in its own words. | Deleted outright by the nightly job that folds them into the document — they live under a day and never reach a 48-hour cutoff. |
 
   The rule the bot is held to when writing any of it is *remember the person,

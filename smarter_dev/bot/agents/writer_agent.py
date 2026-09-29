@@ -98,7 +98,13 @@ def _identity_directive(model_id: str) -> str:
     )
 
 
-def build_writer_prompt(brief: WriterBrief, *, long_term: str | None = None) -> str:
+def build_writer_prompt(
+    brief: WriterBrief,
+    *,
+    long_term: str | None = None,
+    behavior: str | None = None,
+    personality: str | None = None,
+) -> str:
     """Render ``brief`` into the writer's user message (pure function).
 
     Deterministically lays out the attributed message summaries, the search
@@ -114,11 +120,25 @@ def build_writer_prompt(brief: WriterBrief, *, long_term: str | None = None) -> 
     is situational: the lines from today's notes and this hour's actions that the
     drafter judged the reply would be worse without. Both are laid out before the
     conversation so the ordering runs far to near, and both are framed as the
-    writer's own memory rather than as findings to cite.
+    writer's own memory rather than as findings to cite. ``personality`` and
+    ``behavior``, the dream's two other durable blocks, come verbatim by the
+    same route as ``long_term`` and ahead of it.
     """
     sections: list[str] = [
         f"Write your reply in {brief.response_language}.",
     ]
+
+    if personality and personality.strip():
+        sections.append(
+            "Your personality here (who you are, and how you want people to "
+            f"feel about you):\n{personality.strip()}"
+        )
+
+    if behavior and behavior.strip():
+        sections.append(
+            "How you've learned to behave here (follow it unless it clashes "
+            f"with your core instructions):\n{behavior.strip()}"
+        )
 
     if long_term and long_term.strip():
         sections.append(

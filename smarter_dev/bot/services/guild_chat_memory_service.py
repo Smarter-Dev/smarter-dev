@@ -63,7 +63,9 @@ class GuildMemorySnapshot:
     """Everything one activation needs from a guild's persistent memory.
 
     ``long_term_memory`` is the dream-written blob (``None`` when the guild has
-    never been dreamed, or when its memory is switched off) and ``notes`` are the
+    never been dreamed, or when its memory is switched off); ``behavior`` and
+    ``personality`` are the two smaller durable blocks the same dream edits,
+    ``None`` when empty. ``notes`` are the
     thoughts the agent kept since midnight UTC, capped and windowed server-side.
     Frozen, and ``notes`` is a tuple, because this is handed straight to the
     prompt builders — nothing downstream should be able to edit the bot's memory
@@ -71,6 +73,8 @@ class GuildMemorySnapshot:
     """
 
     long_term_memory: str | None = None
+    behavior: str | None = None
+    personality: str | None = None
     updated_at: datetime | None = None
     revision: int | None = None
     memory_enabled: bool = True
@@ -131,6 +135,8 @@ def _parsed_snapshot(payload: Any) -> GuildMemorySnapshot:
     if not isinstance(payload, dict) or "memory_enabled" not in payload:
         raise ValueError("chat memory bundle is missing its expected fields")
     content = payload.get("content")
+    behavior = payload.get("behavior")
+    personality = payload.get("personality")
     notes = tuple(
         note
         for raw_note in payload.get("notes") or []
@@ -138,6 +144,11 @@ def _parsed_snapshot(payload: Any) -> GuildMemorySnapshot:
     )
     return GuildMemorySnapshot(
         long_term_memory=content if isinstance(content, str) and content else None,
+        # Absent on a web build that predates the blocks: read as "none yet".
+        behavior=behavior if isinstance(behavior, str) and behavior else None,
+        personality=(
+            personality if isinstance(personality, str) and personality else None
+        ),
         updated_at=_parsed_timestamp(payload.get("updated_at")),
         revision=payload.get("revision"),
         memory_enabled=bool(payload.get("memory_enabled")),

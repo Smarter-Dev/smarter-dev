@@ -1214,6 +1214,56 @@ def test_render_memory_block_composes_known_sections():
     assert "alice is benchmarking" in block
 
 
+def test_render_memory_block_labels_all_three_durable_blocks():
+    block = proactive.render_memory_block(
+        long_term_memory="This guild loves rust.",
+        long_term_updated_at=datetime(2026, 8, 17, tzinfo=UTC),
+        notes=(),
+        behavior="Wait to be asked before explaining.",
+        personality="Dry, warm, a little nerdy.",
+    )
+    personality = block.index("PERSONALITY (who you are here")
+    behavior = block.index("BEHAVIOR (what you've learned about how to act here")
+    memory = block.index("GUILD MEMORY (dreamed 2026-08-17) (what you know")
+    assert personality < behavior < memory
+    assert "Dry, warm, a little nerdy." in block
+    assert "Wait to be asked before explaining." in block
+
+
+async def test_load_memory_block_carries_the_snapshot_blocks():
+    from smarter_dev.bot.services.guild_chat_memory_service import GuildMemorySnapshot
+
+    service = SimpleNamespace(
+        load_snapshot=AsyncMock(
+            return_value=GuildMemorySnapshot(
+                long_term_memory="This guild loves rust.",
+                behavior="Wait to be asked before explaining.",
+                personality="Dry, warm, a little nerdy.",
+            )
+        )
+    )
+    run = SimpleNamespace(bot=SimpleNamespace(d={"guild_chat_memory_service": service}))
+
+    block = await proactive.load_memory_block(run, "123")
+
+    service.load_snapshot.assert_awaited_once_with("123")
+    assert "PERSONALITY" in block and "Dry, warm, a little nerdy." in block
+    assert "BEHAVIOR" in block and "Wait to be asked before explaining." in block
+    assert "GUILD MEMORY" in block and "This guild loves rust." in block
+
+
+def test_render_memory_block_with_only_personality_is_not_empty():
+    block = proactive.render_memory_block(
+        long_term_memory=None,
+        long_term_updated_at=None,
+        notes=(),
+        personality="Dry, warm, a little nerdy.",
+    )
+    assert "PERSONALITY" in block
+    assert "BEHAVIOR" not in block
+    assert "GUILD MEMORY" not in block
+
+
 def test_render_memory_block_empty_when_nothing_known():
     assert (
         proactive.render_memory_block(
