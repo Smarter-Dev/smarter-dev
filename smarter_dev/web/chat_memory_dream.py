@@ -231,8 +231,8 @@ lasting lesson about how to act, or something about who you are, you may move
 it into behavior or personality over the nights ahead, a little at a time. To
 move an Identity & Voice trait, carry it in `behavior` or `personality` and
 list the trait exactly as it appears (without its bullet) in `identity_moves`;
-code removes it from Identity & Voice only when that trait's text is new in
-the block tonight, so carry it over in its own words. Moving is optional; never lose something by moving it.
+code removes it from Identity & Voice only when that trait's text is in the
+block, so carry it over in its own words. Moving is optional; never lose something by moving it.
 
 # What stays
 
@@ -535,17 +535,14 @@ def _normalized(text: str) -> str:
     return " ".join(text.split()).casefold()
 
 
-def _carried_by_a_revision(trait: str, revisions: list[tuple[str, str]]) -> bool:
-    """Whether ``trait`` arrived tonight in a block that took a revision.
+def _carried_by_a_block(trait: str, blocks: tuple[str, ...]) -> bool:
+    """Whether ``trait`` survives in one of tonight's final blocks.
 
-    Each revision is ``(previous, new)``. Text that was already there before
-    tonight does not count: the trait has to have actually moved.
+    Already being there counts: dropping a duplicate from Identity & Voice
+    loses nothing.
     """
     wanted = _normalized(trait)
-    return any(
-        wanted in _normalized(new) and wanted not in _normalized(previous)
-        for previous, new in revisions
-    )
+    return any(wanted in _normalized(block) for block in blocks)
 
 
 def compose_blocks(
@@ -554,9 +551,10 @@ def compose_blocks(
     """Resolve all three blocks for one night's output.
 
     Behavior and personality resolve first, because an Identity & Voice trait
-    may leave memory only when its text arrived tonight in a block that took a
-    revision. With retries left, anything refused is asked for again; on the
-    last attempt it is recorded in :attr:`DreamBlocks.refusals` instead.
+    may leave memory only when its text is in one of the blocks as resolved.
+    With retries left, anything refused is asked for again. On the last
+    attempt a refused block revision is recorded in :attr:`DreamBlocks.refusals`.
+    A refused move is simply dropped, because the trait stays where it was.
     """
     refusals: list[str] = []
     behavior = resolve_block(
@@ -570,27 +568,19 @@ def compose_blocks(
     personality = resolve_personality(
         output, context, retries_left=retries_left, refusals=refusals
     )
-    revisions = [
-        (previous, new)
-        for previous, new in (
-            (context.previous_behavior, behavior),
-            (context.previous_personality, personality),
-        )
-        if new != previous
-    ]
     moved_traits: list[str] = []
-    for trait in output.identity_moves:
-        if _carried_by_a_revision(trait, revisions):
+    # A trait listed twice is one move; removing it twice would fail the dream.
+    for trait in dict.fromkeys(output.identity_moves):
+        if _carried_by_a_block(trait, (behavior, personality)):
             moved_traits.append(trait)
             continue
         if retries_left > 0:
             raise ModelRetry(
-                f"identity_moves names {trait!r}, but no revised `behavior` or "
+                f"identity_moves names {trait!r}, but neither `behavior` nor "
                 "`personality` carries it. Write it into the block it moves to, "
                 "or leave it out of identity_moves."
             )
         logger.warning("Dream identity move had nowhere to go; keeping the trait")
-        refusals.append("identity_moves")
     memory = compose_dream(
         output, context, retries_left=retries_left, moved_traits=moved_traits
     )

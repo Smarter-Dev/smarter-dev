@@ -379,7 +379,8 @@ def test_identity_moves_need_the_trait_itself_in_the_revised_block():
         compose_blocks(output, context, retries_left=1)
     blocks = compose_blocks(output, context, retries_left=0)
     assert blocks.memory.startswith(_IDENTITY)
-    assert blocks.refusals == ("identity_moves", "identity_moves")
+    # A refused move loses nothing, so it does not cost the night.
+    assert blocks.refusals == ()
 
 
 def test_identity_moves_are_judged_one_trait_at_a_time():
@@ -394,7 +395,7 @@ def test_identity_moves_are_judged_one_trait_at_a_time():
     )
     assert blocks.memory.startswith("## Identity & Voice\n- I use dry humor.\n\n")
     assert "I let others finish." not in blocks.memory
-    assert blocks.refusals == ("identity_moves",)
+    assert blocks.refusals == ()
 
 
 def test_a_trait_cannot_move_into_a_personality_that_was_refused():
@@ -408,20 +409,35 @@ def test_a_trait_cannot_move_into_a_personality_that_was_refused():
     blocks = compose_blocks(output, context, retries_left=0)
     assert blocks.personality == _PERSONALITY
     assert blocks.memory.startswith(_IDENTITY)
-    assert blocks.refusals == ("personality", "identity_moves")
+    assert blocks.refusals == ("personality",)
 
 
-def test_a_trait_already_in_the_block_has_not_moved():
-    output = DreamOutput(
-        memory=_MEMORY,
-        behavior="I let others finish. Keep jokes out of #help.",
-        identity_moves=["I let others finish."],
+def test_a_trait_already_in_an_unchanged_block_can_be_deduplicated():
+    blocks = compose_blocks(
+        DreamOutput(memory=_MEMORY, identity_moves=["I let others finish."]),
+        _context(
+            previous_blob=_IDENTITY + "\n\n" + _MEMORY,
+            previous_behavior="I let others finish.",
+        ),
+        retries_left=1,
     )
-    context = _context(
-        previous_blob=_IDENTITY + "\n\n" + _MEMORY,
-        previous_behavior="I let others finish.",
+    assert blocks.memory.startswith("## Identity & Voice\n- I use dry humor.\n\n")
+    assert blocks.behavior == "I let others finish."
+    assert blocks.refusals == ()
+
+
+def test_a_trait_listed_twice_moves_once():
+    blocks = compose_blocks(
+        DreamOutput(
+            memory=_MEMORY,
+            behavior=_BEHAVIOR + " I let others finish.",
+            identity_moves=["I let others finish.", "I let others finish."],
+        ),
+        _context(previous_blob=_IDENTITY + "\n\n" + _MEMORY),
+        retries_left=0,
     )
-    assert compose_blocks(output, context, retries_left=0).memory.startswith(_IDENTITY)
+    assert "I let others finish." not in blocks.memory
+    assert blocks.memory.startswith("## Identity & Voice\n- I use dry humor.")
 
 
 def test_identity_trait_that_does_not_exist_cannot_move():
@@ -539,7 +555,7 @@ async def test_refused_block_revisions_keep_everything_and_the_notes(db_session)
     assert await db_session.get(ChatAgentMemoryNote, note.id) is not None
 
 
-async def test_an_identity_move_with_nowhere_to_go_keeps_everything(db_session):
+async def test_an_identity_move_with_nowhere_to_go_keeps_the_trait_and_dreams(db_session):
     await _seed(db_session, content=_IDENTITY + "\n\n" + _MEMORY)
     note = await _write_note(db_session)
 
@@ -552,11 +568,11 @@ async def test_an_identity_move_with_nowhere_to_go_keeps_everything(db_session):
         ),
     )
 
-    assert result.outcome is DreamOutcome.KEPT_PREVIOUS
+    assert result.outcome is DreamOutcome.DREAMED
     row = await get_guild_memory_blob(db_session, _GUILD)
     assert row.content == _IDENTITY + "\n\n" + _MEMORY
-    assert row.behavior == _BEHAVIOR
-    assert await db_session.get(ChatAgentMemoryNote, note.id) is not None
+    assert row.behavior == _BEHAVIOR + " Keep jokes out of #help."
+    assert await db_session.get(ChatAgentMemoryNote, note.id) is None
 
 
 async def test_degenerate_memory_keeps_every_block_and_every_note(db_session):
