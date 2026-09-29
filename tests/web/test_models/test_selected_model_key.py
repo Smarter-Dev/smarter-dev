@@ -35,11 +35,11 @@ async def test_settings_read_retired_keys_as_successors(db_session):
 
     assert settings.default_model_key == "gpt-6-luna"
     assert settings.summarizer_model_key == "gpt-6-luna"
-    assert settings.summarizer_fallback_model_key == "gpt-6-sol"
+    assert settings.summarizer_fallback_model_key == "gpt-6-1-sol"
     assert settings.compaction_model_key == "gpt-6-luna"
     assert settings.compaction_fallback_model_key is None
     assert settings.thread_evaluator_model_key == "deepseek-v4"
-    assert settings.thread_evaluator_fallback_model_key == "gpt-6-sol"
+    assert settings.thread_evaluator_fallback_model_key == "gpt-6-1-sol"
 
 
 async def test_reading_and_saving_other_columns_leaves_stored_keys_alone(db_session):
@@ -140,6 +140,13 @@ def test_migration_successors_match_the_catalog_map():
         for retired, successor in _load_migration(revision)._SUCCESSORS:
             assert retired not in combined, retired
             combined[retired] = successor
+    # 7c2d9e4b1a60 retired 6 Sol, a successor itself; the keys that went to
+    # it follow it, so the map stays one lookup deep.
+    gpt_6_1_sol = _load_migration("7c2d9e4b1a60")
+    for retired, successor in combined.items():
+        if successor == gpt_6_1_sol._RETIRED:
+            combined[retired] = gpt_6_1_sol._SUCCESSOR
+    combined[gpt_6_1_sol._RETIRED] = gpt_6_1_sol._SUCCESSOR
     restored = _load_migration("479f5fca562d")._KEY
     assert restored in combined
     del combined[restored]
@@ -408,15 +415,30 @@ def _sonnet_5_5_statements(direction: str = "upgrade"):
 def test_sonnet_5_5_admission_follows_the_conversation_return():
     from smarter_dev.shared.model_catalog import RETIRED_SUCCESSORS
     from smarter_dev.shared.model_catalog import get_model
+    from smarter_dev.shared.model_catalog import successor_key
 
     module = _load_migration("d4a7c1e9f3b5")
     assert module.down_revision == "c3e8a1d5f7b2"
     assert module._KEY == "claude-sonnet-5-5"
     assert get_model(module._KEY) is not None
-    # Its cost-tier peer is the catalog model at the same $2/$10.
-    assert get_model(module._PRICE_PEER) is not None
+    # Its cost-tier peer was the catalog model at the same $2/$10, 6 Sol,
+    # since replaced by 6.1 Sol at the same rates.
+    assert get_model(successor_key(module._PRICE_PEER)) is not None
     # Additive: it takes over no retired key's selections.
     assert module._KEY not in RETIRED_SUCCESSORS.values()
+
+
+async def _gpt_6_sol_row(db_session):
+    """6 Sol's catalog row, which ``ensure_settings`` stopped seeding once it retired."""
+    from smarter_dev.web.models import ChatCatalogModel
+
+    row = await db_session.get(ChatCatalogModel, "gpt-6-sol")
+    if row is None:
+        row = ChatCatalogModel(
+            model_key="gpt-6-sol", enabled=True, cost_tier="medium", sort_order=40
+        )
+        db_session.add(row)
+    return row
 
 
 async def _catalog_rows(db_session):
@@ -438,7 +460,7 @@ async def test_sonnet_5_5_admission_is_enabled_at_sol_tier_and_sorts_last(db_ses
     await ensure_settings(db_session)
     seeded = await db_session.get(ChatCatalogModel, "claude-sonnet-5-5")
     await db_session.delete(seeded)
-    sol = await db_session.get(ChatCatalogModel, "gpt-6-sol")
+    sol = await _gpt_6_sol_row(db_session)
     sol.cost_tier = "high"
     sol.enabled = False
     await db_session.commit()
@@ -538,9 +560,9 @@ def test_gpt_6_1_sol_admission_follows_sonnet_5_5():
     module = _load_migration("5cd5d3b96544")
     assert module.down_revision == "d4a7c1e9f3b5"
     assert get_model(module._KEY).model_id == "gpt-6.1-sol"
-    # 6 Sol stays in the catalog for this deploy, so old and new pods alike
-    # keep serving the selections still on it.
-    assert get_model(module._PREDECESSOR) is not None
+    # 6 Sol stayed in the catalog for that deploy, so old and new pods alike
+    # kept serving the selections still on it; 7c2d9e4b1a60 retired it.
+    assert module._PREDECESSOR == _load_migration("7c2d9e4b1a60")._RETIRED
 
 
 async def test_gpt_6_1_sol_admission_takes_6_sol_slot_and_moves_nothing(db_session):
@@ -550,7 +572,7 @@ async def test_gpt_6_1_sol_admission_takes_6_sol_slot_and_moves_nothing(db_sessi
     await ensure_settings(db_session)
     seeded = await db_session.get(ChatCatalogModel, "gpt-6-1-sol")
     await db_session.delete(seeded)
-    sol = await db_session.get(ChatCatalogModel, "gpt-6-sol")
+    sol = await _gpt_6_sol_row(db_session)
     sol.enabled = False
     sol.cost_tier = "high"
     sol.sort_order = 7
@@ -610,3 +632,167 @@ def test_gpt_6_1_sol_admission_downgrade_deletes_only_its_row():
         "DELETE FROM chat_catalog_models WHERE model_key = :key"
     )
     assert statement.compile().params == {"key": "gpt-6-1-sol"}
+
+
+# 7c2d9e4b1a60 moves every GPT-6 Sol selection to GPT-6.1 Sol (#37), the one
+# retirement that migrates chats and pins.
+
+
+def _gpt_6_sol_move_statements(direction: str = "upgrade"):
+    module = _load_migration("7c2d9e4b1a60")
+    executed: list = []
+
+    class _Op:
+        @staticmethod
+        def execute(statement):
+            executed.append(statement)
+
+    module.op = _Op
+    getattr(module, direction)()
+    return executed
+
+
+def test_gpt_6_sol_move_follows_the_admission_and_names_live_keys():
+    from smarter_dev.shared.model_catalog import RETIRED_SUCCESSORS
+    from smarter_dev.shared.model_catalog import get_model
+
+    module = _load_migration("7c2d9e4b1a60")
+    assert module.down_revision == "5cd5d3b96544"
+    assert get_model(module._RETIRED) is None
+    assert get_model(module._SUCCESSOR) is not None
+    assert RETIRED_SUCCESSORS[module._RETIRED] == module._SUCCESSOR
+
+
+async def _seed_gpt_6_sol_everywhere(db_session):
+    from uuid import uuid4
+
+    from smarter_dev.web.models import ChatCatalogModel
+    from smarter_dev.web.models import WebChatTurn
+
+    settings = _settings()
+    for column in (
+        "default_model_key",
+        "summarizer_model_key",
+        "summarizer_fallback_model_key",
+        "compaction_model_key",
+        "compaction_fallback_model_key",
+        "thread_evaluator_model_key",
+        "thread_evaluator_fallback_model_key",
+    ):
+        setattr(settings, column, "gpt-6-sol")
+    db_session.add(settings)
+    db_session.add_all(
+        [
+            ChatCatalogModel(model_key="gpt-6-sol", enabled=True, cost_tier="high", sort_order=1),
+            ChatCatalogModel(model_key="gpt-6-1-sol", enabled=False, cost_tier="ultra", sort_order=2),
+            ChatCatalogModel(model_key="gpt-6-luna", enabled=True, cost_tier="low", sort_order=0),
+            ChannelModelOverride(
+                guild_id="1", channel_id="2", model_key="gpt-6-sol",
+                fallback_model_key="gpt-6-sol", drafter_model="gpt-6-sol",
+                reasoning_level="none",
+            ),
+            ChannelModelOverride(
+                guild_id="1", channel_id="3", model_key="gpt-6-luna",
+                fallback_model_key="gemma-4-31b",
+            ),
+        ]
+    )
+    await db_session.flush()
+    conversation_id = await _conversation(
+        db_session, selected="gpt-6-sol", reasoning="high", turn_keys=()
+    )
+    other_id = await _conversation(
+        db_session, conversation_id=str(uuid4()), selected="gpt-6-luna", turn_keys=()
+    )
+    # One conversation per turn: a conversation holds one active turn at most.
+    for status in ("complete", "running", "stopping", "submitted", "queued", "failed"):
+        holder = await _conversation(
+            db_session, conversation_id=str(uuid4()), selected="gpt-6-luna", turn_keys=()
+        )
+        db_session.add(WebChatTurn(
+            conversation_id=holder, sequence=1, submission_key=status,
+            response_version_group=uuid4(), response_sequence=2,
+            model_key="gpt-6-sol", status=status,
+        ))
+    await db_session.commit()
+    return conversation_id, other_id
+
+
+async def test_gpt_6_sol_move_rewrites_live_selections_and_keeps_history(db_session):
+    conversation_id, other_id = await _seed_gpt_6_sol_everywhere(db_session)
+
+    for _ in range(2):  # idempotent
+        for statement in _gpt_6_sol_move_statements():
+            await db_session.execute(statement)
+    await db_session.commit()
+
+    settings = (await db_session.execute(text(
+        "SELECT default_model_key, summarizer_model_key, summarizer_fallback_model_key,"
+        " compaction_model_key, compaction_fallback_model_key,"
+        " thread_evaluator_model_key, thread_evaluator_fallback_model_key"
+        " FROM chat_settings"
+    ))).one()
+    assert set(settings) == {"gpt-6-1-sol"}
+    assert await _selection(db_session, conversation_id) == ("gpt-6-1-sol", "high")
+    assert await _selection(db_session, other_id) == ("gpt-6-luna", "medium")
+    assert (await db_session.execute(text(
+        "SELECT count(*) FROM web_chat_conversations WHERE selected_model_key = 'gpt-6-luna'"
+    ))).scalar_one() == 7
+    turns = dict((await db_session.execute(text(
+        "SELECT status, model_key FROM web_chat_turns"
+    ))).all())
+    # Unstarted turns move; what ran, is running or is stopping keeps its key.
+    assert turns == {
+        "complete": "gpt-6-sol", "running": "gpt-6-sol", "stopping": "gpt-6-sol",
+        "submitted": "gpt-6-1-sol", "queued": "gpt-6-1-sol", "failed": "gpt-6-sol",
+    }
+    pins = {
+        pin.channel_id: (pin.model_key, pin.fallback_model_key, pin.drafter_model,
+                         pin.reasoning_level)
+        for pin in (await db_session.execute(select(ChannelModelOverride))).scalars()
+    }
+    # Reasoning stays as stored; "none" runs as 6.1 Sol's lowest level, "low".
+    assert pins == {
+        "2": ("gpt-6-1-sol", "gpt-6-1-sol", "gpt-6-1-sol", "none"),
+        "3": ("gpt-6-luna", "gemma-4-31b", None, None),
+    }
+    # 6 Sol's row goes; 6.1 Sol's keeps its settings, enabled as the default.
+    assert await _catalog_rows(db_session) == {
+        "gpt-6-1-sol": (True, "ultra", 2),
+        "gpt-6-luna": (True, "low", 0),
+    }
+
+
+async def test_gpt_6_sol_move_leaves_a_disabled_6_1_sol_alone_when_not_default(db_session):
+    from smarter_dev.web.models import ChatCatalogModel
+
+    db_session.add(_settings())
+    db_session.add_all([
+        ChatCatalogModel(model_key="gpt-6-sol", enabled=True, cost_tier="high", sort_order=1),
+        ChatCatalogModel(model_key="gpt-6-1-sol", enabled=False, cost_tier="high", sort_order=2),
+    ])
+    await db_session.commit()
+    for statement in _gpt_6_sol_move_statements():
+        await db_session.execute(statement)
+    await db_session.commit()
+    assert await _catalog_rows(db_session) == {"gpt-6-1-sol": (False, "high", 2)}
+
+
+async def test_gpt_6_sol_move_downgrade_restores_the_row_and_keeps_choices(db_session):
+    from smarter_dev.web.models import ChatCatalogModel
+
+    db_session.add(
+        ChatCatalogModel(model_key="gpt-6-1-sol", enabled=True, cost_tier="high", sort_order=2)
+    )
+    db_session.add(ChannelModelOverride(guild_id="1", channel_id="2", model_key="gpt-6-1-sol"))
+    await db_session.commit()
+    for _ in range(2):
+        for statement in _gpt_6_sol_move_statements("downgrade"):
+            await db_session.execute(statement)
+    await db_session.commit()
+    assert await _catalog_rows(db_session) == {
+        "gpt-6-1-sol": (True, "high", 2),
+        "gpt-6-sol": (True, "high", 2),
+    }
+    pin = (await db_session.execute(select(ChannelModelOverride))).scalar_one()
+    assert pin.model_key == "gpt-6-1-sol"

@@ -557,26 +557,15 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         reasoning_levels=_OPENAI_56,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
-    CatalogModel(
-        key="gpt-6-sol",
-        label="GPT-6 Sol",
-        family="GPT",
-        provider=ModelProvider.OPENAI,
-        model_id="gpt-6-sol",
-        supports_vision=True,
-        reasoning_levels=_OPENAI_56,
-        default_reasoning=ReasoningLevel.MEDIUM,
-    ),
     # GPT-6.1 Sol joined on 2026-09-29 to replace 6 Sol, at the user's request
     # (#37). From https://developers.openai.com/api/docs/models/gpt-6.1-sol and
     # a call on the production key: 1.05M context, 128K output, text+image
     # input, low → max reasoning (default medium), $2/$10 per M with cached
     # input at $0.10 (6 Sol: $0.20). Tools only through the Responses API,
-    # which is the only API this provider branch speaks. 6 Sol stays beside it
-    # for one deploy so the pods still on the previous build keep serving its
-    # selections while the next revision moves them here. Budgets stay at
-    # 6 Sol's catalog defaults, so the move changes no chat's compaction point,
-    # output cap or long-context (>272K) billing exposure.
+    # which is the only API this provider branch speaks. 6 Sol left the next
+    # deploy, and its selections moved here (see RETIRED_SUCCESSORS). Budgets
+    # stay at 6 Sol's catalog defaults, so the move changes no chat's
+    # compaction point, output cap or long-context (>272K) billing exposure.
     CatalogModel(
         key="gpt-6-1-sol",
         label="GPT-6.1 Sol",
@@ -704,13 +693,18 @@ _MODEL_BY_KEY: dict[str, CatalogModel] = {
 # lets the deploy that retires a key leave their stored values alone while pods
 # on the previous build still read them. Web conversations, turns and channel
 # pins never read through it.
+#
+# Each entry names a live key, so one lookup always lands on a served model:
+# when a successor retires, the keys that pointed at it are repointed at its
+# own successor. The GPT-5.x flagships went to 6 Sol on 2026-09-24 and follow
+# it to 6.1 Sol.
 RETIRED_SUCCESSORS: dict[str, str] = {
     "gpt-5-6-luna": "gpt-6-luna",
-    "gpt-5-6-terra": "gpt-6-sol",
+    "gpt-5-6-terra": "gpt-6-1-sol",
     "gpt-5-4-mini": "gpt-6-luna",
-    "gpt-5-4": "gpt-6-sol",
-    "gpt-5-5": "gpt-6-sol",
-    "gpt-5-6-sol": "gpt-6-sol",
+    "gpt-5-4": "gpt-6-1-sol",
+    "gpt-5-5": "gpt-6-1-sol",
+    "gpt-5-6-sol": "gpt-6-1-sol",
     "gpt-5-4-nano": "gpt-6-luna",
     # 2026-09-24: 3.8 Flash is the only full Gemini Flash left, and Grok 4.7
     # replaced 4.6. (3.5 Flash Lite, retired the same day by mistake, was
@@ -718,6 +712,11 @@ RETIRED_SUCCESSORS: dict[str, str] = {
     "gemini-3-6-flash": "gemini-3-8-flash",
     "gemini-3-7-flash": "gemini-3-8-flash",
     "grok-4-6": "grok-4-7",
+    # 2026-09-29, the one exception to the rule above (#37): the user asked for
+    # every GPT-6 Sol selection — conversations, queued turns and channel pins
+    # included — to move to GPT-6.1 Sol, and 7c2d9e4b1a60 moved them. It sets
+    # no precedent; the next retirement moves nothing again unless asked.
+    "gpt-6-sol": "gpt-6-1-sol",
 }
 
 

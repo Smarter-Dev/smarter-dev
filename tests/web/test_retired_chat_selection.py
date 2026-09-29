@@ -43,7 +43,7 @@ from tests.web.quick_chat_surface_test import _render_chat_page
 # Retired on 2026-09-24 and still mapped to a successor for admin settings.
 RETIRED = "gpt-5-4"
 AVAILABLE = "gpt-6-luna"  # ensure_settings enables it
-OTHER = "gpt-6-sol"
+OTHER = "gpt-6-1-sol"
 
 _CHAT_JS = (
     Path(__file__).parents[2] / "themes" / "smarterdev" / "static" / "js" / "chat.js"

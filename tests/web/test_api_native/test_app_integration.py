@@ -294,13 +294,13 @@ class TestRepresentativeEndpoints:
             override_path,
             headers=_auth(bot_key),
             json={
-                "model_key": "gpt-6-sol",
+                "model_key": "gpt-6-1-sol",
                 "daily_token_budget": 0,
                 "hourly_token_budget": 0,
             },
         )
         assert put_response.status_code == 200
-        assert put_response.json()["model_key"] == "gpt-6-sol"
+        assert put_response.json()["model_key"] == "gpt-6-1-sol"
 
         get_response = app_client.get(override_path, headers=_auth(bot_key))
         assert get_response.status_code == 200
