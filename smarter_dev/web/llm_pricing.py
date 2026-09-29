@@ -273,6 +273,26 @@ _patch_provider(
     ),
 )
 
+# GPT-6.1 Sol — not yet in genai-prices. Replaced GPT-6 Sol on 2026-09-29
+# (#37). Same input, output and cache-write rates as 6 Sol, but cached input is
+# $0.10 (5% of input) where 6 Sol's is $0.20. Same >272K long-context tier,
+# carried by _LONG_CONTEXT_TIERS. Its own prefix: "gpt-6-sol" does not match
+# "gpt-6.1-sol", so neither patch prices the other's rows.
+# https://developers.openai.com/api/docs/models/gpt-6.1-sol
+_patch_provider(
+    "openai",
+    types.ModelInfo(
+        id="gpt-6.1-sol",
+        match=types.ClauseStartsWith(starts_with="gpt-6.1-sol"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("2.00"),
+            output_mtok=Decimal("10.00"),
+            cache_read_mtok=Decimal("0.10"),
+            cache_write_mtok=Decimal("2.50"),
+        ),
+    ),
+)
+
 # GPT-6 Luna — not yet in genai-prices. Served by OpenAI directly, the
 # server-default chat model since 2026-09-24. Same cache ratios and same
 # >272K-input long-context multiplier as GPT-6 Sol, carried by
@@ -631,6 +651,7 @@ class LongContextTier:
 _LONG_CONTEXT_TIERS: dict[str, LongContextTier] = {
     # OpenAI: prompts above 272K bill 2x input/cache and 1.5x output.
     "gpt-6-sol": LongContextTier(272_001, Decimal("2"), Decimal("1.5")),
+    "gpt-6.1-sol": LongContextTier(272_001, Decimal("2"), Decimal("1.5")),
     "gpt-6-luna": LongContextTier(272_001, Decimal("2"), Decimal("1.5")),
     # OpenRouter's xAI endpoints: an override from min_prompt_tokens 200000
     # doubles prompt, cache read and completion ($3.20/$0.80/$9.60). Read from
