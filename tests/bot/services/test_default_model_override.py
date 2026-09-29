@@ -120,7 +120,7 @@ async def test_read_moves_a_retired_key_onto_its_successor():
     )
     override = await read_default_model_override(_redis_with(stored))
     assert override is not None
-    assert override.model_key == "gpt-6-sol"
+    assert override.model_key == "gpt-6-1-sol"
 
 
 @pytest.mark.asyncio

@@ -24,7 +24,7 @@ from smarter_dev.shared.model_router import model_settings_for
 _DO_MODEL = get_model("qwen3-5-397b")
 _DO_REASONING_MODEL = get_model("qwen3-5-397b")
 _GOOGLE_MODEL = get_model("gemini-3-8-flash")
-_OPENAI_MODEL = get_model("gpt-6-sol")
+_OPENAI_MODEL = get_model("gpt-6-1-sol")
 # Claude left the catalog on 2026-09-03, but ``build_model_for`` and
 # ``model_settings_for`` still carry an Anthropic branch — the provider stays
 # part of the routing vocabulary, and a future Claude entry must not have to
@@ -424,7 +424,7 @@ def test_model_settings_per_provider_uses_model_default():
     # Gemini 3.1 Flash Lite defaults to MEDIUM thinking.
     google_settings = model_settings_for(_GOOGLE_MODEL)
     assert google_settings["google_thinking_config"] == {"thinking_level": "MEDIUM"}
-    # GPT-6 Sol defaults to medium reasoning effort.
+    # GPT-6.1 Sol defaults to medium reasoning effort.
     openai_settings = model_settings_for(_OPENAI_MODEL)
     assert openai_settings["openai_reasoning_effort"] == "medium"
     # Open reasoning model routes reasoning through the chat-model settings.

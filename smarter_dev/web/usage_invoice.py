@@ -72,6 +72,8 @@ _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gemini-3.5-flash-lite", "google")
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gemini-3.6-flash", "google")
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("gemini-3.7-flash", "google")
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("x-ai/grok-4.6", "openrouter")
+# Retired on 2026-09-29 for GPT-6.1 Sol.
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("gpt-6-sol", "openai")
 # Retired when GLM/DeepSeek moved to OpenCode Zen and Laguna XS left the catalog:
 # the models live on under new ids (or not at all), but rows written before the
 # move still carry the old wire id and would otherwise fall to "unknown" and

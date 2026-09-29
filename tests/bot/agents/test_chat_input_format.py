@@ -37,10 +37,10 @@ def _initial_input() -> InitialAgentInput:
 
 def test_metadata_carries_model_identity_with_reasoning():
     user_prompt, _ = build_agent_call(
-        _initial_input(), [], model_name="gpt-6-sol", reasoning_level="high"
+        _initial_input(), [], model_name="gpt-6.1-sol", reasoning_level="high"
     )
     assert (
-        '<your-model id="gpt-6-sol" name="GPT-6 Sol" reasoning-level="high"/>'
+        '<your-model id="gpt-6.1-sol" name="GPT-6.1 Sol" reasoning-level="high"/>'
         in user_prompt
     )
 
