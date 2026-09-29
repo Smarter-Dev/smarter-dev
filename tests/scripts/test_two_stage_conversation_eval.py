@@ -47,8 +47,8 @@ def test_total_tokens_empty_is_zero():
 
 
 def test_stage_cost_matches_list_price_sol():
-    # GPT-6 Sol: $2 in / $10 out per 1M. 1M in + 1M out -> $12.
-    sol = get_model("gpt-6-sol")
+    # GPT-6.1 Sol: $2 in / $10 out per 1M. 1M in + 1M out -> $12.
+    sol = get_model("gpt-6-1-sol")
     cost = harness.stage_cost(
         harness.TokenUse(input_tokens=1_000_000, output_tokens=1_000_000), sol
     )
@@ -56,11 +56,11 @@ def test_stage_cost_matches_list_price_sol():
 
 
 def test_stage_cost_prices_cache_read_and_write_separately():
-    # 1M input of which 800k cache-read, 100k cache-write, on GPT-6 Sol:
+    # 1M input of which 800k cache-read, 100k cache-write, on GPT-6.1 Sol:
     #   uncached 100k @ $2.00/M = 0.20
-    #   cache-read 800k @ $0.20/M = 0.16
-    #   cache-write 100k @ $2.50/M = 0.25  -> total 0.61
-    sol = get_model("gpt-6-sol")
+    #   cache-read 800k @ $0.10/M = 0.08
+    #   cache-write 100k @ $2.50/M = 0.25  -> total 0.53
+    sol = get_model("gpt-6-1-sol")
     cost = harness.stage_cost(
         harness.TokenUse(
             input_tokens=1_000_000,
@@ -70,11 +70,11 @@ def test_stage_cost_prices_cache_read_and_write_separately():
         ),
         sol,
     )
-    assert cost == Decimal("0.61")
+    assert cost == Decimal("0.53")
 
 
 def test_stage_cost_worker_cheaper_than_large_for_same_tokens():
     tokens = harness.TokenUse(input_tokens=500_000, output_tokens=200_000)
     worker_cost = harness.stage_cost(tokens, get_model("gemini-3-8-flash"))
-    large_cost = harness.stage_cost(tokens, get_model("gpt-6-sol"))
+    large_cost = harness.stage_cost(tokens, get_model("gpt-6-1-sol"))
     assert worker_cost < large_cost

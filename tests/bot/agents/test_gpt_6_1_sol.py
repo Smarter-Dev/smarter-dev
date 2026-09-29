@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from pydantic_ai.models.openai import OpenAIResponsesModel
 
+from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ModelProvider
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.shared.model_catalog import resolve_reasoning_level
+from smarter_dev.shared.model_catalog import successor_key
 from smarter_dev.shared.model_router import build_model_for
 from smarter_dev.shared.model_router import model_settings_for
 
@@ -26,10 +28,16 @@ def test_gpt_6_1_sol_is_served_by_openai_directly():
 
 def test_gpt_6_1_sol_keeps_6_sol_budgets():
     # The move must not shift compaction points, output caps or long-context
-    # billing exposure for the selections it takes over.
-    new, old = get_model("gpt-6-1-sol"), get_model("gpt-6-sol")
-    assert new.context_window == old.context_window
-    assert new.max_output_tokens == old.max_output_tokens
+    # billing exposure for the selections it takes over. 6 Sol ran on the
+    # catalog defaults.
+    model = get_model("gpt-6-1-sol")
+    assert model.context_window == CatalogModel.context_window
+    assert model.max_output_tokens == CatalogModel.max_output_tokens
+
+
+def test_gpt_6_sol_is_retired_onto_gpt_6_1_sol():
+    assert get_model("gpt-6-sol") is None
+    assert successor_key("gpt-6-sol") == "gpt-6-1-sol"
 
 
 def test_gpt_6_1_sol_never_sends_none_or_minimal():
