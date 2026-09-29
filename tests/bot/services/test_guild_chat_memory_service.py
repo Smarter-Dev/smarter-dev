@@ -92,6 +92,30 @@ async def test_load_snapshot_reads_the_bundle_endpoint(service, mock_api_client)
     assert "soft shadows" in snapshot.notes[0].text
 
 
+async def test_load_snapshot_reads_behavior_and_personality(service, mock_api_client):
+    bundle = _bundle()
+    bundle.update(behavior="Wait to be asked.", personality="Dry and warm.")
+    mock_api_client.get.return_value = create_mock_response(200, bundle)
+
+    snapshot = await service.load_snapshot(GUILD)
+
+    assert snapshot.behavior == "Wait to be asked."
+    assert snapshot.personality == "Dry and warm."
+
+
+async def test_load_snapshot_reads_a_bundle_without_the_blocks_as_none(
+    service, mock_api_client
+):
+    # A web build from before the blocks existed answers without the fields.
+    mock_api_client.get.return_value = create_mock_response(200, _bundle())
+
+    snapshot = await service.load_snapshot(GUILD)
+
+    assert snapshot.long_term_memory.startswith("## Who's here")
+    assert snapshot.behavior is None
+    assert snapshot.personality is None
+
+
 async def test_load_snapshot_handles_a_guild_with_no_memory_yet(
     service, mock_api_client
 ):

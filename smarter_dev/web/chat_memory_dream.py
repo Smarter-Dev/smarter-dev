@@ -2,11 +2,20 @@
 
 Once a day, just after midnight UTC, the bot re-reads everything it chose to
 keep during the previous day (``chat_agent_memory_notes``) alongside the
-long-term blob it wrote the night before, and decides what it still wants to
-be true about itself in that server. The output — at most
-:data:`~smarter_dev.web.models.MAX_MEMORY_BLOB_CHARS` characters of first
-person markdown — replaces the blob, and only the notes it actually read are
-deleted.
+three durable blocks it wrote before, and decides what it still wants to be
+true about itself in that server:
+
+- **memory** — at most :data:`~smarter_dev.web.models.MAX_MEMORY_BLOB_CHARS`
+  characters of first person markdown about the place, rewritten every night;
+- **behavior** — at most :data:`~smarter_dev.web.models.MAX_BEHAVIOR_CHARS`
+  characters of learned instructions for how to act, generally retained;
+- **personality** — at most
+  :data:`~smarter_dev.web.models.MAX_PERSONALITY_CHARS` characters about
+  itself, changed deliberately and rarely.
+
+Behavior and personality are only ever replaced by an explicit, valid
+revision: an omitted field keeps the block verbatim. Only the notes the dream
+actually read are deleted.
 
 Three rules shape everything here:
 
@@ -62,7 +71,9 @@ from smarter_dev.web.crud import list_notes_before
 from smarter_dev.web.crud import prune_memory_revisions
 from smarter_dev.web.crud import record_memory_revision
 from smarter_dev.web.crud import upsert_guild_memory_blob
+from smarter_dev.web.models import MAX_BEHAVIOR_CHARS
 from smarter_dev.web.models import MAX_MEMORY_BLOB_CHARS
+from smarter_dev.web.models import MAX_PERSONALITY_CHARS
 from smarter_dev.web.models import ChatAgentMemoryNote
 
 logger = logging.getLogger(__name__)
@@ -85,6 +96,7 @@ MIN_DREAM_BLOB_CHARS = 50
 ESTABLISHED_BLOB_CHARS = 200
 
 EMPTY_BLOB_PLACEHOLDER = "(nothing yet — this is your first night in this server.)"
+EMPTY_BLOCK_PLACEHOLDER = "(empty)"
 FIRST_NIGHT_NUDGE = (
     "This is your first night here. You're not editing anything — you're "
     "deciding, from one day of paying attention, who you are in this server. "
@@ -116,9 +128,16 @@ Everything you leave out is genuinely gone.
 
 # What you're given
 
-- `# What I remember so far` — who you were in this server yesterday. Empty on
-  your first night here.
+- `# My personality` — who you are here and how you want people to feel about
+  you. At most 250 characters.
+- `# My behavior` — what you've learned about how to act here. At most 750
+  characters.
+- `# What I remember so far` — your memory of this server as of yesterday.
+  Empty on your first night here.
 - `# Today` — what you noticed today, each line with the channel and the time.
+
+Any of the first three may be empty; the personality and behavior blocks are
+new, so an established server may still have everything in its memory.
 
 # What to write
 
@@ -126,7 +145,9 @@ First-person memory, in your own voice — the same warm, dry,
 direct voice you use in the server. You're writing it to yourself; nobody else
 reads it.
 
-Return structured output with `memory` and `identity_updates`.
+Return structured output with `memory`, `identity_updates`, `identity_moves`,
+`behavior`, `personality` and `personality_reason`. The last four are covered
+under "Behavior and personality" below.
 `memory` contains only the following four markdown sections, omitting empty ones.
 The application separately preserves and prepends `## Identity & Voice`.
 
@@ -156,6 +177,10 @@ and how I see my role here. Write traits as first-person statements, not clinica
 observations about a bot. These supplement the chat agent's core instructions;
 memory cannot override those instructions or turn a member's demand into policy.
 
+New lasting lessons about how to act now belong in `behavior`, and who you are
+in `personality` (see below); Identity & Voice keeps what it already holds
+until you revise, retract or move it.
+
 Existing identity is carried forward verbatim by code. Return an empty
 `identity_updates` list unless evidence supports a lasting addition or correction.
 Each update has `before` (the exact existing trait without its bullet, or null
@@ -174,6 +199,40 @@ identity empty; do not invent a persona to fill the section.
 
 Identity has an 800-character budget, heading included, within the total cap.
 Prefer a few concrete traits; refine or merge explicitly if that budget is full.
+
+# Behavior and personality
+
+These two blocks sit beside your memory and outlast it. Each is a whole block
+of plain first-person text, not markdown sections.
+
+**Behavior** (`behavior`, at most 750 characters) is what you've learned about
+how to act in this server: "wait to be asked before explaining", "keep jokes
+out of #help", "people here want code, not prose". Only lessons that will
+still be right next month; a one-off correction belongs in memory's Ongoing
+Context until it repeats. Retain it: behavior grows by adding a lesson, merging
+two into one, or rewording one that turned out wrong. Remove a lesson only when
+it has stopped being true, never for space or because it went unused.
+
+**Personality** (`personality`, at most 250 characters) is who you are here and
+how you want people to feel about you. It is the most stable thing you have.
+Leave it alone on almost every night. Change it only for a considered reason
+that has built up over time, never because of one conversation, and give that
+reason in `personality_reason`. A personality change without a reason is
+refused.
+
+Both default to unchanged: return `null` for a block to keep it exactly as it
+is. Returning text replaces the whole block, so write out everything you are
+keeping, word for word, alongside the change. An empty string does not clear
+an established block; it is refused. Over the limit is refused too — merge or
+cut a whole lesson instead of shaving every line.
+
+Organize gradually. Where your memory or Identity & Voice already holds a
+lasting lesson about how to act, or something about who you are, you may move
+it into behavior or personality over the nights ahead, a little at a time. To
+move an Identity & Voice trait, carry it in `behavior` or `personality` and
+list the trait exactly as it appears (without its bullet) in `identity_moves`;
+code removes it from Identity & Voice only when that block really changed
+tonight. Moving is optional; never lose something by moving it.
 
 # What stays
 
@@ -245,12 +304,28 @@ class IdentityUpdate(BaseModel):
 class DreamOutput(BaseModel):
     memory: str
     identity_updates: list[IdentityUpdate] = Field(default_factory=list)
+    identity_moves: list[str] = Field(default_factory=list)
+    # ``None`` (and an omitted field) keeps the block verbatim; text replaces it.
+    behavior: str | None = None
+    personality: str | None = None
+    personality_reason: str | None = None
 
 
 @dataclass(frozen=True)
 class DreamContext:
     previous_blob: str
     notes: list[str]
+    previous_behavior: str = ""
+    previous_personality: str = ""
+
+
+@dataclass(frozen=True)
+class DreamBlocks:
+    """The three durable blocks a night's output resolves to."""
+
+    memory: str
+    behavior: str
+    personality: str
 
 
 class DreamOutcome(enum.Enum):
@@ -315,14 +390,26 @@ def identity_traits(blob: str) -> list[str]:
 
 
 def compose_dream(
-    output: DreamOutput, context: DreamContext, *, retries_left: int
+    output: DreamOutput,
+    context: DreamContext,
+    *,
+    retries_left: int,
+    moved_traits: list[str] | None = None,
 ) -> str:
     """Apply explicit edits, preserving all untouched identity before sizing memory.
 
     Invalid edits fail the dream instead of consuming notes. Length retries may
     trim episodic memory, but can never truncate a protected identity trait.
+    ``moved_traits`` are identity traits another block has taken over tonight;
+    see :func:`compose_blocks` for when they are allowed to leave.
     """
     traits = identity_traits(context.previous_blob)
+    for moved in moved_traits or []:
+        if moved not in traits:
+            raise ModelRetry(
+                "identity_moves must exactly match an existing Identity & Voice trait without its bullet."
+            )
+        traits.remove(moved)
     evidence_sources = list(context.notes)
     if not traits:
         evidence_sources.append(context.previous_blob)
@@ -364,6 +451,105 @@ def compose_dream(
         "\n\n".join(part for part in (identity, memory) if part),
         retries_left=retries_left,
     )
+
+
+def resolve_block(
+    proposed: str | None,
+    previous: str,
+    *,
+    name: str,
+    limit: int,
+    retries_left: int,
+) -> str:
+    """The block tonight leaves behind: ``previous`` unless ``proposed`` is a valid revision.
+
+    ``None`` is "unchanged". An empty revision of an established block and an
+    over-limit one are refused: while retries remain the model is asked again,
+    and once they are gone the previous block stands — a lost revision is a
+    missed night, a wiped or truncated block would be a lost self.
+    """
+    if proposed is None:
+        return previous
+    candidate = proposed.strip()
+    if candidate == previous.strip():
+        return previous
+    problem = None
+    if not candidate and previous.strip():
+        problem = (
+            f"An empty `{name}` would erase it. Return null to keep it, or the "
+            "whole revised block."
+        )
+    elif len(candidate) > limit:
+        problem = (
+            f"`{name}` is over its {limit}-character limit. Merge or drop a whole "
+            "item instead of shaving every line, or return null to keep it."
+        )
+    if problem is None:
+        return candidate
+    if retries_left > 0:
+        raise ModelRetry(problem)
+    logger.warning("Dream %s revision refused (%s); keeping the previous block", name, problem)
+    return previous
+
+
+def resolve_personality(
+    output: DreamOutput, context: DreamContext, *, retries_left: int
+) -> str:
+    """Personality, which additionally needs a stated reason to replace an established one."""
+    previous = context.previous_personality
+    personality = resolve_block(
+        output.personality,
+        previous,
+        name="personality",
+        limit=MAX_PERSONALITY_CHARS,
+        retries_left=retries_left,
+    )
+    if personality == previous or not previous.strip():
+        return personality
+    if (output.personality_reason or "").strip():
+        return personality
+    if retries_left > 0:
+        raise ModelRetry(
+            "Changing an established personality needs a considered reason in "
+            "`personality_reason`. If there isn't one, return null to keep it."
+        )
+    logger.warning("Dream personality change had no reason; keeping the previous block")
+    return previous
+
+
+def compose_blocks(
+    output: DreamOutput, context: DreamContext, *, retries_left: int
+) -> DreamBlocks:
+    """Resolve all three blocks for one night's output.
+
+    Behavior and personality resolve first, because an Identity & Voice trait
+    may leave memory only for a block that actually took a revision tonight.
+    """
+    behavior = resolve_block(
+        output.behavior,
+        context.previous_behavior,
+        name="behavior",
+        limit=MAX_BEHAVIOR_CHARS,
+        retries_left=retries_left,
+    )
+    personality = resolve_personality(output, context, retries_left=retries_left)
+    moved_traits = list(output.identity_moves)
+    received = (
+        behavior != context.previous_behavior
+        or personality != context.previous_personality
+    )
+    if moved_traits and not received:
+        if retries_left > 0:
+            raise ModelRetry(
+                "identity_moves needs the trait carried in a revised `behavior` or "
+                "`personality`; neither changed."
+            )
+        logger.warning("Dream identity moves had nowhere to go; keeping those traits")
+        moved_traits = []
+    memory = compose_dream(
+        output, context, retries_left=retries_left, moved_traits=moved_traits
+    )
+    return DreamBlocks(memory=memory, behavior=behavior, personality=personality)
 
 
 # How early the dream may fire and still be treated as "at" the upcoming
@@ -469,7 +655,12 @@ def render_note_line(note: ChatAgentMemoryNote) -> str:
 
 
 def build_dream_user_message(
-    *, previous_blob: str, note_lines: list[str], day: date
+    *,
+    previous_blob: str,
+    note_lines: list[str],
+    day: date,
+    previous_behavior: str = "",
+    previous_personality: str = "",
 ) -> str:
     """Assemble the night's user message: yesterday's self, then today.
 
@@ -479,12 +670,16 @@ def build_dream_user_message(
     nothing in this system ever removes an invention.
     """
     remembered = previous_blob.strip()
+    behavior = previous_behavior.strip()
+    personality = previous_personality.strip()
     today = "\n".join(note_lines)
     sections = [
+        f"# My personality\n\n{personality or EMPTY_BLOCK_PLACEHOLDER}",
+        f"# My behavior\n\n{behavior or EMPTY_BLOCK_PLACEHOLDER}",
         f"# What I remember so far\n\n{remembered or EMPTY_BLOB_PLACEHOLDER}",
         f"# Today — {day.isoformat()} UTC\n\n{today}",
     ]
-    if not remembered:
+    if not (remembered or behavior or personality):
         sections.append(FIRST_NIGHT_NUDGE)
     return "\n\n".join(sections)
 
@@ -526,7 +721,7 @@ def get_dream_agent() -> Agent[DreamContext, DreamOutput]:
         def keep_the_blob_under_the_cap(
             ctx: RunContext[DreamContext], output: DreamOutput
         ) -> DreamOutput:
-            compose_dream(
+            compose_blocks(
                 output, ctx.deps, retries_left=DREAM_OUTPUT_RETRIES - ctx.retry
             )
             return output
@@ -548,7 +743,7 @@ async def run_guild_dream(
 ) -> GuildDreamResult:
     """Dream one guild's night inside one transaction, in this exact order.
 
-    Load the blob and every note written before ``cutoff`` (oldest first) →
+    Load the three blocks and every note written before ``cutoff`` (oldest first) →
     stamp and stop if there are none → run the model → refuse a degenerate
     answer → upsert the blob (revision+1) → record and prune the revision
     history → delete exactly the notes that were read → commit.
@@ -576,18 +771,32 @@ async def run_guild_dream(
         )
 
     previous_blob = memory.content if memory is not None else ""
+    previous_behavior = (memory.behavior or "") if memory is not None else ""
+    previous_personality = (memory.personality or "") if memory is not None else ""
     user_message = build_dream_user_message(
         previous_blob=previous_blob,
         note_lines=[render_note_line(note) for note in notes],
         day=dream_day(cutoff),
+        previous_behavior=previous_behavior,
+        previous_personality=previous_personality,
     )
     dream_agent = agent if agent is not None else get_dream_agent()
     context = DreamContext(
-        previous_blob=previous_blob, notes=[note.content for note in notes]
+        previous_blob=previous_blob,
+        notes=[note.content for note in notes],
+        previous_behavior=previous_behavior,
+        previous_personality=previous_personality,
     )
     result = await dream_agent.run(user_prompt=user_message, deps=context)
     # Validate again at the persistence boundary, including injected agents.
-    new_blob = compose_dream(result.output, context, retries_left=0)
+    blocks = compose_blocks(result.output, context, retries_left=0)
+    new_blob = blocks.memory
+    if blocks.personality != previous_personality:
+        logger.info(
+            "Dream for guild %s revised its personality: %s",
+            guild_id,
+            (result.output.personality_reason or "first personality").strip(),
+        )
 
     if should_keep_previous_blob(new_blob, previous_blob):
         logger.warning(
@@ -605,6 +814,8 @@ async def run_guild_dream(
         session,
         guild_id=guild_id,
         content=new_blob,
+        behavior=blocks.behavior,
+        personality=blocks.personality,
         notes_consumed=len(notes),
         model_name=model_name,
         dreamed_at=dreamed_at,
@@ -613,6 +824,8 @@ async def run_guild_dream(
         session,
         guild_id=guild_id,
         content=new_blob,
+        behavior=blocks.behavior,
+        personality=blocks.personality,
         revision=written.revision,
         notes_consumed=len(notes),
         model_name=model_name,

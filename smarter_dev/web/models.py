@@ -45,6 +45,11 @@ logger = logging.getLogger(__name__)
 # ride along in every activation prompt, and tight enough that the nightly
 # dream has to choose what still matters instead of accreting forever.
 MAX_MEMORY_BLOB_CHARS = 2000
+# Beside the blob, two smaller durable blocks the same dream edits. Behavior is
+# what the agent has learned about how to act here; personality is who it is
+# and how it wants people to feel about it, and changes least of the three.
+MAX_BEHAVIOR_CHARS = 750
+MAX_PERSONALITY_CHARS = 250
 # One mid-term note is one thought, not a transcript excerpt.
 MAX_MEMORY_NOTE_CHARS = 500
 # Runaway guard on the ``remember`` tool: a day that wants more than this is a
@@ -5355,11 +5360,16 @@ class ChatAgentCompactionEvent(Base):
 class ChatAgentGuildMemory(Base):
     """What the chat agent remembers about one guild, long-term.
 
-    Exactly one row per guild: a markdown document of at most
-    :data:`MAX_MEMORY_BLOB_CHARS` characters that the agent writes about
-    itself — who the people here are to it, the running jokes, the opinions it
-    has formed. It is loaded whole at every chat activation and rewritten once
-    a night by the dream session, which is the only writer of ``content``.
+    Exactly one row per guild holding three durable blocks, all loaded whole at
+    every chat activation and edited only by the nightly dream session:
+
+    - ``content`` — the memory: a markdown document of at most
+      :data:`MAX_MEMORY_BLOB_CHARS` characters about the people here, the
+      running jokes, the opinions it has formed.
+    - ``behavior`` — at most :data:`MAX_BEHAVIOR_CHARS` characters of learned
+      instructions for how to act in this guild.
+    - ``personality`` — at most :data:`MAX_PERSONALITY_CHARS` characters about
+      itself and how it wants others to feel about it.
 
     This is authored prose, not captured message content, so it is exempt from
     the retention sweep (see :mod:`smarter_dev.web.retention`).
@@ -5379,6 +5389,20 @@ class ChatAgentGuildMemory(Base):
         nullable=False,
         default="",
         doc="The markdown blob, verbatim as the last dream wrote it.",
+    )
+    behavior: Mapped[str] = mapped_column(
+        String(MAX_BEHAVIOR_CHARS),
+        nullable=False,
+        default="",
+        server_default="",
+        doc="Learned instructions for how to act here; kept unless the dream revises them.",
+    )
+    personality: Mapped[str] = mapped_column(
+        String(MAX_PERSONALITY_CHARS),
+        nullable=False,
+        default="",
+        server_default="",
+        doc="Who the agent is and how it wants to be felt about; changed sparingly.",
     )
     revision: Mapped[int] = mapped_column(
         Integer,
@@ -5495,6 +5519,12 @@ class ChatAgentMemoryRevision(Base):
     guild_id: Mapped[str] = mapped_column(String(20), nullable=False)
     content: Mapped[str] = mapped_column(
         String(MAX_MEMORY_BLOB_CHARS), nullable=False
+    )
+    behavior: Mapped[str] = mapped_column(
+        String(MAX_BEHAVIOR_CHARS), nullable=False, default="", server_default=""
+    )
+    personality: Mapped[str] = mapped_column(
+        String(MAX_PERSONALITY_CHARS), nullable=False, default="", server_default=""
     )
     revision: Mapped[int] = mapped_column(Integer, nullable=False)
     notes_consumed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
