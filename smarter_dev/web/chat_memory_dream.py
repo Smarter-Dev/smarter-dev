@@ -231,8 +231,8 @@ lasting lesson about how to act, or something about who you are, you may move
 it into behavior or personality over the nights ahead, a little at a time. To
 move an Identity & Voice trait, carry it in `behavior` or `personality` and
 list the trait exactly as it appears (without its bullet) in `identity_moves`;
-code removes it from Identity & Voice only when that block really changed
-tonight. Moving is optional; never lose something by moving it.
+code removes it from Identity & Voice only when that trait's text is new in
+the block tonight, so carry it over in its own words. Moving is optional; never lose something by moving it.
 
 # What stays
 
@@ -326,6 +326,9 @@ class DreamBlocks:
     memory: str
     behavior: str
     personality: str
+    # What was refused on the last attempt. Any refusal means the memory half
+    # of the output may assume an edit that never happened, so none of it saves.
+    refusals: tuple[str, ...] = ()
 
 
 class DreamOutcome(enum.Enum):
@@ -460,13 +463,15 @@ def resolve_block(
     name: str,
     limit: int,
     retries_left: int,
+    refusals: list[str] | None = None,
 ) -> str:
     """The block tonight leaves behind: ``previous`` unless ``proposed`` is a valid revision.
 
     ``None`` is "unchanged". An empty revision of an established block and an
     over-limit one are refused: while retries remain the model is asked again,
-    and once they are gone the previous block stands — a lost revision is a
-    missed night, a wiped or truncated block would be a lost self.
+    and once they are gone the previous block stands and the refusal is
+    appended to ``refusals`` — a lost revision is a missed night, a wiped or
+    truncated block would be a lost self.
     """
     if proposed is None:
         return previous
@@ -489,11 +494,17 @@ def resolve_block(
     if retries_left > 0:
         raise ModelRetry(problem)
     logger.warning("Dream %s revision refused (%s); keeping the previous block", name, problem)
+    if refusals is not None:
+        refusals.append(name)
     return previous
 
 
 def resolve_personality(
-    output: DreamOutput, context: DreamContext, *, retries_left: int
+    output: DreamOutput,
+    context: DreamContext,
+    *,
+    retries_left: int,
+    refusals: list[str] | None = None,
 ) -> str:
     """Personality, which additionally needs a stated reason to replace an established one."""
     previous = context.previous_personality
@@ -503,6 +514,7 @@ def resolve_personality(
         name="personality",
         limit=MAX_PERSONALITY_CHARS,
         retries_left=retries_left,
+        refusals=refusals,
     )
     if personality == previous or not previous.strip():
         return personality
@@ -514,7 +526,26 @@ def resolve_personality(
             "`personality_reason`. If there isn't one, return null to keep it."
         )
     logger.warning("Dream personality change had no reason; keeping the previous block")
+    if refusals is not None:
+        refusals.append("personality")
     return previous
+
+
+def _normalized(text: str) -> str:
+    return " ".join(text.split()).casefold()
+
+
+def _carried_by_a_revision(trait: str, revisions: list[tuple[str, str]]) -> bool:
+    """Whether ``trait`` arrived tonight in a block that took a revision.
+
+    Each revision is ``(previous, new)``. Text that was already there before
+    tonight does not count: the trait has to have actually moved.
+    """
+    wanted = _normalized(trait)
+    return any(
+        wanted in _normalized(new) and wanted not in _normalized(previous)
+        for previous, new in revisions
+    )
 
 
 def compose_blocks(
@@ -523,33 +554,52 @@ def compose_blocks(
     """Resolve all three blocks for one night's output.
 
     Behavior and personality resolve first, because an Identity & Voice trait
-    may leave memory only for a block that actually took a revision tonight.
+    may leave memory only when its text arrived tonight in a block that took a
+    revision. With retries left, anything refused is asked for again; on the
+    last attempt it is recorded in :attr:`DreamBlocks.refusals` instead.
     """
+    refusals: list[str] = []
     behavior = resolve_block(
         output.behavior,
         context.previous_behavior,
         name="behavior",
         limit=MAX_BEHAVIOR_CHARS,
         retries_left=retries_left,
+        refusals=refusals,
     )
-    personality = resolve_personality(output, context, retries_left=retries_left)
-    moved_traits = list(output.identity_moves)
-    received = (
-        behavior != context.previous_behavior
-        or personality != context.previous_personality
+    personality = resolve_personality(
+        output, context, retries_left=retries_left, refusals=refusals
     )
-    if moved_traits and not received:
+    revisions = [
+        (previous, new)
+        for previous, new in (
+            (context.previous_behavior, behavior),
+            (context.previous_personality, personality),
+        )
+        if new != previous
+    ]
+    moved_traits: list[str] = []
+    for trait in output.identity_moves:
+        if _carried_by_a_revision(trait, revisions):
+            moved_traits.append(trait)
+            continue
         if retries_left > 0:
             raise ModelRetry(
-                "identity_moves needs the trait carried in a revised `behavior` or "
-                "`personality`; neither changed."
+                f"identity_moves names {trait!r}, but no revised `behavior` or "
+                "`personality` carries it. Write it into the block it moves to, "
+                "or leave it out of identity_moves."
             )
-        logger.warning("Dream identity moves had nowhere to go; keeping those traits")
-        moved_traits = []
+        logger.warning("Dream identity move had nowhere to go; keeping the trait")
+        refusals.append("identity_moves")
     memory = compose_dream(
         output, context, retries_left=retries_left, moved_traits=moved_traits
     )
-    return DreamBlocks(memory=memory, behavior=behavior, personality=personality)
+    return DreamBlocks(
+        memory=memory,
+        behavior=behavior,
+        personality=personality,
+        refusals=tuple(refusals),
+    )
 
 
 # How early the dream may fire and still be treated as "at" the upcoming
@@ -791,12 +841,19 @@ async def run_guild_dream(
     # Validate again at the persistence boundary, including injected agents.
     blocks = compose_blocks(result.output, context, retries_left=0)
     new_blob = blocks.memory
-    if blocks.personality != previous_personality:
-        logger.info(
-            "Dream for guild %s revised its personality: %s",
+
+    if blocks.refusals:
+        # The memory half of this output may assume an edit that was refused —
+        # a lesson taken out of memory for a behavior block that never took it.
+        # Save none of it, and let tomorrow read two days.
+        logger.warning(
+            "Dream for guild %s had refused edits (%s); keeping all three "
+            "blocks and its %d notes",
             guild_id,
-            (result.output.personality_reason or "first personality").strip(),
+            ", ".join(blocks.refusals),
+            len(notes),
         )
+        return GuildDreamResult(guild_id=guild_id, outcome=DreamOutcome.KEPT_PREVIOUS)
 
     if should_keep_previous_blob(new_blob, previous_blob):
         logger.warning(
@@ -833,6 +890,12 @@ async def run_guild_dream(
     await prune_memory_revisions(session, guild_id)
     await delete_notes_by_id(session, [note.id for note in notes])
     await session.commit()
+    if blocks.personality != previous_personality:
+        logger.info(
+            "Dream for guild %s revised its personality: %s",
+            guild_id,
+            (result.output.personality_reason or "first personality").strip(),
+        )
 
     return GuildDreamResult(
         guild_id=guild_id,
