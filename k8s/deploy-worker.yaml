@@ -36,7 +36,8 @@ spec:
                 # the crons move to 0.2.1a1. A 0.2.1a1 agent-worker writes job records with
                 # "visibility_timeout": null (Skrift's agents.run / agents.tool_call), which
                 # 0.2.0a18 cannot read; it must not start until every 0.2.0a18 pod has gone.
-                # The release PR restores <IMAGE_VERSION> after this worker is scaled to 0.
+                # The release PR restores <IMAGE_VERSION> (here and in LOGFIRE_SERVICE_VERSION)
+                # after this worker is scaled to 0.
                 image: zzmmrmn/smarter-dev-website:5ebcb9d
                 # Drain root jobs only. Chat roots may await child jobs, so a separate
                 # deployment drains chat-subagents without queue starvation.
@@ -177,7 +178,7 @@ spec:
                   - name: LOGFIRE_SERVICE_NAME
                     value: "smarter-dev-agent-worker"
                   - name: LOGFIRE_SERVICE_VERSION
-                    value: "<IMAGE_VERSION>"
+                    value: "5ebcb9d"  # TEMPORARY: pinned with the image above
                   - name: POLAR_ACCESS_TOKEN
                     valueFrom:
                       secretKeyRef:
