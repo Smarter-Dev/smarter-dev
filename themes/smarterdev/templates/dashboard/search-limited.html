@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block page_type %}dashboard{% endblock %}
+{% block page_title %}Search limit{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="{{ theme_url('css/pages/user-dashboard.css') }}">{% endblock %}
+{% block content %}
+<div class="ud-limited" data-product data-limited{% if wait %} data-wait="{{ wait }}"{% endif %}>
+  <h1 class="ud-title">Hold on a moment</h1>
+  <p class="ud-lede">{{ message }}{% if wait %} <span data-wait-line>You can search again in <span data-wait-seconds>{{ wait }}</span> s.</span>{% endif %}</p>
+  <div class="ud-limited-actions">
+    {% if login_url %}<a class="p-btn is-primary" href="{{ login_url }}">Log in to keep searching</a>{% endif %}
+    {% if wait %}<a class="p-btn" href="{{ retry_url }}" data-retry aria-disabled="true">Search again</a>{% endif %}
+  </div>
+</div>
+{% endblock %}
+{% block page_scripts %}{% if wait %}<script src="{{ theme_url('js/search-limited.js') }}" defer></script>{% endif %}{% endblock %}

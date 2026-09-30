@@ -16,6 +16,10 @@
   if (!shell || !stateEl) return;
 
   const initial = JSON.parse(stateEl.textContent);
+  // A search run from a search link without logging in: one search, never
+  // saved, read from its own API; no rail and no recent searches.
+  const anonymous = !!initial.anonymous;
+  const searchApi = initial.search_api || '/dashboard/api/searches/';
   const stage = shell.querySelector('[data-stage]');
   const csrfInput = document.querySelector('[data-dashboard-csrf] input[name="_csrf"]');
   const csrfToken = (csrfInput && csrfInput.value) || '';
@@ -28,6 +32,7 @@
   const cache = {
     searches: new Map(),
     recent: initial.recent || [],
+    link: initial.link || null,
   };
   let view = null;        // {name, el, searchId, queriesOpen}
   let elapsedTimer = null;
@@ -176,11 +181,16 @@
       const search = cache.searches.get(view.searchId);
       if (search) renderQueries(view.el, search);
     });
+    if (anonymous) {
+      node.querySelector('[data-back]').hidden = true;
+      node.querySelector('[data-unsaved]').hidden = false;
+      node.querySelector('[data-login]').href = initial.login_url;
+    }
     const search = cache.searches.get(id);
     if (search) renderSearch(search);
     else node.classList.add('is-loading');
     renderRecent();
-    api('/dashboard/api/searches/' + id).then(function (body) {
+    api(searchApi + id).then(function (body) {
       node.classList.remove('is-loading');
       renderSearch(remember(body.search));
       renderRecent();
@@ -197,11 +207,85 @@
     box.hidden = false;
   }
 
+  // ── Browser search ────────────────────────────────────
+
+  function showBrowser() {
+    stopTimers();
+    const node = mount('browser');
+    document.title = 'Browser search · Smarter Dev';
+    const status = node.querySelector('[data-link-status]');
+
+    function save(options, done) {
+      node.querySelector('[data-error]').hidden = true;
+      const request = options === null
+        ? api('/dashboard/api/link', { method: 'DELETE' })
+        : api('/dashboard/api/link', { method: 'POST', body: JSON.stringify(options) });
+      return request.then(function (body) {
+        cache.link = body.link;
+        renderBrowser(node);
+        if (done) status.textContent = done;
+      }).catch(function (error) {
+        renderBrowser(node);
+        showError(node, error.message);
+      });
+    }
+
+    node.querySelector('[data-link-create]').addEventListener('click', function () { save({}); });
+    node.querySelector('[data-link-copy]').addEventListener('click', function () {
+      const field = node.querySelector('[data-link-url]');
+      const copied = function () { status.textContent = 'Copied your search link.'; };
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(field.value).then(copied, function () { field.select(); });
+      } else {
+        field.select();
+      }
+    });
+    node.querySelector('[data-link-open]').addEventListener('change', function (event) {
+      const on = event.currentTarget.checked;
+      save({ open_addresses: on }, on ? 'Web addresses now open directly.' : 'Everything you type is searched now.');
+    });
+    node.querySelector('[data-link-rotate]').addEventListener('click', function () {
+      if (!window.confirm('Make a new search link? The one in your browser stops working, so you will need to add the new one.')) return;
+      save({ rotate: true }, 'Made a new link. Replace the old one in your browser.');
+    });
+    node.querySelector('[data-link-delete]').addEventListener('click', function () {
+      if (!window.confirm('Delete your search link? Searches from your browser stop working until you make a new one.')) return;
+      save(null);
+    });
+    renderBrowser(node);
+    renderRecent();
+  }
+
+  function renderBrowser(node) {
+    const link = cache.link;
+    node.querySelector('[data-link-empty]').hidden = !!link;
+    node.querySelector('[data-link-panel]').hidden = !link;
+    if (link) {
+      node.querySelector('[data-link-url]').value = link.url;
+      node.querySelector('[data-link-open]').checked = !!link.open_addresses;
+    }
+    // Firefox offers to add a search engine the page links to.
+    let tag = document.head.querySelector('link[rel="search"]');
+    if (!link) {
+      if (tag) tag.remove();
+      return;
+    }
+    if (!tag) {
+      tag = document.createElement('link');
+      tag.rel = 'search';
+      tag.type = 'application/opensearchdescription+xml';
+      tag.title = 'Smarter Dev';
+      document.head.appendChild(tag);
+    }
+    if (tag.getAttribute('href') !== link.opensearch) tag.setAttribute('href', link.opensearch);
+  }
+
   // ── Routing ───────────────────────────────────────────
 
   function route(path) {
     const match = path.match(/^\/dashboard\/search\/([0-9a-f-]{36})\/?$/);
     if (match) showSearch(match[1]);
+    else if (/^\/dashboard\/browser\/?$/.test(path)) showBrowser();
     else showHome();
   }
 
@@ -322,9 +406,11 @@
     if (empty) empty.hidden = rows.length > 0;
     const homeRecent = stage.querySelector('[data-home-recent]');
     if (homeRecent) homeRecent.hidden = rows.length === 0;
-    const tool = shell.querySelector('.ud-rail-tool');
-    if (current) tool.removeAttribute('aria-current');
-    else tool.setAttribute('aria-current', 'page');
+    const tool = current ? null : (view && view.name === 'browser' ? 'browser' : 'search');
+    shell.querySelectorAll('.ud-rail-tool').forEach(function (link) {
+      if (link.dataset.tool === tool) link.setAttribute('aria-current', 'page');
+      else link.removeAttribute('aria-current');
+    });
   }
 
   function recentMeta(row) {
@@ -667,7 +753,7 @@
   }
 
   function refresh(id) {
-    return api('/dashboard/api/searches/' + id).then(function (body) {
+    return api(searchApi + id).then(function (body) {
       renderSearch(remember(body.search));
       renderRecent();
     }).catch(function () {});
@@ -691,6 +777,7 @@
     // Events sent while the stream was closed are gone: re-read the open search.
     const current = view && view.searchId && cache.searches.get(view.searchId);
     if (current && current.active) refresh(current.id);
+    if (anonymous) return;
     api('/dashboard/api/searches').then(function (body) {
       cache.recent = body.searches;
       renderRecent();
@@ -703,7 +790,9 @@
   // ── Start ─────────────────────────────────────────────
 
   history.replaceState({ dashboard: true, url: location.pathname }, '', location.pathname);
-  if (initial.view === 'search' && initial.search) {
+  if (initial.view === 'browser') {
+    showBrowser();
+  } else if (initial.view === 'search' && initial.search) {
     view = null;
     showSearch(initial.search.id);
   } else {

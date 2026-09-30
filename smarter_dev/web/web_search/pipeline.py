@@ -36,11 +36,22 @@ ANSWER_TIMEOUT_SECONDS = 150
 
 
 class _Run:
-    """The search's row, re-read and committed for every step."""
+    """The search's row, re-read and committed for every step.
+
+    An anonymous search runs through the same steps on a row that is never
+    saved (``web_search.anonymous``); it provides ``read``, ``update`` and
+    ``record`` in the same shape."""
 
     def __init__(self, run_id: UUID, notify: Notify) -> None:
         self.run_id = run_id
         self.notify = notify
+
+    async def read(self) -> WebSearchRun:
+        async with get_db_session_context() as session:
+            return await session.get(WebSearchRun, self.run_id)
+
+    async def record(self, rows) -> None:
+        await metering.record(self.run_id, rows)
 
     async def update(self, change: Callable[[WebSearchRun], None]) -> dict:
         async with get_db_session_context() as session:
@@ -87,14 +98,17 @@ def _set_query(index: int, **fields) -> Callable[[WebSearchRun], None]:
 
 
 async def run_search(run_id: UUID, notify: Notify) -> str:
-    """Run the search to the end; returns its final status."""
+    """Run the saved search to the end; returns its final status."""
+    return await search(_Run(run_id, notify))
+
+
+async def search(run) -> str:
+    """Run the search in ``run`` to the end; returns its final status."""
     from smarter_dev.web.web_search.queries import plan_queries
     from smarter_dev.web.web_search.ranking import rank
 
-    run = _Run(run_id, notify)
-    async with get_db_session_context() as session:
-        row = await session.get(WebSearchRun, run_id)
-        request = row.request
+    run_id = run.run_id
+    request = (await run.read()).request
 
     def start(row: WebSearchRun) -> None:
         # A retried job starts over: every stage is cheap next to a stale half.
@@ -119,7 +133,7 @@ async def run_search(run_id: UUID, notify: Notify) -> str:
         # Brave URL, which carries the query.
         logger.error("Web search %s: Luna failed (%s)", run_id, type(error).__name__)
         return await _fail(run, f"Couldn't plan the searches ({type(error).__name__}).")
-    await metering.record(run_id, lambda row: [metering.luna_row(row, luna_usage)])
+    await run.record(lambda row: [metering.luna_row(row, luna_usage)])
 
     def searching(row: WebSearchRun) -> None:
         row.status = "searching"
@@ -156,11 +170,9 @@ async def run_search(run_id: UUID, notify: Notify) -> str:
             )
 
     if answered:
-        await metering.record(run_id, lambda row: [metering.brave_row(row, answered)])
+        await run.record(lambda row: [metering.brave_row(row, answered)])
 
-    async with get_db_session_context() as session:
-        row = await session.get(WebSearchRun, run_id)
-        results = _merge(row.queries)
+    results = _merge((await run.read()).queries)
     if not results:
         return await _fail(run, "The searches found nothing.")
 
@@ -177,7 +189,7 @@ async def run_search(run_id: UUID, notify: Notify) -> str:
         judgments, jev_usage = None, {"error": type(error).__name__}
 
     if judgments is not None:
-        await metering.record(run_id, lambda row: [metering.jev_row(row, jev_usage)])
+        await run.record(lambda row: [metering.jev_row(row, jev_usage)])
         ranked = [{**result, **judged} for result, judged in zip(results, judgments, strict=True)]
         # The top pick leads, then the rest by score.
         ranked.sort(key=lambda item: (not item["best"], -item["score"], -item["best_probability"]))
@@ -200,7 +212,7 @@ async def run_search(run_id: UUID, notify: Notify) -> str:
     return "complete"
 
 
-async def _answer(run: _Run, request: str, results: list[dict]) -> None:
+async def _answer(run, request: str, results: list[dict]) -> None:
     """Write the answer above the ranked results, streaming it as it comes.
 
     A failed answer leaves the results in place with a short note."""
@@ -256,7 +268,7 @@ async def _answer(run: _Run, request: str, results: list[dict]) -> None:
         await run.update(failed)
         return
 
-    await metering.record(run.run_id, lambda row: metering.answer_rows(row, usage))
+    await run.record(lambda row: metering.answer_rows(row, usage))
     final = {**state(reads, markdown, "done"), "markdown": markdown}
 
     def done(row: WebSearchRun) -> None:
@@ -268,7 +280,7 @@ async def _answer(run: _Run, request: str, results: list[dict]) -> None:
     await run.update(done)
 
 
-async def _fail(run: _Run, message: str) -> str:
+async def _fail(run, message: str) -> str:
     def fail(row: WebSearchRun) -> None:
         row.status = "error"
         row.error = message

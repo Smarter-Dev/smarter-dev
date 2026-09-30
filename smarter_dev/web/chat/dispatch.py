@@ -71,6 +71,7 @@ _SUBMISSION_DESCRIPTORS = {
     "chat.account.delete": (_ChatAccountDeletionSubmission, "agents", 600.0),
     "resources.agent.run": (_ResourcesSubmission, "agents", 600.0),
     "web_search.run": (_WebSearchSubmission, "agents", 300.0),
+    "web_search.anonymous": (_WebSearchSubmission, "agents", 300.0),
 }
 
 
