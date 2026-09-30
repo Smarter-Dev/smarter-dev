@@ -31,6 +31,7 @@ from smarter_dev.web.models import AccountDeletionRequest
 from smarter_dev.web.models import ResourceAgentRun
 from smarter_dev.web.models import WebChatSubagent
 from smarter_dev.web.models import WebChatTurn
+from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.models import WorkDispatch
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,10 @@ class _ChatAccountDeletionSubmission(BaseModel):
     request_id: str
 
 
+class _WebSearchSubmission(BaseModel):
+    search_id: str
+
+
 class _ResourcesSubmission(BaseModel):
     run_id: str | None = None
     conversation_id: str | None = None
@@ -65,6 +70,7 @@ _SUBMISSION_DESCRIPTORS = {
     "chat.subagent.run": (_ChatSubagentSubmission, "chat-subagents", 1200.0),
     "chat.account.delete": (_ChatAccountDeletionSubmission, "agents", 600.0),
     "resources.agent.run": (_ResourcesSubmission, "agents", 600.0),
+    "web_search.run": (_WebSearchSubmission, "agents", 300.0),
 }
 
 
@@ -178,6 +184,8 @@ async def requeue_stale_dispatches() -> int:
     now = datetime.now(UTC)
     unclaimed_before = now - timedelta(minutes=2)
     legacy_resource_before = now - timedelta(minutes=12)
+    # A web search writes its row at every stage, and no stage takes minutes.
+    web_search_idle_before = now - timedelta(minutes=5)
     repaired = 0
     async with get_db_session_context() as session:
         rows = list(
@@ -266,6 +274,23 @@ async def requeue_stale_dispatches() -> int:
                             aggregate.worker_lease_expires_at is not None
                             and aggregate.worker_lease_expires_at <= now
                         )
+                    )
+                )
+            elif row.job_type == "web_search.run":
+                aggregate = await session.get(WebSearchRun, row.aggregate_id)
+                if aggregate is None or aggregate.status in {"complete", "error"}:
+                    row.status = "complete"
+                    continue
+                stale = bool(
+                    (
+                        aggregate.status == "queued"
+                        and row.dispatched_at is not None
+                        and row.dispatched_at <= unclaimed_before
+                    )
+                    or (
+                        aggregate.status != "queued"
+                        and aggregate.updated_at is not None
+                        and aggregate.updated_at <= web_search_idle_before
                     )
                 )
             elif row.job_type == "chat.account.delete":

@@ -6230,3 +6230,47 @@ class ProactiveAgentHistory(Base):
     )
     history: Mapped[list] = mapped_column(JSON, nullable=False)
     checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class WebSearchRun(Base):
+    """One dashboard web search: Luna's queries, Brave's results, Jev's ranking.
+
+    The agent-worker writes each stage here before it notifies the browser, so
+    a page that reloads or reconnects mid-search paints from this row."""
+
+    __tablename__ = "web_search_runs"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    owner_user_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=False
+    )
+    submission_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    request: Mapped[str] = mapped_column(Text, nullable=False)
+    # queued → planning → searching → ranking → complete, or error.
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    # [{query, angle, status, count, domains}] once Luna has written them.
+    queries: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    # Unique results, best first once Jev has ranked them.
+    results: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    ranked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Model names, token counts and costs per stage.
+    usage: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    # Bumped on every write so the browser can drop a stale notification.
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "owner_user_id", "submission_key", name="uq_web_search_run_submission"
+        ),
+        Index("ix_web_search_runs_owner_created", "owner_user_id", "created_at"),
+    )
