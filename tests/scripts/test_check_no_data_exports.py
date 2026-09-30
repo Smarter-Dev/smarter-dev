@@ -147,3 +147,30 @@ def test_output_names_paths_not_contents(
     err = capsys.readouterr().err
     assert "x.dump" in err
     assert "MARKER" not in err
+
+
+def test_file_added_by_a_merge_and_removed_later_is_caught(repo: Path) -> None:
+    base = _git("rev-parse", "HEAD")
+    _git("checkout", "-q", "-b", "side")
+    _commit({"side.txt": b"side\n"}, "side work")
+    _git("checkout", "-q", "main")
+    _commit({"main.txt": b"main\n"}, "main work")
+    _git("merge", "-q", "--no-commit", "side")
+    _commit({"cache.sqlite3": b"x"}, "merge side")
+    merge = _git("rev-parse", "HEAD")
+    _commit({}, "clean up", remove=("cache.sqlite3",))
+
+    assert guard.check_tree() == []
+    assert guard.check_range(f"{base}..HEAD") == [
+        (f"{merge[:12]}:cache.sqlite3", "database file extension")
+    ]
+
+
+def test_range_takes_rev_list_arguments(repo: Path) -> None:
+    _git("branch", "published")
+    added = _commit({"x.db": b"x"}, "add db")
+    _commit({}, "remove db", remove=("x.db",))
+    assert guard.main(["--range", "HEAD", "--not", "published"]) == 1
+    assert guard.check_range("HEAD", "--not", "published") == [
+        (f"{added[:12]}:x.db", "database file extension")
+    ]
