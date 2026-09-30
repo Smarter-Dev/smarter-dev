@@ -6281,3 +6281,26 @@ class WebSearchRun(Base):
         ),
         Index("ix_web_search_runs_owner_created", "owner_user_id", "created_at"),
     )
+
+
+class WebSearchLink(Base):
+    """A user's search link: a URL with a secret token they add to their
+    browser as a search engine (``/s/<token>?q=%s``).
+
+    The token says whose link it is and holds its options. It never signs
+    anyone in: a visitor who isn't logged in gets the anonymous tier, whose
+    searches aren't saved. Making a new link replaces the token."""
+
+    __tablename__ = "web_search_links"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    owner_user_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=False, unique=True
+    )
+    token: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    # When Jev judges that a request is a web address, open it instead of searching.
+    open_addresses: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
