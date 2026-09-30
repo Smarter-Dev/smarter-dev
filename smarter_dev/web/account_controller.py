@@ -21,6 +21,7 @@ from skrift.auth.second_factors.services import (
 )
 from skrift.config import get_settings as get_skrift_settings
 from skrift.db.models.oauth_account import OAuthAccount
+from skrift.db.models.second_factor import SecondFactorEnrollment
 from skrift.db.models.user import User
 from skrift.flash import flash_error
 from skrift.flash import flash_success
@@ -47,6 +48,29 @@ def _passkey_factor_key(skrift_settings) -> str | None:
         if second_factors.get_method_type(key) == "passkey":
             return key
     return None
+
+
+async def _passkey_enrollments(
+    db_session: AsyncSession, user_id: UUID, factor_key: str | None
+) -> list[SecondFactorEnrollment]:
+    """The user's active passkeys, including ones kept while passkeys are off.
+
+    With passkeys switched off in app.yaml there is no factor key, but the
+    enrollments are still stored; list them by type so they stay visible and
+    removable.
+    """
+    if factor_key:
+        return await list_second_factor_enrollments_for_factor(
+            db_session, str(user_id), factor_key
+        )
+    result = await db_session.execute(
+        select(SecondFactorEnrollment)
+        .where(SecondFactorEnrollment.user_id == user_id)
+        .where(SecondFactorEnrollment.factor_type == "passkey")
+        .where(SecondFactorEnrollment.is_active.is_(True))
+        .order_by(SecondFactorEnrollment.created_at.desc())
+    )
+    return list(result.scalars().all())
 
 
 async def _current_user(request: Request, db_session: AsyncSession) -> User:
@@ -176,11 +200,12 @@ class AccountController(Controller):
 
         skrift_settings = get_skrift_settings()
         factor_key = _passkey_factor_key(skrift_settings)
-        passkeys: list = []
-        if factor_key:
-            passkeys = await list_second_factor_enrollments_for_factor(
-                db_session, str(user.id), factor_key
-            )
+        passkeys = await _passkey_enrollments(db_session, user.id, factor_key)
+        sign_in_methods = skrift_settings.auth.get_method_keys()
+        passkey_sign_in = any(
+            skrift_settings.auth.get_primary_auth_method_type(key) == "passkey"
+            for key in sign_in_methods
+        )
 
         return TemplateResponse(
             "account/security.html",
@@ -190,6 +215,8 @@ class AccountController(Controller):
                 "linked_accounts": linked_accounts,
                 "passkeys": passkeys,
                 "passkey_available": bool(factor_key) and is_webauthn_available(),
+                "passkey_sign_in": passkey_sign_in,
+                "sign_in_methods": sign_in_methods,
                 "flash_messages": get_flash_messages(request),
             },
         )
