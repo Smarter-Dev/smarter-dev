@@ -1,0 +1,37 @@
+{
+  "query": "email validation regex",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:37+00:00",
+  "results": [
+    {
+      "title": "r/PHP on Reddit: What is the perfect email regex to use?",
+      "url": "https://www.reddit.com/r/PHP/comments/cz8ol/what_is_the_perfect_email_regex_to_use/",
+      "domain": "reddit.com",
+      "snippet": "There is a \"perfect\" email regex but it is massively long. I think it's either in one of my Perl books or in Mastering Regular Expressions. However, the best idea is not to bother ... have some basic validation (matches .+@.+) and then send them an email they have to click on to confirm."
+    },
+    {
+      "title": "RegExr: email address validation",
+      "url": "https://regexr.com/3e48o",
+      "domain": "regexr.com",
+      "snippet": "Supports JavaScript & PHP/PCRE RegEx. Results update in real-time as you type. Roll over a match or expression for details. Validate patterns with suites of Tests."
+    },
+    {
+      "title": "regex - How can I validate an email address using a regular expression? - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/201323/how-can-i-validate-an-email-address-using-a-regular-expression",
+      "domain": "stackoverflow.com",
+      "snippet": "You'll find that the MailAddress class in .NET 4.0 is far better at validating email addresses than in previous versions. I made some significant improvements to it. 2009-12-15T09:56:39.003Z+00:00 ... I think it sort of... doesn't work... for simpler ids. a@b doesn't validate. ar@b.com matches only till ar@b , the .com is not matched. However, something like \"I am me\"@[10.10.10.10] does work! :) 2009-12-15T11:24:29.87Z+00:00 ... Be warned that these RFC compliant regex validators will let through a lot of email addresses that you probably wouldn't want to accept such as \"a<body/onload=alert('lol.com?'+document.cookies) @a.a>\" which is a valid email address in perl's Email::Valid (which uses that huge regex), and can be exploited for XSS rt.cpan.org/Public/Bug/Display.html?id=75650 2012-09-28T06:03:33.047Z+00:00"
+    },
+    {
+      "title": "An email regex for reasonable people",
+      "url": "https://colinhacks.com/essays/reasonable-email-regex",
+      "domain": "colinhacks.com",
+      "snippet": "A lot of people think every technically valid email address should pass validation by that schema. I used to think that too. Over the years I've merged several PRs to make the email regex more \"technically correct\". Most recently, I merged a PR that adds support for IPv6 addresses as the domain ..."
+    },
+    {
+      "title": "Email Address Regular Expression That 99.99% Works.",
+      "url": "https://emailregex.com/index.html",
+      "domain": "emailregex.com",
+      "snippet": "Start by entering a regular expression and then a test string. Please refer to the Regex Cheat Sheet on the left hand side. ... Another way is to use the System.Net.Mail.MailAddress class."
+    }
+  ]
+}

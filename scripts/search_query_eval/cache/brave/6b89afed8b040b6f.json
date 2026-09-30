@@ -1,0 +1,37 @@
+{
+  "query": "TypeScript generic type parameter assignment",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:26+00:00",
+  "results": [
+    {
+      "title": "TypeScript: Documentation - Generics",
+      "url": "https://www.typescriptlang.org/docs/handbook/2/generics.html",
+      "domain": "typescriptlang.org",
+      "snippet": "When you begin to use generics, you’ll notice that when you create generic functions like identity, the compiler will enforce that you use any generically typed parameters in the body of the function correctly."
+    },
+    {
+      "title": "TypeScript: pass generic type as parameter in generic class - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/37482342/typescript-pass-generic-type-as-parameter-in-generic-class",
+      "domain": "stackoverflow.com",
+      "snippet": "export abstract class BaseEntity { public static from<T extends BaseEntity>(c: new() => T, data: any): T { return Object.assign(new c(), data) } public static first<T extends BaseEntity>(c: new() => T, data) { if (data.rows.length > 0) { let item = data.rows.item(0); return BaseEntity.from(c, item); } return null; } } This class can be extended by others so you could call methods on the base class or on its subclasses. ... How about defining a base type and extending it?"
+    },
+    {
+      "title": "What is a generic type parameter T in TypeScript? - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/70453731/what-is-a-generic-type-parameter-t-in-typescript",
+      "domain": "stackoverflow.com",
+      "snippet": "You're effectively telling typescript this: \"I'm creating a type parameter (variable) called Type. I'm going to accept an argument in this function which will be an array, and you should use the type of each element in the array as the real type in place of Type. I'm going to return one of the array elements, so the return type of this function should be the same type as one of the array elements (or undefined if I use an index at which there's no value).\""
+    },
+    {
+      "title": "Typescript generic interface parameter assignment - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/53267269/typescript-generic-interface-parameter-assignment",
+      "domain": "stackoverflow.com",
+      "snippet": "I would have expected a different error message: something like { param: U } isn't assignable to generic type I: I is an unknown type, which could have many more attributes and methods than just param. So { param: myParam } is almost guaranteed to not be of type I. ... The problem is that I might have other required properties in addition to param. Typescript will force your generic function implementation to return a valid value for any I that satisfies the constraint of extending IExample<U>, and it does not."
+    },
+    {
+      "title": "How To Easily Understand TypeScript Generics",
+      "url": "https://www.telerik.com/blogs/easily-understand-typescript-generics",
+      "domain": "telerik.com",
+      "snippet": "We assign the value of that type to be the type value of the arg parameter: arg: T."
+    }
+  ]
+}

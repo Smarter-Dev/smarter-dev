@@ -1,0 +1,37 @@
+{
+  "query": "SQLite production web application workload",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:51+00:00",
+  "results": [
+    {
+      "title": "SQLite in Production 2026: Real Benchmarks, Limits, and When to Migrate to Postgres - Sesame Disk",
+      "url": "https://sesamedisk.com/sqlite-in-production-2026-benchmarks-limits/",
+      "domain": "sesamedisk.com",
+      "snippet": "The official SQLite documentation ... itself handles about 400K to 500K HTTP requests per day on a single VM that shares a physical server with 23 others and yet still keeps its load average below 0.1 most of the time, according ..."
+    },
+    {
+      "title": "SQLite for Production: When and How to Use It Beyond Prototyping | daily.dev",
+      "url": "https://daily.dev/blog/sqlite-production-guide-when-how-to-use-beyond-prototyping/",
+      "domain": "daily.dev",
+      "snippet": "Here’s a quick look at how SQLite and PostgreSQL stack up against each other: While SQLite can technically handle databases up to 281 TB, its practical production limit is closer to 1 TB."
+    },
+    {
+      "title": "How to Decide When SQLite Has Outgrown a Production Web Application",
+      "url": "https://oneuptime.com/blog/post/2026-09-08-decide-when-sqlite-outgrown-web-application/view",
+      "domain": "oneuptime.com",
+      "snippet": "A read-heavy local catalog can remain a good SQLite workload at a size that would be awkward for a write-heavy web database."
+    },
+    {
+      "title": "SQLite as a production database for a low-traffic site - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/913067/sqlite-as-a-production-database-for-a-low-traffic-site",
+      "domain": "stackoverflow.com",
+      "snippet": "Instead of writing directly to the SQLite database, you would write to a queue that then in turn sequentially writes to the SQLite database in a first in first out mode. I am not sure if your application reaches to where you would need this if it would be worth writing or just moving on to client/server database...but it is a thought. ... If we're talking about a asp.net web application, a static method could be created with a lock keyword to coordinate each request (thread) to commit transaction one by one; this could avoid the sqlite busy error, but each commit would wait more milliseconds as more users want to write to the db at a time 2020-06-14T14:52:02.74Z+00:00"
+    },
+    {
+      "title": "SQLite for Production: Not Just a Development Database - 0x.run",
+      "url": "https://0x.run/sqlite-production-not-just-development",
+      "domain": "0x.run",
+      "snippet": "The pattern is clear: for single-server workloads, SQLite is faster. ... Reality: SQLite powers Expensify, which handles 4 million queries per second. ... Reality: Most apps never exceed SQLite's limits. Instagram ran on SQLite for years before switching to Postgres for multi-datacenter replication."
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "query": "email address verification confirmation",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:10+00:00",
+  "results": [
+    {
+      "title": "Free email address validator",
+      "url": "https://verifalia.com/validate-email",
+      "domain": "verifalia.com",
+      "snippet": "Verifalia's free email verification service: check if an email address is valid and properly formatted, really exists and can accept mails, plus a lot more!"
+    },
+    {
+      "title": "Email Verifier: Free email checker to avoid risky email addresses • Hunter",
+      "url": "https://hunter.io/email-verifier",
+      "domain": "hunter.io",
+      "snippet": "“Email verifier” and “email checker” refer to the same tool providing the same service—a tool that confirms whether an email address is valid and deliverable."
+    },
+    {
+      "title": "Email Checker: Verify any Email Address Online (Free) - Mailmeteor",
+      "url": "https://mailmeteor.com/email-checker",
+      "domain": "mailmeteor.com",
+      "snippet": "Verify any email address for free. Mailmeteor's Email Checker runs 15+ checks (syntax, disposable, MX, SMTP, catch-all) to confirm the address is real and deliverable — in seconds, no sign-up."
+    },
+    {
+      "title": "Free Email Verifier and Email Checker to Verify Email Addresses",
+      "url": "https://www.verifyemailaddress.org/",
+      "domain": "verifyemailaddress.org",
+      "snippet": "For single email verification all you need to do is supply the email address and we confirm instantly if it is valid or not!"
+    },
+    {
+      "title": "Free Email Verification Tool — Check Any Address | Email Hippo",
+      "url": "https://tools.emailhippo.com/",
+      "domain": "tools.emailhippo.com",
+      "snippet": "Need to verify emails smarter and faster? Try using our CORE csv service or one of our APIs. ... Email address verification technology from Email Hippo identifies fake emails and possible bounces without ever sending an email."
+    }
+  ]
+}

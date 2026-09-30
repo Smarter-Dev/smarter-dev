@@ -1,0 +1,37 @@
+{
+  "query": "PostgreSQL COUNT(*) index only scan visibility map",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:14+00:00",
+  "results": [
+    {
+      "title": "PostgreSQL: Documentation: 18: 11.9. Index-Only Scans and Covering Indexes",
+      "url": "https://www.postgresql.org/docs/current/indexes-index-only-scans.html",
+      "domain": "postgresql.org",
+      "snippet": "This information is stored in a bit in the table's visibility map. An index-only scan, after finding a candidate index entry, checks the visibility map bit for the corresponding heap page."
+    },
+    {
+      "title": "Index-only scans - PostgreSQL wiki",
+      "url": "https://wiki.postgresql.org/wiki/Index-only_scans",
+      "domain": "wiki.postgresql.org",
+      "snippet": "It is a \"relation fork\"; an on-disk ancillary file associated with a particular relation (table or index). Note that index relations (that is, indexes) do not have a visibility map associated with them. The visibility map is concerned with tracking which tuples are visible to all transactions ..."
+    },
+    {
+      "title": "postgresql - Postgres Index-only-scan: can we ignore the visibility map or avoid heap fetches? - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/30878761/postgres-index-only-scan-can-we-ignore-the-visibility-map-or-avoid-heap-fetches",
+      "domain": "stackoverflow.com",
+      "snippet": "This feature would be even more useful for COUNT that could rely only on index scans (and you don't care about the exact value). Instead PG always checks the Heap for visibility, making the COUNT much slower... ... There is no way to do what you want in PostgreSQL as it stands."
+    },
+    {
+      "title": "PostgreSQL Index-Only Scans: Why Your Covering Indexes May Be Lying to You — MVP Factory",
+      "url": "https://mvpfactory.io/blog/postgresql-index-only-scans-and-visibility-maps-the-query-optimization-that",
+      "domain": "mvpfactory.io",
+      "snippet": "SELECT relname, n_dead_tup, n_live_tup, last_autovacuum, (pg_relation_size(oid) / 8192)::int AS heap_pages, (SELECT count(*) FROM pg_visibility(oid) WHERE all_visible) AS vm_visible_pages FROM pg_stat_user_tables WHERE relname = 'mobile_events'; If vm_visible_pages is significantly less than heap_pages, your index-only scans are paying for heap fetches you shouldn’t be making."
+    },
+    {
+      "title": "Index-only scans in Postgres - pgMustard",
+      "url": "https://www.pgmustard.com/blog/2019/03/04/index-only-scans-in-postgres",
+      "domain": "pgmustard.com",
+      "snippet": "Well, in an index-only scan Postgres still needs to be sure that the row is visible before it can return it, and that information is on the heap, not in the index. Low visibility can be a problem — Photo by Wojtek Witkowski · Postgres can often get around going to the heap for a particular row by checking the visibility map, which records whether or not each page has been changed recently."
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "query": "asyncio.wait timeout pending tasks",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:38+00:00",
+  "results": [
+    {
+      "title": "Waiting in asyncio",
+      "url": "https://hynek.me/articles/waiting-in-asyncio/",
+      "domain": "hynek.me",
+      "snippet": "Unlike with gather(), nothing is done to the awaitables when that timeout expires. The function just returns and sorts the tasks into the done and pending buckets. You can tell wait() to not wait until all awaitables are done using the return_when argument. By default it’s set to asyncio.ALL_COMPLETED which does exactly what it sounds like."
+    },
+    {
+      "title": "Coroutines and tasks — Python 3.14.7 documentation",
+      "url": "https://docs.python.org/3/library/asyncio-task.html",
+      "domain": "docs.python.org",
+      "snippet": "The function will wait until the future is actually cancelled, so the total wait time may exceed the timeout. If an exception happens during cancellation, it is propagated. If the wait is cancelled, the future aw is also cancelled. ... async def eternity(): # Sleep for one hour await asyncio.sleep(3600) print('yay!') async def main(): # Wait for at most 1 second try: await asyncio.wait_for(eternity(), timeout=1.0) except TimeoutError: print('timeout!') asyncio.run(main()) # Expected output: # # timeout!"
+    },
+    {
+      "title": "python - The Complete Guide to asyncio Timeouts: wait_for vs. asyncio.wait",
+      "url": "https://runebook.dev/en/docs/python/library/asyncio-exceptions/asyncio.TimeoutError",
+      "domain": "runebook.dev",
+      "snippet": "asyncio.wait doesn't raise TimeoutError; instead, it returns two sets of tasks done (completed) and pending (those that timed out)."
+    },
+    {
+      "title": "Document that asyncio.wait() cancels remaining Tasks for you · Issue #100928 · python/cpython",
+      "url": "https://github.com/python/cpython/issues/100928",
+      "domain": "github.com",
+      "snippet": "However if the return_when condition is satisfied before a timeout is reached, then all remaining tasks provided to wait() will be canceled."
+    },
+    {
+      "title": "Python asyncio stumbling block: aborting tasks",
+      "url": "https://www.hydrogen18.com/blog/python-asyncio-stumbling-blocks-aborting-tasks.html",
+      "domain": "hydrogen18.com",
+      "snippet": "The second task task1 fails immediately by raising an exception. The call to asyncio.wait specifies a timeout of no more than 1 second. So after one second, asyncio.wait returns. In the first set called done is task1 but the second set pending has task0 in it."
+    }
+  ]
+}

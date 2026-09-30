@@ -1,0 +1,37 @@
+{
+  "query": "CSS center div viewport",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:38+00:00",
+  "results": [
+    {
+      "title": "html - Make a div center of viewport - Horizontally and vertically - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/9622354/make-a-div-center-of-viewport-horizontally-and-vertically",
+      "domain": "stackoverflow.com",
+      "snippet": "The CSS solution requires that you know the width and height of the element. In responsive layouts the width and height of an element changes. 2014-07-30T16:09:30.98Z+00:00 ... To add to this.. if you want to properly vertically center elm to viewport regardless of scroll position you need to take into account their current vertical scroll position and add that to the top value."
+    },
+    {
+      "title": "r/css on Reddit: Proper way of centering an element to the viewport? And bonus questions :)",
+      "url": "https://www.reddit.com/r/css/comments/l946ih/proper_way_of_centering_an_element_to_the/",
+      "domain": "reddit.com",
+      "snippet": "If you're using position to center something you'll likely want to use calc w/ 1/2 the element height or width. 3.) Justify content is doing exactly what it sounds like, that's the relationship between parent and child. I think once you tinker w/ CSS more it will start to feel more comfortable."
+    },
+    {
+      "title": "3 easy ways to display your work at the center of the viewport with CSS. | by Bill Rodrigo | Medium",
+      "url": "https://medium.com/@billrodrigo94/3-easy-ways-to-display-your-work-at-the-center-of-the-viewport-with-css-f7bf8a0002d6",
+      "domain": "medium.com",
+      "snippet": "</div> </body> Now we have to give some style to our box because this exists but we can’t see it until we add some style to it. So the CSS we will use for the appearence of the box in all the examples is going to be: .center-box { width: 200px; height: 200px; background-color: lightblue; } Now, let’s start with the three ways to center that box right at the middle of our viewport, these code should be responsive for TV’s, desktop computers, tablets or phones."
+    },
+    {
+      "title": "layout - Vertically center in viewport using CSS - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/659677/vertically-center-in-viewport-using-css/42492195",
+      "domain": "stackoverflow.com",
+      "snippet": "There are numerous issues with transform that I've experienced first-hand, including but not limited to: 1. images in the centered div can become blurry (no easy fix), 2. it breaks some plugins like REDIPS.drag. The table-cell technique solves the two issues above, but it introduces a new issue: it's centered relative to the initial viewport, not the viewport you are currently in after scrolling."
+    },
+    {
+      "title": "Absolute Centering",
+      "url": "https://codepen.io/shshaw/pen/kOxGQa",
+      "domain": "codepen.io",
+      "snippet": "HTML CSS JS Result · HTML Options · Format HTML · View Compiled HTML · Analyze HTML · Maximize HTML Editor · Minimize HTML Editor · Fold All · Unfold All · <div class=\"Modal-Background toggle-Modal\"> <div class=\"Center-Block Absolute-Center is-Fixed is-Variable Modal\" id=\"Fixed-Modal\"> <div class=\"Center-Content\"> <h4 class=\"Title\">Absolute Center.</h4> <p>This box is absolutely centered within the viewport, horizontally and vertically, using only CSS.</p> <p><a href=\"#\" class=\"Shaw-Button trigger-Resize\">Resize Me!</a></p> <p><a href=\"#\" class=\"Shaw-Button toggle-Modal\">Close Modal</"
+    }
+  ]
+}

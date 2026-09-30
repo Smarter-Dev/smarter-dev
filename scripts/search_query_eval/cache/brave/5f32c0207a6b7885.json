@@ -1,0 +1,37 @@
+{
+  "query": "CSS center div flexbox",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:14+00:00",
+  "results": [
+    {
+      "title": "Aligning items in a flex container - CSS - MDN Web Docs",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Flexible_box_layout/Aligning_items",
+      "domain": "developer.mozilla.org",
+      "snippet": "Flexbox provides several properties to control alignment and spacing, with align-items and justify-content being fundamental for centering elements. To center an element, we use the align-items property to align the item on the cross axis, which in this case is the block axis running vertically."
+    },
+    {
+      "title": "html - Flexbox: center horizontally and vertically - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/19026884/flexbox-center-horizontally-and-vertically",
+      "domain": "stackoverflow.com",
+      "snippet": "-webkit-box-pack: center; -moz-box-pack: center; -ms-flex-pack: center; -webkit-justify-content: center; justify-content: center; You could read this two links for better understanding flex: http://css-tricks.com/almanac/properties/j/justify-content/ and http://ptb2.me/flexbox/"
+    },
+    {
+      "title": "How to center a &lt;div&gt; using Flexbox property of CSS ? - GeeksforGeeks",
+      "url": "https://www.geeksforgeeks.org/css/how-to-center-a-div-using-flexbox-property-of-css/",
+      "domain": "geeksforgeeks.org",
+      "snippet": "To center the <div> element both horizontally and vertically, you need to ensure that the container has a defined height. This can be done by adding height: 500px; or any desired height to the container's CSS."
+    },
+    {
+      "title": "Center an element - CSS - MDN Web Docs - Mozilla",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/How_to/Layout_cookbook/Center_an_element",
+      "domain": "developer.mozilla.org",
+      "snippet": "And that's all it takes to center one box inside another! ... div { border: solid 3px; padding: 1em; max-width: 75%; } .item { border: 2px solid rgb(95 97 110); border-radius: 0.5em; padding: 20px; width: 10em; } .container { height: 8em; border: 2px solid rgb(75 70 74); border-radius: 0.5em; font: 1.2em sans-serif; display: flex; align-items: center; justify-content: center; }"
+    },
+    {
+      "title": "How to Center in CSS with Flexbox",
+      "url": "https://coryrylan.com/blog/how-to-center-in-css-with-flexbox",
+      "domain": "coryrylan.com",
+      "snippet": "To vertically center our div we ... align-items: center; } By using align-items: center we can vertically center all flex items to the parent container along the cross axis of the flex container...."
+    }
+  ]
+}

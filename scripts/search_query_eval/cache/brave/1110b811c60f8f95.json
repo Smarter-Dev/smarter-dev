@@ -1,0 +1,37 @@
+{
+  "query": "React Server Components data fetching",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:59+00:00",
+  "results": [
+    {
+      "title": "reactjs - Data-fetching with React Server Components: is this a correct implementation? - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/72587675/data-fetching-with-react-server-components-is-this-a-correct-implementation",
+      "domain": "stackoverflow.com",
+      "snippet": "Check out this detailed blog post on Server components: kulkarniankita.com/react/react-server-client-components 2023-01-18T01:28:31.78Z+00:00 ... Save this answer. ... Show activity on this post. Instead of fetching via an API, you could instead use SSR in _app.tsx that would pass the data as props to the MyApp hook."
+    },
+    {
+      "title": "Exploring “Data Fetching with React Server Components” with Next.js | by Lada496 | Towards Dev",
+      "url": "https://medium.com/towardsdev/exploring-data-fetching-with-react-server-components-with-next-js-54c96f77ea99",
+      "domain": "medium.com",
+      "snippet": "Here is an example of where the client states are preserved when the re-fetch with Next.js. The search input appears only when the search input state is true, and the to-do list is filtered by the filter query controlled on the server side. ... cf) Here is how Next.js explains the interaction between Server Components and Client Components. Next.js calls the special format React Server Component Payload."
+    },
+    {
+      "title": "Client-side data fetching paradigms in React Server Components • AnuRock",
+      "url": "https://anurock.dev/posts/react-19-client-data-fetching/",
+      "domain": "anurock.dev",
+      "snippet": "React introduced an internal server-client communication technique called flight protocol so client components can invoke server functions just like local functions, and receive data & components (in a binary format) similarly to an explicit ..."
+    },
+    {
+      "title": "Mastering Data Fetching in Next.js with Server Components + React Query | by Matt Claffey | Medium",
+      "url": "https://mattclaffey.medium.com/mastering-data-fetching-in-next-js-with-server-components-react-query-517b59bc1a5d",
+      "domain": "mattclaffey.medium.com",
+      "snippet": "Server Components (page.tsx) handle the initial fetch. The trick is to pre-fill React Query’s cache before rendering."
+    },
+    {
+      "title": "Can You Fetch Data with React Server Actions? | Developer Way",
+      "url": "https://www.developerway.com/posts/server-actions-for-data-fetching",
+      "domain": "developerway.com",
+      "snippet": "For Server Components, you don't need Actions to fetch data. You can just import functions directly right away. The repo with examples to follow along is here. Let's start with what those Actions are, to make sure we're on the same page."
+    }
+  ]
+}

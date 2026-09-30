@@ -1,0 +1,37 @@
+{
+  "query": "developer portfolio website sections",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:28+00:00",
+  "results": [
+    {
+      "title": "21 Best Developer & Software Engineer Portfolio Websites (2026) - Colorlib",
+      "url": "https://colorlib.com/wp/developer-portfolios/",
+      "domain": "colorlib.com",
+      "snippet": "The left column, with the section links and social icons, stays in place while the about, experience and projects sections scroll on the right. Moreover, this developer portfolio has a one-page layout, so all the detail is only a few scrolls away."
+    },
+    {
+      "title": "25 web developer portfolio examples for your inspiration",
+      "url": "https://www.hostinger.com/tutorials/web-developer-portfolio/",
+      "domain": "hostinger.com",
+      "snippet": "Front-end developer Braydon Coyer rebuilds his portfolio from scratch every year. He calls it “Blogfolio” – a portfolio wrapped around an active blog. The current version uses Next.js, Tailwind, and Framer Motion. There’s more here than a collection of projects. The site also includes a toolbox showing the software he uses, a speaking section, and a community wall where visitors can leave messages."
+    },
+    {
+      "title": "GitHub - emmabostian/developer-portfolios: A list of developer portfolios for your inspiration · GitHub",
+      "url": "https://github.com/emmabostian/developer-portfolios",
+      "domain": "github.com",
+      "snippet": "A list of developer portfolios for your inspiration - emmabostian/developer-portfolios"
+    },
+    {
+      "title": "24 Brilliant Developer Portfolio Website Examples - Really Good Designs",
+      "url": "https://reallygooddesigns.com/developer-portfolio-examples/",
+      "domain": "reallygooddesigns.com",
+      "snippet": "The site also includes a detailed pricing section for branding and website services, an about section highlighting his journey, and a FAQ section to address common client questions. The contact details are conveniently located at the bottom, making it easy to reach out. Specializes in: Brand identity, Web development, etc. ... Bold and colorful design that showcases creativity. Single-page layout with smooth scrolling navigation. Pricing section for transparency about services. Paul van Loon’s portfolio is a perfect example of simplicity and thoughtful design."
+    },
+    {
+      "title": "How to Build a Standout Developer Portfolio Site | daily.dev",
+      "url": "https://daily.dev/blog/how-to-build-a-standout-developer-portfolio-site/",
+      "domain": "daily.dev",
+      "snippet": "Pay attention to the look of your ... shows you think about the user's experience. Include sections like About, Skills, Projects, Resume, and Contact Info...."
+    }
+  ]
+}

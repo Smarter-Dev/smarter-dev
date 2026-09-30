@@ -1,0 +1,37 @@
+{
+  "query": "three week coding interview plan",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:18+00:00",
+  "results": [
+    {
+      "title": "Coding interview study plan - what to study and practice based on time left | Tech Interview Handbook",
+      "url": "https://www.techinterviewhandbook.org/coding-interview-study-plan/",
+      "domain": "techinterviewhandbook.org",
+      "snippet": "I will be sharing recommended study plans for 3 months (recommended period), but you can generate study plans for practice questions for any time frame you need via the Grind 75 tool (built by me). More options like filtering by difficulty, topics, alternative grouping of questions can be found there. Regardless of how long you have, if you are unfamiliar with core data structures and algorithms knowledge, you are advised to revise them before starting on the coding interview questions practice."
+    },
+    {
+      "title": "How do I prepare for coding interviews in three months?",
+      "url": "https://www.educative.io/blog/how-do-i-prepare-for-coding-interviews-in-three-months",
+      "domain": "educative.io",
+      "snippet": "Adjust your weekly plan based on weakness trends. Code journal: Maintain a notebook or markdown log: for each challenge, note thought process, what you missed, and “how I’d do it next time.” · Including this loop ensures you don’t just grind problems, but learn from them — a hallmark of successful coding interview preparation bootcamp programs."
+    },
+    {
+      "title": "3 Month Coding Interview Preparation Bootcamp | by Fahim ul Haq | Grokking the Tech Interview",
+      "url": "https://grokkingtechinterview.com/3-month-coding-interview-bootcamp-904422926ce8?gi=3c29f82614bd",
+      "domain": "grokkingtechinterview.com",
+      "snippet": "You will have to articulate the complexities in the actual interview clearly, so it’s better to start now. ... Determine if there are any three integers in an array that sum equal to the given value. You will have to spend 2–3 weeks here."
+    },
+    {
+      "title": "How I Prepared for Coding Interviews in 3 Months. | by Ujjwal Sinha | The Startup | Medium",
+      "url": "https://medium.com/swlh/how-i-prepared-for-coding-interviews-in-3-months-8d54ba3bf50",
+      "domain": "medium.com",
+      "snippet": "During interviews, explaining your thought process to the interviewer is more important that solving the question. Thus, do at least 5–10 mock interviews before the placement season begins on Pramp. Also, go through the book called Cracking the Coding Interview by Gayle Laakmann McDowell a week or two before your interviews for a final revision."
+    },
+    {
+      "title": "How to prepare for a coding interview in 3 days?",
+      "url": "https://www.designgurus.io/answers/detail/how-to-prepare-for-a-coding-interview-in-3-days",
+      "domain": "designgurus.io",
+      "snippet": "Simulate Real Conditions: Use platforms like DesignGurus.io or Pramp for free mock interviews. Receive Feedback: Take notes on areas where you can improve based on feedback. Analyze Your Code: Look for ways to optimize your solutions for better ..."
+    }
+  ]
+}

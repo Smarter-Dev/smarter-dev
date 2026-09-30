@@ -1,0 +1,37 @@
+{
+  "query": "Python 3.14 performance improvements",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:00+00:00",
+  "results": [
+    {
+      "title": "Python 3.14 Is Here. How Fast Is It? - miguelgrinberg.com",
+      "url": "https://blog.miguelgrinberg.com/post/python-3-14-is-here-how-fast-is-it",
+      "domain": "blog.miguelgrinberg.com",
+      "snippet": "It ran close to 27% faster, which is another way of saying that 3.13 ran at about 79% of the speed of 3.14. These results also show that version 3.11 is the point at which Python versions moved from being \"very slow\" to \"not so slow\"."
+    },
+    {
+      "title": "What's new in Python 3.14 — Python 3.14.7 documentation",
+      "url": "https://docs.python.org/3/whatsnew/3.14.html",
+      "domain": "docs.python.org",
+      "snippet": "The specializing adaptive interpreter (PEP 659) is now enabled in free-threaded mode, which along with many other optimizations greatly improves its performance. The performance penalty on single-threaded code in free-threaded mode is now roughly ..."
+    },
+    {
+      "title": "Python 3.14 performance: Truth behind 30% speed gains | Framework Training | Expert Instructor-Led Courses | UK, Worldwide, Online",
+      "url": "https://www.frameworktraining.co.uk/news-insights/truth-behind-30-percent-performance-gains-python-3-14",
+      "domain": "frameworktraining.co.uk",
+      "snippet": "In Python terms there are different versions of the language such as Python 2 and Python 3 which might be referred to as epochs, then major releases such as 3.12 and 3.13 and then minor releases such as 3.13.1 and 3.13.2. Therefore Python 3.14 is a major release for Python and you can read more about the release as a whole at the ‘What's new in Python 3.14’ web page. However, as well as numerous changes to the language such as changes to the except syntax and restricting return, break, and continue within a finally block, one of the most interesting things in the next release is a ‘New Type of interpreter’. This interpreter has been added to CPython (the low-level runtime element of the Python environment) specifically to improve the performance of the runtime language."
+    },
+    {
+      "title": "Python 3.14 Performance Looking Good In Benchmarks - Phoronix",
+      "url": "https://www.phoronix.com/review/python-314-benchmarks/2",
+      "domain": "phoronix.com",
+      "snippet": "The Python 3.13 to Python 3.14 performance gains were typically coming in as larger than going from Python 3.12 to Python 3.13."
+    },
+    {
+      "title": "r/Python on Reddit: A new type of interpreter has been added to Python 3.14 with much better performance",
+      "url": "https://www.reddit.com/r/Python/comments/1iks79k/a_new_type_of_interpreter_has_been_added_to/",
+      "domain": "reddit.com",
+      "snippet": "Summary: This week I landed a new type of interpreter into Python 3.14. It improves performance by -3-30% (I actually removed outliers, otherwise it's 45%), and a geometric mean of"
+    }
+  ]
+}

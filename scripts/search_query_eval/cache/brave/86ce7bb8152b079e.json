@@ -1,0 +1,37 @@
+{
+  "query": "Python venv activar CMD Windows",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:28+00:00",
+  "results": [
+    {
+      "title": "python - How to activate virtual environment from Windows 10 command prompt - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/46896093/how-to-activate-virtual-environment-from-windows-10-command-prompt",
+      "domain": "stackoverflow.com",
+      "snippet": "Usually the path is: \"C:\\Users\\admin\\AppData\\Local\\Programs\\Python\\Python37-32\\Scripts\" (Change \"admin\" to your windows username and \"Python37-32\" path according to your python version) ... Save this answer. ... Show activity on this post. You can also create a command-line script like this - @echo off CD\\ CD \"C:\\Users\\[user name]\\venv\\Scripts\" start activate.bat start jupyter notebook · Save this in a notepad file with an extension \".cmd\"."
+    },
+    {
+      "title": "Activating Python Virtual Environment on Windows 11 - Stack Overflow",
+      "url": "https://translate.google.com/translate?u=https%3A%2F%2Fstackoverflow.com%2Fquestions%2F74966861%2Factivating-python-virtual-environment-on-windows-11&hl=es&sl=en&tl=es&client=srp",
+      "domain": "translate.google.com",
+      "snippet": "So, for example, you basically ... of Python and activate them separately to test the same code. ... Run ./.venv/Scripts/Activate.ps1 via Powershell. Or run ./.venv/Scripts/Activate.bat via cmd. Or on WSL/Linux, simply run source ./.venv/Scripts/activate · Being a Windows user, you ..."
+    },
+    {
+      "title": "How Do I Activate venv in Windows? [Step-by-Step Fix] - TechDepot.blog",
+      "url": "https://techdepot.blog/how-to-activate-venv-windows",
+      "domain": "techdepot.blog",
+      "snippet": "To activate venv in Windows, open your terminal, navigate to your project directory, and run .\\venv\\Scripts\\activate for PowerShell or venv\\Scripts\\activate.bat for Command Prompt."
+    },
+    {
+      "title": "python - How to activate virtual environment from Windows 10 command prompt - Stack Overflow",
+      "url": "https://translate.google.com/translate?u=https://stackoverflow.com/questions/46896093/how-to-activate-virtual-environment-from-windows-10-command-prompt&hl=es&sl=en&tl=es&client=srp",
+      "domain": "translate.google.com",
+      "snippet": "Go to the directory where your \"venv\" folder is located and type the below command. ... This should activate your environment in CMD. I am currently running Python 3.12 and it is working but I am not sure about the older Python versions."
+    },
+    {
+      "title": "How To Activate Venv In Cmd – Shrewdnia",
+      "url": "https://shrewdnia.com/blogs/how/how-to-activate-venv-in-cmd",
+      "domain": "shrewdnia.com",
+      "snippet": "Activating a virtual environment (venv) in the Windows Command Prompt is a straightforward process that is vital for managing Python project dependencies effectively. By creating your venv with python -m venv and activating it with venv\\Scripts\\activate.bat, you ensure an isolated workspace ..."
+    }
+  ]
+}

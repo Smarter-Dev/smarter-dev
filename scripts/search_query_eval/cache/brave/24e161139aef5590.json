@@ -1,0 +1,37 @@
+{
+  "query": "llama.cpp RAM usage quantization",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:41+00:00",
+  "results": [
+    {
+      "title": "llama.cpp VRAM Requirements: Complete 2026 Guide to GPU Memory for Local LLMs | LocalLLM.in",
+      "url": "https://localllm.in/blog/llamacpp-vram-requirements-for-local-llms",
+      "domain": "localllm.in",
+      "snippet": "Easily runs 35B models at extreme large contexts (>250K) or accommodates dense ~70B parameter models at massive quantizations. Multi-GPU / 48GB+: Required for comfortable use of dense 70B+ or 100B+ models with heavy context."
+    },
+    {
+      "title": "r/LocalLLaMA on Reddit: llama.cpp - how to free up even more space on your GPU",
+      "url": "https://www.reddit.com/r/LocalLLaMA/comments/1u8i79d/llamacpp_how_to_free_up_even_more_space_on_your/",
+      "domain": "reddit.com",
+      "snippet": "I wish llama.cpp would just turn that flag on by default, it doesn't increase build time all that much. ... This is normal. Using any quantization that does not have a native type on your GPU incurs a compute cost when quantizing it and unquantizing it."
+    },
+    {
+      "title": "llama.cpp: A CPU-First Framework for Running LLaMA Models on Local Hardware",
+      "url": "https://www.sandgarden.com/learn/llama-cpp",
+      "domain": "sandgarden.com",
+      "snippet": "Quantization is what makes it possible: llama.cpp can compress models down to 1.5–8 bits, letting 7B+ parameter models run comfortably on 4–8GB of RAM."
+    },
+    {
+      "title": "llama.cpp/tools/quantize/README.md at master · ggml-org/llama.cpp",
+      "url": "https://github.com/ggml-org/llama.cpp/blob/master/tools/quantize/README.md",
+      "domain": "github.com",
+      "snippet": "# override expert used count metadata to 16, prune layers 20, 21, and 22 without quantizing the model (copy tensors) and use specified name for the output file ./llama-quantize --imatrix imatrix.gguf --override-kv qwen3moe.expert_used_count=int:16 --prune-layers 20,21,22 input-model-f32.gguf pruned-model-f32.gguf copy 8 · When running the larger models, make sure you have enough disk space to store all the intermediate files. As the models are currently fully loaded into memory, you will need adequate disk space to save them and sufficient RAM to load them."
+    },
+    {
+      "title": "r/LocalLLaMA on Reddit: Memory Tests using Llama.cpp KV cache quantization",
+      "url": "https://www.reddit.com/r/LocalLLaMA/comments/1dalkm8/memory_tests_using_llamacpp_kv_cache_quantization/",
+      "domain": "reddit.com",
+      "snippet": "Now that Llama.cpp supports quantized KV cache, I wanted to see how much of a difference it makes when running some of my favorite models. The short answer is a lot! Using \"q4_0\" for the KV cache, I was able to fit Command R (35B) onto a single 24GB Tesla P40 with a context of 8192, and run with the full 131072 context size on 3x P40's."
+    }
+  ]
+}

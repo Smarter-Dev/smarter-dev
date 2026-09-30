@@ -1,0 +1,37 @@
+{
+  "query": "junior developer portfolio hiring managers",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:12+00:00",
+  "results": [
+    {
+      "title": "Junior Developer Portfolio: Examples + Must-Haves",
+      "url": "https://www.codecademy.com/resources/blog/what-to-include-in-a-junior-developer-portfolio",
+      "domain": "codecademy.com",
+      "snippet": "Building a portfolio from scratch can be especially helpful for Junior Developers, giving you a chance to gain real-world experience and illustrate your skills to prospective employers."
+    },
+    {
+      "title": "How to Create a Strong Junior Software Developer Portfolio | Indeed.com Canada",
+      "url": "https://ca.indeed.com/career-advice/career-development/junior-software-developer-portfolio",
+      "domain": "ca.indeed.com",
+      "snippet": "Adding a portfolio to your resume ... Duties, and Skills) ... A well-organized portfolio can help to attract the attention of a hiring manager and persuade them to invite you for an interview...."
+    },
+    {
+      "title": "Junior Developer Portfolio: Best Practices and Examples",
+      "url": "https://www.webportfolios.dev/blog/create-junior-developer-portfolio",
+      "domain": "webportfolios.dev",
+      "snippet": "Here's why your portfolio is a key asset: Showcase your strengths: Use your portfolio to highlight your best work and demonstrate your knowledge and skills. Catch the attention of employers: Recruiters and hiring managers ..."
+    },
+    {
+      "title": "What to Include in Your 2026 Junior Dev Portfolio",
+      "url": "https://codeworks.me/blog/junior-dev-portfolio-projects-coding-5-skills/",
+      "domain": "codeworks.me",
+      "snippet": "This transforms a portfolio from a gallery of apps into a compelling story of growth, and it gives hiring managers confidence in the student’s ability to handle real-world tasks. Another mistake junior developers often make is showcasing only solo projects."
+    },
+    {
+      "title": "Junior Developer Portfolio: Best Practices - DEV Community",
+      "url": "https://dev.to/jtrevdev/junior-developer-portfolio-best-practices-4bj2",
+      "domain": "dev.to",
+      "snippet": "An SEO-optimized portfolio ensures that hiring managers and recruiters can find you when they search for junior developers."
+    }
+  ]
+}

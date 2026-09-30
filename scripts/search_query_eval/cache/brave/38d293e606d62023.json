@@ -1,0 +1,37 @@
+{
+  "query": "Python venv activar PowerShell Windows",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:22+00:00",
+  "results": [
+    {
+      "title": "python - virtualenv in PowerShell? - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/1365081/virtualenv-in-powershell",
+      "domain": "stackoverflow.com",
+      "snippet": "If you are using python -m venv venv to build your virtual environment, then the name of script would be Activate.ps1. 2022-04-06T17:51:58.78Z+00:00 ... anyone who is interested, the \"-Scope Process\" changes the powershell ExecutionPolicy for ..."
+    },
+    {
+      "title": "r/learnpython on Reddit: Virtual Environment and Powershell.",
+      "url": "https://www.reddit.com/r/learnpython/comments/144zuzo/virtual_environment_and_powershell/",
+      "domain": "reddit.com",
+      "snippet": "Also the path to the Python activation script varies by platform and how the virtual environment was specifically created, so that's why you're getting different answers when searching. For Windows, it's likely that the activation script is at .venv/Scripts/activate.ps1 for PowerShell."
+    },
+    {
+      "title": "Creating & Activating Virtual Environment - in Powershell Windows · Issue #534 · AntonOsika/gpt-engineer",
+      "url": "https://github.com/AntonOsika/gpt-engineer/issues/534",
+      "domain": "github.com",
+      "snippet": "Hi. Here is the correct commands for Windows Powershell. Maybe add to setup guide in the event other Win users get stuck here? python -m venv venv .\\venv\\scripts\\activate"
+    },
+    {
+      "title": "How to Setup a Virtual Development Environment for Python with Windows PowerShell | by Aston Technologies | Medium",
+      "url": "https://medium.com/@astontechnologies/how-to-setup-a-virtual-development-environment-for-python-with-windows-powershell-4cd34b2f9f9b",
+      "domain": "medium.com",
+      "snippet": "The virtual environment will have ... when the environment was created. For PowerShell, the activation script is located at C:\\path\\to\\project\\venv-tutorial1\\Scripts\\Activate.ps1..."
+    },
+    {
+      "title": "Enabling Python Virtualenv in Windows PowerShell - DEV Community",
+      "url": "https://dev.to/aka_anoop/enabling-virtualenv-in-windows-powershell-ka3",
+      "domain": "dev.to",
+      "snippet": "Virtualenv is one of the most important tools in Python developers' toolkit. Now that Virtualenv supports PowerShell natively, you can run the script ... venv\\Scripts\\Activate.ps1 cannot be loaded because running scripts is disabled on this system."
+    }
+  ]
+}

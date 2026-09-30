@@ -1,0 +1,37 @@
+{
+  "query": "Godot vs Unity 2D game jam",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:36+00:00",
+  "results": [
+    {
+      "title": "r/gamedev on Reddit: Godot vs Unity for 2D games?",
+      "url": "https://www.reddit.com/r/gamedev/comments/1tr2gsh/godot_vs_unity_for_2d_games/",
+      "domain": "reddit.com",
+      "snippet": "Unity vs. Game Maker for 2D games discussion ... 10+ years in Unity, just gave Godot 4.7 a real shot, the rendering genuinely surprised me. Anyone made the switch? ... Unity has been dethroned by Godot for the first time in the GMTK Game Jam 2026."
+    },
+    {
+      "title": "r/gamedev on Reddit: Unity vs. Godot, pros and cons of each? Which is better for an absolute beginner?",
+      "url": "https://www.reddit.com/r/gamedev/comments/1fxd33a/unity_vs_godot_pros_and_cons_of_each_which_is/",
+      "domain": "reddit.com",
+      "snippet": "The largest problem with godot is that it's a hobby/ game jam engine currently. Great for prototyping, jams and maybe 1-2 man 2d games. Just check out the job listings for unreal, unity and godot devs."
+    },
+    {
+      "title": "r/godot on Reddit: Godot surpassed Unity in the GMTK's game jam 2024 as the N°1 Engine of choice",
+      "url": "https://www.reddit.com/r/godot/comments/1exd4rb/godot_surpassed_unity_in_the_gmtks_game_jam_2024/",
+      "domain": "reddit.com",
+      "snippet": "Godot 4.0 was a minimally viable Unity replacement for a Game Jam level development. Godot 4.3 dropped just in time to make Web Exports simple and easily viable again. ... mostly single threaded mode (more widely supported on apple devices) ..."
+    },
+    {
+      "title": "Godot vs Unity: Ultimate Game Jam - itch.io",
+      "url": "https://itch.io/jam/godot-vs-unity-ultimate-game-jam",
+      "domain": "itch.io",
+      "snippet": "A game jam from 2021-10-17 to 2021-10-31 hosted by AMfromtheWORLD. Hello! Famous Game Devs or Amateur Developers! Godot vs Unity has really been a fight for since so long. Why not just make a jam and let it decide the..."
+    },
+    {
+      "title": "Godot Engine vs. Unity Engine: Difference, Pros, Cons",
+      "url": "https://gamedesignskills.com/game-design/godot-vs-unity/",
+      "domain": "gamedesignskills.com",
+      "snippet": "Godot is also strong in terms of rapid iteration and prototyping, making it useful for game jams. The dedicated 2D engine gives Godot a particular advantage over Unity when it comes to 2D game development."
+    }
+  ]
+}

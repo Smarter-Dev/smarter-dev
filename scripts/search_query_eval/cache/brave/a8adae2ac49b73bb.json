@@ -1,0 +1,37 @@
+{
+  "query": "Rust Go CLI startup time",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:31+00:00",
+  "results": [
+    {
+      "title": "Rust vs Go for CLI Tools: A Practical Comparison | Besterry — Linux & DevOps Notes",
+      "url": "https://besterry.com/posts/rust-vs-go-for-cli-tools/",
+      "domain": "besterry.com",
+      "snippet": "After writing CLI tools in both Rust and Go over the last few years, here are the things that actually matter when choosing between them. Startup time Go wins. A trivial Go program starts in ~1-5ms. A trivial Rust program also starts in ~1-5ms. Both are negligible for CLI tools."
+    },
+    {
+      "title": "Startup/execution time for a specific command line tool",
+      "url": "https://kushaldas.in/posts/startup-execution-time-for-a-specific-command-line-tool.html",
+      "domain": "kushaldas.in",
+      "snippet": "Time (mean ± σ): 3.2 ms ± 1.6 ms [User: 1.0 ms, System: 1.7 ms] Range (min … max): 2.6 ms … 19.6 ms 140 runs ... For now, we will go with the golang based code to do the work. But, if someone can explain the different ways Rust/Golang code starts up, that would be helpful to learn why ..."
+    },
+    {
+      "title": "GitHub - ngs/cli-lang-bench: Startup and throughput benchmarks for small CLI tools written in Rust, Go, and Bun + TypeScript · GitHub",
+      "url": "https://github.com/ngs/cli-lang-bench",
+      "domain": "github.com",
+      "snippet": "Measured on an Apple M4 Max (16 cores), macOS 26.6.2 (Darwin 25.6.0, arm64), with rustc 1.98.1, Go 1.26.4, Bun 1.4.2, hyperfine 1.20.0. ... Bun's binary embeds the whole runtime, which is why it is two orders of magnitude larger. Its \"build\" is a bundling step, not a compile, which is why it is two orders of magnitude faster. ... Startup is where the three differ most, and it is the number that matters for a CLI you invoke in a shell loop."
+    },
+    {
+      "title": "Rust vs Go for CLI Tools: The Honest Comparison — unixy.io",
+      "url": "https://unixy.io/blog/rust-vs-go-cli-tools/",
+      "domain": "unixy.io",
+      "snippet": "Its garbage collector has improved substantially over the years. Startup time is similar. Network-bound work is I/O-bound anyway — the language does not matter as much as the connection."
+    },
+    {
+      "title": "Build Robust CLI Tools with Rust and Go for Developers » Khader Vali",
+      "url": "https://khadervali.com/build-cli-tools-rust-go-developer-productivity/",
+      "domain": "khadervali.com",
+      "snippet": "Performance: Fast startup times and efficient execution, especially for frequently used tools. Distribution: Easy installation and updates, often via static binaries, package managers (Homebrew, APT), or container images. Documentation: Comprehensive --help messages, man pages, and a clear README. User Experience (UX): Beyond functionality, this includes progress indicators for long-running tasks, interactive prompts, and clear feedback. Building a great CLI tool means thoughtfully considering each of these aspects, ensuring that the tool is not just functional, but a joy to use."
+    }
+  ]
+}

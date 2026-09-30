@@ -1,0 +1,37 @@
+{
+  "query": "CSS margin auto vertical centering",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:46+00:00",
+  "results": [
+    {
+      "title": "*Vertical* centering in CSS with `margin: auto` – Matias Kinnunen",
+      "url": "https://mtsknn.fi/blog/css-vertical-margin-auto/",
+      "domain": "mtsknn.fi",
+      "snippet": "Note that for only vertical centering, only margin-top and margin-bottom need to be set to auto; margin-right and margin-left can be anything. This is similar to horizontal centering: only margin-right and margin-left need to be set to auto; margin-top and margin-bottom can be anything."
+    },
+    {
+      "title": "html - Using margin:auto to vertically-align <div> - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/12415661/using-marginauto-to-vertically-align-div",
+      "domain": "stackoverflow.com",
+      "snippet": "If the display of your parent container is flex, then yes, margin: auto auto (also known as margin: auto) will work to center it both horizontally and vertically, regardless if it is an inline or block element."
+    },
+    {
+      "title": "r/css on Reddit: Why do the auto margins center horizontally but not vertically?",
+      "url": "https://www.reddit.com/r/css/comments/1ewqpj0/why_do_the_auto_margins_center_horizontally_but/",
+      "domain": "reddit.com",
+      "snippet": "I tried searching web and the reason I found was the browser does not know the vertical height of page and so I added height:300px to the parent div but still the child div is not centering vertically. I know how to do it though, using flex and other methods. But I wanna know why doesn't this method work? ... <div style=\"height: 300px; background-color: red;\"> <div style=\"width: 100px; height: 100px; margin: auto; background-color: blue;\"></div> </div>"
+    },
+    {
+      "title": "CSS: Vertically center with margin: auto - makandra dev",
+      "url": "https://makandracards.com/makandra/23471-css-vertically-center-margin-auto",
+      "domain": "makandracards.com",
+      "snippet": "We have card with all CSS centering options. You probably want to head over there and get an overview over what techniques are available for your use case and browser requirements. Check out the jsFiddle Demo Show archive.org snapshot . Copy.absoluteCenterWrapper { position: relative; /* Declare this element as the anchor point for centering */ } /* Positioning */ .absoluteCenter { margin: auto; /* Required */ position: absolute; /* Required */ top: 0; bottom: 0; /* Aligns Vertically */ left: 0; right: 0; /* Aligns Horizontally */ } /* Make sure the centered element fits into its container."
+    },
+    {
+      "title": "How margin:auto in CSS Works - Hongkiat",
+      "url": "https://www.hongkiat.com/blog/css-margin-auto/",
+      "domain": "hongkiat.com",
+      "snippet": "This vertical centering exception is notably absent for absolute elements, which can be centered vertically across the entire page. Another unique case involves the margin collapse effect, where adjacent margins merge. Yet, this doesn’t fully explain the rule, as elements that don’t experience margin collapse – like floats and elements with overflow set to anything but visible – also default to 0px vertical margins when using auto."
+    }
+  ]
+}

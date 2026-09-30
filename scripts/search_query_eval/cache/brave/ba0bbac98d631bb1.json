@@ -1,0 +1,37 @@
+{
+  "query": "Docker multi-stage Python build",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:42+00:00",
+  "results": [
+    {
+      "title": "Multi-stage builds #2: Python specifics",
+      "url": "https://pythonspeed.com/articles/multi-stage-docker-python/",
+      "domain": "pythonspeed.com",
+      "snippet": "The basics of how multi-stage builds work, and how Python makes them a little harder. Solving the problem with pip install --user. A virtualenv-based solution. Some additional solutions: building wheels, pex, and platter. As I covered in more detail elsewhere, installing a compiler in one part of the Docker file makes the resulting image much larger."
+    },
+    {
+      "title": "How do I reduce a python (docker) image size using a multi-stage build? - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/48543834/how-do-i-reduce-a-python-docker-image-size-using-a-multi-stage-build",
+      "domain": "stackoverflow.com",
+      "snippet": "So here you can use a multi-stage build: the first stage installs the virtual environment using the full C toolchain, and the final stage copies the built virtual environment but only includes the minimum required libraries."
+    },
+    {
+      "title": "Docker Multi-Stage Builds: A Guide for Python Developers",
+      "url": "https://collabnix.com/docker-multi-stage-builds-for-python-developers-a-complete-guide/",
+      "domain": "collabnix.com",
+      "snippet": "Most Python developers start with ... application COPY . /app WORKDIR /app CMD [\"python\", \"app.py\"] ... Multi-stage builds allow you to use multiple FROM statements in a single Dockerfile...."
+    },
+    {
+      "title": "Building a Python Application Docker Image with Multi-Stage Builds - Farzad Ghanei",
+      "url": "https://www.ghanei.net/python-app-multistage-docker-build/",
+      "domain": "ghanei.net",
+      "snippet": "Or using docker-compose, the production file (not a complete example): --- version: '3' services: myapp: build: context: . target: app-run-stage args: POETRY_INSTALL_OPTS: '--no-root' # install main dependencies only in production build image: myapp restart: unless-stopped"
+    },
+    {
+      "title": "Leveraging Docker multi-stage builds in Python development",
+      "url": "https://www.merixstudio.com/blog/docker-multi-stage-builds-python-development",
+      "domain": "merixstudio.com",
+      "snippet": "This is where the magic of multi-stage builds kicks in. Contents of /wheels is copied from builder image by specifying --from param. Then pip install with additional -f flag is being run. This will force pip to use .whl archives in the specified directory. After that, both /wheels and /root/.cache/pip folders are removed, as you don’t need them anymore. Final steps stay the same. And by the way, full Dockerfile is available here - make sure to check it out and compare it with your local one if any issues arose."
+    }
+  ]
+}

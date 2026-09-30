@@ -1,0 +1,37 @@
+{
+  "query": "Discord Create Message rate limit",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:43+00:00",
+  "results": [
+    {
+      "title": "Discord Rate Limit Calculator | Avoid 429 Errors",
+      "url": "https://www.mambahost.com/tools/discord-bot/rate-limit-calculator/",
+      "domain": "mambahost.com",
+      "snippet": "Creating reaction role messages with multiple emojis. Limit: 1 reaction per 0.25s Solution: Wait 300ms between each reaction ... Assigning roles to many members at once. Limit: 10 updates per 10s per guild Solution: Process in batches with 1s ..."
+    },
+    {
+      "title": "Rate Limits - Documentation - Discord",
+      "url": "https://docs.discord.com/developers/topics/rate-limits",
+      "domain": "docs.discord.com",
+      "snippet": "< HTTP/1.1 429 TOO MANY REQUESTS < Content-Type: application/json < Retry-After: 65 < X-RateLimit-Limit: 10 < X-RateLimit-Remaining: 0 < X-RateLimit-Reset: 1470173023.123 < X-RateLimit-Reset-After: 64.57 < X-RateLimit-Bucket: abcd1234 < X-RateLimit-Scope: user { \"message\": \"You are being rate limited.\", \"retry_after\": 64.57, \"global\": false }"
+    },
+    {
+      "title": "[API] Bot message rate limit · Issue #20 · discord/discord-api-docs",
+      "url": "https://github.com/discord/discord-api-docs/issues/20",
+      "domain": "github.com",
+      "snippet": "A global 50/10 rate limit (meaning, this is the maximum # of messages a bot can send currently across all of discord). A 5/5 per server rate limit. A 5/5 global DM rate limit. The rate limit applies to message creation and editing."
+    },
+    {
+      "title": "Ratelimits | Javacord",
+      "url": "https://javacord.org/wiki/advanced-topics/ratelimits.html",
+      "domain": "javacord.org",
+      "snippet": "You can clearly see the delay between every 5 sent messages. No. Ratelimits are a limitation from Discord itself, which you cannot circumvent."
+    },
+    {
+      "title": "Discord direct message limit rate - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/68273503/discord-direct-message-limit-rate",
+      "domain": "stackoverflow.com",
+      "snippet": "What delay did you use or did you something else to avoid the bot being quarantined? ... @Chris2011931 I don't know the rate limit to send direct messages, but try to send messages with different content and not that fast, and you will be just fine."
+    }
+  ]
+}

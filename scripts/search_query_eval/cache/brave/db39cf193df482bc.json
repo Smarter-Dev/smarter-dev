@@ -1,0 +1,37 @@
+{
+  "query": "asyncio.gather return_exceptions timeout",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:46+00:00",
+  "results": [
+    {
+      "title": "What is asyncio.gather()?",
+      "url": "https://www.educative.io/answers/what-is-asynciogather",
+      "domain": "educative.io",
+      "snippet": "The timeout parameter is an optional float that specifies the maximum time (in seconds) the entire operation should take before raising a TimeoutError exception. The cancel_on_error parameter is an optional boolean parameter that specifies whether ..."
+    },
+    {
+      "title": "Making Sense of Asyncio: Tasks, Futures, and Timeouts Simplified - DEV Community",
+      "url": "https://dev.to/imsushant12/making-sense-of-asyncio-tasks-futures-and-timeouts-simplified-10if",
+      "domain": "dev.to",
+      "snippet": "Asyncio provides several powerful functions and synchronisation primitives to control when and how coroutines produce results, handle exceptions, or wait for coordination between tasks. asyncio.gather(*aws, return_exceptions=False): It runs multiple awaitables concurrently, returning their ..."
+    },
+    {
+      "title": "extmod/uasyncio gather return_exceptions=True does not return exceptions · Issue #5882 · micropython/micropython",
+      "url": "https://github.com/micropython/micropython/issues/5882",
+      "domain": "github.com",
+      "snippet": "try: import uasyncio as asyncio except ImportError: import asyncio async def barking(n): print('Start barking') for _ in range(6): await asyncio.sleep(1) print('Done barking.') return 2 * n async def foo(n): print('Start timeout coro foo()') while True: await asyncio.sleep(1) n += 1 return n async def bar(n): print('Start cancellable bar()') while True: await asyncio.sleep(1) n += 1 return n async def do_cancel(task): await asyncio.sleep(5) print('About to cancel bar') task.cancel() async def main(): tasks = [asyncio.create_task(bar(70))] tasks.append(barking(21)) tasks.append(asyncio.wait_for(foo(10), 7)) asyncio.create_task(do_cancel(tasks[0])) res = None try: res = await asyncio.gather(*tasks, return_exceptions=True) except asyncio.TimeoutError: print('Timeout') except asyncio.CancelledError: print('Cancelled') print('Result: ', res) asyncio.run(main())"
+    },
+    {
+      "title": "Fix: Python asyncio.gather Not Handling Errors — Exceptions Swallowed or All Tasks Cancelled - FixDevs",
+      "url": "https://fixdevs.com/blog/python-asyncio-gather-error/",
+      "domain": "fixdevs.com",
+      "snippet": "import asyncio async def fetch_with_timeout(coro, timeout: float): \"\"\"Wrap a coroutine with a timeout.\"\"\" try: return await asyncio.wait_for(coro, timeout=timeout) except asyncio.TimeoutError: raise asyncio.TimeoutError(f\"Task timed out after {timeout}s\") async def main(): results = await asyncio.gather( fetch_with_timeout(fetch_user(1), timeout=5.0), fetch_with_timeout(fetch_user(2), timeout=5.0), fetch_with_timeout(fetch_user(3), timeout=5.0), return_exceptions=True, ) for i, result in enumerate(results): if isinstance(result, asyncio.TimeoutError): print(f\"Task {i} timed out\") elif isinstance(result, Exception): print(f\"Task {i} failed: {result}\") else: print(f\"Task {i} succeeded: {result}\")"
+    },
+    {
+      "title": "Handling Tasks in Asyncio Like a Pro - Jacob Padilla",
+      "url": "https://jacobpadilla.com/writing/handling-asyncio-tasks",
+      "domain": "jacobpadilla.com",
+      "snippet": "asyncio.wait Is like asyncio.wait_for but accepts a collection of either task or future objects. You can specify a timeout and also when you want to return, whether that’s when they are all completed, the first one is completed, or on the first exception. asyncio.gather takes any number of awaitable objects in the form of positional arguments."
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "query": "Discord global rate limit",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:35+00:00",
+  "results": [
+    {
+      "title": "Rate Limits - Documentation - Discord",
+      "url": "https://docs.discord.com/developers/topics/rate-limits",
+      "domain": "docs.discord.com",
+      "snippet": "As an example, if you exceeded ... without a problem. Global rate limits apply to the total number of requests a bot or user makes, independent of any per-route limits...."
+    },
+    {
+      "title": "Rate Limits - Discord Userdoccers",
+      "url": "https://docs.discord.food/topics/rate-limits",
+      "domain": "docs.discord.food",
+      "snippet": "As an example, if you exceeded a rate limit when calling one endpoint /channels/1234, you could still call another similar endpoint like /channels/9876 without a problem. Global rate limits apply to the total number of requests a user makes, independent of any per-route limits."
+    },
+    {
+      "title": "My Bot is Being Rate Limited! - Developers - Discord",
+      "url": "https://support-dev.discord.com/hc/en-us/articles/6223003921559-My-Bot-is-Being-Rate-Limited",
+      "domain": "support-dev.discord.com",
+      "snippet": "This maintains a steady rate of 40 requests per second, staying safely below the 50 request limit while ensuring all messages are sent in about 5 seconds. If you're hitting global rate limits, your program may have an underlying issue that needs ..."
+    },
+    {
+      "title": "add rate limit algorithm clarification for global rate limits · Issue #5144 · discord/discord-api-docs",
+      "url": "https://github.com/discord/discord-api-docs/issues/5144",
+      "domain": "github.com",
+      "snippet": "Description The API documentation states that the Global Rate Limit is 50 requests per second. Here is a scenario that currently occurs occasionally in interaction with the Discord API using a global bucket rate limit with a 1 second exp..."
+    },
+    {
+      "title": "Discord API Rate Limits Explained (2026)",
+      "url": "https://space-node.net/blog/discord-api-rate-limits-explained-2026",
+      "domain": "space-node.net",
+      "snippet": "Discord rate limits are per route, per bot, with a global 50 req/s cap. Your library handles most of this automatically."
+    }
+  ]
+}

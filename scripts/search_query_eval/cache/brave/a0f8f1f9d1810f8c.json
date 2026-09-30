@@ -1,0 +1,37 @@
+{
+  "query": "LeetCode coding interview patterns",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:31+00:00",
+  "results": [
+    {
+      "title": "Leetcode Patterns",
+      "url": "https://seanprashad.com/leetcode-patterns/",
+      "domain": "seanprashad.com",
+      "snippet": "A collection of 179 questions grouped by pattern to help you prepare for coding interviews. ... In 2019, as a broke college student who couldn't afford premium interview resources, I spent countless hours searching for free materials and teaching ..."
+    },
+    {
+      "title": "10+ top LeetCode patterns (2026) to ace FAANG coding interviews",
+      "url": "https://www.educative.io/blog/coding-interview-leetcode-patterns",
+      "domain": "educative.io",
+      "snippet": "Why patterns beat problem-grindingLeetCode tag frequency (July 2025)Cheat-sheet of LeetCode patternsHow each pattern maps to LeetCode categoriesLeetCode Pattern playbook1. Two Pointers2. Sliding Window3. Fast and Slow Pointers (Cycle detection)4. Depth-First Search (DFS)5. Breadth-First Search (BFS)6. Binary Search7. Merge Intervals8. Topological Sort9. Backtracking10. Union-Find (Disjoint Set)11. Monotonic Stack12. Dynamic Programming (DP) - AdvancedCommon coding interview mistakesNext stepsRecommended resources"
+    },
+    {
+      "title": "10 Top LeetCode Patterns to Crack FAANG Coding Interviews",
+      "url": "https://www.designgurus.io/blog/top-lc-patterns",
+      "domain": "designgurus.io",
+      "snippet": "Master the 10 most important coding patterns (Two Pointers, BFS/DFS, DP, etc.) to crack FAANG interviews. Learn how to recognize and apply each pattern with examples. ... Q1. What are LeetCode patterns?"
+    },
+    {
+      "title": "Coding Interview Patterns: The Complete List of All 42 (LeetCode Cheat Sheet) | Grokking the Coding Interview",
+      "url": "https://www.grokkingthecodinginterview.com/blog/leetcode-patterns",
+      "domain": "grokkingthecodinginterview.com",
+      "snippet": "The full curriculum in Grokking the Coding Interview covers all 42 end to end, each taught exactly this way: tell, template, variations, then practice problems grouped for recognition. Where this list came from. The pattern method started as an essay I wrote called Grokking LeetCode: A Smarter Way to Prepare for Coding Interviews, which named 25 patterns."
+    },
+    {
+      "title": "Coding Interviews were HARD, until I learned these Patterns - DEV Community",
+      "url": "https://dev.to/somadevtoo/coding-interviews-was-hard-until-i-learned-these-patterns-2ji7",
+      "domain": "dev.to",
+      "snippet": "15 Coding Interview Patterns which can be used to solve 100+ Leetcode patterns and crack coding interviews."
+    }
+  ]
+}

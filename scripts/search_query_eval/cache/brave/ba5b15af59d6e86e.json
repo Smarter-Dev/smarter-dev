@@ -1,0 +1,37 @@
+{
+  "query": "LLM context length RAM usage",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:49+00:00",
+  "results": [
+    {
+      "title": "r/LocalLLaMA on Reddit: How much memory context size utilizes, really?",
+      "url": "https://www.reddit.com/r/LocalLLaMA/comments/1f2pc2j/how_much_memory_context_size_utilizes_really/",
+      "domain": "reddit.com",
+      "snippet": "From my own local llm model experience, ... cache I can go up to 128k without any real degradation. So I'd say context of 128k at 16bit uses about 20GB of v/ram...."
+    },
+    {
+      "title": "Memory for Local LLMs: How Much RAM Do You Need? (and When Speed Matters) | CORSAIR",
+      "url": "https://www.corsair.com/us/en/explorer/diy-builder/how-tos/memory-for-local-llms-how-much-ram-do-you-need-and-when-speed-matters/",
+      "domain": "corsair.com",
+      "snippet": "If you're using local LLMs for development work, writing assistance, or anything where output quality matters, 32 GB is where the experience starts to feel genuinely good. Something like a CORSAIR VENGEANCE DDR5 64GB (2x32GB) kit at 6000MT/s ..."
+    },
+    {
+      "title": "LLM RAM Calculator 2026 | Memory Requirements for Llama, Gemma, Qwen & More",
+      "url": "https://tokencalculator.com/tools/llm-ram-calculator",
+      "domain": "tokencalculator.com",
+      "snippet": "Q4_K_M is the sweet spot for most use cases. ... Best balance of quality and memory. Standard for local inference. ... Context Length (tokens) Longer contexts require more KV-cache memory."
+    },
+    {
+      "title": "r/LocalLLaMA on Reddit: How large is your local LLM context?",
+      "url": "https://www.reddit.com/r/LocalLLaMA/comments/1j6xpvt/how_large_is_your_local_llm_context/",
+      "domain": "reddit.com",
+      "snippet": "Give it a try for yourself · There is also a sweet spot for context lengths versus performance. Check out https://arxiv.org/abs/2502.01481 ... Even with FlashAttention, increasing the context from 4k to 128k requires 32 times more RAM..."
+    },
+    {
+      "title": "Factors Influencing LLM Memory Usage",
+      "url": "https://apxml.com/courses/llm-model-sizes-hardware/chapter-5-estimating-hardware-needs/factors-influencing-usage",
+      "domain": "apxml.com",
+      "snippet": "While often smaller than the memory ... total VRAM requirement. The context length, or sequence length, refers to the amount of text (input tokens plus generated tokens) the model can process at any one time. Modern LLMs ......"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "query": "quantized LLM memory requirements",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:25+00:00",
+  "results": [
+    {
+      "title": "LLM VRAM Requirements: How Much GPU Memory You Need (2026) | Spheron Blog",
+      "url": "https://www.spheron.network/blog/gpu-memory-requirements-llm/",
+      "domain": "spheron.network",
+      "snippet": "QLoRA combines 4-bit quantization of the base model with LoRA adapters, enabling fine-tuning of a 70B model on a single A100 80 GB or even an RTX 4090 with careful configuration. For a method-by-method comparison that goes deeper on the ..."
+    },
+    {
+      "title": "Measuring Memory Usage of Quantized LLMs",
+      "url": "https://apxml.com/courses/quantized-llm-deployment/chapter-3-performance-evaluation-quantized-llms/assessing-memory-consumption",
+      "domain": "apxml.com",
+      "snippet": "Framework and Workspace Overhead: Inference libraries (like PyTorch, TensorFlow, TensorRT-LLM, vLLM) require memory for their own operations, CUDA contexts, intermediate buffers (workspace), and potentially for dequantization operations if optimized kernels are not available for all steps."
+    },
+    {
+      "title": "Quantization for Large Language Models (LLMs): Reduce AI Model Sizes Efficiently | DataCamp",
+      "url": "https://www.datacamp.com/tutorial/quantization-for-large-language-models",
+      "domain": "datacamp.com",
+      "snippet": "I hope this article helps you get hands-on with quantization for LLMs! QAT usually leads to better performance as the model learns to be robust to quantization noise. However, it requires more memory during training because it holds both quantized and unquantized weights."
+    },
+    {
+      "title": "A Guide to Quantization in LLMs | Symbl.ai",
+      "url": "https://symbl.ai/developers/blog/a-guide-to-quantization-in-llms/",
+      "domain": "symbl.ai",
+      "snippet": "Consequently, where a 32-bit scaling factor for each block of previously added 0.5 bits per weight, DQ brings this down to only 0.127 bits. Though seemingly insignificant, when combined in a 65B LLM, for example, this saves 3 GB of memory."
+    },
+    {
+      "title": "The Complete Guide to LLM Quantization | LocalLLM.in",
+      "url": "https://localllm.in/blog/quantization-explained",
+      "domain": "localllm.in",
+      "snippet": "Think of it as converting a high-resolution image to a smaller file size while preserving most visual quality. Instead of storing each model parameter as a 32-bit floating-point number requiring 4 bytes of memory..."
+    }
+  ]
+}

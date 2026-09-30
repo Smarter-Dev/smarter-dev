@@ -1,0 +1,37 @@
+{
+  "query": "entry level developer portfolio project ideas",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:20+00:00",
+  "results": [
+    {
+      "title": "8 portfolio projects for beginners to help you land a job",
+      "url": "https://skillcrush.com/blog/portfolio-advice-2/",
+      "domain": "skillcrush.com",
+      "snippet": "One of the most frequent questions we get from students in our classes is “Are we really going to build a portfolio? What can we possibly put in it when we’ve never had any clients or been paid for work?” · And it’s a great question! If you want to start your own design or development business and pick up new clients, it’s a simple fact that you’re going to have to show them examples of your past work — but the good news is, your best work (so far) doesn’t have to mean paid work. You can absolutely invent imaginary projects just for your online portfolio."
+    },
+    {
+      "title": "12 Developer Portfolio Projects That Get You Hired…",
+      "url": "https://rockstardeveloperuniversity.com/developer-portfolio-project-ideas/",
+      "domain": "rockstardeveloperuniversity.com",
+      "snippet": "Good CLI tool ideas: a project scaffolding tool that sets up your preferred boilerplate with one command, a code snippet manager that stores and retrieves code from the terminal, a local development environment manager that handles common tasks like starting services and setting environment variables, or a Git workflow automation tool that handles branch naming conventions and PR descriptions."
+    },
+    {
+      "title": "5 Coding Projects You Should Include in Your Front End Portfolio",
+      "url": "https://www.freecodecamp.org/news/coding-projects-to-include-in-your-frontend-portfolio/",
+      "domain": "freecodecamp.org",
+      "snippet": "The purpose of this article is to provide some guidelines to how to populate your frontend developer portfolio, by way of example projects. Here's a quick summary of the projects we'll be covering in this article: ... Note: this doesn't mean you have to build all these projects. This list is just to provide you with ideas on the sort of projects you can build. Also, these projects are geared towards entry-level developers who've covered the basics of frontend development and are looking for slightly more advanced projects."
+    },
+    {
+      "title": "25 web developer portfolio examples for your inspiration",
+      "url": "https://www.hostinger.com/tutorials/web-developer-portfolio/",
+      "domain": "hostinger.com",
+      "snippet": "If you want your own portfolio to feel more personal, other personal website examples can give you ideas for using layout, illustration, typography, or interaction to make it distinctly yours. Senior frontend engineer Brittany Chiang, who works at Klaviyo, uses a dark background with sticky navigation on the left. Visitors move directly between her experience, projects, and writing rather than scrolling through in a fixed order. Each work entry lists the technologies she used, while the project section combines professional work with personal projects such as Halcyon, a popular color theme for the VS Code editor."
+    },
+    {
+      "title": "GitHub - emmabostian/developer-portfolios: A list of developer portfolios for your inspiration · GitHub",
+      "url": "https://github.com/emmabostian/developer-portfolios",
+      "domain": "github.com",
+      "snippet": "Aftab Alam [An Open-Source, Customizable Portfolio Template For Ai/Ml/Dl Developers And Data Scientists]"
+    }
+  ]
+}

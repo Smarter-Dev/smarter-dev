@@ -1,0 +1,37 @@
+{
+  "query": "OAuth PKCE code_verifier code_challenge",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:58+00:00",
+  "results": [
+    {
+      "title": "Authorization Code Flow with Proof Key for Code Exchange (PKCE) - Auth0 Docs",
+      "url": "https://auth0.com/docs/get-started/authentication-and-authorization-flow/authorization-code-flow-with-pkce",
+      "domain": "auth0.com",
+      "snippet": "The PKCE-enhanced Authorization ... Additionally, the calling app creates a transform value of the Code Verifier called the Code Challenge and sends this value over HTTPS to retrieve an Authorization Code...."
+    },
+    {
+      "title": "PKCE — OAuth 2.0",
+      "url": "https://oauth.net/2/pkce/",
+      "domain": "oauth.net",
+      "snippet": "PKCE works by having the client generate a random secret called a code verifier, then derive a code challenge from it. The code challenge is sent with the authorization request, and the original verifier is sent when exchanging the code for a token."
+    },
+    {
+      "title": "RFC 7636 - Proof Key for Code Exchange by OAuth Public Clients",
+      "url": "https://datatracker.ietf.org/doc/html/rfc7636",
+      "domain": "datatracker.ietf.org",
+      "snippet": "RFC 7636 OAUTH PKCE September 2015 ... 2. A. The client creates and records a secret named the \"code_verifier\" and derives a transformed version \"t(code_verifier)\" (referred to as the \"code_challenge\"), which is sent in the OAuth 2.0 Authorization Request along with the transformation method \"t_m\"...."
+    },
+    {
+      "title": "Online PKCE Generator Tool",
+      "url": "https://tonyxu-io.github.io/pkce-generator/",
+      "domain": "tonyxu-io.github.io",
+      "snippet": "An online tool to generate code verifier and code challenge for OAuth with PKCE."
+    },
+    {
+      "title": "OAuth2 PKCE Flow",
+      "url": "https://developer.constantcontact.com/api_guide/pkce_flow.html",
+      "domain": "developer.constantcontact.com",
+      "snippet": "Using the PKCE Flow, you must create the cryptographically-random code_verifier value. Use S256 to hash the code_verifier value as the code_challenge value."
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "query": "pip requirements.txt venv Windows",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:41+00:00",
+  "results": [
+    {
+      "title": "Install packages in a virtual environment using pip and venv - Python Packaging User Guide",
+      "url": "https://packaging.python.org/guides/installing-using-pip-and-virtual-environments/",
+      "domain": "packaging.python.org",
+      "snippet": "Instead of installing packages individually, pip allows you to declare all dependencies in a Requirements File. For example you could create a requirements.txt file containing:"
+    },
+    {
+      "title": "python - How can I install packages using pip according to the requirements.txt file from a local directory? - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/7225900/how-can-i-install-packages-using-pip-according-to-the-requirements-txt-file-from",
+      "domain": "stackoverflow.com",
+      "snippet": "Using Anaconda Python 3.6 on Windows, I had to do virtualenv -p python myenv, myenv\\Scripts\\activate.bat, pip install -r requirements.txt 2018-08-25T06:13:53.783Z+00:00 ... Actually, on the contrary, this seems like the only answer that does answer the part of the question about installing locally defined deps in requirements.txt to a virtualenv. Unless I am missing something? Anyway, thanks! 2018-09-19T17:39:43.037Z+00:00 ... Save this answer. ... Show activity on this post. Create a virtual environment, python3 -m venv virtual-env (for Windows, use python instead of python3)"
+    },
+    {
+      "title": "Setting Up Your Python Environment With Venv and requirements.txt - Frank's Blog",
+      "url": "https://frankcorso.dev/setting-up-python-environment-venv-requirements.html",
+      "domain": "frankcorso.dev",
+      "snippet": "If you are on Windows, you will use .venv\\Scripts\\activate.bat. On other OSes, you will use source .venv/bin/activate. Once activated, you will see the name of the environment within the terminal. (.venv) fpcorso:~$ pip install -r requirements.txt"
+    },
+    {
+      "title": "Python Project Management Made Easy: Master venv, conda, pip & requirements.txt in One Post! | by Rohan Rokade | Medium",
+      "url": "https://medium.com/@officialyrohanrokade/python-project-management-made-easy-master-venv-conda-pip-requirements-txt-in-one-post-b764c0808589",
+      "domain": "medium.com",
+      "snippet": "Install packages from the requirements.txt: Use the following command in your terminal: ... This command instructs pip to read the requirements.txt file and install all the listed packages with their specified versions into your active virtual ..."
+    },
+    {
+      "title": "Python Requirements.txt – How to Create and Pip Install Requirements.txt in Python",
+      "url": "https://www.freecodecamp.org/news/python-requirementstxt-explained/",
+      "domain": "freecodecamp.org",
+      "snippet": "You can use Pip to install, uninstall, and manage Python packages. To create a requirements file, you must set up your virtual environment. If you use Pycharm, there's a virtual environment already setup (.venv)."
+    }
+  ]
+}

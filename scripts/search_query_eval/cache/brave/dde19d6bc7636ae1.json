@@ -1,0 +1,37 @@
+{
+  "query": "SSE WebSocket connection scaling",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:33+00:00",
+  "results": [
+    {
+      "title": "Scaling Real-Time APIs to 100k+ Concurrent Connections: WebSockets, SSE, and Redis Pub/Sub - DEV Community",
+      "url": "https://dev.to/zkzdnmr/scaling-real-time-apis-to-100k-concurrent-connections-websockets-sse-and-redis-pubsub-5hhm",
+      "domain": "dev.to",
+      "snippet": "The industry has shifted toward persistent connections: WebSockets and SSE. However, scaling these to 100k+ concurrent connections on a single server is impossible; you need a distributed architecture."
+    },
+    {
+      "title": "Connection-Count Trade-offs: SSE vs WebSockets — Server-Sent Events",
+      "url": "https://www.server-sent-events.com/sse-protocol-fundamentals-architecture/sse-vs-websockets-vs-http-polling/connection-count-tradeoffs-sse-vs-websockets/",
+      "domain": "server-sent-events.com",
+      "snippet": "Memory OOM kills: each long-lived WebSocket connection in a framework like Socket.io carries ~40–100 KB of per-socket state; at 10 K connections that is 400 MB–1 GB before any application data."
+    },
+    {
+      "title": "WebSocket vs SSE: Which One Should You Use? | WebSocket.org",
+      "url": "https://websocket.org/comparisons/sse/",
+      "domain": "websocket.org",
+      "snippet": "WebSocket has no browser-imposed connection limit under either protocol version, making it better suited for applications that need many concurrent connections. Section titled “Is SSE or WebSocket better for AI/LLM token streaming?”"
+    },
+    {
+      "title": "WebSocket vs Server-Sent Events - Key Differences",
+      "url": "https://getstream.io/blog/websocket-sse/",
+      "domain": "getstream.io",
+      "snippet": "You scale with the same HTTP autoscaling metrics you use for everything else. CDN edge distribution. SSE streams pass through Cloudflare, Fastly, and CloudFront without special configuration, which means you can fan out at the edge: one origin ..."
+    },
+    {
+      "title": "⚡ Stop Defaulting to WebSockets: Why Server-Sent Events (SSE) are Usually Better - DEV Community",
+      "url": "https://dev.to/mindinu/stop-defaulting-to-websockets-why-server-sent-events-sse-are-usually-better-3k2g",
+      "domain": "dev.to",
+      "snippet": "Stateful Scaling: WebSockets are stateful. If you scale horizontally, your load balancer needs connection-aware routing (sticky sessions) to ensure a client's subsequent messages go to the specific server holding their connection."
+    }
+  ]
+}

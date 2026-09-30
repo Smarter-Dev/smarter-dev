@@ -1,0 +1,37 @@
+{
+  "query": "SQLite production backup deployment",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:16+00:00",
+  "results": [
+    {
+      "title": "Backup strategies for SQLite in production – Oldmoe's blog",
+      "url": "https://oldmoe.blog/2024/04/30/backup-strategies-for-sqlite-in-production/",
+      "domain": "oldmoe.blog",
+      "snippet": "Or wrongfully overriding the database file in your deployment script. For these situations, and others, having a backup would come in handy, as you will hopefully be able to restore the database to a known good state and not lose much data in the process. In this blog, we discuss multiple options you can use for creating those backups for your SQLite ..."
+    },
+    {
+      "title": "SQLite Operations: Backup, Performance Tuning, and Production Deployment - Calmops | Tech, Business & Indie Hacker Knowledge Base",
+      "url": "https://calmops.com/database/sqlite/sqlite-ops/",
+      "domain": "calmops.com",
+      "snippet": "Master SQLite operations including backup strategies, performance optimization, WAL mode configuration, and production deployment best practices."
+    },
+    {
+      "title": "How to Set Up SQLite for Production Use",
+      "url": "https://oneuptime.com/blog/post/2026-02-02-sqlite-production-setup/view",
+      "domain": "oneuptime.com",
+      "snippet": "SQLite provides several backup methods suitable for different scenarios. The VACUUM INTO command creates a backup without blocking writers. This is the recommended method for production backups:"
+    },
+    {
+      "title": "Backup strategies for SQLite in production | Lobsters",
+      "url": "https://lobste.rs/s/zglr47/backup_strategies_for_sqlite_production",
+      "domain": "lobste.rs",
+      "snippet": "So if you backup on a different connection, and your live database is written frequently, your backup might never finish. ... What about simply creating a ZFS snapshot and using zfs send+receive to transfer the snapshot offsite? Since ZFS is copy-on-write and the snapshot is point-in-time consistent, that should be safe, right? ... Correct. If SQLite is crash-safe, which it's supposed to be, a ZFS snapshot can't be worse than a crash."
+    },
+    {
+      "title": "Best Practices for Managing SQLite Backups in Production - Sling Academy",
+      "url": "https://www.slingacademy.com/article/best-practices-for-managing-sqlite-backups-in-production/",
+      "domain": "slingacademy.com",
+      "snippet": "SQLite Backup Techniques .backup ... SQLite Backups ... SQLite is an exceptional lightweight database engine that is often integrated directly into applications rather than existing as a separate server. It's well-suited for small to medium-sized applications and is ideal for mobile apps, desktop apps, or small web servers. However, one critical aspect of deploying SQLite in production is effectively ..."
+    }
+  ]
+}

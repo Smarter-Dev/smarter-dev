@@ -1,0 +1,37 @@
+{
+  "query": "Discord 429 retry_after",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:27+00:00",
+  "results": [
+    {
+      "title": "Rate Limits - Documentation - Discord",
+      "url": "https://docs.discord.com/developers/topics/rate-limits",
+      "domain": "docs.discord.com",
+      "snippet": "< HTTP/1.1 429 TOO MANY REQUESTS < Content-Type: application/json < Retry-After: 65 < X-RateLimit-Limit: 10 < X-RateLimit-Remaining: 0 < X-RateLimit-Reset: 1470173023.123 < X-RateLimit-Reset-After: 64.57 < X-RateLimit-Bucket: abcd1234 < X-RateLimit-Scope: user { \"message\": \"You are being rate limited.\", \"retry_after\": 64.57, \"global\": false }"
+    },
+    {
+      "title": "Discord Discord API Error 429 - Integration Diagnosis",
+      "url": "https://drdroid.io/integration-diagnosis-knowledge/discord-discord-api-error-429/",
+      "domain": "drdroid.io",
+      "snippet": "Adjust your request rate based on the remaining requests and reset time provided in the headers. When a 429 error is received, implement an exponential backoff strategy to retry the request after ..."
+    },
+    {
+      "title": "Unavoidable 429s when executing webhooks at the ratelimit · Issue #1454 · discord/discord-api-docs",
+      "url": "https://github.com/discord/discord-api-docs/issues/1454",
+      "domain": "github.com",
+      "snippet": "When these happen, the previous header contains information that causes my application to expect it still has requests left (e.g. X-RateLimit-Remaining: 2), and then the very next request will return an error 429 with Retry-After: 43323 or some similar value typically between 40-45 seconds."
+    },
+    {
+      "title": "My Bot is Being Rate Limited! - Developers - Discord",
+      "url": "https://support-dev.discord.com/hc/en-us/articles/6223003921559-My-Bot-is-Being-Rate-Limited",
+      "domain": "support-dev.discord.com",
+      "snippet": "Key headers to check: ... the type of rate limit (global, user, or shared) retry_after: Milliseconds to wait before making another request..."
+    },
+    {
+      "title": "Discord error 429: HTTP 429 Too Many Requests (rate limited)",
+      "url": "https://www.conferbot.com/errors/discord/http-429",
+      "domain": "conferbot.com",
+      "snippet": "The 429 body tells you what to do: retry_after is the number of seconds (float) to wait; global is true when you hit the 50/s global limit (in which case every request must pause, not just this route); and an optional code appears when a ..."
+    }
+  ]
+}

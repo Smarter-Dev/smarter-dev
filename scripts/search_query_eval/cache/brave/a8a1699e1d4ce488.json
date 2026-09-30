@@ -1,0 +1,37 @@
+{
+  "query": "website slow how to diagnose",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:32+00:00",
+  "results": [
+    {
+      "title": "How to Diagnose and Repair a Slow-Loading Website",
+      "url": "https://www.telerik.com/blogs/how-diagnose-repair-slow-loading-website",
+      "domain": "telerik.com",
+      "snippet": "So, where do you start in terms of diagnosing the problem? Start by running a performance scan. There are various tools that will help you get to the root of the problem. But don’t stop there."
+    },
+    {
+      "title": "r/Wordpress on Reddit: How can I diagnose why a website is incredibly slow?",
+      "url": "https://www.reddit.com/r/Wordpress/comments/o3yqwd/how_can_i_diagnose_why_a_website_is_incredibly/",
+      "domain": "reddit.com",
+      "snippet": "Try seoptimer.com/yourdomain.com as it will give you a free SEO audit but it will also tell you server response time and full website load time, which will help you see if hosting is a major bottleneck or not. Also run gtmetrix.com to see more details about what is slow in the website loading process and then read about their proposed solutions to fix it."
+    },
+    {
+      "title": "r/webhosting on Reddit: Website to Diagnose Possible Issue (website is sometimes VERY slow to load, as in 30+ seconds)",
+      "url": "https://www.reddit.com/r/webhosting/comments/yd9fvn/website_to_diagnose_possible_issue_website_is/",
+      "domain": "reddit.com",
+      "snippet": "But a bi-product of this constant monitoring is, that you'll be able to see how fast your website is responding over a periode of time. For instance, you can get a graph of your response times, measured once every 15 minutes for 7 days straight. Then you'll know often it happens - and how slow your website gets."
+    },
+    {
+      "title": "How To Diagnose A Slow Wordpress Website | purpleplanet Blog",
+      "url": "https://purpleplanet.com/blog/diagnose-a-slow-wordpress-website/",
+      "domain": "purpleplanet.com",
+      "snippet": "To get a better perspective on your website performance we recommend you use different tools and test it from multiple locations around the world. Do not rely on a single tool or software to get your results, as they all have their own database and their own way of working. Always check your mobile performance. Most users use a 4G or 3G connection, which can be significantly slower than the wireless Internet in your home."
+    },
+    {
+      "title": "performance - how does one identify why a website is slow? - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/15652531/how-does-one-identify-why-a-website-is-slow",
+      "domain": "stackoverflow.com",
+      "snippet": "Does the user experience the same problems with other websites hosted at the same webhoster? If so, this could indicate a network problem. Normally this could also indicate a resource problem at the webserver, but in that case the site would also be slow for you. If neither of the above leads to an answer, you could assume that the connection to the server and the server itself are fine."
+    }
+  ]
+}

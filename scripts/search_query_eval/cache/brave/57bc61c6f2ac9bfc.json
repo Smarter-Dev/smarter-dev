@@ -1,0 +1,37 @@
+{
+  "query": "website high TTFB causes",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:48+00:00",
+  "results": [
+    {
+      "title": "Troubleshoot High Time to First Byte (TTFB)",
+      "url": "https://wpengine.com/support/troubleshooting-high-time-first-byte-ttfb/",
+      "domain": "wpengine.com",
+      "snippet": "Another big factor that can contribute to TTFB are the queries to your database. Too many queries, queries that run too long, or queries that don’t complete will all directly impact the page’s ability to load efficiently. Installing a diagnostic plugin like Query Monitor can help you find which plugins, themes, or settings are impacting load time. A more robust tool, called New Relic, can also allow digging in at a code-level to find any queries causing trouble."
+    },
+    {
+      "title": "r/webhosting on Reddit: Please help explain Time To First Byte (TTFB) since its seems very slow and im getting bad performance scores",
+      "url": "https://www.reddit.com/r/webhosting/comments/ttmsak/please_help_explain_time_to_first_byte_ttfb_since/",
+      "domain": "reddit.com",
+      "snippet": "Do you really, really need to do that? You didn't provide details of your website and why you're doing these scans. A large TTFB could also be caused by a slow unoptimized server and a site that needs to do some heavy processing."
+    },
+    {
+      "title": "Optimize Time to First Byte | Articles | web.dev",
+      "url": "https://web.dev/articles/optimize-ttfb",
+      "domain": "web.dev",
+      "snippet": "This can particularly impact sites that receive high volumes of visitors from advertisements or newsletters, since they often redirect through analytics services for measurement purposes. Eliminating redirects under your direct control can help to achieve a good TTFB. ... Same-origin redirects, where the redirect occurs entirely on your website."
+    },
+    {
+      "title": "A slow website - time to first byte (TTFB) - KeyCDN",
+      "url": "https://www.keycdn.com/blog/a-slow-website-time-to-first-byte-ttfb",
+      "domain": "keycdn.com",
+      "snippet": "If the TTFB turns out to be higher than 500 ms, this can have various causes. For example: ... High latencies can occur when the distance between the user's location and the DNS server resolves the domain name or the server. Relevant for the choice of the data center should be the location of the target group of the website..."
+    },
+    {
+      "title": "How to Fix High Time to First Byte (TTFB) & Reduce Latency",
+      "url": "https://murtazaraheem.com/time-to-first-byte-ttfb/",
+      "domain": "murtazaraheem.com",
+      "snippet": "A substantial delay before the ... setup time and web server responsiveness. High TTFB values can stem from network issues (redirects, DNS lookups) or server-side processing bottlenecks...."
+    }
+  ]
+}

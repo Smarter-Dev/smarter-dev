@@ -1,0 +1,37 @@
+{
+  "query": "PostgreSQL fast exact count trigger counter table",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:18+00:00",
+  "results": [
+    {
+      "title": "PostgreSQL count(*) made fast | CYBERTEC",
+      "url": "https://www.cybertec-postgresql.com/en/postgresql-count-made-fast/",
+      "domain": "cybertec-postgresql.com",
+      "snippet": "This is guaranteed because CREATE TRIGGER locks the table in SHARE ROW EXCLUSIVE mode, which prevents all concurrent modifications. The down side is of course that all concurrent data modifications have to wait until the SELECT count(*) is done. This provides us with a really fast alternative to count(*), but at the price of slowing down all data modifications on the table."
+    },
+    {
+      "title": "Faster PostgreSQL Counting - Citus Data",
+      "url": "https://www.citusdata.com/blog/2016/10/12/count-performance/",
+      "domain": "citusdata.com",
+      "snippet": "How can we make this faster? Something has to give, either we can settle for an estimated rather than exact count, or we can cache the count ourselves using a manual increasing-decreasing tally. However in the second case we have to keep a tally for each table and where clause that we want to count quickly later. Here's an example of the tally approach applied to the whole items table. The following trigger-based solution is adapted from A. Elein Mustain. PostgreSQL's MVCC will maintain consistency between the items table and a table of row counts."
+    },
+    {
+      "title": "Faster PostgreSQL Counting",
+      "url": "https://dzone.com/articles/faster-postgresql-counting",
+      "domain": "dzone.com",
+      "snippet": "Either we can settle for an estimated rather than exact count, or we can cache the count ourselves using a manual increasing/decreasing tally. However, in the second case, we have to keep a tally for each table and where clause that we want to count quickly later. Here’s an example of the tally approach applied to the whole items table. The following trigger-based solution is adapted from A. Elein Mustain. PostgreSQL’s MVCC will maintain consistency between the items table and a table of row counts."
+    },
+    {
+      "title": "How to count SQL databases quickly in PostgreSQL and MySQL | New Relic",
+      "url": "https://newrelic.com/blog/infrastructure-monitoring/fast-counting-in-postgresql-and-mysql",
+      "domain": "newrelic.com",
+      "snippet": "If you need to quickly get an exact count, one option is to pay the time cost for this data in small pieces, ahead of time, by using triggers and functions to maintain a MySQL/MyISAM-like count that is kept up to date at all times."
+    },
+    {
+      "title": "sql - How do I speed up counting rows in a PostgreSQL table? - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/14570488/how-do-i-speed-up-counting-rows-in-a-postgresql-table",
+      "domain": "stackoverflow.com",
+      "snippet": "You can ask for the exact value of the count in the table by simply using trigger AFTER INSERT OR DELETE Something like this"
+    }
+  ]
+}

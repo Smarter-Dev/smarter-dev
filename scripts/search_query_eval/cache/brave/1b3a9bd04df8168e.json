@@ -1,0 +1,37 @@
+{
+  "query": "site:rfc-editor.org OAuth PKCE",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:14+00:00",
+  "results": [
+    {
+      "title": "RFC 7636: Proof Key for Code Exchange by OAuth Public Clients",
+      "url": "https://www.rfc-editor.org/rfc/rfc7636",
+      "domain": "rfc-editor.org",
+      "snippet": "Request for Comments: 7636 Nomura Research Institute Category: Standards Track J. Bradley ISSN: 2070-1721 Ping Identity N. Agarwal Google September 2015 Proof Key for Code Exchange by OAuth Public Clients Abstract OAuth 2.0 public clients utilizing the Authorization Code Grant are susceptible ..."
+    },
+    {
+      "title": "RFC 8252: OAuth 2.0 for Native Apps",
+      "url": "https://www.rfc-editor.org/rfc/rfc8252.html",
+      "domain": "rfc-editor.org",
+      "snippet": "RFC 8252 OAuth 2.0 for Native Apps October 2017 The PKCE [RFC7636] protocol was created specifically to mitigate this attack. It is a proof-of-possession extension to OAuth 2.0 that protects the authorization code from being used if it is intercepted."
+    },
+    {
+      "title": "RFC 8252: OAuth 2.0 for Native Apps | RFC Editor",
+      "url": "https://rfc-editor.org/rfc/rfc8252",
+      "domain": "rfc-editor.org",
+      "snippet": "RFC 8252 OAuth 2.0 for Native Apps ... to mitigate this attack. It is a proof-of-possession extension to OAuth 2.0 that protects the authorization code from being used if it is intercepted...."
+    },
+    {
+      "title": "RFC 9700: Best Current Practice for OAuth 2.0 Security",
+      "url": "https://www.rfc-editor.org/rfc/rfc9700.html",
+      "domain": "rfc-editor.org",
+      "snippet": "Clients that have ensured that the authorization server supports Proof Key for Code Exchange (PKCE) [RFC7636] MAY rely on the CSRF protection provided by PKCE. In OpenID Connect flows, the nonce parameter provides CSRF protection. Otherwise, one-time use CSRF tokens carried in the state parameter ..."
+    },
+    {
+      "title": "rfc7636",
+      "url": "https://www.rfc-editor.org/rfc/inline-errata/rfc7636.html",
+      "domain": "rfc-editor.org",
+      "snippet": "Request for Comments: 7636 Nomura Research Institute Category: Standards Track J. Bradley ISSN: 2070-1721 Ping Identity N. Agarwal Google September 2015 Proof Key for Code Exchange by OAuth Public Clients Abstract OAuth 2.0 public clients utilizing the Authorization Code Grant are susceptible ..."
+    }
+  ]
+}

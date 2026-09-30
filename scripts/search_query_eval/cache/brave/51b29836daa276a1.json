@@ -1,0 +1,37 @@
+{
+  "query": "TypeScript return value generic T error",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:17+00:00",
+  "results": [
+    {
+      "title": "Why do I get an error in Typescript when I use a generic as a return value? - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/73644533/why-do-i-get-an-error-in-typescript-when-i-use-a-generic-as-a-return-value",
+      "domain": "stackoverflow.com",
+      "snippet": "I don't know why the error is reported. Can anyone help me? ... The problem stems from the fact that your function claims it will return an object of type T, but in fact you could be returning a type that's narrower (a subtype) of T."
+    },
+    {
+      "title": "Typescript Function with Generic Return Type - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/60178347/typescript-function-with-generic-return-type",
+      "domain": "stackoverflow.com",
+      "snippet": "The type ... is a concrete type referring to a generic function. <T>() => T means: \"a function whose caller specifies a type T and which returns a value of type T.\" This is essentially impossible to implement safely."
+    },
+    {
+      "title": "TypeScript: Documentation - Generics",
+      "url": "https://www.typescriptlang.org/docs/handbook/2/generics.html",
+      "domain": "typescriptlang.org",
+      "snippet": "While using any is certainly generic in that it will cause the function to accept any and all types for the type of arg, we actually are losing the information about what that type was when the function returns."
+    },
+    {
+      "title": "r/typescript on Reddit: Infer generic T from return type and use T in the argument",
+      "url": "https://www.reddit.com/r/typescript/comments/1dem9hj/infer_generic_t_from_return_type_and_use_t_in_the/",
+      "domain": "reddit.com",
+      "snippet": "The arg type can’t be inferred before the return type is known, and if the return type is based on the arg, then that’s another circle. ... I get what you're trying to do, I had the same issue with my library api and the answer is that it is actually possible to some extent (i dont remember how), but it's really not worth it because typescript can randomly decide it won't work for whatever reason."
+    },
+    {
+      "title": "r/typescript on Reddit: How to return a generic type from a function?",
+      "url": "https://www.reddit.com/r/typescript/comments/zp2wkc/how_to_return_a_generic_type_from_a_function/",
+      "domain": "reddit.com",
+      "snippet": "type FooRet<T = unknown> = <U extends T>(value: U) => U | undefined type WorksLikeThis = FooRet type WorksLikeThat = FooRet<string> ... I'm not entirely sure what you are trying to do, but this was my way of making sense of it. That said I rarely ever have to use generics, and I have no formal training in TS. function buildGenericFunc<T>(myOtherValue: any) { return <T>(myValue: T):T|undefined => { return myOtherValue === myValue ?"
+    }
+  ]
+}

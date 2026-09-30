@@ -1,0 +1,37 @@
+{
+  "query": "PKCE client secret OAuth security",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:31+00:00",
+  "results": [
+    {
+      "title": "PKCE — OAuth 2.0",
+      "url": "https://oauth.net/2/pkce/",
+      "domain": "oauth.net",
+      "snippet": "When to use this Use PKCE on every Authorization Code flow. It was originally designed for mobile and native apps (which can't safely store a client secret), but its protection against authorization code injection makes it valuable for all client types, including confidential web apps."
+    },
+    {
+      "title": "Authorization Code Flow with Proof Key for Code Exchange (PKCE) - Auth0 Docs",
+      "url": "https://auth0.com/docs/get-started/authentication-and-authorization-flow/authorization-code-flow-with-pkce",
+      "domain": "auth0.com",
+      "snippet": "Cannot securely store a Client Secret because their entire source is available to the browser. Given these situations, OAuth 2.0 provides a version of the Authorization Code Flow which makes use of a Proof Key for Code Exchange (PKCE) (defined ..."
+    },
+    {
+      "title": "Get Rid Of Client Secrets With OAuth Authorization Code PKCE Flow | Xebia",
+      "url": "https://xebia.com/blog/get-rid-of-client-secrets-with-oauth-authorization-code-pkce-flow/",
+      "domain": "xebia.com",
+      "snippet": "PKCE enhances security by using dynamically generated code verifiers and code challenges instead of static credentials, reducing the risks associated with storing, rotating, and managing client secrets."
+    },
+    {
+      "title": "oauth - PKCE vs Client Secret - Information Security Stack Exchange",
+      "url": "https://security.stackexchange.com/questions/219105/pkce-vs-client-secret",
+      "domain": "security.stackexchange.com",
+      "snippet": "When you ask for an authorization code, PKCE requires you to send the hash of a nonce. When you redeem the code, you must provide the original (unhashed) nonce. This means that a malicious actor (XSS or CSRF vulnerability) observing the authorization code request and response cannot redeem the code, as they don't know the nonce. Edit: Additionally, the client_secret means that only your server can redeem authorization codes."
+    },
+    {
+      "title": "oauth - Do we really need client_secret to get access_token on PKCE flow? - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/63057801/do-we-really-need-client-secret-to-get-access-token-on-pkce-flow",
+      "domain": "stackoverflow.com",
+      "snippet": "The PKCE challenge or OpenID Connect \"nonce\" MUST be transaction-specific and securely bound to the client and the user agent in which the transaction was started. Note: although PKCE so far was designed as a mechanism to protect native apps, this advice applies to all kinds of OAuth clients, including web applications. Why is it recommended to use \"PKCE Flow\" if it will just expose the client_secret?"
+    }
+  ]
+}

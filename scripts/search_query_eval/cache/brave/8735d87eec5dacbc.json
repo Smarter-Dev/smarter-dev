@@ -1,0 +1,37 @@
+{
+  "query": "OAuth backend authorization code PKCE",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:22+00:00",
+  "results": [
+    {
+      "title": "Authorization Code Flow with Proof Key for Code Exchange (PKCE) - Auth0 Docs",
+      "url": "https://auth0.com/docs/get-started/authentication-and-authorization-flow/authorization-code-flow-with-pkce",
+      "domain": "auth0.com",
+      "snippet": "Cannot securely store a Client Secret because their entire source is available to the browser. Given these situations, OAuth 2.0 provides a version of the Authorization Code Flow which makes use of a Proof Key for Code Exchange (PKCE) (defined ..."
+    },
+    {
+      "title": "PKCE — OAuth 2.0",
+      "url": "https://oauth.net/2/pkce/",
+      "domain": "oauth.net",
+      "snippet": "PKCE prevents authorization code injection and CSRF attacks in the Authorization Code flow."
+    },
+    {
+      "title": "What Is PKCE? | Postman Blog",
+      "url": "https://blog.postman.com/what-is-pkce/",
+      "domain": "blog.postman.com",
+      "snippet": "Eradication of code interception attacks: Without PKCE, an attacker that intercepts the authorization code can potentially exchange it for an access token. PKCE prevents this attack method by requiring a code verifier with every exchange, ensuring that only the original client that started the flow can obtain the token. Backwards compatibility: PKCE can be used with any OAuth 2.0 authorization server that supports it—while still being compatible with servers that do not."
+    },
+    {
+      "title": "Implement the OAuth 2.0 Authorization Code with PKCE Flow | Okta Developer",
+      "url": "https://developer.okta.com/blog/2019/08/22/okta-authjs-pkce",
+      "domain": "developer.okta.com",
+      "snippet": "It turns out there’s an extension to the Authorization Code flow that’s been in use for some time with Mobile and Native apps. That’s Proof Key for Code Exchange or PKCE (pronounced “pixie”)."
+    },
+    {
+      "title": "OAuth Authorization Code Flow with PKCE on stateless backend - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/75341865/oauth-authorization-code-flow-with-pkce-on-stateless-backend",
+      "domain": "stackoverflow.com",
+      "snippet": "And if an attacker sends a \"OAauth2 server response\"-like request, he doesn't get your token-endpoint-request containing the code verifier - it's a different request. 2023-02-05T07:04:07.567Z+00:00 ... The OAuth + PKCE flow can be implemented in both stateful and stateless ways. This idea is even hinted at in the PKCE RFC: When the server issues the authorization code in the authorization response, it MUST associate the \"code_challenge\" and \"code_challenge_method\" values with the authorization code so it can be verified later."
+    }
+  ]
+}

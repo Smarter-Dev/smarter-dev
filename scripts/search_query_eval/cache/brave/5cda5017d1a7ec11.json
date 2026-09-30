@@ -1,0 +1,37 @@
+{
+  "query": "OAuth PKCE confidential clients backend",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:06+00:00",
+  "results": [
+    {
+      "title": "Why do confidential OAuth clients still benefit from PKCE?",
+      "url": "https://nhimg.org/faq/why-do-confidential-oauth-clients-still-benefit-from-pkce/",
+      "domain": "nhimg.org",
+      "snippet": "This distinction becomes especially ... possible before the backend secret is even used. Use PKCE for every OAuth authorisation code flow, even when the client is confidential...."
+    },
+    {
+      "title": "What is PKCE? A Developer's Guide to Secure OAuth Flows",
+      "url": "https://www.scalekit.com/blog/pkce-developers-guide-secure-oauth-flows",
+      "domain": "scalekit.com",
+      "snippet": "Confidential clients like backend servers can store these secrets securely, but public clients, mobile apps, SPAs, CLI tools cannot, because their code and storage can be inspected or extracted by users or attackers."
+    },
+    {
+      "title": "OAuth 2.0: The importance of PKCE for confidential clients - Condatis",
+      "url": "https://condatis.com/blog/oauth-confidential-clients/",
+      "domain": "condatis.com",
+      "snippet": "Always make use of PKCE for confidential clients. Many authentication providers such as Azure AD B2C offer the option to use PKCE also for confidential clients. Prefer the use of well-known OAuth/OpenID client libraries rather than re-implementing ..."
+    },
+    {
+      "title": "PKCE — OAuth 2.0",
+      "url": "https://oauth.net/2/pkce/",
+      "domain": "oauth.net",
+      "snippet": "When to use this Use PKCE on every Authorization Code flow. It was originally designed for mobile and native apps (which can't safely store a client secret), but its protection against authorization code injection makes it valuable for all client types, including confidential web apps."
+    },
+    {
+      "title": "r/oauth on Reddit: PKCE and Confidential Client (bff) flow for native mobile apps",
+      "url": "https://www.reddit.com/r/oauth/comments/1k2j3ra/pkce_and_confidential_client_bff_flow_for_native/",
+      "domain": "reddit.com",
+      "snippet": "I found a couple of places that say a PKCE + BFF (Backend-for-Frontend) pattern is the most secure flow for SPAs. This article in particular shows that a BFF pattern is the most secure way to authenticate. https://docs.abblix.com/docs/openid-connect-flows-explained-simply-from-implicit-flows-to-authorization-code-flows-with-pkce-and-bff · My question is, does this apply to native mobile apps too? Would a confidential client (aka BFF) be the most secure way to handle tokens with a native mobile app?"
+    }
+  ]
+}

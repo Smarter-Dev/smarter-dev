@@ -1,0 +1,37 @@
+{
+  "query": "git filter-repo remove secret history",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:23+00:00",
+  "results": [
+    {
+      "title": "How to Remove Secrets from Git History Safely",
+      "url": "https://techcommunity.microsoft.com/blog/azureinfrastructureblog/how-to-safely-remove-secrets-from-your-git-history-the-right-way/4464722",
+      "domain": "techcommunity.microsoft.com",
+      "snippet": "Now, remove the sensitive file from every commit in your repository’s history. git filter-repo --path \"config/secrets.json\" --invert-paths"
+    },
+    {
+      "title": "How To Remove Secrets From The Git History | Warp",
+      "url": "https://www.warp.dev/terminus/remove-secret-git-history",
+      "domain": "warp.dev",
+      "snippet": "Entering remove secret from git in the AI Command Suggestions will prompt a git command that can then quickly be inserted into your shell by doing CMD+ENTER. Although tools like BFG and git-filter-repo will clean up your repository's history from secrets, it is possible that the repository may still have references to some of these files and commits."
+    },
+    {
+      "title": "Removing sensitive data from a repository - GitHub Docs",
+      "url": "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository",
+      "domain": "docs.github.com",
+      "snippet": "When altering your repository's history using tools like git-filter-repo, it's crucial to understand the implications. Rewriting history requires careful coordination with collaborators to successfully execute, and has a number of side effects that must be managed. It is important to note that if the sensitive data you need to remove is a secret (e.g."
+    },
+    {
+      "title": "git-filter-repo: Remove Sensitive Information from Git History with - Nimbus Intelligence",
+      "url": "https://nimbusintelligence.com/2024/02/git-filter-repo-remove-sensitive-information-from-git-history-with/",
+      "domain": "nimbusintelligence.com",
+      "snippet": "With this syntax we are telling git-filter-repo to look for every line containing the word password and to replace it with ***REMOVED***. We could have specify another word to replace the line with as follows: Then we need to type in the shell or prompt where expression.txt should be replaced by the path to the file where you specified what to mask: ... Aborting: Refusing to destructively overwrite repo history since this does not look like a fresh clone."
+    },
+    {
+      "title": "Using git-filter-repo to rewrite history and remove secrets · GitHub",
+      "url": "https://gist.github.com/Boggin/2e25abd3a4423ca812671b4bd3f860d0",
+      "domain": "gist.github.com",
+      "snippet": "Now we are ready to rewrite history: git filter-repo --replace-text .\\expressions.txt --source <dir_clone_bare> --target <dir_clone_wc> Check the commits again to ensure all the secrets have been replaced (in this case with ***REMOVED***)."
+    }
+  ]
+}
