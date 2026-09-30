@@ -2,10 +2,12 @@
 """Result-judging eval: how well Jev rates search results against a request.
 
 Takes a run.py report, searches Brave for each of its queries (5 results
-each, so 25 per request), and asks Jev, TypeSafe's classifier, two yes/no
+each, so 25 per request), and asks Jev, TypeSafe's classifier, two
 questions about every result: is it relevant to the user's request, and is it
-a good-quality source. Jev only sees each result's domain and snippet. One Jev
-call per request covers all 25 results.
+a good-quality source. Relevance is a yes/no question, or in prompts that
+define levels a rubric whose unrounded score ranks the results; such prompts
+can also ask which one result would help most. Jev only sees each result's
+domain and snippet. One Jev call per request covers all 25 results.
 
 Brave results are cached in cache/brave/, so reruns judge exactly the same
 results and cost no searches.
@@ -30,6 +32,7 @@ import os
 import re
 import sys
 import time
+from enum import Enum
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
@@ -60,12 +63,16 @@ BOOLEAN_THRESHOLD = 0.5
 # Jev list price (.env.example, 2026-09-15); output tokens are free.
 INPUT_PRICE_PER_MILLION_USD = 0.042
 
-DEFAULT_PROMPT = "v6d"
+DEFAULT_PROMPT = "v7b"
 
 
 def load_prompt(name: str) -> dict:
-    """judge_prompts/<name>.yaml: instructions, the two per-result questions
-    and an optional guide that goes at the top of the material."""
+    """judge_prompts/<name>.yaml: instructions, the per-result questions and
+    an optional guide that goes at the top of the material.
+
+    Relevance is either `relevant`, a yes/no question, or `relevance` with
+    `levels`, a rubric from 0 where `relevant_from` is the lowest unrounded
+    score that counts as relevant. An optional `best` question picks one result."""
     prompt = yaml.safe_load((HERE / "judge_prompts" / f"{name}.yaml").read_text())
     today = datetime.now(UTC).date()
     monday = today - timedelta(days=today.weekday())
@@ -167,14 +174,33 @@ class _JudgmentsBase(BaseModel):
 
 
 def judgment_model(results: list[dict], prompt: dict) -> type[BaseModel]:
-    """Two bools per result; each description is the question about it."""
+    """Relevance and quality per result, plus the optional best pick; each
+    description is the question about it."""
     fields = {}
+    if "best" in prompt:
+        # Pick-one options are strings; Jev reports its distribution keyed by them.
+        best = Enum("Best", {f"r{n}": f"RESULT [{n}]" for n in range(1, len(results) + 1)})
+        fields["best"] = (best, Field(description=prompt["best"]))
     for n, result in enumerate(results, 1):
         where = f"RESULT [{n}] ({result['domain']})"
-        fields[f"result_{n}_relevant"] = (
-            bool,
-            Field(description=prompt["relevant"].format(where=where)),
-        )
+        if "levels" in prompt:
+            fields[f"result_{n}_relevance"] = (
+                int,
+                Field(
+                    description=prompt["relevance"].format(where=where),
+                    json_schema_extra={
+                        "anyOf": [
+                            {"const": level, "description": text}
+                            for level, text in enumerate(prompt["levels"])
+                        ]
+                    },
+                ),
+            )
+        else:
+            fields[f"result_{n}_relevant"] = (
+                bool,
+                Field(description=prompt["relevant"].format(where=where)),
+            )
         fields[f"result_{n}_quality"] = (
             bool,
             Field(description=prompt["quality"].format(where=where)),
@@ -218,12 +244,27 @@ async def judge_request(model, prompt: dict, case: dict, brave: Brave) -> dict:
     details = run.response.provider_details or {}
     confidence = details.get("confidence") or {}
     probabilities = details.get("probabilities") or {}
+    scores = details.get("scores") or {}
+    if "best" in prompt:
+        record["best"] = int(verdicts["best"].value.strip("RESULT []"))
+        record["best_confidence"] = confidence.get("best")
+        best_probabilities = probabilities.get("best") or {}
     for n, result in enumerate(results, 1):
-        for question in ("relevant", "quality"):
+        if "levels" in prompt:
+            name = f"result_{n}_relevance"
+            result["relevance"] = verdicts[name]
+            result["relevance_score"] = scores.get(name)
+            result["relevance_confidence"] = confidence.get(name)
+            result["relevant"] = scores.get(name, verdicts[name]) >= prompt["relevant_from"]
+            result["relevant_confidence"] = confidence.get(name)
+        questions = ("quality",) if "levels" in prompt else ("relevant", "quality")
+        for question in questions:
             name = f"result_{n}_{question}"
             result[question] = verdicts[name]
             result[f"{question}_confidence"] = confidence.get(name)
             result[f"{question}_probability"] = probabilities.get(name)
+        if "best" in prompt:
+            result["best_probability"] = best_probabilities.get(f"RESULT [{n}]", 0.0)
     record["model_name"] = run.response.model_name
     record["input_tokens"] = run.usage.input_tokens or 0
     record["output_tokens"] = run.usage.output_tokens or 0
@@ -242,6 +283,12 @@ def summarize(records: list[dict]) -> dict:
         "results_judged": len(judged),
         "relevant": sum(res["relevant"] for res in judged),
         "good_quality": sum(res["quality"] for res in judged),
+        **(
+            {"levels": {level: sum(res["relevance"] == level for res in judged)
+                        for level in sorted({res["relevance"] for res in judged})}}
+            if judged and "relevance" in judged[0]
+            else {}
+        ),
         "duplicate_urls": sum(
             len(r["results"]) - len({res["url"] for res in r["results"]}) for r in ok
         ),
@@ -250,6 +297,14 @@ def summarize(records: list[dict]) -> dict:
         "median_seconds": seconds[len(seconds) // 2] if seconds else None,
         "max_seconds": seconds[-1] if seconds else None,
     }
+
+
+def ranked(record: dict) -> list[dict]:
+    """A request's results by relevance score, then best-pick probability."""
+    return sorted(
+        record["results"],
+        key=lambda res: (-(res.get("relevance_score") or 0), -(res.get("best_probability") or 0)),
+    )
 
 
 def mark(value: bool, conf: float | None) -> str:
@@ -269,11 +324,27 @@ def render_markdown(report: dict) -> str:
         f"- **Run at:** {report['run_at']}",
         f"- **Requests:** {s['succeeded']}/{s['requests']} judged, {s['results_judged']} results",
         f"- **Jev says relevant:** {s['relevant']} · **good quality:** {s['good_quality']}",
+        *(
+            [f"- **Relevance levels:** " + " · ".join(f"{level}: {count}" for level, count in s["levels"].items())]
+            if s.get("levels")
+            else []
+        ),
         f"- **Duplicate URLs within a request:** {s['duplicate_urls']}",
         f"- **Cost:** ${s['cost_usd']:.6f} ({s['input_tokens']} input tokens, list price)",
         f"- **Jev time per request:** median {s['median_seconds']} s, slowest {s['max_seconds']} s",
         "",
         "Each cell is Jev's answer and its confidence (0 undecided, 1 certain).",
+        *(
+            [
+                "",
+                f"Results are ranked by Jev's relevance score, its unrounded position on the "
+                f"0–{len(report['levels']) - 1} rubric; a score of {settings['relevant_from']} or more "
+                "counts as relevant, and Level is the rounded score. Best is the probability Jev gives each result in the "
+                "pick-the-best question, and ★ marks its pick.",
+            ]
+            if report.get("levels")
+            else []
+        ),
         "",
         "## Instructions",
         "",
@@ -284,6 +355,7 @@ def render_markdown(report: dict) -> str:
         "Per-result questions:",
         "",
         *(f"- {name}: `{text}`" for name, text in report.get("questions", {}).items()),
+        *(f"  - {level}: {text}" for level, text in enumerate(report.get("levels") or [])),
         *(
             ["", "Guide (sent once, at the top of the material):", "", "```text", report["guide"], "```"]
             if report.get("guide")
@@ -296,6 +368,9 @@ def render_markdown(report: dict) -> str:
         lines += ["", f"### {record['id']}", "", f"> {record['request'].strip()}", ""]
         if "error" in record:
             lines += [f"**Error:** {record['error']}", ""]
+        if report.get("levels") and "error" not in record:
+            lines += render_ranked(record)
+            continue
         queries = {}
         for res in record["results"]:
             queries.setdefault(res["query_index"], []).append(res)
@@ -323,6 +398,41 @@ def render_markdown(report: dict) -> str:
                 f"_${record['cost_usd']:.6f} · {record['input_tokens']} in · {record['seconds']} s_",
             ]
     return "\n".join(lines) + "\n"
+
+
+def render_ranked(record: dict) -> list[str]:
+    lines = [
+        "| Rank | Score | Level | Best | Q | Domain | Snippet | Quality |",
+        "|---|---|---|---|---|---|---|---|",
+    ]
+    seen = set()
+    for n, res in enumerate(record["results"], 1):
+        res["n"] = n
+    for place, res in enumerate(ranked(record), 1):
+        snippet = res["snippet"].replace("|", "\\|").replace("\n", " ")
+        if len(snippet) > 140:
+            snippet = snippet[:137] + "…"
+        dup = " (dup)" if res["url"] in seen else ""
+        seen.add(res["url"])
+        star = " ★" if record.get("best") == res["n"] else ""
+        best = f"{res['best_probability']:.2f}{star}" if "best_probability" in res else "—"
+        lines.append(
+            f"| {place} | {res['relevance_score']:.2f} | {res['relevance']} ({res['relevance_confidence']:.2f}) | {best} | {res['query_index']}.{res['rank']} | "
+            f"[{res['domain']}]({res['url']}){dup} | {snippet} | {mark(res['quality'], res['quality_confidence'])} |"
+        )
+    lines += ["", "Queries:", ""]
+    lines += [
+        f"{index}. `{query}`"
+        for index, query in dict.fromkeys(
+            (res["query_index"], res["query"]) for res in record["results"]
+        )
+    ]
+    if "cost_usd" in record:
+        lines += [
+            "",
+            f"_${record['cost_usd']:.6f} · {record['input_tokens']} in · {record['seconds']} s_",
+        ]
+    return lines
 
 
 async def main() -> None:
@@ -369,6 +479,7 @@ async def main() -> None:
             "model": args.model,
             "prompt": args.prompt,
             "boolean_threshold": BOOLEAN_THRESHOLD,
+            "relevant_from": prompt.get("relevant_from"),
             "queries_report": queries_report,
             "results_per_query": RESULTS_PER_QUERY,
             "judged_fields": "domain and snippet",
@@ -376,7 +487,10 @@ async def main() -> None:
         },
         "instructions": prompt["instructions"],
         "guide": prompt.get("guide"),
-        "questions": {"relevant": prompt["relevant"], "quality": prompt["quality"]},
+        "questions": {
+            name: prompt[name] for name in ("relevant", "relevance", "best", "quality") if name in prompt
+        },
+        "levels": prompt.get("levels"),
         "summary": summarize(records),
         "results": records,
     }
