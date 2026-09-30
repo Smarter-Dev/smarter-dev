@@ -153,4 +153,5 @@ async def plan_queries(request: str) -> tuple[list[dict], dict]:
         "requests": usage.requests,
         "input_tokens": usage.input_tokens or 0,
         "output_tokens": usage.output_tokens or 0,
+        "cache_read_tokens": usage.cache_read_tokens or 0,
     }

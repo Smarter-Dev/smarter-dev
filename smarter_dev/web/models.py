@@ -4874,7 +4874,7 @@ class UsageCostRow(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "product_mode IN ('resources','chat','discord')",
+            "product_mode IN ('resources','chat','discord','search')",
             name="usage_product_mode",
         ),
         CheckConstraint(
