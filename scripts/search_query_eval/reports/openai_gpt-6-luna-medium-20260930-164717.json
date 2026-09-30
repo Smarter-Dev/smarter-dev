@@ -1,0 +1,356 @@
+{
+  "model": "openai/gpt-6-luna",
+  "system_prompt": "You turn a user's request into web search queries.\n\nWrite exactly 5 search queries that, run on a web search engine, would find the information needed to answer the request well. Write them the way a skilled researcher types into a search box: short, specific, keyword-focused. Cover different angles of the request instead of rephrasing the same query. Keep the user's language unless English sources would clearly serve them better. Today's date is 2026-09-30.",
+  "results": [
+    {
+      "id": "py-async-timeout",
+      "request": "How do I put a timeout on an asyncio task in Python without cancelling the whole gather?",
+      "queries": [
+        "Python asyncio per-task timeout in gather without cancelling other tasks",
+        "asyncio.wait_for gather timeout one coroutine cancellation behavior Python docs",
+        "asyncio.shield wait_for timeout task keep running gather Python",
+        "Python asyncio.timeout per task gather TaskGroup timeout isolate exception",
+        "asyncio.gather return_exceptions per coroutine timeout wrapper example"
+      ],
+      "seconds": 3.97,
+      "input_tokens": 175,
+      "output_tokens": 148
+    },
+    {
+      "id": "rust-vs-go-cli",
+      "request": "Should I write my next CLI tool in Rust or Go? I care about startup time and easy cross-compiling.",
+      "queries": [
+        "Rust vs Go CLI startup time benchmark cold start binary startup",
+        "Rust CLI cross-compilation target platforms cross toolchain official documentation",
+        "Go cross-compilation GOOS GOARCH official documentation CLI",
+        "Rust versus Go CLI binary size startup time static linking comparison",
+        "Go Rust CLI development tradeoffs dependency management build distribution cross-platform"
+      ],
+      "seconds": 2.63,
+      "input_tokens": 180,
+      "output_tokens": 79
+    },
+    {
+      "id": "postgres-slow-count",
+      "request": "Why is SELECT COUNT(*) so slow on my big Postgres table and what can I do about it?",
+      "queries": [
+        "PostgreSQL why SELECT COUNT(*) slow large table MVCC visibility heap scan",
+        "PostgreSQL COUNT(*) performance exact count index-only scan visibility map explain analyze",
+        "PostgreSQL fast approximate row count pg_class reltuples statistics large table",
+        "PostgreSQL optimize COUNT(*) partitioning cached counter materialized view tradeoffs",
+        "PostgreSQL count rows vacuum analyze visibility map index-only scans performance"
+      ],
+      "seconds": 4.02,
+      "input_tokens": 178,
+      "output_tokens": 95
+    },
+    {
+      "id": "k8s-oomkilled",
+      "request": "my pod keeps getting OOMKilled but the memory graph never gets near the limit",
+      "queries": [
+        "Kubernetes pod OOMKilled memory graph below limit metrics sampling transient spike cgroup memory usage",
+        "Kubernetes OOMKilled despite memory usage below container limit node OOM eviction vs container OOM",
+        "Kubernetes memory metrics working set RSS cache memory limit cgroup OOMKilled",
+        "Kubernetes OOMKilled diagnose container_memory_usage_bytes memory.events oom_kill cgroup v2",
+        "Prometheus kubelet container memory metrics sampling interval misses OOM spike Grafana OOMKilled"
+      ],
+      "seconds": 4.91,
+      "input_tokens": 173,
+      "output_tokens": 183
+    },
+    {
+      "id": "react-server-components",
+      "request": "Explain React Server Components like I only know classic client-side React.",
+      "queries": [
+        "React Server Components official documentation mental model server client components",
+        "React Server Components how rendering and RSC payload works compared to client-side React",
+        "React Server Components data fetching server-only code client component boundaries use client",
+        "React Server Components limitations no state effects event handlers examples",
+        "React Server Components Next.js App Router practical example Server Component Client Component props serialization"
+      ],
+      "seconds": 2.98,
+      "input_tokens": 170,
+      "output_tokens": 85
+    },
+    {
+      "id": "latest-python-release",
+      "request": "What's new in the latest Python release?",
+      "queries": [
+        "latest Python release 2026 official Python.org version release notes",
+        "Python latest stable release what's new features official documentation",
+        "Python 3 latest release changelog performance syntax improvements",
+        "Python latest version release date download Python.org",
+        "Python newest release backward incompatible changes deprecations known issues"
+      ],
+      "seconds": 3.13,
+      "input_tokens": 165,
+      "output_tokens": 116
+    },
+    {
+      "id": "discord-bot-rate-limits",
+      "request": "My Discord bot gets 429s when it sends a lot of messages at once. How are the rate limits supposed to work?",
+      "queries": [
+        "Discord API rate limits 429 response Retry-After X-RateLimit headers official documentation",
+        "Discord API rate limits per-route bucket global limits official docs",
+        "Discord bot sending many messages rate limit message create endpoint per-channel limits",
+        "Discord rate limit handling exponential backoff Retry-After discord.py documentation",
+        "Discord API rate limits FAQ 429 global shared route bucket official"
+      ],
+      "seconds": 2.52,
+      "input_tokens": 183,
+      "output_tokens": 88
+    },
+    {
+      "id": "first-job-portfolio",
+      "request": "I'm self-taught and trying to land my first dev job. What should actually be in my portfolio?",
+      "queries": [
+        "software developer portfolio what to include entry-level hiring managers projects README live demo source code",
+        "self-taught junior developer portfolio projects demonstrate skills problem solving deployed applications",
+        "junior software engineer portfolio resume GitHub project quality hiring advice recruiters",
+        "developer portfolio accessibility mobile responsive testing documentation case study project examples",
+        "first developer job portfolio avoid tutorial clones unfinished projects how many projects"
+      ],
+      "seconds": 3.84,
+      "input_tokens": 178,
+      "output_tokens": 87
+    },
+    {
+      "id": "css-center-div",
+      "request": "center a div vertically and horizontally",
+      "queries": [
+        "CSS center div horizontally and vertically flexbox align-items justify-content",
+        "CSS Grid center div both vertically and horizontally place-items center",
+        "CSS position absolute center div transform translate(-50%, -50%)",
+        "CSS center div in viewport height 100vh flexbox",
+        "CSS center div inside parent container responsive horizontal vertical alignment"
+      ],
+      "seconds": 3.27,
+      "input_tokens": 163,
+      "output_tokens": 118
+    },
+    {
+      "id": "git-undo-pushed-commit",
+      "request": "I pushed a commit with a secret in it to a public repo. What do I do now?",
+      "queries": [
+        "GitHub official leaked secret public repository revoke rotate credentials immediately secret scanning remediation",
+        "GitHub remove sensitive data from repository history git filter-repo force push official docs",
+        "GitLab secret leaked public repository revoke credentials remove from git history docs",
+        "AWS exposed access key public GitHub rotate deactivate key incident response official",
+        "GitHub leaked secret incident response check logs audit unauthorized access official guidance"
+      ],
+      "seconds": 2.76,
+      "input_tokens": 177,
+      "output_tokens": 91
+    },
+    {
+      "id": "llm-local-laptop",
+      "request": "What's the best open-weight LLM I can run locally on a laptop with 16 GB of RAM?",
+      "queries": [
+        "best open-weight LLM 16GB RAM laptop 2026 7B 8B benchmark",
+        "Qwen3 8B vs Gemma 3 12B vs Llama 3.1 8B local laptop benchmarks",
+        "LM Studio Ollama system requirements 16GB RAM quantized models 2026",
+        "best quantization GGUF Q4_K_M 8B model memory usage 16GB RAM",
+        "open-weight language model laptop 16GB RAM coding reasoning multilingual evaluation 2026"
+      ],
+      "seconds": 2.83,
+      "input_tokens": 178,
+      "output_tokens": 120
+    },
+    {
+      "id": "sqlite-prod",
+      "request": "Is SQLite actually fine for a production web app with a few thousand users?",
+      "queries": [
+        "SQLite production web application few thousand users concurrency write workload WAL mode limits",
+        "SQLite official when to use SQLite server-side application concurrent writers",
+        "SQLite production deployment backups durability WAL network filesystem recommendations",
+        "SQLite scaling read-heavy web app connection pooling busy timeout write contention benchmarks",
+        "SQLite vs PostgreSQL production web app migration thresholds concurrent writes operational tradeoffs"
+      ],
+      "seconds": 2.86,
+      "input_tokens": 172,
+      "output_tokens": 82
+    },
+    {
+      "id": "typescript-generics-error",
+      "request": "TypeScript says 'Type T could be instantiated with an arbitrary type which could be unrelated to T'. What does that mean?",
+      "queries": [
+        "TypeScript \"could be instantiated with an arbitrary type\" explanation generic error",
+        "TypeScript error TS2322 \"could be unrelated to T\" generic function example",
+        "TypeScript generic type parameter arbitrary subtype constraint T assignability explanation",
+        "TypeScript \"Type 'T' could be instantiated\" generic return value fix",
+        "TypeScript generics assignability constraint vs type parameter arbitrary subtype FAQ"
+      ],
+      "seconds": 2.82,
+      "input_tokens": 182,
+      "output_tokens": 139
+    },
+    {
+      "id": "mechanical-keyboard",
+      "request": "looking for a quiet mechanical keyboard for coding in a shared office, budget around $150",
+      "queries": [
+        "best quiet mechanical keyboards for office typing silent switches 2026",
+        "quiet mechanical keyboard coding shared office under $150 reviews",
+        "mechanical keyboards with silent linear switches prebuilt under $150",
+        "quiet tactile mechanical keyboard office silent switches under $150",
+        "low-noise mechanical keyboard comparison sound tests typing"
+      ],
+      "seconds": 2.6,
+      "input_tokens": 174,
+      "output_tokens": 75
+    },
+    {
+      "id": "ergonomic-rsi",
+      "request": "My wrists hurt after long coding sessions. What can I change?",
+      "queries": [
+        "computer workstation ergonomics wrist pain keyboard mouse neutral wrist posture breaks authoritative guidance",
+        "coding wrist pain ergonomic adjustments keyboard mouse desk chair setup occupational health",
+        "wrist and hand exercises stretches for computer users evidence workplace health guidance",
+        "typing mouse repetitive strain wrist pain when to seek medical care numbness weakness red flags",
+        "alternative keyboards vertical mouse trackball wrist pain evidence ergonomic review"
+      ],
+      "seconds": 2.83,
+      "input_tokens": 170,
+      "output_tokens": 130
+    },
+    {
+      "id": "oauth-pkce",
+      "request": "What is PKCE and do I need it if my OAuth app has a backend?",
+      "queries": [
+        "OAuth 2.0 PKCE explained code_verifier code_challenge RFC 7636",
+        "OAuth web application backend confidential client authorization code flow PKCE required recommended",
+        "OAuth 2.0 Security Best Current Practice PKCE confidential clients RFC 9700",
+        "OAuth PKCE backend web app server-side client secret authorization code interception",
+        "OAuth PKCE when required public clients confidential clients official documentation"
+      ],
+      "seconds": 9.05,
+      "input_tokens": 174,
+      "output_tokens": 94
+    },
+    {
+      "id": "vague-slow-website",
+      "request": "my website is slow",
+      "queries": [
+        "how to diagnose why a website is slow PageSpeed Insights Lighthouse",
+        "website slow server response time TTFB troubleshooting hosting database",
+        "Core Web Vitals improve LCP INP CLS website performance",
+        "slow website causes optimize images JavaScript CSS caching CDN",
+        "website speed test waterfall analysis browser developer tools"
+      ],
+      "seconds": 2.9,
+      "input_tokens": 161,
+      "output_tokens": 139
+    },
+    {
+      "id": "docker-image-size",
+      "request": "How can I make my Python Docker image smaller? It's 1.2 GB right now.",
+      "queries": [
+        "Docker official docs multi-stage builds Python image reduce size",
+        "Python Docker image slimming audit image layers dive docker history",
+        "Dockerfile Python use slim base image build dependencies multi-stage pip cache",
+        "Python Docker image optimize dependency size wheels runtime dependencies",
+        "Docker build .dockerignore reduce image size Python project"
+      ],
+      "seconds": 3.72,
+      "input_tokens": 176,
+      "output_tokens": 74
+    },
+    {
+      "id": "game-jam-engine",
+      "request": "Doing my first game jam next weekend, 2D, solo. Godot, Unity, or something else?",
+      "queries": [
+        "Godot vs Unity for beginner solo 2D game jam rapid prototyping",
+        "best beginner-friendly 2D game engine for a solo game jam Godot Unity GameMaker Construct",
+        "Godot 2D workflow templates export setup game jam beginner documentation",
+        "Unity 2D game jam beginner workflow setup time templates 2026",
+        "GameMaker vs Godot vs Construct 2D game jam engine learning curve pricing offline export"
+      ],
+      "seconds": 66.35,
+      "input_tokens": 180,
+      "output_tokens": 175
+    },
+    {
+      "id": "regex-email",
+      "request": "whats the regex to validate an email address",
+      "queries": [
+        "email validation regex practical pattern JavaScript HTML5",
+        "RFC 5322 email address regex limitations validation",
+        "simple email regex pattern common recommendation",
+        "email address validation regex examples Python JavaScript",
+        "email validation best practice regex confirmation email RFC"
+      ],
+      "seconds": 63.36,
+      "input_tokens": 166,
+      "output_tokens": 100
+    },
+    {
+      "id": "salary-remote-junior",
+      "request": "What do remote junior backend developers get paid in the US these days?",
+      "queries": [
+        "2026 US remote junior backend developer salary average salary range",
+        "junior backend developer remote salary United States entry level job postings",
+        "junior software engineer backend salary remote US Glassdoor Indeed 2026",
+        "remote entry level backend developer compensation salary by experience US",
+        "junior backend engineer salary US startup versus large tech remote 2026"
+      ],
+      "seconds": 63.67,
+      "input_tokens": 171,
+      "output_tokens": 83
+    },
+    {
+      "id": "websocket-vs-sse",
+      "request": "For a live notifications feed, should I use WebSockets or Server-Sent Events?",
+      "queries": [
+        "Server-Sent Events vs WebSockets live notifications feed comparison one-way real-time use cases",
+        "MDN Server-Sent Events EventSource automatic reconnect HTTP limitations",
+        "WebSocket API MDN full-duplex communication protocol browser",
+        "SSE vs WebSockets scalability proxy load balancer connection limits deployment",
+        "live notification system architecture SSE WebSockets authentication scaling tradeoffs"
+      ],
+      "seconds": 63.48,
+      "input_tokens": 174,
+      "output_tokens": 86
+    },
+    {
+      "id": "spanish-request",
+      "request": "¿Cómo configuro un entorno virtual de Python en Windows?",
+      "queries": [
+        "cómo crear entorno virtual Python Windows venv paso a paso",
+        "activar entorno virtual Python Windows PowerShell cmd Scripts activate",
+        "instalar Python Windows verificar PATH py launcher venv",
+        "solucionar errores venv Windows ejecución de scripts PowerShell activar",
+        "gestionar dependencias pip requirements.txt entorno virtual Windows"
+      ],
+      "seconds": 62.89,
+      "input_tokens": 168,
+      "output_tokens": 76
+    },
+    {
+      "id": "event-today",
+      "request": "Is there any big tech conference happening this week?",
+      "queries": [
+        "major technology conferences September 28 October 4 2026",
+        "big tech events conference calendar week of September 28 2026",
+        "technology conferences October 2026 dates September 28 October 4",
+        "AI and software developer conferences September 28 October 4 2026",
+        "major tech trade shows and industry conferences worldwide early October 2026"
+      ],
+      "seconds": 2.86,
+      "input_tokens": 167,
+      "output_tokens": 184
+    },
+    {
+      "id": "learn-dsa-interview",
+      "request": "I have a FAANG interview in 3 weeks and I'm rusty on data structures and algorithms. Where should I focus?",
+      "queries": [
+        "FAANG software engineering interview 3 week data structures algorithms study plan",
+        "most frequently asked coding interview topics arrays graphs trees dynamic programming 2025",
+        "NeetCode 150 vs Blind 75 interview preparation problem list patterns",
+        "FAANG coding interview practice strategy mock interviews timed problem solving",
+        "coding interview data structures algorithms topic priority weak fundamentals three week preparation"
+      ],
+      "seconds": 4.56,
+      "input_tokens": 181,
+      "output_tokens": 180
+    }
+  ]
+}
