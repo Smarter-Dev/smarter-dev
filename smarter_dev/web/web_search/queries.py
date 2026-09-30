@@ -44,7 +44,9 @@ Rules:
 Bad (a pile of terms): `nginx 502 bad gateway upstream reverse proxy error causes troubleshooting fix configuration`
 Bad (terms strung together): `nginx upstream timeout proxy buffer keepalive 502`
 Bad (the same query reworded): `nginx 502 error`, `nginx 502 bad gateway fix`, `why nginx returns 502`
-Good: `nginx 502 bad gateway upstream`, `nginx proxy_read_timeout`, `nginx 502 only under load`, `site:nginx.org upstream keepalive`"""
+Good: `nginx 502 bad gateway upstream`, `nginx proxy_read_timeout`, `nginx 502 only under load`, `site:nginx.org upstream keepalive`
+
+Also decide needs_answer. After the searches, an assistant can read the pages and write the user an answer above the results. Set it to true when the user wants something answered, explained, solved or compared, such as how to do something, why something happens, which option to choose, or whether something is true or happening. Set it to false when they want pages to open rather than an answer: a particular site, a download, the docs or product page for a named thing, or a list to browse."""
 
 
 class SearchQuery(BaseModel):
@@ -56,6 +58,9 @@ class SearchQuery(BaseModel):
 
 class SearchQueries(BaseModel):
     queries: list[SearchQuery] = Field(min_length=5, max_length=5)
+    needs_answer: bool = Field(
+        description="Whether the user needs a written answer, not just pages to open."
+    )
 
 
 def _script(char: str) -> str | None:
@@ -105,8 +110,8 @@ def _check_queries(ctx: RunContext[None], output: SearchQueries) -> SearchQuerie
     return output
 
 
-def _model():
-    """GPT-6 Luna on OpenAI's Responses API, as in production.
+def model_for(name: str):
+    """An OpenAI model on the Responses API, as in production.
 
     Without OPENAI_API_KEY, a LiteLLM proxy (LITE_LLM_PROXY_HOST and
     LITE_LLM_API_KEY, as the search eval uses) serves it, so the search runs
@@ -116,11 +121,11 @@ def _model():
 
     host = os.getenv("LITE_LLM_PROXY_HOST", "").rstrip("/")
     if os.getenv("OPENAI_API_KEY") or not host:
-        return OpenAIResponsesModel(QUERY_MODEL)
+        return OpenAIResponsesModel(name)
     if not host.startswith("http"):
         host = f"https://{host}"
     return OpenAIResponsesModel(
-        f"openai/{QUERY_MODEL}",
+        f"openai/{name}",
         provider=OpenAIProvider(
             base_url=f"{host}/v1", api_key=os.environ["LITE_LLM_API_KEY"]
         ),
@@ -132,7 +137,7 @@ def build_query_agent() -> Agent[None, SearchQueries]:
 
     prompt = SYSTEM_PROMPT.replace("{today}", datetime.now(UTC).date().isoformat())
     agent = Agent(
-        _model(),
+        model_for(QUERY_MODEL),
         output_type=SearchQueries,
         system_prompt=prompt,
         model_settings=OpenAIResponsesModelSettings(
@@ -144,11 +149,12 @@ def build_query_agent() -> Agent[None, SearchQueries]:
     return agent
 
 
-async def plan_queries(request: str) -> tuple[list[dict], dict]:
-    """Five ``{"query", "angle"}`` dicts for ``request``, and the run's usage."""
+async def plan_queries(request: str) -> tuple[list[dict], bool, dict]:
+    """Five ``{"query", "angle"}`` dicts for ``request``, whether it needs a
+    written answer, and the run's usage."""
     result = await build_query_agent().run(request)
     usage = result.usage() if callable(result.usage) else result.usage
-    return [q.model_dump() for q in result.output.queries], {
+    return [q.model_dump() for q in result.output.queries], result.output.needs_answer, {
         "model": QUERY_MODEL,
         "requests": usage.requests,
         "input_tokens": usage.input_tokens or 0,

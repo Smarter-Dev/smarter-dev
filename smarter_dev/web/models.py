@@ -6248,13 +6248,20 @@ class WebSearchRun(Base):
     )
     submission_key: Mapped[str] = mapped_column(String(64), nullable=False)
     request: Mapped[str] = mapped_column(Text, nullable=False)
-    # queued → planning → searching → ranking → complete, or error.
+    # queued → planning → searching → ranking → [answering →] complete, or error.
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
     # [{query, angle, status, count, domains}] once Luna has written them.
     queries: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     # Unique results, best first once Jev has ranked them.
     results: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     ranked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Luna decides while planning whether the request needs a written answer.
+    needs_answer: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    # {status, markdown, html, reads: [{number, domain, status}], error} once
+    # the answer starts.
+    answer: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     # Model names, token counts and costs per stage.
     usage: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
