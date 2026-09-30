@@ -15,7 +15,8 @@ Usage:
     uv run python scripts/search_query_eval/judge.py --queries reports/<run>.json --only event-today
 
 Reads BRAVE_SEARCH_API_KEY and TYPESAFE_API_KEY from .env. Writes
-scripts/search_query_eval/reports/judge-<model>-<timestamp>.{json,md}.
+scripts/search_query_eval/reports/judge-<model>-<prompt>-<timestamp>.{json,md}.
+Jev's wording lives in judge_prompts/<prompt>.yaml.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ import os
 import re
 import sys
 import time
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -59,23 +60,22 @@ BOOLEAN_THRESHOLD = 0.5
 # Jev list price (.env.example, 2026-09-15); output tokens are free.
 INPUT_PRICE_PER_MILLION_USD = 0.042
 
-INSTRUCTIONS = """\
-You judge web search results for a search assistant. Today is {today}. The REQUEST is what the \
-user asked for. Each RESULT is one search result, shown as the site's domain \
-and the snippet the search engine returned. Judge every result on its own, \
-from its domain and snippet only.
-
-- Relevant: the page would help answer the REQUEST itself, not merely share \
-some of its words.
-- Good quality: the source is trustworthy and substantive for this topic, \
-such as official documentation, a standards body, a reputable publication, \
-an expert Q&A answer or a well-known practitioner. Content farms, thin SEO \
-listicles, scraped copies, spam and pages selling something unrelated are \
-not good quality."""
+DEFAULT_PROMPT = "v5"
 
 
-def instructions() -> str:
-    return INSTRUCTIONS.replace("{today}", datetime.now(UTC).date().isoformat())
+def load_prompt(name: str) -> dict:
+    """judge_prompts/<name>.yaml: instructions plus the two per-result questions."""
+    prompt = yaml.safe_load((HERE / "judge_prompts" / f"{name}.yaml").read_text())
+    today = datetime.now(UTC).date()
+    monday = today - timedelta(days=today.weekday())
+    sunday = monday + timedelta(days=6)
+    for placeholder, value in {
+        "{today}": today.isoformat(),
+        "{weekday}": f"{today:%A}",
+        "{this_week}": f"Monday {monday.isoformat()} to Sunday {sunday.isoformat()}",
+    }.items():
+        prompt["instructions"] = prompt["instructions"].replace(placeholder, value)
+    return prompt
 
 
 def brave_cache_path(query: str, count: int) -> Path:
@@ -158,18 +158,18 @@ class _JudgmentsBase(BaseModel):
     """Which search RESULTS are relevant to the REQUEST and of good quality."""
 
 
-def judgment_model(results: list[dict]) -> type[BaseModel]:
+def judgment_model(results: list[dict], prompt: dict) -> type[BaseModel]:
     """Two bools per result; each description is the question about it."""
     fields = {}
     for n, result in enumerate(results, 1):
         where = f"RESULT [{n}] ({result['domain']})"
         fields[f"result_{n}_relevant"] = (
             bool,
-            Field(description=f"Would {where} help answer the REQUEST?"),
+            Field(description=prompt["relevant"].format(where=where)),
         )
         fields[f"result_{n}_quality"] = (
             bool,
-            Field(description=f"Is {where} a trustworthy, substantive source for this topic?"),
+            Field(description=prompt["quality"].format(where=where)),
         )
     return create_model("ResultJudgments", __base__=_JudgmentsBase, **fields)
 
@@ -185,7 +185,7 @@ def build_model(model_id: str) -> TypeSafeModel:
     )
 
 
-async def judge_request(model, case: dict, brave: Brave) -> dict:
+async def judge_request(model, prompt: dict, case: dict, brave: Brave) -> dict:
     results = []
     for index, item in enumerate(case["queries"], 1):
         for rank, hit in enumerate(await brave.search(item["query"]), 1):
@@ -194,12 +194,12 @@ async def judge_request(model, case: dict, brave: Brave) -> dict:
     if not results:
         record["error"] = "Brave returned no results"
         return record
-    agent = Agent(model, output_type=judgment_model(results), retries=0)
+    agent = Agent(model, output_type=judgment_model(results, prompt), retries=0)
     started = time.perf_counter()
     try:
         run = await agent.run(
             material(case["request"], results),
-            instructions=instructions(),
+            instructions=prompt["instructions"],
             model_settings={"timeout": 60, "typesafe_boolean_threshold": BOOLEAN_THRESHOLD},
         )
     except Exception as error:  # noqa: BLE001 - report the failure, keep going
@@ -255,6 +255,7 @@ def render_markdown(report: dict) -> str:
         "# Search result judging eval",
         "",
         f"- **Judge:** `{settings['model']}` (threshold {settings['boolean_threshold']})",
+        f"- **Prompt:** `{settings.get('prompt', 'v1')}`",
         f"- **Queries from:** `{settings['queries_report']}`",
         f"- **Search:** Brave, {settings['results_per_query']} results per query",
         f"- **Run at:** {report['run_at']}",
@@ -271,6 +272,10 @@ def render_markdown(report: dict) -> str:
         "```text",
         report["instructions"],
         "```",
+        "",
+        "Per-result questions:",
+        "",
+        *(f"- {name}: `{text}`" for name, text in report.get("questions", {}).items()),
         "",
         "## Results",
     ]
@@ -311,6 +316,7 @@ async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--queries", type=Path, default=DEFAULT_QUERIES, help="run.py report JSON")
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--prompt", default=DEFAULT_PROMPT, help="wording in judge_prompts/")
     parser.add_argument("--only", nargs="*", help="request ids to judge")
     parser.add_argument("--concurrency", type=int, default=5)
     args = parser.parse_args()
@@ -324,13 +330,14 @@ async def main() -> None:
         if r.get("queries") and (not args.only or r["id"] in args.only)
     ]
     model = build_model(args.model)
+    prompt = load_prompt(args.prompt)
     semaphore = asyncio.Semaphore(args.concurrency)
     async with httpx.AsyncClient(timeout=30) as client:
         brave = Brave(client)
 
         async def one(case: dict) -> dict:
             async with semaphore:
-                record = await judge_request(model, case, brave)
+                record = await judge_request(model, prompt, case, brave)
             for res in record["results"]:
                 res["query"] = case["queries"][res["query_index"] - 1]["query"]
             print(f"{case['id']}: {record.get('error', 'ok')}", file=sys.stderr)
@@ -347,18 +354,20 @@ async def main() -> None:
         "run_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "settings": {
             "model": args.model,
+            "prompt": args.prompt,
             "boolean_threshold": BOOLEAN_THRESHOLD,
             "queries_report": queries_report,
             "results_per_query": RESULTS_PER_QUERY,
             "judged_fields": "domain and snippet",
             "brave_searches_this_run": searches,
         },
-        "instructions": instructions(),
+        "instructions": prompt["instructions"],
+        "questions": {"relevant": prompt["relevant"], "quality": prompt["quality"]},
         "summary": summarize(records),
         "results": records,
     }
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-    stem = HERE / "reports" / f"judge-{args.model.replace(':', '_')}-{stamp}"
+    stem = HERE / "reports" / f"judge-{args.model.replace(':', '_')}-{args.prompt}-{stamp}"
     stem.parent.joinpath(f"{stem.name}.json").write_text(
         json.dumps(report, indent=2, ensure_ascii=False)
     )
