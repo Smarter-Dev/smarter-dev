@@ -25,6 +25,51 @@ node_modules
 *.swo
 *~
 
+# Data. Never bake a database, dump or export into an image, even one that
+# is only lying around untracked in a local checkout. Patterns are spelled
+# case-insensitively ([dD][bB]) because .dockerignore matching is
+# case-sensitive and the guard (scripts/check_no_data_exports.py) is not.
+**/[dD][aA][tT][aA][bB][aA][sS][eE]_[bB][aA][cC][kK][uU][pP]
+**/*.[dD][bB]
+**/*.[dD][bB]3
+**/*.[sS][qQ][lL][iI][tT][eE]
+**/*.[sS][qQ][lL][iI][tT][eE]3
+**/*.[dD][bB]-[jJ][oO][uU][rR][nN][aA][lL]
+**/*.[dD][bB]-[wW][aA][lL]
+**/*.[dD][bB]-[sS][hH][mM]
+**/*.[dD][uU][mM][pP]
+**/*.[pP][gG][dD][uU][mM][pP]
+**/*.[bB][aA][cC][kK][uU][pP]
+**/*.[sS][qQ][lL][iI][tT][eE]-*
+**/*.[sS][qQ][lL][iI][tT][eE]3-*
+# Mirrors the backup/dump name rule in scripts/check_no_data_exports.py.
+**/*[bB][aA][cC][kK][uU][pP]*.[jJ][sS][oO][nN]
+**/*[bB][aA][cC][kK][uU][pP]*.[jJ][sS][oO][nN][lL]
+**/*[bB][aA][cC][kK][uU][pP]*.[nN][dD][jJ][sS][oO][nN]
+**/*[bB][aA][cC][kK][uU][pP]*.[cC][sS][vV]
+**/*[bB][aA][cC][kK][uU][pP]*.[tT][sS][vV]
+**/*[bB][aA][cC][kK][uU][pP]*.[sS][qQ][lL]
+**/*[bB][aA][cC][kK][uU][pP]*.[gG][zZ]
+**/*[bB][aA][cC][kK][uU][pP]*.[zZ][iI][pP]
+**/*[bB][aA][cC][kK][uU][pP]*.[tT][aA][rR]
+**/*[bB][aA][cC][kK][uU][pP]*.[tT][gG][zZ]
+**/*[bB][aA][cC][kK][uU][pP]*.[bB][zZ]2
+**/*[bB][aA][cC][kK][uU][pP]*.[xX][zZ]
+**/*[bB][aA][cC][kK][uU][pP]*.[zZ][sS][tT]
+**/*[dD][uU][mM][pP]*.[jJ][sS][oO][nN]
+**/*[dD][uU][mM][pP]*.[jJ][sS][oO][nN][lL]
+**/*[dD][uU][mM][pP]*.[nN][dD][jJ][sS][oO][nN]
+**/*[dD][uU][mM][pP]*.[cC][sS][vV]
+**/*[dD][uU][mM][pP]*.[tT][sS][vV]
+**/*[dD][uU][mM][pP]*.[sS][qQ][lL]
+**/*[dD][uU][mM][pP]*.[gG][zZ]
+**/*[dD][uU][mM][pP]*.[zZ][iI][pP]
+**/*[dD][uU][mM][pP]*.[tT][aA][rR]
+**/*[dD][uU][mM][pP]*.[tT][gG][zZ]
+**/*[dD][uU][mM][pP]*.[bB][zZ]2
+**/*[dD][uU][mM][pP]*.[xX][zZ]
+**/*[dD][uU][mM][pP]*.[zZ][sS][tT]
+
 # OS
 .DS_Store
 Thumbs.db
