@@ -59,7 +59,7 @@ function select() {
   var el = element();
   el.options = [];
   el.listeners = 0;
-  el.addEventListener = function () { el.listeners += 1; };
+  el.addEventListener = function (type, handler) { el.listeners += 1; el.handler = handler; };
   el.appendChild = function (option) { el.options.push(option); };
   Object.defineProperty(el, 'textContent', {
     get: function () { return ''; },
@@ -77,13 +77,20 @@ function select() {
 var modelSelect = select();
 var reasoningSelect = select();
 var settingsDisclosure = element({hidden: true});
+var regenerate = element({dataset: {regenerate: '', turnId: 't-1'}});
 var controls = {
   '[data-chat-model]': modelSelect,
   '[data-chat-reasoning]': reasoningSelect,
+  '[data-regenerate]': regenerate,
 };
 
+// The listeners chat.js registers on the document, by type, so the real
+// regenerate click handler can be driven.
+var documentListeners = {};
 var document = {
-  addEventListener: function () {},
+  addEventListener: function (type, handler) {
+    (documentListeners[type] = documentListeners[type] || []).push(handler);
+  },
   createElement: function () { return {value: '', textContent: '', dataset: {}}; },
   querySelectorAll: function (selector) { return controls[selector] ? [controls[selector]] : []; },
   querySelector: function (selector) { return controls[selector] || null; },
@@ -117,7 +124,8 @@ var replies = [];
 function reply(status, body) { replies.push({status: status, body: body}); }
 function fetch(url, options) {
   requests.push([options && options.method || 'GET', url]);
-  var next = replies.shift();
+  // An unscripted request fails rather than crashing, so the checks name it.
+  var next = replies.shift() || {status: 599, body: {detail: 'unexpected request'}};
   return Promise.resolve({
     ok: next.status < 400,
     status: next.status,
@@ -134,6 +142,20 @@ function submit(text) {
   input.value = text;
   // The form handler clears the box once sendMessage accepts the draft.
   if (sendMessage(input.value)) input.value = '';
+}
+
+// A click on the Regenerate button, through every document click listener.
+function clickRegenerate() {
+  var event = {target: {closest: function (selector) {
+    return selector === '[data-regenerate]' ? regenerate : null;
+  }}};
+  documentListeners.click.forEach(function (handler) { handler(event); });
+}
+
+// A new reasoning level chosen, through the listener bound on the select.
+function chooseReasoning(level) {
+  reasoningSelect.value = level;
+  reasoningSelect.handler({target: reasoningSelect});
 }
 
 function keys(el) { return el.options.map(function (o) { return o.value; }); }
@@ -203,7 +225,8 @@ async function main() {
   check(input.value === 'Typed since', 'a newer draft is not overwritten');
   check(thread.children.length === 2 && thread.children[0].content.textContent === 'First draft',
     'the refused words stay on the thread instead');
-  check(thread.children[1].content.textContent === UNAVAILABLE.detail, 'beside the refusal');
+  check(thread.children.length === 2 && thread.children[1].content.textContent === UNAVAILABLE.detail,
+    'beside the refusal');
   check(modelUnavailable, 'the composer still locks');
 
   // A question sent from the quote box is not a composer draft.
@@ -255,8 +278,53 @@ async function main() {
   check(!input.disabled && !submitBtn.disabled, 'an unrelated 409 does not lock the composer');
   check(requests.length === 1, 'an unrelated 409 does not reload the catalog');
   check(thread.children.length === 2, 'an unrelated 409 keeps its exchange on the thread');
-  check(thread.children[1].content.textContent === 'Wait for the active turn to finish or stop it.',
+  check(thread.children.length === 2 && thread.children[1].content.textContent === 'Wait for the active turn to finish or stop it.',
     'and shows its error in place, as before');
+
+  // Regenerate, through its real click listener.
+  reset();
+  reply(409, UNAVAILABLE);
+  reply(200, CATALOG_WITHOUT);
+  clickRegenerate();
+  await settle();
+  check(requests[0][0] === 'POST' && requests[0][1] === '/v2/api/chat/conversations/c-1/turns/t-1/regenerate',
+    'the click asks to regenerate');
+  check(modelUnavailable && !unavailableNotice.hidden, 'a refused regenerate shows the notice');
+  check(input.disabled && submitBtn.disabled && regenerate.disabled, 'and locks the composer and Regenerate');
+  check(requests.length === 2 && requests[1][1] === '/v2/api/chat/catalog', 'and reloads the catalog');
+  requests = [];
+  clickRegenerate();
+  check(requests.length === 0, 'a locked page sends no second regenerate');
+
+  reset();
+  reply(409, {status_code: 409, detail: 'Another turn is active.'});
+  clickRegenerate();
+  await settle();
+  check(!modelUnavailable && unavailableNotice.hidden, 'a busy regenerate shows no notice');
+  check(!input.disabled && !submitBtn.disabled && !regenerate.disabled, 'and locks nothing');
+  check(requests.length === 1, 'and reloads no catalog');
+  check(errorEl.textContent === 'Another turn is active.', 'its own error is shown');
+
+  // Reasoning, through the listener bound on its select.
+  reset();
+  reply(409, UNAVAILABLE);
+  reply(200, CATALOG_WITHOUT);
+  chooseReasoning('low');
+  await settle();
+  check(requests[0][0] === 'PATCH' && requests[0][1] === '/v2/api/chat/conversations/c-1/reasoning',
+    'choosing a level asks to change reasoning');
+  check(modelUnavailable && !unavailableNotice.hidden, 'a refused reasoning change shows the notice');
+  check(input.disabled && submitBtn.disabled && reasoningSelect.disabled, 'and locks the composer and reasoning');
+  check(requests.length === 2 && requests[1][1] === '/v2/api/chat/catalog', 'and reloads the catalog');
+
+  reset();
+  reply(409, {status_code: 409, detail: 'Model and reasoning can only change between turns.'});
+  chooseReasoning('low');
+  await settle();
+  check(!modelUnavailable && unavailableNotice.hidden, 'a between-turns reasoning refusal shows no notice');
+  check(!input.disabled && !reasoningSelect.disabled, 'and locks nothing');
+  check(requests.length === 1, 'and reloads no catalog');
+  check(reasoningSelect.value === 'high', 'the select goes back to the stored level');
 
   // The code alone is not enough: it has to arrive on a 409.
   check(!isModelUnavailable({status: 422, code: 'model_unavailable'}), 'a 422 with the code is not the refusal');
