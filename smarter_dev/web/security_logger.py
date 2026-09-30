@@ -126,21 +126,27 @@ class SecurityLogger:
     async def log_authentication_failed(
         self,
         session: Optional[AsyncSession],
-        failed_key_prefix: str,
+        bearer_presented: bool,
         request: Request,
         reason: str
     ) -> Optional[SecurityLog]:
-        """Log failed authentication attempt."""
+        """Log failed authentication attempt.
+
+        Records only whether a bearer was presented, never any part of it: a
+        rejected token may be a real key sent to the wrong place, and a prefix
+        of it is a credential fragment.
+        """
+        credential = "presented bearer" if bearer_presented else "missing bearer"
         return await self.log_event(
             session=session,
             action="authentication_failed",
             success=False,
-            details=f"Authentication failed for key '{failed_key_prefix}***': {reason}",
+            details=f"Authentication failed ({credential}): {reason}",
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent", "unknown"),
             request_id=request.headers.get("x-request-id"),
             event_metadata={
-                "failed_key_prefix": failed_key_prefix,
+                "bearer_presented": bearer_presented,
                 "endpoint": str(request.url.path),
                 "method": request.method,
                 "reason": reason
@@ -154,7 +160,11 @@ class SecurityLogger:
         request: Request,
         success: bool = True
     ) -> SecurityLog:
-        """Log an API request for rate limiting tracking."""
+        """Log an API request for rate limiting tracking.
+
+        Keeps query parameter names but not their values, which can carry
+        search terms and other user input.
+        """
         return await self.log_event(
             session=session,
             action="api_request",
@@ -168,7 +178,7 @@ class SecurityLogger:
             event_metadata={
                 "method": request.method,
                 "path": str(request.url.path),
-                "query_params": dict(request.query_params)
+                "query_param_names": sorted(request.query_params.keys())
             }
         )
 
