@@ -207,6 +207,31 @@ async def test_duplicate_pages_merge_and_results_sort_by_score(search_env):
     assert [r["url"] for r in search_env["events"][-2]["results"]][:2] == ["https://a.org", "https://b.org"]
 
 
+async def test_the_top_pick_leads_then_the_rest_by_score(search_env, monkeypatch):
+    async def rank(request, results):
+        # Jev picks the third-best score.
+        judgments = [
+            {
+                "score": float(n),
+                "level": min(3, n),
+                "relevant": n >= 1,
+                "quality": False,
+                "best_probability": 0.0,
+                "best": n == 2,
+            }
+            for n in range(len(results))
+        ]
+        return judgments, {"model": "jev-1.13.0", "input_tokens": 10_000, "cost_usd": 0.00042}
+
+    monkeypatch.setattr(ranking, "rank", rank)
+    run = await _new_run(search_env["session"])
+    await pipeline.run_search(run.id, search_env["notify"])
+
+    final = search_env["events"][-1]
+    assert [r["score"] for r in final["results"]] == [2.0, 4.0, 3.0, 1.0, 0.0]
+    assert final["results"][0]["best"] is True
+
+
 async def test_a_failed_ranking_still_completes_in_search_order(search_env, monkeypatch):
     async def broken(request, results):
         raise TimeoutError
