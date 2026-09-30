@@ -26,6 +26,8 @@ Scenario YAML schema:
       ## Who's here
       - alice (id 1) builds shaders.
     long_term_memory_updated: "2026-08-05"   # optional; the blob's date
+    behavior: "Wait to be asked before explaining."   # optional; dream-written
+    personality: "Dry, warm, a little nerdy."         # optional; dream-written
     memory_notes:                # optional; what the agent kept earlier today
       - text: "alice (id 1) got soft shadows working."
         channel: "dev-help"      # optional
@@ -202,6 +204,8 @@ class _ParsedScenario:
     kind: str  # "initial" or "followup"
     long_term_memory: str | None
     long_term_memory_updated_at: datetime | None
+    behavior: str | None
+    personality: str | None
     memory_notes: list[MemoryNote]
     guild_events: list[GuildEventView]
 
@@ -304,6 +308,8 @@ def _parse_scenario(path: Path) -> _ParsedScenario:
             if blob_date
             else None
         ),
+        behavior=data.get("behavior"),
+        personality=data.get("personality"),
         memory_notes=_parse_memory_notes(data.get("memory_notes")),
         guild_events=_parse_guild_events(data.get("guild_events")),
     )
@@ -323,6 +329,8 @@ def _build_call(scenario: _ParsedScenario) -> tuple[str, list[Any]]:
             notes=scenario.notes,
             long_term_memory=scenario.long_term_memory,
             long_term_memory_updated_at=scenario.long_term_memory_updated_at,
+            behavior=scenario.behavior,
+            personality=scenario.personality,
             memory_notes=scenario.memory_notes,
             guild_events=scenario.guild_events,
         )

@@ -210,6 +210,20 @@ class InitialAgentInput(BaseModel):
         default=None,
         description="When the blob was last rewritten by a dream, if it ever was.",
     )
+    behavior: str | None = Field(
+        default=None,
+        description=(
+            "Learned instructions for how to act in this guild. Initial turn "
+            "only, like the blob."
+        ),
+    )
+    personality: str | None = Field(
+        default=None,
+        description=(
+            "Who the bot is here and how it wants to be felt about. Initial "
+            "turn only, like the blob."
+        ),
+    )
     memory_notes: list[MemoryNote] = Field(
         default_factory=list,
         description="Notes the agent kept since midnight UTC, newest capped server-side.",
@@ -252,6 +266,14 @@ class FollowupAgentInput(BaseModel):
     long_term_memory_updated_at: datetime | None = Field(
         default=None,
         description="When the blob was last rewritten by a dream, if it ever was.",
+    )
+    behavior: str | None = Field(
+        default=None,
+        description="Normally None; re-emitted with the blob after a compaction.",
+    )
+    personality: str | None = Field(
+        default=None,
+        description="Normally None; re-emitted with the blob after a compaction.",
     )
     new_guild_events: list[GuildEventView] = Field(
         default_factory=list,

@@ -5928,6 +5928,8 @@ async def upsert_guild_memory_blob(
     notes_consumed: int,
     model_name: str | None,
     dreamed_at: datetime,
+    behavior: str | None = None,
+    personality: str | None = None,
 ) -> ChatAgentGuildMemory:
     """Write the night's blob for ``guild_id``, bumping ``revision`` atomically.
 
@@ -5939,28 +5941,36 @@ async def upsert_guild_memory_blob(
     UNIQUE violation.
 
     ``memory_enabled`` is deliberately absent from the update set — a dream must
-    never undo the per-guild forget button.
+    never undo the per-guild forget button. ``behavior`` and ``personality``
+    left as ``None`` are absent from it too, so a caller that does not name a
+    block can never wipe it.
     """
     insert = pg_insert if session.bind.dialect.name == "postgresql" else sqlite_insert
     statement = insert(ChatAgentGuildMemory).values(
         guild_id=guild_id,
         content=content,
+        behavior=behavior or "",
+        personality=personality or "",
         revision=1,
         last_dream_at=dreamed_at,
         notes_consumed=notes_consumed,
         model_name=model_name,
         updated_at=dreamed_at,
     )
+    update_set = {
+        "content": content,
+        "revision": ChatAgentGuildMemory.__table__.c.revision + 1,
+        "last_dream_at": dreamed_at,
+        "notes_consumed": notes_consumed,
+        "model_name": model_name,
+        "updated_at": dreamed_at,
+    }
+    if behavior is not None:
+        update_set["behavior"] = behavior
+    if personality is not None:
+        update_set["personality"] = personality
     statement = statement.on_conflict_do_update(
-        index_elements=["guild_id"],
-        set_={
-            "content": content,
-            "revision": ChatAgentGuildMemory.__table__.c.revision + 1,
-            "last_dream_at": dreamed_at,
-            "notes_consumed": notes_consumed,
-            "model_name": model_name,
-            "updated_at": dreamed_at,
-        },
+        index_elements=["guild_id"], set_=update_set
     )
     await session.execute(statement)
     await session.flush()
@@ -6113,11 +6123,15 @@ async def record_memory_revision(
     revision: int,
     notes_consumed: int,
     model_name: str | None,
+    behavior: str = "",
+    personality: str = "",
 ) -> ChatAgentMemoryRevision:
     """Append one night's dream output to the guild's revision history."""
     record = ChatAgentMemoryRevision(
         guild_id=guild_id,
         content=content,
+        behavior=behavior,
+        personality=personality,
         revision=revision,
         notes_consumed=notes_consumed,
         model_name=model_name,

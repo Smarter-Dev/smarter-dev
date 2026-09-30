@@ -336,3 +336,55 @@ def test_memory_blocks_sit_between_the_image_quota_and_the_topic():
         prompt.index("<notes>"),
     ]
     assert order == sorted(order)
+
+
+# -- behavior and personality ----------------------------------------------
+
+BEHAVIOR = "Wait to be asked before explaining a toolchain."
+PERSONALITY = "Dry, warm, quietly delighted by good shader work."
+
+
+def test_personality_and_behavior_render_labelled_ahead_of_the_blob():
+    prompt, _ = build_agent_call(
+        _initial(long_term_memory=BLOB, behavior=BEHAVIOR, personality=PERSONALITY),
+        [],
+    )
+
+    assert f"<my-personality>\n{PERSONALITY}\n</my-personality>" in prompt
+    assert f"<how-i-behave>\n{BEHAVIOR}\n</how-i-behave>" in prompt
+    assert (
+        prompt.index("<my-personality>")
+        < prompt.index("<how-i-behave>")
+        < prompt.index("<what-i-remember>")
+    )
+
+
+def test_empty_behavior_and_personality_omit_their_tags():
+    prompt, _ = build_agent_call(
+        _initial(long_term_memory=BLOB, behavior="  ", personality=None), []
+    )
+
+    assert "my-personality" not in prompt
+    assert "how-i-behave" not in prompt
+    assert "<what-i-remember>" in prompt
+
+
+def test_behavior_and_personality_render_without_a_blob():
+    prompt, _ = build_agent_call(
+        _initial(behavior=BEHAVIOR, personality=PERSONALITY), []
+    )
+
+    assert "<my-personality>" in prompt
+    assert "<how-i-behave>" in prompt
+    assert "what-i-remember" not in prompt
+
+
+def test_followup_re_emits_behavior_and_personality_with_the_blob():
+    assert "how-i-behave" not in build_agent_call(_followup(), [])[0]
+    prompt, _ = build_agent_call(
+        _followup(long_term_memory=BLOB, behavior=BEHAVIOR, personality=PERSONALITY),
+        [],
+    )
+
+    assert PERSONALITY in prompt
+    assert BEHAVIOR in prompt

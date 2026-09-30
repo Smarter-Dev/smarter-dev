@@ -246,16 +246,35 @@ async def dispatch_response(
     return sent
 
 
-def render_memory_block(*, long_term_memory, long_term_updated_at, notes) -> str:
-    """The memory bundle as one brief-ready block; empty when nothing is known."""
+def render_memory_block(
+    *, long_term_memory, long_term_updated_at, notes, behavior=None, personality=None
+) -> str:
+    """The memory bundle as one brief-ready block; empty when nothing is known.
+
+    The dream's three durable blocks each carry a label saying what they are
+    for, most stable first, before today's notes.
+    """
     sections = []
+    if personality:
+        sections.append(
+            "PERSONALITY (who you are here and how you want people to feel "
+            f"about you; let it set your tone):\n{personality}"
+        )
+    if behavior:
+        sections.append(
+            "BEHAVIOR (what you've learned about how to act here; follow it "
+            f"unless it clashes with your instructions):\n{behavior}"
+        )
     if long_term_memory:
         stamp = (
             f" (dreamed {long_term_updated_at:%Y-%m-%d})"
             if long_term_updated_at
             else ""
         )
-        sections.append(f"GUILD MEMORY{stamp}:\n{long_term_memory}")
+        sections.append(
+            f"GUILD MEMORY{stamp} (what you know about this place and its "
+            f"people):\n{long_term_memory}"
+        )
     if notes:
         note_lines = "\n".join(
             f"- [{note.channel_name or note.channel_id or 'somewhere'}] {note.text}"
@@ -271,6 +290,8 @@ async def load_memory_block(run: ProactiveRuntime, guild_id: str) -> str:
     """Read guild memory only; per-channel reads do not scale with a guild."""
     long_term = None
     long_term_at = None
+    behavior = None
+    personality = None
     kept_notes = ()
     guild_service = run.bot.d.get("guild_chat_memory_service")
     if guild_service is not None:
@@ -278,6 +299,8 @@ async def load_memory_block(run: ProactiveRuntime, guild_id: str) -> str:
             snapshot = await guild_service.load_snapshot(guild_id)
             long_term = snapshot.long_term_memory
             long_term_at = snapshot.updated_at
+            behavior = snapshot.behavior
+            personality = snapshot.personality
             kept_notes = snapshot.notes
         except Exception:  # noqa: BLE001 — memory is best-effort context
             logger.warning("proactive guild memory read failed", exc_info=True)
@@ -285,6 +308,8 @@ async def load_memory_block(run: ProactiveRuntime, guild_id: str) -> str:
         long_term_memory=long_term,
         long_term_updated_at=long_term_at,
         notes=kept_notes,
+        behavior=behavior,
+        personality=personality,
     )
 
 

@@ -108,6 +108,8 @@ def _blob_row(**overrides) -> SimpleNamespace:
     fields = {
         "guild_id": _GUILD,
         "content": "## Who's here\nkai (id 7) is deep in embedded rust.",
+        "behavior": "",
+        "personality": "",
         "revision": 4,
         "memory_enabled": True,
         "updated_at": datetime(2026, 8, 6, 0, 20, tzinfo=UTC),
@@ -181,10 +183,34 @@ class TestGetChatMemoryBundle:
         body = response.json()
         assert body["guild_id"] == _GUILD
         assert body["content"] is None
+        assert body["behavior"] is None
+        assert body["personality"] is None
         assert body["revision"] is None
         assert body["updated_at"] is None
         assert body["memory_enabled"] is True
         assert body["notes"] == []
+
+    def test_returns_behavior_and_personality_beside_the_blob(
+        self, chat_memory_client: TestClient, chat_memory_crud_mock
+    ):
+        chat_memory_crud_mock.get_blob.return_value = _blob_row(
+            behavior="Wait to be asked.", personality="Dry and warm."
+        )
+
+        body = chat_memory_client.get(_BUNDLE_URL).json()
+
+        assert body["behavior"] == "Wait to be asked."
+        assert body["personality"] == "Dry and warm."
+
+    def test_empty_behavior_and_personality_read_back_as_null(
+        self, chat_memory_client: TestClient, chat_memory_crud_mock
+    ):
+        chat_memory_crud_mock.get_blob.return_value = _blob_row()
+
+        body = chat_memory_client.get(_BUNDLE_URL).json()
+
+        assert body["behavior"] is None
+        assert body["personality"] is None
 
     def test_returns_the_blob_and_todays_notes(
         self, chat_memory_client: TestClient, chat_memory_crud_mock
@@ -238,13 +264,17 @@ class TestGetChatMemoryBundle:
     def test_the_per_guild_kill_switch_empties_the_bundle(
         self, chat_memory_client: TestClient, chat_memory_crud_mock
     ):
-        chat_memory_crud_mock.get_blob.return_value = _blob_row(memory_enabled=False)
+        chat_memory_crud_mock.get_blob.return_value = _blob_row(
+            memory_enabled=False, behavior="Wait.", personality="Dry."
+        )
         chat_memory_crud_mock.list_notes.return_value = [_note_row()]
 
         body = chat_memory_client.get(_BUNDLE_URL).json()
 
         assert body["memory_enabled"] is False
         assert body["content"] is None
+        assert body["behavior"] is None
+        assert body["personality"] is None
         assert body["notes"] == []
 
 
