@@ -124,6 +124,12 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: brave-search-api-key
+                  # Jev decides whether a search link request is a web address.
+                  - name: TYPESAFE_API_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: typesafe-api-key
                   - name: YOUTUBE_API_KEY
                     valueFrom:
                       secretKeyRef:

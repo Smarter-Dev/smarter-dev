@@ -307,6 +307,7 @@
   transition: transform .18s;
 }
 .ud-back:hover { color: var(--p-text) }
+.ud-back[hidden] { display: none }
 .ud-back:hover svg { transform: translateX(-2px) }
 
 .ud-request {
@@ -803,6 +804,140 @@
 .ud-more [data-more-wrap].is-open { grid-template-rows: 1fr }
 .ud-more-toggle { margin-bottom: 8px }
 
+/* ── Anonymous searches ───────────────────────────────── */
+
+/* A search from a search link by someone not logged in: no rail. */
+.ud-shell.is-anonymous { grid-template-columns: minmax(0, 1fr) }
+
+.ud-unsaved {
+  margin: 0 0 18px;
+  padding: 10px 14px;
+  font-size: .82rem;
+  line-height: 1.55;
+  color: var(--p-body);
+  background: var(--p-accent-wash);
+  border: 1px solid var(--p-accent-line);
+}
+.ud-unsaved a { color: var(--p-accent-text) }
+
+.ud-home-link {
+  display: inline-block;
+  margin-top: 22px;
+  font-size: .82rem;
+  color: var(--p-muted);
+  text-decoration: none;
+  transition: color .18s;
+}
+.ud-home-link:hover { color: var(--p-text) }
+
+/* ── Browser search ───────────────────────────────────── */
+
+.ud-browser .ud-section-title { margin-top: 32px }
+
+.ud-field-label {
+  display: block;
+  margin: 0 0 8px;
+  font-size: .8rem;
+  color: var(--p-muted);
+}
+
+.ud-link-row {
+  display: flex;
+  gap: 8px;
+}
+.ud-link-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--p-tap);
+  box-sizing: border-box;
+  padding: 0 12px;
+  font-family: var(--mono);
+  font-size: .8rem;
+  color: var(--p-text);
+  background: var(--p-surface);
+  border: 1px solid var(--p-line-strong);
+}
+.ud-link-url:focus { outline: none; border-color: var(--p-line-focus) }
+
+.ud-link-note {
+  margin: 10px 0 0;
+  font-size: .8rem;
+  line-height: 1.6;
+  color: var(--p-dim);
+}
+
+.ud-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 26px;
+  padding: 14px 16px;
+  background: var(--p-surface);
+  border: 1px solid var(--p-line-strong);
+  cursor: pointer;
+}
+.ud-toggle input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--p-accent);
+}
+.ud-toggle-text { display: flex; flex-direction: column; gap: 4px }
+.ud-toggle-title { font-size: .9rem; color: var(--p-text) }
+.ud-toggle-detail { font-size: .8rem; line-height: 1.6; color: var(--p-body) }
+
+.ud-browser code,
+.ud-setup code {
+  font-family: var(--mono);
+  font-size: .85em;
+  color: var(--p-text);
+}
+
+.ud-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding-left: 1.2rem;
+  font-size: .85rem;
+  line-height: 1.65;
+  color: var(--p-body);
+}
+.ud-setup strong { color: var(--p-text); font-weight: 500 }
+
+.ud-link-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 32px;
+}
+.ud-link-status {
+  min-height: 1.4em;
+  margin: 10px 0 0;
+  font-size: .8rem;
+  color: var(--p-accent-text);
+}
+.ud-browser .ud-error { margin-top: 20px }
+
+/* ── Search limit page ────────────────────────────────── */
+
+.ud-limited {
+  max-width: var(--p-measure);
+  margin: 0 auto;
+  padding: clamp(56px, 16vh, 160px) var(--p-pad) 80px;
+}
+.ud-limited-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.ud-limited [aria-disabled="true"] {
+  color: var(--p-dim);
+  border-color: var(--p-line);
+  pointer-events: none;
+}
+
 /* ── Narrow screens: the rail folds away and home lists recent searches ── */
 
 @media (max-width: 860px) {
@@ -810,6 +945,7 @@
   .ud-rail { display: none }
   .ud-home-recent:not([hidden]) { display: block }
   .ud-composer-hint { display: none }
+  .ud-link-row { flex-direction: column }
 }
 
 @media (prefers-reduced-motion: reduce) {

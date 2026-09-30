@@ -12,6 +12,7 @@ then the worker notifies the owner over Skrift's SSE stream after every stage.
 from __future__ import annotations
 
 import hashlib
+import secrets
 import time
 from collections import defaultdict
 from datetime import UTC
@@ -23,6 +24,7 @@ from uuid import UUID
 
 from litestar import Controller
 from litestar import Request
+from litestar import delete
 from litestar import get
 from litestar import post
 from litestar.exceptions import HTTPException
@@ -36,9 +38,11 @@ from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.shared.config import get_settings
 from smarter_dev.web.chat.csrf import require_api_csrf
 from smarter_dev.web.chat.dispatch import create_dispatch
 from smarter_dev.web.chat.dispatch import dispatch_one
+from smarter_dev.web.models import WebSearchLink
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.web_search.snapshot import EVENT_TYPE
 from smarter_dev.web.web_search.snapshot import MAX_REQUEST_CHARS
@@ -51,6 +55,12 @@ MIN_REQUEST_CHARS = 3
 PER_MINUTE_LIMIT = 6
 PER_DAY_LIMIT = 100
 _recent_starts: dict[str, list[float]] = defaultdict(list)
+
+
+class LinkBody(Struct):
+    open_addresses: bool | None = None
+    # Replace the token: the old link stops working.
+    rotate: bool = False
 
 
 class SearchBody(Struct):
@@ -164,11 +174,70 @@ async def _enforce_limits(db_session: AsyncSession, user_id: UUID) -> None:
     _recent_starts[str(user_id)] = [*starts, now]
 
 
+def link_state(link: WebSearchLink | None) -> dict | None:
+    """The user's search link as the dashboard shows it."""
+    if link is None:
+        return None
+    base = get_settings().site_base_url.rstrip("/")
+    return {
+        "url": f"{base}/s/{link.token}?q=%s",
+        "opensearch": f"/s/{link.token}/opensearch.xml",
+        "open_addresses": link.open_addresses,
+    }
+
+
+async def _link(db_session: AsyncSession, user_id: UUID) -> WebSearchLink | None:
+    return await db_session.scalar(
+        select(WebSearchLink).where(WebSearchLink.owner_user_id == user_id)
+    )
+
+
+def new_link_token() -> str:
+    return secrets.token_urlsafe(18)
+
+
+async def create_search(
+    db_session: AsyncSession, user_id: UUID, text: str, submission_key: str
+) -> WebSearchRun:
+    """Save a new search and hand it to the agent-worker."""
+    run = WebSearchRun(
+        owner_user_id=user_id,
+        submission_key=submission_key,
+        request=text,
+        status="queued",
+        queries=[],
+        results=[],
+        ranked=False,
+        usage={},
+        version=0,
+        attempt_count=0,
+    )
+    db_session.add(run)
+    await db_session.flush()
+    dispatch = await create_dispatch(
+        db_session,
+        job_type="web_search.run",
+        aggregate_id=run.id,
+        payload={"search_id": str(run.id)},
+    )
+    await db_session.commit()
+    await db_session.refresh(run)
+    try:
+        await dispatch_one(dispatch.id)
+    except Exception:  # noqa: BLE001 - the outbox reconciler retries it
+        pass
+    return run
+
+
 class DashboardController(Controller):
     path = "/dashboard"
 
     async def _page(
-        self, request: Request, db_session: AsyncSession, search_id: UUID | None
+        self,
+        request: Request,
+        db_session: AsyncSession,
+        search_id: UUID | None,
+        view: str | None = None,
     ) -> Template | Redirect:
         user_id = _session_user_id(request)
         user = await db_session.get(User, user_id) if user_id else None
@@ -184,13 +253,14 @@ class DashboardController(Controller):
             "dashboard/index.html",
             context={
                 "dashboard_state": {
-                    "view": "search" if search else "home",
+                    "view": view or ("search" if search else "home"),
                     "user": {"name": user.name or "there"},
                     "recent": await _recent(db_session, user.id),
                     "search": search,
                     "event_type": EVENT_TYPE,
                     "max_request_chars": MAX_REQUEST_CHARS,
                     "build": CLIENT_BUILD,
+                    "link": link_state(await _link(db_session, user.id)),
                 },
                 "seo_meta": {"robots": "noindex,nofollow", "description": "Your Smarter Dev dashboard"},
             },
@@ -205,6 +275,43 @@ class DashboardController(Controller):
         self, request: Request, db_session: AsyncSession, search_id: UUID
     ) -> Template | Redirect:
         return await self._page(request, db_session, search_id)
+
+    @get("/browser")
+    async def browser_page(self, request: Request, db_session: AsyncSession) -> Template | Redirect:
+        return await self._page(request, db_session, None, view="browser")
+
+    @get("/api/link")
+    async def get_link(self, request: Request, db_session: AsyncSession) -> dict:
+        user = await _active_user(request, db_session)
+        return {"link": link_state(await _link(db_session, user.id)), "build": CLIENT_BUILD}
+
+    @post("/api/link", status_code=200)
+    async def save_link(self, data: LinkBody, request: Request, db_session: AsyncSession) -> dict:
+        """Create the user's search link, or change its options or token."""
+        require_api_csrf(request)
+        user = await _active_user(request, db_session)
+        link = await _link(db_session, user.id)
+        if link is None:
+            link = WebSearchLink(
+                owner_user_id=user.id, token=new_link_token(), open_addresses=False
+            )
+            db_session.add(link)
+        elif data.rotate:
+            link.token = new_link_token()
+        if data.open_addresses is not None:
+            link.open_addresses = data.open_addresses
+        await db_session.commit()
+        return {"link": link_state(link), "build": CLIENT_BUILD}
+
+    @delete("/api/link", status_code=200)
+    async def delete_link(self, request: Request, db_session: AsyncSession) -> dict:
+        require_api_csrf(request)
+        user = await _active_user(request, db_session)
+        link = await _link(db_session, user.id)
+        if link is not None:
+            await db_session.delete(link)
+            await db_session.commit()
+        return {"link": None, "build": CLIENT_BUILD}
 
     @get("/api/searches")
     async def list_searches(self, request: Request, db_session: AsyncSession) -> dict:
@@ -238,30 +345,5 @@ class DashboardController(Controller):
             return {"search": snapshot(existing), "idempotent": True, "build": CLIENT_BUILD}
         text = _validate_request(data.request)
         await _enforce_limits(db_session, user.id)
-        run = WebSearchRun(
-            owner_user_id=user.id,
-            submission_key=submission_key,
-            request=text,
-            status="queued",
-            queries=[],
-            results=[],
-            ranked=False,
-            usage={},
-            version=0,
-            attempt_count=0,
-        )
-        db_session.add(run)
-        await db_session.flush()
-        dispatch = await create_dispatch(
-            db_session,
-            job_type="web_search.run",
-            aggregate_id=run.id,
-            payload={"search_id": str(run.id)},
-        )
-        await db_session.commit()
-        await db_session.refresh(run)
-        try:
-            await dispatch_one(dispatch.id)
-        except Exception:  # noqa: BLE001 - the outbox reconciler retries it
-            pass
+        run = await create_search(db_session, user.id, text, submission_key)
         return {"search": snapshot(run), "build": CLIENT_BUILD}
