@@ -1,0 +1,52 @@
+# Search requests for the search-query eval. Each id stays stable across runs
+# so results from different models and prompts can be compared side by side.
+- id: py-async-timeout
+  request: How do I put a timeout on an asyncio task in Python without cancelling the whole gather?
+- id: rust-vs-go-cli
+  request: Should I write my next CLI tool in Rust or Go? I care about startup time and easy cross-compiling.
+- id: postgres-slow-count
+  request: Why is SELECT COUNT(*) so slow on my big Postgres table and what can I do about it?
+- id: k8s-oomkilled
+  request: my pod keeps getting OOMKilled but the memory graph never gets near the limit
+- id: react-server-components
+  request: Explain React Server Components like I only know classic client-side React.
+- id: latest-python-release
+  request: What's new in the latest Python release?
+- id: discord-bot-rate-limits
+  request: My Discord bot gets 429s when it sends a lot of messages at once. How are the rate limits supposed to work?
+- id: first-job-portfolio
+  request: I'm self-taught and trying to land my first dev job. What should actually be in my portfolio?
+- id: css-center-div
+  request: center a div vertically and horizontally
+- id: git-undo-pushed-commit
+  request: I pushed a commit with a secret in it to a public repo. What do I do now?
+- id: llm-local-laptop
+  request: What's the best open-weight LLM I can run locally on a laptop with 16 GB of RAM?
+- id: sqlite-prod
+  request: Is SQLite actually fine for a production web app with a few thousand users?
+- id: typescript-generics-error
+  request: "TypeScript says 'Type T could be instantiated with an arbitrary type which could be unrelated to T'. What does that mean?"
+- id: mechanical-keyboard
+  request: looking for a quiet mechanical keyboard for coding in a shared office, budget around $150
+- id: ergonomic-rsi
+  request: My wrists hurt after long coding sessions. What can I change?
+- id: oauth-pkce
+  request: What is PKCE and do I need it if my OAuth app has a backend?
+- id: vague-slow-website
+  request: my website is slow
+- id: docker-image-size
+  request: How can I make my Python Docker image smaller? It's 1.2 GB right now.
+- id: game-jam-engine
+  request: Doing my first game jam next weekend, 2D, solo. Godot, Unity, or something else?
+- id: regex-email
+  request: whats the regex to validate an email address
+- id: salary-remote-junior
+  request: What do remote junior backend developers get paid in the US these days?
+- id: websocket-vs-sse
+  request: For a live notifications feed, should I use WebSockets or Server-Sent Events?
+- id: spanish-request
+  request: ¿Cómo configuro un entorno virtual de Python en Windows?
+- id: event-today
+  request: Is there any big tech conference happening this week?
+- id: learn-dsa-interview
+  request: I have a FAANG interview in 3 weeks and I'm rusty on data structures and algorithms. Where should I focus?

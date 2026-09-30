@@ -1,0 +1,851 @@
+{
+  "run_at": "2026-09-30T17:38:53+00:00",
+  "settings": {
+    "model": "openai/gpt-6-luna",
+    "reasoning_effort": "low",
+    "prompt": "v4",
+    "output_mode": "tool",
+    "api": "openai-responses",
+    "concurrency": 5
+  },
+  "system_prompt": "You write web search queries for a user's request.\n\nReturn 5 queries. Each one is what an experienced engineer would actually type into Google: usually 3 to 5 words, never more than 7. Search engines do not reward extra keywords; every added word narrows or muddies the results.\n\nWrite each query as a phrase that the answering page would contain, such as an error message, a page title, a setting name or a short question. Do not string related terms together.\n\nRules:\n- One angle per query. The 5 queries should find 5 different pages, not rephrase one idea.\n- No filler words such as \"official\", \"docs\", \"guide\", \"explanation\", \"best practices\", \"troubleshooting\". To target a source, use `site:` (for example `site:nginx.org`).\n- Do not put guesses or answers in a query. Search for what the user needs to learn, not what you think the answer is.\n- Add a year only when the request is about recent or current things. Today's date is 2026-09-30.\n- Write in the user's language.\n\nBad (a pile of terms): `nginx 502 bad gateway upstream reverse proxy error causes troubleshooting fix configuration`\nBad (terms strung together): `nginx upstream timeout proxy buffer keepalive 502`\nGood: `nginx 502 bad gateway upstream`, `nginx proxy_read_timeout`, `why does nginx return 502`",
+  "summary": {
+    "requests": 25,
+    "succeeded": 25,
+    "input_tokens": 10386,
+    "output_tokens": 2512,
+    "reasoning_tokens": 0,
+    "total_cost_usd": 0.002295,
+    "mean_cost_usd": 9.2e-05,
+    "retried": 0,
+    "mean_query_words": 4.7,
+    "max_query_words": 7
+  },
+  "results": [
+    {
+      "id": "py-async-timeout",
+      "request": "How do I put a timeout on an asyncio task in Python without cancelling the whole gather?",
+      "queries": [
+        {
+          "angle": "Per-task timeout with gather",
+          "query": "asyncio timeout individual task gather"
+        },
+        {
+          "angle": "wait_for cancellation behavior",
+          "query": "asyncio wait_for cancels task"
+        },
+        {
+          "angle": "Timeout context manager behavior",
+          "query": "asyncio timeout task cancellation"
+        },
+        {
+          "angle": "Prevent sibling cancellation",
+          "query": "asyncio gather task timeout siblings"
+        },
+        {
+          "angle": "Shield task from cancellation",
+          "query": "asyncio shield wait_for task"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 5.04,
+      "input_tokens": 417,
+      "cached_input_tokens": 0,
+      "output_tokens": 98,
+      "reasoning_tokens": 0,
+      "cost_usd": 9.07e-05
+    },
+    {
+      "id": "rust-vs-go-cli",
+      "request": "Should I write my next CLI tool in Rust or Go? I care about startup time and easy cross-compiling.",
+      "queries": [
+        {
+          "angle": "Rust and Go CLI startup benchmarks",
+          "query": "Rust Go CLI startup time benchmark"
+        },
+        {
+          "angle": "Go cross-compilation workflow",
+          "query": "Go cross compile CLI binaries"
+        },
+        {
+          "angle": "Rust cross-compilation setup",
+          "query": "Rust cross compile target CLI"
+        },
+        {
+          "angle": "Rust CLI binary startup overhead",
+          "query": "Rust command line startup time"
+        },
+        {
+          "angle": "Go CLI startup performance",
+          "query": "Go command line startup performance"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 4.94,
+      "input_tokens": 422,
+      "cached_input_tokens": 0,
+      "output_tokens": 99,
+      "reasoning_tokens": 0,
+      "cost_usd": 9.17e-05
+    },
+    {
+      "id": "postgres-slow-count",
+      "request": "Why is SELECT COUNT(*) so slow on my big Postgres table and what can I do about it?",
+      "queries": [
+        {
+          "angle": "Why exact counts require scanning",
+          "query": "PostgreSQL COUNT(*) table scan"
+        },
+        {
+          "angle": "How MVCC affects count performance",
+          "query": "PostgreSQL MVCC COUNT visibility"
+        },
+        {
+          "angle": "Use planner statistics for approximate counts",
+          "query": "PostgreSQL estimate table row count"
+        },
+        {
+          "angle": "Index-only scan conditions for counts",
+          "query": "PostgreSQL index only COUNT"
+        },
+        {
+          "angle": "Ways to maintain fast exact counts",
+          "query": "PostgreSQL cached exact row count"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 4.91,
+      "input_tokens": 420,
+      "cached_input_tokens": 0,
+      "output_tokens": 111,
+      "reasoning_tokens": 0,
+      "cost_usd": 9.75e-05
+    },
+    {
+      "id": "k8s-oomkilled",
+      "request": "my pod keeps getting OOMKilled but the memory graph never gets near the limit",
+      "queries": [
+        {
+          "angle": "Kubernetes OOM kill accounting",
+          "query": "Kubernetes OOMKilled memory usage limit"
+        },
+        {
+          "angle": "Container memory metric differences",
+          "query": "container memory working set vs usage"
+        },
+        {
+          "angle": "Cgroup OOM events",
+          "query": "cgroup memory OOM events counter"
+        },
+        {
+          "angle": "Pod versus node memory pressure",
+          "query": "Kubernetes node OOM killer pod"
+        },
+        {
+          "angle": "Memory limit and sidecars",
+          "query": "Kubernetes sidecar memory limits OOMKilled"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 3.68,
+      "input_tokens": 415,
+      "cached_input_tokens": 0,
+      "output_tokens": 110,
+      "reasoning_tokens": 0,
+      "cost_usd": 9.65e-05
+    },
+    {
+      "id": "react-server-components",
+      "request": "Explain React Server Components like I only know classic client-side React.",
+      "queries": [
+        {
+          "angle": "React’s own conceptual overview",
+          "query": "React Server Components overview"
+        },
+        {
+          "angle": "How server and client components differ",
+          "query": "Server Components vs Client Components React"
+        },
+        {
+          "angle": "How rendering and data fetching work",
+          "query": "React Server Components data fetching"
+        },
+        {
+          "angle": "Client boundary directives and interactivity",
+          "query": "use client directive React"
+        },
+        {
+          "angle": "What gets sent to browser",
+          "query": "React Server Components serialization payload"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 3.68,
+      "input_tokens": 412,
+      "cached_input_tokens": 0,
+      "output_tokens": 100,
+      "reasoning_tokens": 0,
+      "cost_usd": 9.12e-05
+    },
+    {
+      "id": "latest-python-release",
+      "request": "What's new in the latest Python release?",
+      "queries": [
+        {
+          "angle": "Latest release and version",
+          "query": "Python latest release"
+        },
+        {
+          "angle": "New features overview",
+          "query": "Python latest release new features"
+        },
+        {
+          "angle": "What's changed in release",
+          "query": "Python release notes latest"
+        },
+        {
+          "angle": "Language syntax changes",
+          "query": "Python latest version syntax changes"
+        },
+        {
+          "angle": "Standard library additions",
+          "query": "Python latest release standard library changes"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 3.42,
+      "input_tokens": 407,
+      "cached_input_tokens": 0,
+      "output_tokens": 88,
+      "reasoning_tokens": 0,
+      "cost_usd": 8.47e-05
+    },
+    {
+      "id": "discord-bot-rate-limits",
+      "request": "My Discord bot gets 429s when it sends a lot of messages at once. How are the rate limits supposed to work?",
+      "queries": [
+        {
+          "angle": "Discord API rate limit fundamentals",
+          "query": "Discord API rate limits"
+        },
+        {
+          "angle": "429 response and retry headers",
+          "query": "Discord 429 Retry-After header"
+        },
+        {
+          "angle": "Per-route and bucket behavior",
+          "query": "Discord rate limit buckets"
+        },
+        {
+          "angle": "Global rate limiting",
+          "query": "Discord global rate limit"
+        },
+        {
+          "angle": "Message create endpoint limits",
+          "query": "Discord create message rate limit"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 2.73,
+      "input_tokens": 425,
+      "cached_input_tokens": 0,
+      "output_tokens": 94,
+      "reasoning_tokens": 0,
+      "cost_usd": 8.95e-05
+    },
+    {
+      "id": "first-job-portfolio",
+      "request": "I'm self-taught and trying to land my first dev job. What should actually be in my portfolio?",
+      "queries": [
+        {
+          "angle": "Portfolio project selection for junior developers",
+          "query": "junior developer portfolio projects"
+        },
+        {
+          "angle": "What hiring managers assess in portfolios",
+          "query": "developer portfolio hiring manager"
+        },
+        {
+          "angle": "Portfolio requirements and essential sections",
+          "query": "software developer portfolio sections"
+        },
+        {
+          "angle": "How to present projects and case studies",
+          "query": "developer portfolio project case study"
+        },
+        {
+          "angle": "Portfolio advice for self-taught developers",
+          "query": "self taught developer portfolio job"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 2.45,
+      "input_tokens": 420,
+      "cached_input_tokens": 0,
+      "output_tokens": 102,
+      "reasoning_tokens": 0,
+      "cost_usd": 9.3e-05
+    },
+    {
+      "id": "css-center-div",
+      "request": "center a div vertically and horizontally",
+      "queries": [
+        {
+          "angle": "CSS Flexbox centering",
+          "query": "CSS flexbox center div"
+        },
+        {
+          "angle": "CSS Grid centering",
+          "query": "CSS grid center div"
+        },
+        {
+          "angle": "Absolute positioning centering",
+          "query": "CSS absolute center element"
+        },
+        {
+          "angle": "Centering with place-items",
+          "query": "CSS place-items center"
+        },
+        {
+          "angle": "Center div viewport",
+          "query": "center div viewport CSS"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 2.24,
+      "input_tokens": 405,
+      "cached_input_tokens": 0,
+      "output_tokens": 90,
+      "reasoning_tokens": 0,
+      "cost_usd": 8.55e-05
+    },
+    {
+      "id": "git-undo-pushed-commit",
+      "request": "I pushed a commit with a secret in it to a public repo. What do I do now?",
+      "queries": [
+        {
+          "angle": "Immediate response and credential invalidation",
+          "query": "revoke exposed secret immediately"
+        },
+        {
+          "angle": "GitHub leaked secret response",
+          "query": "GitHub secret leaked public repository"
+        },
+        {
+          "angle": "Remove sensitive data from Git history",
+          "query": "GitHub remove sensitive data history"
+        },
+        {
+          "angle": "Rotate credentials and assess exposure",
+          "query": "rotate compromised credentials incident response"
+        },
+        {
+          "angle": "Prevent future secret commits",
+          "query": "GitHub secret scanning push protection"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 3.31,
+      "input_tokens": 419,
+      "cached_input_tokens": 0,
+      "output_tokens": 102,
+      "reasoning_tokens": 0,
+      "cost_usd": 9.29e-05
+    },
+    {
+      "id": "llm-local-laptop",
+      "request": "What's the best open-weight LLM I can run locally on a laptop with 16 GB of RAM?",
+      "queries": [
+        {
+          "angle": "Current laptop model comparisons",
+          "query": "best local LLM 16GB RAM"
+        },
+        {
+          "angle": "Model memory requirements",
+          "query": "LLM RAM requirements quantization"
+        },
+        {
+          "angle": "Popular small open models",
+          "query": "best 8B open weight models"
+        },
+        {
+          "angle": "Running models locally",
+          "query": "Ollama laptop 16GB RAM models"
+        },
+        {
+          "angle": "Model performance benchmarks",
+          "query": "local LLM benchmarks 8B models"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 2.12,
+      "input_tokens": 420,
+      "cached_input_tokens": 0,
+      "output_tokens": 103,
+      "reasoning_tokens": 0,
+      "cost_usd": 9.35e-05
+    },
+    {
+      "id": "sqlite-prod",
+      "request": "Is SQLite actually fine for a production web app with a few thousand users?",
+      "queries": [
+        {
+          "angle": "Production suitability and workload limits",
+          "query": "SQLite production web application workload"
+        },
+        {
+          "angle": "Concurrency and write locking",
+          "query": "SQLite concurrent writes locking"
+        },
+        {
+          "angle": "Hosting and deployment tradeoffs",
+          "query": "SQLite production deployment web app"
+        },
+        {
+          "angle": "Scaling to more users",
+          "query": "when to migrate SQLite PostgreSQL"
+        },
+        {
+          "angle": "Real-world SQLite production examples",
+          "query": "SQLite at scale production users"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 2.6,
+      "input_tokens": 414,
+      "cached_input_tokens": 0,
+      "output_tokens": 96,
+      "reasoning_tokens": 0,
+      "cost_usd": 8.94e-05
+    },
+    {
+      "id": "typescript-generics-error",
+      "request": "TypeScript says 'Type T could be instantiated with an arbitrary type which could be unrelated to T'. What does that mean?",
+      "queries": [
+        {
+          "angle": "Meaning of the compiler diagnostic",
+          "query": "Type could be instantiated arbitrary type"
+        },
+        {
+          "angle": "Common TypeScript generic error wording",
+          "query": "Type T could be instantiated unrelated"
+        },
+        {
+          "angle": "Why generic assignments fail",
+          "query": "TypeScript generic type assignment error"
+        },
+        {
+          "angle": "Generic function type parameter explanation",
+          "query": "TypeScript generic type parameter constraints"
+        },
+        {
+          "angle": "Minimal example of arbitrary type diagnostic",
+          "query": "TypeScript arbitrary type generic example"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 2.47,
+      "input_tokens": 424,
+      "cached_input_tokens": 0,
+      "output_tokens": 104,
+      "reasoning_tokens": 0,
+      "cost_usd": 9.44e-05
+    },
+    {
+      "id": "mechanical-keyboard",
+      "request": "looking for a quiet mechanical keyboard for coding in a shared office, budget around $150",
+      "queries": [
+        {
+          "angle": "Quiet mechanical keyboards under budget",
+          "query": "quiet mechanical keyboard under $150"
+        },
+        {
+          "angle": "Low-noise switch options",
+          "query": "silent mechanical keyboard switches"
+        },
+        {
+          "angle": "Shared-office keyboard recommendations",
+          "query": "quiet keyboard for shared office"
+        },
+        {
+          "angle": "Coding-friendly keyboard layouts",
+          "query": "mechanical keyboard for programming"
+        },
+        {
+          "angle": "Reviews of quieter models",
+          "query": "best quiet mechanical keyboards review"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 2.69,
+      "input_tokens": 416,
+      "cached_input_tokens": 0,
+      "output_tokens": 95,
+      "reasoning_tokens": 0,
+      "cost_usd": 8.91e-05
+    },
+    {
+      "id": "ergonomic-rsi",
+      "request": "My wrists hurt after long coding sessions. What can I change?",
+      "queries": [
+        {
+          "angle": "Ergonomic wrist and hand positioning",
+          "query": "computer workstation neutral wrist posture"
+        },
+        {
+          "angle": "Keyboard and mouse setup adjustments",
+          "query": "keyboard mouse wrist pain setup"
+        },
+        {
+          "angle": "Breaks and movement during computer work",
+          "query": "computer work breaks wrist pain"
+        },
+        {
+          "angle": "Alternative pointing devices",
+          "query": "ergonomic mouse trackball wrist pain"
+        },
+        {
+          "angle": "When wrist symptoms need medical care",
+          "query": "wrist pain numbness when see doctor"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 2.46,
+      "input_tokens": 412,
+      "cached_input_tokens": 0,
+      "output_tokens": 106,
+      "reasoning_tokens": 0,
+      "cost_usd": 9.42e-05
+    },
+    {
+      "id": "oauth-pkce",
+      "request": "What is PKCE and do I need it if my OAuth app has a backend?",
+      "queries": [
+        {
+          "angle": "PKCE definition and mechanics",
+          "query": "OAuth PKCE code verifier challenge"
+        },
+        {
+          "angle": "When backend web apps use PKCE",
+          "query": "PKCE confidential client backend"
+        },
+        {
+          "angle": "OAuth authorization code flow security",
+          "query": "OAuth authorization code flow PKCE"
+        },
+        {
+          "angle": "OAuth client types and secrets",
+          "query": "OAuth public confidential client secret"
+        },
+        {
+          "angle": "Current OAuth security recommendations",
+          "query": "OAuth 2.0 Security BCP PKCE"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 2.98,
+      "input_tokens": 416,
+      "cached_input_tokens": 0,
+      "output_tokens": 106,
+      "reasoning_tokens": 0,
+      "cost_usd": 9.46e-05
+    },
+    {
+      "id": "vague-slow-website",
+      "request": "my website is slow",
+      "queries": [
+        {
+          "angle": "Measure page speed",
+          "query": "website page speed test"
+        },
+        {
+          "angle": "Find slow-loading assets",
+          "query": "website waterfall performance analysis"
+        },
+        {
+          "angle": "Improve Core Web Vitals",
+          "query": "improve Core Web Vitals"
+        },
+        {
+          "angle": "Diagnose server response delays",
+          "query": "website slow server response time"
+        },
+        {
+          "angle": "Optimize frontend loading",
+          "query": "reduce website JavaScript bundle size"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 2.25,
+      "input_tokens": 403,
+      "cached_input_tokens": 0,
+      "output_tokens": 93,
+      "reasoning_tokens": 0,
+      "cost_usd": 8.68e-05
+    },
+    {
+      "id": "docker-image-size",
+      "request": "How can I make my Python Docker image smaller? It's 1.2 GB right now.",
+      "queries": [
+        {
+          "angle": "Identify what's taking space",
+          "query": "docker image layer size analysis"
+        },
+        {
+          "angle": "Reduce image through build stages",
+          "query": "Python Docker multi stage build"
+        },
+        {
+          "angle": "Choose smaller Python base",
+          "query": "Python slim Docker image"
+        },
+        {
+          "angle": "Avoid retaining package build files",
+          "query": "Docker pip no cache"
+        },
+        {
+          "angle": "Remove unneeded OS packages",
+          "query": "Docker apt cleanup image size"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 2.11,
+      "input_tokens": 418,
+      "cached_input_tokens": 0,
+      "output_tokens": 94,
+      "reasoning_tokens": 0,
+      "cost_usd": 8.88e-05
+    },
+    {
+      "id": "game-jam-engine",
+      "request": "Doing my first game jam next weekend, 2D, solo. Godot, Unity, or something else?",
+      "queries": [
+        {
+          "angle": "Choosing an engine for a first game jam",
+          "query": "best engine first game jam"
+        },
+        {
+          "angle": "Godot's 2D workflow and capabilities",
+          "query": "Godot 2D game development"
+        },
+        {
+          "angle": "Unity's suitability for game jams",
+          "query": "Unity game jam workflow"
+        },
+        {
+          "angle": "Other lightweight engine options",
+          "query": "GameMaker game jam 2D"
+        },
+        {
+          "angle": "Jam-focused engine comparisons and advice",
+          "query": "solo game jam engine choice"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 3.08,
+      "input_tokens": 422,
+      "cached_input_tokens": 0,
+      "output_tokens": 109,
+      "reasoning_tokens": 0,
+      "cost_usd": 9.67e-05
+    },
+    {
+      "id": "regex-email",
+      "request": "whats the regex to validate an email address",
+      "queries": [
+        {
+          "angle": "Practical email validation pattern",
+          "query": "email validation regex"
+        },
+        {
+          "angle": "HTML built-in email validation",
+          "query": "HTML input type email validation"
+        },
+        {
+          "angle": "Email address syntax standard",
+          "query": "RFC 5322 email address syntax"
+        },
+        {
+          "angle": "Regex email validation tradeoffs",
+          "query": "email regex validation limitations"
+        },
+        {
+          "angle": "Validate email with JavaScript",
+          "query": "JavaScript email validation regex"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 2.0,
+      "input_tokens": 408,
+      "cached_input_tokens": 0,
+      "output_tokens": 96,
+      "reasoning_tokens": 0,
+      "cost_usd": 8.88e-05
+    },
+    {
+      "id": "salary-remote-junior",
+      "request": "What do remote junior backend developers get paid in the US these days?",
+      "queries": [
+        {
+          "angle": "Salary benchmark",
+          "query": "junior backend developer salary US"
+        },
+        {
+          "angle": "Remote-specific pay",
+          "query": "remote junior backend developer salary"
+        },
+        {
+          "angle": "Job-posting salary ranges",
+          "query": "remote entry level backend engineer salary"
+        },
+        {
+          "angle": "Hourly compensation",
+          "query": "junior backend developer hourly pay US"
+        },
+        {
+          "angle": "Compensation by experience",
+          "query": "backend developer salary 0 2 years"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 63.83,
+      "input_tokens": 413,
+      "cached_input_tokens": 0,
+      "output_tokens": 96,
+      "reasoning_tokens": 0,
+      "cost_usd": 8.93e-05
+    },
+    {
+      "id": "websocket-vs-sse",
+      "request": "For a live notifications feed, should I use WebSockets or Server-Sent Events?",
+      "queries": [
+        {
+          "angle": "SSE and WebSocket comparison",
+          "query": "Server Sent Events vs WebSockets"
+        },
+        {
+          "angle": "When SSE fits notifications",
+          "query": "when to use Server Sent Events"
+        },
+        {
+          "angle": "WebSocket use cases and tradeoffs",
+          "query": "when to use WebSockets"
+        },
+        {
+          "angle": "SSE browser reconnect behavior",
+          "query": "EventSource automatic reconnection"
+        },
+        {
+          "angle": "Infrastructure support and scaling",
+          "query": "SSE WebSocket proxy connection limits"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 64.51,
+      "input_tokens": 416,
+      "cached_input_tokens": 0,
+      "output_tokens": 103,
+      "reasoning_tokens": 0,
+      "cost_usd": 9.31e-05
+    },
+    {
+      "id": "spanish-request",
+      "request": "¿Cómo configuro un entorno virtual de Python en Windows?",
+      "queries": [
+        {
+          "angle": "Crear un entorno con venv",
+          "query": "Python venv Windows crear entorno"
+        },
+        {
+          "angle": "Activar en PowerShell",
+          "query": "venv activar PowerShell Windows"
+        },
+        {
+          "angle": "Activar en símbolo del sistema",
+          "query": "venv activar cmd Windows"
+        },
+        {
+          "angle": "Instalar paquetes en entorno",
+          "query": "pip install entorno virtual Windows"
+        },
+        {
+          "angle": "Solucionar error de permisos PowerShell",
+          "query": "PowerShell no se pueden cargar scripts venv"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 62.6,
+      "input_tokens": 410,
+      "cached_input_tokens": 0,
+      "output_tokens": 109,
+      "reasoning_tokens": 0,
+      "cost_usd": 9.55e-05
+    },
+    {
+      "id": "event-today",
+      "request": "Is there any big tech conference happening this week?",
+      "queries": [
+        {
+          "angle": "Major technology conferences scheduled this week",
+          "query": "major tech conferences this week"
+        },
+        {
+          "angle": "Technology events calendar for this week",
+          "query": "technology conference calendar this week"
+        },
+        {
+          "angle": "Large technology trade shows happening now",
+          "query": "biggest technology conferences September 2026"
+        },
+        {
+          "angle": "Upcoming technology conferences by date",
+          "query": "tech conferences September 30 2026"
+        },
+        {
+          "angle": "Major software and developer events this week",
+          "query": "developer conferences this week September 2026"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 63.83,
+      "input_tokens": 409,
+      "cached_input_tokens": 0,
+      "output_tokens": 112,
+      "reasoning_tokens": 0,
+      "cost_usd": 9.69e-05
+    },
+    {
+      "id": "learn-dsa-interview",
+      "request": "I have a FAANG interview in 3 weeks and I'm rusty on data structures and algorithms. Where should I focus?",
+      "queries": [
+        {
+          "angle": "Three-week preparation plan",
+          "query": "three week coding interview study plan"
+        },
+        {
+          "angle": "High-frequency interview topics",
+          "query": "most common coding interview topics"
+        },
+        {
+          "angle": "Company-tagged question prioritization",
+          "query": "FAANG top interview questions"
+        },
+        {
+          "angle": "Algorithm patterns to review",
+          "query": "coding interview algorithm patterns"
+        },
+        {
+          "angle": "Practice schedule and mock interviews",
+          "query": "coding interview mock interview schedule"
+        }
+      ],
+      "model_requests": 1,
+      "seconds": 62.64,
+      "input_tokens": 423,
+      "cached_input_tokens": 0,
+      "output_tokens": 96,
+      "reasoning_tokens": 0,
+      "cost_usd": 9.03e-05
+    }
+  ]
+}

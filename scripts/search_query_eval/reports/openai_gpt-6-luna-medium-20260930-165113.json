@@ -1,0 +1,446 @@
+{
+  "run_at": "2026-09-30T16:51:13+00:00",
+  "settings": {
+    "model": "openai/gpt-6-luna",
+    "reasoning_effort": "medium",
+    "api": "openai-responses",
+    "concurrency": 5
+  },
+  "system_prompt": "You turn a user's request into web search queries.\n\nWrite exactly 5 search queries that, run on a web search engine, would find the information needed to answer the request well. Write them the way a skilled researcher types into a search box: short, specific, keyword-focused. Cover different angles of the request instead of rephrasing the same query. Keep the user's language unless English sources would clearly serve them better. Today's date is 2026-09-30.",
+  "summary": {
+    "requests": 25,
+    "succeeded": 25,
+    "input_tokens": 4336,
+    "output_tokens": 2614,
+    "reasoning_tokens": 488,
+    "total_cost_usd": 0.001741,
+    "mean_cost_usd": 7e-05
+  },
+  "results": [
+    {
+      "id": "py-async-timeout",
+      "request": "How do I put a timeout on an asyncio task in Python without cancelling the whole gather?",
+      "queries": [
+        "Python asyncio timeout individual task in gather asyncio.wait_for cancellation behavior",
+        "asyncio.timeout per coroutine in asyncio.gather prevent cancelling other tasks Python",
+        "asyncio.gather return_exceptions individual task timeout example",
+        "asyncio shield wait_for task timeout without cancelling underlying task docs",
+        "Python asyncio task group per-task timeout gather alternatives"
+      ],
+      "seconds": 4.42,
+      "input_tokens": 175,
+      "cached_input_tokens": 0,
+      "output_tokens": 80,
+      "reasoning_tokens": 0,
+      "cost_usd": 5.75e-05
+    },
+    {
+      "id": "rust-vs-go-cli",
+      "request": "Should I write my next CLI tool in Rust or Go? I care about startup time and easy cross-compiling.",
+      "queries": [
+        "Rust vs Go CLI startup time benchmark cold start",
+        "Rust Go command line tools startup latency binary size comparison",
+        "Go cross compilation official documentation CGO_ENABLED targets",
+        "Rust cross compilation official guide target toolchains",
+        "Rust vs Go CLI development tradeoffs startup time cross compiling static binaries"
+      ],
+      "seconds": 4.41,
+      "input_tokens": 180,
+      "cached_input_tokens": 0,
+      "output_tokens": 71,
+      "reasoning_tokens": 0,
+      "cost_usd": 5.35e-05
+    },
+    {
+      "id": "postgres-slow-count",
+      "request": "Why is SELECT COUNT(*) so slow on my big Postgres table and what can I do about it?",
+      "queries": [
+        "PostgreSQL why SELECT COUNT(*) slow full table scan MVCC visibility map",
+        "PostgreSQL exact row count alternatives estimate pg_class reltuples count(*)",
+        "PostgreSQL COUNT(*) performance index-only scan visibility map vacuum analyze",
+        "PostgreSQL fast approximate count rows planner statistics reltuples",
+        "PostgreSQL optimize COUNT(*) large table partitioning cached counter triggers tradeoffs"
+      ],
+      "seconds": 4.49,
+      "input_tokens": 178,
+      "cached_input_tokens": 0,
+      "output_tokens": 92,
+      "reasoning_tokens": 0,
+      "cost_usd": 6.38e-05
+    },
+    {
+      "id": "k8s-oomkilled",
+      "request": "my pod keeps getting OOMKilled but the memory graph never gets near the limit",
+      "queries": [
+        "Kubernetes pod OOMKilled memory graph below limit causes cgroup memory metrics sampling spikes",
+        "Kubernetes OOMKilled container memory usage metrics-server versus cgroup memory limit Prometheus",
+        "Kubernetes OOMKilled exit code 137 inspect container status events memory limit node OOM",
+        "Kubernetes pod memory limit accounting sidecars shared memory tmpfs page cache OOMKilled",
+        "Kubernetes OOMKilled below memory limit kernel logs node memory pressure cgroup v1 v2"
+      ],
+      "seconds": 5.02,
+      "input_tokens": 173,
+      "cached_input_tokens": 0,
+      "output_tokens": 201,
+      "reasoning_tokens": 89,
+      "cost_usd": 0.0001178
+    },
+    {
+      "id": "react-server-components",
+      "request": "Explain React Server Components like I only know classic client-side React.",
+      "queries": [
+        "React Server Components official documentation mental model client components server components",
+        "React Server Components explained compared with client-side React render server bundle serialization props",
+        "React Server Components boundaries use client directive client server module graph",
+        "React Server Components data fetching server only code advantages limitations",
+        "React Server Components streaming HTML server rendering versus Server Components distinction hydration"
+      ],
+      "seconds": 5.22,
+      "input_tokens": 170,
+      "cached_input_tokens": 0,
+      "output_tokens": 80,
+      "reasoning_tokens": 0,
+      "cost_usd": 5.7e-05
+    },
+    {
+      "id": "latest-python-release",
+      "request": "What's new in the latest Python release?",
+      "queries": [
+        "latest Python release 2026 official Python.org version what's new",
+        "Python 3 latest stable release release notes new features",
+        "What's New in Python latest version docs.python.org",
+        "latest Python release performance improvements changes deprecations",
+        "Python latest release date supported versions Python.org downloads"
+      ],
+      "seconds": 1.87,
+      "input_tokens": 165,
+      "cached_input_tokens": 0,
+      "output_tokens": 71,
+      "reasoning_tokens": 0,
+      "cost_usd": 5.2e-05
+    },
+    {
+      "id": "discord-bot-rate-limits",
+      "request": "My Discord bot gets 429s when it sends a lot of messages at once. How are the rate limits supposed to work?",
+      "queries": [
+        "Discord API official rate limits 429 bucket headers Retry-After global limits",
+        "Discord developer docs rate limits route buckets major parameters X-RateLimit-Bucket",
+        "Discord API rate limit sending messages per channel 5 messages 5 seconds",
+        "Discord bot 429 handling exponential backoff retry_after global rate limit",
+        "Discord message create endpoint rate limits bulk sending messages concurrency queue best practices"
+      ],
+      "seconds": 2.81,
+      "input_tokens": 183,
+      "cached_input_tokens": 0,
+      "output_tokens": 91,
+      "reasoning_tokens": 0,
+      "cost_usd": 6.38e-05
+    },
+    {
+      "id": "first-job-portfolio",
+      "request": "I'm self-taught and trying to land my first dev job. What should actually be in my portfolio?",
+      "queries": [
+        "software developer portfolio projects hiring managers entry-level self-taught developer",
+        "junior developer portfolio README live demos source code project selection",
+        "developer portfolio resume case study project descriptions impact technical decisions",
+        "first software developer job portfolio GitHub profile recruiter expectations",
+        "web developer portfolio accessibility responsive design testing deployment best practices"
+      ],
+      "seconds": 3.37,
+      "input_tokens": 178,
+      "cached_input_tokens": 0,
+      "output_tokens": 75,
+      "reasoning_tokens": 0,
+      "cost_usd": 5.53e-05
+    },
+    {
+      "id": "css-center-div",
+      "request": "center a div vertically and horizontally",
+      "queries": [
+        "CSS center div horizontally and vertically flexbox",
+        "CSS Grid center element both axes place-items center",
+        "CSS position absolute center div transform translate",
+        "CSS center div in viewport responsive flexbox examples",
+        "CSS vertical horizontal centering div parent container methods"
+      ],
+      "seconds": 2.64,
+      "input_tokens": 163,
+      "cached_input_tokens": 0,
+      "output_tokens": 101,
+      "reasoning_tokens": 35,
+      "cost_usd": 6.68e-05
+    },
+    {
+      "id": "git-undo-pushed-commit",
+      "request": "I pushed a commit with a secret in it to a public repo. What do I do now?",
+      "queries": [
+        "GitHub secret leaked public repository incident response revoke rotate credentials immediately official guidance",
+        "GitHub remove sensitive data from repository history git filter-repo official docs",
+        "GitHub secret scanning leaked credential remediation provider revoke rotate exposed secret",
+        "what to do after API key leaked public GitHub repo incident response checklist",
+        "GitHub purge sensitive data cached views forks collaborators rewrite history official docs"
+      ],
+      "seconds": 2.75,
+      "input_tokens": 177,
+      "cached_input_tokens": 0,
+      "output_tokens": 89,
+      "reasoning_tokens": 0,
+      "cost_usd": 6.22e-05
+    },
+    {
+      "id": "llm-local-laptop",
+      "request": "What's the best open-weight LLM I can run locally on a laptop with 16 GB of RAM?",
+      "queries": [
+        "best open-weight LLM 16 GB RAM laptop local inference 2026 benchmarks",
+        "small open language models 7B 8B 12B quantized RAM requirements local laptop",
+        "Qwen3 8B Gemma 3 12B Llama open weights local inference 16GB RAM comparison",
+        "llama.cpp GGUF quantization memory requirements Q4_K_M 8B model 16GB RAM",
+        "best local LLM laptop 16GB RAM coding reasoning benchmarks 2025 2026"
+      ],
+      "seconds": 5.07,
+      "input_tokens": 178,
+      "cached_input_tokens": 0,
+      "output_tokens": 120,
+      "reasoning_tokens": 0,
+      "cost_usd": 7.78e-05
+    },
+    {
+      "id": "sqlite-prod",
+      "request": "Is SQLite actually fine for a production web app with a few thousand users?",
+      "queries": [
+        "SQLite production web application few thousand users when to use SQLite concurrency writes",
+        "SQLite official documentation WAL mode concurrent readers writers single writer",
+        "SQLite production deployment reliability backups filesystem network filesystem official guidance",
+        "SQLite vs PostgreSQL workload concurrency scaling web app benchmarks",
+        "SQLite production web app case studies millions users Litestream Rails Django"
+      ],
+      "seconds": 2.32,
+      "input_tokens": 172,
+      "cached_input_tokens": 0,
+      "output_tokens": 77,
+      "reasoning_tokens": 0,
+      "cost_usd": 5.57e-05
+    },
+    {
+      "id": "typescript-generics-error",
+      "request": "TypeScript says 'Type T could be instantiated with an arbitrary type which could be unrelated to T'. What does that mean?",
+      "queries": [
+        "TypeScript \"could be instantiated with an arbitrary type\" meaning generic error",
+        "TypeScript generic function Type T could be instantiated arbitrary type unrelated to T example fix",
+        "TypeScript TS2322 generic type assignability arbitrary subtype T explanation",
+        "TypeScript generic constraints T extends unknown arbitrary type error return value",
+        "TypeScript generics assignability cannot assign concrete type to T caller chooses type parameter"
+      ],
+      "seconds": 2.96,
+      "input_tokens": 182,
+      "cached_input_tokens": 0,
+      "output_tokens": 150,
+      "reasoning_tokens": 55,
+      "cost_usd": 9.32e-05
+    },
+    {
+      "id": "mechanical-keyboard",
+      "request": "looking for a quiet mechanical keyboard for coding in a shared office, budget around $150",
+      "queries": [
+        "best quiet mechanical keyboards for shared office silent switches 2026",
+        "quiet mechanical keyboard coding tactile silent switches under $150",
+        "Keychron V1 Max silent switches office typing noise reviews",
+        "best prebuilt silent mechanical keyboards under $150 hot swappable",
+        "mechanical keyboard switch noise comparison silent linear silent tactile office"
+      ],
+      "seconds": 3.22,
+      "input_tokens": 174,
+      "cached_input_tokens": 0,
+      "output_tokens": 78,
+      "reasoning_tokens": 0,
+      "cost_usd": 5.64e-05
+    },
+    {
+      "id": "ergonomic-rsi",
+      "request": "My wrists hurt after long coding sessions. What can I change?",
+      "queries": [
+        "wrist pain computer use ergonomics keyboard mouse posture breaks evidence",
+        "Mayo Clinic wrist pain computer typing when to see doctor numbness weakness",
+        "OSHA computer workstation ergonomics keyboard mouse neutral wrist setup",
+        "NHS repetitive strain injury wrist self care exercises work breaks",
+        "Cochrane ergonomic interventions computer workers wrist musculoskeletal pain keyboards mouse"
+      ],
+      "seconds": 2.39,
+      "input_tokens": 170,
+      "cached_input_tokens": 0,
+      "output_tokens": 84,
+      "reasoning_tokens": 0,
+      "cost_usd": 5.9e-05
+    },
+    {
+      "id": "oauth-pkce",
+      "request": "What is PKCE and do I need it if my OAuth app has a backend?",
+      "queries": [
+        "OAuth 2.0 PKCE what it is code verifier code challenge RFC 7636",
+        "OAuth PKCE required confidential clients backend web application authorization code flow RFC 9700",
+        "OAuth 2.0 security best current practice PKCE confidential clients recommendations",
+        "OAuth authorization code flow backend server client secret PKCE CSRF interception protection",
+        "OpenID Connect PKCE server-side web application should use PKCE backend"
+      ],
+      "seconds": 2.05,
+      "input_tokens": 174,
+      "cached_input_tokens": 0,
+      "output_tokens": 98,
+      "reasoning_tokens": 0,
+      "cost_usd": 6.64e-05
+    },
+    {
+      "id": "vague-slow-website",
+      "request": "my website is slow",
+      "queries": [
+        "how to diagnose why a website is slow page speed testing tools",
+        "Google PageSpeed Insights Core Web Vitals slow website fixes",
+        "website slow server response time TTFB hosting database troubleshooting",
+        "slow website image JavaScript CSS optimization caching CDN guide",
+        "website performance troubleshooting checklist browser network waterfall"
+      ],
+      "seconds": 2.64,
+      "input_tokens": 161,
+      "cached_input_tokens": 0,
+      "output_tokens": 128,
+      "reasoning_tokens": 53,
+      "cost_usd": 8.01e-05
+    },
+    {
+      "id": "docker-image-size",
+      "request": "How can I make my Python Docker image smaller? It's 1.2 GB right now.",
+      "queries": [
+        "Docker Python image reduce size multi-stage builds slim distroless official docs",
+        "Docker image size analysis dive tool identify large layers Python",
+        "Python Docker image optimize pip cache no-cache-dir build dependencies multi-stage",
+        "Docker best practices minimize image layers .dockerignore apt cache official",
+        "Python Docker image 1GB large dependencies inspect installed package size optimize wheels"
+      ],
+      "seconds": 62.49,
+      "input_tokens": 176,
+      "cached_input_tokens": 0,
+      "output_tokens": 85,
+      "reasoning_tokens": 0,
+      "cost_usd": 6.01e-05
+    },
+    {
+      "id": "game-jam-engine",
+      "request": "Doing my first game jam next weekend, 2D, solo. Godot, Unity, or something else?",
+      "queries": [
+        "Godot vs Unity for beginner 2D game jam solo pros cons 2026",
+        "Godot 2D game jam beginner quickstart tutorial official",
+        "Unity 2D game jam beginner setup templates tutorials",
+        "best engine for first solo 2D game jam Godot GameMaker Construct time to learn",
+        "game jam postmortem solo developer 2D engine choice Godot Unity GameMaker"
+      ],
+      "seconds": 63.07,
+      "input_tokens": 180,
+      "cached_input_tokens": 0,
+      "output_tokens": 169,
+      "reasoning_tokens": 71,
+      "cost_usd": 0.0001025
+    },
+    {
+      "id": "regex-email",
+      "request": "whats the regex to validate an email address",
+      "queries": [
+        "practical email validation regex JavaScript simple recommended",
+        "email address validation regex RFC 5322 limitations",
+        "HTML5 email input validation regex email address syntax",
+        "email validation best practice regex verify address confirmation",
+        "email regex examples Python JavaScript common formats plus tags subdomains"
+      ],
+      "seconds": 62.9,
+      "input_tokens": 166,
+      "cached_input_tokens": 0,
+      "output_tokens": 110,
+      "reasoning_tokens": 39,
+      "cost_usd": 7.16e-05
+    },
+    {
+      "id": "salary-remote-junior",
+      "request": "What do remote junior backend developers get paid in the US these days?",
+      "queries": [
+        "2026 US remote junior backend developer salary entry level salary range",
+        "junior backend developer salary United States remote 2025 2026 job postings",
+        "entry level backend software engineer salary US salary data junior",
+        "remote junior backend developer hourly pay United States contract",
+        "junior backend developer salary by location United States levels.fyi Glassdoor Indeed"
+      ],
+      "seconds": 62.03,
+      "input_tokens": 171,
+      "cached_input_tokens": 0,
+      "output_tokens": 84,
+      "reasoning_tokens": 0,
+      "cost_usd": 5.91e-05
+    },
+    {
+      "id": "websocket-vs-sse",
+      "request": "For a live notifications feed, should I use WebSockets or Server-Sent Events?",
+      "queries": [
+        "WebSockets vs Server-Sent Events live notifications feed pros cons decision guide",
+        "MDN Server-Sent Events one-way communication automatic reconnection EventSource",
+        "WebSocket API browser full duplex communication protocol use cases",
+        "SSE vs WebSockets scalability proxy compatibility connection limits HTTP/2",
+        "real-time notifications architecture SSE WebSockets authentication scaling backpressure"
+      ],
+      "seconds": 66.52,
+      "input_tokens": 174,
+      "cached_input_tokens": 0,
+      "output_tokens": 84,
+      "reasoning_tokens": 0,
+      "cost_usd": 5.94e-05
+    },
+    {
+      "id": "spanish-request",
+      "request": "¿Cómo configuro un entorno virtual de Python en Windows?",
+      "queries": [
+        "crear entorno virtual Python Windows comando py -m venv activar PowerShell",
+        "documentación oficial Python venv Windows activar entorno scripts",
+        "activar entorno virtual Python Windows CMD PowerShell política ejecución",
+        "instalar Python Windows verificar PATH lanzador py pip entorno virtual",
+        "desactivar y eliminar entorno virtual Python Windows venv】【。"
+      ],
+      "seconds": 2.37,
+      "input_tokens": 168,
+      "cached_input_tokens": 0,
+      "output_tokens": 79,
+      "reasoning_tokens": 0,
+      "cost_usd": 5.63e-05
+    },
+    {
+      "id": "event-today",
+      "request": "Is there any big tech conference happening this week?",
+      "queries": [
+        "major technology conferences September 28 October 4 2026",
+        "big tech industry events conference October 2026 this week",
+        "technology conference calendar September 2026 major events",
+        "AI cloud cybersecurity tech conferences September 29 October 2026",
+        "upcoming major tech conferences October 2026 dates locations"
+      ],
+      "seconds": 5.48,
+      "input_tokens": 167,
+      "cached_input_tokens": 0,
+      "output_tokens": 179,
+      "reasoning_tokens": 100,
+      "cost_usd": 0.0001062
+    },
+    {
+      "id": "learn-dsa-interview",
+      "request": "I have a FAANG interview in 3 weeks and I'm rusty on data structures and algorithms. Where should I focus?",
+      "queries": [
+        "FAANG coding interview high-yield data structures algorithms topics frequency 2025",
+        "three week software engineering interview study plan data structures algorithms coding practice",
+        "LeetCode interview patterns arrays strings hash maps sliding window two pointers trees graphs dynamic programming",
+        "FAANG coding interview topic distribution graph tree dynamic programming company interview questions",
+        "technical interview preparation rusty algorithms practice schedule mock interviews complexity analysis"
+      ],
+      "seconds": 2.99,
+      "input_tokens": 181,
+      "cached_input_tokens": 0,
+      "output_tokens": 138,
+      "reasoning_tokens": 46,
+      "cost_usd": 8.71e-05
+    }
+  ]
+}
