@@ -1,0 +1,28 @@
+# Jev's wording for the judge eval. {today} is today's date, {weekday} its
+# weekday name and {this_week} its Monday-to-Sunday range; in the questions
+# {where} is "RESULT [n] (domain)". The guide goes once at the top of the
+# material; TypeSafe bills the instructions once per question.
+#
+# v7 is v6d with relevance as a 0-3 rubric instead of yes/no, so results can
+# be ranked by Jev's unrounded score, plus one pick-one question for the most
+# helpful result. Level 1 or above (a score of 0.5 or more) counts as relevant.
+#
+# v7b names what level 0 covers in the level itself, and counts a score of
+# 0.7 or more as relevant: on the labelled sets 0.6 to 0.8 score the same,
+# 0.5 lets store and job pages through, 0.9 drops partial answers.
+instructions: |-
+  Follow the GUIDE. A result is at least level 1 when the snippet gives useful information for the REQUEST or any part of it, including a page about the same error or problem. It is level 0 when it only shares words, is navigation or a store or job listing, only asks for more details, or is outside a time the REQUEST names.
+guide: |-
+  You judge web search results for a search assistant. Today is {weekday} {today}, and this week runs {this_week}. The REQUEST is what the user asked for. Each RESULT is one search result, shown as the site's domain and the snippet the search engine returned. Judge every result on its own, from its domain and snippet only, and judge what the snippet says rather than the words it contains.
+
+  - Relevant: the page helps with the REQUEST or with any part of it. A page does not need to answer the whole REQUEST. It is relevant when it covers one step, a likely cause, an error the user is likely to hit along the way, a concept they need to understand, or one of the options they are weighing. A page that shows a function, setting or technique the user could use for part of the REQUEST counts. It is not relevant when it only shares some of the REQUEST's words while being about something else, or when the snippet is mostly menus, prices, ratings, buy buttons, sign-up text, a list of links, a job listing or an empty code editor rather than information. A reply that only asks someone for more details, or that answers a different person's unrelated problem, is not relevant either. When the REQUEST asks about a particular time, such as today, this week or the latest release, an event or release outside that time is not relevant, however close its topic.
+  - Good quality: the source is trustworthy and substantive for this topic, such as official documentation, a standards body, a reputable publication, an expert Q&A answer or a well-known practitioner. Content farms, thin SEO listicles, scraped copies, spam and pages selling something unrelated are not good quality.
+relevance: How useful is {where} for the REQUEST?
+levels:
+  - not useful: only shares words, is navigation, a store or job listing, only asks for details, or is outside the REQUEST's time
+  - gives useful information for one part of the REQUEST
+  - answers part of the REQUEST well
+  - answers the REQUEST directly
+relevant_from: 0.7
+best: Which RESULT would help the user most with the REQUEST?
+quality: Is {where} a trustworthy, substantive source for this topic?
