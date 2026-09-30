@@ -59,11 +59,15 @@ CHANNEL_ID = 42
 
 BLOB = "## Who's here\n- alice (id 1) is deep in shader work and hates cmake."
 BLOB_UPDATED_AT = datetime(2026, 8, 6, 0, 20, tzinfo=UTC)
+BEHAVIOR = "Wait to be asked before explaining a whole toolchain."
+PERSONALITY = "Dry, warm, quietly delighted by good shader work."
 
 
 def _snapshot(*, notes: tuple[MemoryNote, ...] = ()) -> GuildMemorySnapshot:
     return GuildMemorySnapshot(
         long_term_memory=BLOB,
+        behavior=BEHAVIOR,
+        personality=PERSONALITY,
         updated_at=BLOB_UPDATED_AT,
         revision=4,
         memory_enabled=True,
@@ -260,6 +264,8 @@ class _EngineHarness:
                 in (
                     "long_term_memory",
                     "long_term_memory_updated_at",
+                    "behavior",
+                    "personality",
                     "memory_notes",
                     "guild_events",
                 )
@@ -276,6 +282,8 @@ class _EngineHarness:
                 in (
                     "long_term_memory",
                     "long_term_memory_updated_at",
+                    "behavior",
+                    "personality",
                     "new_guild_events",
                 )
             }
@@ -368,6 +376,13 @@ async def test_initial_turn_carries_blob_notes_and_the_full_event_window(
     prompt = harness.prompts[0]
     assert '<what-i-remember updated="2026-08-06">' in prompt
     assert "hates cmake" in prompt
+    assert f"<my-personality>\n{PERSONALITY}\n</my-personality>" in prompt
+    assert f"<how-i-behave>\n{BEHAVIOR}\n</how-i-behave>" in prompt
+    assert (
+        prompt.index("<my-personality>")
+        < prompt.index("<how-i-behave>")
+        < prompt.index("<what-i-remember")
+    )
     assert "<from-today>" in prompt
     assert "soft shadows" in prompt
     assert '<what-i-did window="last-60-min">' in prompt
@@ -581,6 +596,8 @@ async def test_compaction_re_emits_the_blob_on_the_next_turn(
 
     assert "<what-i-remember" in harness.prompts[1]
     assert "hates cmake" in harness.prompts[1]
+    assert PERSONALITY in harness.prompts[1]
+    assert BEHAVIOR in harness.prompts[1]
 
 
 async def test_a_re_emitted_blob_is_not_repeated_on_the_turn_after(
@@ -609,6 +626,8 @@ async def test_a_re_emitted_blob_is_not_repeated_on_the_turn_after(
 
     assert "<what-i-remember" in harness.prompts[1]
     assert "<what-i-remember" not in harness.prompts[2]
+    assert "<how-i-behave>" not in harness.prompts[2]
+    assert "<my-personality>" not in harness.prompts[2]
 
 
 async def test_no_compaction_means_no_re_emit(fake_memory, event_redis):
@@ -622,6 +641,8 @@ async def test_no_compaction_means_no_re_emit(fake_memory, event_redis):
         await engine._run_once(first_activation=False)
 
     assert "<what-i-remember" not in harness.prompts[1]
+    assert "<how-i-behave>" not in harness.prompts[1]
+    assert "<my-personality>" not in harness.prompts[1]
 
 
 # --------------------------------------------------------------------------- #
@@ -659,6 +680,10 @@ async def test_writer_stage_receives_the_blob_verbatim(fake_memory, event_redis)
     writer_prompt = writer_agent.run.await_args.args[0]
     assert "What you remember about this place:" in writer_prompt
     assert "hates cmake" in writer_prompt
+    assert "Your personality here" in writer_prompt
+    assert PERSONALITY in writer_prompt
+    assert "How you've learned to behave here" in writer_prompt
+    assert BEHAVIOR in writer_prompt
     assert "Also on your mind right now:" in writer_prompt
     assert "alice has been on shaders all week" in writer_prompt
 
@@ -688,4 +713,6 @@ async def test_writer_stage_omits_memory_sections_when_there_is_none(
 
     writer_prompt = writer_agent.run.await_args.args[0]
     assert "What you remember about this place:" not in writer_prompt
+    assert "Your personality here" not in writer_prompt
+    assert "How you've learned to behave here" not in writer_prompt
     assert "Also on your mind right now:" not in writer_prompt

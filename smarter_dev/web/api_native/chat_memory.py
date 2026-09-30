@@ -3,8 +3,8 @@
 Two routes, modelled on ``model_overrides.py``:
 
 - ``GET  /api/guilds/{guild_id}/chat-memory`` — the whole activation payload in
-  one round trip: the long-term blob plus the notes the agent kept since
-  midnight UTC.
+  one round trip: the long-term blob, the behavior and personality blocks, and
+  the notes the agent kept since midnight UTC.
 - ``POST /api/guilds/{guild_id}/chat-memory/notes`` — the ``remember`` tool
   keeping one thought.
 
@@ -98,6 +98,8 @@ class ChatMemoryController(Controller):
             return ChatMemoryBundleRead(
                 guild_id=guild_id,
                 content=None,
+                behavior=None,
+                personality=None,
                 revision=None,
                 updated_at=None,
                 memory_enabled=False,
@@ -115,6 +117,8 @@ class ChatMemoryController(Controller):
             # An existing-but-empty blob reads back as null so the prompt omits
             # the block entirely rather than handing the agent its own amnesia.
             content=(blob.content or None) if blob is not None else None,
+            behavior=(blob.behavior or None) if blob is not None else None,
+            personality=(blob.personality or None) if blob is not None else None,
             revision=blob.revision if blob is not None else None,
             updated_at=blob.updated_at if blob is not None else None,
             memory_enabled=True,

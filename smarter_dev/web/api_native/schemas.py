@@ -922,6 +922,14 @@ class ChatMemoryBundleRead(BaseAPIModel):
     content: str | None = Field(
         None, description="The long-term memory blob, or null if there is none yet"
     )
+    behavior: str | None = Field(
+        None,
+        description="Learned instructions for how to act in this guild, or null if none",
+    )
+    personality: str | None = Field(
+        None,
+        description="Who the agent is here and how it wants to be felt about, or null",
+    )
     revision: int | None = Field(
         None, description="How many dreams have written the blob, or null"
     )
