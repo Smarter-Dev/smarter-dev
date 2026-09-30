@@ -23,6 +23,7 @@ from smarter_dev.web import dashboard_controller
 from smarter_dev.web.models import UsageCostRow
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.usage_invoice import monthly_invoice
+from smarter_dev.web.web_search import answer
 from smarter_dev.web.web_search import brave
 from smarter_dev.web.web_search import metering
 from smarter_dev.web.web_search import pipeline
@@ -77,8 +78,10 @@ def test_ranking_schema_has_a_best_pick_and_a_rubric_per_result():
         "best",
         "result_1_relevance",
         "result_1_quality",
+        "result_1_local",
         "result_2_relevance",
         "result_2_quality",
+        "result_2_local",
     }
     levels = schema["properties"]["result_1_relevance"]["anyOf"]
     assert [level["const"] for level in levels] == [0, 1, 2, 3]
@@ -111,7 +114,7 @@ def search_env(db_session, monkeypatch):
         events.append(state)
 
     async def plan(request):
-        return [{"query": f"query {n}", "angle": f"angle {n}"} for n in range(5)], {
+        return [{"query": f"query {n}", "angle": f"angle {n}"} for n in range(5)], False, {
             "model": "gpt-6-luna",
             "input_tokens": 1_000_000,
             "output_tokens": 1_000_000,
@@ -334,3 +337,119 @@ async def test_a_user_gets_six_searches_a_minute(db_session):
     with pytest.raises(HTTPException) as caught:
         await dashboard_controller._enforce_limits(db_session, user_id)
     assert caught.value.status_code == 429
+
+
+def _verdicts(levels, local, best):
+    verdicts = {"best": type("Pick", (), {"value": f"RESULT [{best}]"})()}
+    for n, (level, is_local) in enumerate(zip(levels, local, strict=True), 1):
+        verdicts[f"result_{n}_relevance"] = level
+        verdicts[f"result_{n}_quality"] = False
+        verdicts[f"result_{n}_local"] = is_local
+    return verdicts
+
+
+def test_a_local_page_drops_a_level_and_loses_the_top_pick():
+    details = {
+        "scores": {"result_1_relevance": 2.4, "result_2_relevance": 2.6, "result_3_relevance": 1.2},
+        "probabilities": {"best": {"RESULT [1]": 0.2, "RESULT [2]": 0.7, "RESULT [3]": 0.1}},
+    }
+    judged = ranking.judge(_verdicts([2, 3, 1], [False, True, False], best=2), details, 3)
+    assert judged[1]["score"] == pytest.approx(1.6) and judged[1]["local"] is True
+    # Jev picked the Tampa page; the pick moves to the likeliest non-local one.
+    assert [j["best"] for j in judged] == [True, False, False]
+
+
+def test_when_every_result_is_local_jevs_pick_stands():
+    details = {"scores": {}, "probabilities": {"best": {"RESULT [2]": 0.9}}}
+    judged = ranking.judge(_verdicts([1, 2], [True, True], best=2), details, 2)
+    assert [j["best"] for j in judged] == [False, True]
+    assert judged[1]["score"] == 1.0
+
+
+def test_citations_become_links_to_the_cited_results():
+    results = [
+        {"url": "https://a.org/x", "domain": "a.org"},
+        {"url": "https://en.wikipedia.org/wiki/Foo_(bar)", "domain": "wikipedia.org"},
+    ]
+    html = answer.render("Use `git revert` [1][2]. Also [2, 1]. Not [9].\n\n[1]: https://evil.org", results)
+    assert html.count('class="ud-cite"') == 5
+    assert 'href="https://en.wikipedia.org/wiki/Foo_(bar)" title="wikipedia.org">2</a>' in html
+    assert "[9]" in html and "evil.org" in html and 'href="https://evil.org"' not in html
+    assert 'target="_blank" rel="noopener noreferrer"' in html
+
+
+def test_answer_html_never_carries_raw_markup_or_script_links():
+    html = answer.render("<img src=x onerror=alert(1)> [x](javascript:alert(1))", [])
+    assert "<img" not in html and 'href="javascript' not in html
+
+
+@pytest.fixture
+def answering_env(search_env, monkeypatch):
+    async def plan(request):
+        return [{"query": f"query {n}", "angle": f"angle {n}"} for n in range(5)], True, {
+            "model": "gpt-6-luna",
+            "input_tokens": 1_000,
+            "output_tokens": 100,
+        }
+
+    async def write(request, results, on_progress):
+        reads = [answer.Read(number=1, domain=results[0]["domain"], status="done", tokens=2_000_000)]
+        await on_progress(reads, "")
+        await on_progress(reads, "Partly written [1]")
+        return "The answer [1].", reads, {
+            "model": "gpt-6-luna",
+            "input_tokens": 1_000_000,
+            "output_tokens": 0,
+            "reader_tokens": 2_000_000,
+        }
+
+    monkeypatch.setattr(queries, "plan_queries", plan)
+    monkeypatch.setattr(answer, "write_answer", write)
+    return search_env
+
+
+async def test_the_answer_follows_the_ranked_results(answering_env):
+    run = await _new_run(answering_env["session"])
+    assert await pipeline.run_search(run.id, answering_env["notify"]) == "complete"
+
+    events = answering_env["events"]
+    statuses = [event["status"] for event in events]
+    first_answering = statuses.index("answering")
+    # The ranked results go out before any of the answer.
+    assert events[first_answering]["ranked"] is True
+    assert events[first_answering]["answer"] == {"status": "reading", "reads": [], "html": "", "error": None}
+    assert any(event["answer"] and event["answer"]["status"] == "writing" for event in events)
+
+    final = events[-1]
+    assert final["status"] == "complete" and final["active"] is False
+    assert final["answer"]["status"] == "done"
+    assert final["answer"]["reads"] == [{"number": 1, "domain": "e.org", "status": "done"}]
+    assert 'href="https://e.org"' in final["answer"]["html"]
+    assert "markdown" not in final["answer"]
+
+    ledger = await _ledger(answering_env["session"])
+    assert ledger["web_search_answer"].cost_usd == Decimal("0.1")
+    assert ledger["web_search_reader"].provider_key == "jina"
+    assert ledger["web_search_reader"].cost_usd == 2 * Decimal(answer.JINA_PRICE_PER_MILLION_TOKENS_USD)
+
+
+async def test_a_failed_answer_keeps_the_results(answering_env, monkeypatch):
+    async def broken(request, results, on_progress):
+        raise TimeoutError
+
+    monkeypatch.setattr(answer, "write_answer", broken)
+    run = await _new_run(answering_env["session"])
+    assert await pipeline.run_search(run.id, answering_env["notify"]) == "complete"
+
+    final = answering_env["events"][-1]
+    assert final["answer"]["status"] == "failed"
+    assert final["answer"]["error"].startswith("Couldn't write an answer")
+    assert len(final["results"]) == 5 and final["ranked"] is True
+    assert "web_search_answer" not in await _ledger(answering_env["session"])
+
+
+async def test_searches_that_need_no_answer_never_start_one(search_env):
+    run = await _new_run(search_env["session"])
+    await pipeline.run_search(run.id, search_env["notify"])
+    assert "answering" not in [event["status"] for event in search_env["events"]]
+    assert search_env["events"][-1]["answer"] is None

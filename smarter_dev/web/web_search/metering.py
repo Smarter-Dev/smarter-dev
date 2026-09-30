@@ -1,7 +1,8 @@
 """The web search's spend in the usage ledger, which the admin invoices read.
 
 Each attempt writes one row per paid step: Luna's queries, the Brave requests
-that were answered, and Jev's ranking. Rows are keyed by search and attempt,
+that were answered, Jev's ranking and, when the search writes one, Luna's
+answer and the Jina Reader pages it read. Rows are keyed by search and attempt,
 so a retried job records what the retry spent and a repeated write records
 nothing."""
 
@@ -47,7 +48,7 @@ def _row(run: WebSearchRun, step: str, **fields) -> UsageCostRow:
     )
 
 
-def luna_row(run: WebSearchRun, usage: dict) -> UsageCostRow | None:
+def luna_row(run: WebSearchRun, usage: dict, step: str = "queries") -> UsageCostRow | None:
     from smarter_dev.web.chat.usage import usage_cost
 
     wire = usage.get("model", "")
@@ -63,7 +64,7 @@ def luna_row(run: WebSearchRun, usage: dict) -> UsageCostRow | None:
     }
     return _row(
         run,
-        "queries",
+        step,
         provider_key=model.provider.value,
         catalog_model_key=model.key,
         model_id=model.model_id,
@@ -84,6 +85,26 @@ def brave_row(run: WebSearchRun, requests: int) -> UsageCostRow:
     )
     row.details = {**row.details, "requests": requests}
     return row
+
+
+def answer_rows(run: WebSearchRun, usage: dict) -> list[UsageCostRow | None]:
+    from smarter_dev.web.web_search import answer
+
+    rows = [luna_row(run, usage, step="answer")]
+    tokens = int(usage.get("reader_tokens") or 0)
+    if tokens:
+        rows.append(
+            _row(
+                run,
+                "reader",
+                provider_key="jina",
+                catalog_model_key="jina-reader",
+                model_id="jina-reader",
+                output_tokens=tokens,
+                cost_usd=Decimal(answer.JINA_PRICE_PER_MILLION_TOKENS_USD) * tokens / 1_000_000,
+            )
+        )
+    return rows
 
 
 def jev_row(run: WebSearchRun, usage: dict) -> UsageCostRow:

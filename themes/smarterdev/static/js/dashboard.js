@@ -21,7 +21,7 @@
   const csrfToken = (csrfInput && csrfInput.value) || '';
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   const EVENT_TYPE = initial.event_type || 'web_search';
-  const STEPS = ['planning', 'searching', 'ranking'];
+  const STEPS = ['planning', 'searching', 'ranking', 'answering'];
   const LEAVE_MS = 180;
   const POLL_MS = 4000;
 
@@ -311,6 +311,7 @@
 
   function recentMeta(row) {
     const when = relativeTime(row.created_at);
+    if (row.status === 'answering') return 'Writing an answer… · ' + when;
     if (row.active) return 'Searching… · ' + when;
     if (row.status === 'error') return 'Failed · ' + when;
     return plural(row.relevant, 'relevant result') + ' · ' + when;
@@ -321,6 +322,7 @@
   function stepState(search, step) {
     const order = STEPS.indexOf(step);
     const status = search.status;
+    if (step === 'answering' && search.answer && search.answer.status === 'failed') return 'failed';
     if (status === 'complete') return 'done';
     if (status === 'queued') return order === 0 ? 'waiting' : 'pending';
     if (status === 'error') {
@@ -352,6 +354,17 @@
       if (state === 'done') return plural(results.length, 'unique result') + ' from ' + plural(queries.length, 'search', 'searches');
       return 'Brave runs each one';
     }
+    if (step === 'answering') {
+      const reads = (search.answer && search.answer.reads) || [];
+      const read = reads.filter(function (r) { return r.status === 'done'; }).length;
+      if (state === 'failed') return 'Luna couldn’t write an answer.';
+      if (state === 'done') return 'Luna read ' + plural(read, 'page') + ' and wrote an answer';
+      if (state === 'active') {
+        if (search.answer && search.answer.status === 'writing') return 'Luna is writing the answer…';
+        return reads.length ? 'Luna is reading ' + plural(reads.length, 'page') + '…' : 'Luna is choosing pages to read…';
+      }
+      return 'Luna reads the best pages and answers';
+    }
     if (state === 'active') return 'Jev is ranking ' + plural(results.length, 'result') + '…';
     if (state === 'done') {
       return search.ranked
@@ -367,6 +380,7 @@
     if (search.status === 'queued') return 'Queued';
     if (search.status === 'planning') return 'Planning searches';
     if (search.status === 'searching') return 'Searching the web';
+    if (search.status === 'answering') return 'Writing an answer';
     return 'Ranking results';
   }
 
@@ -380,6 +394,7 @@
 
     STEPS.forEach(function (step) {
       const item = node.querySelector('[data-step="' + step + '"]');
+      if (step === 'answering') item.hidden = !search.needs_answer;
       const state = stepState(search, step);
       item.dataset.state = state;
       const detail = item.querySelector('[data-step-detail]');
@@ -388,6 +403,7 @@
     });
 
     renderQueries(node, search);
+    renderAnswer(node, search);
     renderResults(node, search);
 
     const errorBox = node.querySelector('[data-error]');
@@ -431,13 +447,52 @@
     });
     while (list.children.length > search.queries.length) list.lastElementChild.remove();
 
-    // Once the search stops, fold the queries away so the results come up.
-    const open = view.queriesOpen == null ? search.active : view.queriesOpen;
+    // Once the results are ranked, fold the queries away so the answer and
+    // the results come up.
+    const searching = search.active && search.status !== 'answering';
+    const open = view.queriesOpen == null ? searching : view.queriesOpen;
     node.querySelector('[data-queries-wrap]').classList.toggle('is-closed', !open);
     const toggle = node.querySelector('[data-queries-toggle]');
-    toggle.hidden = search.active || !search.queries.length;
+    toggle.hidden = searching || !search.queries.length;
     toggle.setAttribute('aria-expanded', String(open));
     toggle.textContent = open ? 'Hide searches' : 'Show the ' + plural(search.queries.length, 'search', 'searches');
+  }
+
+  // ── Answer ────────────────────────────────────────────
+
+  /** The answer panel: the pages Luna reads, then the answer as it streams.
+      The HTML is rendered and sanitized by the worker. */
+  function renderAnswer(node, search) {
+    const panel = node.querySelector('[data-answer]');
+    const answer = search.answer;
+    panel.hidden = !search.needs_answer || !answer;
+    if (panel.hidden) return;
+    panel.dataset.state = answer.status;
+
+    const list = panel.querySelector('[data-reads]');
+    const rows = new Map();
+    list.querySelectorAll('li').forEach(function (li) { rows.set(li.dataset.number, li); });
+    (answer.reads || []).forEach(function (read) {
+      let li = rows.get(String(read.number));
+      if (!li) {
+        li = el('li', 'ud-read', read.domain);
+        li.dataset.number = String(read.number);
+        list.appendChild(li);
+      }
+      li.dataset.state = read.status;
+      li.title = read.status === 'failed' ? 'Couldn’t read this page' : read.status === 'done' ? 'Read' : 'Reading…';
+    });
+
+    const body = panel.querySelector('[data-answer-body]');
+    const html = answer.html || '';
+    if (body.dataset.html !== html) {
+      body.innerHTML = html;
+      body.dataset.html = html;
+    }
+    panel.querySelector('[data-answer-skeleton]').hidden = !!html || answer.status === 'failed' || answer.status === 'done';
+    const note = panel.querySelector('[data-answer-note]');
+    note.hidden = answer.status !== 'failed';
+    if (!note.hidden) note.textContent = answer.error || 'Couldn’t write an answer this time.';
   }
 
   // ── Results ───────────────────────────────────────────
@@ -496,7 +551,8 @@
 
     const main = node.querySelector('[data-result-list]');
     const quiet = node.querySelector('[data-more-list]');
-    const done = search.status === 'complete';
+    // Ranked results stand once Jev is done, even while the answer is written.
+    const done = search.status === 'complete' || search.status === 'answering';
     const ranked = done && search.ranked;
     const pending = !done;
     section.classList.toggle('is-pending', pending);
