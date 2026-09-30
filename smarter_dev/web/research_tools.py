@@ -20,6 +20,25 @@ logger = logging.getLogger(__name__)
 USER_AGENT = "Smarter Dev Scan Agent - admin@smarter.dev"
 
 
+def _failure_summary(exc: Exception) -> str:
+    """Describe a request failure without its URL.
+
+    httpx errors carry the request URL in their text, and these URLs hold
+    search terms and API keys, so log lines get the type and status only.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f"{type(exc).__name__} {exc.response.status_code}"
+    return type(exc).__name__
+
+
+def _host(url: str) -> str:
+    """Host for a log line; never raises, since callers are exception handlers."""
+    try:
+        return urlparse(url).hostname or "?"
+    except ValueError:
+        return "?"
+
+
 class RateLimiter:
     """Enforces a minimum delay between requests to the same key."""
 
@@ -105,7 +124,7 @@ async def brave_search(
         return results
 
     except Exception as e:
-        logger.error("Brave Search failed: %s", e)
+        logger.error("Brave Search failed: %s", _failure_summary(e))
         return [{"error": f"Search failed: {e}"}]
 
 
@@ -148,7 +167,7 @@ async def jina_search(
         return results
 
     except Exception as e:
-        logger.error("Jina Search failed: %s", e)
+        logger.error("Jina Search failed: %s", _failure_summary(e))
         return [{"error": f"Search failed: {e}"}]
 
 
@@ -208,7 +227,7 @@ async def youtube_search(
         return results
 
     except Exception as e:
-        logger.error("YouTube search (Brave) failed: %s", e)
+        logger.error("YouTube search (Brave) failed: %s", _failure_summary(e))
         return [{"error": f"YouTube search failed: {e}"}]
 
 
@@ -259,7 +278,7 @@ async def youtube_video_details(
             })
         return results
     except Exception as e:
-        logger.error("YouTube video details failed: %s", e)
+        logger.error("YouTube video details failed: %s", _failure_summary(e))
         return []
 
 
@@ -341,7 +360,7 @@ async def jina_read(client: httpx.AsyncClient, url: str) -> dict:
         }
 
     except Exception as e:
-        logger.error("Jina Reader failed for %s: %s (%s)", url, e, type(e).__name__)
+        logger.error("Jina Reader failed for %s: %s", _host(url), _failure_summary(e))
         return {"error": f"Failed to read URL ({type(e).__name__}): {e}", "url": url}
 
 
@@ -438,5 +457,5 @@ async def fetch_og_metadata(
         return result
 
     except Exception:
-        logger.debug("OG fetch failed for %s", url)
+        logger.debug("OG fetch failed for %s", _host(url))
         return {}

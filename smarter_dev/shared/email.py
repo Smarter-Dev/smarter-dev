@@ -33,10 +33,12 @@ async def send_email(to: str, subject: str, html: str) -> None:
     """Send a transactional email via Resend.
 
     No-ops gracefully when the API key is not configured so local dev
-    works without credentials.
+    works without credentials. Log lines never carry the recipient address,
+    and a send failure logs only the exception type: provider errors can echo
+    the request, including the address.
     """
     if not _ensure_api_key():
-        logger.info("Skipping email to %s (no API key)", to)
+        logger.info("Skipping email (no API key)")
         return
 
     import resend
@@ -50,6 +52,6 @@ async def send_email(to: str, subject: str, html: str) -> None:
                 "html": html,
             }
         )
-        logger.info("Confirmation email sent to %s", to)
-    except Exception:
-        logger.exception("Failed to send email to %s", to)
+        logger.info("Email sent")
+    except Exception as exc:
+        logger.error("Failed to send email: %s", type(exc).__name__)

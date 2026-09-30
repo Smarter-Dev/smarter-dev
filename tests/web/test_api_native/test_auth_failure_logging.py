@@ -59,10 +59,10 @@ class TestAuthenticationFailureLogging:
         assert response.status_code == 401
         security_logger_mock.log_authentication_failed.assert_awaited_once()
         call_kwargs = security_logger_mock.log_authentication_failed.await_args.kwargs
-        assert call_kwargs["failed_key_prefix"] == ""
+        assert call_kwargs["bearer_presented"] is False
         assert call_kwargs["session"] is None
 
-    async def test_legacy_sk_dash_key_401_and_logged_with_prefix(
+    async def test_rejected_key_401_and_logged_without_any_of_it(
         self, guarded_client: TestClient, security_logger_mock: Mock
     ):
         legacy_token = "sk-" + "a" * 43
@@ -74,7 +74,8 @@ class TestAuthenticationFailureLogging:
         assert response.status_code == 401
         security_logger_mock.log_authentication_failed.assert_awaited_once()
         call_kwargs = security_logger_mock.log_authentication_failed.await_args.kwargs
-        assert call_kwargs["failed_key_prefix"] == legacy_token[:10]
+        assert call_kwargs["bearer_presented"] is True
+        assert "sk-" not in repr(call_kwargs)
 
     async def test_logging_failure_never_masks_the_401(
         self, guarded_client: TestClient, security_logger_mock: Mock
