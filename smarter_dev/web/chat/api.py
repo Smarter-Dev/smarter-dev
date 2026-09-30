@@ -202,6 +202,17 @@ async def available_model(session: AsyncSession, key: str):
 
 
 UNAVAILABLE_MODEL_DETAIL = "The selected model is unavailable; choose a new model."
+# Sent beside the detail so an open page can tell this refusal from every other
+# 409 and show the retired-model notice without a reload.
+MODEL_UNAVAILABLE_CODE = "model_unavailable"
+
+
+def model_unavailable() -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail=UNAVAILABLE_MODEL_DETAIL,
+        extra={"code": MODEL_UNAVAILABLE_CODE},
+    )
 
 
 async def require_between_turns(session: AsyncSession, conversation_id: UUID) -> None:
@@ -804,7 +815,7 @@ class ChatApiController(Controller):
         if model is None:
             # Resolving against nothing would clear the stored level; leave the
             # retired selection exactly as it was until a model is chosen.
-            raise HTTPException(status_code=409, detail=UNAVAILABLE_MODEL_DETAIL)
+            raise model_unavailable()
         effective = resolve_reasoning_level(
             model, parse_reasoning_level(data.reasoning_level)
         )
@@ -1346,7 +1357,7 @@ class ChatApiController(Controller):
                 status_code=409, detail="Wait for the active turn to finish or stop it."
             )
         if await available_model(db_session, conversation.selected_model_key) is None:
-            raise HTTPException(status_code=409, detail=UNAVAILABLE_MODEL_DETAIL)
+            raise model_unavailable()
         if (
             conversation.intelligence_mode == IntelligenceMode.ULTRA_INTELLIGENCE.value
             and not has_ultra_chat(permissions)
@@ -1569,7 +1580,7 @@ class ChatApiController(Controller):
         # A regenerate runs on the conversation's current pick, never on a
         # successor of a retired one.
         if await available_model(db_session, conversation.selected_model_key) is None:
-            raise HTTPException(status_code=409, detail=UNAVAILABLE_MODEL_DETAIL)
+            raise model_unavailable()
         root_turn_id = original.regenerates_turn_id or original.id
         root_turn = await db_session.get(WebChatTurn, root_turn_id)
         if root_turn is None:

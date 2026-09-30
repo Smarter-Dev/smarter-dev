@@ -55,7 +55,18 @@ def http_exception_handler(request: Request, exc: HTTPException) -> Response:
         login_url = f"/auth/login?{urlencode({'next': next_url})}"
         return Redirect(path=login_url, status_code=303)
 
-    return skrift_http_exception_handler(request, exc)
+    response = skrift_http_exception_handler(request, exc)
+    # Skrift's JSON body carries only the status and detail. A string ``code``
+    # in ``extra`` rides along so a client can act on one specific refusal
+    # without matching on its wording.
+    code = exc.extra.get("code") if isinstance(exc.extra, dict) else None
+    if (
+        isinstance(code, str)
+        and response.media_type == "application/json"
+        and isinstance(response.content, dict)
+    ):
+        response.content = {**response.content, "code": code}
+    return response
 
 
 def install_exception_handlers() -> None:
