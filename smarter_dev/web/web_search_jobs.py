@@ -35,8 +35,12 @@ async def notify_progress(owner_user_id: UUID, state: dict) -> None:
         await notify_user(
             str(owner_user_id), EVENT_TYPE, mode=NotificationMode.EPHEMERAL, search=state
         )
-    except Exception:
-        logger.exception("Web search notification failed after its state was saved")
+    except Exception as error:
+        # Type only: the payload holds the user's request and results.
+        logger.error(
+            "Web search notification failed after its state was saved (%s)",
+            type(error).__name__,
+        )
 
 
 # max_attempts matches the web pod's submission descriptor in chat.dispatch.

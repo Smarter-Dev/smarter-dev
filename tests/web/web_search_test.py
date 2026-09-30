@@ -7,12 +7,14 @@ what the models say."""
 
 from __future__ import annotations
 
+import logging
 from contextlib import asynccontextmanager
 from datetime import UTC
 from datetime import datetime
 from decimal import Decimal
 from uuid import uuid4
 
+import httpx
 import pytest
 from litestar.exceptions import HTTPException
 from sqlalchemy import select
@@ -43,6 +45,19 @@ def test_stray_characters_allow_latin_and_the_requests_script():
 def test_brave_snippets_lose_markup_and_www():
     assert brave.clean_snippet("<strong>COUNT</strong> is &amp; slow") == "COUNT is & slow"
     assert brave.domain_of("https://www.postgresql.org/docs/") == "postgresql.org"
+
+
+async def test_httpx_request_lines_for_brave_are_dropped(caplog, monkeypatch):
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "test-key")
+    monkeypatch.setattr(brave, "MIN_INTERVAL_SECONDS", 0)
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, json={}))
+    caplog.set_level(logging.INFO, logger="httpx")
+    async with httpx.AsyncClient(transport=transport) as client:
+        await brave.search(client, "secret user words")
+        await client.get("https://example.org/other")
+    lines = [record.getMessage() for record in caplog.records if record.name == "httpx"]
+    assert len(lines) == 1 and "example.org" in lines[0]
+    assert "secret" not in caplog.text
 
 
 def test_ranking_material_numbers_results_under_the_guide():
