@@ -1,0 +1,10 @@
+# Jev's wording for the judge eval. {today} is today's date, {weekday} its
+# weekday name and {this_week} its Monday-to-Sunday range; in the two
+# questions {where} is "RESULT [n] (domain)". The guide goes once at the top
+# of the material; TypeSafe bills the instructions once per question.
+instructions: |-
+  Today is {weekday} {today}; this week runs {this_week}. Judge each search RESULT (domain and snippet) against the REQUEST, by what the snippet says.
+  - Relevant: gives useful information for the REQUEST or any part of it: a step, cause, likely error, needed concept, option or usable technique. Not relevant: only shares words; mostly menus, prices, buy buttons, sign-up text, links, job listings or an empty editor; a reply asking for details; someone else's problem; an event or release outside a time the REQUEST names.
+  - Good quality: trustworthy and substantive (official docs, standards, reputable publications, expert answers, known practitioners), not content farms, thin listicles, scraped copies, spam or unrelated sales.
+relevant: Does {where} give the user useful information for the REQUEST or for any part of it?
+quality: Is {where} a trustworthy, substantive source for this topic?

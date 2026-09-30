@@ -60,11 +60,12 @@ BOOLEAN_THRESHOLD = 0.5
 # Jev list price (.env.example, 2026-09-15); output tokens are free.
 INPUT_PRICE_PER_MILLION_USD = 0.042
 
-DEFAULT_PROMPT = "v5"
+DEFAULT_PROMPT = "v6d"
 
 
 def load_prompt(name: str) -> dict:
-    """judge_prompts/<name>.yaml: instructions plus the two per-result questions."""
+    """judge_prompts/<name>.yaml: instructions, the two per-result questions
+    and an optional guide that goes at the top of the material."""
     prompt = yaml.safe_load((HERE / "judge_prompts" / f"{name}.yaml").read_text())
     today = datetime.now(UTC).date()
     monday = today - timedelta(days=today.weekday())
@@ -74,7 +75,9 @@ def load_prompt(name: str) -> dict:
         "{weekday}": f"{today:%A}",
         "{this_week}": f"Monday {monday.isoformat()} to Sunday {sunday.isoformat()}",
     }.items():
-        prompt["instructions"] = prompt["instructions"].replace(placeholder, value)
+        for key in ("instructions", "guide"):
+            if key in prompt:
+                prompt[key] = prompt[key].replace(placeholder, value)
     return prompt
 
 
@@ -146,9 +149,14 @@ class Brave:
         return results
 
 
-def material(request: str, results: list[dict]) -> str:
-    """The text Jev judges: the request, then every numbered result."""
-    lines = [f"REQUEST:\n{request.strip()}", "", "RESULTS:"]
+def material(request: str, results: list[dict], guide: str | None = None) -> str:
+    """The text Jev judges: the request, then every numbered result.
+
+    A prompt's optional guide goes first. TypeSafe bills the instructions
+    once per question (50 per request) but the material only once, so rules
+    in the guide cost about a fiftieth as much."""
+    lines = [f"GUIDE:\n{guide.strip()}", ""] if guide else []
+    lines += [f"REQUEST:\n{request.strip()}", "", "RESULTS:"]
     for n, result in enumerate(results, 1):
         lines.append(f"[{n}] {result['domain']}: {result['snippet']}")
     return "\n".join(lines)
@@ -198,7 +206,7 @@ async def judge_request(model, prompt: dict, case: dict, brave: Brave) -> dict:
     started = time.perf_counter()
     try:
         run = await agent.run(
-            material(case["request"], results),
+            material(case["request"], results, prompt.get("guide")),
             instructions=prompt["instructions"],
             model_settings={"timeout": 60, "typesafe_boolean_threshold": BOOLEAN_THRESHOLD},
         )
@@ -276,6 +284,11 @@ def render_markdown(report: dict) -> str:
         "Per-result questions:",
         "",
         *(f"- {name}: `{text}`" for name, text in report.get("questions", {}).items()),
+        *(
+            ["", "Guide (sent once, at the top of the material):", "", "```text", report["guide"], "```"]
+            if report.get("guide")
+            else []
+        ),
         "",
         "## Results",
     ]
@@ -362,6 +375,7 @@ async def main() -> None:
             "brave_searches_this_run": searches,
         },
         "instructions": prompt["instructions"],
+        "guide": prompt.get("guide"),
         "questions": {"relevant": prompt["relevant"], "quality": prompt["quality"]},
         "summary": summarize(records),
         "results": records,
