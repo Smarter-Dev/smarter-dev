@@ -16,6 +16,22 @@ latex_renderer/node_modules/
 .env
 smarter_dev.db
 *.sqlite
+
+# Database files, dumps and exports (never commit data; see
+# scripts/check_no_data_exports.py, which CI runs on every PR)
+*.db
+*.db3
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.dump
+*.pgdump
+database_backup/
+
 logs/
 .DS_Store
 **/.DS_Store

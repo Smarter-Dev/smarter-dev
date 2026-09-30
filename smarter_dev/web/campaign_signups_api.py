@@ -190,7 +190,7 @@ class CampaignSignupsApiController(Controller):
 
         logger.info(
             "Campaign signup created: %s for %s",
-            data.email or data.discord_id,
+            signup.id,
             data.campaign_slug,
         )
 
