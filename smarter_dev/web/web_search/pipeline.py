@@ -66,6 +66,11 @@ def _merge(queries: list[dict]) -> list[dict]:
     return list(merged.values())
 
 
+def _brave_failure(error: Exception) -> str:
+    # BraveError text is only ever the status or a missing key.
+    return str(error) if isinstance(error, brave.BraveError) else type(error).__name__
+
+
 def _set_query(index: int, **fields) -> Callable[[WebSearchRun], None]:
     def change(run: WebSearchRun) -> None:
         queries = [dict(item) for item in run.queries]
@@ -102,7 +107,9 @@ async def run_search(run_id: UUID, notify: Notify) -> str:
     try:
         planned, luna_usage = await plan_queries(request)
     except Exception as error:  # noqa: BLE001 - shown to the user as a failed search
-        logger.exception("Web search %s: Luna failed", run_id)
+        # Type only, here and below: error text can echo the request or the
+        # Brave URL, which carries the query.
+        logger.error("Web search %s: Luna failed (%s)", run_id, type(error).__name__)
         return await _fail(run, f"Couldn't plan the searches ({type(error).__name__}).")
     await metering.record(run_id, lambda row: [metering.luna_row(row, luna_usage)])
 
@@ -123,7 +130,9 @@ async def run_search(run_id: UUID, notify: Notify) -> str:
             try:
                 hits = await brave.search(client, item["query"])
             except Exception as error:  # noqa: BLE001 - one failed query is not fatal
-                logger.warning("Web search %s: Brave failed on query %d: %s", run_id, index, error)
+                logger.warning(
+                    "Web search %s: Brave failed on query %d (%s)", run_id, index, _brave_failure(error)
+                )
                 await run.update(_set_query(index, status="failed", count=0))
                 continue
             answered += 1
@@ -155,7 +164,7 @@ async def run_search(run_id: UUID, notify: Notify) -> str:
     try:
         judgments, jev_usage = await rank(request, results)
     except Exception as error:  # noqa: BLE001 - unranked results beat none
-        logger.exception("Web search %s: Jev failed", run_id)
+        logger.error("Web search %s: Jev failed (%s)", run_id, type(error).__name__)
         judgments, jev_usage = None, {"error": type(error).__name__}
 
     if judgments is not None:

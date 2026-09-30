@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import logging
 import os
 import re
 import time
@@ -12,6 +13,21 @@ from urllib.parse import urlparse
 import httpx
 
 BRAVE_URL = "https://api.search.brave.com/res/v1/web/search"
+BRAVE_HOST = urlparse(BRAVE_URL).hostname
+
+
+class _HideBraveRequests(logging.Filter):
+    """Drop httpx's request lines for Brave: their URL carries the query,
+    which Luna wrote from the user's request. The worker keeps httpx at INFO
+    for everything else."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not any(
+            getattr(arg, "host", None) == BRAVE_HOST for arg in record.args or ()
+        )
+
+
+logging.getLogger("httpx").addFilter(_HideBraveRequests())
 RESULTS_PER_QUERY = 5
 # Brave's base plan allows 1 request a second. The pacing is per worker
 # process, so the other Brave users in the agent-worker (the research agents)
