@@ -558,6 +558,7 @@
         if (!response.ok) {
           var error = new Error(body.detail || body.message || 'Request failed');
           error.status = response.status;
+          error.code = body.code || null;
           throw error;
         }
         return body;
@@ -584,6 +585,23 @@
       if (name && modelKey) name.textContent = modelKey;
     }
     setBusy(Boolean(activeTurn));
+  }
+
+  // True only for the refusal that means this conversation's model was retired
+  // or disabled after the page loaded. Every other 409 is left to its caller.
+  function isModelUnavailable(error) {
+    return Boolean(error && error.status === 409 && error.code === 'model_unavailable');
+  }
+
+  // The server has just said the selection cannot run. Lock the composer now,
+  // then reload the catalog so the model select lists what can be chosen and
+  // the stored key reads as unavailable, exactly as a reload would show it.
+  function refreshModelAvailability() {
+    setModelAvailability(false, shell.dataset.modelKey);
+    return api('/v2/api/chat/catalog').then(function (data) {
+      catalog = data;
+      activateConversationControls(shell.dataset.modelKey, shell.dataset.reasoningLevel || '');
+    }).catch(function () {});
   }
 
   function showError(message) {
@@ -1993,6 +2011,7 @@
           }).catch(function (error) {
             reasoning.value = reasoning.dataset.original || '';
             showError(error.message);
+            if (isModelUnavailable(error)) refreshModelAvailability();
           });
         });
         reasoning.dataset.bound = 'true';
@@ -2327,9 +2346,21 @@
       syncMediaInstruction();
       if (mode === 'resources') setStatus('Resource Agent is working…');
     }).catch(function (error) {
-      assistant.querySelector('.chat-content').textContent = error.message;
       setStatus('');
       showError(error.message);
+      if (isModelUnavailable(error)) {
+        // Nothing was sent: take the exchange back off the thread and return
+        // the draft, unless something new has been typed since.
+        user.remove();
+        assistant.remove();
+        if (input && !input.value.trim()) {
+          input.value = text;
+          autoGrow();
+        }
+        refreshModelAvailability();
+        return;
+      }
+      assistant.querySelector('.chat-content').textContent = error.message;
       setBusy(false);
     });
     return true;
@@ -2378,6 +2409,7 @@
     }).catch(function (error) {
       setBusy(false);
       showError(error.message);
+      if (isModelUnavailable(error)) refreshModelAvailability();
     });
   });
 

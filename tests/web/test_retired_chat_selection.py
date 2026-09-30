@@ -28,6 +28,7 @@ from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.web.chat import api as chat_api
 from smarter_dev.web.chat import controller as chat_controller
 from smarter_dev.web.chat import jobs as chat_jobs
+from smarter_dev.web.chat.api import MODEL_UNAVAILABLE_CODE
 from smarter_dev.web.chat.api import ChatApiController
 from smarter_dev.web.chat.api import ModelChangeBody
 from smarter_dev.web.chat.api import ReasoningBody
@@ -222,6 +223,7 @@ async def test_sending_on_a_retired_model_is_refused(db_session, entitled):
 
     assert refused.value.status_code == 409
     assert "choose a new model" in refused.value.detail
+    assert refused.value.extra == {"code": MODEL_UNAVAILABLE_CODE}
     await db_session.rollback()
     assert await _turn_count(db_session, conversation_id) == 1
     assert await _stored(db_session, conversation_id) == (RETIRED, "high")
@@ -238,6 +240,7 @@ async def test_regenerating_on_a_retired_model_is_refused(db_session, entitled):
 
     assert refused.value.status_code == 409
     assert "choose a new model" in refused.value.detail
+    assert refused.value.extra == {"code": MODEL_UNAVAILABLE_CODE}
     await db_session.rollback()
     assert await _turn_count(db_session, conversation_id) == 1
     active = (
@@ -267,8 +270,60 @@ async def test_changing_reasoning_on_a_retired_model_leaves_it_alone(
         )
 
     assert refused.value.status_code == 409
+    assert refused.value.extra == {"code": MODEL_UNAVAILABLE_CODE}
     await db_session.rollback()
     assert await _stored(db_session, conversation_id) == (RETIRED, "high")
+
+
+async def test_a_model_disabled_under_an_open_page_is_refused_with_the_code(
+    db_session, entitled
+):
+    """The page loaded while the model was enabled; an admin disabled it since.
+
+    The refusal carries the code the page acts on, and nothing is lost: the
+    selection, its reasoning and the history all stay as they were.
+    """
+    user, conversation, _ = await _seed(db_session, selected=OTHER)
+    conversation_id = conversation.id
+    (await db_session.get(ChatCatalogModel, OTHER)).enabled = False
+    await db_session.commit()
+
+    with pytest.raises(HTTPException) as refused:
+        await ChatApiController.submit_turn.fn(
+            _controller(),
+            conversation_id,
+            TurnBody(content="Sent from a stale page", submission_key="stale"),
+            _request(user.id),
+            db_session,
+        )
+
+    assert refused.value.status_code == 409
+    assert refused.value.extra == {"code": MODEL_UNAVAILABLE_CODE}
+    await db_session.rollback()
+    assert await _turn_count(db_session, conversation_id) == 1
+    assert await _stored(db_session, conversation_id) == (OTHER, "high")
+
+
+async def test_an_unrelated_conflict_carries_no_code(db_session, entitled):
+    """A busy conversation is a 409 too, and must not read as a retirement."""
+    user, conversation, turn = await _seed(db_session, selected=AVAILABLE)
+    await db_session.execute(
+        text("UPDATE web_chat_turns SET status = 'running' WHERE id = :id"),
+        {"id": turn.id.hex},
+    )
+    await db_session.commit()
+
+    with pytest.raises(HTTPException) as refused:
+        await ChatApiController.submit_turn.fn(
+            _controller(),
+            conversation.id,
+            TurnBody(content="While it runs", submission_key="busy"),
+            _request(user.id),
+            db_session,
+        )
+
+    assert refused.value.status_code == 409
+    assert refused.value.extra in (None, {})
 
 
 @pytest.fixture
@@ -491,6 +546,40 @@ def test_the_composer_lock_follows_the_notice(tmp_path):
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_an_unavailable_model_refusal_updates_an_open_page(tmp_path):
+    source = _CHAT_JS.read_text()
+    functions = "\n".join(
+        _function(source, name)
+        for name in (
+            "api",
+            "setModelAvailability",
+            "isModelUnavailable",
+            "refreshModelAvailability",
+            "showError",
+            "setBusy",
+            "submitChat",
+            "sendMessage",
+        )
+    )
+    harness = (Path(__file__).parent / "js" / "model_refused_harness.js").read_text()
+    script = tmp_path / "model_refused.js"
+    script.write_text(harness.replace("// <CHAT_JS_FUNCTIONS>", functions))
+
+    result = subprocess.run(
+        ["node", str(script)], capture_output=True, text=True, check=False
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_regenerate_and_reasoning_refusals_refresh_availability_too():
+    source = _CHAT_JS.read_text()
+    regenerate = source.split("/regenerate'", 1)[1].split("\n  });", 1)[0]
+    assert "if (isModelUnavailable(error)) refreshModelAvailability();" in regenerate
+    reasoning = source.split("/reasoning'", 1)[1].split("\n        });", 1)[0]
+    assert "if (isModelUnavailable(error)) refreshModelAvailability();" in reasoning
 
 
 def test_chat_js_reads_availability_from_the_catalog_and_the_snapshot():
