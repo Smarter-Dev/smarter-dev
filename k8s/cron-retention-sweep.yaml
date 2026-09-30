@@ -5,6 +5,7 @@
 #     contexts), stamping content_purged_at
 #   - keeps the rows themselves: timestamps, token counts, cost, decisions
 #   - hard-deletes expired 48-hour agent web-search previews
+#   - hard-deletes security_logs rows older than 90 days, in committed batches
 #
 # Runs hourly rather than daily so the real worst-case physical retention is
 # 48-49h rather than 48-72h. Search previews become inaccessible at exactly
