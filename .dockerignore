@@ -25,6 +25,19 @@ node_modules
 *.swo
 *~
 
+# Data. Never bake a database, dump or export into an image, even one that
+# is only lying around untracked in a local checkout.
+database_backup/
+*.db
+*.db3
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+*.dump
+*.pgdump
+
 # OS
 .DS_Store
 Thumbs.db
