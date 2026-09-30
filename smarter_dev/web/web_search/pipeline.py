@@ -179,7 +179,8 @@ async def run_search(run_id: UUID, notify: Notify) -> str:
     if judgments is not None:
         await metering.record(run_id, lambda row: [metering.jev_row(row, jev_usage)])
         ranked = [{**result, **judged} for result, judged in zip(results, judgments, strict=True)]
-        ranked.sort(key=lambda item: (-item["score"], -item["best_probability"]))
+        # The top pick leads, then the rest by score.
+        ranked.sort(key=lambda item: (not item["best"], -item["score"], -item["best_probability"]))
     else:
         ranked = results
 
