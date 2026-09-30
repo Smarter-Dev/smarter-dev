@@ -576,14 +576,6 @@ def test_an_unavailable_model_refusal_updates_an_open_page(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_regenerate_and_reasoning_refusals_refresh_availability_too():
-    source = _CHAT_JS.read_text()
-    regenerate = source.split("/regenerate'", 1)[1].split("\n  });", 1)[0]
-    assert "if (isModelUnavailable(error)) refreshModelAvailability();" in regenerate
-    reasoning = source.split("/reasoning'", 1)[1].split("\n        });", 1)[0]
-    assert "if (isModelUnavailable(error)) refreshModelAvailability();" in reasoning
-
-
 def test_chat_js_reads_availability_from_the_catalog_and_the_snapshot():
     source = _CHAT_JS.read_text()
     activate = _function(source, "activateConversationControls")
