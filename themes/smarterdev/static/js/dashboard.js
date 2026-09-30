@@ -563,8 +563,9 @@
     const animate = !reduceMotion.matches && existing.size > 0;
     if (animate) existing.forEach(function (li, url) { before.set(url, li.getBoundingClientRect()); });
 
-    const primary = ranked ? results.filter(function (r) { return r.relevant; }) : results;
-    const secondary = ranked ? results.filter(function (r) { return !r.relevant; }) : [];
+    // The top pick always leads the main list, even if Jev scored it low.
+    const primary = ranked ? results.filter(function (r) { return r.relevant || r.best; }) : results;
+    const secondary = ranked ? results.filter(function (r) { return !r.relevant && !r.best; }) : [];
     // If Jev found nothing relevant, show everything rather than an empty list.
     const shown = primary.length ? primary : results;
     const hidden = primary.length ? secondary : [];
