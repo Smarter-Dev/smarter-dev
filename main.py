@@ -8,11 +8,19 @@ The bot API at /api is served by the native Litestar controllers in
 smarter_dev.web.api_native, registered in the app yamls.
 """
 
+import logging
+
 from smarter_dev.shared.observability import configure_observability
 from smarter_dev.web.exception_handlers import install_exception_handlers
 
 configure_observability("smarter-dev-web")
 install_exception_handlers()
+
+# Litestar's default logging config puts the root logger at INFO, where httpx
+# logs every outbound request with its full URL, query string included (admin
+# member searches, OAuth callbacks). Errors still surface at WARNING. Scoped to
+# the web entry point so the bot and workers keep their own logging.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 from skrift.asgi import app as skrift_app  # noqa: E402
 

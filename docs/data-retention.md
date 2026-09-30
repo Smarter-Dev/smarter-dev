@@ -194,9 +194,13 @@ allowed — that is a keyword watch, not a command.
 - Identity fields everywhere: user ids, usernames, display names, snowflakes.
   These come from the members intent, not the message-content intent, and an
   abuse record is worthless without knowing who it concerns.
-- Logs. Log lines name message ids, author ids and character counts, never
-  message text, so the log stream is not a second copy of the thing this
-  document is about.
+- Logs. The goal is that log lines name message ids, author ids and character
+  counts, never message text, so the log stream is not a second copy of the
+  thing this document is about. The bot does not meet it yet: some bot and
+  agent log sites still print text a member wrote (#47 tracks them). The web
+  side does not log email addresses, any part of a rejected bearer token,
+  query-string values of bot API requests, or httpx's outbound request URLs
+  (capped at WARNING in `main.py`).
 - In-memory only, never written down: the spam engine's message buffer, the
   message gate, and the chat agent's live context window. These die with the
   process.

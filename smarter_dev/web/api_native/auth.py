@@ -84,13 +84,14 @@ async def bot_api_auth_guard(
         await auth_guard(connection, route_handler)
     except NotAuthorizedException as auth_error:
         authorization_header = connection.headers.get("authorization", "")
-        token = ""
-        if authorization_header.startswith("Bearer "):
-            token = authorization_header[7:].strip()
+        bearer_presented = bool(
+            authorization_header.startswith("Bearer ")
+            and authorization_header[7:].strip()
+        )
         try:
             await get_security_logger().log_authentication_failed(
                 session=None,  # Separate session for reliability
-                failed_key_prefix=token[:10],
+                bearer_presented=bearer_presented,
                 request=Request(connection.scope),
                 reason=str(auth_error.detail),
             )
