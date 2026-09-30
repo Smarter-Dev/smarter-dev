@@ -58,6 +58,7 @@ controllers:
   - smarter_dev.web.controllers:discord_redirect
   - smarter_dev.web.account_controller:AccountController
   - smarter_dev.web.account_controller:BillingController
+  - smarter_dev.web.dashboard_controller:DashboardController
   - smarter_dev.web.feature_flags_admin:FeatureFlagsAdminController
   - smarter_dev.web.chat_settings_admin:ChatSettingsAdminController
   # Native bot API (/api) — Litestar controllers replacing the FastAPI mount
@@ -250,6 +251,7 @@ workers:
     - smarter_dev.web.blogging_agent.pipeline
     - smarter_dev.web.handlers_jobs
     - smarter_dev.web.admin_handlers_jobs
+    - smarter_dev.web.web_search_jobs
 
 agents:
   default_queue: agents

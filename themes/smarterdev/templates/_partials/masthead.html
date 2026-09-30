@@ -10,7 +10,13 @@
     {% macro nav_link(href, label, match) %}
     <a href="{{ href }}"{% if _path == match or _path.startswith(match ~ '/') %} class="active"{% endif %}>{{ label }}</a>
     {% endmacro %}
+    {# Signed-in check falls back to the session so the nav stays correct on any page,
+       even when its controller doesn't pass `user` into the template context. Guard
+       `request`: skrift's error pages render outside session middleware and omit it
+       (they pass a resolved `user` instead), so touching it unguarded 500s the error page. #}
+    {% set _signed_in = user or (request is defined and request.session and request.session.get('user_id')) %}
     <div class="nav-links">
+        {% if _signed_in %}{{ nav_link('/dashboard', 'Dashboard', '/dashboard') }}{% endif %}
         {{ nav_link('/resources', 'Resources', '/resources') }}
         {{ nav_link('/chat', 'Chat', '/chat') }}
         {{ nav_link('/blog/', 'Blog', '/blog') }}
@@ -18,11 +24,6 @@
         <a href="https://discord.gg/de8kajxbYS" target="_blank" data-sk-no-spa>Discord</a>
         {{ nav_link('/sudo', 'sudo', '/sudo') }}
     </div>
-    {# Signed-in check falls back to the session so the nav stays correct on any page,
-       even when its controller doesn't pass `user` into the template context. Guard
-       `request`: skrift's error pages render outside session middleware and omit it
-       (they pass a resolved `user` instead), so touching it unguarded 500s the error page. #}
-    {% set _signed_in = user or (request is defined and request.session and request.session.get('user_id')) %}
     {% if _signed_in %}
     <a href="/account" class="btn-follow">Account</a>
     {% else %}
