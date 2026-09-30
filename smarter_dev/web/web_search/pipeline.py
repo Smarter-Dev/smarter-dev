@@ -21,6 +21,7 @@ from sqlalchemy import select
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.web_search import brave
+from smarter_dev.web.web_search import metering
 from smarter_dev.web.web_search.snapshot import snapshot
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,7 @@ async def run_search(run_id: UUID, notify: Notify) -> str:
     except Exception as error:  # noqa: BLE001 - shown to the user as a failed search
         logger.exception("Web search %s: Luna failed", run_id)
         return await _fail(run, f"Couldn't plan the searches ({type(error).__name__}).")
+    await metering.record(run_id, lambda row: [metering.luna_row(row, luna_usage)])
 
     def searching(row: WebSearchRun) -> None:
         row.status = "searching"
@@ -114,6 +116,7 @@ async def run_search(run_id: UUID, notify: Notify) -> str:
 
     await run.update(searching)
 
+    answered = 0
     async with httpx.AsyncClient(timeout=20) as client:
         for index, item in enumerate(planned):
             await run.update(_set_query(index, status="searching"))
@@ -123,6 +126,7 @@ async def run_search(run_id: UUID, notify: Notify) -> str:
                 logger.warning("Web search %s: Brave failed on query %d: %s", run_id, index, error)
                 await run.update(_set_query(index, status="failed", count=0))
                 continue
+            answered += 1
             await run.update(
                 _set_query(
                     index,
@@ -132,6 +136,9 @@ async def run_search(run_id: UUID, notify: Notify) -> str:
                     hits=hits,
                 )
             )
+
+    if answered:
+        await metering.record(run_id, lambda row: [metering.brave_row(row, answered)])
 
     async with get_db_session_context() as session:
         row = await session.get(WebSearchRun, run_id)
@@ -152,6 +159,7 @@ async def run_search(run_id: UUID, notify: Notify) -> str:
         judgments, jev_usage = None, {"error": type(error).__name__}
 
     if judgments is not None:
+        await metering.record(run_id, lambda row: [metering.jev_row(row, jev_usage)])
         ranked = [{**result, **judged} for result, judged in zip(results, judgments, strict=True)]
         ranked.sort(key=lambda item: (-item["score"], -item["best_probability"]))
     else:

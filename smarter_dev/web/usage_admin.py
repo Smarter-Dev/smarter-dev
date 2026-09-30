@@ -446,6 +446,7 @@ class UsageAdminController(Controller):
                 "resources": "#3b82f6",
                 "chat": "#8b5cf6",
                 "discord": "#22c55e",
+                "search": "#f59e0b",
             }
             chart_datasets = [
                 {
