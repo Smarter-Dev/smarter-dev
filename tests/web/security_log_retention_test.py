@@ -83,6 +83,12 @@ async def test_exact_multiple_of_batch_size_terminates(db_session):
 
 
 @pytest.mark.asyncio
+async def test_rejects_a_batch_size_that_could_never_finish(db_session):
+    with pytest.raises(ValueError):
+        await delete_expired_security_logs(db_session, now=_NOW, batch_size=0)
+
+
+@pytest.mark.asyncio
 async def test_rerun_is_a_no_op(db_session):
     db_session.add_all([_log(_CUTOFF - timedelta(days=1), "old"), _log(_NOW, "fresh")])
     await db_session.commit()
