@@ -1,0 +1,37 @@
+name: Data guard
+
+# Refuses database files, dumps and exports (scripts/check_no_data_exports.py).
+# Runs on pull requests so a dump is caught before it reaches main, and on
+# main as a backstop. It reads only the repository: no secrets, no deploy.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  no-data-exports:
+    name: No database files or dumps
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4
+        with:
+          # Every commit in the range is checked, not just the tip: a dump
+          # added and then deleted in a PR still lands in history on merge.
+          fetch-depth: 0
+
+      - name: Check the tree and every new commit
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -n "$BASE" ] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            python3 scripts/check_no_data_exports.py --range "$BASE..$HEAD"
+          else
+            python3 scripts/check_no_data_exports.py
+          fi
