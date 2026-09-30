@@ -32,7 +32,11 @@ def _failure_summary(exc: Exception) -> str:
 
 
 def _host(url: str) -> str:
-    return urlparse(url).hostname or "?"
+    """Host for a log line; never raises, since callers are exception handlers."""
+    try:
+        return urlparse(url).hostname or "?"
+    except ValueError:
+        return "?"
 
 
 class RateLimiter:

@@ -229,3 +229,25 @@ async def test_research_tool_failures_log_no_url_query_or_key(caplog, monkeypatc
     for secret in (SEARCH, "test-key-value", "abcdefghijk", "/p?"):
         assert secret not in logged
 
+
+@pytest.mark.asyncio
+async def test_research_tool_failure_logging_survives_malformed_urls(caplog):
+    """A URL urlparse rejects must still reach the tools' fallbacks."""
+    caplog.set_level(logging.DEBUG, logger=research_tools.__name__)
+    malformed = f"http://[{SEARCH}/p"
+
+    def raise_connect(request):
+        raise httpx.ConnectError("cannot connect", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(raise_connect)) as client:
+        read = await research_tools.jina_read(client, malformed)
+        og = await research_tools.fetch_og_metadata(client, malformed)
+
+    assert "error" in read
+    assert og == {}
+    assert SEARCH not in "\n".join(
+        record.getMessage()
+        for record in caplog.records
+        if record.name == research_tools.__name__
+    )
+
