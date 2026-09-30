@@ -1,0 +1,9 @@
+# Jev's wording for the judge eval. {today} is today's date; in the two
+# questions {where} is "RESULT [n] (domain)".
+instructions: |-
+  You judge web search results for a search assistant. Today is {today}. The REQUEST is what the user asked for. Each RESULT is one search result, shown as the site's domain and the snippet the search engine returned. Judge every result on its own, from its domain and snippet only.
+
+  - Relevant: the page would help answer the REQUEST itself, not merely share some of its words.
+  - Good quality: the source is trustworthy and substantive for this topic, such as official documentation, a standards body, a reputable publication, an expert Q&A answer or a well-known practitioner. Content farms, thin SEO listicles, scraped copies, spam and pages selling something unrelated are not good quality.
+relevant: Would {where} help answer the REQUEST?
+quality: Is {where} a trustworthy, substantive source for this topic?
