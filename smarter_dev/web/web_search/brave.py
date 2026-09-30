@@ -18,6 +18,9 @@ RESULTS_PER_QUERY = 5
 # can still collide with it; one retry covers that.
 MIN_INTERVAL_SECONDS = float(os.getenv("BRAVE_MIN_INTERVAL_SECONDS", "1.1"))
 RATE_LIMIT_RETRY_SECONDS = 1.5
+# What one answered request costs, for the usage ledger: Brave's published
+# $5 per 1,000 requests. Set BRAVE_PRICE_PER_REQUEST_USD if the plan differs.
+PRICE_PER_REQUEST_USD = os.getenv("BRAVE_PRICE_PER_REQUEST_USD", "0.005")
 
 _lock = asyncio.Lock()
 _last_call = 0.0
