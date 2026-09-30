@@ -16,9 +16,11 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 from uuid import uuid4
 
+import httpx
 import pytest
 
 from smarter_dev.shared import email as email_module
+from smarter_dev.web import research_tools
 from smarter_dev.web.security_logger import SecurityLogger
 
 ADDRESS = "someone@example.invalid"
@@ -64,10 +66,62 @@ async def test_rejected_bearer_leaves_no_fragment_in_row_or_stdout(caplog):
     row = _written_row(session)
     assert row.event_metadata["bearer_presented"] is True
     assert "failed_key_prefix" not in row.event_metadata
-    stored = f"{row.details} {row.event_metadata}"
-    assert TOKEN[:4] not in stored
     assert "presented bearer" in row.details
     assert "***" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_rejected_bearer_through_real_guard_and_logger(monkeypatch):
+    """One rejected request, real guard and real security logger, row and stdout."""
+    from litestar.di import Provide
+    from litestar.plugins.pydantic import PydanticPlugin
+    from litestar.testing import create_test_client
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from smarter_dev.shared import database
+    from smarter_dev.web.api_native.bytes import BytesController
+
+    stored = _session()
+
+    async def fake_db_session():
+        yield stored
+
+    monkeypatch.setattr(database, "get_db_session", fake_db_session)
+    # Litestar's dictConfig replaces root handlers, so capture on the logger.
+    records: list[logging.LogRecord] = []
+    capture = logging.Handler()
+    capture.emit = records.append
+    stdout_logger = logging.getLogger("smarter_dev.web.security_logger.SecurityLogger")
+    stdout_logger.addHandler(capture)
+    monkeypatch.setattr(stdout_logger, "level", logging.INFO)
+
+    try:
+        client_cm = create_test_client(
+            route_handlers=[BytesController],
+            plugins=[PydanticPlugin()],
+            dependencies={
+                "db_session": Provide(
+                    lambda: AsyncMock(spec=AsyncSession), sync_to_thread=False
+                )
+            },
+        )
+        with client_cm as client:
+            response = client.get(
+                "/api/guilds/123456789012345678/bytes/config",
+                headers={"Authorization": f"Bearer {TOKEN}"},
+            )
+    finally:
+        stdout_logger.removeHandler(capture)
+    logged = "\n".join(record.getMessage() for record in records)
+
+    assert response.status_code == 401
+    row = _written_row(stored)
+    assert row.action == "authentication_failed"
+    assert row.event_metadata["bearer_presented"] is True
+    fragment = TOKEN[:6]
+    assert fragment not in f"{row.details} {row.event_metadata}"
+    assert "Security event: authentication_failed" in logged
+    assert fragment not in logged
 
 
 @pytest.mark.asyncio
@@ -132,3 +186,46 @@ def test_web_entry_point_caps_httpx_at_warning():
     assert int(root) == logging.INFO
     assert int(httpx_level) == logging.WARNING
     assert int(app_level) == logging.INFO
+
+
+def _failing_client(status: int) -> httpx.AsyncClient:
+    return httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(status))
+    )
+
+
+@pytest.mark.asyncio
+async def test_research_tool_failures_log_no_url_query_or_key(caplog, monkeypatch):
+    monkeypatch.setenv("BRAVE_SEARCH_API_KEY", "brave-test-key-value")
+    monkeypatch.setenv("YOUTUBE_API_KEY", "youtube-test-key-value")
+    monkeypatch.setenv("JINA_API_KEY", "jina-test-key-value")
+    caplog.set_level(logging.DEBUG, logger=research_tools.__name__)
+
+    async with _failing_client(403) as client:
+        await research_tools.brave_search(client, SEARCH)
+        await research_tools.youtube_search(client, SEARCH)
+        await research_tools.youtube_video_details(client, ["abcdefghijk"])
+
+    def raise_connect(request):
+        raise httpx.ConnectError(f"cannot reach {request.url}", request=request)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(raise_connect)) as client:
+        await research_tools.jina_search(client, SEARCH)
+        await research_tools.jina_read(client, f"https://example.org/p?q={SEARCH}")
+        await research_tools.fetch_og_metadata(
+            client, f"https://example.org/p?q={SEARCH}"
+        )
+
+    # httpx's own INFO lines are main.py's concern (see the entry point test).
+    logged = "\n".join(
+        record.getMessage()
+        for record in caplog.records
+        if record.name == research_tools.__name__
+    )
+    assert "HTTPStatusError 403" in logged
+    assert "ConnectError" in logged
+    assert "Jina Reader failed for example.org: ConnectError" in logged
+    assert "OG fetch failed for example.org" in logged
+    for secret in (SEARCH, "test-key-value", "abcdefghijk", "/p?"):
+        assert secret not in logged
+
