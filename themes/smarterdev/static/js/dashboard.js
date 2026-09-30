@@ -57,6 +57,7 @@
     if (options.method && options.method !== 'GET') options.headers['X-CSRF-Token'] = csrfToken;
     return fetch(url, options).then(function (response) {
       return response.json().catch(function () { return {}; }).then(function (body) {
+        reloadIfDeployed(body.build);
         if (!response.ok) {
           const error = new Error(body.detail || 'Something went wrong. Try again.');
           error.status = response.status;
@@ -65,6 +66,23 @@
         return body;
       });
     });
+  }
+
+  /** A tab left open across a deploy runs the old script, which can't render
+      what the new server sends. Reload once the caller has updated the URL.
+      During a rolling deploy old and new pods answer side by side, so each
+      build triggers at most one reload per tab. */
+  let reloading = false;
+  function reloadIfDeployed(build) {
+    if (reloading || !build || !initial.build || build === initial.build) return;
+    try {
+      if (sessionStorage.getItem('dashboard-reloaded-for') === build) return;
+      sessionStorage.setItem('dashboard-reloaded-for', build);
+    } catch (error) {
+      return;
+    }
+    reloading = true;
+    window.setTimeout(function () { location.reload(); }, 0);
   }
 
   function newKey() {
