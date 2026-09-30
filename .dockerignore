@@ -35,8 +35,38 @@ database_backup/
 *.db-journal
 *.db-wal
 *.db-shm
+*.sqlite-*
+*.sqlite3-*
 *.dump
 *.pgdump
+*.backup
+# Mirrors the backup/dump name rule in scripts/check_no_data_exports.py.
+**/*backup*.json
+**/*backup*.jsonl
+**/*backup*.ndjson
+**/*backup*.csv
+**/*backup*.tsv
+**/*backup*.sql
+**/*backup*.gz
+**/*backup*.zip
+**/*backup*.tar
+**/*backup*.tgz
+**/*backup*.bz2
+**/*backup*.xz
+**/*backup*.zst
+**/*dump*.json
+**/*dump*.jsonl
+**/*dump*.ndjson
+**/*dump*.csv
+**/*dump*.tsv
+**/*dump*.sql
+**/*dump*.gz
+**/*dump*.zip
+**/*dump*.tar
+**/*dump*.tgz
+**/*dump*.bz2
+**/*dump*.xz
+**/*dump*.zst
 
 # OS
 .DS_Store

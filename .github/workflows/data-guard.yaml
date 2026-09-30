@@ -33,5 +33,10 @@ jobs:
           if [ -n "$BASE" ] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
             python3 scripts/check_no_data_exports.py --range "$BASE..$HEAD"
           else
-            python3 scripts/check_no_data_exports.py
+            # A newly created branch has no "before": check every commit not
+            # already on another branch of the remote. With no other branch this
+            # scans all history, which still holds old exports, and fails loudly.
+            mapfile -t others < <(git for-each-ref --format='%(refname)' refs/remotes/origin \
+              | grep -vxF -e "refs/remotes/origin/${GITHUB_REF_NAME}" -e refs/remotes/origin/HEAD)
+            python3 scripts/check_no_data_exports.py --range "$HEAD" --not "${others[@]}"
           fi

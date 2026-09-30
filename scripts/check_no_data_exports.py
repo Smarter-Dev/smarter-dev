@@ -10,8 +10,10 @@ Two modes:
 * ``python scripts/check_no_data_exports.py`` checks every tracked file in
   the current tree.
 * ``--range BASE..HEAD`` also checks every file added or changed by each
-  commit in the range. A dump committed and then deleted inside a pull
-  request still lands in history on merge, so the tree alone is not enough.
+  commit in the range, merge commits included. A dump committed and then
+  deleted inside a pull request still lands in history on merge, so the tree
+  alone is not enough. ``--range`` takes any rev-list arguments, e.g.
+  ``--range HEAD --not --remotes``.
 
 Findings print the path and the rule only, never file contents.
 
@@ -133,13 +135,17 @@ def check_tree(rev: str = "HEAD") -> list[tuple[str, str]]:
     return violations(paths, lambda p: _blob_head(rev, p))
 
 
-def check_range(rev_range: str) -> list[tuple[str, str]]:
+def check_range(*revs: str) -> list[tuple[str, str]]:
     found = []
-    for commit in _git("rev-list", "--no-merges", rev_range).decode().split():
-        paths = _split_z(
-            _git(
-                "diff-tree", "--root", "--no-commit-id", "-r", "-z",
-                "--name-only", "--diff-filter=ACMRT", commit,
+    for commit in _git("rev-list", *revs, "--").decode().split():
+        # -m diffs a merge against each parent, so a file introduced while
+        # resolving a merge is seen; duplicates across parents are dropped.
+        paths = dict.fromkeys(
+            _split_z(
+                _git(
+                    "diff-tree", "-m", "--root", "--no-commit-id", "-r", "-z",
+                    "--name-only", "--diff-filter=ACMRT", commit,
+                )
             )
         )
         for path, rule in violations(paths, lambda p: _blob_head(commit, p)):
@@ -151,14 +157,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument(
         "--range",
-        dest="rev_range",
-        help="also check every commit in BASE..HEAD",
+        dest="revs",
+        nargs=argparse.REMAINDER,
+        help="also check every commit rev-list selects, e.g. BASE..HEAD",
     )
     args = parser.parse_args(argv)
 
     found = check_tree()
-    if args.rev_range:
-        found += check_range(args.rev_range)
+    if args.revs:
+        found += check_range(*args.revs)
 
     if not found:
         print("No database files or dumps tracked.")
