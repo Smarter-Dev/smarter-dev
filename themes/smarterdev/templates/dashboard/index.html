@@ -2,22 +2,29 @@
 {% block page_type %}dashboard{% endblock %}
 {% block page_title %}{% if dashboard_state.search %}{{ dashboard_state.search.request }}{% else %}Dashboard{% endif %}{% endblock %}
 {% block page_css %}<link rel="stylesheet" href="{{ theme_url('css/pages/user-dashboard.css') }}">{% endblock %}
+{% block head %}{% if dashboard_state.link %}<link rel="search" type="application/opensearchdescription+xml" title="Smarter Dev" href="{{ dashboard_state.link.opensearch }}">{% endif %}{% endblock %}
 {% block content %}
 {# dashboard.js renders every view from this state and keeps it current from the
    API and the notification stream; the markup below is only the shell. #}
 <script type="application/json" id="dashboard-state">{{ dashboard_state|tojson }}</script>
 <div data-dashboard-csrf hidden>{{ csrf_field() }}</div>
-<div class="ud-shell" data-product data-dashboard>
+<div class="ud-shell{% if dashboard_state.anonymous %} is-anonymous{% endif %}" data-product data-dashboard>
+  {% if not dashboard_state.anonymous %}
   <aside class="ud-rail" aria-label="Dashboard">
     <p class="ud-rail-label">Tools</p>
-    <a class="ud-rail-tool" href="/dashboard" data-dashboard-link aria-current="page">
+    <a class="ud-rail-tool" href="/dashboard" data-dashboard-link data-tool="search" aria-current="page">
       <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4.5 4.5"/></svg>
       Web search
+    </a>
+    <a class="ud-rail-tool" href="/dashboard/browser" data-dashboard-link data-tool="browser">
+      <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="2.5" y="3.5" width="15" height="13" rx="1.5"/><path d="M2.5 7.5h15M5.5 5.5h.01M8 5.5h.01"/></svg>
+      Browser search
     </a>
     <p class="ud-rail-label">Recent searches</p>
     <ol class="ud-recent" data-recent></ol>
     <p class="ud-recent-empty" data-recent-empty hidden>Searches you run show up here.</p>
   </aside>
+  {% endif %}
   <div class="ud-stage" data-stage aria-live="polite"></div>
 </div>
 
@@ -42,6 +49,7 @@
       <button type="button" class="ud-example">Is there a big tech conference this week?</button>
       <button type="button" class="ud-example">How do I undo a commit I already pushed?</button>
     </div>
+    <a class="ud-home-link" href="/dashboard/browser" data-dashboard-link>Search from your browser's address bar →</a>
     <section class="ud-home-recent" data-home-recent hidden>
       <h2 class="ud-section-title">Recent searches</h2>
       <ol class="ud-recent" data-recent></ol>
@@ -52,10 +60,11 @@
 <template id="ud-search">
   <section class="ud-view ud-search" data-view="search">
     <header class="ud-search-head">
-      <a class="ud-back" href="/dashboard" data-dashboard-link>
+      <a class="ud-back" href="/dashboard" data-dashboard-link data-back>
         <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M10 3 5 8l5 5"/></svg>
         New search
       </a>
+      <p class="ud-unsaved" data-unsaved hidden>This search isn't saved and disappears in 30 minutes. <a data-login>Log in</a> to keep your searches and skip the limit of 2 a minute.</p>
       <h1 class="ud-request" data-request-text></h1>
       <p class="ud-status" data-status><span class="ud-pulse" aria-hidden="true"></span><span data-status-text></span><span class="ud-elapsed" data-elapsed></span></p>
     </header>
@@ -111,6 +120,54 @@
         <div class="ud-collapse" data-more-wrap><ol class="ud-result-list is-quiet" data-more-list></ol></div>
       </div>
     </section>
+  </section>
+</template>
+
+<template id="ud-browser">
+  <section class="ud-view ud-browser" data-view="browser">
+    <header class="ud-browser-head">
+      <a class="ud-back" href="/dashboard" data-dashboard-link>
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M10 3 5 8l5 5"/></svg>
+        Web search
+      </a>
+      <h1 class="ud-title">Search from your browser's address bar</h1>
+      <p class="ud-lede">Add your search link to your browser as a search engine. Type a request in the address bar and Luna, Brave and Jev take it from there.</p>
+    </header>
+
+    <div class="ud-link-empty" data-link-empty hidden>
+      <button type="button" class="p-btn is-primary" data-link-create>Create my search link</button>
+    </div>
+
+    <div class="ud-link" data-link-panel hidden>
+      <label class="ud-field-label" for="ud-link-url">Your search link</label>
+      <div class="ud-link-row">
+        <input id="ud-link-url" class="ud-link-url" type="text" readonly data-link-url spellcheck="false">
+        <button type="button" class="p-btn" data-link-copy>Copy</button>
+      </div>
+      <p class="ud-link-note">It's yours alone, so keep it private. It doesn't sign anyone in: searches from it are saved to your account when you're logged in on that browser, and otherwise run unsaved, 2 a minute.</p>
+
+      <label class="ud-toggle">
+        <input type="checkbox" data-link-open>
+        <span class="ud-toggle-text">
+          <span class="ud-toggle-title">Open web addresses directly</span>
+          <span class="ud-toggle-detail">When what you type is a web address, like <code>getbuild.ing</code> or <code>smarter.dev/dashboard</code>, Jev sends you straight there instead of searching. This works while you're logged in.</span>
+        </span>
+      </label>
+
+      <h2 class="ud-section-title">Add it to your browser</h2>
+      <ol class="ud-setup">
+        <li><strong>Chrome, Edge, Brave or Arc:</strong> open Settings, then Search engine, then Manage search engines. Next to Site search, choose Add. Name it Smarter Dev, give it a shortcut such as <code>sd</code>, paste your link as the URL, then make it the default if you like.</li>
+        <li><strong>Firefox:</strong> with this page open, click the address bar, then the search icon at its left end, and choose Add “Smarter Dev”. Then pick it as the default under Settings, Search.</li>
+        <li><strong>Safari</strong> can't add search engines.</li>
+      </ol>
+
+      <div class="ud-link-actions">
+        <button type="button" class="p-btn" data-link-rotate>Make a new link</button>
+        <button type="button" class="p-btn" data-link-delete>Delete the link</button>
+      </div>
+      <p class="ud-link-status" data-link-status role="status"></p>
+    </div>
+    <p class="ud-error" data-error role="alert" hidden></p>
   </section>
 </template>
 {% endblock %}
