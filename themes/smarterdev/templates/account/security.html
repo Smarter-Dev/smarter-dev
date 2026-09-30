@@ -47,7 +47,11 @@
 
 <div class="account-card">
     <h2 style="font-family:var(--heading);color:var(--white);font-size:.95rem;letter-spacing:.06em;margin:0 0 .5rem;">Linked sign-in providers</h2>
+    {% if sign_in_methods | length == 1 %}
+    <p class="account-meta">Sign-in is {{ sign_in_methods[0] | capitalize }} only for now. Other linked providers stay on your account but cannot be used to sign in.</p>
+    {% else %}
     <p class="account-meta">Sign in with any of these to reach the same account. To link another, just sign in with it using the same verified email.</p>
+    {% endif %}
     {% if linked_accounts %}
     <div class="sec-list">
         {% for acct in linked_accounts %}
@@ -57,6 +61,7 @@
                 <div class="sec-item-meta">
                     {% if acct.provider_email %}<code>{{ acct.provider_email }}</code>{% endif %}
                     {% if acct.created_at %} • linked {{ acct.created_at.strftime('%Y-%m-%d') }}{% endif %}
+                    {% if acct.provider not in sign_in_methods %} • sign-in off for now{% endif %}
                 </div>
             </div>
         </div>
@@ -69,7 +74,11 @@
 
 <div class="account-card">
     <h2 style="font-family:var(--heading);color:var(--white);font-size:.95rem;letter-spacing:.06em;margin:0 0 .5rem;">Passkeys</h2>
+    {% if passkey_sign_in %}
     <p class="account-meta">Sign in with Face ID, Touch ID, Windows Hello, or a security key — no provider redirect needed.</p>
+    {% else %}
+    <p class="account-meta">Passkey sign-in is off for now. Passkeys you already added are kept and can be removed here.</p>
+    {% endif %}
 
     {% if passkey_available %}
     <form id="passkey-add-form" class="sec-add-form">
@@ -81,12 +90,12 @@
         <button type="submit" class="account-btn-primary">Add passkey</button>
     </form>
     <p id="passkey-add-status" class="sec-status"></p>
-    {% else %}
+    {% elif passkey_sign_in %}
     <p class="sec-empty">Passkeys aren't available in this environment.</p>
     {% endif %}
 
     {% if passkeys %}
-    {% if passkeys | length == 1 and not linked_accounts %}
+    {% if passkey_sign_in and passkeys | length == 1 and not linked_accounts %}
     <p class="sec-warning">This passkey is your only way to sign in. Add another method before removing it or you may lock yourself out.</p>
     {% endif %}
     <div class="sec-list">
