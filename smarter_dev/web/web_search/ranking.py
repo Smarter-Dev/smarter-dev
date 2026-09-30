@@ -1,8 +1,9 @@
 """Jev, TypeSafe's classifier, ranks search results against the request.
 
 One call judges every result: its relevance on a 0-3 rubric, whose unrounded
-score orders the results, whether it is a trustworthy source, and which one
-result would help most. The wording is the search eval's judge prompt v7b
+score orders the results, whether it is a trustworthy source, whether it is a
+local page for a place the request doesn't name, and which one result would
+help most. The wording is the search eval's judge prompt v7b
 (``scripts/search_query_eval/judge_prompts/v7b.yaml``); Jev sees only each
 result's domain and snippet.
 """
@@ -26,6 +27,9 @@ RANK_MODEL = os.getenv("WEB_SEARCH_RANK_MODEL", "jev-1.13.0")
 # pages that answer part of the request.
 RELEVANT_FROM = 0.7
 BOOLEAN_THRESHOLD = 0.5
+# A local page the REQUEST didn't ask for (a Tampa events list for "big tech
+# conferences this week") drops a whole rubric level and is never the top pick.
+LOCAL_PENALTY = 1.0
 TIMEOUT_SECONDS = 60
 # Jev list price; output tokens are free.
 INPUT_PRICE_PER_MILLION_USD = 0.042
@@ -52,6 +56,10 @@ LEVELS = (
 )
 BEST_QUESTION = "Which RESULT would help the user most with the REQUEST?"
 QUALITY_QUESTION = "Is {where} a trustworthy, substantive source for this topic?"
+LOCAL_QUESTION = (
+    "Is {where} a local listing, calendar, news or community page meant for people "
+    "in one city, state or region that the REQUEST does not name?"
+)
 
 
 def guide(today=None) -> str:
@@ -97,6 +105,10 @@ def judgment_model(results: list[dict]) -> type[BaseModel]:
             bool,
             Field(description=QUALITY_QUESTION.format(where=where)),
         )
+        fields[f"result_{n}_local"] = (
+            bool,
+            Field(description=LOCAL_QUESTION.format(where=where)),
+        )
     return create_model("ResultJudgments", __base__=_Judgments, **fields)
 
 
@@ -111,11 +123,49 @@ def build_model():
     return TypeSafeModel(RANK_MODEL, provider=TypeSafeProvider(http_client=http_client))
 
 
+def _best_index(verdicts: dict, judgments: list[dict]) -> int:
+    """Jev's pick, unless it is local: then the non-local result Jev gave the
+    most probability. When every result is local, Jev's pick stands."""
+    picked = int(verdicts["best"].value.strip("RESULT []")) - 1
+    if not judgments[picked]["local"]:
+        return picked
+    others = [n for n, judged in enumerate(judgments) if not judged["local"]]
+    if not others:
+        return picked
+    return max(others, key=lambda n: (judgments[n]["best_probability"], judgments[n]["score"]))
+
+
+def judge(verdicts: dict, details: dict, count: int) -> list[dict]:
+    """Judgments from Jev's answers and its unrounded scores and probabilities."""
+    scores = details.get("scores") or {}
+    best_probabilities = (details.get("probabilities") or {}).get("best") or {}
+    judgments = []
+    for n in range(1, count + 1):
+        level = verdicts[f"result_{n}_relevance"]
+        local = verdicts[f"result_{n}_local"]
+        score = float(scores.get(f"result_{n}_relevance", level))
+        if local:
+            score = max(0.0, score - LOCAL_PENALTY)
+        judgments.append(
+            {
+                "score": round(score, 3),
+                "level": level,
+                "relevant": score >= RELEVANT_FROM,
+                "quality": verdicts[f"result_{n}_quality"],
+                "local": local,
+                "best_probability": round(float(best_probabilities.get(f"RESULT [{n}]", 0.0)), 3),
+                "best": False,
+            }
+        )
+    judgments[_best_index(verdicts, judgments)]["best"] = True
+    return judgments
+
+
 async def rank(request: str, results: list[dict]) -> tuple[list[dict], dict]:
     """Jev's judgment of each result, in the order given, and the call's usage.
 
-    Each judgment is ``{"score", "level", "relevant", "quality", "best_probability"}``;
-    exactly one result also has ``"best": True``."""
+    Each judgment is ``{"score", "level", "relevant", "quality", "local",
+    "best_probability", "best"}``; exactly one has ``"best": True``."""
     agent = Agent(build_model(), output_type=judgment_model(results), retries=0)
     run = await agent.run(
         material(request, results),
@@ -125,25 +175,7 @@ async def rank(request: str, results: list[dict]) -> tuple[list[dict], dict]:
             "typesafe_boolean_threshold": BOOLEAN_THRESHOLD,
         },
     )
-    verdicts = run.output.model_dump()
-    details = run.response.provider_details or {}
-    scores = details.get("scores") or {}
-    best_probabilities = (details.get("probabilities") or {}).get("best") or {}
-    best = int(verdicts["best"].value.strip("RESULT []"))
-    judgments = []
-    for n in range(1, len(results) + 1):
-        level = verdicts[f"result_{n}_relevance"]
-        score = float(scores.get(f"result_{n}_relevance", level))
-        judgments.append(
-            {
-                "score": round(score, 3),
-                "level": level,
-                "relevant": score >= RELEVANT_FROM,
-                "quality": verdicts[f"result_{n}_quality"],
-                "best_probability": round(float(best_probabilities.get(f"RESULT [{n}]", 0.0)), 3),
-                "best": n == best,
-            }
-        )
+    judgments = judge(run.output.model_dump(), run.response.provider_details or {}, len(results))
     usage = run.usage() if callable(run.usage) else run.usage
     input_tokens = usage.input_tokens or 0
     return judgments, {

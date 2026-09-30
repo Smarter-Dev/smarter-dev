@@ -83,9 +83,26 @@
           <p class="ud-step-detail" data-step-detail></p>
         </div>
       </li>
+      <li class="ud-step" data-step="answering" hidden>
+        <span class="ud-step-mark" aria-hidden="true"></span>
+        <div class="ud-step-body">
+          <p class="ud-step-title">Answer</p>
+          <p class="ud-step-detail" data-step-detail></p>
+        </div>
+      </li>
     </ol>
 
     <p class="ud-error" data-error role="alert" hidden></p>
+
+    <section class="ud-answer" data-answer aria-label="Answer" hidden>
+      <header class="ud-answer-head">
+        <p class="ud-answer-label">Answer</p>
+        <ol class="ud-reads" data-reads></ol>
+      </header>
+      <div class="ud-answer-skeleton" data-answer-skeleton aria-hidden="true"><span></span><span></span><span></span></div>
+      <div class="ud-answer-body" data-answer-body></div>
+      <p class="ud-answer-note" data-answer-note hidden></p>
+    </section>
 
     <section class="ud-results" data-results hidden>
       <ol class="ud-result-list" data-result-list></ol>
