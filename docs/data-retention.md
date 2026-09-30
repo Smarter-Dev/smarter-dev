@@ -236,3 +236,15 @@ These snapshots have a separate fixed 48-hour lifecycle. The public controller
 rejects them as soon as `expires_at` is reached, and the same hourly retention
 job then hard-deletes the expired rows. Only a SHA-256 hash of the random URL
 token is stored. Preview pages are read-only, unlisted, and marked `noindex`.
+
+## Security logs
+
+`security_logs` records one row per bytes API call and per authentication or
+admin event: IP address, user agent, request path and query, and whatever
+Discord ids those carry. Rows are kept for 90 days and then deleted outright by
+the same hourly retention job (`smarter_dev/web/security_log_retention.py`); a
+security log with its identifying columns blanked would have no audit value
+left, so there is nothing to scrub and keep. The delete runs in batches of
+1,000, each committed on its own, so the first run's backlog is never one long
+transaction and a run that dies partway keeps the batches it finished. Nothing
+reads further back than 90 days: rate limiting counts the last 15 minutes.
