@@ -21,6 +21,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 import unicodedata
@@ -60,7 +61,7 @@ REASONING_LEVELS = ["none", "minimal", "low", "medium", "high", "xhigh"]
 OUTPUT_MODES = {"tool": ToolOutput, "native": NativeOutput}
 DEFAULT_OUTPUT_MODE = "tool"
 
-DEFAULT_PROMPT = "v4"
+DEFAULT_PROMPT = "v6"
 # Proxy model name -> (genai-prices provider, model ref) for models whose proxy
 # name doesn't match the price table. openai/* names resolve on their own.
 PRICE_REFS = {"glm-5.3-flash": ("openrouter", "z-ai/glm-5.3-flash")}
@@ -109,6 +110,31 @@ def reject_stray_characters(ctx: RunContext[None], output: SearchQueries) -> Sea
     return output
 
 
+# site: then whatever follows it up to the next space; empty means "site: x".
+SITE_OPERATOR = re.compile(r"site:(\S*)", re.IGNORECASE)
+
+
+def malformed_site(query: str) -> str | None:
+    """Why a query's site: operator won't work, or None if it's fine.
+
+    Search engines ignore `site: example.com` (the space detaches the domain)
+    and Luna sometimes writes `site:example.com/docs`, a path v6 forbids."""
+    for match in SITE_OPERATOR.finditer(query):
+        target = match.group(1)
+        if not target:
+            return "has a space after site:, so the search engine ignores it"
+        if "/" in target:
+            return f"puts a path in site:{target}; use the bare domain"
+    return None
+
+
+def reject_malformed_site(ctx: RunContext[None], output: SearchQueries) -> SearchQueries:
+    for item in output.queries:
+        if problem := malformed_site(item.query):
+            raise ModelRetry(f"The query {item.query!r} {problem}. Rewrite it.")
+    return output
+
+
 def system_prompt(name: str) -> str:
     """Render prompts/<name>.md; {today} becomes today's date."""
     template = (HERE / "prompts" / f"{name}.md").read_text().strip()
@@ -146,6 +172,7 @@ def build_agent(
         retries=OUTPUT_RETRIES,
     )
     agent.output_validator(reject_stray_characters)
+    agent.output_validator(reject_malformed_site)
     return agent
 
 
