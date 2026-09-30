@@ -126,6 +126,9 @@ PROVIDER_LABELS: dict[str, str] = {
     # on it, so any Laguna line would have raised.
     "openrouter": "OpenRouter",
     "opencode_zen": "OpenCode Zen",
+    # The dashboard's web search: Jev ranks results, Brave runs the queries.
+    "typesafe": "TypeSafe",
+    "brave": "Brave",
     "unknown": "Unknown",
 }
 

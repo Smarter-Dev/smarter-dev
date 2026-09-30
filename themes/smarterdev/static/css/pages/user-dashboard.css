@@ -1,0 +1,695 @@
+/* ══════════════════════════════════════════════════════
+   User dashboard (/dashboard) — product surface
+
+   A rail of tools and recent searches beside one stage. dashboard.js mounts
+   each view into the stage; the leaving and entering views share one grid
+   cell so a swap cross-fades without the page jumping. Motion here follows
+   product rule 4: only what is actually happening moves. A search's steps,
+   its queries and its results animate as the worker reports them.
+   ══════════════════════════════════════════════════════ */
+
+.ud-shell {
+  --ud-rail: 264px;
+  --ud-ease: cubic-bezier(.2, .7, .2, 1);
+  display: grid;
+  grid-template-columns: var(--ud-rail) minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ── Rail ─────────────────────────────────────────────── */
+
+.ud-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 24px 14px;
+  overflow-y: auto;
+  background: var(--p-recess);
+  border-right: 1px solid var(--p-line);
+}
+
+.ud-rail-label {
+  margin: 14px 10px 6px;
+  font-family: var(--heading);
+  font-size: .5rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--p-dim);
+}
+.ud-rail-label:first-child { margin-top: 0 }
+
+.ud-rail-tool {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--p-tap);
+  padding: 0 10px;
+  font-size: .88rem;
+  color: var(--p-muted);
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: color .18s, background .18s, border-color .18s;
+}
+.ud-rail-tool svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.ud-rail-tool:hover { color: var(--p-text); background: var(--p-surface) }
+.ud-rail-tool[aria-current="page"] {
+  color: var(--p-text);
+  background: var(--p-surface);
+  border-color: var(--p-line-strong);
+}
+
+.ud-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ud-recent-row.is-new { animation: ud-rise .36s var(--ud-ease) both }
+
+.ud-recent-link {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px 8px 12px;
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  transition: background .18s, border-color .18s;
+}
+.ud-recent-link:hover { background: var(--p-surface) }
+.ud-recent-link[aria-current="page"] {
+  background: var(--p-surface);
+  border-left-color: var(--p-accent);
+}
+.ud-recent-text {
+  overflow: hidden;
+  font-size: .84rem;
+  line-height: 1.35;
+  color: var(--p-body);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.ud-recent-link[aria-current="page"] .ud-recent-text { color: var(--p-text) }
+.ud-recent-meta {
+  font-family: var(--mono);
+  font-size: .68rem;
+  color: var(--p-dim);
+  font-variant-numeric: tabular-nums;
+}
+.ud-recent-link.is-active .ud-recent-meta { color: var(--p-accent-text) }
+.ud-recent-link.is-failed .ud-recent-meta { color: var(--p-bad) }
+
+.ud-recent-empty {
+  margin: 4px 10px;
+  font-size: .8rem;
+  color: var(--p-dim);
+}
+
+/* ── Stage and view swaps ─────────────────────────────── */
+
+.ud-stage {
+  display: grid;
+  /* An auto column would grow to the widest query or snippet. */
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  min-width: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.ud-view {
+  grid-area: 1 / 1;
+  width: 100%;
+  max-width: var(--p-measure);
+  margin: 0 auto;
+  padding: clamp(28px, 6vh, 64px) var(--p-pad) 80px;
+  box-sizing: border-box;
+}
+
+.ud-view.is-entering { animation: ud-enter .34s var(--ud-ease) .12s both }
+.ud-view.is-leaving { animation: ud-leave .16s ease-in both; pointer-events: none }
+
+/* framework.css pads every <section> for marketing pages. */
+.ud-results,
+.ud-home-recent { padding: 0 }
+
+@keyframes ud-enter {
+  from { opacity: 0; transform: translateY(14px) }
+}
+@keyframes ud-leave {
+  to { opacity: 0; transform: translateY(-10px) }
+}
+@keyframes ud-rise {
+  from { opacity: 0; transform: translateY(8px) }
+}
+@keyframes ud-pop {
+  from { opacity: 0; transform: scale(.85) }
+}
+@keyframes ud-spin {
+  to { transform: rotate(360deg) }
+}
+@keyframes ud-pulse {
+  0%, 100% { opacity: 1 }
+  50% { opacity: .35 }
+}
+@keyframes ud-sweep {
+  from { background-position: 200% 0 }
+  to { background-position: -200% 0 }
+}
+
+/* ── Home ─────────────────────────────────────────────── */
+
+.ud-home { padding-top: clamp(40px, 14vh, 140px) }
+
+.ud-kicker {
+  margin: 0 0 10px;
+  font-family: var(--mono);
+  font-size: .78rem;
+  color: var(--p-accent-text);
+}
+
+.ud-title {
+  margin: 0;
+  font-family: var(--heading);
+  font-weight: 400;
+  font-size: clamp(1.3rem, 3vw, 1.8rem);
+  letter-spacing: .04em;
+  line-height: 1.25;
+  color: var(--p-text);
+}
+
+.ud-lede {
+  margin: 12px 0 28px;
+  max-width: 36rem;
+  font-size: .95rem;
+  line-height: 1.65;
+  color: var(--p-body);
+}
+
+.ud-composer {
+  display: flex;
+  flex-direction: column;
+  background: var(--p-surface);
+  border: 1px solid var(--p-line-strong);
+  transition: border-color .18s;
+}
+.ud-composer:focus-within { border-color: var(--p-line-focus) }
+
+.ud-composer textarea {
+  width: 100%;
+  min-height: 3.4em;
+  box-sizing: border-box;
+  padding: 16px 18px 6px;
+  resize: none;
+  font-family: var(--body);
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--p-text);
+  background: transparent;
+  border: 0;
+  outline: none;
+}
+.ud-composer textarea::placeholder { color: var(--p-dim) }
+/* The composer's own border shows focus; the global field ring would draw a
+   second box inside it. */
+.ud-composer textarea:focus { outline: none; border: 0; box-shadow: none }
+
+.ud-composer-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px 10px 18px;
+}
+.ud-composer-hint {
+  font-family: var(--mono);
+  font-size: .68rem;
+  color: var(--p-dim);
+}
+
+.ud-form-error {
+  margin: 0;
+  padding: 10px 18px;
+  font-size: .85rem;
+  color: var(--p-bad);
+  background: var(--p-bad-wash);
+  border-top: 1px solid var(--p-bad-line);
+}
+
+.ud-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.ud-example {
+  padding: 7px 12px;
+  font-family: var(--body);
+  font-size: .8rem;
+  color: var(--p-muted);
+  background: transparent;
+  border: 1px solid var(--p-line-strong);
+  cursor: pointer;
+  transition: color .18s, border-color .18s, background .18s;
+}
+.ud-example:hover {
+  color: var(--p-text);
+  border-color: var(--p-line-focus);
+  background: var(--p-surface);
+}
+
+.ud-home-recent { display: none; margin-top: 44px }
+.ud-section-title {
+  margin: 0 0 10px;
+  font-family: var(--heading);
+  font-weight: 400;
+  font-size: .55rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--p-dim);
+}
+
+/* ── A search ─────────────────────────────────────────── */
+
+.ud-search-head { margin-bottom: 28px }
+
+.ud-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 18px;
+  font-size: .82rem;
+  color: var(--p-muted);
+  text-decoration: none;
+  transition: color .18s;
+}
+.ud-back svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform .18s;
+}
+.ud-back:hover { color: var(--p-text) }
+.ud-back:hover svg { transform: translateX(-2px) }
+
+.ud-request {
+  margin: 0;
+  font-family: var(--body);
+  font-weight: 600;
+  font-size: clamp(1.15rem, 2.6vw, 1.5rem);
+  line-height: 1.35;
+  color: var(--p-text);
+  overflow-wrap: anywhere;
+}
+
+.ud-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+  font-size: .82rem;
+  color: var(--p-muted);
+}
+.ud-pulse {
+  display: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--p-accent);
+  animation: ud-pulse 1.4s ease-in-out infinite;
+}
+.ud-search:is([data-status="queued"], [data-status="planning"], [data-status="searching"], [data-status="ranking"]) .ud-pulse { display: inline-block }
+.ud-search[data-status="error"] .ud-status { color: var(--p-bad) }
+.ud-elapsed {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: .72rem;
+  color: var(--p-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.ud-search.is-loading .ud-pipeline { opacity: 0 }
+
+/* Pipeline: three steps on a rail of marks. */
+
+.ud-pipeline {
+  margin: 0 0 32px;
+  padding: 0;
+  list-style: none;
+  transition: opacity .2s;
+}
+
+.ud-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 14px;
+  padding-bottom: 18px;
+}
+/* The rule joining one mark to the next fills in once its step is done. */
+.ud-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 24px;
+  bottom: 2px;
+  width: 2px;
+  background: linear-gradient(var(--p-accent-line), var(--p-accent-line)) top / 100% 0 no-repeat, var(--p-line);
+  transition: background-size .5s var(--ud-ease);
+}
+.ud-step[data-state="done"]:not(:last-child)::before { background-size: 100% 100%, auto }
+
+.ud-step-mark {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid var(--p-line-strong);
+  transition: border-color .25s, background .25s;
+}
+.ud-step:is([data-state="active"], [data-state="waiting"]) .ud-step-mark {
+  border-color: var(--p-line-strong);
+  border-top-color: var(--p-accent);
+  animation: ud-spin .9s linear infinite;
+}
+.ud-step[data-state="waiting"] .ud-step-mark { border-top-color: var(--p-muted) }
+.ud-step[data-state="done"] .ud-step-mark {
+  background: var(--p-accent);
+  border-color: var(--p-accent);
+}
+.ud-step[data-state="done"] .ud-step-mark::after {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 5px;
+  height: 10px;
+  border: solid #04121a;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+  animation: ud-pop .25s var(--ud-ease) both;
+}
+.ud-step[data-state="failed"] .ud-step-mark {
+  background: var(--p-bad-wash);
+  border-color: var(--p-bad);
+}
+
+.ud-step-title {
+  margin: 1px 0 2px;
+  font-family: var(--heading);
+  font-size: .6rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--p-dim);
+  transition: color .25s;
+}
+.ud-step:is([data-state="active"], [data-state="done"]) .ud-step-title { color: var(--p-text) }
+.ud-step[data-state="failed"] .ud-step-title { color: var(--p-bad) }
+
+.ud-step-detail {
+  margin: 0;
+  font-size: .85rem;
+  color: var(--p-muted);
+}
+.ud-step[data-state="active"] .ud-step-detail { color: var(--p-body) }
+
+/* Queries. */
+
+.ud-collapse {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows .4s var(--ud-ease);
+}
+.ud-collapse > * { min-height: 0; overflow: hidden }
+.ud-collapse.is-closed { grid-template-rows: 0fr }
+.ud-collapse.is-closed .ud-queries { opacity: 0; transition: opacity .2s }
+.ud-queries { transition: opacity .3s .1s }
+
+.ud-step-toggle {
+  margin-left: 10px;
+  padding: 0;
+  font-family: var(--body);
+  font-size: .8rem;
+  color: var(--p-accent-text);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.ud-step-toggle:hover { color: var(--p-accent); text-decoration: underline }
+
+.ud-queries {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ud-query {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  padding: 9px 12px;
+  background: var(--p-surface);
+  border: 1px solid var(--p-line);
+  animation: ud-rise .4s var(--ud-ease) both;
+  animation-delay: calc(var(--i, 0) * 70ms);
+  transition: border-color .25s, opacity .25s;
+}
+.ud-query[data-state="pending"] { opacity: .55 }
+.ud-query[data-state="searching"] { border-color: var(--p-accent-line) }
+
+.ud-query-mark {
+  width: 10px;
+  height: 10px;
+  margin-top: 4px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 1.5px solid var(--p-line-focus);
+  transition: background .25s, border-color .25s;
+}
+.ud-query[data-state="searching"] .ud-query-mark {
+  border-color: var(--p-line-strong);
+  border-top-color: var(--p-accent);
+  animation: ud-spin .8s linear infinite;
+}
+.ud-query[data-state="done"] .ud-query-mark { background: var(--p-accent); border-color: var(--p-accent) }
+.ud-query[data-state="failed"] .ud-query-mark { background: var(--p-bad); border-color: var(--p-bad) }
+
+.ud-query-body { display: flex; flex-direction: column; gap: 3px; min-width: 0 }
+.ud-query-text {
+  font-family: var(--mono);
+  font-size: .84rem;
+  color: var(--p-text);
+  overflow-wrap: anywhere;
+}
+.ud-query-angle { font-size: .78rem; color: var(--p-dim) }
+.ud-query-domains { display: flex; flex-wrap: wrap; gap: 4px }
+.ud-query-domains:empty { display: none }
+.ud-domain {
+  padding: 1px 6px;
+  font-family: var(--mono);
+  font-size: .66rem;
+  color: var(--p-muted);
+  background: var(--p-surface-2);
+  border: 1px solid var(--p-line);
+  animation: ud-pop .3s var(--ud-ease) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+
+.ud-query-count {
+  min-width: 1.6em;
+  font-family: var(--mono);
+  font-size: .75rem;
+  text-align: right;
+  color: var(--p-accent-text);
+  font-variant-numeric: tabular-nums;
+}
+.ud-query-count:not(:empty) { animation: ud-pop .3s var(--ud-ease) both }
+.ud-query[data-state="failed"] .ud-query-count { color: var(--p-bad) }
+
+.ud-error {
+  margin: 0 0 24px;
+  padding: 12px 14px;
+  font-size: .88rem;
+  color: var(--p-bad);
+  background: var(--p-bad-wash);
+  border: 1px solid var(--p-bad-line);
+  animation: ud-rise .3s var(--ud-ease) both;
+}
+
+/* ── Results ──────────────────────────────────────────── */
+
+.ud-results { position: relative }
+
+/* Before Jev has ranked them, results show in search order, quieter, under a
+   sweep that says the order is still being decided. */
+.ud-results.is-pending::before {
+  content: "";
+  position: absolute;
+  inset: -12px 0 auto;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--p-accent), transparent) 0 0 / 50% 100% no-repeat;
+  animation: ud-sweep 1.4s linear infinite;
+}
+.ud-results.is-pending .ud-result { opacity: .5 }
+
+.ud-result-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ud-result {
+  position: relative;
+  padding: 16px 0 16px 16px;
+  border-bottom: 1px solid var(--p-line);
+  transition: opacity .35s;
+}
+.ud-result.is-new {
+  animation: ud-rise .4s var(--ud-ease) both;
+  animation-delay: calc(var(--i, 0) * 35ms);
+}
+.ud-result::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 16px;
+  bottom: 16px;
+  width: 2px;
+  background: transparent;
+  transition: background .3s;
+}
+.ud-result.is-best::before { background: var(--p-accent) }
+
+.ud-result-link {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-decoration: none;
+}
+.ud-result-source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: .72rem;
+  color: var(--p-dim);
+}
+.ud-favicon { width: 14px; height: 14px; flex: none }
+.ud-result-domain { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.ud-result-age::before { content: "·"; margin-right: 8px }
+.ud-result-title {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--p-text);
+  transition: color .18s;
+}
+.ud-result-link:hover .ud-result-title { color: var(--p-accent-text) }
+
+.ud-result-snippet {
+  margin: 6px 0 0;
+  font-size: .88rem;
+  line-height: 1.6;
+  color: var(--p-body);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
+
+.ud-result-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 10px;
+}
+.ud-result-meta:empty { display: none }
+
+.ud-badge {
+  padding: 2px 7px;
+  font-size: .68rem;
+  font-weight: 500;
+  border: 1px solid var(--p-line-strong);
+  animation: ud-pop .3s var(--ud-ease) both;
+}
+.ud-badge.is-best { color: #04121a; background: var(--p-accent); border-color: var(--p-accent) }
+.ud-badge.is-trusted { color: var(--p-ok); border-color: rgba(62, 207, 142, .35) }
+
+.ud-meter {
+  position: relative;
+  width: 64px;
+  height: 4px;
+  background: var(--p-line-strong);
+  overflow: hidden;
+}
+.ud-meter::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--p-accent-text);
+  transform-origin: left;
+  transform: scaleX(var(--score, 0));
+  animation: ud-fill .6s var(--ud-ease) both;
+}
+@keyframes ud-fill {
+  from { transform: scaleX(0) }
+}
+
+.ud-found {
+  font-family: var(--mono);
+  font-size: .68rem;
+  color: var(--p-dim);
+}
+
+.ud-result-list.is-quiet .ud-result-title { font-weight: 500; color: var(--p-body) }
+.ud-result-list.is-quiet .ud-result-snippet { color: var(--p-muted) }
+
+.ud-more { margin-top: 20px }
+.ud-more [data-more-wrap] { grid-template-rows: 0fr }
+.ud-more [data-more-wrap].is-open { grid-template-rows: 1fr }
+.ud-more-toggle { margin-bottom: 8px }
+
+/* ── Narrow screens: the rail folds away and home lists recent searches ── */
+
+@media (max-width: 860px) {
+  .ud-shell { grid-template-columns: minmax(0, 1fr) }
+  .ud-rail { display: none }
+  .ud-home-recent:not([hidden]) { display: block }
+  .ud-composer-hint { display: none }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ud-shell *,
+  .ud-shell *::before,
+  .ud-shell *::after {
+    animation-duration: .01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
