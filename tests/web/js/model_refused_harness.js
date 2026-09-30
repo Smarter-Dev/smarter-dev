@@ -54,10 +54,39 @@ function bubble(role, text) {
   };
 }
 
+// Just enough of a <select> for the controls to be rebuilt for real.
+function select() {
+  var el = element();
+  el.options = [];
+  el.listeners = 0;
+  el.addEventListener = function () { el.listeners += 1; };
+  el.appendChild = function (option) { el.options.push(option); };
+  Object.defineProperty(el, 'textContent', {
+    get: function () { return ''; },
+    set: function () { el.options = []; },
+  });
+  Object.defineProperty(el, 'value', {
+    get: function () { return el.current || ''; },
+    set: function (value) {
+      el.current = el.options.some(function (o) { return o.value === value; }) ? value : '';
+    },
+  });
+  el.querySelectorAll = function () { return []; };
+  return el;
+}
+var modelSelect = select();
+var reasoningSelect = select();
+var settingsDisclosure = element({hidden: true});
+var controls = {
+  '[data-chat-model]': modelSelect,
+  '[data-chat-reasoning]': reasoningSelect,
+};
+
 var document = {
   addEventListener: function () {},
-  querySelectorAll: function () { return []; },
-  querySelector: function () { return null; },
+  createElement: function () { return {value: '', textContent: '', dataset: {}}; },
+  querySelectorAll: function (selector) { return controls[selector] ? [controls[selector]] : []; },
+  querySelector: function (selector) { return controls[selector] || null; },
 };
 
 var IDLE_HINT = 'shift+enter · newline';
@@ -69,9 +98,9 @@ var conversationId = 'c-1';
 var csrfToken = 't';
 var modelUnavailable = false;
 var catalog = null;
+var pendingChange = null;
 var pendingAttachments = [];
 var autoGrown = 0;
-var activations = [];
 
 function json(method, body) { return {method: method, body: JSON.stringify(body)}; }
 function setStatus() {}
@@ -80,15 +109,8 @@ function autoGrow() { autoGrown += 1; }
 function submitResources() { throw new Error('not in chat mode'); }
 function submissionKey() { return 'k'; }
 function createConversation() { throw new Error('the conversation exists'); }
-// The real one rebuilds the selects and ends by deriving availability from the
-// catalog it was given; only that last step matters here.
-function activateConversationControls(persistedModel, persistedReasoning) {
-  activations.push([persistedModel, persistedReasoning]);
-  setModelAvailability(
-    catalog.models.some(function (item) { return item.key === persistedModel; }),
-    persistedModel
-  );
-}
+function proposeModel() {}
+function syncModelLabel() {}
 
 var requests = [];
 var replies = [];
@@ -114,21 +136,35 @@ function submit(text) {
   if (sendMessage(input.value)) input.value = '';
 }
 
+function keys(el) { return el.options.map(function (o) { return o.value; }); }
+
 function reset() {
   thread.children = [];
   requests = [];
-  activations = [];
+  pendingChange = null;
   autoGrown = 0;
   input.value = '';
-  setModelAvailability(true, 'gpt-6-1-sol');
+  catalog = CATALOG_WITH;
+  activateConversationControls('gpt-6-1-sol', 'high');
   showError('');
 }
 
 var UNAVAILABLE = {status_code: 409, detail: 'The selected model is unavailable; choose a new model.', code: 'model_unavailable'};
-var CATALOG_WITHOUT = {models: [{key: 'gpt-6-luna'}]};
-var CATALOG_WITH = {models: [{key: 'gpt-6-luna'}, {key: 'gpt-6-1-sol'}]};
+function model(key, levels) {
+  return {key: key, label: key, cost_tier: '$', reasoning_levels: levels};
+}
+var LUNA = model('gpt-6-luna', ['low', 'high']);
+var SOL = model('gpt-6-1-sol', ['low', 'medium', 'high']);
+var GROK = model('grok-4-5', ['high']);
+var CATALOG_WITHOUT = {models: [LUNA, GROK]};
+var CATALOG_WITH = {models: [LUNA, SOL]};
 
 async function main() {
+  // The page loaded while the selection was available.
+  catalog = CATALOG_WITH;
+  activateConversationControls('gpt-6-1-sol', 'high');
+  check(!modelUnavailable && keys(modelSelect).join() === 'gpt-6-luna,gpt-6-1-sol', 'the page starts available');
+
   // A model disabled after the page loaded.
   reset();
   reply(409, UNAVAILABLE);
@@ -145,8 +181,15 @@ async function main() {
   check(thread.children.length === 0, 'the refused exchange leaves the thread');
   check(!errorEl.hidden && errorEl.textContent === UNAVAILABLE.detail, 'the refusal is said');
   check(requests.length === 2 && requests[1][1] === '/v2/api/chat/catalog', 'the catalog is reloaded');
-  check(activations.length === 1 && activations[0][0] === 'gpt-6-1-sol' && activations[0][1] === 'high',
-    'the controls are rebuilt on the stored selection');
+  check(keys(modelSelect).join() === 'gpt-6-luna,grok-4-5,gpt-6-1-sol',
+    'the select now offers the catalog, with the stored key last');
+  check(modelSelect.options[2].textContent === 'gpt-6-1-sol · unavailable (select a new model)'
+    && 'unavailable' in modelSelect.options[2].dataset, 'the stored key is marked unavailable, as after a reload');
+  check(modelSelect.value === 'gpt-6-1-sol', 'the select still shows the stored key');
+  check(keys(reasoningSelect).join() === '', 'reasoning falls back to the model default only');
+  check(reasoningSelect.disabled, 'reasoning is locked');
+  check(!modelSelect.disabled, 'the model select stays usable to recover');
+  check(!settingsDisclosure.hidden, 'the settings stay reachable');
   check(sendMessage('again') === false, 'a second send is stopped before the network');
   check(requests.length === 2, 'and makes no request');
 
@@ -157,8 +200,34 @@ async function main() {
   submit('First draft');
   input.value = 'Typed since';
   await settle();
-  check(input.value === 'Typed since', 'a newer draft wins over the returned one');
+  check(input.value === 'Typed since', 'a newer draft is not overwritten');
+  check(thread.children.length === 2 && thread.children[0].content.textContent === 'First draft',
+    'the refused words stay on the thread instead');
+  check(thread.children[1].content.textContent === UNAVAILABLE.detail, 'beside the refusal');
   check(modelUnavailable, 'the composer still locks');
+
+  // A question sent from the quote box is not a composer draft.
+  reset();
+  reply(409, UNAVAILABLE);
+  reply(200, CATALOG_WITHOUT);
+  check(sendMessage('> passage\n\nquestion', function () {}), 'the quoted send goes out');
+  await settle();
+  check(input.value === '', 'a quoted question is not poured into the composer');
+  check(thread.children.length === 2 && thread.children[0].content.textContent === '> passage\n\nquestion',
+    'it stays on the thread');
+  check(modelUnavailable, 'the composer locks');
+
+  // A change awaiting confirmation keeps its target showing.
+  reset();
+  modelSelect.value = 'gpt-6-luna';
+  pendingChange = {id: 'change-1'};
+  reply(409, UNAVAILABLE);
+  reply(200, CATALOG_WITHOUT);
+  submit('Mid-change');
+  await settle();
+  check(modelSelect.value === 'gpt-6-luna', 'the proposed model still shows under the open dialog');
+  check(modelSelect.dataset.original === 'gpt-6-1-sol', 'cancel still returns to the stored key');
+  check(modelSelect.listeners === 1 && reasoningSelect.listeners === 1, 'rebuilding binds no second listener');
 
   // Re-enabled between the refusal and the catalog read: the catalog decides.
   reset();

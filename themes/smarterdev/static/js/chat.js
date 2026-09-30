@@ -604,7 +604,13 @@
     setModelAvailability(false, shell.dataset.modelKey);
     return api('/v2/api/chat/catalog').then(function (data) {
       catalog = data;
+      // A change awaiting confirmation keeps its target showing in the select.
+      var select = document.querySelector('[data-chat-model]');
+      var proposed = pendingChange && select ? select.value : null;
       activateConversationControls(shell.dataset.modelKey, shell.dataset.reasoningLevel || '');
+      if (proposed && catalog.models.some(function (item) { return item.key === proposed; })) {
+        select.value = proposed;
+      }
     }).catch(function () {});
   }
 
@@ -2353,16 +2359,17 @@
       setStatus('');
       showError(error.message);
       if (isModelUnavailable(error)) {
-        // Nothing was sent: take the exchange back off the thread and return
-        // the draft, unless something new has been typed since.
-        user.remove();
-        assistant.remove();
-        if (input && !input.value.trim()) {
+        refreshModelAvailability();
+        // Nothing was sent. A composer draft goes back into an empty box and
+        // the exchange comes off the thread; anywhere else (a quoted question,
+        // text typed since) its bubble stays so the words are not lost.
+        if (!build && input && !input.value.trim()) {
+          user.remove();
+          assistant.remove();
           input.value = text;
           autoGrow();
+          return;
         }
-        refreshModelAvailability();
-        return;
       }
       assistant.querySelector('.chat-content').textContent = error.message;
       setBusy(false);

@@ -561,6 +561,8 @@ def test_an_unavailable_model_refusal_updates_an_open_page(tmp_path):
             "setBusy",
             "submitChat",
             "sendMessage",
+            "fillReasoning",
+            "activateConversationControls",
         )
     )
     harness = (Path(__file__).parent / "js" / "model_refused_harness.js").read_text()
