@@ -11,11 +11,13 @@ then the worker notifies the owner over Skrift's SSE stream after every stage.
 
 from __future__ import annotations
 
+import hashlib
 import time
 from collections import defaultdict
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
+from pathlib import Path
 from urllib.parse import urlencode
 from uuid import UUID
 
@@ -57,6 +59,29 @@ class SearchBody(Struct):
     # a second search.
     submission_key: str
 
+
+THEME_DIR = Path(__file__).resolve().parents[2] / "themes" / "smarterdev"
+CLIENT_FILES = (
+    "static/js/dashboard.js",
+    "static/css/pages/user-dashboard.css",
+    "templates/dashboard/index.html",
+)
+
+
+def _client_build() -> str:
+    """A fingerprint of the dashboard's page, script and styles. A tab open
+    across a deploy sees a new one in an API reply and reloads, since the old
+    script can't render what the new server sends."""
+    digest = hashlib.sha256()
+    for name in CLIENT_FILES:
+        try:
+            digest.update((THEME_DIR / name).read_bytes())
+        except OSError:
+            return ""
+    return digest.hexdigest()[:12]
+
+
+CLIENT_BUILD = _client_build()
 
 def _session_user_id(request: Request) -> UUID | None:
     raw = request.session.get(SESSION_USER_ID) if request.session else None
@@ -165,6 +190,7 @@ class DashboardController(Controller):
                     "search": search,
                     "event_type": EVENT_TYPE,
                     "max_request_chars": MAX_REQUEST_CHARS,
+                    "build": CLIENT_BUILD,
                 },
                 "seo_meta": {"robots": "noindex,nofollow", "description": "Your Smarter Dev dashboard"},
             },
@@ -183,14 +209,17 @@ class DashboardController(Controller):
     @get("/api/searches")
     async def list_searches(self, request: Request, db_session: AsyncSession) -> dict:
         user = await _active_user(request, db_session)
-        return {"searches": await _recent(db_session, user.id)}
+        return {"searches": await _recent(db_session, user.id), "build": CLIENT_BUILD}
 
     @get("/api/searches/{search_id:uuid}")
     async def get_search(
         self, request: Request, db_session: AsyncSession, search_id: UUID
     ) -> dict:
         user = await _active_user(request, db_session)
-        return {"search": snapshot(await _owned(db_session, user.id, search_id))}
+        return {
+            "search": snapshot(await _owned(db_session, user.id, search_id)),
+            "build": CLIENT_BUILD,
+        }
 
     @post("/api/searches", status_code=HTTP_201_CREATED)
     async def start_search(
@@ -206,7 +235,7 @@ class DashboardController(Controller):
             )
         )
         if existing is not None:
-            return {"search": snapshot(existing), "idempotent": True}
+            return {"search": snapshot(existing), "idempotent": True, "build": CLIENT_BUILD}
         text = _validate_request(data.request)
         await _enforce_limits(db_session, user.id)
         run = WebSearchRun(
@@ -235,4 +264,4 @@ class DashboardController(Controller):
             await dispatch_one(dispatch.id)
         except Exception:  # noqa: BLE001 - the outbox reconciler retries it
             pass
-        return {"search": snapshot(run)}
+        return {"search": snapshot(run), "build": CLIENT_BUILD}

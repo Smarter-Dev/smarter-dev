@@ -355,6 +355,18 @@ def test_submission_keys_must_look_like_keys():
             dashboard_controller._validate_submission_key(bad)
 
 
+def test_the_client_build_changes_with_the_dashboard_script(tmp_path, monkeypatch):
+    build = dashboard_controller.CLIENT_BUILD
+    assert len(build) == 12
+    for name in dashboard_controller.CLIENT_FILES:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_bytes((dashboard_controller.THEME_DIR / name).read_bytes())
+    monkeypatch.setattr(dashboard_controller, "THEME_DIR", tmp_path)
+    assert dashboard_controller._client_build() == build
+    (tmp_path / "static/js/dashboard.js").write_text("// next deploy")
+    assert dashboard_controller._client_build() not in {"", build}
+
+
 async def test_a_user_gets_six_searches_a_minute(db_session):
     user_id = uuid4()
     for _ in range(dashboard_controller.PER_MINUTE_LIMIT):
