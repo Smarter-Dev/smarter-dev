@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from smarter_dev.web.models import WebSearchRun
 
-ACTIVE_STATUSES = ("queued", "planning", "searching", "ranking")
+ACTIVE_STATUSES = ("queued", "planning", "searching", "ranking", "answering")
 # The notification type the dashboard listens for.
 EVENT_TYPE = "web_search"
 MAX_REQUEST_CHARS = 500
@@ -14,6 +14,18 @@ MAX_REQUEST_CHARS = 500
 
 def _iso(value) -> str | None:
     return value.isoformat() if value is not None else None
+
+
+def _answer(answer: dict | None) -> dict | None:
+    # The browser gets the rendered HTML, not the Markdown.
+    if not answer:
+        return None
+    return {
+        "status": answer.get("status", "reading"),
+        "html": answer.get("html", ""),
+        "reads": answer.get("reads", []),
+        "error": answer.get("error"),
+    }
 
 
 def snapshot(run: WebSearchRun) -> dict:
@@ -35,6 +47,8 @@ def snapshot(run: WebSearchRun) -> dict:
         ],
         "results": run.results or [],
         "ranked": run.ranked,
+        "needs_answer": bool(run.needs_answer),
+        "answer": _answer(run.answer),
         "error": run.error,
         "version": run.version,
         "created_at": _iso(run.created_at),
