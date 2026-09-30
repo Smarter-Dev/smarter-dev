@@ -1,0 +1,37 @@
+{
+  "query": "Rust Go cross compiling CLI",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:48+00:00",
+  "results": [
+    {
+      "title": "How does Golang's cross compilation differ from Rust's - The Rust Programming Language Forum",
+      "url": "https://users.rust-lang.org/t/how-does-golangs-cross-compilation-differ-from-rusts/9014",
+      "domain": "users.rust-lang.org",
+      "snippet": "For example, if I want to cross compile my Golang program for Windows GOOS=windows GOARCH=amd64 go build main.go If I want to cross compile my Rust program, I also need to obtain cross-linker for specific platform whic…"
+    },
+    {
+      "title": "Cross-compiling Rust",
+      "url": "https://blog.selfassembled.org/cross-compiling-rust-go.html",
+      "domain": "blog.selfassembled.org",
+      "snippet": "Again, why it’s able to figure out the compiler but nothing else is annoying, but we can solve this with another flag passed in via RUSTFLAGS: -L [path to directory]. And, again, when we installed the proper toolchain we actually got these files. On Debian they’re in /usr/lib/gcc-cross/aarch64-linux-gnu/12/, so we’ll try this again! RUSTFLAGS=\"-Clinker=aarch64-linux-gnu-ld -L /usr/lib/gcc-cross/aarch64-linux-gnu/12/\" cargo build --target aarch64-unknown-linux-gnu #[again a lot of messages] todd@cross:~/top-secret-work-project# file target/aarch64-unknown-linux-gnu/debug/top-secret-work-project target/aarch64-unknown-linux-gnu/debug/top-secret-work-project: ELF 64-bit LSB pie executable, ARM aarch64, version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux-aarch64.so.1, with debug_info, not stripped"
+    },
+    {
+      "title": "How to cross compile Rust across operating systems and CPU architectures? - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/73642596/how-to-cross-compile-rust-across-operating-systems-and-cpu-architectures",
+      "domain": "stackoverflow.com",
+      "snippet": "I am learning Rust and writing some basic CLI tools as an exercise. I am storing my application source in Github, using Github actions to generate binaries and publish those binaries via Github releases. The issue is; I am unsure how to cross compile my Rust application for various target architectures and operating systems. (Apologise for the comparison) Previously when using Go, I could specify the target CPU architecture and target Operating System in the build command like:"
+    },
+    {
+      "title": "Notes on cross-compiling Rust - John Millikin",
+      "url": "https://john-millikin.com/notes-on-cross-compiling-rust",
+      "domain": "john-millikin.com",
+      "snippet": "In practice cross-compilation requires more than simply generating object code, but with a bit of effort from the toolchain developers it's possible to make this nearly seamless. Go is the gold standard here; it ships its own linker and the sources for its standard library, so a normal installation can directly build executables for any supported target. The first build tool I tried is Cargo, which I installed with rustup."
+    },
+    {
+      "title": "Rust ecosystem needs improvement in the area of cross compilation - community - The Rust Programming Language Forum",
+      "url": "https://users.rust-lang.org/t/rust-ecosystem-needs-improvement-in-the-area-of-cross-compilation/101378",
+      "domain": "users.rust-lang.org",
+      "snippet": "One non functional requirement is the resultant binary should run on linux, macOS as well as Windows. I googled a lot, but I found only two viable solutions: Compile the your source code on three different machines ..."
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "query": "React Server Components use client boundary",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:43+00:00",
+  "results": [
+    {
+      "title": "'use client' directive – React",
+      "url": "https://react.dev/reference/rsc/use-client",
+      "domain": "react.dev",
+      "snippet": "When a file marked with 'use client' is imported from a Server Component, compatible bundlers will treat the module import as a boundary between server-run and client-run code."
+    },
+    {
+      "title": "React Foundations: Server and Client Components | Next.js",
+      "url": "https://nextjs.org/learn/react-foundations/server-and-client-components",
+      "domain": "nextjs.org",
+      "snippet": "To understand how Server and Client ... application code can be executed in: the server and the client. The network boundary that separates server and client code. ... The client refers to the browser on a user’s device that sends ..."
+    },
+    {
+      "title": "React Server Components in 2026: The Mental Model, the use client Boundary & When Not to Use Them",
+      "url": "https://umesh-malik.com/blog/react-server-components-guide",
+      "domain": "umesh-malik.com",
+      "snippet": "The mental model: your app is two ... to draw the line. use client marks a boundary, not a file — everything imported into a client module joins the client bundle...."
+    },
+    {
+      "title": "Getting Started: Server and Client Components | Next.js",
+      "url": "https://nextjs.org/docs/app/getting-started/server-and-client-components",
+      "domain": "nextjs.org",
+      "snippet": "Learn how to use the use client directive to render a component on the client. Learn where Server and Client Components run in the App Router and how the boundary between them works."
+    },
+    {
+      "title": "Modern React 16: Server Components and client boundaries | Here Be Dragons",
+      "url": "https://waggertron.github.io/tech-learning/posts/2026-07-07-react-server-components-client-boundaries/",
+      "domain": "waggertron.github.io",
+      "snippet": "Server Component: A component rendered by the server-side React environment. Client Component: A component included in the browser bundle, usually marked by a framework with \"use client\". Client boundary: The import boundary where a framework starts bundling code for the browser."
+    }
+  ]
+}

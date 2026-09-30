@@ -1,0 +1,37 @@
+{
+  "query": "GitHub leaked secret rotate credentials",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:15+00:00",
+  "results": [
+    {
+      "title": "Remediating a leaked secret in your repository - GitHub Docs",
+      "url": "https://docs.github.com/en/code-security/tutorials/remediate-leaked-secrets/remediating-a-leaked-secret",
+      "domain": "docs.github.com",
+      "snippet": "Regularly rotate secrets to minimize the impact of any potential leaks."
+    },
+    {
+      "title": "Secret leakage risks - GitHub Docs",
+      "url": "https://docs.github.com/en/code-security/concepts/secret-security/secret-leakage-risks",
+      "domain": "docs.github.com",
+      "snippet": "This helps prevent secret sprawl by catching leaked credentials before they reach your repositories. Use secret scanning to continuously monitor your repositories for hardcoded secrets and generate alerts when credentials are detected, enabling you to revoke and rotate compromised credentials quickly."
+    },
+    {
+      "title": "[P0][SECURITY] EMERGENCY credential rotation required — multiple live secrets exposed (tower API, env file, git history) · Issue #696 · SaifulHaqueNiloy/supremeai",
+      "url": "https://github.com/SaifulHaqueNiloy/supremeai/issues/696",
+      "domain": "github.com",
+      "snippet": "The repo's own runbook ... secrets leaked in PUBLIC git history #504, P0) already documents Render keys + Infisical secrets living in git history; its checklist is entirely unchecked. GitHub PAT (admin!) → 2. Render keys ×4 → 3. Redis (Upstash) tokens ×5 → 4. CI_WEBHOOK_SECRET + admin password + TOTP re-enroll → 5. Infisical client secret + identity re-scope → 6. SUPREMEAI_API_KEY → 7. Render deploy hook regeneration. Verify each old credential now returns ..."
+    },
+    {
+      "title": "Secret scanning - GitHub Docs",
+      "url": "https://docs.github.com/code-security/secret-scanning/about-secret-scanning",
+      "domain": "docs.github.com",
+      "snippet": "When secret scanning detects a ... about the exposed credential. When you receive an alert, rotate the affected credential immediately to prevent unauthorized access...."
+    },
+    {
+      "title": "Rotate any credential that ever touched git history; enable secret scanning and push protection · Issue #32 · Mizithra/ActiveTerrain",
+      "url": "https://github.com/Mizithra/ActiveTerrain/issues/32",
+      "domain": "github.com",
+      "snippet": "History rewriting removes a secret from the repo but does not un-leak it if it ever reached a remote or a fork. Rotate WiFi and MQTT credentials, then turn on GitHub secret scanning and push protection and add a pre-commit or CI scanner."
+    }
+  ]
+}

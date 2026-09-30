@@ -1,0 +1,37 @@
+{
+  "query": "PostgreSQL EXPLAIN ANALYZE slow COUNT",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:19+00:00",
+  "results": [
+    {
+      "title": "Slow Counting - PostgreSQL wiki",
+      "url": "https://wiki.postgresql.org/wiki/Slow_Counting",
+      "domain": "wiki.postgresql.org",
+      "snippet": "A full count of rows in a table can be comparatively slow in PostgreSQL: ... The reason is related to the MVCC implementation in PostgreSQL. The fact that multiple transactions can see different states of the data means that there can be no straightforward way for \"COUNT(*)\" to summarize data ..."
+    },
+    {
+      "title": "How to Read and Optimize Slow Queries with EXPLAIN ANALYZE",
+      "url": "https://oneuptime.com/blog/post/2026-01-25-explain-analyze-postgresql/view",
+      "domain": "oneuptime.com",
+      "snippet": "Sort (cost=1500.00..1500.50 rows=365 width=48) (actual time=298.234..298.456 rows=365 loops=1) -> HashAggregate (cost=1400.00..1450.00 rows=365 width=48) -> Index Only Scan using idx_orders_created_covering on orders Index Cond: (created_at >= '2024-01-01' AND created_at <= '2024-12-31') Buffers: shared hit=1250 -- Found in PostgreSQL shared buffers · -- Slow join: 8 seconds EXPLAIN (ANALYZE, BUFFERS) SELECT p.name, SUM(oi.quantity) as total_sold FROM products p JOIN order_items oi ON oi.product_id = p.id JOIN orders o ON o.id = oi.order_id WHERE o.created_at > NOW() - INTERVAL '30 days' GROUP BY p.id, p.name ORDER BY total_sold DESC LIMIT 10;"
+    },
+    {
+      "title": "3 ways to detect slow queries in PostgreSQL | CYBERTEC PostgreSQL | Services & Support",
+      "url": "https://www.cybertec-postgresql.com/en/3-ways-to-detect-slow-queries-in-postgresql/",
+      "domain": "cybertec-postgresql.com",
+      "snippet": "The data presented by pg_stat_statements can then be analyzed. Some time ago I wrote a blog post about this issue which can be found on our website. The advantage of this module is that you will even be able to find millions of fairly fast queries which could be the reason for a high load. In addition to that, pg_stat_statements will tell you about the I/O behavior of various types of queries. The downside is that it can be fairly hard to track down individual slow queries which are usually fast but sometimes slow."
+    },
+    {
+      "title": "Explaining Your Postgres Query Performance | Crunchy Data Blog",
+      "url": "https://www.crunchydata.com/blog/get-started-with-explain-analyze",
+      "domain": "crunchydata.com",
+      "snippet": "us=# EXPLAIN ANALYZE SELECT type, COUNT(*) FROM us_geonames GROUP BY 1 ORDER BY 2; QUERY PLAN ---------------------------------------------------------------------------------------------------------------------------------------------------------- Sort (cost=33818.27..33818.66 rows=156 width=12) (actual time=529.629..532.138 rows=416 loops=1) Sort Key: (count(*)) Sort Method: quicksort Memory: 44kB -> Finalize GroupAggregate (cost=33753.31..33812.59 rows=156 width=12) (actual time=528.715..531.991 rows=416 loops=1) Group Key: type -> Gather Merge (cost=33753.31..33808.69 rows=468 width=12) (a"
+    },
+    {
+      "title": "sql - How can I use PostgreSQL's EXPLAIN and ANALYZE to identify slow joins in a query? - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/79280685/how-can-i-use-postgresqls-explain-and-analyze-to-identify-slow-joins-in-a-query",
+      "domain": "stackoverflow.com",
+      "snippet": "Execution plan nodes that take a lot of time. If you speed them up, you will gain. You have to subtract the lower nodes from the higher ones to get the net time. Don't forget to multiply with the loops count! The total buffers used in the EXPLAIN (ANALYZE, BUFFERS) output."
+    }
+  ]
+}

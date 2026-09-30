@@ -1,0 +1,37 @@
+{
+  "query": "SSE notifications delivery reliability",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:40+00:00",
+  "results": [
+    {
+      "title": "How We Used Server-Sent Events (SSE) to Deliver Real-Time Notifications on Our Backend | by Muzaffer Yılmaz | Trendyol Tech | Medium",
+      "url": "https://medium.com/trendyol-tech/how-we-used-server-sent-events-sse-to-deliver-real-time-notifications-on-our-backend-ebae41d3b5cb",
+      "domain": "medium.com",
+      "snippet": "By using Redis pub/sub, we were ... With our SSE-based notification system, we have successfully created a reliable and efficient solution for delivering notifications to our clients...."
+    },
+    {
+      "title": "How to build real-time notifications | Pliant",
+      "url": "https://www.getpliant.com/en/blog/building-notifications-with-server-side-events",
+      "domain": "getpliant.com",
+      "snippet": "Simple > complex: SSE solved our needs without overengineering · Event persistence is critical for reliability and observability · Fallback delivery paths are essential when supporting multi-device flows · Kafka fan-out patterns enabled event delivery across multiple service instances · Real-time feedback is critical for security workflows like 3DS. By using Server-Side Events, we built a system that is fast, reliable, and easy to operate."
+    },
+    {
+      "title": "Enhancing Push Notification Delivery Success in Android Using Server-Sent Events | by Vineet Nigam | Medium",
+      "url": "https://medium.com/@nvineet02/enhancing-push-notification-delivery-success-in-android-using-server-sent-events-c9557aadaae9",
+      "domain": "medium.com",
+      "snippet": "Here’s how SSE can be leveraged ... due to network or battery settings), SSE can act as a fallback mechanism to ensure reliable delivery of notifications to Android devices...."
+    },
+    {
+      "title": "Build an end-to-end realtime notification and SSE delivery test platform · Issue #654 · Elcare-care/elcare-care-app",
+      "url": "https://github.com/Elcare-care/elcare-care-app/issues/654",
+      "domain": "github.com",
+      "snippet": "Current state The backend exposes SSE from api/routes.ts, has a realtime subsystem under indexer/src/realtime, notification modules, Redis-backed or local replay behavior, heartbeats, filters, Last-Event-ID, reorg events, and tests for SSE/realtime hubs. The existing coverage does not fully run real clients through multi-instance delivery, reconnect, replay-window exhaustion, notification fan-out, and process failure."
+    },
+    {
+      "title": "Real-Time Notifications with Server-Sent Events (SSE) in Next.js - Pedro Alonso",
+      "url": "https://www.pedroalonso.net/blog/sse-nextjs-real-time-notifications/",
+      "domain": "pedroalonso.net",
+      "snippet": "To enhance your SSE implementations: Add authentication: Secure endpoints with session validation · Implement message persistence: Use Redis for reliable delivery · Add event filtering: Let clients subscribe to specific events · Build reconnection UI: Show connection status to users ·"
+    }
+  ]
+}

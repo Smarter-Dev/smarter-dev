@@ -1,0 +1,37 @@
+{
+  "query": "public repository leaked API key incident response",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:48+00:00",
+  "results": [
+    {
+      "title": "How to Detect & Remove Leaked API Keys From Code - Checkmarx",
+      "url": "https://checkmarx.com/learn/how-to-detect-and-remove-leaked-api-keys-tokens-and-passwords-from-code-repositories/",
+      "domain": "checkmarx.com",
+      "snippet": "You also need to check your logs for signs of suspicious activity: unauthorized access, failed authentication attempts, unusual API usage, etc.. If any is found, begin incident response procedures. At this stage, use your secrets manager to handle the rotation securely and consistently. A tool like AWS Secrets Manager or HashiCorp Vault ensures new credentials are safely stored, distributed, and versioned, and that old ones can’t be reused. Once the active secret is neutralized, you need to clean your repository."
+    },
+    {
+      "title": "How to Fix a Leaked API Key: A Developer’s Guide to Git Security",
+      "url": "https://www.freecodecamp.org/news/how-to-fix-a-leaked-api-key/",
+      "domain": "freecodecamp.org",
+      "snippet": "10:15 - API key committed 10:23 - Repository pushed publicly 10:41 - Unusual usage detected 10:45 - Key revoked 11:00 - Logs reviewed 11:30 - Replacement key deployed 12:00 - Git history cleaned · This can be especially useful if you need to report the incident to a team or service provider."
+    },
+    {
+      "title": "Rafter - You Leaked an API Key—Now What? Emergency Response Guide",
+      "url": "https://rafter.so/blog/secrets/leaked-api-key-emergency-response",
+      "domain": "rafter.so",
+      "snippet": "Standard API keys (third-party SaaS): Rotate quarterly · Development keys: Rotate on team member offboarding · Use this template to document the incident for your team and for compliance: ## Incident Report: Credential Leak **Date detected:** YYYY-MM-DD HH:MM UTC **Credential type:** [Stripe sk_live / OpenAI / AWS / etc.] **How it leaked:** [Committed to public repo / CI logs / shared in chat / etc.] **Exposure duration:** [When committed] to [when revoked] **Actions taken:** 1."
+    },
+    {
+      "title": "My API Key Was Exposed: What to Do Next | Incident Response.",
+      "url": "https://privacyreport.org/api-key-exposed-what-to-do/",
+      "domain": "privacyreport.org",
+      "snippet": "Using tools like PrivacyReport’s automated App Security Scanner allows product teams to scan live-deployed apps and data flows to flag exposed API keys, unauthenticated endpoints, and data leaks. PrivacyReport’s security practices leverage static analysis engines without storing source code, guaranteeing safe detection. Yes. Once a repository is public, it is indexed by automated scrapers almost instantly."
+    },
+    {
+      "title": "How to Fix a Leaked API Key: A Developer’s Guide to Git Security | daily.dev",
+      "url": "https://daily.dev/posts/how-to-fix-a-leaked-api-key-a-developer-s-guide-to-git-security-43yrnksw9",
+      "domain": "daily.dev",
+      "snippet": "It walks through the 'Invalidate → Investigate → Remove → Replace → Prevent' workflow: revoking or rotating the leaked key first, checking provider logs and billing for abuse, removing the secret from working files using environment ..."
+    }
+  ]
+}

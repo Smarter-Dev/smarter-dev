@@ -1,0 +1,37 @@
+{
+  "query": "asyncio.timeout task cancellation",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:02+00:00",
+  "results": [
+    {
+      "title": "Coroutines and tasks — Python 3.14.7 documentation",
+      "url": "https://docs.python.org/3/library/asyncio-task.html",
+      "domain": "docs.python.org",
+      "snippet": "In either case, the context manager can be rescheduled after creation using Timeout.reschedule(). ... If long_running_task takes more than 10 seconds to complete, the context manager will cancel the current task and handle the resulting asyncio.Ca..."
+    },
+    {
+      "title": "Asyncio Task Cancellation Best Practices – SuperFastPython",
+      "url": "https://superfastpython.com/asyncio-task-cancellation-best-practices/",
+      "domain": "superfastpython.com",
+      "snippet": "A task may be canceled automatically by a timeout. This can be achieved via the asyncio.wait_for() call which will cancel the target task after a fixed number of seconds by raising a CancelledError in the task and transforming it into a TimeoutError."
+    },
+    {
+      "title": "asyncio: Timeouts, Task Cancellation and Graceful Shutdown - PyLand Blog",
+      "url": "https://pylandschool.com/en/blog/article/asyncio-timeout-cancel/",
+      "domain": "pylandschool.com",
+      "snippet": "return_exceptions=True in gather() matters: without it the first CancelledError will interrupt waiting for the other tasks. ... asyncio.timeout() — painless timeouts (Python 3.11+) CancelledError — task cancellation Graceful Shutdown — clean termination"
+    },
+    {
+      "title": "Cancellation and timeouts — AnyIO 4.15.1 documentation",
+      "url": "https://anyio.readthedocs.io/en/stable/cancellation.html",
+      "domain": "anyio.readthedocs.io",
+      "snippet": "The difference between these two is that the former simply exits the context block prematurely on a timeout, while the other raises a TimeoutError. Both methods create a new cancel scope, and you can check the deadline by accessing the deadline attribute. Note, however, that an outer cancel scope may have an earlier deadline than your current cancel scope. To check the actual deadline, you can use the current_effective_deadline() function. ... from anyio import create_task_group, move_on_after, sleep, run async def main(): async with create_task_group() as tg: with move_on_after(1) as scope: print('Starting sleep') await sleep(2) print('This should never be printed') # The cancelled_caught property will be True if timeout was reached print('Exited cancel scope, cancelled =', scope.cancelled_caught) run(main)"
+    },
+    {
+      "title": "Python asyncio.wait_for(): Cancel a Task with a Timeout",
+      "url": "https://www.pythontutorial.net/python-concurrency/python-asyncio-wait_for/",
+      "domain": "pythontutorial.net",
+      "snippet": "To wait for a task to complete with a timeout, you can use the asyncio.wait_for() function. The asyncio.wait_for() function waits for a single task to be completed with a timeout. When a timeout occurs, the asyncio.wait_for() function cancels the task and raises the TimeoutError exception."
+    }
+  ]
+}

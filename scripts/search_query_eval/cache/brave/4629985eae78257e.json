@@ -1,0 +1,37 @@
+{
+  "query": "TypeScript generic constraint arbitrary type",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:09+00:00",
+  "results": [
+    {
+      "title": "TypeScript Generic Constraints",
+      "url": "https://www.typescripttutorial.net/typescript-tutorial/typescript-generic-constraints/",
+      "domain": "typescripttutorial.net",
+      "snippet": "In order to denote the constraint, you use the extends keyword. For example: function merge<U extends object, V extends object>(obj1: U, obj2: V) { return { ...obj1, ...obj2 }; } Code language: TypeScript (typescript) Because the merge() function is now constrained, it will no longer work with all types. Instead, it works with the object type only."
+    },
+    {
+      "title": "TypeScript: Documentation - Generics",
+      "url": "https://www.typescriptlang.org/docs/handbook/2/generics.html",
+      "domain": "typescriptlang.org",
+      "snippet": "We’d like to ensure that we’re not accidentally grabbing a property that does not exist on the obj, so we’ll place a constraint between the two types: ... \"m\");Argument of type '\"m\"' is not assignable to parameter of type '\"a\" | \"b\" | \"c\" | \"d\"'.2345Argument of type '\"m\"' is not assignable to parameter of type '\"a\" | \"b\" | \"c\" | \"d\"'.Try · When creating factories in TypeScript using generics, it is necessary to refer to class types by their constructor functions."
+    },
+    {
+      "title": "TypeScript Function with generics & Constraints in typescript",
+      "url": "https://medium.com/@ridoyislam/typescript-function-with-generics-constraints-in-typescript-a6ce17e62c5e",
+      "domain": "medium.com",
+      "snippet": "By applying these constraints, the TypeScript compiler ensures that only objects with the required properties can be passed as arguments to the merge function. you can use the keyof operator to specify a constraint on a generic type parameter."
+    },
+    {
+      "title": "Constraints in Generics - Scaler Topics",
+      "url": "https://www.scaler.com/topics/typescript/generics-constraints-typescript/",
+      "domain": "scaler.com",
+      "snippet": "We may express the function as follows using the later choice: ... This function is declared to be generic by the syntax used. A Generic function allows us to supply an arbitrary type parameter in the same way as a function allows us to send an arbitrary input parameter into its argument list."
+    },
+    {
+      "title": "TypeScript Generic Constraints - GeeksforGeeks",
+      "url": "https://www.geeksforgeeks.org/typescript-generic-constraints/",
+      "domain": "geeksforgeeks.org",
+      "snippet": "Generics are defined as <T> and This type of T is used to define the type of function arguments, return values, etc. Generic Constraints are used to specify limits to the types that can be used with generic type parameters."
+    }
+  ]
+}

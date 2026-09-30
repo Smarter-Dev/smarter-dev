@@ -1,0 +1,37 @@
+{
+  "query": "Kubernetes node OOM killer container",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:57+00:00",
+  "results": [
+    {
+      "title": "Demystifying OOM Killer in Kubernetes: Tracking Down Memory Issues | Cloud Native Daily",
+      "url": "https://medium.com/cloud-native-daily/title-demystifying-oom-killer-in-kubernetes-tracking-down-memory-issues-b5a4973fbd56",
+      "domain": "medium.com",
+      "snippet": "By sacrificing one process, the OOM killer prevents a complete system crash, ensuring the overall stability of the cluster. When a pod in Kubernetes exceeds its specified memory limit, it triggers an OOM event."
+    },
+    {
+      "title": "Kubernetes Pod vs. Container OOMKilled - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/74182797/kubernetes-pod-vs-container-oomkilled",
+      "domain": "stackoverflow.com",
+      "snippet": "If I understand correctly the conditions for Kubernetes to OOM kill a pod or container (from komodor.com): If a container uses more memory than its memory limit, it is terminated with an OOMKilled status."
+    },
+    {
+      "title": "5 Ways You Can Diagnose & Prevent OOMKilled Errors in Kubernetes",
+      "url": "https://www.fairwinds.com/blog/5-ways-you-can-diagnose-and-prevent-oomkilled-errors-in-kubernetes",
+      "domain": "fairwinds.com",
+      "snippet": "In Kubernetes, there is an important difference between a container being OOMKilled because it exceeded its own cgroup memory limit and a container being OOMKilled during node-level memory exhaustion."
+    },
+    {
+      "title": "How to Fix OOMKilled Kubernetes Error (Exit Code 137)?",
+      "url": "https://komodor.com/learn/how-to-fix-oomkilled-exit-code-137/",
+      "domain": "komodor.com",
+      "snippet": "When a container attempts to consume more memory than its set limit the Linux OOM Killer changes the container status to ‘OOMKilled’, which prompts Kubernetes to terminate it. This mechanism prevents a single container from exhausting the node’s memory, which could compromise other containers running on the same node."
+    },
+    {
+      "title": "Troubleshoot OOM events | Google Kubernetes Engine (GKE) | Google Cloud Documentation",
+      "url": "https://docs.cloud.google.com/kubernetes-engine/docs/troubleshooting/oom-events",
+      "domain": "docs.cloud.google.com",
+      "snippet": "Never: the container isn't restarted and remains in a terminated state. By isolating the failure to the offending container, the OOM Killer prevents a single faulty Pod from crashing the entire node."
+    }
+  ]
+}

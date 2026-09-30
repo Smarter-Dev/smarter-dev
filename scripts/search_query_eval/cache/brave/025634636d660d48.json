@@ -1,0 +1,37 @@
+{
+  "query": "Rust Go command line cold start benchmark",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:39+00:00",
+  "results": [
+    {
+      "title": "GitHub - ngs/cli-lang-bench: Startup and throughput benchmarks for small CLI tools written in Rust, Go, and Bun + TypeScript · GitHub",
+      "url": "https://github.com/ngs/cli-lang-bench",
+      "domain": "github.com",
+      "snippet": "Startup and throughput benchmarks for small CLI tools written in Rust, Go, and Bun + TypeScript - ngs/cli-lang-bench"
+    },
+    {
+      "title": "GitHub - bdrung/startup-time: Measure startup time of different programming languages · GitHub",
+      "url": "https://github.com/bdrung/startup-time",
+      "domain": "github.com",
+      "snippet": "$ make Run on: Raspberry Pi 3 (arm64) ... 898.30 ms Haskell (ghc 8.0.2): 9.44 ms Pascal (fpc 3.0.4): 0.66 ms Rust (rustc 1.22.1): 4.42 ms Bash 4.4.12(1): 7.31 ms CShell 20110502: 10.98 ms Lua 5.2.4: 6.23 ms Perl 5.26.1: 8.78 ms PHP ..."
+    },
+    {
+      "title": "coldstart command - github.com/samyfodil/wazy/benchmarks/coldstart - Go Packages",
+      "url": "https://pkg.go.dev/github.com/samyfodil/wazy/benchmarks/coldstart",
+      "domain": "pkg.go.dev",
+      "snippet": "Command coldstart runs a wasip2 *command* component (one exporting wasi:cli/run) end to end -- decode, compile, instantiate, invoke run() -- and exits. It exists to time wazy's component cold start against the `wasmtime run <component>` CLI on the identical component: both processes pay ..."
+    },
+    {
+      "title": "Rust has an advantage in the serverless world as cold starts are faster in gener... | Hacker News",
+      "url": "https://news.ycombinator.com/item?id=35501342",
+      "domain": "news.ycombinator.com",
+      "snippet": "One caveat - these are hello world programs without I/O. The maintainer plans to add I/O to the benchmarked code · That’s one misconception you have about Go, when it comes to Cold start uptimes Go is one of the top garbage collected language to compete the likes of C, the go runtime is ..."
+    },
+    {
+      "title": "time - How to benchmark programs in Rust? - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/13322479/how-to-benchmark-programs-in-rust",
+      "domain": "stackoverflow.com",
+      "snippet": "A quick way to find out the execution time of a program, regardless of implementation language, is to run time prog on the command line. For example: Copy~$ time sleep 4 real 0m4.002s user 0m0.000s sys 0m0.000s · The most interesting measurement is usually user, which measures the actual amount of work done by the program, regardless of what's going on in the system (sleep is a pretty boring program to benchmark)."
+    }
+  ]
+}

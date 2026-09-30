@@ -1,0 +1,37 @@
+{
+  "query": "Godot beginner 2D game jam",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:44+00:00",
+  "results": [
+    {
+      "title": "GitHub - bitbrain/godot-gamejam: 🤖 Godot Engine 4 template to better get started for gamejams with your 2D or 3D game!",
+      "url": "https://github.com/bitbrain/godot-gamejam",
+      "domain": "github.com",
+      "snippet": "🤖 Godot Engine 4 template to better get started for gamejams with your 2D or 3D game! - bitbrain/godot-gamejam"
+    },
+    {
+      "title": "My first game jam (with an intro to Godot)",
+      "url": "https://adinagrecu.me/posts/game-jam/",
+      "domain": "adinagrecu.me",
+      "snippet": "Whilst watching random YouTube I stumbled upon this video, a short tutorial for building a 2D platformer in Godot. Now, my husband and I have been joking for a while about one day making 'an indie game' – it ticks off all the creative and technical hobbies we have, from programming to music, art, design and everything in between."
+    },
+    {
+      "title": "2D Godot Game JAM #1!!! - itch.io",
+      "url": "https://itch.io/jam/2d-godot-game-jam",
+      "domain": "itch.io",
+      "snippet": "A game jam from 2023-11-01 to 2023-11-10 hosted by Artin The Coder. Welcome to the 2D Godot Game Jam #1! . Whether you're a person who is a casual Godot game developer, or you just recently started to use the Godot gam..."
+    },
+    {
+      "title": "Your first 2D game — Godot Engine (stable) documentation in English",
+      "url": "https://docs.godotengine.org/en/stable/getting_started/first_2d_game/index.html",
+      "domain": "docs.godotengine.org",
+      "snippet": "In this step-by-step tutorial series, you will create your first complete 2D game with Godot. By the end of the series, you will have a simple yet complete game of your own, like the image below. i..."
+    },
+    {
+      "title": "Godot Beginner's Week Jam - itch.io",
+      "url": "https://itch.io/jam/godot-beginners-week-jam",
+      "domain": "itch.io",
+      "snippet": "Welcome to a game jam focused on the game engine everyone loves: Godot. ... Any project can be submitted (made before or during the window). Only 2D projects."
+    }
+  ]
+}

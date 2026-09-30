@@ -1,0 +1,37 @@
+{
+  "query": "PostgreSQL approximate row count pg_class reltuples",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:16+00:00",
+  "results": [
+    {
+      "title": "Count estimate - PostgreSQL wiki",
+      "url": "https://wiki.postgresql.org/wiki/Count_estimate",
+      "domain": "wiki.postgresql.org",
+      "snippet": "This can be rather slow because ... might be good enough and is much faster to retrieve for big tables. SELECT reltuples AS estimate FROM pg_class WHERE relname = 'table_name'; estimate ----------- 100..."
+    },
+    {
+      "title": "sql - Fast way to discover the row count of a table in PostgreSQL - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/7943233/fast-way-to-discover-the-row-count-of-a-table-in-postgresql",
+      "domain": "stackoverflow.com",
+      "snippet": "CopySELECT reltuples::bigint AS estimate FROM pg_class WHERE oid = 'myschema.mytable'::regclass;"
+    },
+    {
+      "title": "Faster PostgreSQL Counting - Citus Data",
+      "url": "https://www.citusdata.com/blog/2016/10/12/count-performance/",
+      "domain": "citusdata.com",
+      "snippet": "We can multiply the average rows per page by up-to-date information about the current number of pages occupied by a table for a more accurate estimation of the current number of rows. -- pg_relation_size and block size have fresh info so combine them with -- the estimation of tuples per page SELECT (reltuples/relpages) * ( pg_relation_size('items') / (current_setting('block_size')::integer) ) FROM pg_class where relname = 'items'; Copy"
+    },
+    {
+      "title": "How to get approximate row count in postgres tables? · Manoj Awasthi",
+      "url": "https://awmanoj.github.io/tech/2017/08/31/how-to-get-approximate-row-count-postgres/",
+      "domain": "awmanoj.github.io",
+      "snippet": "SAMPLEDB=> SELECT reltuples::BIGINT AS estimate FROM pg_class WHERE relname = 'SAMPLE'; estimate ---------- 54296044 (1 row) Ref: https://wiki.postgresql.org/wiki/Count_estimate"
+    },
+    {
+      "title": "PostgreSQL: Documentation: 18: 69.1. Row Estimation Examples",
+      "url": "https://www.postgresql.org/docs/current/row-estimation-examples.html",
+      "domain": "postgresql.org",
+      "snippet": "How the planner determines the ... rows is looked up in pg_class: SELECT relpages, reltuples FROM pg_class WHERE relname = 'tenk1'; relpages | reltuples ----------+----------- 358 | 10000..."
+    }
+  ]
+}

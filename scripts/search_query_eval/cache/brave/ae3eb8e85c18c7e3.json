@@ -1,0 +1,37 @@
+{
+  "query": "Docker Python image size layers",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:34+00:00",
+  "results": [
+    {
+      "title": "Shrinking your Python application’s Docker image: an overview",
+      "url": "https://pythonspeed.com/articles/smaller-docker-images/",
+      "domain": "pythonspeed.com",
+      "snippet": "Docker’s image format is comprised of layers, much like Git commits. You can see layer size using the docker history command."
+    },
+    {
+      "title": "r/docker on Reddit: How I Reduced Docker Image Size from 588 MB to Only 47.7 MB - A whomping 91.89 %",
+      "url": "https://www.reddit.com/r/docker/comments/1f1wqnb/how_i_reduced_docker_image_size_from_588_mb_to/",
+      "domain": "reddit.com",
+      "snippet": "We all know minimizing docker image sizes accelerates container deployment, and for large-scale operations, this can lead to substantial savings in storage space. For a flask app, I picked up Python 3.9-alpine which is a whomping 95.2% smaller than Python 3.9 · This minimal images contain only the essentials, significantly reducing the image size. 2. I minimized layers - every command in a Dockerfile (like RUN, COPY, etc.) generates a separate layer in the final image."
+    },
+    {
+      "title": "How to make your Python Docker images secure, fast & small | by Björn van Dijkman | VantageAI | Medium",
+      "url": "https://medium.com/vantageai/how-to-make-your-python-docker-images-secure-fast-small-b3a6870373a0",
+      "domain": "medium.com",
+      "snippet": "Now that we have completed some ... WORKDIR command, followed by the copying of two files. ... The current image has a size of 139 MB...."
+    },
+    {
+      "title": "Image size measurement: docker images | Docker For Ml Intermediate Course | The Neural Base",
+      "url": "https://theneuralbase.com/docker-for-ml/learn/intermediate/image-size-measurement-docker-images/",
+      "domain": "theneuralbase.com",
+      "snippet": "Understanding layer size distribution lets you restructure your Dockerfile to move large operations (like CUDA or model downloads) to multi-stage builds where they can be discarded in the final image. ... # List all images with size information docker images # Output example: # REPOSITORY TAG IMAGE ID CREATED SIZE # my-ml-app latest a1b2c3d4e5f6 2 hours ago 3.2GB # nvidia/cuda 12.4.1 f7e8d9c0b1a2 3 weeks ago 4.1GB # python 3.11 c2b1a0f9e8d7 1 month ago 920MB # Show detailed layer breakdown (most important for optimization) docker history my-ml-app:latest --no-trunc # Output example: # IMAGE CR"
+    },
+    {
+      "title": "docker-image-size-limit · PyPI",
+      "url": "https://pypi.org/project/docker-image-size-limit/",
+      "domain": "pypi.org",
+      "snippet": "... # If your image has 7 layers: $ disl your-image-name:label 300MiB --max-layers=5 your-image-name:label exceeds 5 maximum layers by 2 # If your image has 5 layers: $ disl your-image-name:label 300MiB --max-layers=5 # ok!"
+    }
+  ]
+}

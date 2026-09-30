@@ -1,0 +1,37 @@
+{
+  "query": "coding interview mock practice",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:45+00:00",
+  "results": [
+    {
+      "title": "Practice Mock Interviews & Coding Problems - Land Top Jobs | Pramp",
+      "url": "https://www.pramp.com/",
+      "domain": "pramp.com",
+      "snippet": "Join thousands of professionals practicing live mock interviews & interview questions online, with peers, for free. We help you prep & land your dream tech job. Learn more!"
+    },
+    {
+      "title": "Anonymous Coding & Technical Interview Prep for Software Engineers | interviewing.io",
+      "url": "https://interviewing.io/",
+      "domain": "interviewing.io",
+      "snippet": "Our AI Interviewer conducts coding and system design interviews, in the style of a FAANG mock interview."
+    },
+    {
+      "title": "Practice Coding mock interviews to get a job at Google, Meta, Amazon, etc.",
+      "url": "https://igotanoffer.com/en/mock-interviews/type/coding",
+      "domain": "igotanoffer.com",
+      "snippet": "Practice a mock interview for 45mins, and receive expert feedback for 15mins."
+    },
+    {
+      "title": "r/ExperiencedDevs on Reddit: Platforms where you can take live mock coding interviews?",
+      "url": "https://www.reddit.com/r/ExperiencedDevs/comments/1crvwwi/platforms_where_you_can_take_live_mock_coding/",
+      "domain": "reddit.com",
+      "snippet": "It’s specifically designed for mock coding interview practice and aims to provide that 'real thing' environment you're looking for with a focus on actionable feedback. It is currently in alpha and free to use."
+    },
+    {
+      "title": "AI-Powered Mock Interviews | Practice Real Tech Rounds - HackerRank",
+      "url": "https://www.hackerrank.com/mock-interviews",
+      "domain": "hackerrank.com",
+      "snippet": "Ace your next tech interview with HackerRank's AI mock interviews. Simulate real coding, system design, and frontend rounds. Get feedback. Improve. Get hired."
+    }
+  ]
+}

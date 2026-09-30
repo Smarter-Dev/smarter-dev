@@ -1,0 +1,37 @@
+{
+  "query": "React Server Components mental model",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:34+00:00",
+  "results": [
+    {
+      "title": "The Complete Guide to React Server Components: Mental Models for 2025 - DEV Community",
+      "url": "https://dev.to/eva_clari_289d85ecc68da48/the-complete-guide-to-react-server-components-mental-models-for-2025-390d",
+      "domain": "dev.to",
+      "snippet": "Every single component was shipping to the client, even the ones that never needed to be interactive. Product descriptions, static headers, footer links - all of it bundled up and sent down the wire, forcing browsers to download, parse, and execute JavaScript that literally just displayed text. Then React Server Components landed, and everything changed."
+    },
+    {
+      "title": "React Server Components: A Mental Model Shift - DEV Community",
+      "url": "https://dev.to/3ni8ma/react-server-components-a-mental-model-shift-2p1l",
+      "domain": "dev.to",
+      "snippet": "Server Components can directly query databases, read files, or call internal APIs — no useEffect, no SWR, no React Query. The component is async and awaits data directly. This eliminates waterfall loading states, reduces bundle size, and ..."
+    },
+    {
+      "title": "Server Components – React",
+      "url": "https://react.dev/reference/rsc/server-components",
+      "domain": "react.dev",
+      "snippet": "Server Components can be made dynamic by re-fetching them from a server, where they can access the data and render again. This new application architecture combines the simple “request/response” mental model of server-centric Multi-Page ..."
+    },
+    {
+      "title": "I Stopped Fighting React Server Components — Here's What Finally Made It - DEV Community",
+      "url": "https://dev.to/thebitforge/i-stopped-fighting-react-server-components-heres-what-finally-made-it-4cho",
+      "domain": "dev.to",
+      "snippet": "A server component can render a client component. They're not mutually exclusive — they're complementary. The mental model shift here is: think of your app as spanning two environments, not as being in one of them."
+    },
+    {
+      "title": "React Server Components in 2026: The Mental Model, the use client Boundary & When Not to Use Them",
+      "url": "https://umesh-malik.com/blog/react-server-components-guide",
+      "domain": "umesh-malik.com",
+      "snippet": "React Server Components are components ... Next.js 15’s App Router. The mental model: your app is two graphs — a server graph (default) and a client graph (opt-in with use client)...."
+    }
+  ]
+}

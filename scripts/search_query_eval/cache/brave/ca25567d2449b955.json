@@ -1,0 +1,37 @@
+{
+  "query": "site:python.org Python What's New release",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:44+00:00",
+  "results": [
+    {
+      "title": "What’s New in Python",
+      "url": "https://docs.python.org/3/whatsnew/index.html",
+      "domain": "docs.python.org",
+      "snippet": "The “What’s New in Python” series of essays takes tours through the most important changes between major Python versions. They are a “must read” for anyone wishing to stay up-to-date after a new release."
+    },
+    {
+      "title": "What's new in Python 3.14 — Python 3.14.7 documentation",
+      "url": "https://docs.python.org/3/whatsnew/3.14.html",
+      "domain": "docs.python.org",
+      "snippet": "Python 3.14 is the latest stable release of the Python programming language, with a mix of changes to the language, the implementation, and the standard library. The biggest changes include template string literals, deferred evaluation of ..."
+    },
+    {
+      "title": "Status of Python versions",
+      "url": "https://devguide.python.org/versions/",
+      "domain": "devguide.python.org",
+      "snippet": "The main branch is currently the future Python 3.16, and is the only branch that accepts new features. The latest release for each Python version can be found on the download page. (See below for a chart with older versions."
+    },
+    {
+      "title": "Python Release Python 3.14.0 | Python.org",
+      "url": "https://www.python.org/downloads/release/python-3140/",
+      "domain": "python.org",
+      "snippet": "Note: Python 3.14.0 has been superseded by Python 3.14.7. Release date: Oct. 7, 2025 · Python 3.14.0 is the newest major release of the Python programming language, and it contains many new features and optimisations compared to Python 3.13."
+    },
+    {
+      "title": "What's new in Python 3.15 — Python 3.15.0rc2 documentation",
+      "url": "https://docs.python.org/3.15/whatsnew/3.15.html",
+      "domain": "docs.python.org",
+      "snippet": "Python 3.15 will be the latest stable release of the Python programming language, with a mix of changes to the language, the implementation, and the standard library. The biggest changes include lazy imports, frozendict and sentinel builtins, ..."
+    }
+  ]
+}

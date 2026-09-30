@@ -1,0 +1,37 @@
+{
+  "query": "TypeScript generic T assignability error",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:01+00:00",
+  "results": [
+    {
+      "title": "TypeScript Generics: 'type is not assignable to type T' - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/49749663/typescript-generics-type-is-not-assignable-to-type-t",
+      "domain": "stackoverflow.com",
+      "snippet": "I want to use generics to ensure that all of the objects returned are from sub-classes that extend an abstract classes. I thought that the logic of the createInstance method shown below could be described as 'createInstance() will return a type T that is constrained to be a class that extends Animal. As you can see, Lion extends Animal, but I still get the compiler warning type Lion is not assignable to type T."
+    },
+    {
+      "title": "TypeScript: Documentation - Generics",
+      "url": "https://www.typescriptlang.org/docs/handbook/2/generics.html",
+      "domain": "typescriptlang.org",
+      "snippet": "\"m\");Argument of type '\"m\"' is not assignable to parameter of type '\"a\" | \"b\" | \"c\" | \"d\"'.2345Argument of type '\"m\"' is not assignable to parameter of type '\"a\" | \"b\" | \"c\" | \"d\"'.Try · When creating factories in TypeScript using generics, it is necessary to refer to class types by their constructor functions."
+    },
+    {
+      "title": "Type 'T' is not assignable to type when Generic Anonymous Function is inside an interface. · Issue #48461 · microsoft/TypeScript",
+      "url": "https://github.com/microsoft/TypeScript/issues/48461",
+      "domain": "github.com",
+      "snippet": "Appears to be an error on all versions back to atleast 4.0. This is the behavior in every version I tried, and I reviewed the FAQ for entries about this. ... interface GenericFnContainer { fn: <T>(a: T) => any } const a: GenericFnContainer = { fn: (a: string) => \"a\" }; Type '(a: string) => string' is not assignable to type '<T>(a: T) => any'."
+    },
+    {
+      "title": "Fix regression of generic T assignability to Partial<T> by andrewbranch · Pull Request #32354 · microsoft/TypeScript",
+      "url": "https://github.com/microsoft/TypeScript/pull/32354",
+      "domain": "github.com",
+      "snippet": "1> Property '[Symbol.observable]' is missing in type 'Store<IntlState>' but required in type 'Store<any, AnyAction>'. 1> Overload 2 of 2, '(props: ProviderProps<AnyAction>, context?: any): Provider<AnyAction>', gave the following error. 1> Type 'Store<IntlState>' is not assignable to type 'Store<any, AnyAction>'. ... I don’t actually think this is related, as none of those types referenced are mapped types (thought they might be until looking at them). They’re just generic classes/interfaces."
+    },
+    {
+      "title": "TS 2322 Type is not assignable to Partial<GENERIC> when GENERIC extends another generic · Issue #39207 · microsoft/TypeScript",
+      "url": "https://github.com/microsoft/TypeScript/issues/39207",
+      "domain": "github.com",
+      "snippet": "Actual behavior: TS2322: Type '{ id: string; originalData: TYPE; }' is not assignable to type 'Partial<CHILD_CTX>'. Playground Link: https://www.typescriptlang.org/play/?ts=4.0.0-dev.20200622#code/JYOwLgpgTgZghgYwgAgOJzAC2qA5gUQA8AHAYU2ABsATAWUQpAgCE4BnCUge3AkLAA8AFQCaABXwA+ZAG8AUAEhg1APwAuZGzBQ8irjtyg4lACIY4G0RL1Rq0DSACuAWwBG0OQF85c0JFiIKABqAIIAMgCSJgD6+AAaYtFW+LKKyhpaOiC4Xj4wjiAIYMA8yAhQEBicFDT0CIwQAorJyHyQINRsyKGRMfGJyQA0iqQAEhFhMaRCca38EB1d6Fg42URkNXQMoCzsnDyQ-MLiUnKSABQAlBoAblzKqQoIPFrIPADK0DfQ+N-gyABeZDnDhQb5QMxgCzIZLXZBiOBQYrGARjCZTGbSAHSeQKBQVMCOKAgR549KaL7QSFwAB0ymGeIU+mAhhAxmpGUpEPMigU3j5uSAA"
+    }
+  ]
+}

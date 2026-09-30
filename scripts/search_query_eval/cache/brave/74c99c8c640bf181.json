@@ -1,0 +1,37 @@
+{
+  "query": "HTML email input validation",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:45+00:00",
+  "results": [
+    {
+      "title": "<input type=\"email\"> HTML attribute value - MDN Web Docs",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/email",
+      "domain": "developer.mozilla.org",
+      "snippet": "First, there's the standard level of validation offered to all <input>s, which automatically ensures that the contents meet the requirements to be a valid email address. But there's also the option to add additional filtering to ensure that your own specialized needs are met, if you have any. Warning: HTML form validation is not a substitute for scripts that ensure that the entered data is in the proper format."
+    },
+    {
+      "title": "html - HTML5 Email Validation - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/19605773/html5-email-validation",
+      "domain": "stackoverflow.com",
+      "snippet": "The best way to \"validate\" an email addresses is to simply have them type it twice and run a Regex check that gives a WARNING to the user that it doesn't look like a valid email address if it does not match the pattern, and asks the user to double check..."
+    },
+    {
+      "title": "<input type=\"email\"> HTML attribute value - HTML | MDN",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/HTML/Element/input/email",
+      "domain": "developer.mozilla.org",
+      "snippet": "First, there's the standard level of validation offered to all <input>s, which automatically ensures that the contents meet the requirements to be a valid email address. But there's also the option to add additional filtering to ensure that your own specialized needs are met, if you have any. Warning: HTML form validation is not a substitute for scripts that ensure that the entered data is in the proper format."
+    },
+    {
+      "title": "Simple guide to HTML Email Validation | Abstract",
+      "url": "https://www.abstractapi.com/guides/email-validation/html-email-validation",
+      "domain": "abstractapi.com",
+      "snippet": "Set the input type to email and add the required attribute: <input type=\"email\" required>. This tells the browser to reject submissions that are missing an entry or do not match a basic email pattern."
+    },
+    {
+      "title": "HTML5 Email Validation Tutorial | Mailtrap Blog",
+      "url": "https://mailtrap.io/blog/html5-email-validation-tutorial/",
+      "domain": "mailtrap.io",
+      "snippet": "And now let’s try to insert something that doesn’t even resemble an email address: Note that the field needs to be set to ‘required’ for the validation to happen. We intentionally left out this parameter for the ‘website’ field and the following inputs were allowed (despite ‘URL’ being set as a ‘type’ parameter): On another note, the validation will only work if the browser supports HTML5, which is the vast majority of modern browsers."
+    }
+  ]
+}

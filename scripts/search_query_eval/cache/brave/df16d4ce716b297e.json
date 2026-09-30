@@ -1,0 +1,37 @@
+{
+  "query": "solo first game jam scope",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:08+00:00",
+  "results": [
+    {
+      "title": "r/gamedev on Reddit: If you are a solo game dev or in a small indie team. Do you participate in Game Jams. If you do, how do you manage your time",
+      "url": "https://www.reddit.com/r/gamedev/comments/1adyxgo/if_you_are_a_solo_game_dev_or_in_a_small_indie/",
+      "domain": "reddit.com",
+      "snippet": "First, I only pick longer game jams. 2 weeks feels like the optimal time for me. Not so short that I just can't realistically build something, but not so long that I'm doing it forever."
+    },
+    {
+      "title": "Tips for solodev game jamming – Christina Lassheikki",
+      "url": "https://christinalassheikki.com/2020/10/06/tips-for-solodev-game-jamming/",
+      "domain": "christinalassheikki.com",
+      "snippet": "Think of it as a NaNoWriMo sort ... strategy is actually the same for me as a solodev as in a team. 1. Scope the game to fit the time-frame of the jam...."
+    },
+    {
+      "title": "A Successful Scoping Down: Controlling Expectations in a Game Jam",
+      "url": "https://www.gamedeveloper.com/design/a-successful-scoping-down-controlling-expectations-in-a-game-jam",
+      "domain": "gamedeveloper.com",
+      "snippet": "Recently I was part of a game jam which successfully scoped down a project. This is a break-down of what happened, and what lessons I’ll be taking with me going forward. I joined the Adventure Jam 2023 with no small amount of trepidation. I’d done solo game jams in the past but this was the first ..."
+    },
+    {
+      "title": "🎲 Your first game jam - by Patrick Buechner",
+      "url": "https://soloist.substack.com/p/your-first-game-jam",
+      "domain": "soloist.substack.com",
+      "snippet": "Firelights Jam – March 1 to May 1. Design and publish a game based on the rules system behind Firelights (see The Soloist March 1)."
+    },
+    {
+      "title": "I Just Finished My First 2-Week Solo Game Jam — Here's What I Made - DEV Community",
+      "url": "https://dev.to/formantaudio/i-just-finished-my-first-2-week-solo-game-jam-heres-what-i-made-10c0",
+      "domain": "dev.to",
+      "snippet": "This was my first full solo Global Game Jam, and I’m proud to say I pulled it off — entirely on my own."
+    }
+  ]
+}

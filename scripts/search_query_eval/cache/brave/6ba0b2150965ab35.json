@@ -1,0 +1,37 @@
+{
+  "query": "Go cross compilation GOOS GOARCH",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:56+00:00",
+  "results": [
+    {
+      "title": "Go Cross Platform Compilation | Xebia",
+      "url": "https://xebia.com/blog/go-cross-compilation/",
+      "domain": "xebia.com",
+      "snippet": "To compile for a specific platform, you have to set the GOOS and GOARCH environment variables. Below is a table that shows the available values. Go supports more OS and CPU architectures than the one shown below, but normally you will use these ..."
+    },
+    {
+      "title": "Cross Compiling - Go Cookbook",
+      "url": "https://golangcookbook.com/chapters/running/cross-compiling/",
+      "domain": "golangcookbook.com",
+      "snippet": "On the other hand, if we wanted to compile for Microsoft Windows, we’d simply set GOOS=windows and GOARCH=386. When we run the resulting binary on the right platform, we see: ... This is another example of Go’s strengths as a language for building easily distributed tools."
+    },
+    {
+      "title": "How to Cross-Compile Go Programs (GOOS and GOARCH) — Go FAQ",
+      "url": "https://www.gofaq.org/en/how-to-cross-compile-go-programs-goos-and-goarch/",
+      "domain": "gofaq.org",
+      "snippet": "To cross-compile a Go program, simply set the `GOOS` and `GOARCH` environment variables before running `go build`, which tells the compiler to generate binaries for a different operating system and CPU architecture than your host machine."
+    },
+    {
+      "title": "Effortless Cross Compilation In Go With GOOS And GOARCH",
+      "url": "https://onlinetutorialhub.com/go-language/cross-compilation-in-go/",
+      "domain": "onlinetutorialhub.com",
+      "snippet": "Before using the go build command, you must set the GOOS and GOARCH environment variables to the target you want to use in order to cross-compile a Go application."
+    },
+    {
+      "title": "compilation - Cross compile Go on OSX? - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/12168873/cross-compile-go-on-osx",
+      "domain": "stackoverflow.com",
+      "snippet": "No ./make.bash-ing or brew-ing required. The process is described here but for the TLDR-ers (like me) out there: you just set the GOOS and the GOARCH environment variables and run the go build."
+    }
+  ]
+}

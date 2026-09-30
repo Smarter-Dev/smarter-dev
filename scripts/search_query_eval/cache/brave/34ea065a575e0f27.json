@@ -1,0 +1,37 @@
+{
+  "query": "kubectl describe pod OOMKilled memory",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:05+00:00",
+  "results": [
+    {
+      "title": "Assign Memory Resources to Containers and Pods | Kubernetes",
+      "url": "https://kubernetes.io/docs/tasks/configure-pod-container/assign-memory-resource/",
+      "domain": "kubernetes.io",
+      "snippet": "kubectl get pod memory-demo-2 --namespace=mem-example NAME READY STATUS RESTARTS AGE memory-demo-2 0/1 OOMKilled 1 37s · kubectl get pod memory-demo-2 --namespace=mem-example NAME READY STATUS RESTARTS AGE memory-demo-2 1/1 Running 2 40s · View detailed information about the Pod history: kubectl describe pod memory-demo-2 --namespace=mem-example ·"
+    },
+    {
+      "title": "How to Fix OOMKilled Kubernetes Error (Exit Code 137)?",
+      "url": "https://komodor.com/learn/how-to-fix-oomkilled-exit-code-137/",
+      "domain": "komodor.com",
+      "snippet": "Use profiling tools like JVM’s built-in tools to detect and fix memory leaks in your application. Run kubectl describe pod [name] and save the content to a text file for future reference: kubectl describe pod [name] /tmp/troubleshooting_describe_pod.txt · Check the Events section of the describe pod text file, and look for the following message: State: Running Started: Thu, 10 Oct 2019 11:14:13 +0200 Last State: Terminated Reason: OOMKilled Exit Code: 137 ..."
+    },
+    {
+      "title": "Kubernetes OOMKilled | Troubleshooting Out-of-Memory Issues",
+      "url": "https://www.groundcover.com/kubernetes-troubleshooting/oomkilled",
+      "domain": "groundcover.com",
+      "snippet": "• kubectl describe pod: As part of root cause analysis, use kubectl describe pod to review recent events and confirm why a container was terminated. • Kernel message logs: The Linux kernel generates logs that capture system-level events, ..."
+    },
+    {
+      "title": "5 Ways You Can Diagnose & Prevent OOMKilled Errors in Kubernetes",
+      "url": "https://www.fairwinds.com/blog/5-ways-you-can-diagnose-and-prevent-oomkilled-errors-in-kubernetes",
+      "domain": "fairwinds.com",
+      "snippet": "By inspecting the restart count ... errors. kubectl describe pod: retrieves detailed information about a specific pod, including its current state, events, and container status...."
+    },
+    {
+      "title": "How to Debug Kubernetes OOMKilled Errors and Memory Issues",
+      "url": "https://oneuptime.com/blog/post/2026-02-20-kubernetes-debug-oomkilled/view",
+      "domain": "oneuptime.com",
+      "snippet": "# Check pod status for OOMKilled kubectl get pods -n your-namespace # Get detailed container status kubectl describe pod your-pod-name -n your-namespace ... # Get the last termination reason for each container kubectl get pod your-pod-name -n ..."
+    }
+  ]
+}

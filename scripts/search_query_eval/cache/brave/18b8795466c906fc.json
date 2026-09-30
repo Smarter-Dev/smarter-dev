@@ -1,0 +1,37 @@
+{
+  "query": "\"could be instantiated with an arbitrary type\" TypeScript",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:53+00:00",
+  "results": [
+    {
+      "title": "r/typescript on Reddit: Doesn't the following error: 'T' could be instantiated with an arbitrary type which could be unrelated to 'number', defeat the purpose of generics?",
+      "url": "https://www.reddit.com/r/typescript/comments/v8p1oo/doesnt_the_following_error_t_could_be/",
+      "domain": "reddit.com",
+      "snippet": "To do this you would have to cast the return value to T. Discussion: https://github.com/microsoft/TypeScript/issues/24929 ... For your example I would use function overloading. For isNum: true the function returns a number, and for the false version it returns a string."
+    },
+    {
+      "title": "typescript - 'R' could be instantiated with an arbitrary type which could be unrelated to 'Response<Command>' - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/62623637/r-could-be-instantiated-with-an-arbitrary-type-which-could-be-unrelated-to-re",
+      "domain": "stackoverflow.com",
+      "snippet": "type 'Response<Command>' is not assignable to type 'R'. 'R' could be instantiated with an arbitrary type which could be unrelated to 'Response<Command>'."
+    },
+    {
+      "title": "TypeScript: TSConfig Option: noStrictGenericChecks",
+      "url": "https://www.typescriptlang.org/tsconfig/noStrictGenericChecks.html",
+      "domain": "typescriptlang.org",
+      "snippet": "... b; // ErrorType 'B' is not assignable to type 'A'. Types of parameters 'y' and 'y' are incompatible. Type 'U' is not assignable to type 'T'. 'T' could be instantiated with an arbitrary type which could be unrelated to 'U'.2322Type 'B' is not assignable to type 'A'. Types of parameters 'y' ..."
+    },
+    {
+      "title": "Issue · microsoft/TypeScript",
+      "url": "https://github.com/microsoft/TypeScript/issues/39429",
+      "domain": "github.com",
+      "snippet": "Argument of type 'Options<T>' is not assignable to parameter of type 'Options<unknown>'. Type 'unknown' is not assignable to type 'T'. 'T' could be instantiated with an arbitrary type which could be unrelated to 'unknown'.(2345) Playground Link: https://www.typescriptlang.org/play?ts=3.9.2..."
+    },
+    {
+      "title": "TypeScript Introduction | Good Times Paradigms",
+      "url": "https://tgdwyer.github.io/typescript1/",
+      "domain": "tgdwyer.github.io",
+      "snippet": "Error: Argument of type ‘V’ ... could be instantiated with an arbitrary type which could be unrelated to ‘V’. So it’s complaining that our use of a y:V into a parameter that should be a U and vice-versa for x. We flip them back and we are good again… but TypeScript helps us make ..."
+    }
+  ]
+}

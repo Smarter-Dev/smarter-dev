@@ -1,0 +1,37 @@
+{
+  "query": "Discord API rate limits",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:10+00:00",
+  "results": [
+    {
+      "title": "Rate Limits - Documentation - Discord",
+      "url": "https://docs.discord.com/developers/topics/rate-limits",
+      "domain": "docs.discord.com",
+      "snippet": "Rate limits exist across Discord’s APIs to prevent spam, abuse, and service overload. Limits are applied to individual bots and users both on a per-route basis and globally."
+    },
+    {
+      "title": "Rate Limits - Discord Userdoccers",
+      "url": "https://docs.discord.food/topics/rate-limits",
+      "domain": "docs.discord.food",
+      "snippet": "Note that normal route rate-limiting headers will also be sent in this response. The rate-limiting response will look something like the following: ... All users can make up to 50 requests per second to our API. If no authorization header is provided, then the limit is applied to the IP address."
+    },
+    {
+      "title": "My Bot is Being Rate Limited! - Developers - Discord",
+      "url": "https://support-dev.discord.com/hc/en-us/articles/6223003921559-My-Bot-is-Being-Rate-Limited",
+      "domain": "support-dev.discord.com",
+      "snippet": "Discord uses multiple types of rate limiting to protect the API."
+    },
+    {
+      "title": "node.js - Discord API Rate Limiting - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/74701792/discord-api-rate-limiting",
+      "domain": "stackoverflow.com",
+      "snippet": "You shouldn't be experiencing rate limits that quickly, why are you making so many requests to the API? The access token provided from OAuth2 flow works for multiple requests (it stays valid for a full week if you don't ask for a new token), so make sure you aren't requesting a new token every time the client loads your app. If the problem is that you're using the access token to make a request to the Discord API for user info every time the user reloads your app, then you need to change that."
+    },
+    {
+      "title": "Discord Rate Limit Calculator | Avoid 429 Errors",
+      "url": "https://www.mambahost.com/tools/discord-bot/rate-limit-calculator/",
+      "domain": "mambahost.com",
+      "snippet": "Understanding rate limits is crucial for building reliable bots that don't get temporarily banned or cause poor user experiences due to failed requests. A hard limit of 50 requests per second across all API endpoints."
+    }
+  ]
+}

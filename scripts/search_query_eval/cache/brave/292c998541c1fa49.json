@@ -1,0 +1,37 @@
+{
+  "query": "site:docs.github.com remove sensitive data repository",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:32+00:00",
+  "results": [
+    {
+      "title": "Removing sensitive data from a repository - GitHub Docs",
+      "url": "https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository",
+      "domain": "docs.github.com",
+      "snippet": "Update the repository on GitHub, ... sensitive data may still be accessible elsewhere: ... You cannot remove sensitive data from other users' clones of your repository; you will have to send them the instructions from Make sure ..."
+    },
+    {
+      "title": "Removing sensitive data from a repository - GitHub Enterprise Cloud Docs",
+      "url": "https://docs.github.com/en/enterprise-cloud@latest/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository",
+      "domain": "docs.github.com",
+      "snippet": "Update the repository on GitHub, ... sensitive data may still be accessible elsewhere: ... You cannot remove sensitive data from other users' clones of your repository; you will have to send them the instructions from Make sure ..."
+    },
+    {
+      "title": "Removing sensitive data from a repository - GitHub Enterprise Server 3.13 Docs",
+      "url": "https://docs.github.com/en/enterprise-server@3.13/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository",
+      "domain": "docs.github.com",
+      "snippet": "Update the repository on GitHub, ... sensitive data may still be accessible elsewhere: ... You cannot remove sensitive data from other users' clones of your repository; you will have to send them the instructions from Make sure ..."
+    },
+    {
+      "title": "GitHub Private Information Removal Policy - GitHub Docs",
+      "url": "https://docs.github.com/en/site-policy/content-removal-policies/github-private-information-removal-policy",
+      "domain": "docs.github.com",
+      "snippet": "In most cases, we will contact the user who created the repository and give them an opportunity to delete or modify the private information specified in the request or to dispute the claim."
+    },
+    {
+      "title": "Suppression de données sensibles dans un dépôt - GitHub Enterprise Server 3.22 Docs",
+      "url": "https://docs.github.com/fr/enterprise-server@3.22/authentication/keeping-your-account-and-data-secure/removing-sensitive-data-from-a-repository",
+      "domain": "docs.github.com",
+      "snippet": "git clone https://HOSTNAME/YOUR-USERNAME/YOUR-REPOSITORY · Accédez au répertoire de travail du dépôt. ... Exécutez une commande git-filter-repo pour nettoyer les données sensibles."
+    }
+  ]
+}

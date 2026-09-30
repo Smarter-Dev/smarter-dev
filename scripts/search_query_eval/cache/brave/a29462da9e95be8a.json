@@ -1,0 +1,37 @@
+{
+  "query": "pip install no-cache-dir Docker",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:58+00:00",
+  "results": [
+    {
+      "title": "Avoid cache directory with pip install --no-cache-dir <package> (DOK-P1003) ・ Docker",
+      "url": "https://deepsource.com/directory/docker/issues/DOK-P1003",
+      "domain": "deepsource.com",
+      "snippet": "Once a package is installed, it does not need to be re-installed and the Docker cache can be leveraged instead. Since the pip cache makes the images larger and is not needed, it's better to disable it."
+    },
+    {
+      "title": "python - What is pip's `--no-cache-dir` good for? - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/45594707/what-is-pips-no-cache-dir-good-for",
+      "domain": "stackoverflow.com",
+      "snippet": "... The --no-cache-dir option tells pip to not save the downloaded packages locally, as that is only if pip was going to be run again to install the same packages, but that's not the case when working with containers."
+    },
+    {
+      "title": "r/Python on Reddit: How to write a great Dockerfile for Python applications: 6 things you can do to really improve your Dockerfiles",
+      "url": "https://www.reddit.com/r/Python/comments/ji9nu7/how_to_write_a_great_dockerfile_for_python/",
+      "domain": "reddit.com",
+      "snippet": "Edit: or, as mentioned here, use ENV PIP_NO_CACHE_DIR=1. See also: https://github.com/pypa/pip/pull/5884 ... I don't know of a way better than passing UID+GID from the environment into the container. Perhaps the rootless dockerd could solve that in some cases too."
+    },
+    {
+      "title": "Ensure use '--no-cache-dir' in pip install",
+      "url": "https://guides.spectralops.io/docs/dockr038",
+      "domain": "guides.spectralops.io",
+      "snippet": "FROM python:3 - RUN pip install --upgrade pip && \\ - pip install nibabel pydicom matplotlib pillow && \\ - pip install med2image + RUN pip install --no-cache-dir --upgrade pip && \\ + pip install --no-cache-dir nibabel pydicom matplotlib pillow && \\ + pip install --no-cache-dir med2image RUN pip3 install --no-cache-dir requests=2.7.0 - RUN [\"pip3\", \"install\", \"requests=2.7.0\"] + RUN [\"pip3\", \"install\", \"requests=2.7.0\", \"--no-cache-dir\"] CMD [\"cat\", \"/etc/os-release\"] https://docs.docker.com/develop/develop-images/dockerfile_best-practices/"
+    },
+    {
+      "title": "[docker] use `--no-cache-dir` flag to `pip` in dockerfiles to save ...",
+      "url": "https://gerrit.onap.org/r/c/ccsdk/cds/+/116549",
+      "domain": "gerrit.onap.org",
+      "snippet": "Gerrit Code Review"
+    }
+  ]
+}

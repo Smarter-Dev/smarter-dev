@@ -1,0 +1,37 @@
+{
+  "query": "Python venv Windows crear entorno virtual",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:15+00:00",
+  "results": [
+    {
+      "title": "venv — Creación de entornos virtuales — documentación de Python - 3.8.20",
+      "url": "https://docs.python.org/es/3.8/library/venv.html",
+      "domain": "docs.python.org",
+      "snippet": "Ver PEP 405 para más información sobre los entornos virtuales de Python. ... Al ejecutar este comando se crea el directorio de destino (creando cualquier directorio padre que todavía no exista) y coloca un archivo pyvenv.cfg en él con una clave home apuntando a la instalación Python desde la que el comando se lanzó (un nombre común para el directorio destino es .venv). También crea un subdirectorio bin (o Scripts en Windows) conteniendo una copia/enlace simbólico del binario/s Python (según lo apropiado para la plataforma o los argumentos usados en el momento de la creación del entorno)."
+    },
+    {
+      "title": "Cómo crear un entorno virtual (virtualenv / venv) - Recursos Python",
+      "url": "https://micro.recursospython.com/recursos/como-crear-un-entorno-virtual-venv.html",
+      "domain": "micro.recursospython.com",
+      "snippet": "python -m venv env Esto creará un nuevo entorno virtual en la carpeta env. El comando típicamente se ejecuta desde la ruta en la cual se encuentran los archivos del proyecto para el cual se quiere crear el entorno."
+    },
+    {
+      "title": "Como instalar un entorno virtual en windows con python, utilizando virtualenv | by Roberto Madriz | Medium",
+      "url": "https://medium.com/@devm.soluciones/como-instalar-un-entorno-virtual-en-windows-con-python-utilizando-virtualenv-d7d1c76e6f88",
+      "domain": "medium.com",
+      "snippet": "3. Una vez que estés en el directorio correcto, puedes crear tu entorno virtual. Para esto, necesitarás el paquete virtualenv. Si aún no lo tienes instalado, puedes hacerlo con el siguiente comando: ... Donde venvDir, es el nombre de tu entorno ..."
+    },
+    {
+      "title": "Crea entornos virtuales para Windows en 3 pasos",
+      "url": "https://platzi.com/blog/crea-entornos-virtuales-en-windows-en-3-pasos/",
+      "domain": "platzi.com",
+      "snippet": "Abre el CMD y ubícate en la carpeta en donde quieres crear el entorno virtual Ejecuta python -m venv mi_entorno Ejecuta mi_entorno\\Scripts\\activate"
+    },
+    {
+      "title": "12. Entornos virtuales y paquetes — documentación de Python - 3.14.7",
+      "url": "https://docs.python.org/es/3/tutorial/venv.html",
+      "domain": "docs.python.org",
+      "snippet": "For instance, executing the command with python3.12 will install version 3.12. Para crear un entorno virtual, decide en que carpeta quieres crearlo y ejecuta el módulo venv como script con la ruta a la carpeta:"
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "query": "Python 3.14 removed deprecated features",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:09+00:00",
+  "results": [
+    {
+      "title": "Deprecations — Python 3.14.7 documentation",
+      "url": "https://docs.python.org/3/deprecations/index.html",
+      "domain": "docs.python.org",
+      "snippet": "Calling the Python implementation of functools.reduce() with function or sequence as keyword arguments has been deprecated since Python 3.14. ... Support for custom logging handlers with the strm argument is deprecated and scheduled for removal ..."
+    },
+    {
+      "title": "What's new in Python 3.14 — Python 3.14.7 documentation",
+      "url": "https://docs.python.org/3/whatsnew/3.14.html",
+      "domain": "docs.python.org",
+      "snippet": "The CPython runtime supports running multiple copies of Python in the same process simultaneously and has done so for over 20 years. Each of these separate copies is called an ‘interpreter’. However, the feature had been available only through the C-API. That limitation is removed in Python 3.14, with the new concurrent.interpreters module."
+    },
+    {
+      "title": "Pending removal in Python 3.14 — Python 3.14.4 documentation",
+      "url": "https://docs.python.org/3/deprecations/pending-removal-in-3.14.html",
+      "domain": "docs.python.org",
+      "snippet": "asyncio.set_child_watcher(), asyncio.get_child_watcher(), asyncio.AbstractEventLoopPolicy.set_child_watcher() and asyncio.AbstractEventLoopPolicy.get_child_watcher() are deprecated and will be removed in Python 3.14."
+    },
+    {
+      "title": "Python 3.14: What's New and What Actually Matters — CODERCOPS",
+      "url": "https://blog.codercops.com/blog/python-3-14-whats-new-2026",
+      "domain": "blog.codercops.com",
+      "snippet": "Python’s packaging story is still evolving but not from the language itself. pyproject.toml with uv or pip + hatchling is the current clean path; nothing in 3.14 disrupts that. Async/await syntax is unchanged. If you’re on asyncio, everything works as before. The match statement from 3.10 got minor refinements but no breaking changes. Existing patterns continue working. ... Run python -W error::DeprecationWarning against your test suite on 3.12 or 3.13 first. Many things deprecated in 3.10-3.12 are removed in 3.14."
+    },
+    {
+      "title": "Deprecations — Python 3.12.13 documentation",
+      "url": "https://docs.python.org/3.12/deprecations/index.html",
+      "domain": "docs.python.org",
+      "snippet": "The child watcher classes MultiLoopChildWatcher, FastChildWatcher, AbstractChildWatcher and SafeChildWatcher are deprecated and will be removed in Python 3.14."
+    }
+  ]
+}

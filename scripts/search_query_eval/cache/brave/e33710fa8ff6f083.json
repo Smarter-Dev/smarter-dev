@@ -1,0 +1,37 @@
+{
+  "query": "React Server Components wire format",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:07+00:00",
+  "results": [
+    {
+      "title": "How React server components work: an in-depth guide | Plasmic Blog",
+      "url": "https://www.plasmic.app/blog/how-react-server-components-work",
+      "domain": "plasmic.app",
+      "snippet": "Again, since the rendering happens on the server, this requires another API call to the server to get the new content in RSC wire format. The good news is, once the browser receives the new content, it can construct a new React element tree, ..."
+    },
+    {
+      "title": "An RSC Parser Because React Thought Wire Protocols Were Fun",
+      "url": "https://www.adversis.io/blogs/an-rsc-parser-because-react-decided-wire-protocols-were-fun",
+      "domain": "adversis.io",
+      "snippet": "The server renders components, ... and round trips. To do this, React uses an internal serialization format called the Flight protocol...."
+    },
+    {
+      "title": "Some notes on React Server Components (specifically the streaming wire format), Next.js v13+ (specifically `__next_f`), and Webpack · GitHub",
+      "url": "https://gist.github.com/0xdevalias/ac465fb2f7e6fded183c2a4273d21e61",
+      "domain": "gist.github.com",
+      "snippet": "This is a parser for React Server Components (RSC) when sent over the network. React uses a format to represent a tree of components/html or metadata such as requiered imports, suspense boundaries, and css/fonts that needs to be loaded."
+    },
+    {
+      "title": "Devtools for React Server Components",
+      "url": "https://www.alvar.dev/blog/creating-devtools-for-react-server-components",
+      "domain": "alvar.dev",
+      "snippet": "Everyone is working hard on creating ... bit of data to work with. Arguably much more than we've ever had before. There's this format that RSC uses when streaming content to a page. It's been referred to as the \"wire format\" sometimes...."
+    },
+    {
+      "title": "React Server Components: the Good, the Bad, and the Ugly",
+      "url": "https://mayank.co/blog/react-server-components/",
+      "domain": "mayank.co",
+      "snippet": "The bigger difference with React Server Components is what happens underneath. Server components are converted into an intermediate serializable format, which can be prerendered into HTML (same as before) and can also be sent over the wire for rendering on the client (this is new!)."
+    }
+  ]
+}

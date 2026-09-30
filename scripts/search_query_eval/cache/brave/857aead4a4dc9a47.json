@@ -1,0 +1,37 @@
+{
+  "query": "Discord rate limit buckets",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:18+00:00",
+  "results": [
+    {
+      "title": "Rate Limits - Documentation - Discord",
+      "url": "https://docs.discord.com/developers/topics/rate-limits",
+      "domain": "docs.discord.com",
+      "snippet": "< HTTP/1.1 429 TOO MANY REQUESTS < Content-Type: application/json < Retry-After: 65 < X-RateLimit-Limit: 10 < X-RateLimit-Remaining: 0 < X-RateLimit-Reset: 1470173023.123 < X-RateLimit-Reset-After: 64.57 < X-RateLimit-Bucket: abcd1234 < X-RateLimit-Scope: user { \"message\": \"You are being rate limited.\", \"retry_after\": 64.57, \"global\": false }"
+    },
+    {
+      "title": "Discord.py: 429 rate limit. What does \"not making requests on exhausted buckets until after they have reset\" exactly mean? - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/67268074/discord-py-429-rate-limit-what-does-not-making-requests-on-exhausted-buckets",
+      "domain": "stackoverflow.com",
+      "snippet": "We recommend using this header value as a unique identifier for the rate limit, which will allow you to group up these shared limits as you discover them across different routes. ... Or in other words, the HTTP response will contain a header called X-RateLimit-Bucket, which will contain an identifying string for the API route you are using. That means that if you were to send thousands of requests to 1 specific API endpoint, Discord will presumably return the same X-RateLimit-Bucket ID in each response."
+    },
+    {
+      "title": "Rate Limits - Discord Userdoccers",
+      "url": "https://docs.discord.food/topics/rate-limits",
+      "domain": "docs.discord.food",
+      "snippet": "Per-route rate limits exist for many individual endpoints, and may include the HTTP method (GET, POST, PUT, or DELETE). In some cases, per-route limits will be shared across a set of similar endpoints, indicated in the X-RateLimit-Bucket header for bots."
+    },
+    {
+      "title": "r/discordapp on Reddit: What 'a rate limit bucket' is?",
+      "url": "https://www.reddit.com/r/discordapp/comments/a3plks/what_a_rate_limit_bucket_is/",
+      "domain": "reddit.com",
+      "snippet": "The rate limit bucket is a method of limiting the request load to the Discord API by a user."
+    },
+    {
+      "title": "add rate limit algorithm clarification for global rate limits · Issue #5144 · discord/discord-api-docs",
+      "url": "https://github.com/discord/discord-api-docs/issues/5144",
+      "domain": "github.com",
+      "snippet": "How are global rate limits calculated from Discord? A global rate limit uses a bucket algorithm with a reset time based on a Date header (with an unspecified precision; presented to the second)."
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "query": "Python latest stable release features",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:36+00:00",
+  "results": [
+    {
+      "title": "Status of Python versions",
+      "url": "https://devguide.python.org/versions/",
+      "domain": "devguide.python.org",
+      "snippet": "After the first beta, no new features can go in, but feature fixes (including significant changes to new features), bug fixes, and security fixes are accepted for the upcoming feature release."
+    },
+    {
+      "title": "Python Release Python 3.14.0 | Python.org",
+      "url": "https://www.python.org/downloads/release/python-3140/",
+      "domain": "python.org",
+      "snippet": "Python 3.14.0 is the newest major release of the Python programming language, and it contains many new features and optimisations compared to Python 3.13."
+    },
+    {
+      "title": "What's new in Python 3.14 — Python 3.14.7 documentation",
+      "url": "https://docs.python.org/3/whatsnew/3.14.html",
+      "domain": "docs.python.org",
+      "snippet": "This article explains the new features in Python 3.14, compared to 3.13. Python 3.14 was released on 7 October 2025. For full details, see the changelog. ... Python 3.14 is the latest stable release of the Python programming language, with a mix of changes to the language, the implementation, and the standard library..."
+    },
+    {
+      "title": "Python Release Python 3.13.0 | Python.org",
+      "url": "https://www.python.org/downloads/release/python-3130/",
+      "domain": "python.org",
+      "snippet": "Python 3.13.0 is the newest major release of the Python programming language, and it contains many new features and optimizations compared to Python 3.12."
+    },
+    {
+      "title": "The Latest Version of Python | phoenixNAP KB",
+      "url": "https://phoenixnap.com/kb/latest-python-version",
+      "domain": "phoenixnap.com",
+      "snippet": "As of February 2026, the latest stable version of Python is Python 3.14.3, released on February 3, 2026. It contains about 299 bug fixes, improvements, and documentation changes since the previous version, 3.14.2. Notable features introduced ..."
+    }
+  ]
+}

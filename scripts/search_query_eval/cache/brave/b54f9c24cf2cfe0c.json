@@ -1,0 +1,37 @@
+{
+  "query": "Core Web Vitals website performance",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:40+00:00",
+  "results": [
+    {
+      "title": "Core Web Vitals report - Search Console Help",
+      "url": "https://support.google.com/webmasters/answer/9205520?hl=en",
+      "domain": "support.google.com",
+      "snippet": "Core Web Vitals URLs include URL parameters when distinguishing the page; PageSpeed Insights strips all parameter data from the URL, and then assigns all results to the bare URL. ... The report is not designed find the status of a specific URL, but rather to see your site's performance as a whole, and troubleshoot issues affecting multiple pages on your site."
+    },
+    {
+      "title": "Understanding Core Web Vitals and Google search results | Google Search Central | Documentation | Google for Developers",
+      "url": "https://developers.google.com/search/docs/appearance/core-web-vitals",
+      "domain": "developers.google.com",
+      "snippet": "Core Web Vitals is a set of metrics that measure real-world user experience for loading performance, interactivity, and visual stability of the page. We highly recommend site owners achieve good Core Web Vitals for success with Search and to ..."
+    },
+    {
+      "title": "Core Web Vitals Testing: 8 Best Tools in 2026",
+      "url": "https://wp-rocket.me/blog/core-web-vitals-testing-performance-monitoring-tools/",
+      "domain": "wp-rocket.me",
+      "snippet": "The performance of a site can substantially vary based on a user’s device capabilities, their network conditions, what other processes may be running on the device, and how they’re interacting with the page. In fact, each of the Core Web Vitals metrics can have its score affected by user interaction. Only field measurement can accurately capture the complete picture. Below is a selection of the 8 best website performance and Core Web Vitals testing tools to help you test speed, analyze Core Web Vitals, identify performance bottlenecks, and monitor performance over time."
+    },
+    {
+      "title": "What are Core Web Vitals?",
+      "url": "https://www.dynatrace.com/knowledge-base/core-web-vitals/",
+      "domain": "dynatrace.com",
+      "snippet": "Core Web Vitals are three key metrics of web page performance that measure a page’s loading performance, interactivity, and visual stability. They are part of Web Vitals, a quality standards initiative by Google that helps web developers deliver great user experiences."
+    },
+    {
+      "title": "Web Vitals | Articles | web.dev",
+      "url": "https://web.dev/articles/vitals",
+      "domain": "web.dev",
+      "snippet": "The Chrome User Experience Report collects anonymized, real user measurement data for each Core Web Vital. This data enables site owners to quickly assess their performance without requiring them to manually instrument analytics on their pages, and powers tools like Chrome DevTools, PageSpeed Insights, and Search Console's Core Web Vitals report."
+    }
+  ]
+}

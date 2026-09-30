@@ -1,0 +1,37 @@
+{
+  "query": "Kubernetes memory metrics sampling OOM spike",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:49+00:00",
+  "results": [
+    {
+      "title": "Out-of-memory (OOM) in Kubernetes – Part 3: Memory metrics sources and tools to collect them",
+      "url": "https://mihai-albert.com/2022/02/13/out-of-memory-oom-in-kubernetes-part-3-memory-metrics-sources-and-tools-to-collect-them/",
+      "domain": "mihai-albert.com",
+      "snippet": "We’ll use this command further on as it does give interesting output, as per the official Kubernetes guidance. One thing we need to be aware of is that it doesn’t measure actual usage on that node, but instead just shows how much the request and limits value stack up. We’ll use htop to investigate both a node’s overall memory stats as well as individual container processes. We’ve seen the components involved in collecting metrics, listed their endpoints, and saw samples for each that contained various metrics."
+    },
+    {
+      "title": "Demystifying OOM Killer in Kubernetes: Tracking Down Memory Issues | Cloud Native Daily",
+      "url": "https://medium.com/cloud-native-daily/title-demystifying-oom-killer-in-kubernetes-tracking-down-memory-issues-b5a4973fbd56",
+      "domain": "medium.com",
+      "snippet": "The container runtime, such as Docker, reports the memory usage to the Kubernetes kubelet. The kubelet, in turn, monitors the memory usage of all pods and compares it against their respective limits. If a pod breaches its limit, the kubelet initiates the OOM killer to terminate the offending pod, freeing up memory resources for other critical workloads. To make informed decisions about OOM kills, the OOM killer relies on memory metrics obtained from cAdvisor (Container Advisor) and exposed to Kubernetes."
+    },
+    {
+      "title": "Kubernetes Container Memory Metrics | Baeldung on Ops",
+      "url": "https://www.baeldung.com/ops/kubernetes-container-memory-metrics",
+      "domain": "baeldung.com",
+      "snippet": "Specifically, we can rely on the container_memory_working_set_bytes metric as the indicator for a possible OOM kill event. Concretely, when the container_memory_working_set continuously increases despite the kernel’s attempt to clear off the ..."
+    },
+    {
+      "title": "How to Troubleshoot OOMKilled Errors in Kubernetes",
+      "url": "https://oneuptime.com/blog/post/2026-01-24-kubernetes-oomkilled-errors/view",
+      "domain": "oneuptime.com",
+      "snippet": "# Using Prometheus # Query: container_memory_usage_bytes{pod=\"myapp-xyz\"} # Using kubectl top over time (manual sampling) watch -n 5 kubectl top pod myapp-xyz · The most common issue. Your application legitimately needs more memory than allocated."
+    },
+    {
+      "title": "How to Debug Kubernetes Pod Restarts by Correlating OOM Kill Events",
+      "url": "https://oneuptime.com/blog/post/2026-02-06-debug-kubernetes-pod-restarts-oom-memory-metrics/view",
+      "domain": "oneuptime.com",
+      "snippet": "Your pod keeps restarting. kubectl describe pod shows OOMKilled as the last termination reason. You increase the memory limit, the restarts stop for a week, then come back. This cycle continues until you actually figure out what is consuming the memory. OpenTelemetry runtime metrics give you the visibility to track memory usage over time and correlate it with the specific operations that cause the growth. First, instrument your application to export memory metrics."
+    }
+  ]
+}

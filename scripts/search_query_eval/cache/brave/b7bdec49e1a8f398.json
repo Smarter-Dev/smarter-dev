@@ -1,0 +1,37 @@
+{
+  "query": "site:sqlite.org appropriate uses SQLite",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:08+00:00",
+  "results": [
+    {
+      "title": "Appropriate Uses For SQLite",
+      "url": "https://www.sqlite.org/whentouse.html",
+      "domain": "sqlite.org",
+      "snippet": "Because an SQLite database requires ... good fit for use in cellphones, set-top boxes, televisions, game consoles, cameras, watches, kitchen appliances, thermostats, automobiles, machine tools, airplanes, remote sensors, drones, medical devices, and robots: the \"internet of ..."
+    },
+    {
+      "title": "Well-Known Users Of SQLite",
+      "url": "https://www.sqlite.org/famous.html",
+      "domain": "sqlite.org",
+      "snippet": "The United States Library of Congress recognizes SQLite as a recommended storage format for preservation of digital content. McAfee uses SQLite in its antivirus programs."
+    },
+    {
+      "title": "SQLite Documentation: Artifact [fc46eae081]",
+      "url": "https://www.sqlite.org/docsrc/info/fc46eae081251c3c",
+      "domain": "sqlite.org",
+      "snippet": "</p> <p> The basic rule of thumb for when it is appropriate to use SQLite is this: Use SQLite in situations where simplicity of administration, implementation, and maintenance are more important than the countless complex features that enterprise database engines provide."
+    },
+    {
+      "title": "Documentation Source Text: Artifact [c8477cfdff]",
+      "url": "https://www.sqlite.org/docsrc/artifact/c8477cfdff02dd3a",
+      "domain": "sqlite.org",
+      "snippet": "If the \"application\" is an [server-side database|application server] and if the content resides on the same physical machine as the application server, then SQLite might still be appropriate even though the end user is another network hop away.</p> </li> <li><p><b>Many concurrent writers?"
+    },
+    {
+      "title": "Features Of SQLite",
+      "url": "https://sqlite.org/features.html",
+      "domain": "sqlite.org",
+      "snippet": "SQLite is a popular choice for the database engine in cellphones, PDAs, MP3 players, set-top boxes, and other electronic gadgets. SQLite has a small code footprint, makes efficient use of memory, disk space, and disk bandwidth, is highly reliable, and requires no maintenance from a Database ..."
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "query": "RFC 5322 email address syntax",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:53+00:00",
+  "results": [
+    {
+      "title": "RFC 5322 - Internet Message Format",
+      "url": "https://datatracker.ietf.org/doc/html/rfc5322",
+      "domain": "datatracker.ietf.org",
+      "snippet": "However, the domain portion contains addressing information specified by and used in other protocols (e.g., [RFC1034], [RFC1035], [RFC1123], [RFC5321]). It is therefore incumbent upon implementations to conform to the syntax of addresses for the context in which they are used. Resnick Standards Track [Page 17] RFC 5322 Internet Message Format October 2008 addr-spec = local-part \"@\" domain local-part = dot-atom / quoted-string / obs-local-part domain = dot-atom / domain-literal / obs-domain domain-literal = [CFWS] \"[\" *([FWS] dtext) [FWS] \"]\" [CFWS] dtext = �3-90 / ; Printable US-ASCII �4-126 / ; characters not including obs-dtext ; \"[\", \"]\", or \"\\\" The domain portion identifies the point to which the mail is delivered."
+    },
+    {
+      "title": "Email address - Wikipedia",
+      "url": "https://en.wikipedia.org/wiki/Email_address",
+      "domain": "en.wikipedia.org",
+      "snippet": "RFC 5322 Internet Message Format (Obsoletes RFC 2822, Updated by RFC 6854) (Errata) ... RFC 6854 Update to Internet Message Format to Allow Group Syntax in the \"From:\" and \"Sender:\" Header Fields (Updates RFC 5322)"
+    },
+    {
+      "title": "RFC 5322 Explained: Email Header Format & Why SPF Cares | DMARC Report",
+      "url": "https://dmarcreport.com/blog/rfc-5322-email-security-specifications-for-sender-policy-framework/",
+      "domain": "dmarcreport.com",
+      "snippet": "RFC 5322 laid down email security specifications for Sender Policy Framework · RFC 5322 defines the syntax for Internet email headers. SPF, DKIM, and DMARC rely on these headers to authenticate emails and prevent phishing."
+    },
+    {
+      "title": "RFC 5322 Explained Simply: Email Format and Headers",
+      "url": "https://dmarceye.com/glossary/rfc-5322",
+      "domain": "dmarceye.com",
+      "snippet": "RFC 5322 defines several crucial ... · Message body: The plain text or multipart content of the email. Syntax rules: Requirements for line length, character encoding, and whitespace handling...."
+    },
+    {
+      "title": "RFC 5322: The Technical Side of Email Marketing",
+      "url": "https://campaignrefinery.com/rfc-5322/",
+      "domain": "campaignrefinery.com",
+      "snippet": "RFC 5322 defines the syntax rules for constructing header field names and values. Header field names are case-insensitive and must consist of printable ASCII characters. Header field values may contain various types of data, including text, ..."
+    }
+  ]
+}

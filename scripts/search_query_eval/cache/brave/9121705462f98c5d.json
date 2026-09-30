@@ -1,0 +1,37 @@
+{
+  "query": "GDevelop game jam beginner 2D",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:00+00:00",
+  "results": [
+    {
+      "title": "Read this if you're new to game jams - Community - GDevelop Forum",
+      "url": "https://forum.gdevelop.io/t/read-this-if-youre-new-to-game-jams/72598",
+      "domain": "forum.gdevelop.io",
+      "snippet": "I recently posted a “guide” to help game jam newbies out. So if this is your first game jam, but you don’t know how to get started, then maybe the post will help you out a bit. I should also mention that I go over some really basic stuff on what to do, like “following the game jam rules”. ..."
+    },
+    {
+      "title": "GDevelop 2D Black and White platformer - itch.io",
+      "url": "https://itch.io/jam/gdevelop-",
+      "domain": "itch.io",
+      "snippet": "A game jam from 2024-06-01 to 2024-07-03 hosted by Calvin wolff. This game jam must be made with GDevelop and be a black and white platformer. must be 2D"
+    },
+    {
+      "title": "Game jams - GDevelop Forum",
+      "url": "https://forum.gdevelop.io/c/community/game-jams/25",
+      "domain": "forum.gdevelop.io",
+      "snippet": "Discuss about game jams where GDevelop games can be submitted. Check also this forum for game jams dedicated to games created with GDevelop!"
+    },
+    {
+      "title": "r/gdevelop on Reddit: This is a game I made for the Itch.io 2025 Beginner Game Jam using GDevelop. The theme was \"Reflection\".",
+      "url": "https://www.reddit.com/r/gdevelop/comments/1jrqzmg/this_is_a_game_i_made_for_the_itchio_2025/",
+      "domain": "reddit.com",
+      "snippet": "Subreddit for GDevelop, the open-source, cross-platform game engine designed for everyone. It's extensible, fast and easy to learn. ... A portal to a parallel world wide web constrained only by the collective imagination of its explorers ..."
+    },
+    {
+      "title": "Game jams with GDevelop | GDevelop",
+      "url": "https://gdevelop.io/page/game-jams",
+      "domain": "gdevelop.io",
+      "snippet": "GDevelop is a perfect fit for quickly making games during game jams like the Global Game Jam, Ludum Dare, and others."
+    }
+  ]
+}

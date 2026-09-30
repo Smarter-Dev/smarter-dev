@@ -1,0 +1,37 @@
+{
+  "query": "PostgreSQL COUNT(*) table scan MVCC",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:13+00:00",
+  "results": [
+    {
+      "title": "PostgreSQL: COUNT(*) uses a sequential scan, not index - Database Administrators Stack Exchange",
+      "url": "https://dba.stackexchange.com/questions/2070/postgresql-count-uses-a-sequential-scan-not-index",
+      "domain": "dba.stackexchange.com",
+      "snippet": "Why does PostgreSQL sequentially scans the table for COUNT(*) query, while there is a very small and indexed primary key? ... [...] The reason why this is slow is related to the MVCC implementation in PostgreSQL."
+    },
+    {
+      "title": "Slow Counting - PostgreSQL wiki",
+      "url": "https://wiki.postgresql.org/wiki/Slow_Counting",
+      "domain": "wiki.postgresql.org",
+      "snippet": "The fact that multiple transactions can see different states of the data means that there can be no straightforward way for \"COUNT(*)\" to summarize data across the whole table. PostgreSQL must walk through all rows to determine visibility. This normally results in a sequential scan reading information about every row in the table."
+    },
+    {
+      "title": "Understanding Why COUNT(*) Can Be Slow in PostgreSQL.",
+      "url": "https://vaibhavjha.substack.com/p/understanding-why-count-can-be-slow",
+      "domain": "vaibhavjha.substack.com",
+      "snippet": "But with autovacuum and auto-analyze ... versions of rows exist. Without any filtering conditions, Postgres usually performs a sequential scan to evaluate COUNT(*)...."
+    },
+    {
+      "title": "How SELECT COUNT Affects Performance - Ahmed's Blog",
+      "url": "https://ahmed-n-abdeltwab.github.io/blog/2025/09/02/select-count-performance.html",
+      "domain": "ahmed-n-abdeltwab.github.io",
+      "snippet": "How it finds those rows depends on the query and indexes: Index Scan: If there is an index on a column in the WHERE clause, Postgres will traverse the index to find matching row locations (TIDs), then access the table (heap) for each of those rows. It does this to retrieve any needed columns ..."
+    },
+    {
+      "title": "Why Adding an Index Won't Fix Your Slow COUNT(*) in PostgreSQL - DEV Community",
+      "url": "https://dev.to/bodanthebackend/why-adding-an-index-wont-fix-your-slow-count-in-postgresql-477a",
+      "domain": "dev.to",
+      "snippet": "An Index Only Scan can skip a lot of table visits because the values needed to answer the query already live in the index itself. ... an index on status holds what's needed to locate the relevant entries. But PostgreSQL still has to respect MVCC's visibility rules — and that's where the visibility map comes in."
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "query": "React Server Components serialization props",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:51+00:00",
+  "results": [
+    {
+      "title": "How React server components work: an in-depth guide | Plasmic Blog",
+      "url": "https://www.plasmic.app/blog/how-react-server-components-work",
+      "domain": "plasmic.app",
+      "snippet": "At the end of this process, we hope to end up with a React tree that looks something more like this on the server, to be sent to the browser to “finish up”: Because we are serializing the whole React tree to JSON, all the props that you are passing to client components or base html tags must be serializable as well."
+    },
+    {
+      "title": "RSC Payload & Serialized Props - hrtyy.dev",
+      "url": "https://hrtyy.dev/web/rsc_payload/",
+      "domain": "hrtyy.dev",
+      "snippet": "In Next.js document, the output is called RSC Payload. (I couldn't find the term in React official document.) RSC Payload contains any props passed from a Server Component to a Client Component. Then, the props are serialized."
+    },
+    {
+      "title": "'use server' directive – React",
+      "url": "https://react.dev/reference/rsc/use-server",
+      "domain": "react.dev",
+      "snippet": "Here are supported types for Server Function arguments: ... Objects that are instances of any class (other than the built-ins mentioned) or objects with a null prototype · Symbols not registered globally, ex. Symbol('my new symbol') ... Supported serializable return values are the same as serializable props for a boundary Client Component..."
+    },
+    {
+      "title": "Understanding prop passing from RSC to Client Components - Frontend First notes and takeaways",
+      "url": "https://podpulse.ai/podcast-notes-and-takeaways/frontend-first-understanding-prop-passing-from-rsc-to-client-components",
+      "domain": "podpulse.ai",
+      "snippet": "Within this payload, references ... end. This payload also includes properties, or \"props,\" which must be serializable to be conveyed over the network...."
+    },
+    {
+      "title": "Serializable values that can be passed from the Server to ...",
+      "url": "https://github.com/vercel/next.js/issues/54291",
+      "domain": "github.com",
+      "snippet": "Props passed from the Server to Client Components need to be serializable. This means that values such as functions, Dates, etc, cannot be passed directly to Client Components. In fact, Date, Set, Map, especially Promise are seriarizable."
+    }
+  ]
+}

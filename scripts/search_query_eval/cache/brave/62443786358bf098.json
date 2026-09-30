@@ -1,0 +1,37 @@
+{
+  "query": "self taught developer portfolio first job",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:44+00:00",
+  "results": [
+    {
+      "title": "Self-Taught Developer: Let’s Get That Developer Job 3/4 — Designing The Best Portfolio",
+      "url": "https://medium.com/for-self-taught-developers/self-taught-developer-lets-get-that-developer-job-3-4-designing-the-best-portfolio-fe45055541",
+      "domain": "medium.com",
+      "snippet": "Let me first tell you a little bit about my experience when I started working on my first Developer job because I wanted you to know more about how it is in real life before you can start designing your portfolio. As a Self-Taught Developer we didn’t have anything yet to offer, sure personal projects, good design resume is the best way to do it but let me tell you, at this period, everyone already knows that you can easily get the source code, you can easily copy other people’s work, and at this period, the competition is getting harder and harder, competing with Engineers and Computer Science graduate is overwhelming, so maybe we can do different approach?"
+    },
+    {
+      "title": "r/learnprogramming on Reddit: Self-taught Front-End Developer Portfolio Needs Review",
+      "url": "https://www.reddit.com/r/learnprogramming/comments/scl451/selftaught_frontend_developer_portfolio_needs/",
+      "domain": "reddit.com",
+      "snippet": "I've been teaching myself web-development (front-end) for 7 months. I built a portfolio website hoping to land my first developer job. How does it look? Any comments or advice would be really appreciated."
+    },
+    {
+      "title": "How I land my first software engineer job as a self-taught developer ? - DEV Community",
+      "url": "https://dev.to/tris909/finally-i-have-landed-the-job-as-a-self-taught-developer-3knb",
+      "domain": "dev.to",
+      "snippet": "After 1 year and 2 months, I have landed my first job as a developer by just sitting at home and learning how to code on my own. Hi everyone, I am Tri Tran - a self-taught developer."
+    },
+    {
+      "title": "How to build a portfolio as a self taught programmer - Quora",
+      "url": "https://www.quora.com/How-can-I-build-a-portfolio-as-a-self-taught-programmer",
+      "domain": "quora.com",
+      "snippet": "Answer (1 of 4): Disclaimer: This is the advice that I am currently following, however I am about to enter college and have not (yet) been hired for a programming position based on my portfolio. This is merely what makes sense to me. It’s pretty simple to build your own portfolio as a ..."
+    },
+    {
+      "title": "r/learnprogramming on Reddit: As a self taught developer (no degree) looking for their first job, what kind of projects should I have in my portfolio to show my skill set is acceptable to potential employers? What are the expectations? Clone of a well known app? Selection of 'simpler' programs? Something in-between?",
+      "url": "https://www.reddit.com/r/learnprogramming/comments/hpb0la/as_a_self_taught_developer_no_degree_looking_for/",
+      "domain": "reddit.com",
+      "snippet": "If you actually want to be successful there are two major options: make some significant contributions to an open source project, or pick a problem and show how you can solve it. What fields are you interest in or currently work in?"
+    }
+  ]
+}

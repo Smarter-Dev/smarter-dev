@@ -1,0 +1,37 @@
+{
+  "query": "best local LLM 16GB RAM 2026",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:17+00:00",
+  "results": [
+    {
+      "title": "Best Local LLMs for 16GB RAM or VRAM in 2026 - Atomic Chat",
+      "url": "https://atomic.chat/blog/guides/best-local-llm-16gb",
+      "domain": "atomic.chat",
+      "snippet": "A roundup of the strongest models that actually fit in 16GB — Qwen 3.8 27B, Ornith 1.5, gpt-oss-20b, Gemma 4 and LFM2.5 — with the exact GGUF build to use on a 16GB graphics card versus a 16GB RAM or unified-memory machine."
+    },
+    {
+      "title": "Run AI Locally: The Best LLMs for 8GB, 16GB, 32GB Memory and Beyond",
+      "url": "https://www.microcenter.com/site/mc-news/article/best-local-llms-8gb-16gb-32gb-memory-guide.aspx",
+      "domain": "microcenter.com",
+      "snippet": "A couple of the new models will be mentioned below, but one clearly stands out from the crowd: Qwen3.8 27B. Alibaba's Qwen models were already a go-to for many people who use local LLMs."
+    },
+    {
+      "title": "Best LLM for 16GB VRAM (2026): Top Local Models Ranked",
+      "url": "https://localaimaster.com/vram/best-llm-16gb-vram",
+      "domain": "localaimaster.com",
+      "snippet": "The best local LLM for 16GB VRAM in 2026 is Qwen 3 14B — ~9GB at Q4_K_M and ~35 tokens/sec on an RTX 4080, leaving room for a long context. Phi-4 14B is the best for STEM/reasoning, Gemma 3 12B the best multilingual, and DeepSeek-R1 14B the ..."
+    },
+    {
+      "title": "Best local LLMs for 16GB RAM in 2026 | LocalClaw",
+      "url": "https://localclaw.io/ram/16gb",
+      "domain": "localclaw.io",
+      "snippet": "Catalogue summary: Official MIT reasoning model from Ornith AI with a 262K native context window, tool-calling focus, and official Q4_K_M GGUF, MLX and Ollama/llama.cpp paths for local coding-agent experiments on 16GB+ machines. ... Why it fits: Comfortable memory headroom. General match. Custom runtime required. Catalogue summary: PrismML Apache 2.0 ternary Qwen3.8-27B derivative with official GGUF and MLX paths. The PQ2_0 pack is 7.21GB, PTQ1_0 is 5.95GB, and custom llama.cpp/MLX kernels target laptop-class local inference. ... Why it fits: Comfortable memory headroom. General match. Catalogue summary: Official OpenBMB compact on-device LLM with Apache 2.0 licensing, 131K context, tool-calling and coding focus, plus official Q4_K_M GGUF, Ollama, llama.cpp, Docker and OpenClaw run paths."
+    },
+    {
+      "title": "r/LocalLLM on Reddit: Which is the best local LLM in April 2026 for a 16 GB GPU? I'm looking for an ultimate model for some chat, light coding, and experiments with agent building.",
+      "url": "https://www.reddit.com/r/LocalLLM/comments/1sj9c4c/which_is_the_best_local_llm_in_april_2026_for_a/",
+      "domain": "reddit.com",
+      "snippet": "Assuming you're talking 16GB GPU and you have 32GB+ system RAM, I'd go with Qwen3.5 35b. Use Q4_K_XL or 5 or 6, whatever meets your needs. Offload all layers to GPU use flash attention, q8 kv cache, offload experts to CPU until it fits."
+    }
+  ]
+}

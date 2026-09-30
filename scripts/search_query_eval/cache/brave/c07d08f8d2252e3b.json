@@ -1,0 +1,37 @@
+{
+  "query": "FAANG interview question frequency",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:38+00:00",
+  "results": [
+    {
+      "title": "40 FAANG Interview Questions you may face during your interview (2026 Edition) - MentorCruise",
+      "url": "https://mentorcruise.com/questions/faang/",
+      "domain": "mentorcruise.com",
+      "snippet": "Are you prepared for questions like 'Explain the difference between process and thread.' and similar? We've collected 40 interview questions for you to prepare for your next FAANG interview."
+    },
+    {
+      "title": "GitHub - ombharatiya/FAANG-Coding-Interview-Questions: A curated List of Coding Questions Asked in FAANG Interviews · GitHub",
+      "url": "https://github.com/ombharatiya/FAANG-Coding-Interview-Questions",
+      "domain": "github.com",
+      "snippet": "Please feel free to submit a pull request with new questions, corrections, or additional company coverage. New questions, papers, and strategies drop here every single week, before they surface anywhere else. The engineers who land FAANG offers ..."
+    },
+    {
+      "title": "50 FAANG Interview Questions by Dr. Nancy Li @drnancyli www.drnancyli.com",
+      "url": "https://cdn.uconnectlabs.com/wp-content/uploads/sites/99/2024/03/drnancyli.comTop-50-Real-life-FAANG-PM-Interview-Questions.pdf",
+      "domain": "cdn.uconnectlabs.com",
+      "snippet": "50 FAANG · Interview Questions · by Dr. Nancy Li"
+    },
+    {
+      "title": "FAANG Interview Prep: Your Complete 2026 Guide",
+      "url": "https://www.byte-by-byte.com/faang-interview-prep/",
+      "domain": "byte-by-byte.com",
+      "snippet": "FAANG coding questions almost always come down to a handful of recurring patterns. Understand these deeply and you’ll recognize them no matter how the question is dressed up: Arrays and strings — two pointers, sliding window, prefix sums · Hash maps and sets — frequency counting, finding pairs, deduplication"
+    },
+    {
+      "title": "FAANG+ interview questions (SWE, MLE, AI engineers, etc) + answers - IGotAnOffer",
+      "url": "https://igotanoffer.com/blogs/tech/faang-interview-questions",
+      "domain": "igotanoffer.com",
+      "snippet": "Engineering manager candidates at FAANG and other top tech companies generally face a mix of people management, project management, fit, system design, and coding questions. Depending on your level and company, you can expect two or even three system design interviews."
+    }
+  ]
+}

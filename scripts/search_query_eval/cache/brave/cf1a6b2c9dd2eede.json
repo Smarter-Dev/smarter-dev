@@ -1,0 +1,37 @@
+{
+  "query": "python slim Docker image",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:50+00:00",
+  "results": [
+    {
+      "title": "Image Layer Details - sha256-0d15918ecae76250659ae3036ad1fc898f801f6cb803860bdf0cc4b27fe316dc:3.10-slim",
+      "url": "https://hub.docker.com/layers/library/python/3.10-slim/images/sha256-0d15918ecae76250659ae3036ad1fc898f801f6cb803860bdf0cc4b27fe316dc",
+      "domain": "hub.docker.com",
+      "snippet": "Docker Suite · Sign inSign up · Multi-platform · Also known as: 3-slim · 3-slim-bullseye · 3.10-slim-bullseye · 3.10.5-slim · 3.10.5-slim-bullseye · slim · slim-bullseye · Languages & frameworks · Index digest · sha256:31dd4d9529d02d7436659061cb7564cd4733fc90e5e152709a942d53382ec8d0 · OS/ARCH · ​ · ​ · Compressed size · --- Last pushed · 4 days by doijanky · Type · Image ·"
+    },
+    {
+      "title": "python - Official Image | Docker Hub",
+      "url": "https://hub.docker.com/_/python/",
+      "domain": "hub.docker.com",
+      "snippet": "Python is an interpreted, interactive, object-oriented, open-source programming language. ... Where to get help: the Docker Community Slack⁠, Server Fault⁠, Unix & Linux⁠, or Stack Overflow⁠ · (See \"What's the difference between 'Shared' and 'Simple' tags?\" in the FAQ⁠.) ... 3.14.7-slim-trixie, 3.14-slim-trixie, 3-slim-trixie, slim-trixie, 3.14.7-slim, 3.14-slim, 3-slim, slim⁠"
+    },
+    {
+      "title": "Image Layer Details - sha256-7ae2d10e4bdc6f69ba2daf031647568fec08f3191621d7a5c8760abb236d16ab:3.11-slim",
+      "url": "https://hub.docker.com/layers/library/python/3.11-slim/images/sha256-7ae2d10e4bdc6f69ba2daf031647568fec08f3191621d7a5c8760abb236d16ab?context=explore",
+      "domain": "hub.docker.com",
+      "snippet": "Docker Suite · Sign inSign up · Multi-platform · Also known as: 3-slim · 3-slim-bullseye · 3.11-slim-bullseye · 3.11.1-slim · 3.11.1-slim-bullseye · slim · slim-bullseye · Languages & frameworks · Index digest · sha256:da047cb8f9d1d98e5c070f5300ba9f7274e33b8fc0e5be5ed88740aed1b95ba9 · OS/ARCH · ​ · ​ · Compressed size · --- Last pushed · 2 days by doijanky · Type · Image ..."
+    },
+    {
+      "title": "How to make your Python Docker images secure, fast & small | by Björn van Dijkman | VantageAI | Medium",
+      "url": "https://medium.com/vantageai/how-to-make-your-python-docker-images-secure-fast-small-b3a6870373a0",
+      "domain": "medium.com",
+      "snippet": "The aim of the Docker image is to serve as a host for a FASTAPI server for a machine learning application, with Poetry as its dependency manager. For more information on the motivation to use Poetry instead of pip/pipenv/pip-tools/conda, read this and this blog. Please note that a basic understanding of Docker and Dockerfiles is a prerequisite for this article. ... I am using the slim version of Python 3.11 to minimize the size of the container and make it as lightweight as possible."
+    },
+    {
+      "title": "Docker: for python based images, use the -slim version · Issue #1352 · nginx/unit",
+      "url": "https://github.com/nginx/unit/issues/1352",
+      "domain": "github.com",
+      "snippet": "After a conversation with @MichaelMcAleer and our docker initiatives, he suggested we use the -slim variant python images as base when creating the unit-python dockerfiles. Main reason is the slim image has a lot fewer packages and there..."
+    }
+  ]
+}

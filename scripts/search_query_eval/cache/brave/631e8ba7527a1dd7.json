@@ -1,0 +1,37 @@
+{
+  "query": "venv PowerShell execution policy Activate.ps1",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:35+00:00",
+  "results": [
+    {
+      "title": "& : File D:\\vscode\\.venv\\Scripts\\Activate.ps1 cannot be loaded because running scripts is disabled on this system. For more information, see about_Execution_Policies at https:/go.microsoft.com/fwlink/?LinkID=135170. At line:1 char:3 - Microsoft Q&A",
+      "url": "https://learn.microsoft.com/en-us/answers/questions/5546688/file-d-vscode-venvscriptsactivate-ps1-cannot-be-lo",
+      "domain": "learn.microsoft.com",
+      "snippet": "That message is PowerShell blocking scripts by policy. The quickest fix is to relax the policy only for the current terminal and then activate your venv."
+    },
+    {
+      "title": "r/learnpython on Reddit: Script execution is deactivated on this computer",
+      "url": "https://www.reddit.com/r/learnpython/comments/1k4qne5/script_execution_is_deactivated_on_this_computer/",
+      "domain": "reddit.com",
+      "snippet": "In .venv/Scripts folder there are two active scripts; Actiave.ps1 (for PowerShell) and activate.bat (for CMD). By default, Windows PowerShell script execution is blocked. So, if you are trying to run Activate.ps1 in PowrShell you get this error."
+    },
+    {
+      "title": "New Computer, Python venv Error? Don’t Panic — Here’s the Fix | by Md Merazul Islam | Medium",
+      "url": "https://medium.com/@mdmerazul75/new-computer-python-venv-error-dont-panic-here-s-the-fix-30b4f3c4953a",
+      "domain": "medium.com",
+      "snippet": "Activate.ps1 cannot be loaded because running scripts is disabled on this system ... Let’s break down why it happens and how to fix it — in the simplest way. Windows blocks scripts by default for security reasons. When you activate a Python virtual environment, PowerShell tries to run:"
+    },
+    {
+      "title": "Enabling Python Virtualenv in Windows PowerShell - DEV Community",
+      "url": "https://dev.to/aka_anoop/enabling-virtualenv-in-windows-powershell-ka3",
+      "domain": "dev.to",
+      "snippet": "Now that Virtualenv supports PowerShell natively, you can run the script ... venv\\Scripts\\Activate.ps1 cannot be loaded because running scripts is disabled on this system. For more information, see about_Execution_Policies"
+    },
+    {
+      "title": "Solution to \"Running Scripts Is Disabled On This System\" Error On PowerShell",
+      "url": "https://www.stanleyulili.com/powershell/solution-to-running-scripts-is-disabled-on-this-system-error-on-powershell",
+      "domain": "stanleyulili.com",
+      "snippet": "This error happens because the venv\\Scripts\\activate command tries to run the Activate.ps1 PowerShell script to activate the virtual environment on your system. Note: .ps1 is an extension for PowerShell scripts. It turns out on my Windows 10 system, the Execution Policy is set to restricted ..."
+    }
+  ]
+}

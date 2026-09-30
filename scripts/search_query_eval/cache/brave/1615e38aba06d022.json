@@ -1,0 +1,37 @@
+{
+  "query": "Unity 2D game jam beginner",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:52+00:00",
+  "results": [
+    {
+      "title": "Get started with game jams",
+      "url": "https://learn.unity.com/project/get-started-with-game-jams",
+      "domain": "learn.unity.com",
+      "snippet": "Are you a creator in need of a challenge? Creators all over the world participate in game jam events to develop their skills and test their ingenuity by making games. This project will guide you through the basics of game jams, from what you can expect when you join a game jam to developing your game after the jam is complete."
+    },
+    {
+      "title": "Game Jam Starter Kit - 2D by Petipois - itch.io",
+      "url": "https://petipois.itch.io/game-jam-starter-kit-2d",
+      "domain": "petipois.itch.io",
+      "snippet": "Download Simple Game Jam Starter kit - 2D and start programming your game!"
+    },
+    {
+      "title": "r/Unity2D on Reddit: My First Game Jam Experience",
+      "url": "https://www.reddit.com/r/Unity2D/comments/li6od9/my_first_game_jam_experience/",
+      "domain": "reddit.com",
+      "snippet": "134K subscribers in the Unity2D community. A subreddit for the 2D aspects of Unity game development."
+    },
+    {
+      "title": "Game Jam for beginners in Unity - itch.io",
+      "url": "https://itch.io/jam/for-unity-begins",
+      "domain": "itch.io",
+      "snippet": "A game jam from 2023-01-28 to 2023-02-18 hosted by VerVey. So, on January 28 at 8:30 Moscow time, jam will begin. You will have 2 weeks to create the game. I know that it's not easy for you to wait for a theme..."
+    },
+    {
+      "title": "GitHub - peabnuts123/Unity-2D-Jam-Template: Template Unity project for creating 2D games for game jams · GitHub",
+      "url": "https://github.com/peabnuts123/Unity-2D-Jam-Template",
+      "domain": "github.com",
+      "snippet": "This is a project template for getting up-and-running quickly for game jams. It is configured for creating 2D games in Unity. Included are a bunch of common plugins, code and prefabs I use, a main menu and pause functionality, and some UI SFX."
+    }
+  ]
+}

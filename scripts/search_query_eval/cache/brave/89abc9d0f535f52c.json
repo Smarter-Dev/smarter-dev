@@ -1,0 +1,37 @@
+{
+  "query": "dive analyze Docker image",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:07+00:00",
+  "results": [
+    {
+      "title": "GitHub - wagoodman/dive: A tool for exploring each layer in a docker image · GitHub",
+      "url": "https://github.com/wagoodman/dive",
+      "domain": "github.com",
+      "snippet": "To analyze a Docker image simply run dive with an image tag/id/digest:"
+    },
+    {
+      "title": "How to Optimize Docker Images Using Dive | by Fabricio Pautasso | Nexton | Medium",
+      "url": "https://medium.com/nexton/how-to-optimize-docker-images-using-dive-dc590f45dbf5",
+      "domain": "medium.com",
+      "snippet": "You can build a Docker image and do an immediate analysis with one command: dive build -t some-tag . ... Installation instructions for almost every platform is available on the tool GitHub repository."
+    },
+    {
+      "title": "Dive Into Docker part 4: Inspecting Docker Image - DEV Community",
+      "url": "https://dev.to/klip_klop/dive-into-docker-part-4-inspecting-docker-image-568o",
+      "domain": "dev.to",
+      "snippet": "I prefer to use dive during local development of Docker containers. To get started I typically just run: dive image-name if the image is not found locally this will take care of pulling the image from the remote repository."
+    },
+    {
+      "title": "How to Use Dive to Explore Docker Image Layers",
+      "url": "https://oneuptime.com/blog/post/2026-02-08-how-to-use-dive-to-explore-docker-image-layers/view",
+      "domain": "oneuptime.com",
+      "snippet": "When you select a layer, Dive highlights exactly what changed. This makes it easy to spot unexpected additions. # Build an image and immediately analyze it docker build -t myapp:test ."
+    },
+    {
+      "title": "Dive — Analyze Docker Images",
+      "url": "https://medium.com/@jinvishal2011/dive-analyze-docker-images-5c973ef0aa4c",
+      "domain": "medium.com",
+      "snippet": "To analyze a Docker image simply run dive with an image tag/id/digest:"
+    }
+  ]
+}

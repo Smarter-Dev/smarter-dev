@@ -1,0 +1,37 @@
+{
+  "query": "CSS absolute center transform",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:30+00:00",
+  "results": [
+    {
+      "title": "CSS Centering with Transform - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/42121150/css-centering-with-transform",
+      "domain": "stackoverflow.com",
+      "snippet": "why does centering with transform translate and left 50% center perfectly (with position relative parent) but not right 50%? ... Save this answer. ... Show activity on this post. Because translateX(-50%) moves something back to the left 50% (because of the - negative value), which means it pairs with left: 50%; to center something. If you want to use right: 50%; then use that with translateX(50%) to center. * {margin:0;} span { position: absolute; top: 50%; right: 50%; transform: translate(50%,-50%); background: black; color: white; } body:after, body:before { content: ''; position: absolute; background: red; } body:after { top: 50%; left: 0; right: 0; height: 1px; } body:before { left: 50%; top: 0; bottom: 0; width: 1px; }"
+    },
+    {
+      "title": "Absolute Centering in CSS. If you want to center something… | by Manisha Basra | Frontend Weekly | Medium",
+      "url": "https://medium.com/front-end-weekly/absolute-centering-in-css-ea3a9d0ad72e",
+      "domain": "medium.com",
+      "snippet": "In this article, we’ll check out ... position: relative; } .child{ position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); }..."
+    },
+    {
+      "title": "How to center the absolutely positioned element in div using CSS? - GeeksforGeeks",
+      "url": "https://www.geeksforgeeks.org/css/how-to-center-absolutely-positioned-element-in-div-using-css/",
+      "domain": "geeksforgeeks.org",
+      "snippet": "This approach centers an absolutely positioned element by setting top: 50% and left: 50%, which moves the element's top-left corner to the center of the container. To fully center the element itself, we apply transform: translate(-50%, -50%), which ..."
+    },
+    {
+      "title": "Center with position and transform",
+      "url": "https://www.w3schools.com/css/tryit.asp?filename=trycss_align_transform",
+      "domain": "w3schools.com",
+      "snippet": "The W3Schools online code editor allows you to edit code and view the result in your browser"
+    },
+    {
+      "title": "Forums - CSS - Horizontally centering an absolute element",
+      "url": "https://css-tricks.com/forums/topic/horizontal-centering-of-an-absolute-element/",
+      "domain": "css-tricks.com",
+      "snippet": "There are a few options, like for example when the width is known : #somelement { width: 200px; position: absolute; left: 50%; margin-left: -100px } ... #somelement { position: absolute; left: 50%; -webkit-transform: translateX(-50%); transform: ..."
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "query": "remote junior backend engineer pay Glassdoor",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:03+00:00",
+  "results": [
+    {
+      "title": "Salary: Junior Software Engineer Backend in Remote 2026 | Glassdoor",
+      "url": "https://www.glassdoor.com/Salaries/company-salaries.htm?sc.occupationParam=Junior+Software+Engineer+%28Backend%29&sc.locationSeoString=Remote&locId=12547&locT=S",
+      "domain": "glassdoor.com",
+      "snippet": "The lowest salary for a Junior Backend Software Engineer in Remote is $61,190 per year, $5,099 per month or $29 per hour."
+    },
+    {
+      "title": "4,032 junior backend developer Jobs in Remote, September 2026 | Glassdoor",
+      "url": "https://www.glassdoor.com/Job/junior-backend-developer-jobs-SRCH_IS11047_KO0,24.htm",
+      "domain": "glassdoor.com",
+      "snippet": "Make system design decisions, evaluating, integrating, and developing…&hellip; ... Familiarity with RESTful API design and implementation. Design and develop robust backend services and APIs using Golang. Payrate - $50/hr on W2.&hellip;"
+    },
+    {
+      "title": "Salary: Junior Backend Developer in Remote 2025 | Glassdoor",
+      "url": "https://www.glassdoor.com/Salaries/remote-junior-backend-developer-salary-SRCH_IL.0,6_IS12617_KO7,31.htm",
+      "domain": "glassdoor.com",
+      "snippet": "The lowest salary for a Junior Backend Developer in Remote is $54,780 per year, $4,565 per month or $26 per hour."
+    },
+    {
+      "title": "247 junior backend Jobs in Remote, September 2026 | Glassdoor",
+      "url": "https://www.glassdoor.com/Job/remote-junior-backend-jobs-SRCH_IL.0,6_IS11047_KO7,21.htm",
+      "domain": "glassdoor.com",
+      "snippet": "Search Junior backend jobs in Remote with company ratings & salaries. 247 open jobs for Junior backend in Remote."
+    },
+    {
+      "title": "Junior Backend Developer: Average Salary & Pay Trends 2026 | Glassdoor",
+      "url": "https://www.glassdoor.com/Salaries/junior-backend-developer-salary-SRCH_KO0,24.htm",
+      "domain": "glassdoor.com",
+      "snippet": "The average salary for a Junior Backend Developer is $92,394 per year in United States. Click here to see the total pay, recent salaries shared and more!"
+    }
+  ]
+}

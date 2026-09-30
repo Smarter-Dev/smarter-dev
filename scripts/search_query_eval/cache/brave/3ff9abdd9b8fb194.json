@@ -1,0 +1,37 @@
+{
+  "query": "WebSocket bidirectional messaging use cases",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:26+00:00",
+  "results": [
+    {
+      "title": "Web Sockets: A Bidirectional Communication Marvel | by Tahseen Rasheed | Medium",
+      "url": "https://tahseenrchowdhury.medium.com/web-sockets-a-bidirectional-communication-marvel-7e219512320b",
+      "domain": "tahseenrchowdhury.medium.com",
+      "snippet": "The handshake involves a special ... Chat Applications: Web sockets are perfect for building real-time chat applications, allowing users to send and receive messages instantly...."
+    },
+    {
+      "title": "WebSocket: Simultaneous Bi-Directional Client-Server Communication | by Gabbie Piraino | Medium",
+      "url": "https://medium.com/@nerdplusdog/websocket-simultaneous-bi-directional-client-server-communication-e7948203054b",
+      "domain": "medium.com",
+      "snippet": "In short, it’s a new type of communications protocol that is different from HTTP. WebSocket allows a single TCP socket connection to be hijacked so that the client-server relationship can relay bi-directional, full-duplex (or sometimes also referred to as double-duplex) messages instantaneously."
+    },
+    {
+      "title": "Intro to real-time bidirectional communications between browsers and webSocket servers | DC Web Makers Developer Guide",
+      "url": "https://www.blockchain.dcwebmakers.com/blog/intro-to-real-time-bidirectional-communications-between-browsers-and-websocket-servers.html",
+      "domain": "blockchain.dcwebmakers.com",
+      "snippet": "WebSocket has gained popularity and is already being used by many websites due to its real-time and full-duplex features. Due to overhead caused by comet techniques, it was not suitable for real-time bidirectional message transfer, and it was also not possible to establish a full-duplex communication system between a web browser and web server using comet."
+    },
+    {
+      "title": "Send bidirectional messages between services with WebSocket :: Open Liberty Docs",
+      "url": "https://openliberty.io/docs/latest/web-socket.html",
+      "domain": "openliberty.io",
+      "snippet": "The WebSocket protocol supports real-time bidirectional messaging between a client and server. The Open Liberty Jakarta WebSocket feature supports applications that use this protocol."
+    },
+    {
+      "title": "What is WebSocket: Protocols, Benefits & Examples | Ramotion Agency",
+      "url": "https://www.ramotion.com/blog/what-is-websocket/",
+      "domain": "ramotion.com",
+      "snippet": "For example, if you are using WebSockets to send messages in real-time from a chat room on your website, users will see the messages appear on their screen almost immediately after sending them—rather than waiting for their request to be processed ..."
+    }
+  ]
+}

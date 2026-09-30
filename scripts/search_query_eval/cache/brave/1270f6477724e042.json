@@ -1,0 +1,37 @@
+{
+  "query": "website performance waterfall analysis",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:05+00:00",
+  "results": [
+    {
+      "title": "Waterfall Analysis - Diving into Your Website's Requests - KeyCDN",
+      "url": "https://www.keycdn.com/blog/waterfall-analysis",
+      "domain": "keycdn.com",
+      "snippet": "Analyzing website performance is something we do on a daily basis here at KeyCDN. One way we benchmark and troubleshoot slowness is by diving into the website's individual requests and doing what we like to call a waterfall analysis. There are numerous tools out there like Chrome DevTools, WebPageTest, and Pingdom which will generate a waterfall chart of your website."
+    },
+    {
+      "title": "Web Performance: How to Read Waterfall Charts",
+      "url": "https://www.dotcom-monitor.com/blog/optimizing-web-performance-understanding-waterfall-charts/",
+      "domain": "dotcom-monitor.com",
+      "snippet": "When you open a waterfall chart in a website monitoring tool like Dotcom-Monitor, you’ll see multiple color-coded bars that represent various stages in the loading process for each request. Here’s a breakdown of what each section typically means: Interactive Slider: The Interactive Slider is an indicator of the performance of each element in terms of milliseconds."
+    },
+    {
+      "title": "How to Read a Request Waterfall Chart | DebugBear",
+      "url": "https://www.debugbear.com/docs/waterfall",
+      "domain": "debugbear.com",
+      "snippet": "The length of the waterfall bar indicates how long the request takes. The bar itself consists of different components, like wait time, time spent connecting to the server, or time spent downloading the resource. To make web performance optimization easier, page speed tools also provide additional information for each request."
+    },
+    {
+      "title": "Monitoring Web Performance & Third Party Content Using Waterfall Charts",
+      "url": "https://bluetriangle.com/blog/monitoring-web-performance-using-waterfall-charts",
+      "domain": "bluetriangle.com",
+      "snippet": "You can access these waterfalls by measuring the performance of your actual users (Real User Monitoring) or simulating traffic (Synthetic Monitoring)."
+    },
+    {
+      "title": "Waterfall Chart: Data Visualization for Web Performance Analysis",
+      "url": "https://www.dotcom-monitor.com/blog/waterfall-chart-web-performance-analysis/",
+      "domain": "dotcom-monitor.com",
+      "snippet": "When tracking Web performance, a waterfall chart can help determine how long it takes for each action between the Web server and the user when a user accesses a website."
+    }
+  ]
+}

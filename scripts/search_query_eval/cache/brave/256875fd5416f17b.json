@@ -1,0 +1,37 @@
+{
+  "query": "GitHub secret scanning leaked credential alert",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:40+00:00",
+  "results": [
+    {
+      "title": "Secret scanning - GitHub Docs",
+      "url": "https://docs.github.com/code-security/secret-scanning/about-secret-scanning",
+      "domain": "docs.github.com",
+      "snippet": "When secret scanning detects a credential leak, GitHub generates an alert on your repository's Security and quality tab with details about the exposed credential."
+    },
+    {
+      "title": "About secret scanning alerts - GitHub Docs",
+      "url": "https://docs.github.com/en/code-security/concepts/secret-security/about-alerts",
+      "domain": "docs.github.com",
+      "snippet": "If access to a resource requires paired credentials, then secret scanning will create an alert only when both parts of the pair are detected in the same file. This ensures that the most critical leaks are not hidden behind information about ..."
+    },
+    {
+      "title": "Secret scanning - GitHub Enterprise Cloud Docs",
+      "url": "https://docs.github.com/en/enterprise-cloud@latest/code-security/secret-scanning/introduction/about-secret-scanning",
+      "domain": "docs.github.com",
+      "snippet": "When secret scanning detects a credential leak, GitHub generates an alert on your repository's Security and quality tab with details about the exposed credential."
+    },
+    {
+      "title": "Leaked a secret? Check your GitHub alerts...for free - The GitHub Blog",
+      "url": "https://github.blog/security/application-security/leaked-a-secret-check-your-github-alerts-for-free/",
+      "domain": "github.blog",
+      "snippet": "At GitHub, we partner with service providers to flag leaked credentials on all public repositories through our secret scanning partner program. We scan repositories for 200+ token formats and work with relevant partners to help protect our mutual ..."
+    },
+    {
+      "title": "Set up secret scanning for GitHub Advanced Security - Azure Repos | Microsoft Learn",
+      "url": "https://learn.microsoft.com/en-us/azure/devops/repos/security/github-advanced-security-secret-scanning?view=azure-devops",
+      "domain": "learn.microsoft.com",
+      "snippet": "If access to a resource requires paired credentials, then secret scanning might create an alert only when both parts of the pair are detected in the same file. The pairing ensures that the most critical leaks aren't hidden behind information ..."
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "query": "EventSource reconnect Last-Event-ID",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:20+00:00",
+  "results": [
+    {
+      "title": "M11-6: ?last-id= in the EventSource URL overrides the fresher Last-Event-ID on every auto-reconnect — replay livelock with replay_max_messages · Issue #102 · ideaconnect/nuts",
+      "url": "https://github.com/ideaconnect/nuts/issues/102",
+      "domain": "github.com",
+      "snippet": "M11-6: ?last-id= in the EventSource URL overrides the fresher Last-Event-ID on every auto-reconnect — replay livelock with replay_max_messages#102"
+    },
+    {
+      "title": "Server Sent Events",
+      "url": "https://javascript.info/server-sent-events",
+      "domain": "javascript.info",
+      "snippet": "data: Message 1 id: 1 data: Message 2 id: 2 data: Message 3 data: of two lines id: 3 ... Sets the property eventSource.lastEventId to its value. Upon reconnection sends the header Last-Event-ID with that id, so that the server may re-send following ..."
+    },
+    {
+      "title": "Is an EventSource (SSE) supposed to try to reconnect indefinitely?",
+      "url": "https://stackoverflow.com/questions/24564030/is-an-eventsource-sse-supposed-to-try-to-reconnect-indefinitely",
+      "domain": "stackoverflow.com",
+      "snippet": "@DrFred, maybe the last event ID is lost. I have not tried that. The whole point of this code is to work around the failure of browsers to reconnect when the connection is lost. The last event ID is supposed to help with the transparent resending of messages, but the whole mechanism does not work well and works differently in each browser."
+    },
+    {
+      "title": "Using server-sent events - Web APIs | MDN",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events",
+      "domain": "developer.mozilla.org",
+      "snippet": "The event ID to set the EventSource object's last event ID value. ... The reconnection time. If the connection to the server is lost, the browser will wait for the specified time before attempting to reconnect. This must be an integer, specifying the reconnection time in milliseconds."
+    },
+    {
+      "title": "Provide Last-Event-Id to EventSource constructor",
+      "url": "https://stackoverflow.com/questions/38454443/provide-last-event-id-to-eventsource-constructor",
+      "domain": "stackoverflow.com",
+      "snippet": "The EventSource request will only have the Last-Event-Id header if the connection breaks and the client will have to reconnect."
+    }
+  ]
+}

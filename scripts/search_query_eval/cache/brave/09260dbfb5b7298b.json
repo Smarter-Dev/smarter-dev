@@ -1,0 +1,37 @@
+{
+  "query": "email regex edge cases",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:02+00:00",
+  "results": [
+    {
+      "title": "How to Write a Regex for Email Validation (With Edge Cases) | GenKitLab",
+      "url": "https://genkitlab.com/blog/regex-for-email-validation/",
+      "domain": "genkitlab.com",
+      "snippet": "Send a confirmation email as the real check. This is the step that actually proves anything — that the address exists, that it accepts mail, and that whoever submitted the form controls it. No regex, however good, does any of that. A syntax check and a delivery proof are two entirely different questions, and only one of them can be answered with a pattern match. Test the simple pattern, or any variant you're considering, against the exact edge cases above — plus-addressing, subdomains, and a deliberately malformed string or two — in GenKitLab's Regex Tester."
+    },
+    {
+      "title": "Improve email regexp on edge cases by AlekseyLobanov · Pull Request #10601 · pydantic/pydantic",
+      "url": "https://github.com/pydantic/pydantic/pull/10601",
+      "domain": "github.com",
+      "snippet": "I found that one single change in email regexp solves slowdowns on special invalid email strings. See related issue for details ... My PR is ready to review, please add a comment including the phrase \"please review\" to assign reviewers ... - Drastically improves performance on cases like `\"<\" + \" \" * N` - Last spaces are not needed anyway because this group is stripped later."
+    },
+    {
+      "title": "Building an Email Regex Test Suite with 200+ RFC Edge Cases",
+      "url": "https://www.heybounce.io/blog/building-email-regex-test-suite-rfc-edge-cases",
+      "domain": "heybounce.io",
+      "snippet": "The only reliable way to know whether your pattern hits the mark is to unleash an audacious collection of edge cases. This guide focuses exclusively on curating that collection. We will not cover CI pipelines or repository wiring—only the test data itself. ... { \"address\": \"\\\"very.(),:;<>[]\\\\\\\"very@\\\\\\\"very\\\\\\\\\\\\\\\".unusual\\\"@example.com\", \"valid\": true, \"comment\": \"quoted-local + specials\" } address — the literal string, exactly as it should be fed to your regex."
+    },
+    {
+      "title": "Email Regex Validator [FREE] | Smart Online Tools for Everyone | ToolGrid.io",
+      "url": "https://www.toolgrid.io/email-regex-validator",
+      "domain": "toolgrid.io",
+      "snippet": "A primary use case is designing or debugging signup and contact forms. You can test sample addresses that your users enter, such as names with dots, plus tags, and multi-level domains, and see exactly why some are accepted or rejected. For adjacent tasks, matching phone numbers with regex addresses a complementary step. Another scenario is reviewing your current email regex during a code audit."
+    },
+    {
+      "title": "On the Practicality of Regex for Email Address Processing | HackerNoon",
+      "url": "https://hackernoon.com/on-the-practicality-of-regex-for-email-address-processing",
+      "domain": "hackernoon.com",
+      "snippet": "The only significant practical constraint is that quotes or parenthesis must be balanced, something that is a real challenge to verify in vanilla regex. However real-world mailbox implementations are again the measure that the practical programmer should employ. As a rule, the people who pay us frown upon 90% of our billable hours being directed to resolving the 10% of theoretical edge cases that might possibly not even exist at all in real life. Let’s look at the dominant email mailbox providers, consumers, and businesses, and consider what types of email addresses they permit."
+    }
+  ]
+}

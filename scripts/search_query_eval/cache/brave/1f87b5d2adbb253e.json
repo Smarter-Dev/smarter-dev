@@ -1,0 +1,37 @@
+{
+  "query": "Python 3.14 new features",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:52+00:00",
+  "results": [
+    {
+      "title": "What’s new in Python 3.14",
+      "url": "https://docs.python.org/3/whatsnew/3.14.html",
+      "domain": "docs.python.org",
+      "snippet": "A --without-remote-debug configure flag to completely disable the feature at build time. (Contributed by Pablo Galindo Salgado, Matt Wozniski, and Ivona Stojanovic in gh-131591.) ... A new type of interpreter has been added to CPython. It uses tail calls between small C functions that implement individual Python opcodes, rather than one large C case statement. For certain newer compilers, this interpreter provides significantly better performance. Preliminary benchmarks suggest a geometric mean of 3-5% faster on the standard pyperformance benchmark suite, depending on platform and architecture."
+    },
+    {
+      "title": "r/Python on Reddit: My favorite new features in Python 3.14",
+      "url": "https://www.reddit.com/r/Python/comments/1o0jr55/my_favorite_new_features_in_python_314/",
+      "domain": "reddit.com",
+      "snippet": "Haven't used Python to code anything since 3.7 to be real. I still stick to around the range 3.5 to 3.7 and the only new feature I bothered with was f-strings. So I'm not sure what new features there are but is the syntax highlighting is like ipython?"
+    },
+    {
+      "title": "Python 3.14: Cool New Features for You to Try – Real Python",
+      "url": "https://realpython.com/python314-new-features/",
+      "domain": "realpython.com",
+      "snippet": "Learn what's new in Python 3.14, including an upgraded REPL, template strings, lazy annotations, and subinterpreters, with examples to try in your code."
+    },
+    {
+      "title": "The best new features and fixes in Python 3.14 | InfoWorld",
+      "url": "https://www.infoworld.com/article/3975624/the-best-new-features-and-fixes-in-python-3-14.html",
+      "domain": "infoworld.com",
+      "snippet": "Official support for free-threaded Python, an experimental JIT, a smarter installation manager for Windows, and more have arrived in Python 3.14, which is now generally available."
+    },
+    {
+      "title": "Python 3.14 Is Here. How Fast Is It? - miguelgrinberg.com",
+      "url": "https://blog.miguelgrinberg.com/post/python-3-14-is-here-how-fast-is-it",
+      "domain": "blog.miguelgrinberg.com",
+      "snippet": "In the next table and chart you ... 3.13 and 3.14: And this is a bit disappointing. At least for this test, the JIT interpreter did not produce any significant performance gains, so much that I had to double and triple check that I used a correctly built interpreter with this feature enabled. I do not know much about the internals of the new JIT compiler, ..."
+    }
+  ]
+}

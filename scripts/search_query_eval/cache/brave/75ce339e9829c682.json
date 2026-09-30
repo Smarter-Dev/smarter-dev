@@ -1,0 +1,37 @@
+{
+  "query": "entry level backend engineer salary United States",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:55+00:00",
+  "results": [
+    {
+      "title": "Back End Developer/ Engineer Salary in 2026 | PayScale",
+      "url": "https://www.payscale.com/research/US/Job=Back_End_Developer%2F_Engineer/Salary",
+      "domain": "payscale.com",
+      "snippet": "... Before you decide whether variable ... End Developer/ Engineer with less than 1 year experience can expect to earn an average total compensation (includes tips, bonus, and overtime pay) of $84,544 based on 15 salaries...."
+    },
+    {
+      "title": "Entry Level Back End Developer Salary: Hourly Rate (USA)",
+      "url": "https://www.ziprecruiter.com/Salaries/Entry-Level-Back-End-Developer-Salary",
+      "domain": "ziprecruiter.com",
+      "snippet": "While ZipRecruiter is seeing annual salaries as high as $175,000 and as low as $25,000, the majority of Entry Level Back End Developer salaries currently range between $98,500 (25th percentile) to $142,000 (75th percentile) with top earners ..."
+    },
+    {
+      "title": "Entry Level Backend Developer Salary: Hourly Rate (USA)",
+      "url": "https://www.ziprecruiter.com/Salaries/Entry-Level-Backend-Developer-Salary",
+      "domain": "ziprecruiter.com",
+      "snippet": "While ZipRecruiter is seeing annual salaries as high as $175,000 and as low as $25,000, the majority of Entry Level Backend Developer salaries currently range between $98,500 (25th percentile) to $142,000 (75th percentile) with top earners (90th ..."
+    },
+    {
+      "title": "Backend Developer: Average Salary & Pay Trends 2026 | Glassdoor",
+      "url": "https://www.glassdoor.com/Salaries/backend-developer-salary-SRCH_KO0,17.htm",
+      "domain": "glassdoor.com",
+      "snippet": "How much does a Backend Developer make?The average salary for a Backend Developer is $122,463 per year or $59 per hour, with top earners making up to $221,387 (90th percentile). Typically, pay ranges from $91,847 (25th percentile) to $167,801 (75th percentile) annually."
+    },
+    {
+      "title": "Back-End Developer Salary: Your 2026 Guide | Coursera",
+      "url": "https://www.coursera.org/articles/back-end-developer-salary",
+      "domain": "coursera.org",
+      "snippet": "Front-end developers earn a median total salary of $102,000, which is $19,000 lower than back-end developers' median total salary [2]. A back-end developer’s entry-level salary in the US is $92,000 [1]. Learn how much you can earn as a back-end ..."
+    }
+  ]
+}

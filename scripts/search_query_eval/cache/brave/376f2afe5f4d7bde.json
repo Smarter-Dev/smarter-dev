@@ -1,0 +1,37 @@
+{
+  "query": "CSS place-items center grid",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:22+00:00",
+  "results": [
+    {
+      "title": "place-items - Flexbox & Grid - Tailwind CSS",
+      "url": "https://tailwindcss.com/docs/place-items",
+      "domain": "tailwindcss.com",
+      "snippet": "<div class=\"grid h-56 grid-cols-3 place-items-end gap-4 ...\"> <div>01</div> <div>02</div> <div>03</div> <div>04</div> <div>05</div> <div>06</div></div> Use place-items-center to place grid items on the center of their grid areas on both axes:"
+    },
+    {
+      "title": "html - Centering in CSS Grid - Stack Overflow",
+      "url": "https://stackoverflow.com/questions/45536537/centering-in-css-grid",
+      "domain": "stackoverflow.com",
+      "snippet": "The CSS place-items shorthand property sets the align-items and justify-items properties, respectively. If the second value is not set, the first value is also used for it. Copy.parent { display: grid; place-items: center; }"
+    },
+    {
+      "title": "Place-Items and CSS Grid – centering content in cells",
+      "url": "https://www.js-craft.io/blog/place-items-css-grid-center-content-cells/",
+      "domain": "js-craft.io",
+      "snippet": ".my-grid-element { display: grid; place-items: center; /* place-items replaces the following: align-items: center; justify-items: center; */ }"
+    },
+    {
+      "title": "place-items CSS property - MDN Web Docs - Mozilla",
+      "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Properties/place-items",
+      "domain": "developer.mozilla.org",
+      "snippet": "#example-element { border: 1px solid #c5c5c5; display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: 80px; grid-gap: 10px; width: 220px; } #example-element > div { background-color: rgb(0 0 255 / 0.2); border: 3px solid blue; } This property is a shorthand for the following CSS properties: align-items · justify-items · css · /* Positional alignment */ place-items: center; place-items: normal start; place-items: center normal; place-items: start legacy; place-items: end normal; place-items: self-start legacy; place-items: self-end normal; place-items: flex-start legacy; place-items:"
+    },
+    {
+      "title": "CSS place-items property",
+      "url": "https://www.w3schools.com/cssref/css_pr_place-items.php",
+      "domain": "w3schools.com",
+      "snippet": "Share Link Copied · The place-items ... the place-items property has two values: place-items: start center; align-items property value is 'start' justify-items property value is 'center' If the place-items property has one value: ..."
+    }
+  ]
+}

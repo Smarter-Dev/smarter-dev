@@ -1,0 +1,37 @@
+{
+  "query": "cgroup memory.current OOM events",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:41+00:00",
+  "results": [
+    {
+      "title": "linux kernel - Actual sequence of events from memory pressure to OOM for cgroups V2 - Server Fault",
+      "url": "https://serverfault.com/questions/1192733/actual-sequence-of-events-from-memory-pressure-to-oom-for-cgroups-v2",
+      "domain": "serverfault.com",
+      "snippet": "If the kernel is unable to reclaim enough pages when memory.current > memory.max, then the OOM killer is invoked, and by default, the largest process in the cgroup is killed."
+    },
+    {
+      "title": "Memory Resource Controller — The Linux Kernel documentation",
+      "url": "https://docs.kernel.org/admin-guide/cgroup-v1/memory.html",
+      "domain": "docs.kernel.org",
+      "snippet": "The application will be notified through eventfd when OOM happens. OOM notification doesn’t work for the root cgroup. You can disable the OOM-killer by writing “1” to memory.oom_control file, as: ... If OOM-killer is disabled, tasks under cgroup will hang/sleep in memory cgroup’s ..."
+    },
+    {
+      "title": "cgroup memory controller",
+      "url": "https://www.kernel.org/doc/Documentation/cgroup-v1/memory.txt",
+      "domain": "kernel.org",
+      "snippet": "Memory cgroup implements OOM notifier using the cgroup notification API (See cgroups.txt). It allows to register multiple OOM notification delivery and gets notification when OOM happens. To register a notifier, an application must: - create an eventfd using eventfd(2) - open memory.oom_control ..."
+    },
+    {
+      "title": "3.7. memory | Resource Management Guide | Red Hat Enterprise Linux | 6 | Red Hat Documentation",
+      "url": "https://docs.redhat.com/en/documentation/red_hat_enterprise_linux/6/html/resource_management_guide/sec-memory",
+      "domain": "docs.redhat.com",
+      "snippet": "~]# echo 1 > /cgroup/memory/lab1/memory.oom_control · When the OOM killer is disabled, tasks that attempt to use more memory than they are allowed are paused until additional memory is freed. The memory.oom_control file also reports the OOM status of the current cgroup under the under_oom entry."
+    },
+    {
+      "title": "Linux Cgroups V2 Memory Throttling & OOM Fix | Netdata",
+      "url": "https://www.netdata.cloud/academy/diagnosing-linux-cgroups/",
+      "domain": "netdata.cloud",
+      "snippet": "oom: The number of processes OOM-killed within the cgroup. PSI is a modern kernel feature that provides a much clearer view of resource contention. Instead of just showing event counts, it shows the percentage of wall-clock time that processes ..."
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "query": "Rust Go CLI binary size startup",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:04+00:00",
+  "results": [
+    {
+      "title": "GitHub - ngs/cli-lang-bench: Startup and throughput benchmarks for small CLI tools written in Rust, Go, and Bun + TypeScript · GitHub",
+      "url": "https://github.com/ngs/cli-lang-bench",
+      "domain": "github.com",
+      "snippet": "Release flags are the ones you would ship. Rust: opt-level = 3, LTO, codegen-units = 1, panic = \"abort\", stripped. Go: -trimpath -ldflags \"-s -w\". Bun: --compile --minify, plus a separate --bytecode target so the trade-off between binary size and startup is visible."
+    },
+    {
+      "title": "Rust vs Go for CLI Tools: A Practical Comparison | Besterry — Linux & DevOps Notes",
+      "url": "https://besterry.com/posts/rust-vs-go-for-cli-tools/",
+      "domain": "besterry.com",
+      "snippet": "Both are negligible for CLI tools. (The old argument about Go’s startup was mostly about JVM-vs-Go, not Go-vs-Rust.) Binary size Out of the box: Go: 5-15 MB for a small program Rust: 2-8 MB for a small program (with LTO and strip) After aggressive optimization:"
+    },
+    {
+      "title": "RFC: Standardize Dex CLI in Go/Rust for lightweight binaries (<4MB) and native process orchestration · Issue #2 · patrickaigbogun/dex",
+      "url": "https://github.com/patrickaigbogun/dex/issues/2",
+      "domain": "github.com",
+      "snippet": "Pros: Minimal binary size (~5–8 MB uncompressed, ~2 MB gzipped) with LTO/strip. Rich CLI ecosystem (clap). Cons: Slightly higher cross-compilation complexity in CI. ┌────────────────────────..."
+    },
+    {
+      "title": "I Optimized a Rust Binary From 40MB to 400KB. Here’s How - DEV Community",
+      "url": "https://dev.to/speed_engineer/i-optimized-a-rust-binary-from-40mb-to-400kb-heres-how-3n26",
+      "domain": "dev.to",
+      "snippet": "What I got instead was a 40MB binary for a simple CLI tool that parsed JSON and made HTTP requests. My wake-up call came during a Docker deployment. The base image ballooned to 180MB, pushing our container startup time from 2 seconds to 8 seconds."
+    },
+    {
+      "title": "GitHub - johnthagen/min-sized-rust: 🦀 How to minimize Rust binary size 📦 https://github.com/johnthagen/min-sized-rust",
+      "url": "https://github.com/johnthagen/min-sized-rust",
+      "domain": "github.com",
+      "snippet": "By default, Rust includes file, line, and column information for panic!() and [track_caller] to provide more useful traceback information. This information requires space in the binary and thus increases the size of the compiled binaries."
+    }
+  ]
+}

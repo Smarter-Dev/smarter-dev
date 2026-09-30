@@ -1,0 +1,37 @@
+{
+  "query": "GitHub portfolio project README examples",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:45:36+00:00",
+  "results": [
+    {
+      "title": "How to write Badass READMES for your Github projects",
+      "url": "https://www.stefannibrasil.me/posts/github-readme-examples-and-template/",
+      "domain": "stefannibrasil.me",
+      "snippet": "It’s a good idea to have a repository for each project. Your GitHub profile becomes a portfolio by itself. Add a personal README and up to 4 projects that you want people to see first. See my GitHub README as an example."
+    },
+    {
+      "title": "CREATE PORTFOLIO USING README.MD Github | by Nitish Patel | Medium",
+      "url": "https://medium.com/@patelnitish/create-theme-your-github-portfolio-57248b0ddb9c",
+      "domain": "medium.com",
+      "snippet": "So the trick here is to Create a new Repository and name it as your Github username. Once done initialize the repository with a README.md file."
+    },
+    {
+      "title": "GitHub - othneildrew/Best-README-Template: An awesome README template to jumpstart your projects! · GitHub",
+      "url": "https://github.com/othneildrew/Best-README-Template",
+      "domain": "github.com",
+      "snippet": "Use the BLANK_README.md to get started. ... This section should list any major frameworks/libraries used to bootstrap your project. Leave any add-ons/plugins for the acknowledgements section. Here are a few examples."
+    },
+    {
+      "title": "GitHub - alexandrerosseto/readme-portfolio-template: Awesome README.md template for you to show your portfolio",
+      "url": "https://github.com/alexandrerosseto/readme-portfolio-template",
+      "domain": "github.com",
+      "snippet": "Awesome README.md template for you to show your portfolio - alexandrerosseto/readme-portfolio-template"
+    },
+    {
+      "title": "GitHub - matiassingers/awesome-readme: A curated list of awesome READMEs · GitHub",
+      "url": "https://github.com/matiassingers/awesome-readme",
+      "domain": "github.com",
+      "snippet": "GIFs for project demo, examples, and instructions. Fast and simple copy-paste instructions for installation and usage. Pretty table of contents. A quick overview of project's main features. feberts/python-game-server - A diagram that shows at a glance what the project is about. A clearly structured readme that shows everything a developer needs to know without getting lost in unnecessary details."
+    }
+  ]
+}

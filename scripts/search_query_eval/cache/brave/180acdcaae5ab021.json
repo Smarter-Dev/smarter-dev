@@ -1,0 +1,37 @@
+{
+  "query": "WebSockets versus Server-Sent Events",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:47:13+00:00",
+  "results": [
+    {
+      "title": "r/webdev on Reddit: Using SSE vs Web-sockets",
+      "url": "https://www.reddit.com/r/webdev/comments/1caydnk/using_sse_vs_websockets/",
+      "domain": "reddit.com",
+      "snippet": "It's pretty straightforward to consume SSE on the client-side, without additional dependencies, because you can use EventSource directly and it's a native part of the Web APIs. ... You may need some more logic for handling and tracking open connections, deleting closed connections, and so on. You may need to track authentication state per-connection, since your client might need to send an initial WebSocket request to authenticate."
+    },
+    {
+      "title": "WebSockets vs Server-Sent Events: how to choose the right one for production",
+      "url": "https://ably.com/blog/websockets-vs-sse",
+      "domain": "ably.com",
+      "snippet": "Tradeoff: no built-in reconnection, so a dropped connection is yours to handle. Server-Sent Events use the EventSource API to let a browser subscribe to a one-way stream of updates over plain HTTP."
+    },
+    {
+      "title": "WebSockets vs Server-Sent-Events vs Long-Polling vs WebRTC vs WebTransport | RxDB",
+      "url": "https://rxdb.info/articles/websockets-sse-polling-webrtc-webtransport.html",
+      "domain": "rxdb.info",
+      "snippet": "It was then succeeded by WebSockets, which offered a more robust solution for bidirectional communication. Following WebSockets, Server-Sent Events (SSE) provided a simpler method for one-way communication from server to client."
+    },
+    {
+      "title": "WebSocket vs SSE (Server-Sent Events)",
+      "url": "https://www.svix.com/resources/faq/websocket-vs-sse/",
+      "domain": "svix.com",
+      "snippet": "The difference is direction. A WebSocket is a full-duplex channel where either side can send at any moment, while SSE is a one-way stream from server to browser carried over an ordinary HTTP response."
+    },
+    {
+      "title": "Server-Sent Events vs WebSockets | System Design - YouTube",
+      "url": "https://www.youtube.com/watch?v=X_DdIXrmWOo",
+      "domain": "youtube.com",
+      "snippet": "https://systemdesignschool.io/ 👈 Best place to learn and practice system designShould you use Server-Sent Events (SSE) or WebSockets for your next web proje..."
+    }
+  ]
+}

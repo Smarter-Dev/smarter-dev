@@ -1,0 +1,37 @@
+{
+  "query": "website image optimization page speed",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:46:57+00:00",
+  "results": [
+    {
+      "title": "Optimize Images | PageSpeed Insights | Google for Developers",
+      "url": "https://developers.google.com/speed/docs/insights/OptimizeImages",
+      "domain": "developers.google.com",
+      "snippet": "For your convenience, you can download the optimized images directly from PageSpeed Insights (which is using image optimization library from modpagespeed.com)."
+    },
+    {
+      "title": "Optimizing Images For Web Performance: All You Need To Know | DebugBear",
+      "url": "https://www.debugbear.com/blog/image-optimization-web-performance",
+      "domain": "debugbear.com",
+      "snippet": "This is especially valuable for logos, icons, and other images that appear on multiple pages. You can control how long browsers cache your images through HTTP headers—longer cache times mean faster repeat visits. Server caching: Your server can store pre-processed versions of your images, so it doesn't have to resize or optimize them from scratch every time someone requests them. This reduces server processing time and speeds up initial page loads."
+    },
+    {
+      "title": "Image Optimization: Here’s How I Used It to Speed Up My Website",
+      "url": "https://blog.hubspot.com/website/how-to-optimize-images-for-page-speed",
+      "domain": "blog.hubspot.com",
+      "snippet": "When done properly, image optimization can drastically decrease the size of your images in kilobytes and megabytes without affecting how they appear on a website. I’ve found that compressing and resizing images are two of the easiest ways ..."
+    },
+    {
+      "title": "Website Image Optimization for Faster Page Speed",
+      "url": "https://www.quattr.com/core-web-vitals/optimizing-images-for-page-speed",
+      "domain": "quattr.com",
+      "snippet": "A key part of website image optimization involves ensuring images don't slow down your site's page load time. ... When you make images load faster on website, it can have a significant impact on your website’s speed."
+    },
+    {
+      "title": "Six Tips on How to Optimize Images for Page Speed | Cloudinary",
+      "url": "https://cloudinary.com/guides/web-performance/six-tips-on-how-to-optimize-images-for-page-speed",
+      "domain": "cloudinary.com",
+      "snippet": "Image optimization can take several forms, ranging from using built-in features like the srcset and sizes attributes of the HTML <img> element, to advanced techniques like image compression and caching. Before diving into optimization, it’s always a good idea to start by checking how your website or app is currently performing. Tools like PageSpeed Insights can help you measure your site’s speed and identify areas that need improvement."
+    }
+  ]
+}

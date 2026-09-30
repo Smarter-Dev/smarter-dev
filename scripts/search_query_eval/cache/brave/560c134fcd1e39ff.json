@@ -1,0 +1,37 @@
+{
+  "query": "Kubernetes OOMKilled container memory limit",
+  "count": 5,
+  "fetched_at": "2026-09-30T18:44:33+00:00",
+  "results": [
+    {
+      "title": "Assign Memory Resources to Containers and Pods | Kubernetes",
+      "url": "https://kubernetes.io/docs/tasks/configure-pod-container/assign-memory-resource/",
+      "domain": "kubernetes.io",
+      "snippet": "kubectl apply -f https://k8s.io/examples/pods/resource/memory-request-limit-2.yaml --namespace=mem-example ... At this point, the Container might be running or killed. Repeat the preceding command until the Container is killed: NAME READY STATUS RESTARTS AGE memory-demo-2 0/1 OOMKilled 1 24s"
+    },
+    {
+      "title": "Troubleshoot OOM events | Google Kubernetes Engine (GKE) | Google Cloud Documentation",
+      "url": "https://docs.cloud.google.com/kubernetes-engine/docs/troubleshooting/oom-events",
+      "domain": "docs.cloud.google.com",
+      "snippet": "In a Kubernetes environment, the OOM Killer operates at two different scopes: the control group (cgroup), which affects one container; and the system, which affects the entire node. A container-level OOM kill occurs when a container attempts to exceed its predefined memory limit."
+    },
+    {
+      "title": "Kubernetes OOMKilled Error: How to Fix & Tips for Preventing It · Dash0",
+      "url": "https://www.dash0.com/guides/kubernetes-oomkilled-error-how-to-fix-and-tips-for-preventing-it",
+      "domain": "dash0.com",
+      "snippet": "The Kubernetes OOMKilled (Exit ... This event is usually an indication that a container in a pod has exceeded its memory limit and the system cannot allocate additional memory...."
+    },
+    {
+      "title": "What Everyone Should Know About Kubernetes Memory Limits, OOMKilled Pods, and Pizza Parties — Robusta Blog",
+      "url": "https://home.robusta.dev/blog/kubernetes-memory-limit",
+      "domain": "home.robusta.dev",
+      "snippet": "To paraphrase Tim Hockin, one of the Kubernetes maintainers at Google, the best practice for Kubernetes resource limits is to set memory limit=request, and never set CPU limits to avoid Kubernetes CPU throttling."
+    },
+    {
+      "title": "How to Fix OOMKilled Kubernetes Error (Exit Code 137)?",
+      "url": "https://komodor.com/learn/how-to-fix-oomkilled-exit-code-137/",
+      "domain": "komodor.com",
+      "snippet": "The memory limit is the ceiling of RAM usage that a container can reach before it is forcefully terminated, whereas the memory request is the baseline amount of memory that Kubernetes will guarantee for the container’s operation. When a container attempts to consume more memory than its set limit the Linux OOM Killer changes the container status to ‘OOMKilled’, which prompts Kubernetes to terminate it."
+    }
+  ]
+}
