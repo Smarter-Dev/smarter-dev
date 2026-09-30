@@ -8,14 +8,21 @@ what the models say."""
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import UTC
+from datetime import datetime
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
 from litestar.exceptions import HTTPException
+from sqlalchemy import select
 
 from smarter_dev.web import dashboard_controller
+from smarter_dev.web.models import UsageCostRow
 from smarter_dev.web.models import WebSearchRun
+from smarter_dev.web.usage_invoice import monthly_invoice
 from smarter_dev.web.web_search import brave
+from smarter_dev.web.web_search import metering
 from smarter_dev.web.web_search import pipeline
 from smarter_dev.web.web_search import queries
 from smarter_dev.web.web_search import ranking
@@ -82,6 +89,7 @@ def search_env(db_session, monkeypatch):
         yield db_session
 
     monkeypatch.setattr(pipeline, "get_db_session_context", session_context)
+    monkeypatch.setattr(metering, "get_db_session_context", session_context)
     events: list[dict] = []
 
     async def notify(owner, state):
@@ -89,7 +97,10 @@ def search_env(db_session, monkeypatch):
 
     async def plan(request):
         return [{"query": f"query {n}", "angle": f"angle {n}"} for n in range(5)], {
-            "model": "gpt-6-luna"
+            "model": "gpt-6-luna",
+            "input_tokens": 1_000_000,
+            "output_tokens": 1_000_000,
+            "cache_read_tokens": 0,
         }
 
     hits = {
@@ -116,7 +127,7 @@ def search_env(db_session, monkeypatch):
             }
             for n in range(len(results))
         ]
-        return judgments, {"model": "jev-1.13.0", "input_tokens": 10, "cost_usd": 0.0}
+        return judgments, {"model": "jev-1.13.0", "input_tokens": 10_000, "cost_usd": 0.00042}
 
     monkeypatch.setattr(queries, "plan_queries", plan)
     monkeypatch.setattr(brave, "search", search)
@@ -223,6 +234,66 @@ async def test_a_retried_search_starts_over(search_env):
     saved = await search_env["session"].get(WebSearchRun, run.id)
     assert saved.attempt_count == 2
     assert len(saved.results) == 5
+
+
+async def _ledger(session) -> dict[str, UsageCostRow]:
+    rows = (await session.scalars(select(UsageCostRow))).all()
+    return {row.operation_type: row for row in rows}
+
+
+async def test_each_paid_step_reaches_the_invoice(search_env):
+    run = await _new_run(search_env["session"])
+    await pipeline.run_search(run.id, search_env["notify"])
+
+    ledger = await _ledger(search_env["session"])
+    assert set(ledger) == {"web_search_queries", "web_search_brave", "web_search_ranking"}
+    assert {row.product_mode for row in ledger.values()} == {"search"}
+    assert {row.user_id for row in ledger.values()} == {run.owner_user_id}
+    # GPT-6 Luna: $0.10 in and $0.50 out per million tokens.
+    assert ledger["web_search_queries"].cost_usd == Decimal("0.6")
+    # Every query was answered, including query 2, which found nothing.
+    assert ledger["web_search_brave"].details["requests"] == 5
+    assert ledger["web_search_brave"].cost_usd == 5 * Decimal(brave.PRICE_PER_REQUEST_USD)
+    assert ledger["web_search_ranking"].provider_key == "typesafe"
+    assert ledger["web_search_ranking"].cost_usd == Decimal("0.00042")
+
+    lines = await monthly_invoice(search_env["session"], datetime.now(UTC).strftime("%Y-%m"))
+    by_source = {line.source: line for line in lines}
+    assert by_source["search:web_search_brave"].provider_label == "Brave"
+    assert by_source["search:web_search_ranking"].provider_label == "TypeSafe"
+    assert by_source["search:web_search_queries"].provider_label == "OpenAI"
+
+
+async def test_a_retry_bills_again_but_a_repeat_write_does_not(search_env):
+    run = await _new_run(search_env["session"])
+    await pipeline.run_search(run.id, search_env["notify"])
+    await pipeline.run_search(run.id, search_env["notify"])
+    rows = (await search_env["session"].scalars(select(UsageCostRow))).all()
+    assert len(rows) == 6
+
+    saved = await search_env["session"].get(WebSearchRun, run.id)
+    await metering.record(run.id, lambda row: [metering.brave_row(row, 5)])
+    rows = (await search_env["session"].scalars(select(UsageCostRow))).all()
+    assert len(rows) == 6 and saved.attempt_count == 2
+
+
+async def test_failed_brave_queries_and_a_failed_ranking_cost_nothing(search_env, monkeypatch):
+    async def flaky(client, query):
+        if query == "query 0":
+            raise brave.BraveError("Brave answered 500")
+        return search_env["hits"][query]
+
+    async def broken(request, results):
+        raise TimeoutError
+
+    monkeypatch.setattr(brave, "search", flaky)
+    monkeypatch.setattr(ranking, "rank", broken)
+    run = await _new_run(search_env["session"])
+    await pipeline.run_search(run.id, search_env["notify"])
+
+    ledger = await _ledger(search_env["session"])
+    assert set(ledger) == {"web_search_queries", "web_search_brave"}
+    assert ledger["web_search_brave"].details["requests"] == 4
 
 
 def test_requests_are_trimmed_and_bounded():
