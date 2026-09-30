@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block page_type %}dashboard{% endblock %}
+{% block page_title %}{% if dashboard_state.search %}{{ dashboard_state.search.request }}{% else %}Dashboard{% endif %}{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="{{ theme_url('css/pages/user-dashboard.css') }}">{% endblock %}
+{% block content %}
+{# dashboard.js renders every view from this state and keeps it current from the
+   API and the notification stream; the markup below is only the shell. #}
+<script type="application/json" id="dashboard-state">{{ dashboard_state|tojson }}</script>
+<div data-dashboard-csrf hidden>{{ csrf_field() }}</div>
+<div class="ud-shell" data-product data-dashboard>
+  <aside class="ud-rail" aria-label="Dashboard">
+    <p class="ud-rail-label">Tools</p>
+    <a class="ud-rail-tool" href="/dashboard" data-dashboard-link aria-current="page">
+      <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4.5 4.5"/></svg>
+      Web search
+    </a>
+    <p class="ud-rail-label">Recent searches</p>
+    <ol class="ud-recent" data-recent></ol>
+    <p class="ud-recent-empty" data-recent-empty hidden>Searches you run show up here.</p>
+  </aside>
+  <div class="ud-stage" data-stage aria-live="polite"></div>
+</div>
+
+<template id="ud-home">
+  <section class="ud-view ud-home" data-view="home">
+    <header class="ud-home-head">
+      <p class="ud-kicker" data-greeting></p>
+      <h1 class="ud-title">Search the web, smarter</h1>
+      <p class="ud-lede">Describe what you need in plain words. Luna writes five searches, Brave runs them, and Jev ranks what comes back.</p>
+    </header>
+    <form class="ud-composer" data-search-form>
+      <label class="p-sr" for="ud-request">What are you looking for?</label>
+      <textarea id="ud-request" name="request" rows="2" data-request placeholder="Why is COUNT(*) slow on my big Postgres table?" required></textarea>
+      <div class="ud-composer-foot">
+        <span class="ud-composer-hint" data-hint>Enter to search · Shift+Enter for a new line</span>
+        <button type="submit" class="p-btn is-primary" data-submit>Search</button>
+      </div>
+      <p class="ud-form-error" data-form-error role="alert" hidden></p>
+    </form>
+    <div class="ud-examples" data-examples>
+      <button type="button" class="ud-example">my website is slow</button>
+      <button type="button" class="ud-example">Is there a big tech conference this week?</button>
+      <button type="button" class="ud-example">How do I undo a commit I already pushed?</button>
+    </div>
+    <section class="ud-home-recent" data-home-recent hidden>
+      <h2 class="ud-section-title">Recent searches</h2>
+      <ol class="ud-recent" data-recent></ol>
+    </section>
+  </section>
+</template>
+
+<template id="ud-search">
+  <section class="ud-view ud-search" data-view="search">
+    <header class="ud-search-head">
+      <a class="ud-back" href="/dashboard" data-dashboard-link>
+        <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M10 3 5 8l5 5"/></svg>
+        New search
+      </a>
+      <h1 class="ud-request" data-request-text></h1>
+      <p class="ud-status" data-status><span class="ud-pulse" aria-hidden="true"></span><span data-status-text></span><span class="ud-elapsed" data-elapsed></span></p>
+    </header>
+
+    <ol class="ud-pipeline" data-pipeline>
+      <li class="ud-step" data-step="planning">
+        <span class="ud-step-mark" aria-hidden="true"></span>
+        <div class="ud-step-body">
+          <p class="ud-step-title">Plan</p>
+          <p class="ud-step-detail" data-step-detail></p>
+        </div>
+      </li>
+      <li class="ud-step" data-step="searching">
+        <span class="ud-step-mark" aria-hidden="true"></span>
+        <div class="ud-step-body">
+          <p class="ud-step-title">Search</p>
+          <p class="ud-step-detail"><span data-step-detail></span><button type="button" class="ud-step-toggle" data-queries-toggle aria-expanded="true" hidden></button></p>
+          <div class="ud-collapse" data-queries-wrap><ol class="ud-queries" data-queries></ol></div>
+        </div>
+      </li>
+      <li class="ud-step" data-step="ranking">
+        <span class="ud-step-mark" aria-hidden="true"></span>
+        <div class="ud-step-body">
+          <p class="ud-step-title">Rank</p>
+          <p class="ud-step-detail" data-step-detail></p>
+        </div>
+      </li>
+    </ol>
+
+    <p class="ud-error" data-error role="alert" hidden></p>
+
+    <section class="ud-results" data-results hidden>
+      <ol class="ud-result-list" data-result-list></ol>
+      <div class="ud-more" data-more hidden>
+        <button type="button" class="p-btn ud-more-toggle" data-more-toggle aria-expanded="false"></button>
+        <div class="ud-collapse" data-more-wrap><ol class="ud-result-list is-quiet" data-more-list></ol></div>
+      </div>
+    </section>
+  </section>
+</template>
+{% endblock %}
+{% block page_scripts %}<script src="{{ theme_url('js/dashboard.js') }}" defer></script>{% endblock %}

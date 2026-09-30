@@ -118,6 +118,7 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "web_chat_subagents",
     "web_chat_threads",
     "web_chat_turns",
+    "web_search_runs",
     "webhook_events_processed",
     "work_dispatches",
 })
