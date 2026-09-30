@@ -21,34 +21,45 @@ auth:
       scopes:
         - identify
         - email
-    github:
-      client_id: $GITHUB_CLIENT_ID
-      client_secret: $GITHUB_CLIENT_SECRET
-      scopes:
-        - user:email
-    google:
-      client_id: $GOOGLE_CLIENT_ID
-      client_secret: $GOOGLE_CLIENT_SECRET
-      scopes:
-        - openid
-        - email
-        - profile
+  # Discord-only login (task #56). GitHub, Google and passkey sign-in are
+  # switched off by leaving them out of this block: Skrift answers 404 on the
+  # login, callback and passkey routes of any method not configured here, and
+  # the login page lists only configured methods. Accounts, linked providers,
+  # passkey enrollments and live sessions are untouched, and the
+  # GITHUB_/GOOGLE_ env vars and secrets stay in k8s/deploy.yaml.
+  # To re-enable, uncomment the blocks below (delete the leading "# ") and
+  # deploy; see docs/auth-providers.md.
+    # github:
+    #   client_id: $GITHUB_CLIENT_ID
+    #   client_secret: $GITHUB_CLIENT_SECRET
+    #   scopes:
+    #     - user:email
+    # google:
+    #   client_id: $GOOGLE_CLIENT_ID
+    #   client_secret: $GOOGLE_CLIENT_SECRET
+    #   scopes:
+    #     - openid
+    #     - email
+    #     - profile
+  #
   # Discoverable passkey sign-in. `factor_key: passkey` ties primary login to
   # the `second_factors.passkey` enrollment store, so a passkey added from the
   # account page (while logged in via OAuth) also works as a login method.
-  methods:
-    passkey:
-      type: passkey
-      label: Passkey
-      factor_key: passkey
-  second_factors:
-    enabled: true
-    # Keep OAuth logins unchallenged — passkeys are purely additive, never a
-    # forced second factor for users who already sign in with a provider.
-    challenge_on_enrolled: false
-    methods:
-      passkey:
-        type: passkey
+  # Enrollment is off too while passkeys cannot sign in, so nobody adds a
+  # passkey the login page will not accept.
+  # methods:
+  #   passkey:
+  #     type: passkey
+  #     label: Passkey
+  #     factor_key: passkey
+  # second_factors:
+  #   enabled: true
+  #   # Keep OAuth logins unchallenged — passkeys are purely additive, never a
+  #   # forced second factor for users who already sign in with a provider.
+  #   challenge_on_enrolled: false
+  #   methods:
+  #     passkey:
+  #       type: passkey
 
 controllers:
   - skrift.admin.controller:AdminController
