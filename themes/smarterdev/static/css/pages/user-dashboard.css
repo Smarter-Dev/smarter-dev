@@ -143,6 +143,7 @@
 
 /* framework.css pads every <section> for marketing pages. */
 .ud-results,
+.ud-answer,
 .ud-home-recent { padding: 0 }
 
 @keyframes ud-enter {
@@ -334,7 +335,7 @@
   background: var(--p-accent);
   animation: ud-pulse 1.4s ease-in-out infinite;
 }
-.ud-search:is([data-status="queued"], [data-status="planning"], [data-status="searching"], [data-status="ranking"]) .ud-pulse { display: inline-block }
+.ud-search:is([data-status="queued"], [data-status="planning"], [data-status="searching"], [data-status="ranking"], [data-status="answering"]) .ud-pulse { display: inline-block }
 .ud-search[data-status="error"] .ud-status { color: var(--p-bad) }
 .ud-elapsed {
   margin-left: auto;
@@ -535,6 +536,134 @@
   background: var(--p-bad-wash);
   border: 1px solid var(--p-bad-line);
   animation: ud-rise .3s var(--ud-ease) both;
+}
+
+/* ── Answer ───────────────────────────────────────────── */
+
+/* Luna's answer sits above the results: the pages it reads appear as chips,
+   then the text streams in under a caret until it is done. */
+.ud-answer:not([hidden]) {
+  display: block;
+  margin: 0 0 32px;
+  padding: 18px 20px 20px;
+  background: var(--p-surface);
+  border: 1px solid var(--p-line);
+  border-left: 2px solid var(--p-accent);
+  animation: ud-rise .4s var(--ud-ease) both;
+}
+.ud-answer-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+.ud-answer-label {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: .72rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--p-accent-text);
+}
+.ud-reads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ud-read {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  font-family: var(--mono);
+  font-size: .68rem;
+  color: var(--p-muted);
+  border: 1px solid var(--p-line-strong);
+  animation: ud-pop .3s var(--ud-ease) both;
+}
+.ud-read::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--p-line-strong);
+}
+.ud-read[data-state="reading"]::before { background: var(--p-accent); animation: ud-pulse 1s ease-in-out infinite }
+.ud-read[data-state="done"] { color: var(--p-body) }
+.ud-read[data-state="done"]::before { background: var(--p-accent) }
+.ud-read[data-state="failed"] { color: var(--p-dim); text-decoration: line-through }
+.ud-read[data-state="failed"]::before { background: var(--p-bad) }
+
+.ud-answer-skeleton:not([hidden]) { display: grid; gap: 10px; padding: 4px 0 }
+.ud-answer-skeleton span {
+  height: 10px;
+  background: linear-gradient(90deg, var(--p-line), var(--p-line-strong), var(--p-line)) 0 0 / 200% 100%;
+  animation: ud-sweep 1.6s linear infinite;
+}
+.ud-answer-skeleton span:nth-child(2) { width: 86% }
+.ud-answer-skeleton span:nth-child(3) { width: 62% }
+
+.ud-answer-body {
+  font-size: .95rem;
+  line-height: 1.65;
+  color: var(--p-body);
+}
+.ud-answer-body > :first-child { margin-top: 0 }
+.ud-answer-body > :last-child { margin-bottom: 0 }
+.ud-answer-body p,
+.ud-answer-body ul,
+.ud-answer-body ol,
+.ud-answer-body pre { margin: 0 0 12px }
+.ud-answer-body strong { color: var(--p-text) }
+.ud-answer-body a { color: var(--p-accent-text) }
+.ud-answer-body code {
+  font-family: var(--mono);
+  font-size: .85em;
+  padding: 1px 4px;
+  background: var(--p-recess);
+}
+.ud-answer-body pre {
+  padding: 12px 14px;
+  overflow-x: auto;
+  background: var(--p-recess);
+  border: 1px solid var(--p-line);
+}
+.ud-answer-body pre code { padding: 0; background: none }
+.ud-answer-body a.ud-cite {
+  display: inline-block;
+  min-width: 1.5em;
+  margin: 0 1px;
+  padding: 0 4px;
+  font-family: var(--mono);
+  font-size: .68rem;
+  line-height: 1.5;
+  text-align: center;
+  text-decoration: none;
+  vertical-align: .15em;
+  color: var(--p-accent-text);
+  border: 1px solid var(--p-accent-line);
+}
+.ud-answer-body a.ud-cite:hover { color: var(--p-text); border-color: var(--p-accent) }
+/* A caret at the end of the text while it streams. */
+.ud-answer[data-state="writing"] .ud-answer-body > :last-child::after {
+  content: "";
+  display: inline-block;
+  width: .5em;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -.12em;
+  background: var(--p-accent);
+  animation: ud-pulse .9s steps(2) infinite;
+}
+.ud-answer-note:not([hidden]) {
+  display: block;
+  margin: 0;
+  font-size: .85rem;
+  color: var(--p-muted);
 }
 
 /* ── Results ──────────────────────────────────────────── */
