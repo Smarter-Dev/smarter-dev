@@ -50,6 +50,8 @@ async def delete_expired_security_logs(
 
     Commits after each batch. Returns the number of rows deleted.
     """
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be at least 1, got {batch_size}")
     cutoff = security_log_cutoff(now or datetime.now(UTC))
     deleted = 0
     while True:
