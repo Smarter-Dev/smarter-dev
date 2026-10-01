@@ -307,7 +307,8 @@
   transition: transform .18s;
 }
 .ud-back:hover { color: var(--p-text) }
-.ud-back[hidden] { display: none }
+/* Every rule here that sets display would otherwise beat the hidden attribute. */
+.ud-shell [hidden] { display: none !important }
 .ud-back:hover svg { transform: translateX(-2px) }
 
 .ud-request {
@@ -364,8 +365,8 @@
   gap: 14px;
   padding-bottom: 18px;
 }
-/* The rule joining one mark to the next fills in once its step is done. */
-.ud-step:not(:last-child)::before {
+/* The rule joining one mark to the next shown step fills in once its step is done. */
+.ud-step:has(~ .ud-step:not([hidden]))::before {
   content: "";
   position: absolute;
   left: 10px;
@@ -375,7 +376,7 @@
   background: linear-gradient(var(--p-accent-line), var(--p-accent-line)) top / 100% 0 no-repeat, var(--p-line);
   transition: background-size .5s var(--ud-ease);
 }
-.ud-step[data-state="done"]:not(:last-child)::before { background-size: 100% 100%, auto }
+.ud-step[data-state="done"]:has(~ .ud-step:not([hidden]))::before { background-size: 100% 100%, auto }
 
 .ud-step-mark {
   position: relative;
