@@ -9,6 +9,9 @@ db:
 
 session:
   cookie_domain: ".smarter.dev"
+  # Rolling: every visit re-issues the cookie, so this is how long a login
+  # survives without one. Skrift's default is a day.
+  max_age: 2592000  # 30 days
 
 auth:
   redirect_base_url: "https://smarter.dev"
