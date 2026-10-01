@@ -130,6 +130,9 @@ spec:
                       secretKeyRef:
                         name: smarter-dev-secrets
                         key: typesafe-api-key
+                  # Load Jev's SDK at startup so the first redirect after a deploy is fast.
+                  - name: WEB_SEARCH_ADDRESS_WARM
+                    value: "1"
                   - name: YOUTUBE_API_KEY
                     valueFrom:
                       secretKeyRef:

@@ -30,6 +30,9 @@ OPEN_FROM = 0.5
 CODE_BELOW = 0.5
 FILE_BELOW = 0.5
 TIMEOUT_SECONDS = 5
+# Checks are rare, so keep the connection open between them rather than
+# paying ~70 ms for a new one each time (httpx's default is 5 s).
+KEEPALIVE_SECONDS = 300.0
 # Jev list price; output tokens are free.
 INPUT_PRICE_PER_MILLION_USD = 0.042
 
@@ -121,8 +124,41 @@ def build_client():
     return AsyncTypeSafeClient(
         model=ADDRESS_MODEL,
         timeout=TIMEOUT_SECONDS,
-        http_client=httpx2.AsyncClient(headers={"Accept-Encoding": "gzip, deflate"}),
+        http_client=httpx2.AsyncClient(
+            headers={"Accept-Encoding": "gzip, deflate"},
+            limits=httpx2.Limits(keepalive_expiry=KEEPALIVE_SECONDS),
+        ),
     )
+
+
+_shared = None
+
+
+def shared_client():
+    """The process's one client, so checks reuse a warm connection."""
+    global _shared
+    if _shared is None:
+        _shared = build_client()
+    return _shared
+
+
+async def close_shared_client() -> None:
+    global _shared
+    if _shared is not None:
+        client, _shared = _shared, None
+        await client.aclose()
+
+
+async def warm() -> None:
+    """Load the SDK and make one check, so the first real one is fast.
+
+    On a website pod importing the SDK takes ~11 s and the first call ~3 s
+    more; without this the owner's first redirect after a deploy waits for both."""
+    import asyncio
+    import importlib
+
+    await asyncio.to_thread(importlib.import_module, "typesafe_sdk")
+    await ask_jev(parse("smarter.dev"))
 
 
 def decide(probabilities: dict[str, float]) -> bool:
@@ -139,22 +175,16 @@ async def ask_jev(found: Address, client=None) -> tuple[dict[str, float], dict]:
     from typesafe_sdk import Noul
     from typesafe_sdk import NoulCriteria
 
-    own = client is None
-    client = client or build_client()
-    try:
-        result = await client.system_one(
-            state=material(found),
-            questions={
-                "open": Noul(
-                    instructions=QUESTION, criteria=NoulCriteria(true=OPEN, false=SEARCH)
-                ),
-                "file": Noul(instructions=FILE_QUESTION),
-                "code": Noul(instructions=CODE_QUESTION),
-            },
-        )
-    finally:
-        if own:
-            await client.aclose()
+    result = await (client or shared_client()).system_one(
+        state=material(found),
+        questions={
+            "open": Noul(
+                instructions=QUESTION, criteria=NoulCriteria(true=OPEN, false=SEARCH)
+            ),
+            "file": Noul(instructions=FILE_QUESTION),
+            "code": Noul(instructions=CODE_QUESTION),
+        },
+    )
     tokens = result.usage.input_tokens
     probabilities = {name: answer.noul for name, answer in result.nouls.items()}
     return probabilities, {

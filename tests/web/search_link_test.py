@@ -172,8 +172,31 @@ async def test_the_owner_goes_straight_to_a_web_address(link_env, search_env, mo
 
     assert response.status_code == 302 and response.url == "https://getbuild.ing"
     assert await _runs(link_env["session"]) == 0
+    # The ledger row waits until the redirect has gone out.
+    assert await link_env["session"].scalar(select(UsageCostRow)) is None
+    await response.background()
     row = await link_env["session"].scalar(select(UsageCostRow))
     assert (row.operation_type, row.user_id, row.input_tokens) == ("web_search_address", owner.id, 50)
+
+
+async def test_a_check_that_says_search_is_recorded_and_searches(link_env, search_env, monkeypatch, caplog):
+    owner = await _user(link_env["session"])
+    link = await _link(link_env["session"], owner, open_addresses=True)
+
+    async def to_open(text):
+        return None, {"model": "jev-1.13.0", "input_tokens": 40, "cost_usd": 0.0000017}
+
+    monkeypatch.setattr(address, "address_to_open", to_open)
+    caplog.set_level("INFO", logger=links.__name__)
+
+    response = await run_link(None, _request(user=owner), link_env["session"], link.token, "setup.py")
+
+    assert response.url.startswith("/dashboard/search/")
+    row = await link_env["session"].scalar(select(UsageCostRow))
+    assert row.operation_type == "web_search_address"
+    assert "Search link address check: search in" in caplog.text
+    # Timings only: the request never reaches the logs.
+    assert "setup.py" not in caplog.text
 
 
 async def test_nobody_else_is_redirected_by_a_link(link_env, monkeypatch):
@@ -301,3 +324,49 @@ async def test_an_explicit_address_opens_without_asking_jev(monkeypatch):
     monkeypatch.setattr(address, "ask_jev", ask)
     assert await address.address_to_open("https://example.com") == ("https://example.com", {})
     assert await address.address_to_open("why is my build slow") == (None, {})
+
+
+async def test_checks_share_one_client(monkeypatch):
+    built: list[object] = []
+
+    class Client:
+        async def system_one(self, **_):
+            noul = SimpleNamespace(noul=0.9)
+            return SimpleNamespace(
+                nouls={"open": noul, "file": SimpleNamespace(noul=0.1), "code": SimpleNamespace(noul=0.1)},
+                usage=SimpleNamespace(input_tokens=10),
+            )
+
+        async def aclose(self):
+            built.remove(self)
+
+    def build():
+        built.append(Client())
+        return built[-1]
+
+    monkeypatch.setattr(address, "build_client", build)
+    monkeypatch.setattr(address, "_shared", None)
+
+    for _ in range(3):
+        assert (await address.address_to_open("getbuild.ing"))[0] == "https://getbuild.ing"
+
+    assert len(built) == 1
+    await address.close_shared_client()
+    assert built == [] and address._shared is None
+
+
+async def test_the_warm_up_runs_only_where_enabled_and_never_blocks_startup(monkeypatch):
+    calls: list[str] = []
+
+    async def warm():
+        calls.append("warm")
+        raise TimeoutError
+
+    monkeypatch.setattr(address, "warm", warm)
+    monkeypatch.setattr(links, "WARM_ON_STARTUP", False)
+    await links.warm_address_check(None)
+    assert calls == []
+
+    monkeypatch.setattr(links, "WARM_ON_STARTUP", True)
+    await links.warm_address_check(None)  # a failed warm-up is logged, not raised
+    assert calls == ["warm"]
