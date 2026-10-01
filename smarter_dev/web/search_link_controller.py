@@ -17,7 +17,10 @@ Browsers prefetch and prerender likely results pages; those requests
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
+import time
 from typing import Annotated
 from urllib.parse import urlencode
 from uuid import UUID
@@ -27,10 +30,14 @@ from litestar import Controller
 from litestar import Request
 from litestar import Response
 from litestar import get
+from litestar.background_tasks import BackgroundTask
 from litestar.exceptions import HTTPException
 from litestar.params import Parameter
 from litestar.response import Redirect
 from litestar.response import Template
+from skrift.hooks import APP_SHUTDOWN
+from skrift.hooks import APP_STARTUP
+from skrift.hooks import action
 from skrift.lib.client_ip import get_client_ip
 from skrift.notifications import ensure_nid
 from sqlalchemy import select
@@ -82,18 +89,52 @@ def _limited(request: Request, *, message: str, wait: int | None, login: bool) -
     )
 
 
-async def _check_address(link: WebSearchLink, text: str) -> str | None:
-    from smarter_dev.web.web_search import metering
+# Set on the website pods only: tests and other processes skip the warm-up.
+WARM_ON_STARTUP = os.getenv("WEB_SEARCH_ADDRESS_WARM") == "1"
+WARM_TIMEOUT_SECONDS = 60
+
+
+@action(APP_STARTUP)
+async def warm_address_check(_app) -> None:
+    """Load Jev's SDK before the pod takes traffic (see ``address.warm``)."""
+    if not WARM_ON_STARTUP:
+        return
+    from smarter_dev.web.web_search import address
+
+    started = time.monotonic()
+    try:
+        await asyncio.wait_for(address.warm(), WARM_TIMEOUT_SECONDS)
+    except Exception as error:  # noqa: BLE001 - a cold first check beats a pod that won't start
+        logger.warning("Search link address check warm-up failed (%s)", type(error).__name__)
+        return
+    logger.info("Search link address check warmed in %d ms", (time.monotonic() - started) * 1000)
+
+
+@action(APP_SHUTDOWN)
+async def close_address_client(_app) -> None:
+    from smarter_dev.web.web_search import address
+
+    await address.close_shared_client()
+
+
+async def _check_address(text: str) -> tuple[str | None, dict]:
+    """The URL to open, or None to search; and Jev's usage to record."""
     from smarter_dev.web.web_search.address import address_to_open
 
+    started = time.monotonic()
     try:
         url, usage = await address_to_open(text)
     except Exception as error:  # noqa: BLE001 - searching is the safe fallback
         logger.warning("Search link address check failed (%s)", type(error).__name__)
-        return None
-    if usage:
-        await metering.record_address(link.owner_user_id, usage)
-    return url
+        return None, {}
+    # Timing and outcome only: the text is the user's.
+    logger.info(
+        "Search link address check: %s in %d ms (%s)",
+        "open" if url else "search",
+        (time.monotonic() - started) * 1000,
+        "jev" if usage else "no jev",
+    )
+    return url, usage
 
 
 async def _start_anonymous(request: Request, link: WebSearchLink, text: str) -> Response:
@@ -170,6 +211,7 @@ class SearchLinkController(Controller):
         token: str,
         q: Annotated[str | None, Parameter(query="q")] = None,
     ) -> Response:
+        received = time.monotonic()
         link = await db_session.scalar(select(WebSearchLink).where(WebSearchLink.token == token))
         if link is None:
             raise HTTPException(status_code=404, detail="This search link doesn't exist.")
@@ -187,9 +229,23 @@ class SearchLinkController(Controller):
         # Only the link's owner is redirected: anyone could otherwise make a
         # link that turns smarter.dev into an open redirect for phishing.
         if link.open_addresses and user is not None and user.id == link.owner_user_id:
-            url = await _check_address(link, text)
+            from smarter_dev.web.web_search import metering
+
+            url, usage = await _check_address(text)
             if url is not None:
-                return Redirect(path=url, status_code=302)
+                logger.info(
+                    "Search link redirect ready in %d ms", (time.monotonic() - received) * 1000
+                )
+                # The ledger row is written after the redirect goes out.
+                return Redirect(
+                    path=url,
+                    status_code=302,
+                    background=BackgroundTask(metering.record_address, link.owner_user_id, usage)
+                    if usage
+                    else None,
+                )
+            if usage:
+                await metering.record_address(link.owner_user_id, usage)
 
         if user is None:
             return await _start_anonymous(request, link, text)
