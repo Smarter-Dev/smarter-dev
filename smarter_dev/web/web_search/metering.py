@@ -120,6 +120,46 @@ def jev_row(run: WebSearchRun, usage: dict) -> UsageCostRow:
     )
 
 
+async def record_address(owner_user_id, usage: dict) -> None:
+    """Jev's check of whether a search link request was a web address. It
+    belongs to no search, so each check gets its own key."""
+    from uuid import uuid4
+
+    model = usage.get("model") or "jev"
+    row = UsageCostRow(
+        operation_key=f"web_search_address:{uuid4()}",
+        product_mode=PRODUCT_MODE,
+        operation_type="web_search_address",
+        user_id=owner_user_id,
+        details={},
+        provider_key="typesafe",
+        catalog_model_key=model,
+        model_id=model,
+        input_tokens=int(usage.get("input_tokens") or 0),
+        cost_usd=Decimal(str(usage.get("cost_usd") or 0)),
+    )
+    try:
+        async with get_db_session_context() as session:
+            session.add(row)
+            await session.commit()
+    except Exception:  # noqa: BLE001 - the redirect matters more than the ledger row
+        logger.exception("Web search address check: couldn't record usage")
+
+
+async def record_unsaved(run: WebSearchRun, rows) -> None:
+    """Append the rows ``rows(run)`` builds for a run that is never saved, an
+    anonymous search's. Like ``record``, it never fails the search."""
+    try:
+        async with get_db_session_context() as session:
+            for row in rows(run):
+                if row is not None:
+                    row.details = {**row.details, "anonymous": True}
+                    await _append(session, row)
+            await session.commit()
+    except Exception:  # noqa: BLE001 - the user's results matter more than the ledger row
+        logger.exception("Web search %s: couldn't record usage", run.id)
+
+
 async def record(run_id, rows) -> None:
     """Append the rows the ``rows(run)`` callback builds for the saved run.
 

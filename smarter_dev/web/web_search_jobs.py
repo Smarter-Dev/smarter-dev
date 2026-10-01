@@ -1,4 +1,4 @@
-"""Agent-worker job that runs one dashboard web search.
+"""Agent-worker jobs that run one dashboard web search, saved or anonymous.
 
 The web pod submits ``web_search.run`` through the dispatch outbox with only a
 lightweight descriptor (``chat.dispatch._SUBMISSION_DESCRIPTORS``); this
@@ -18,6 +18,7 @@ from skrift.workers import handler
 
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.models import WebSearchRun
+from smarter_dev.web.web_search import anonymous
 from smarter_dev.web.web_search.snapshot import EVENT_TYPE
 
 logger = logging.getLogger(__name__)
@@ -62,3 +63,20 @@ async def run_web_search_job(payload: WebSearchPayload) -> dict:
             await session.commit()
             return {"status": "error"}
     return {"status": await run_search(search_id, notify_progress)}
+
+
+# max_attempts matches the web pod's submission descriptor in chat.dispatch.
+@handler(anonymous.JOB_TYPE, queue="agents", max_attempts=5, visibility_timeout=300.0)
+async def run_anonymous_web_search_job(payload: WebSearchPayload) -> dict:
+    """An anonymous search from a search link: nothing about it is saved but
+    the usage ledger's rows (``web_search.anonymous``)."""
+    from smarter_dev.shared.redis_client import get_redis_client
+    from smarter_dev.web.web_search.pipeline import search
+
+    redis = get_redis_client()
+    entry = await anonymous.load(redis, payload.search_id)
+    if entry is None:
+        return {"status": "expired"}
+    if entry["search"]["status"] in {"complete", "error"}:
+        return {"status": entry["search"]["status"], "idempotent": True}
+    return {"status": await search(anonymous.UnsavedRun(redis, entry))}
