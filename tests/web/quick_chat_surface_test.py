@@ -388,7 +388,7 @@ class TestRailPinning:
             db_session, user, chat_mode="quick", title="Quick chat"
         )
 
-        rail = await chat_controller._rail_context(db_session, user.id)
+        rail = await chat_controller.rail_context(db_session, user.id)
 
         assert rail["quick_conversation"].id == quick.id
         assert [row.id for row in rail["conversations"]] == [standard.id]
@@ -403,7 +403,7 @@ class TestRailPinning:
         user = await _seed_user(db_session)
         await _seed_conversation(db_session, user)
 
-        rail = await chat_controller._rail_context(db_session, user.id)
+        rail = await chat_controller.rail_context(db_session, user.id)
 
         assert rail["quick_conversation"] is None
 
@@ -416,7 +416,7 @@ class TestRailPinning:
         context = await _page_context(
             db_session,
             quick,
-            **await chat_controller._rail_context(db_session, user.id),
+            **await chat_controller.rail_context(db_session, user.id),
         )
 
         html = _render_chat_page(context)
@@ -437,7 +437,7 @@ class TestRailPinning:
             "settings": await ensure_settings(db_session),
             "catalog_models": [],
             "ultra_chat": False,
-            **await chat_controller._rail_context(db_session, user.id),
+            **await chat_controller.rail_context(db_session, user.id),
         }
 
         html = _render_chat_page(context)
@@ -457,7 +457,7 @@ class TestRailPinning:
             "settings": await ensure_settings(db_session),
             "catalog_models": [],
             "ultra_chat": False,
-            **await chat_controller._rail_context(db_session, user.id),
+            **await chat_controller.rail_context(db_session, user.id),
         }
 
         html = _render_chat_page(context)

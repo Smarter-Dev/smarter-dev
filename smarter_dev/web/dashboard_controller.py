@@ -1,8 +1,12 @@
 """The signed-in user's dashboard at /dashboard, and its web search.
 
-The page is one shell that ``dashboard.js`` drives as a single-page app:
-``/dashboard`` and ``/dashboard/search/{id}`` both render it, with the view
-to open and everything it needs embedded, so a reload paints at once.
+The sidebar holds Web search and Chat (``dashboard_nav``). ``/dashboard`` opens
+the Quick chat for anyone with Chat, and the new-search view for everyone else.
+
+The search pages are one shell that ``dashboard.js`` drives as a single-page
+app: ``/dashboard/search``, ``/dashboard/search/{id}`` and ``/dashboard/browser``
+all render it, with the view to open and everything it needs embedded, so a
+reload paints at once.
 
 A search runs in the agent-worker (``web_search_jobs``): ``POST
 /dashboard/api/searches`` saves the row and hands it to the dispatch outbox,
@@ -32,6 +36,7 @@ from litestar.response import Redirect
 from litestar.response import Template
 from litestar.status_codes import HTTP_201_CREATED
 from msgspec import Struct
+from skrift.auth.services import get_user_permissions
 from skrift.auth.session_keys import SESSION_USER_ID
 from skrift.db.models.user import User
 from sqlalchemy import func
@@ -39,17 +44,20 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.config import get_settings
+from smarter_dev.web.chat.controller import quick_chat_page
+from smarter_dev.web.chat.controller import rail_context
 from smarter_dev.web.chat.csrf import require_api_csrf
 from smarter_dev.web.chat.dispatch import create_dispatch
 from smarter_dev.web.chat.dispatch import dispatch_one
+from smarter_dev.web.chat.entitlements import has_chat
+from smarter_dev.web.dashboard_nav import nav_context
+from smarter_dev.web.dashboard_nav import recent_searches
 from smarter_dev.web.models import WebSearchLink
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.web_search.snapshot import EVENT_TYPE
 from smarter_dev.web.web_search.snapshot import MAX_REQUEST_CHARS
 from smarter_dev.web.web_search.snapshot import snapshot
-from smarter_dev.web.web_search.snapshot import summary
 
-RECENT_LIMIT = 20
 MIN_REQUEST_CHARS = 3
 # Each search costs five Brave queries, so both limits are per user.
 PER_MINUTE_LIMIT = 6
@@ -73,8 +81,11 @@ class SearchBody(Struct):
 THEME_DIR = Path(__file__).resolve().parents[2] / "themes" / "smarterdev"
 CLIENT_FILES = (
     "static/js/dashboard.js",
+    "static/js/dashboard-nav.js",
     "static/css/pages/user-dashboard.css",
+    "static/css/pages/dashboard-nav.css",
     "templates/dashboard/index.html",
+    "templates/dashboard/_nav.html",
 )
 
 
@@ -116,13 +127,7 @@ def _login_redirect(request: Request) -> Redirect:
 
 
 async def _recent(db_session: AsyncSession, user_id: UUID) -> list[dict]:
-    rows = await db_session.scalars(
-        select(WebSearchRun)
-        .where(WebSearchRun.owner_user_id == user_id)
-        .order_by(WebSearchRun.created_at.desc())
-        .limit(RECENT_LIMIT)
-    )
-    return [summary(row) for row in rows]
+    return await recent_searches(db_session, user_id)
 
 
 async def _owned(db_session: AsyncSession, user_id: UUID, search_id: UUID) -> WebSearchRun:
@@ -243,19 +248,39 @@ class DashboardController(Controller):
         user = await db_session.get(User, user_id) if user_id else None
         if user is None or not user.is_active:
             return _login_redirect(request)
+        permissions = await get_user_permissions(db_session, user.id)
+        chat = has_chat(permissions)
+        if view == "default":
+            if chat:
+                return await quick_chat_page(db_session, user.id, permissions)
+            view = None
         search = None
         if search_id is not None:
             run = await db_session.get(WebSearchRun, search_id)
             if run is None or run.owner_user_id != user.id:
                 raise HTTPException(status_code=404, detail="Search not found.")
             search = snapshot(run)
+        view = view or ("search" if search else "home")
+        recent = await _recent(db_session, user.id)
         return Template(
             "dashboard/index.html",
             context={
+                **nav_context(
+                    page="dashboard",
+                    open_section="search",
+                    recent=recent,
+                    chat=chat,
+                    tool=None if search else view if view == "browser" else "search",
+                    search_id=search["id"] if search else None,
+                ),
+                **(await rail_context(db_session, user.id) if chat else {}),
                 "dashboard_state": {
-                    "view": view or ("search" if search else "home"),
+                    "view": view,
+                    # /dashboard is the Quick chat for this user, not the
+                    # new-search view, so going back to it needs the server.
+                    "chat_home": chat,
                     "user": {"name": user.name or "there"},
-                    "recent": await _recent(db_session, user.id),
+                    "recent": recent,
                     "search": search,
                     "event_type": EVENT_TYPE,
                     "max_request_chars": MAX_REQUEST_CHARS,
@@ -268,6 +293,12 @@ class DashboardController(Controller):
 
     @get("/")
     async def home(self, request: Request, db_session: AsyncSession) -> Template | Redirect:
+        return await self._page(request, db_session, None, view="default")
+
+    @get("/search")
+    async def new_search_page(
+        self, request: Request, db_session: AsyncSession
+    ) -> Template | Redirect:
         return await self._page(request, db_session, None)
 
     @get("/search/{search_id:uuid}")

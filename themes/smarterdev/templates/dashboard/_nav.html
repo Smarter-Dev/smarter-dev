@@ -1,0 +1,98 @@
+{# The dashboard sidebar Web search and Chat share: one accordion section each,
+   Web search on top. Included by dashboard/index.html and, in chat mode, by
+   chat/index.html, with the context from smarter_dev/web/dashboard_nav.py.
+
+   A section's entry is a link to that tool's start (a new search, the Quick
+   chat), and the page it lands on has that section open. The chevron beside it
+   opens or shuts the history in place; dashboard-nav.js keeps one open at a
+   time. The open section is the only one with a scrolling body. #}
+{% set nav = dashboard_nav|default({'open': 'chat', 'chat': true, 'chat_actions': true, 'recent': [], 'search_home': '/dashboard/search', 'chat_home': '/dashboard'}) %}
+{% set on_dashboard = nav.page|default('chat') == 'dashboard' %}
+{# Search links stay inside dashboard.js's single-page app on the search page;
+   from a chat page they are a full load, so spa-nav need not fetch them first. #}
+{% set search_link = 'data-dashboard-link' if on_dashboard else 'data-sk-no-spa' %}
+{% set chat_link = 'data-sk-no-spa' if on_dashboard else '' %}
+{% set search_open = nav.open == 'search' %}
+{% set chat_open = nav.open == 'chat' %}
+{% macro nav_history_row(item, archived=false) -%}
+{%- set current = conversation is defined and conversation and mode|default('') == 'chat' and item.id == conversation.id -%}
+<div class="chat-history-row" data-history-row data-conversation-id="{{ item.id }}" data-archived="{{ 'true' if archived else 'false' }}">
+  <a href="/chat/{{ item.id }}" {% if current %}aria-current="page"{% endif %} data-history-title {{ chat_link }}>{{ item.title or 'Untitled chat' }}</a>
+  {%- if nav.chat_actions %}
+  <button type="button" class="chat-history-more" data-history-menu aria-haspopup="true" aria-expanded="false">
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.35"/><circle cx="8" cy="8" r="1.35"/><circle cx="8" cy="13" r="1.35"/></svg>
+    <span class="p-sr">Actions for {{ item.title or 'Untitled chat' }}</span>
+  </button>
+  {%- endif %}
+</div>
+{%- endmacro %}
+<div class="ud-nav" data-ud-nav>
+  <section class="ud-nav-section" data-ud-section="search"{% if search_open %} data-open{% endif %}>
+    <div class="ud-nav-head">
+      <a class="ud-nav-entry" href="{{ nav.search_home }}" data-ud-entry data-tool="search" {{ search_link }}{% if nav.tool == 'search' %} aria-current="page"{% endif %}>
+        <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4.5 4.5"/></svg>
+        Web search
+      </a>
+      <button type="button" class="ud-nav-toggle" data-ud-toggle aria-expanded="{{ 'true' if search_open else 'false' }}" aria-controls="ud-nav-search">
+        <span class="p-sr">Search history</span>
+      </button>
+    </div>
+    <div class="ud-nav-body" id="ud-nav-search"{% if not search_open %} hidden{% endif %}>
+      <a class="ud-rail-tool" href="/dashboard/browser" data-tool="browser" {{ search_link }}{% if nav.tool == 'browser' %} aria-current="page"{% endif %}>
+        <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="2.5" y="3.5" width="15" height="13" rx="1.5"/><path d="M2.5 7.5h15M5.5 5.5h.01M8 5.5h.01"/></svg>
+        Browser search
+      </a>
+      <p class="ud-rail-label">Recent searches</p>
+      <ol class="ud-recent" data-recent>
+        {% for row in nav.recent %}
+        <li class="ud-recent-row" data-id="{{ row.id }}">
+          <a class="ud-recent-link{% if row.active %} is-active{% endif %}{% if row.status == 'error' %} is-failed{% endif %}" href="/dashboard/search/{{ row.id }}" {{ search_link }}{% if row.id == nav.search_id %} aria-current="page"{% endif %}><span class="ud-recent-text">{{ row.request }}</span><span class="ud-recent-meta">{{ row.meta }}</span></a>
+        </li>
+        {% endfor %}
+      </ol>
+      <p class="ud-recent-empty" data-recent-empty{% if nav.recent %} hidden{% endif %}>Searches you run show up here.</p>
+    </div>
+  </section>
+  {% if nav.chat %}
+  {% set quick_pin = quick_conversation|default(none) %}
+  {% set archived = archived_conversations|default([]) %}
+  <section class="ud-nav-section" data-ud-section="chat"{% if chat_open %} data-open{% endif %}>
+    <div class="ud-nav-head">
+      <a class="ud-nav-entry" href="{{ nav.chat_home }}" data-ud-entry data-tool="chat" {{ chat_link }}>
+        <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><path d="M3.5 4.5h13v9h-7l-4 3v-3h-2z"/></svg>
+        Chat
+      </a>
+      <button type="button" class="ud-nav-toggle" data-ud-toggle aria-expanded="{{ 'true' if chat_open else 'false' }}" aria-controls="ud-nav-chat">
+        <span class="p-sr">Chat history</span>
+      </button>
+    </div>
+    <div class="ud-nav-body" id="ud-nav-chat"{% if not chat_open %} hidden{% endif %}>
+      <div class="chat-sidebar-head">
+        <a href="/chat/new" class="p-btn is-accent chat-new" {{ chat_link }}>+ New chat</a>
+      </div>
+      <nav class="chat-history" aria-label="Chat history">
+        {% if quick_pin %}
+        {# Pinned above the recency bands and deliberately menu-less: the Quick
+           chat is a fixed surface, so renaming, archiving or deleting it would
+           only leave its owner with no Quick chat and no obvious way back. #}
+        <div class="chat-history-row is-pinned" data-quick-chat-row>
+          <a href="/chat" {% if conversation is defined and conversation and mode|default('') == 'chat' and quick_pin.id == conversation.id %}aria-current="page"{% endif %} data-history-title {{ chat_link }}>{{ quick_pin.title or 'Quick chat' }}</a>
+        </div>
+        {% endif %}
+        {% for group in conversation_groups|default([]) %}
+        <p class="p-label chat-history-group">{{ group.label }}</p>
+        {% for item in group['items'] %}{{ nav_history_row(item) }}{% endfor %}
+        {% endfor %}
+        {% if archived %}
+        {# Filed away, not gone. Shut by default unless the reader is looking at
+           one, in which case the drawer it lives in ought to be open. #}
+        <details class="chat-history-archive" data-history-archive {% if conversation is defined and conversation and mode|default('') == 'chat' and conversation.archived_at %}open{% endif %}>
+          <summary class="p-label chat-history-group">Archived<span class="chat-history-archive-count">{{ archived|length }}</span></summary>
+          {% for item in archived %}{{ nav_history_row(item, archived=true) }}{% endfor %}
+        </details>
+        {% endif %}
+      </nav>
+    </div>
+  </section>
+  {% endif %}
+</div>
