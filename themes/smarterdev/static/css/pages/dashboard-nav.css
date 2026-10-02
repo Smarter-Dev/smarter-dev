@@ -1,0 +1,282 @@
+/* ══════════════════════════════════════════════════════
+   Dashboard sidebar — Web search and Chat as accordion sections
+
+   templates/dashboard/_nav.html, drawn in the search pages' .ud-rail and the
+   chat pages' .chat-sidebar alike, so it carries its own spacing and owns
+   nothing about the column around it. The open section fills the rail and
+   scrolls; a shut one is just its entry. The chat history inside the Chat
+   section keeps its chat.css styles, which the search pages load for it.
+   ══════════════════════════════════════════════════════ */
+
+.ud-nav {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-top: 12px;
+}
+.ud-nav [hidden] { display: none !important }
+
+/* framework.css pads every <section> for marketing pages. */
+.ud-nav-section {
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 auto;
+  min-height: 0;
+  padding: 0;
+}
+.ud-nav-section[data-open] { flex: 1 1 auto }
+.ud-nav-section + .ud-nav-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--p-line);
+}
+
+.ud-nav-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 10px;
+}
+
+.ud-nav-entry {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: var(--p-tap);
+  padding: 0 10px;
+  font-size: .88rem;
+  color: var(--p-muted);
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: color .18s, background .18s, border-color .18s;
+}
+.ud-nav-entry svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ud-nav-entry:hover { color: var(--p-text); background: var(--p-surface) }
+.ud-nav-section[data-open] .ud-nav-entry { color: var(--p-text) }
+.ud-nav-entry[aria-current="page"] {
+  background: var(--p-surface);
+  border-color: var(--p-line-strong);
+}
+
+/* The chevron: right when shut, down when open, like the archived drawer. */
+.ud-nav-toggle {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: var(--p-tap);
+  padding: 0;
+  color: var(--p-dim);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: color .18s, background .18s;
+}
+.ud-nav-toggle::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateX(-1px) rotate(-45deg);
+  transition: transform .18s;
+}
+.ud-nav-toggle[aria-expanded="true"]::before { transform: translateY(-2px) rotate(45deg) }
+.ud-nav-toggle:hover { color: var(--p-text); background: var(--p-surface) }
+
+.ud-nav-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  gap: 2px;
+  min-height: 0;
+  padding: 6px 10px 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* The chat history is its own scroller (chat.js closes a row's menu when it
+   scrolls), so the Chat body only stacks the New chat button over it. */
+#ud-nav-chat {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.ud-nav .chat-sidebar-head {
+  padding: 6px 1rem 10px;
+  border-bottom: 0;
+}
+.ud-nav .chat-history { flex: 1 1 auto }
+
+/* A chat page puts the sidebar where its own head, history and foot went. */
+.chat-sidebar.has-nav { grid-template-rows: minmax(0, 1fr) auto }
+.chat-sidebar.has-nav .ud-nav { min-width: var(--chat-rail) }
+
+/* ── Inside the Web search section ────────────────────── */
+
+.ud-rail-label {
+  margin: 14px 10px 6px;
+  font-family: var(--heading);
+  font-size: .5rem;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--p-dim);
+}
+.ud-rail-label:first-child { margin-top: 0 }
+
+.ud-rail-tool {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: var(--p-tap);
+  padding: 0 10px;
+  font-size: .88rem;
+  color: var(--p-muted);
+  text-decoration: none;
+  border: 1px solid transparent;
+  transition: color .18s, background .18s, border-color .18s;
+}
+.ud-rail-tool svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+}
+.ud-rail-tool:hover { color: var(--p-text); background: var(--p-surface) }
+.ud-rail-tool[aria-current="page"] {
+  color: var(--p-text);
+  background: var(--p-surface);
+  border-color: var(--p-line-strong);
+}
+
+.ud-recent {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ud-recent-row.is-new { animation: ud-rise .36s var(--ud-ease) both }
+
+.ud-recent-link {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px 8px 12px;
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  transition: background .18s, border-color .18s;
+}
+.ud-recent-link:hover { background: var(--p-surface) }
+.ud-recent-link[aria-current="page"] {
+  background: var(--p-surface);
+  border-left-color: var(--p-accent);
+}
+.ud-recent-text {
+  overflow: hidden;
+  font-size: .84rem;
+  line-height: 1.35;
+  color: var(--p-body);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.ud-recent-link[aria-current="page"] .ud-recent-text { color: var(--p-text) }
+.ud-recent-meta {
+  font-family: var(--mono);
+  font-size: .68rem;
+  color: var(--p-dim);
+  font-variant-numeric: tabular-nums;
+}
+.ud-recent-link.is-active .ud-recent-meta { color: var(--p-accent-text) }
+.ud-recent-link.is-failed .ud-recent-meta { color: var(--p-bad) }
+
+.ud-recent-empty {
+  margin: 4px 10px;
+  font-size: .8rem;
+  color: var(--p-dim);
+}
+
+/* ── A phone: the rail is a strip above the page ──────────
+   The two entries sit side by side as a switch and the open section's
+   history runs under them as one scrolling row, like the chat strip it
+   replaces. There is no room to peek at the other section, so the
+   chevrons go. */
+
+@media (max-width: 760px) {
+  .chat-sidebar.has-nav { display: block; padding: 0 }
+  .chat-sidebar.has-nav .ud-nav { min-width: 0 }
+
+  .ud-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: .5rem;
+    padding: .5rem .75rem;
+  }
+  .ud-nav-section,
+  .ud-nav-section[data-open] { display: contents }
+  .ud-nav-head { grid-row: 1; padding: 0 }
+  .ud-nav-toggle { display: none }
+  .ud-nav-entry {
+    justify-content: center;
+    min-height: 36px;
+    border-color: var(--p-line);
+  }
+  .ud-nav-section[data-open] .ud-nav-entry {
+    background: var(--p-surface);
+    border-color: var(--p-line-strong);
+  }
+
+  .ud-nav-body,
+  #ud-nav-chat {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    flex-direction: row;
+    align-items: center;
+    gap: .4rem;
+    padding: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  #ud-nav-chat { overflow: visible }
+  .ud-nav .chat-sidebar-head { flex: 0 0 auto; padding: 0 }
+  .ud-nav .chat-history { min-width: 0 }
+
+  .ud-nav-body .ud-rail-tool { flex: 0 0 auto; min-height: 34px; border-color: var(--p-line) }
+  .ud-nav-body .ud-rail-label,
+  .ud-nav-body .ud-recent-meta { display: none }
+  .ud-nav-body .ud-recent { flex-direction: row; gap: .4rem }
+  .ud-nav-body .ud-recent-row { flex: 0 0 auto }
+  .ud-nav-body .ud-recent-link {
+    max-width: 12rem;
+    padding: 0 .7rem;
+    line-height: 34px;
+    border-left: 0;
+    border-bottom: 2px solid transparent;
+  }
+  .ud-nav-body .ud-recent-link[aria-current="page"] { border-bottom-color: var(--p-accent) }
+  .ud-nav-body .ud-recent-text {
+    display: block;
+    font-size: .78rem;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .ud-nav-body .ud-recent-empty { flex: 0 0 auto; margin: 0 .25rem }
+}

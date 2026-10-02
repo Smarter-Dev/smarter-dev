@@ -37,6 +37,8 @@ from smarter_dev.web.chat.settings import ensure_settings
 from smarter_dev.web.chat.threads import QUICK_CHAT_MODE
 from smarter_dev.web.chat.threads import thread_breaks
 from smarter_dev.web.chat.threads import thread_snapshots
+from smarter_dev.web.dashboard_nav import nav_context
+from smarter_dev.web.dashboard_nav import recent_searches
 from smarter_dev.web.models import AgentConversation
 from smarter_dev.web.models import ChatCatalogModel
 from smarter_dev.web.models import ResourceAgentRun
@@ -79,7 +81,7 @@ def group_conversations(conversations: list, now: datetime) -> list[dict]:
     ]
 
 
-async def _rail_context(session: AsyncSession, user_id: UUID) -> dict:
+async def rail_context(session: AsyncSession, user_id: UUID) -> dict:
     """The history rail: live conversations grouped by recency, archived below.
 
     Archiving is filing, not deleting, so an archived conversation keeps its URL
@@ -123,6 +125,18 @@ async def _rail_context(session: AsyncSession, user_id: UUID) -> dict:
         "archived_conversations": archived,
         "quick_conversation": await _live_quick_conversation(session, user_id),
     }
+
+
+async def _nav_context(session: AsyncSession, user_id: UUID) -> dict:
+    """The dashboard sidebar for a chat page: Chat open, with its row menus,
+    and the owner's recent searches under a shut Web search entry."""
+    return nav_context(
+        page="chat",
+        open_section="chat",
+        recent=await recent_searches(session, user_id),
+        chat=True,
+        chat_actions=True,
+    )
 
 
 async def _live_quick_conversation(
@@ -408,7 +422,8 @@ async def _web_chat_page(
             "conversation": conversation,
             "mode": "chat",
             "quick_chat": conversation.chat_mode == QUICK_CHAT_MODE,
-            **await _rail_context(session, user_id),
+            **await rail_context(session, user_id),
+            **await _nav_context(session, user_id),
             "model": selected_model,
             "model_unavailable": model_unavailable,
             "model_reasoning_levels": [
@@ -453,7 +468,8 @@ async def chat_new(request: Request, db_session: AsyncSession) -> Template:
             "versions": {},
             "mode": "chat",
             "settings": settings,
-            **await _rail_context(db_session, user_id),
+            **await rail_context(db_session, user_id),
+            **await _nav_context(db_session, user_id),
             "ultra_chat": has_ultra_chat(permissions),
             "seo_meta": {
                 "robots": "noindex,nofollow",
@@ -479,9 +495,15 @@ async def chat_quick(request: Request, db_session: AsyncSession) -> Template:
         raise HTTPException(
             status_code=403, detail="Chat is not enabled for your account."
         )
-    conversation = await ensure_quick_conversation(db_session, user_id, permissions)
+    return await quick_chat_page(db_session, user_id, permissions)
+
+
+async def quick_chat_page(session: AsyncSession, user_id: UUID, permissions) -> Template:
+    """The Quick chat page, for ``/chat`` and for ``/dashboard``, which opens on
+    it. The caller has already checked the user may use Chat."""
+    conversation = await ensure_quick_conversation(session, user_id, permissions)
     return await _web_chat_page(
-        db_session,
+        session,
         user_id=user_id,
         conversation=conversation,
         permissions=permissions,

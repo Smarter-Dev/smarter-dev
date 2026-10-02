@@ -19,102 +19,15 @@
 
 /* ── Rail ─────────────────────────────────────────────── */
 
+/* The rail is the dashboard sidebar (dashboard-nav.css), the same one the
+   chat pages draw, so it takes the chat rail's ground rather than a recess. */
 .ud-rail {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 24px 14px;
-  overflow-y: auto;
-  background: var(--p-recess);
-  border-right: 1px solid var(--p-line);
-}
-
-.ud-rail-label {
-  margin: 14px 10px 6px;
-  font-family: var(--heading);
-  font-size: .5rem;
-  letter-spacing: .14em;
-  text-transform: uppercase;
-  color: var(--p-dim);
-}
-.ud-rail-label:first-child { margin-top: 0 }
-
-.ud-rail-tool {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: var(--p-tap);
-  padding: 0 10px;
-  font-size: .88rem;
-  color: var(--p-muted);
-  text-decoration: none;
-  border: 1px solid transparent;
-  transition: color .18s, background .18s, border-color .18s;
-}
-.ud-rail-tool svg {
-  width: 16px;
-  height: 16px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.6;
-  stroke-linecap: round;
-}
-.ud-rail-tool:hover { color: var(--p-text); background: var(--p-surface) }
-.ud-rail-tool[aria-current="page"] {
-  color: var(--p-text);
-  background: var(--p-surface);
-  border-color: var(--p-line-strong);
-}
-
-.ud-recent {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.ud-recent-row.is-new { animation: ud-rise .36s var(--ud-ease) both }
-
-.ud-recent-link {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px 8px 12px;
-  text-decoration: none;
-  border-left: 2px solid transparent;
-  transition: background .18s, border-color .18s;
-}
-.ud-recent-link:hover { background: var(--p-surface) }
-.ud-recent-link[aria-current="page"] {
-  background: var(--p-surface);
-  border-left-color: var(--p-accent);
-}
-.ud-recent-text {
+  min-height: 0;
   overflow: hidden;
-  font-size: .84rem;
-  line-height: 1.35;
-  color: var(--p-body);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
-.ud-recent-link[aria-current="page"] .ud-recent-text { color: var(--p-text) }
-.ud-recent-meta {
-  font-family: var(--mono);
-  font-size: .68rem;
-  color: var(--p-dim);
-  font-variant-numeric: tabular-nums;
-}
-.ud-recent-link.is-active .ud-recent-meta { color: var(--p-accent-text) }
-.ud-recent-link.is-failed .ud-recent-meta { color: var(--p-bad) }
-
-.ud-recent-empty {
-  margin: 4px 10px;
-  font-size: .8rem;
-  color: var(--p-dim);
+  background: var(--p-bg);
+  border-right: 1px solid var(--p-line);
 }
 
 /* ── Stage and view swaps ─────────────────────────────── */
@@ -939,14 +852,21 @@
   pointer-events: none;
 }
 
-/* ── Narrow screens: the rail folds away and home lists recent searches ── */
+/* ── Narrow screens ───────────────────────────────────── */
 
 @media (max-width: 860px) {
-  .ud-shell { grid-template-columns: minmax(0, 1fr) }
-  .ud-rail { display: none }
-  .ud-home-recent:not([hidden]) { display: block }
   .ud-composer-hint { display: none }
   .ud-link-row { flex-direction: column }
+}
+
+/* A phone: the rail becomes a strip above the stage, at the width the chat
+   page makes the same change, and home lists recent searches in full. */
+@media (max-width: 760px) {
+  /* chat.css, loaded for the sidebar, raises the phone tap height on :root;
+     the search views keep their own. */
+  .ud-shell { --p-tap: 40px; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) }
+  .ud-rail { border-right: 0; border-bottom: 1px solid var(--p-line) }
+  .ud-home-recent:not([hidden]) { display: block }
 }
 
 @media (prefers-reduced-motion: reduce) {
