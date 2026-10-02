@@ -92,3 +92,47 @@ def test_install_replaces_skrift_http_exception_handler() -> None:
         assert EXCEPTION_HANDLERS[HTTPException] is http_exception_handler
     finally:
         EXCEPTION_HANDLERS[HTTPException] = original
+
+
+def test_a_json_error_carries_a_string_code_from_extra() -> None:
+    response = http_exception_handler(
+        _request("/v2/api/chat/conversations/c/turns", accept="application/json"),
+        HTTPException(
+            status_code=409, detail="Refused.", extra={"code": "model_unavailable"}
+        ),
+    )
+
+    assert response.status_code == 409
+    assert response.content == {
+        "status_code": 409,
+        "detail": "Refused.",
+        "code": "model_unavailable",
+    }
+
+
+def test_a_json_error_without_a_code_is_unchanged() -> None:
+    for extra in (None, {"other": "value"}, {"code": 7}):
+        response = http_exception_handler(
+            _request("/v2/api/chat/conversations/c", accept="application/json"),
+            HTTPException(status_code=409, detail="Busy.", extra=extra),
+        )
+
+        assert response.content == {"status_code": 409, "detail": "Busy."}
+
+
+def test_an_html_error_ignores_the_code() -> None:
+    fallback = Response(content="Conflict", status_code=409, media_type="text/html")
+
+    with patch(
+        "smarter_dev.web.exception_handlers.skrift_http_exception_handler",
+        return_value=fallback,
+    ):
+        response = http_exception_handler(
+            _request("/chat/c"),
+            HTTPException(
+                status_code=409, detail="Refused.", extra={"code": "model_unavailable"}
+            ),
+        )
+
+    assert response is fallback
+    assert response.content == "Conflict"
