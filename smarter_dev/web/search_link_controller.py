@@ -219,7 +219,7 @@ class SearchLinkController(Controller):
             return Response(content=b"", status_code=204, headers={"Cache-Control": "no-store"})
         text = " ".join((q or "").split())[:MAX_REQUEST_CHARS]
         if not text:
-            return Redirect(path="/dashboard", status_code=303)
+            return Redirect(path="/dashboard/search", status_code=303)
 
         user_id = dashboard._session_user_id(request)
         user = await db_session.get(dashboard.User, user_id) if user_id else None
@@ -286,7 +286,7 @@ class SearchLinkController(Controller):
                     "recent": [],
                     "search": search,
                     "search_api": "/s/api/",
-                    "login_url": f"/auth/login?{urlencode({'next': '/dashboard'})}",
+                    "login_url": f"/auth/login?{urlencode({'next': '/dashboard/search'})}",
                     "event_type": EVENT_TYPE,
                     "max_request_chars": MAX_REQUEST_CHARS,
                     "build": dashboard.CLIENT_BUILD,

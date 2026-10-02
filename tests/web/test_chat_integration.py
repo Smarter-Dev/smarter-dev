@@ -1443,7 +1443,7 @@ async def test_the_rail_hides_archived_chats_in_their_own_drawer(
     db_session.add(filed)
     await db_session.commit()
 
-    rail = await chat_controller._rail_context(db_session, user.id)
+    rail = await chat_controller.rail_context(db_session, user.id)
 
     assert [row.id for row in rail["conversations"]] == [live.id]
     assert [row.id for row in rail["archived_conversations"]] == [filed.id]

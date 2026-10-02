@@ -1,5 +1,5 @@
 /**
- * The user dashboard (/dashboard) as a single-page app.
+ * The dashboard's web search (/dashboard/search…) as a single-page app.
  *
  * Every view paints from `cache`: the page embeds the first state, the API
  * fills in what a route needs, and the worker's `web_search` notifications
@@ -283,6 +283,12 @@
   // ── Routing ───────────────────────────────────────────
 
   function route(path) {
+    // /dashboard opens the Quick chat for anyone with Chat, which is another page.
+    if (initial.chat_home && /^\/dashboard\/?$/.test(path)) {
+      location.reload();
+      return;
+    }
+    if (window.dashboardNav) window.dashboardNav.open('search');
     const match = path.match(/^\/dashboard\/search\/([0-9a-f-]{36})\/?$/);
     if (match) showSearch(match[1]);
     else if (/^\/dashboard\/browser\/?$/.test(path)) showBrowser();
@@ -407,7 +413,7 @@
     const homeRecent = stage.querySelector('[data-home-recent]');
     if (homeRecent) homeRecent.hidden = rows.length === 0;
     const tool = current ? null : (view && view.name === 'browser' ? 'browser' : 'search');
-    shell.querySelectorAll('.ud-rail-tool').forEach(function (link) {
+    shell.querySelectorAll('.ud-rail [data-tool]').forEach(function (link) {
       if (link.dataset.tool === tool) link.setAttribute('aria-current', 'page');
       else link.removeAttribute('aria-current');
     });
