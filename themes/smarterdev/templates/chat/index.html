@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block page_type %}chat{% endblock %}
 {% block page_title %}{% if conversation %}{{ conversation.title or 'Chat' }}{% else %}Chat{% endif %}{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="{{ theme_url('css/pages/chat.css') }}"><link rel="stylesheet" href="{{ theme_url('css/pages/chat-documents.css') }}"><link rel="stylesheet" href="{{ theme_url('css/pages/sdanswer.css') }}">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="{{ theme_url('css/pages/chat.css') }}">{% if mode == 'chat' %}<link rel="stylesheet" href="{{ theme_url('css/pages/dashboard-nav.css') }}">{% endif %}<link rel="stylesheet" href="{{ theme_url('css/pages/chat-documents.css') }}"><link rel="stylesheet" href="{{ theme_url('css/pages/sdanswer.css') }}">{% endblock %}
 {% block content %}
 {% if mode == 'chat' or is_owner|default(false) %}<div data-chat-csrf hidden>{{ csrf_field() }}</div>{% endif %}
 {% set models = catalog_models|default([]) %}
@@ -65,6 +65,12 @@
      data-active-turn-id="{{ active_turn.id if active_turn else '' }}"
      data-resource-running="{{ 'true' if resource_running|default(false) else 'false' }}">
 
+  {% if mode == 'chat' %}
+  {# Chat lives in the dashboard: the rail is the dashboard sidebar, with the
+     Chat section open over this conversation's history. #}
+  <aside class="chat-sidebar has-nav" id="chat-history-rail" aria-label="Dashboard">
+    {% include "dashboard/_nav.html" %}
+  {% else %}
   <aside class="chat-sidebar" id="chat-history-rail" aria-label="Chat history">
     <div class="chat-sidebar-head">
       <a href="{{ '/resources' if mode == 'resources' else '/chat/new' }}" class="p-btn is-accent chat-new">+ New {{ 'question' if mode == 'resources' else 'chat' }}</a>
@@ -91,6 +97,7 @@
       </details>
       {% endif %}
     </nav>
+  {% endif %}
     {# Connection is worth one line at the bottom of the rail and nothing more:
        it only matters when it is wrong. #}
     <div class="chat-rail-foot p-meta" data-chat-connection>
@@ -106,7 +113,7 @@
          the rail is folded away. #}
       <button type="button" class="chat-rail-toggle" data-rail-toggle aria-expanded="true" aria-controls="chat-history-rail">
         <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><rect x="1.5" y="2.5" width="13" height="11" rx="1" fill="none" stroke="currentColor"/><line x1="6" y1="2.5" x2="6" y2="13.5" stroke="currentColor"/></svg>
-        <span class="p-sr">Toggle chat history</span>
+        <span class="p-sr">{{ 'Toggle sidebar' if mode == 'chat' else 'Toggle chat history' }}</span>
       </button>
       <h1 class="p-title">{{ conversation.title if conversation else 'New chat' }}</h1>
       {% if mode == 'chat' %}
@@ -346,4 +353,4 @@
 <div class="p-backdrop" data-delete-dialog hidden><div role="dialog" aria-modal="true" aria-labelledby="chat-delete-title" class="p-dialog chat-dialog"><h2 id="chat-delete-title">Delete this chat?</h2><p>“<span data-delete-title></span>” and everything in it — every message, document, and uploaded file — will be destroyed. This cannot be undone.</p><div class="chat-dialog-actions"><button type="button" class="p-btn" data-delete-cancel>Cancel</button><button type="button" class="p-btn is-danger" data-delete-confirm>Delete chat</button></div></div></div>
 {% endif %}
 {% endblock %}
-{% block page_scripts %}<script src="{{ theme_url('js/sdanswer.js') }}" defer></script><script src="{{ theme_url('js/chat.js') }}" defer></script>{% endblock %}
+{% block page_scripts %}{% if mode == 'chat' %}<script src="{{ theme_url('js/dashboard-nav.js') }}" defer></script>{% endif %}<script src="{{ theme_url('js/sdanswer.js') }}" defer></script><script src="{{ theme_url('js/chat.js') }}" defer></script>{% endblock %}

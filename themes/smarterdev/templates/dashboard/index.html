@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block page_type %}dashboard{% endblock %}
 {% block page_title %}{% if dashboard_state.search %}{{ dashboard_state.search.request }}{% else %}Dashboard{% endif %}{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="{{ theme_url('css/pages/user-dashboard.css') }}">{% endblock %}
+{% block page_css %}{% if not dashboard_state.anonymous %}<link rel="stylesheet" href="{{ theme_url('css/pages/chat.css') }}"><link rel="stylesheet" href="{{ theme_url('css/pages/dashboard-nav.css') }}">{% endif %}<link rel="stylesheet" href="{{ theme_url('css/pages/user-dashboard.css') }}">{% endblock %}
 {% block head %}{% if dashboard_state.link %}<link rel="search" type="application/opensearchdescription+xml" title="Smarter Dev" href="{{ dashboard_state.link.opensearch }}">{% endif %}{% endblock %}
 {% block content %}
 {# dashboard.js renders every view from this state and keeps it current from the
@@ -11,18 +11,7 @@
 <div class="ud-shell{% if dashboard_state.anonymous %} is-anonymous{% endif %}" data-product data-dashboard>
   {% if not dashboard_state.anonymous %}
   <aside class="ud-rail" aria-label="Dashboard">
-    <p class="ud-rail-label">Tools</p>
-    <a class="ud-rail-tool" href="/dashboard" data-dashboard-link data-tool="search" aria-current="page">
-      <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4.5 4.5"/></svg>
-      Web search
-    </a>
-    <a class="ud-rail-tool" href="/dashboard/browser" data-dashboard-link data-tool="browser">
-      <svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><rect x="2.5" y="3.5" width="15" height="13" rx="1.5"/><path d="M2.5 7.5h15M5.5 5.5h.01M8 5.5h.01"/></svg>
-      Browser search
-    </a>
-    <p class="ud-rail-label">Recent searches</p>
-    <ol class="ud-recent" data-recent></ol>
-    <p class="ud-recent-empty" data-recent-empty hidden>Searches you run show up here.</p>
+    {% include "dashboard/_nav.html" %}
   </aside>
   {% endif %}
   <div class="ud-stage" data-stage aria-live="polite"></div>
@@ -60,7 +49,7 @@
 <template id="ud-search">
   <section class="ud-view ud-search" data-view="search">
     <header class="ud-search-head">
-      <a class="ud-back" href="/dashboard" data-dashboard-link data-back>
+      <a class="ud-back" href="/dashboard/search" data-dashboard-link data-back>
         <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M10 3 5 8l5 5"/></svg>
         New search
       </a>
@@ -126,7 +115,7 @@
 <template id="ud-browser">
   <section class="ud-view ud-browser" data-view="browser">
     <header class="ud-browser-head">
-      <a class="ud-back" href="/dashboard" data-dashboard-link>
+      <a class="ud-back" href="/dashboard/search" data-dashboard-link>
         <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M10 3 5 8l5 5"/></svg>
         Web search
       </a>
@@ -171,4 +160,4 @@
   </section>
 </template>
 {% endblock %}
-{% block page_scripts %}<script src="{{ theme_url('js/dashboard.js') }}" defer></script>{% endblock %}
+{% block page_scripts %}{% if not dashboard_state.anonymous %}<script src="{{ theme_url('js/dashboard-nav.js') }}" defer></script>{% endif %}<script src="{{ theme_url('js/dashboard.js') }}" defer></script>{% endblock %}
