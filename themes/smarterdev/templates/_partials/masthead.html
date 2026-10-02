@@ -5,8 +5,13 @@
     </button>
     {# Mark the section the reader is in. Guard `request` for the same reason the
        signed-in check below does: error pages render outside the middleware that
-       sets it. `_path` is compared by prefix so /chat/<id> still marks Chat. #}
+       sets it. `_path` is compared by prefix so /dashboard/<view> still marks
+       Dashboard. Chat lives in the dashboard sidebar, so /chat pages mark
+       Dashboard, except a shareable Resources answer, which marks Resources. #}
     {% set _path = request.url.path if request is defined and request else '' %}
+    {% if _path == '/chat' or _path.startswith('/chat/') %}
+    {% set _path = '/resources' if mode is defined and mode == 'resources' else '/dashboard' %}
+    {% endif %}
     {% macro nav_link(href, label, match) %}
     <a href="{{ href }}"{% if _path == match or _path.startswith(match ~ '/') %} class="active"{% endif %}>{{ label }}</a>
     {% endmacro %}
@@ -18,7 +23,6 @@
     <div class="nav-links">
         {% if _signed_in %}{{ nav_link('/dashboard', 'Dashboard', '/dashboard') }}{% endif %}
         {{ nav_link('/resources', 'Resources', '/resources') }}
-        {{ nav_link('/chat', 'Chat', '/chat') }}
         {{ nav_link('/blog/', 'Blog', '/blog') }}
         {{ nav_link('/about', 'About', '/about') }}
         <a href="https://discord.gg/de8kajxbYS" target="_blank" data-sk-no-spa>Discord</a>
