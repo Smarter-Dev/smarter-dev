@@ -207,8 +207,11 @@ async def run_moderation_agent(
     )
 
     try:
+        # Awaited on the bot's own loop: the tools are coroutines that call
+        # hikari REST, which DSPy's sync ReAct (run in a worker thread by
+        # asyncify) refuses to run, turning every chosen tool into an error.
         with dspy.context(lm=MODERATION_LM):
-            result = await dspy.asyncify(react_agent)(
+            result = await react_agent.acall(
                 conversation_context=context_text,
                 trigger_message=trigger_message_content,
                 trigger_author=trigger_author,

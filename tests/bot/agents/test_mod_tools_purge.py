@@ -38,7 +38,8 @@ def _message(message_id: int, author_id):
 
 def _get_purge_tool(bot):
     tools, tracker = mod_tools.create_moderation_tools(
-        bot, guild_id="111", channel_id="555", trigger_message_id=None
+        bot, guild_id="111", channel_id="555", trigger_message_id=None,
+        enabled_tools=["purge"],
     )
     purge = next(t for t in tools if t.__name__ == "purge_messages")
     return purge, tracker
@@ -53,6 +54,12 @@ class _FakeSessionCtx:
 
     async def __aexit__(self, *args):
         return False
+
+
+@pytest.fixture(autouse=True)
+def _target_is_a_plain_member(monkeypatch):
+    # Purge checks the target (target_refusal, tested on its own) first.
+    monkeypatch.setattr(mod_tools, "target_refusal", AsyncMock(return_value=None))
 
 
 @pytest.mark.asyncio
