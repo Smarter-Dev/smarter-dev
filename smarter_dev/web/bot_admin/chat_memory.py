@@ -8,13 +8,16 @@ diagnosis. The short-term layer — the conversation transcript itself — alrea
 has a home in the conversations dashboard, so this page links out to it rather
 than duplicating it.
 
-Deliberately read-only. The per-guild forget switch (``memory_enabled``) is the
+Deliberately read-only. The per-guild pause switch (``memory_enabled``) is the
 bot's contract with its guilds, and flipping it belongs next to the rest of the
 guild-facing chat settings when it grows a UI; a preview page that silently
-edits memory would be worse than none. Note that the switch hides memory from
-the *bot*, never from the admin: a disabled guild's blob still renders here,
-flagged, because "what did it remember before we switched it off" is exactly
-the question an operator with this page open is asking.
+edits memory would be worse than none. The switch pauses memory, it never
+erases it: the stored blob and notes stay as they are, the bot is not shown
+them and the nightly dream skips the guild. It hides memory from the *bot*,
+never from the admin: a disabled guild's blob still renders here, flagged,
+because "what did it remember before we switched it off" is exactly the
+question an operator with this page open is asking. Only the agent edits its
+own memory, so this page has no edit or reset either.
 """
 
 from __future__ import annotations

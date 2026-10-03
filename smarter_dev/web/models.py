@@ -5434,9 +5434,10 @@ class ChatAgentGuildMemory(Base):
         default=True,
         server_default=text("true"),
         doc=(
-            "Per-guild kill switch. Setting it false (with an emptied "
-            "``content``) is the forget button: dreams skip the guild and "
-            "activations load nothing."
+            "Per-guild pause switch. Setting it false keeps every stored "
+            "block, note and revision as it is: dreams skip the guild and "
+            "activations load nothing. It is not a reset; nothing blanks "
+            "or deletes the memory."
         ),
     )
 
