@@ -15,7 +15,7 @@ help prepare or check a step, but does not run mutations.
 | | Stores |
 | --- | --- |
 | **Purge (agent)** | Everything the chat bot holds about the person: the guild memory, behavior and personality blocks, pending notes and retained revisions, both agents' working histories and their compaction summaries, the proactive recovery copy and watch instructions, and the external worker's history. The agent does the edit; see step 4. |
-| **Delete** | Bytes balances, squad memberships, quest and challenge submissions and quest progress, member activity dates, forum subscriptions, campaign signups, `/help` and `/tldr` records they started, legacy `/scan` profiles, rate-limit and DM caches, bot API security log rows whose request named them, and their site account with its chat, attachments, searches, resources questions, profile, linked logins (and their stored Discord tokens), push subscriptions, roles, API keys, second-factor enrollments, OAuth consent grants, republish links and membership rows. Also, with no time limit of their own: AI error messages and engagement topics that name them, blog topic candidates from their conversations or naming them, entries in automation memory that carry them, handler jobs about them in Skrift's job stores, and their site jobs and agent sessions. |
+| **Delete** | Bytes balances, squad memberships, quest and challenge submissions and quest progress, member activity dates, forum subscriptions, campaign signups, `/help` and `/tldr` records they started, legacy `/scan` profiles, rate-limit and DM caches, bot API security log rows whose request named them, and their site account with its chat, attachments, searches, resources questions, profile, linked logins (and their stored Discord tokens), push subscriptions, roles, API keys, second-factor enrollments, OAuth consent grants, republish links and membership rows. Also these, which have no time limit of their own: AI error messages that name them, engagement topics and notes rewritten after the 48-hour sweep, blog topic candidates from their conversations or naming them, entries in automation memory that carry them, automation jobs about them in Skrift's job stores, AI agent sessions that mention them, and their site jobs. |
 | **Anonymise** | Rows other people share. Bytes transfers the person sent or received keep their amount and date for the other member, with the person's id and username replaced and the reason cleared. Chat engagements they started lose the starter's id and username. Usage cost rows lose their Discord id and details. Legacy `/scan` usage rows lose their user id. Chat agent turns and handler runs have the person's id and names replaced where they stand as values; forum agent responses have the author's display name replaced. Site page revisions they wrote lose their author when the account is deleted. |
 | **Keep** | Moderation history: `moderation_actions` and the bot's posts in the guild's moderation and audit log channels. Anonymised billing: usage cost rows with no person linked (the membership rows are deleted with the account; Polar keeps its payment records under its own terms). A bare receipt that the request was completed. The person's Discord id alone in `chat_bot_blocked_users`, written by the purge in step 4, so the chat bot sees their messages only as `[BLOCKED BY USER]` and does not respond to them. |
 | **Ages out** | Short-lived records listed below. Nothing in them lasts past 30 days, so a request does not touch them. |
@@ -49,7 +49,10 @@ for a request.
 - **Cleared by the hourly retention sweep 48 hours after they are written:**
   the AI's own text in `chat_agent_turns`, `chat_agent_compaction_events`
   (`original_content`, `summary`), `chat_agent_errors.provider_body`,
-  `handler_runs.error`, the text of `help_conversations` (including other
+  `chat_agent_engagements.last_topic` and `last_notes` (once, 48 hours
+  after the engagement started; step 6 clears what is written later),
+  `handler_runs.error` on `error` and `cap_exceeded` rows, the text of
+  `help_conversations` (including other
   members' names in a conversation someone else started) and the post text of
   `forum_agent_responses`.
 - **Queues and hand-offs:** the proactive wake stream (48 hours); the pending
@@ -445,8 +448,8 @@ already redacted and their triggering messages carry ids, not names, so they
 usually change 0 rows. The handler run and forum updates are the ones that
 normally match. A name the model repeated in its own words is not matched.
 
-The AI-written text in these rows (replies, topics, notes, forum replies) is
-listed under "Not covered yet" above.
+The AI-written text in these rows (replies, forum replies) is cleared by the
+48-hour sweep; see "Ages out" at the top.
 
 Expected side effects, all accepted:
 
@@ -483,18 +486,34 @@ did. A removed key reads as never set. Expected effects:
   mapped".
 - If the person was the Disboard bump king, the tracker no longer knows it
   and does not take the role away: remove it from them in Discord.
+- The DM relay no longer knows it warned them, so it shows them its
+  "Heads up" notice again the next time they DM the bot.
+- A map entry or list element that mentions the person goes whole, including
+  anything about other members kept in that same entry.
+
+Pausing has effects too, so keep it short (usually a minute or two). It pauses
+every automation whose memory holds the person and, when a guild key does,
+every admin automation in that guild, moderation automations included. While
+paused, events for them are not handled (a member's DM through the relay is
+dropped, not queued), a one-shot timer that comes due is lost (such as the
+Disboard two-hour reminder), and a recurring schedule skips until the
+handler sweep re-arms it, one period plus 15 minutes later.
 
 Run this step and step 8 in **one** `psql` session: they share the
 temporary table and functions set up here, which vanish when the session
-ends. If you reconnect, run the setup again.
+ends. The setup starts by dropping its own leftovers, so it is safe to run
+again, and you must run it again if you reconnect.
 
 Setup. Add one `INSERT` per name noted in step 1:
 
 ```sql
-CREATE TEMP TABLE terms (did text, jq text);
-INSERT INTO terms VALUES (:'did', NULL);
+DROP FUNCTION IF EXISTS pg_temp.scrub_memory(json), pg_temp.scrub(json),
+  pg_temp.hit(text), pg_temp.mentions(text);
+DROP TABLE IF EXISTS terms;
+CREATE TEMP TABLE terms (did text, jq text, name text);
+INSERT INTO terms VALUES (:'did', NULL, NULL);
 \set name 'their_username'
-INSERT INTO terms VALUES (NULL, to_json(:'name'::text)::text);
+INSERT INTO terms VALUES (NULL, to_json(:'name'::text)::text, :'name');
 -- repeat the two lines above for each name
 
 -- Whether a piece of JSON text carries the person: their id as a whole
@@ -503,6 +522,15 @@ CREATE FUNCTION pg_temp.hit(t text) RETURNS boolean LANGUAGE sql STABLE AS $$
   SELECT EXISTS (SELECT 1 FROM pg_temp.terms
                   WHERE coalesce(t ~ ('(^|[^0-9])' || did || '([^0-9]|$)'), false)
                      OR coalesce(strpos(t, jq) > 0, false))
+$$;
+
+-- Whether free text mentions the person: their id as a whole number, or one
+-- of their names anywhere, ignoring case. Used for run errors and AI agent
+-- sessions in step 8, where names stand inside sentences.
+CREATE FUNCTION pg_temp.mentions(t text) RETURNS boolean LANGUAGE sql STABLE AS $$
+  SELECT EXISTS (SELECT 1 FROM pg_temp.terms
+                  WHERE coalesce(t ~ ('(^|[^0-9])' || did || '([^0-9]|$)'), false)
+                     OR coalesce(strpos(lower(t), lower(name)) > 0, false))
 $$;
 
 -- A map without the entries that carry the person, or a list without the
@@ -548,6 +576,7 @@ progress cannot write its old copy of the memory back over the edit:
 
 ```sql
 BEGIN;
+DROP TABLE IF EXISTS paused;
 CREATE TEMP TABLE paused AS
   SELECT 'channel' AS tier, id FROM channel_handlers
    WHERE enabled AND pg_temp.hit(memory::jsonb::text)
@@ -604,8 +633,12 @@ those for you to judge.
 
 Skrift's job tables keep each automation run's trigger: who wrote the message
 or joined, their names and the moderation target. Finished jobs' state ages
-out in 7 days, but jobs still waiting, dead letters and run errors have no
-limit. Use the same `psql` session as step 7.
+out in 7 days, but jobs still waiting, dead letters, run errors and AI agent
+sessions have no limit. Use the same `psql` session as step 7.
+
+Deleting a waiting job cancels it. That includes an automation's timer or
+recurring fire about the person that is already due; one due later is left
+for a developer, because deleting it stops a recurring schedule for good.
 
 Dry run:
 
@@ -626,7 +659,7 @@ UNION ALL SELECT 'dead letters (delete)', count(*) FROM worker_dead_letters WHER
 UNION ALL SELECT 'job state (delete)', count(*) FROM worker_state
  WHERE key LIKE 'workers:jobs:%' AND pg_temp.hit(value::jsonb::text)
 UNION ALL SELECT 'run errors (clear)', count(*) FROM worker_events
- WHERE stream = 'workers:lifecycle' AND pg_temp.hit(event::jsonb::text)
+ WHERE stream = 'workers:lifecycle' AND pg_temp.mentions(event::jsonb::text)
 UNION ALL SELECT 'archive events, all (expect 0)', count(*) FROM worker_archive_events
 UNION ALL SELECT 'webhook deliveries, all (expect 0)', count(*) FROM webhook_deliveries;
 ROLLBACK;
@@ -645,21 +678,21 @@ CREATE TEMP TABLE gone_jobs ON COMMIT DROP AS
    WHERE job::jsonb ->> 'type' IN ('handlers.fire', 'admin_handlers.fire')
      AND claim_token IS NULL AND (dead_lettered OR visible_at <= now())
      AND pg_temp.hit((job::jsonb -> 'payload')::text);
-DELETE FROM worker_queue WHERE job_id IN (SELECT job_id FROM gone_jobs);
+DELETE FROM worker_queue WHERE job_id IN (SELECT job_id FROM gone_jobs) AND claim_token IS NULL;
 DELETE FROM worker_dead_letters WHERE pg_temp.hit(entry::jsonb::text);
 DELETE FROM worker_state
  WHERE key LIKE 'workers:jobs:%'
    AND (substr(key, 14) IN (SELECT job_id FROM gone_jobs) OR pg_temp.hit(value::jsonb::text))
    AND substr(key, 14) NOT IN (SELECT job_id FROM worker_queue);
 UPDATE worker_events SET event = jsonb_set(event::jsonb, '{error}', '"[removed]"')::json
- WHERE stream = 'workers:lifecycle' AND pg_temp.hit(event::jsonb::text);
--- stop here: compare each count with the dry run (job state may be higher:
--- it includes the state of the deleted queue rows), then run COMMIT; or ROLLBACK;
+ WHERE stream = 'workers:lifecycle' AND pg_temp.mentions(event::jsonb::text);
+-- stop here: compare each count with the dry run (job state may be lower: the
+-- state of a job still in the queue, such as a timer due later, stays with its
+-- job), then run COMMIT; or ROLLBACK;
 ```
 
-*Site*, with `uid` set and after step 5 has finished: the site's own jobs and
-AI agent sessions (Resources questions, chat titles) name the account by
-`uid`.
+*Site*, with `uid` set and after step 5 has finished: the site's own jobs
+name the account by `uid`.
 
 ```sql
 BEGIN READ ONLY;
@@ -667,19 +700,10 @@ SELECT 'work_dispatches' AS store, count(*) FROM work_dispatches WHERE strpos(pa
 UNION ALL SELECT 'queue, waiting or dead-lettered', count(*) FROM worker_queue WHERE claim_token IS NULL AND strpos(job::text, :'uid') > 0
 UNION ALL SELECT 'dead letters', count(*) FROM worker_dead_letters WHERE strpos(entry::text, :'uid') > 0
 UNION ALL SELECT 'job state', count(*) FROM worker_state WHERE key LIKE 'workers:jobs:%' AND strpos(value::text, :'uid') > 0
-UNION ALL SELECT 'agent sessions', count(DISTINCT key) FROM (
-  SELECT key FROM worker_state WHERE key LIKE 'runstate:%' AND strpos(value::text, :'uid') > 0
-  UNION SELECT key FROM worker_archive_snapshots WHERE key LIKE 'runstate:%' AND strpos(value::text, :'uid') > 0) s;
+   AND substr(key, 14) NOT IN (SELECT job_id FROM worker_queue WHERE claim_token IS NOT NULL);
 ROLLBACK;
 
 BEGIN;
-CREATE TEMP TABLE gone_sessions ON COMMIT DROP AS
-  SELECT DISTINCT substr(key, 10) AS session_id FROM (
-    SELECT key FROM worker_state WHERE key LIKE 'runstate:%' AND strpos(value::text, :'uid') > 0
-    UNION SELECT key FROM worker_archive_snapshots WHERE key LIKE 'runstate:%' AND strpos(value::text, :'uid') > 0) s;
-DELETE FROM worker_events WHERE stream IN (SELECT 'agents:run:' || session_id FROM gone_sessions);
-DELETE FROM worker_state WHERE key IN (SELECT 'runstate:' || session_id FROM gone_sessions);
-DELETE FROM worker_archive_snapshots WHERE key IN (SELECT 'runstate:' || session_id FROM gone_sessions);
 DELETE FROM work_dispatches WHERE strpos(payload::text, :'uid') > 0;
 DELETE FROM worker_queue WHERE claim_token IS NULL AND strpos(job::text, :'uid') > 0;
 DELETE FROM worker_dead_letters WHERE strpos(entry::text, :'uid') > 0;
@@ -687,6 +711,57 @@ DELETE FROM worker_state WHERE key LIKE 'workers:jobs:%' AND strpos(value::text,
    AND substr(key, 14) NOT IN (SELECT job_id FROM worker_queue);
 -- stop here: compare each count with the dry run, then run COMMIT; or ROLLBACK;
 ```
+
+**AI agent sessions.** The site's AI agents (Resources questions, chat
+titles, the blogging pipeline) keep each session's messages in `worker_state`
+(`runstate:<session>`), `worker_archive_snapshots` and the event stream
+`agents:run:<session>`. A session goes whole if it mentions the person (the
+id, or a name anywhere, ignoring case) or, for the site account, holds `uid`.
+The blogging pipeline copies blog topic candidates into its sessions, so this
+is where copies of the candidates deleted in step 6 go. Do not run this while
+a Resources question or a blogging run that involves them is still in
+progress.
+
+Collect the sessions. Run the last three `INSERT`s only with `uid` set:
+
+```sql
+DROP TABLE IF EXISTS sessions;
+CREATE TEMP TABLE sessions (session_id text PRIMARY KEY);
+INSERT INTO sessions SELECT substr(key, 10) FROM worker_state
+ WHERE key LIKE 'runstate:%' AND pg_temp.mentions(value::jsonb::text) ON CONFLICT DO NOTHING;
+INSERT INTO sessions SELECT DISTINCT substr(key, 10) FROM worker_archive_snapshots
+ WHERE key LIKE 'runstate:%' AND pg_temp.mentions(value::jsonb::text) ON CONFLICT DO NOTHING;
+INSERT INTO sessions SELECT DISTINCT substr(stream, 12) FROM worker_events
+ WHERE stream LIKE 'agents:run:%' AND pg_temp.mentions(event::jsonb::text) ON CONFLICT DO NOTHING;
+-- site only:
+INSERT INTO sessions SELECT substr(key, 10) FROM worker_state
+ WHERE key LIKE 'runstate:%' AND strpos(value::text, :'uid') > 0 ON CONFLICT DO NOTHING;
+INSERT INTO sessions SELECT DISTINCT substr(key, 10) FROM worker_archive_snapshots
+ WHERE key LIKE 'runstate:%' AND strpos(value::text, :'uid') > 0 ON CONFLICT DO NOTHING;
+INSERT INTO sessions SELECT DISTINCT substr(stream, 12) FROM worker_events
+ WHERE stream LIKE 'agents:run:%' AND strpos(event::text, :'uid') > 0 ON CONFLICT DO NOTHING;
+```
+
+Dry run, then delete:
+
+```sql
+BEGIN READ ONLY;
+SELECT 'sessions' AS store, count(*) FROM sessions
+UNION ALL SELECT 'session events', count(*) FROM worker_events WHERE stream IN (SELECT 'agents:run:' || session_id FROM sessions)
+UNION ALL SELECT 'session state', count(*) FROM worker_state WHERE key IN (SELECT 'runstate:' || session_id FROM sessions)
+UNION ALL SELECT 'session snapshots', count(*) FROM worker_archive_snapshots WHERE key IN (SELECT 'runstate:' || session_id FROM sessions);
+ROLLBACK;
+
+BEGIN;
+DELETE FROM worker_events WHERE stream IN (SELECT 'agents:run:' || session_id FROM sessions);
+DELETE FROM worker_state WHERE key IN (SELECT 'runstate:' || session_id FROM sessions);
+DELETE FROM worker_archive_snapshots WHERE key IN (SELECT 'runstate:' || session_id FROM sessions);
+-- stop here: compare each count with the dry run, then run COMMIT; or ROLLBACK;
+```
+
+A name matched anywhere can also match a common word or another member's
+name. If the session count is higher than you expect, stop and ask a
+developer.
 
 ## 9. Clear Redis caches
 
