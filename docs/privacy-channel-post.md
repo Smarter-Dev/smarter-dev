@@ -5,7 +5,7 @@ What Smarter Dev stores about you here and on smarter.dev, and how to have it de
 - The chat bot keeps permanent memories about the people it talks with, written in its own words and naming people by username and Discord ID. It never resets them.
 - Moderation history is kept, even after you ask us to delete your data.
 - When your data is deleted, your membership record goes with it; only anonymous usage and cost records stay.
-- To have your data deleted, including from the chat bot's memories, send a direct message to **[PLACEHOLDER: the admin account or role to message]** on our Discord server.
+- To have your data deleted, including from the chat bot's memories, send a direct message to anyone with the @admin role on the Smarter Dev Discord server. We delete it within 30 days.
 
 The full notice: https://smarter.dev/privacy
 Use `/privacy` anywhere in the server to get this link again.
