@@ -175,6 +175,7 @@ async def open_purge_request(
 
 def start_new_run(request: ChatBotPurgeRequest, *, list_revision: int) -> None:
     previous_entry = (request.steps or {}).get("command_entry_id")
+    memory_done = (request.steps or {}).get("memory_done") or {}
     request.run_id = uuid4()
     request.status = STATUS_QUEUED
     request.completed_at = None
@@ -187,7 +188,15 @@ def start_new_run(request: ChatBotPurgeRequest, *, list_revision: int) -> None:
         "worker": {},
         # A superseded run's command is deleted when the new one is sent.
         "stale_command_entry_id": previous_entry,
+        # Guilds whose memory this request already purged, and with which
+        # names: a re-run skips them rather than have the agent rewrite other
+        # members' memory again, unless the admin has added a name since.
+        "memory_done": memory_done,
     }
+
+
+def names_key(target: PurgeTarget) -> str:
+    return "\n".join(sorted(name.casefold() for name in target.names))
 
 
 # -- running a request ---------------------------------------------------------------
@@ -256,6 +265,7 @@ async def run_purge(
         target = PurgeTarget.build(request.discord_user_id, request.names or [])
         list_revision = int(request.steps.get("list_revision", 0))
         stale_entry = request.steps.get("stale_command_entry_id")
+        memory_done = dict(request.steps.get("memory_done") or {})
 
     # 1. Both runtimes must be enforcing the list that blocks this user.
     waited = 0.0
@@ -283,7 +293,12 @@ async def run_purge(
     async with session_factory() as session:
         guild_ids = await affected_guild_ids(session)
     memory_steps: dict[str, dict] = {}
+    current_names = names_key(target)
     for guild_id in guild_ids:
+        done = memory_done.get(guild_id)
+        if done and done.get("names") == current_names:
+            memory_steps[guild_id] = {**done["step"], "earlier_run": True}
+            continue
         async with session_factory() as session:
             try:
                 result = await purge_guild_memory(
@@ -291,6 +306,7 @@ async def run_purge(
                 )
                 await session.commit()
                 memory_steps[guild_id] = result.as_step()
+                memory_done[guild_id] = {"names": current_names, "step": result.as_step()}
             except Exception as error:  # noqa: BLE001 — one guild must not stop the rest
                 await session.rollback()
                 # Type only: a validation error's text can quote memory.
@@ -323,6 +339,7 @@ async def run_purge(
     def record(request: ChatBotPurgeRequest) -> None:
         request.steps["guild_ids"] = guild_ids
         request.steps["memory"] = memory_steps
+        request.steps["memory_done"] = memory_done
         request.steps["command_entry_id"] = entry_id
         request.steps["stale_command_entry_id"] = None
         # A fast runtime can acknowledge before this commit lands.

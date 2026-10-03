@@ -390,3 +390,51 @@ async def test_the_check_reads_list_and_stream_keys_too(db_session, session_fact
         "chat_agent:999000111222333444:history"
     ]
     assert [hit["location"] for hit in report["operational"]] == ["proactive:v1:dead-letter"]
+
+
+class _CountingAgent(_ScriptedAgent):
+    def __init__(self):
+        self.calls = 0
+
+    async def run(self, user_prompt: str, *, deps: PurgeContext):
+        self.calls += 1
+        return await super().run(user_prompt, deps=deps)
+
+
+async def test_a_rerun_of_the_same_request_leaves_purged_memory_alone_until_a_name_is_added(
+    db_session, session_factory, redis
+):
+    from smarter_dev.web.chat_bot_purge import start_new_run
+
+    await _seed_memory(db_session)
+    request = await _open(db_session)
+    await _enforce(redis, 1)
+    agent = _CountingAgent()
+
+    async def run(run_id):
+        return await run_purge(
+            request.id, run_id, session_factory=session_factory, redis=redis,
+            now=lambda: _NOW, agent=agent, sleep=_no_sleep,
+        )
+
+    await run(request.run_id)
+    first_calls = agent.calls
+    assert first_calls >= 1
+
+    async with session_factory() as session:
+        stored = await session.get(ChatBotPurgeRequest, request.id)
+        start_new_run(stored, list_revision=1)
+        rerun_id = stored.run_id
+        await session.commit()
+    await run(rerun_id)
+    assert agent.calls == first_calls
+    async with session_factory() as session:
+        stored = await session.get(ChatBotPurgeRequest, request.id)
+        assert stored.steps["memory"][_GUILD]["earlier_run"] is True
+
+    reopened = await open_purge_request(
+        db_session, discord_user_id=_KAI_ID, names=["kai", "rusty"], requested_by="admin-1"
+    )
+    await db_session.commit()
+    await run(reopened.run_id)
+    assert agent.calls > first_calls
