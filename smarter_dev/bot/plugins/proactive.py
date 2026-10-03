@@ -422,6 +422,9 @@ class GuildAgentState:
     history_loaded: bool = False
     memory_refreshed_at: float = 0.0
     pending_passive_wake: bool = False
+    # Held for a whole wake; a privacy purge takes it to rewrite the history
+    # and watch instructions without a wake writing stale copies back.
+    wake_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 def _channel_name_for_id(bot, channel_id: str) -> str:
@@ -1199,7 +1202,8 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
 
 async def _consumer_loop_iteration(state: GuildAgentState) -> None:
     await state.queue.wait_for_wake()
-    await _consume_guild_once(state)
+    async with state.wake_lock:
+        await _consume_guild_once(state)
 
 
 async def _consumer_loop(state: GuildAgentState) -> None:

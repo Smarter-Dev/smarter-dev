@@ -131,6 +131,22 @@ class ChatMemory:
     async def clear_history(self, channel_id: int) -> None:
         await self._redis.delete(self._history_key(channel_id))
 
+    # -- privacy purge rewrites: same keys, the original expiry is kept so a
+    # purge never extends how long memory lives.
+
+    async def replace_history(
+        self, channel_id: int, messages: list[ModelMessage]
+    ) -> None:
+        payload = ModelMessagesTypeAdapter.dump_json(messages)
+        await self._redis.set(self._history_key(channel_id), payload, keepttl=True)
+
+    async def replace_topic(self, channel_id: int, text: str) -> None:
+        """Rewrite the topic text, keeping its written-at stamp and expiry."""
+        await self._redis.set(self._topic_key(channel_id), text, keepttl=True)
+
+    async def replace_notes(self, channel_id: int, text: str) -> None:
+        await self._redis.set(self._notes_key(channel_id), text, keepttl=True)
+
     async def increment_idle_counter(self, channel_id: int) -> int:
         count = await self._redis.incr(self._counter_key(channel_id))
         await self._redis.expire(self._counter_key(channel_id), COUNTER_TTL_SECONDS)
