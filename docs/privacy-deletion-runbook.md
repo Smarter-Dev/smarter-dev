@@ -15,50 +15,51 @@ help prepare or check a step, but does not run mutations.
 | | Stores |
 | --- | --- |
 | **Purge (agent)** | Everything the chat bot holds about the person: the guild memory, behavior and personality blocks, pending notes and retained revisions, both agents' working histories and their compaction summaries, the proactive recovery copy and watch instructions, and the external worker's history. The agent does the edit; see step 4. |
-| **Delete** | Bytes balances, squad memberships, quest and challenge submissions and quest progress, member activity dates, forum subscriptions, campaign signups, `/help` and `/tldr` records they started, legacy `/scan` profiles, rate-limit and DM caches, bot API security log rows whose request named them, and their site account with its chat, attachments, searches, resources questions, profile, linked logins (and their stored Discord tokens), push subscriptions, roles, API keys, second-factor enrollments, OAuth consent grants, republish links and membership rows. |
+| **Delete** | Bytes balances, squad memberships, quest and challenge submissions and quest progress, member activity dates, forum subscriptions, campaign signups, `/help` and `/tldr` records they started, legacy `/scan` profiles, rate-limit and DM caches, bot API security log rows whose request named them, and their site account with its chat, attachments, searches, resources questions, profile, linked logins (and their stored Discord tokens), push subscriptions, roles, API keys, second-factor enrollments, OAuth consent grants, republish links and membership rows. Also, with no time limit of their own: AI error messages and engagement topics that name them, blog topic candidates from their conversations or naming them, entries in automation memory that carry them, handler jobs about them in Skrift's job stores, and their site jobs and agent sessions. |
 | **Anonymise** | Rows other people share. Bytes transfers the person sent or received keep their amount and date for the other member, with the person's id and username replaced and the reason cleared. Chat engagements they started lose the starter's id and username. Usage cost rows lose their Discord id and details. Legacy `/scan` usage rows lose their user id. Chat agent turns and handler runs have the person's id and names replaced where they stand as values; forum agent responses have the author's display name replaced. Site page revisions they wrote lose their author when the account is deleted. |
 | **Keep** | Moderation history: `moderation_actions` and the bot's posts in the guild's moderation and audit log channels. Anonymised billing: usage cost rows with no person linked (the membership rows are deleted with the account; Polar keeps its payment records under its own terms). A bare receipt that the request was completed. The person's Discord id alone in `chat_bot_blocked_users`, written by the purge in step 4, so the chat bot sees their messages only as `[BLOCKED BY USER]` and does not respond to them. |
-| **Not covered yet** | Everything in the list below. |
+| **Ages out** | Short-lived records listed below. Nothing in them lasts past 30 days, so a request does not touch them. |
 
-### Not covered yet
+The Delete and Anonymise rows also cover records with no time limit that the
+steps below edit: AI error messages and engagement topics (step 6), blog
+topic candidates (step 6), automation memory (step 7) and job stores
+(step 8).
 
-These can hold the person's id, name or words, and neither the purge nor the
-steps below remove them. Do not touch them by hand for a request.
+The Keep row has a second part, disclosed in the notice's "What we keep":
+creator fields on automations, campaigns and scheduled messages set up by a
+requester who is an admin (`created_by` on `channel_handlers`,
+`admin_handlers`, `forum_agents`, `campaigns`, `scheduled_messages`,
+`squad_sale_events` and `repeating_messages`;
+`extension_installs.installed_by`); Pydantic Logfire and server logs; copies
+held by AI model providers and the other processors the notice names; the
+bot's Discord posts and DMs outside the moderation and audit log channels;
+and copies of channel conversations exported to test the bot's AI
+(`scripts/proactive_eval/fetch_history.py`, and the historical copies from
+#42). Site pages and assets an admin authored are reassigned, not kept (step
+5).
+
+### Ages out
+
+These can hold the person's id, name or words for a short time. Each has a
+limit, and the longest is 30 days, which the notice states. Do not touch them
+for a request.
 
 **[PLACEHOLDER: copies of message text and the queues with no time limit. #80 removes them (message text out of error bodies, handler errors and job payloads; time limits on the pending list, dead-letter, claimed and shadow queues; a prune job for Skrift dead letters). Rewrite this list from the #80 builder's facts; fill this in before the runbook is used.]**
 
-- **Audit prose that can name or quote the person:** `chat_agent_compaction_events`
-  (`original_content`, `summary`), `chat_agent_errors`,
-  `chat_agent_engagements.last_topic` and `last_notes`, the post text of
-  `forum_agent_responses` (`post_title`, `post_content`, `attachments`),
-  `handler_runs.error`, the AI's own text in `chat_agent_turns`,
-  `help_conversations` started by other members, and
-  `candidate_blog_topics.evidence`.
-- **Script-written handler memory:** `guild_handler_memory`, and the `memory`
-  JSON on `channel_handlers` and `admin_handlers`. Scripts decide what goes in
-  it.
-- **Queues and job stores:** the proactive wake stream, pending list,
-  dead-letter stream, claimed batches and shadow streams; Skrift's
-  `worker_queue`, `worker_state`, `worker_events`, `worker_dead_letters`,
-  `worker_archive_events` and `worker_archive_snapshots`; `work_dispatches`
-  payloads; `webhook_deliveries` and `webhook_delivery_attempts`.
-- **Short-lived caches that age out:** `search_result_previews` (48 hours),
+- **Cleared by the hourly retention sweep 48 hours after they are written:**
+  the AI's own text in `chat_agent_turns`, `chat_agent_compaction_events`
+  (`original_content`, `summary`), `chat_agent_errors.provider_body`,
+  `handler_runs.error`, the text of `help_conversations` (including other
+  members' names in a conversation someone else started) and the post text of
+  `forum_agent_responses`.
+- **Queues and hand-offs:** the proactive wake stream (48 hours); the pending
+  list, dead-letter stream, claimed batches and shadow streams (limits from
+  #80); Skrift `worker_state` rows for finished jobs (7 days).
+- **Caches:** `search_result_previews` (48 hours),
   `chat_agent:guild:{guild}:events` (about an hour), `mediaread:*` (24 hours),
   `hclaim:*` (up to 30 days; deleting one can make a handler act twice), the
   anonymous web search keys (30 minutes) and in-process caches in the bot and
   workers.
-- **Creator fields, only when the requester is an admin:** `created_by` on
-  `channel_handlers`, `admin_handlers`, `forum_agents`, `campaigns`,
-  `scheduled_messages`, `squad_sale_events` and `repeating_messages`;
-  `extension_installs.installed_by`; site pages and assets they authored (see
-  step 5).
-- **Logs:** Pydantic Logfire and server logs are not edited per person. The
-  notice discloses both.
-- **Outside our database:** copies held by AI model providers and the other
-  processors the notice names; the bot's Discord posts and DMs outside the
-  moderation and audit log channels; exports made for evaluation
-  (`scripts/proactive_eval/fetch_history.py`) and the historical copies from
-  #42.
 
 Do **not** reset, blank or hand-edit the chat bot's memory to satisfy a
 request. Only the agent edits its own memory, and the bot never resets it. Do
@@ -88,8 +89,8 @@ history change for a request.
    deletion cannot be undone. Wait for a yes. The 30 days run from the
    request.
 4. Note the names the person goes by on Discord: their username, display
-   name and server nickname, as shown on their profile in the server. Step 6
-   replaces them in shared audit rows. Keep them only until the request is
+   name and server nickname, as shown on their profile in the server. Steps 4
+   and 6 to 8 use them. Keep them only until the request is
    closed.
 5. Start a private note for this request with a random receipt id
    (`uuidgen`), the date received and the date confirmed. The note never holds
@@ -152,6 +153,9 @@ UNION ALL SELECT 'usage_cost_rows (anonymise)', count(*) FROM usage_cost_rows WH
 UNION ALL SELECT 'security_logs', count(*) FROM security_logs WHERE details ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR event_metadata::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
 UNION ALL SELECT 'chat_agent_turns (anonymise)', count(*) FROM chat_agent_turns WHERE triggering_messages::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR model_messages_delta::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR agent_output::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
 UNION ALL SELECT 'handler_runs (anonymise)', count(*) FROM handler_runs WHERE trigger_context::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
+UNION ALL SELECT 'chat_agent_errors (clear text)', count(*) FROM chat_agent_errors WHERE error_message ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR traceback ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR coalesce(provider_body, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
+UNION ALL SELECT 'chat_agent_engagements topic (clear)', count(*) FROM chat_agent_engagements WHERE coalesce(last_topic, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR coalesce(last_notes, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
+UNION ALL SELECT 'candidate_blog_topics', count(*) FROM candidate_blog_topics WHERE engagement_id IN (SELECT id FROM chat_agent_engagements WHERE activation_user_id = :'did') OR (headline || ' ' || observation || ' ' || scope || ' ' || evidence::text) ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
 -- kept:
 UNION ALL SELECT 'moderation_actions (kept)', count(*) FROM moderation_actions WHERE target_user_id = :'did' OR moderator_user_id = :'did'
 -- chat bot stores, purged by the agent in step 4; counted to compare after:
@@ -161,6 +165,9 @@ UNION ALL SELECT 'memory notes mentioning (agent purge)', count(*) FROM chat_age
 UNION ALL SELECT 'proactive histories mentioning (agent purge)', count(*) FROM proactive_agent_histories WHERE history::text LIKE '%' || :'did' || '%';
 ROLLBACK;
 ```
+
+Automation memory and the job stores have their own counts in steps 7 and
+8.
 
 A zero for the memory and history rows only means the id is not written
 there. The bot may still remember the person by name. Treat those counts as
@@ -186,28 +193,42 @@ before going on.
 
 ## 4. Purge the chat bot
 
-Open Admin → Bot → Privacy purge (#79), enter `DID` and the names noted in
-step 1, and start the purge. Creating the request writes `DID` to
-`chat_bot_blocked_users`, where it stays: from then on the chat bot sees the
-person's messages only as `[BLOCKED BY USER]` and does not respond to them.
-The agent then removes everything tied to the person from its memory blocks,
-notes and revisions, a forced compaction of both agents' working histories
-leaves them out and drops the raw history holding their messages, and the
-external worker's history is purged too. The page refuses to start unless
-both the bot and the worker are enforcing the blocked list. It is safe to run
-twice. When it finishes, read its check report, which lists anything still
-mentioning the id or the names in any store it touched.
+The purge (#79) works only once both runtimes enforce the blocked list.
+Before the first request, check that #79 was rolled out in this order: the
+web release first (it serves the list), then the bot and the external
+worker, in either order. Each refuses to send any Discord message to a model
+until it has loaded the list once. A purge run before both enforce it can be
+undone within hours, because the next wake reads the person's old messages
+back into history. The page refuses to start until both report enforcing.
 
-**[PLACEHOLDER: the page's final wording and report format, filled in from
-#79 when its PRs are up.]**
+1. Open Admin → Bot Admin → Privacy Purges.
+2. Enter `DID`, press "Look up names", and add every name noted in step 1
+   that the lookup did not find.
+3. Start the purge. This writes `DID` to `chat_bot_blocked_users`, where it
+   stays: from then on the chat bot sees the person's messages only as
+   `[BLOCKED BY USER]` and does not respond to them. The chat bot's own
+   model then rewrites the guild memory, behavior and personality blocks,
+   that day's notes and the retained past versions without them, keeping
+   everything else word for word. Both agents' working histories, topics and
+   notes, and the external worker's history with its recovery and legacy
+   copies, are folded into new summaries without them and the raw messages
+   dropped. Watch instructions are reviewed the same way, and queued wake
+   notifications about them are dropped.
+4. Wait until every guild shows its memory, bot and worker steps.
+5. Read the check report. It lists, by location and count only, anything
+   still holding the id or the names you entered.
+   - An id hit is a leftover: run the purge again.
+   - A name hit may be another member with the same name: judge it from
+     the guild's Chat Memory page, and run the purge again if it is them.
 
 If the report shows a step still pending (for example, the external worker
-is down), steps 5 to 7 may go ahead, but the request stays open: step 8 does
+is down), steps 5 to 9 may go ahead, but the request stays open: step 10 does
 not close it until the report is clean.
 
-Resolve every leftover the report lists through the agent (run the purge
-again with the names it flags). Never fix a leftover by editing memory or
-history by hand.
+Never fix a leftover by editing memory, history or Redis by hand. The purge
+finds the person by id and by the names you give it; something that only
+paraphrases them, or names them another way, is found only if the agent
+recognises it, so give it every name you know.
 
 ## 5. Delete the site account *(site)*
 
@@ -326,6 +347,16 @@ DELETE FROM help_conversations WHERE user_id = :'did';
 DELETE FROM research_sessions WHERE user_id = :'did';
 DELETE FROM scan_user_profiles WHERE user_id = :'did';
 UPDATE scan_service_usage SET user_id = NULL WHERE user_id = :'did';
+-- Records with no time limit that can name them. Blog topic candidates go
+-- first: they are found through the engagement the person started, which
+-- the statements after them anonymise.
+DELETE FROM candidate_blog_topics
+ WHERE engagement_id IN (SELECT id FROM chat_agent_engagements WHERE activation_user_id = :'did') OR (headline || ' ' || observation || ' ' || scope || ' ' || evidence::text) ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)');
+UPDATE chat_agent_errors
+   SET error_message = '[removed]', traceback = '[removed]', provider_body = NULL
+ WHERE error_message ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR traceback ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR coalesce(provider_body, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)');
+UPDATE chat_agent_engagements SET last_topic = NULL, last_notes = NULL
+ WHERE coalesce(last_topic, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR coalesce(last_notes, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)');
 -- Shared audit rows: keep the row, drop who started it.
 UPDATE chat_agent_engagements
    SET activation_user_id = '0', activation_username = '[deleted user]',
@@ -344,7 +375,8 @@ UPDATE chat_agent_turns SET
 UPDATE handler_runs SET
    trigger_context = regexp_replace(trigger_context::text, '(?<![0-9])' || :'did' || '(?![0-9])', '0', 'g')::json
  WHERE trigger_context::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)');
--- Bot API calls that named the person in their path.
+-- Bot API calls that named the person in their path. A safety net for rows
+-- written before #81 stopped per-request logging; expect 0 after its cleanup.
 DELETE FROM security_logs
  WHERE details ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR event_metadata::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)');
 -- stop here: compare each count with the dry run, then run COMMIT; or ROLLBACK;
@@ -361,7 +393,10 @@ a developer when:
 - the name is a common word (`send`, `content`, `kind`), which can also be a
   JSON key or an ordinary value;
 - the name contains an emoji or another character outside the Basic
-  Multilingual Plane, which the escape below does not produce.
+  Multilingual Plane, which the escape below does not produce;
+- the errors, engagement topics or blog topics count is higher than you
+  expect. Those are matched by the name anywhere in their text, ignoring
+  case, so a short name can match ordinary words.
 
 ```sql
 \set name 'their_username'
@@ -375,7 +410,10 @@ UNION ALL SELECT 'turns: name in prompt text', count(*) FROM chat_agent_turns
  WHERE strpos(coalesce(model_messages_delta::text, ''), 'username=\"' || :'jin' || '\"') > 0
     OR strpos(coalesce(model_messages_delta::text, ''), 'nickname=\"' || :'jin' || '\"') > 0
 UNION ALL SELECT 'handler runs', count(*) FROM handler_runs WHERE strpos(trigger_context::text, :'jq') > 0
-UNION ALL SELECT 'forum responses', count(*) FROM forum_agent_responses WHERE author_display_name = :'name';
+UNION ALL SELECT 'forum responses', count(*) FROM forum_agent_responses WHERE author_display_name = :'name'
+UNION ALL SELECT 'errors: name in text', count(*) FROM chat_agent_errors WHERE (strpos(lower(error_message), lower(:'name')) > 0 OR strpos(error_message, :'jin') > 0) OR (strpos(lower(traceback), lower(:'name')) > 0 OR strpos(traceback, :'jin') > 0) OR (strpos(lower(coalesce(provider_body, '')), lower(:'name')) > 0 OR strpos(coalesce(provider_body, ''), :'jin') > 0)
+UNION ALL SELECT 'engagement topics: name', count(*) FROM chat_agent_engagements WHERE (strpos(lower(coalesce(last_topic, '')), lower(:'name')) > 0 OR strpos(coalesce(last_topic, ''), :'jin') > 0) OR (strpos(lower(coalesce(last_notes, '')), lower(:'name')) > 0 OR strpos(coalesce(last_notes, ''), :'jin') > 0)
+UNION ALL SELECT 'blog topics: name', count(*) FROM candidate_blog_topics WHERE (strpos(lower(headline || ' ' || observation || ' ' || scope), lower(:'name')) > 0 OR strpos(headline || ' ' || observation || ' ' || scope, :'jin') > 0);
 ROLLBACK;
 BEGIN;
 UPDATE chat_agent_turns
@@ -392,7 +430,14 @@ UPDATE handler_runs
  WHERE strpos(trigger_context::text, :'jq') > 0;
 UPDATE forum_agent_responses SET author_display_name = '[deleted user]'
  WHERE author_display_name = :'name';
--- stop here: compare each UPDATE count with its line above, then run COMMIT; or ROLLBACK;
+UPDATE chat_agent_errors
+   SET error_message = '[removed]', traceback = '[removed]', provider_body = NULL
+ WHERE (strpos(lower(error_message), lower(:'name')) > 0 OR strpos(error_message, :'jin') > 0) OR (strpos(lower(traceback), lower(:'name')) > 0 OR strpos(traceback, :'jin') > 0) OR (strpos(lower(coalesce(provider_body, '')), lower(:'name')) > 0 OR strpos(coalesce(provider_body, ''), :'jin') > 0);
+UPDATE chat_agent_engagements SET last_topic = NULL, last_notes = NULL
+ WHERE (strpos(lower(coalesce(last_topic, '')), lower(:'name')) > 0 OR strpos(coalesce(last_topic, ''), :'jin') > 0) OR (strpos(lower(coalesce(last_notes, '')), lower(:'name')) > 0 OR strpos(coalesce(last_notes, ''), :'jin') > 0);
+DELETE FROM candidate_blog_topics
+ WHERE (strpos(lower(headline || ' ' || observation || ' ' || scope), lower(:'name')) > 0 OR strpos(headline || ' ' || observation || ' ' || scope, :'jin') > 0);
+-- stop here: compare each UPDATE and DELETE count with its line above, then run COMMIT; or ROLLBACK;
 ```
 
 The chat turn updates are a safety net: turns are written with member text
@@ -417,7 +462,233 @@ Expected side effects, all accepted:
 Do not touch `moderation_actions`, including rows where the person was the
 moderator.
 
-## 7. Clear Redis caches
+## 7. Remove them from automation memory
+
+Server automations (handlers) keep their own memory: a JSON object per
+handler (`memory` on `channel_handlers` and `admin_handlers`) and shared keys
+per guild (`guild_handler_memory`). This is automation state, not the chat
+bot's memory, and the admin may edit it. The bundled automations keep member
+ids there: the DM relay maps members to their forum posts and lists members
+it has warned, and the Disboard tracker lists bumps and the current bump
+king. Member-written automations can keep anything.
+
+The edit removes whole entries, never parts of one: a top-level key whose
+value is the person's id or name, a map entry keyed by them or whose value
+mentions them, and a list element that mentions them. A map stays a map and a
+list stays a list of the same shape, so the automation reads what it always
+did. A removed key reads as never set. Expected effects:
+
+- The DM relay opens a new forum post the next time the person sends the
+  bot a DM; a staff reply in their old post is refused with "No member is
+  mapped".
+- If the person was the Disboard bump king, the tracker no longer knows it
+  and does not take the role away: remove it from them in Discord.
+
+Run this step and step 8 in **one** `psql` session: they share the
+temporary table and functions set up here, which vanish when the session
+ends. If you reconnect, run the setup again.
+
+Setup. Add one `INSERT` per name noted in step 1:
+
+```sql
+CREATE TEMP TABLE terms (did text, jq text);
+INSERT INTO terms VALUES (:'did', NULL);
+\set name 'their_username'
+INSERT INTO terms VALUES (NULL, to_json(:'name'::text)::text);
+-- repeat the two lines above for each name
+
+-- Whether a piece of JSON text carries the person: their id as a whole
+-- number, or one of their names as a whole JSON string.
+CREATE FUNCTION pg_temp.hit(t text) RETURNS boolean LANGUAGE sql STABLE AS $$
+  SELECT EXISTS (SELECT 1 FROM pg_temp.terms
+                  WHERE coalesce(t ~ ('(^|[^0-9])' || did || '([^0-9]|$)'), false)
+                     OR coalesce(strpos(t, jq) > 0, false))
+$$;
+
+-- A map without the entries that carry the person, or a list without the
+-- elements that do. Anything else comes back unchanged. Order is kept: the
+-- DM relay prunes its map oldest-first.
+CREATE FUNCTION pg_temp.scrub(v json) RETURNS json LANGUAGE plpgsql STABLE AS $$
+BEGIN
+  IF json_typeof(v) = 'object' THEN
+    RETURN (SELECT coalesce(json_object_agg(e.k, e.v ORDER BY e.o), '{}'::json)
+              FROM json_each(v) WITH ORDINALITY AS e(k, v, o)
+             WHERE NOT pg_temp.hit(to_jsonb(e.k)::text)
+               AND NOT pg_temp.hit(e.v::jsonb::text));
+  ELSIF json_typeof(v) = 'array' THEN
+    RETURN (SELECT coalesce(json_agg(e.v ORDER BY e.o), '[]'::json)
+              FROM json_array_elements(v) WITH ORDINALITY AS e(v, o)
+             WHERE NOT pg_temp.hit(e.v::jsonb::text));
+  END IF;
+  RETURN v;
+END $$;
+
+-- A handler's memory object: drop keys that are the person or whose plain
+-- value carries them, and scrub each map or list value.
+CREATE FUNCTION pg_temp.scrub_memory(m json) RETURNS json LANGUAGE sql STABLE AS $$
+  SELECT coalesce(json_object_agg(e.k, pg_temp.scrub(e.v) ORDER BY e.o), '{}'::json)
+    FROM json_each(m) WITH ORDINALITY AS e(k, v, o)
+   WHERE NOT pg_temp.hit(to_jsonb(e.k)::text)
+     AND NOT (json_typeof(e.v) NOT IN ('object', 'array') AND pg_temp.hit(e.v::jsonb::text))
+$$;
+```
+
+Dry run. It lists where the person appears, by handler and key:
+
+```sql
+BEGIN READ ONLY;
+SELECT 'channel handler' AS memory, id::text AS handler_or_guild, NULL AS key FROM channel_handlers WHERE pg_temp.hit(memory::jsonb::text)
+UNION ALL SELECT 'admin handler', id::text, NULL FROM admin_handlers WHERE pg_temp.hit(memory::jsonb::text)
+UNION ALL SELECT 'guild', guild_id, key FROM guild_handler_memory WHERE pg_temp.hit(to_jsonb(key)::text) OR pg_temp.hit(value::jsonb::text);
+ROLLBACK;
+```
+
+No rows: go to step 8. Otherwise pause the automations involved, so a run in
+progress cannot write its old copy of the memory back over the edit:
+
+```sql
+BEGIN;
+CREATE TEMP TABLE paused AS
+  SELECT 'channel' AS tier, id FROM channel_handlers
+   WHERE enabled AND pg_temp.hit(memory::jsonb::text)
+  UNION ALL
+  SELECT 'admin', id FROM admin_handlers
+   WHERE enabled AND (pg_temp.hit(memory::jsonb::text)
+     OR guild_id IN (SELECT guild_id FROM guild_handler_memory
+                      WHERE pg_temp.hit(to_jsonb(key)::text) OR pg_temp.hit(value::jsonb::text)));
+UPDATE channel_handlers SET enabled = false WHERE id IN (SELECT id FROM paused WHERE tier = 'channel');
+UPDATE admin_handlers SET enabled = false WHERE id IN (SELECT id FROM paused WHERE tier = 'admin');
+COMMIT;
+```
+
+Wait until no run of a paused automation is in progress. Repeat this until it
+prints 0; it is usually 0 within a minute:
+
+```sql
+SELECT count(*) FROM worker_queue
+ WHERE claim_token IS NOT NULL
+   AND job::jsonb ->> 'type' IN ('handlers.fire', 'admin_handlers.fire')
+   AND coalesce(job::jsonb #>> '{payload,handler_id}', job::jsonb #>> '{payload,admin_handler_id}')
+       IN (SELECT id::text FROM paused);
+```
+
+Then edit and resume in one transaction:
+
+```sql
+BEGIN;
+UPDATE channel_handlers SET memory = pg_temp.scrub_memory(memory)
+ WHERE pg_temp.hit(memory::jsonb::text);
+UPDATE admin_handlers SET memory = pg_temp.scrub_memory(memory)
+ WHERE pg_temp.hit(memory::jsonb::text);
+DELETE FROM guild_handler_memory
+ WHERE pg_temp.hit(to_jsonb(key)::text)
+    OR (json_typeof(value) NOT IN ('object', 'array') AND pg_temp.hit(value::jsonb::text));
+UPDATE guild_handler_memory SET value = pg_temp.scrub(value), updated_at = now()
+ WHERE pg_temp.hit(value::jsonb::text);
+-- each of these must print 0:
+SELECT count(*) FROM channel_handlers WHERE pg_temp.hit(memory::jsonb::text);
+SELECT count(*) FROM admin_handlers WHERE pg_temp.hit(memory::jsonb::text);
+SELECT count(*) FROM guild_handler_memory WHERE pg_temp.hit(to_jsonb(key)::text) OR pg_temp.hit(value::jsonb::text);
+UPDATE channel_handlers SET enabled = true WHERE id IN (SELECT id FROM paused WHERE tier = 'channel');
+UPDATE admin_handlers SET enabled = true WHERE id IN (SELECT id FROM paused WHERE tier = 'admin');
+-- stop here: compare the counts with the dry run rows and check the three
+-- zeros, then run COMMIT; or ROLLBACK; (after a ROLLBACK the automations are
+-- still paused: resume them with the last two UPDATEs on their own)
+```
+
+Names are matched only as whole values (`"their_username"`). A name inside a
+longer text an automation wrote is not matched; the dry run in step 10 counts
+those for you to judge.
+
+## 8. Remove them from job stores
+
+Skrift's job tables keep each automation run's trigger: who wrote the message
+or joined, their names and the moderation target. Finished jobs' state ages
+out in 7 days, but jobs still waiting, dead letters and run errors have no
+limit. Use the same `psql` session as step 7.
+
+Dry run:
+
+```sql
+BEGIN READ ONLY;
+SELECT 'queue: waiting or dead-lettered (delete)' AS store, count(*) FROM worker_queue
+ WHERE job::jsonb ->> 'type' IN ('handlers.fire', 'admin_handlers.fire')
+   AND claim_token IS NULL AND (dead_lettered OR visible_at <= now())
+   AND pg_temp.hit((job::jsonb -> 'payload')::text)
+UNION ALL SELECT 'queue: running now (wait, then rerun)', count(*) FROM worker_queue
+ WHERE job::jsonb ->> 'type' IN ('handlers.fire', 'admin_handlers.fire')
+   AND claim_token IS NOT NULL AND pg_temp.hit((job::jsonb -> 'payload')::text)
+UNION ALL SELECT 'queue: timers due later (ask a developer)', count(*) FROM worker_queue
+ WHERE job::jsonb ->> 'type' IN ('handlers.fire', 'admin_handlers.fire')
+   AND claim_token IS NULL AND NOT dead_lettered AND visible_at > now()
+   AND pg_temp.hit((job::jsonb -> 'payload')::text)
+UNION ALL SELECT 'dead letters (delete)', count(*) FROM worker_dead_letters WHERE pg_temp.hit(entry::jsonb::text)
+UNION ALL SELECT 'job state (delete)', count(*) FROM worker_state
+ WHERE key LIKE 'workers:jobs:%' AND pg_temp.hit(value::jsonb::text)
+UNION ALL SELECT 'run errors (clear)', count(*) FROM worker_events
+ WHERE stream = 'workers:lifecycle' AND pg_temp.hit(event::jsonb::text)
+UNION ALL SELECT 'archive events, all (expect 0)', count(*) FROM worker_archive_events
+UNION ALL SELECT 'webhook deliveries, all (expect 0)', count(*) FROM webhook_deliveries;
+ROLLBACK;
+```
+
+Running jobs finish within minutes; rerun the dry run until that row is 0. A
+timer due later is an automation's scheduled follow-up; deleting it cancels
+it, and if it belongs to a recurring schedule the schedule stops, so a
+developer decides. The archive and webhook tables are not used by this site:
+if either count is not 0, stop and ask a developer.
+
+```sql
+BEGIN;
+CREATE TEMP TABLE gone_jobs ON COMMIT DROP AS
+  SELECT job_id FROM worker_queue
+   WHERE job::jsonb ->> 'type' IN ('handlers.fire', 'admin_handlers.fire')
+     AND claim_token IS NULL AND (dead_lettered OR visible_at <= now())
+     AND pg_temp.hit((job::jsonb -> 'payload')::text);
+DELETE FROM worker_queue WHERE job_id IN (SELECT job_id FROM gone_jobs);
+DELETE FROM worker_dead_letters WHERE pg_temp.hit(entry::jsonb::text);
+DELETE FROM worker_state
+ WHERE key LIKE 'workers:jobs:%'
+   AND (substr(key, 14) IN (SELECT job_id FROM gone_jobs) OR pg_temp.hit(value::jsonb::text))
+   AND substr(key, 14) NOT IN (SELECT job_id FROM worker_queue);
+UPDATE worker_events SET event = jsonb_set(event::jsonb, '{error}', '"[removed]"')::json
+ WHERE stream = 'workers:lifecycle' AND pg_temp.hit(event::jsonb::text);
+-- stop here: compare each count with the dry run (job state may be higher:
+-- it includes the state of the deleted queue rows), then run COMMIT; or ROLLBACK;
+```
+
+*Site*, with `uid` set and after step 5 has finished: the site's own jobs and
+AI agent sessions (Resources questions, chat titles) name the account by
+`uid`.
+
+```sql
+BEGIN READ ONLY;
+SELECT 'work_dispatches' AS store, count(*) FROM work_dispatches WHERE strpos(payload::text, :'uid') > 0
+UNION ALL SELECT 'queue, waiting or dead-lettered', count(*) FROM worker_queue WHERE claim_token IS NULL AND strpos(job::text, :'uid') > 0
+UNION ALL SELECT 'dead letters', count(*) FROM worker_dead_letters WHERE strpos(entry::text, :'uid') > 0
+UNION ALL SELECT 'job state', count(*) FROM worker_state WHERE key LIKE 'workers:jobs:%' AND strpos(value::text, :'uid') > 0
+UNION ALL SELECT 'agent sessions', count(DISTINCT key) FROM (
+  SELECT key FROM worker_state WHERE key LIKE 'runstate:%' AND strpos(value::text, :'uid') > 0
+  UNION SELECT key FROM worker_archive_snapshots WHERE key LIKE 'runstate:%' AND strpos(value::text, :'uid') > 0) s;
+ROLLBACK;
+
+BEGIN;
+CREATE TEMP TABLE gone_sessions ON COMMIT DROP AS
+  SELECT DISTINCT substr(key, 10) AS session_id FROM (
+    SELECT key FROM worker_state WHERE key LIKE 'runstate:%' AND strpos(value::text, :'uid') > 0
+    UNION SELECT key FROM worker_archive_snapshots WHERE key LIKE 'runstate:%' AND strpos(value::text, :'uid') > 0) s;
+DELETE FROM worker_events WHERE stream IN (SELECT 'agents:run:' || session_id FROM gone_sessions);
+DELETE FROM worker_state WHERE key IN (SELECT 'runstate:' || session_id FROM gone_sessions);
+DELETE FROM worker_archive_snapshots WHERE key IN (SELECT 'runstate:' || session_id FROM gone_sessions);
+DELETE FROM work_dispatches WHERE strpos(payload::text, :'uid') > 0;
+DELETE FROM worker_queue WHERE claim_token IS NULL AND strpos(job::text, :'uid') > 0;
+DELETE FROM worker_dead_letters WHERE strpos(entry::text, :'uid') > 0;
+DELETE FROM worker_state WHERE key LIKE 'workers:jobs:%' AND strpos(value::text, :'uid') > 0
+   AND substr(key, 14) NOT IN (SELECT job_id FROM worker_queue);
+-- stop here: compare each count with the dry run, then run COMMIT; or ROLLBACK;
+```
+
+## 9. Clear Redis caches
 
 These expire on their own within hours to days; delete them so nothing
 waits on a clock. With `redis-cli` against the bot's Redis:
@@ -432,17 +703,29 @@ Repeat each `SCAN` from the cursor it returns until it returns `0`. Do not
 touch `chat_agent:*`, `proactive:*` or `chat_agent:guild:*` keys (see the top
 of this runbook).
 
-## 8. Check and close
+## 10. Check and close
 
 Close the request only when the purge report from step 4 is clean: no step
-pending and nothing remaining. Until then the request stays open, the receipt
-row in point 2 is not written, and the member is not told it is complete. If
+pending and nothing remaining. Until then the request stays open, points 2 and 3
+are not done, and the member is not told it is complete. If
 the report is still not clean as the 30 days run out, tell the member what is
 left and that the request is open.
 
-1. Rerun the dry-run counts. Every deleted store reads 0; the anonymise rows
-   read 0; moderation is unchanged; the agent purge rows match the purge
-   report.
+1. Rerun the dry-run counts of steps 3, 7 and 8. Every deleted store reads
+   0; the anonymise rows read 0; moderation is unchanged; the agent purge rows
+   match the purge report. Then, for each name (`\set name` as in step 6),
+   count it inside longer text in automation memory. Judge any hit by reading
+   the memory: the handler's admin page shows it, and a guild key is read
+   with `SELECT key, value FROM guild_handler_memory WHERE …`. Remove a real
+   one the step 7 way, with a developer:
+
+   ```sql
+   SELECT count(*) FROM (
+     SELECT memory::jsonb::text AS t FROM channel_handlers
+     UNION ALL SELECT memory::jsonb::text FROM admin_handlers
+     UNION ALL SELECT value::jsonb::text FROM guild_handler_memory) m
+    WHERE strpos(lower(t), lower(:'name')) > 0;
+   ```
 2. *Site:* strip the deletion job's row down to the receipt:
 
    ```sql
@@ -453,10 +736,12 @@ left and that the request is open.
    -- expect UPDATE 1, then run COMMIT; (anything else: ROLLBACK;)
    ```
 
-3. Finish the receipt note: receipt id, dates, "completed", and the classes
+3. Close the purge on the Privacy Purges page. This strips it to a bare
+   receipt (times, outcome, counts); the blocked-list entry stays.
+4. Finish the receipt note: receipt id, dates, "completed", and the classes
    handled (purged, deleted, anonymised, kept). No id, username,
    counts per person or message text. Discard the names noted in step 1.
-4. Reply to the member with the receipt id, and repeat what was kept. Once
+5. Reply to the member with the receipt id, and repeat what was kept. Once
    they have it, you may delete the DM thread on your side.
 
 ## Retention windows
