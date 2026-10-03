@@ -1,0 +1,97 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Privacy Purges - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Privacy Purges</h1>
+            <p>Remove one Discord user from the chat bot's memory and history.</p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="sk-panel" style="margin-bottom:1.5rem;">
+            <div class="sk-panel-head">Block list enforcement</div>
+            <div class="sk-panel-body">
+                <p class="sk-text-muted" style="font-size:0.85rem;">
+                    A purge starts only when both runtimes report enforcing the block list
+                    (revision {{ list_revision }}). Otherwise their next wake could read the
+                    person's old messages back into history.
+                </p>
+                <ul>
+                    {% for component, revision in enforcing.items() %}
+                    <li>
+                        {{ component }}:
+                        {% if revision is none %}
+                        <span class="sk-badge sk-badge-danger">not enforcing</span>
+                        {% else %}
+                        enforcing revision {{ revision }}
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+
+        <div class="sk-panel" style="margin-bottom:1.5rem;">
+            <div class="sk-panel-head">New purge</div>
+            <div class="sk-panel-body">
+                <form method="get" action="/admin/bot/privacy-purges" style="display:flex; gap:.5rem; align-items:end; margin-bottom:1rem;">
+                    <label style="flex:1;">Discord user ID
+                        <input type="text" name="user_id" value="{{ lookup_id }}" inputmode="numeric" required>
+                    </label>
+                    <button type="submit" class="sk-btn-outline">Look up names</button>
+                </form>
+                {% if lookup_id %}
+                <form method="post" action="/admin/bot/privacy-purges">
+                    {{ csrf_field() }}
+                    <input type="hidden" name="user_id" value="{{ lookup_id }}">
+                    <label>Names they went by, one per line
+                        <textarea name="names" rows="6">{{ names | join("\n") }}</textarea>
+                    </label>
+                    <p class="sk-text-muted" style="font-size:0.85rem;">
+                        Prefilled from Discord (username, display name, server nicknames) and stored
+                        usernames. Add any other name people used for them. The agent removes
+                        everything tied to the ID and these names; the check searches for them.
+                        Starting the purge also puts the ID on the block list, permanently.
+                    </p>
+                    <button type="submit" class="sk-btn">Start purge for {{ lookup_id }}</button>
+                </form>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Requests</div>
+            <div class="sk-panel-body">
+                {% if requests %}
+                <table class="sk-admin-table">
+                    <thead><tr><th>Asked</th><th>User</th><th>Status</th><th>Finished</th></tr></thead>
+                    <tbody>
+                        {% for r in requests %}
+                        <tr>
+                            <td><a href="/admin/bot/privacy-purges/{{ r.id }}">{{ r.created_at.strftime('%Y-%m-%d %H:%M') }}</a></td>
+                            <td>{{ r.discord_user_id or '(closed)' }}</td>
+                            <td>{{ r.status }}</td>
+                            <td>{{ r.completed_at.strftime('%Y-%m-%d %H:%M') if r.completed_at else '—' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="sk-no-items">No purge requests yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

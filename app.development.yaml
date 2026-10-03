@@ -63,6 +63,7 @@ controllers:
   - smarter_dev.web.api_native.proactive_settings:ProactiveGuildSettingsController
   - smarter_dev.web.api_native.proactive_settings:ProactiveChannelSettingsController
   - smarter_dev.web.api_native.proactive_settings:ProactiveAgentHistoryController
+  - smarter_dev.web.api_native.privacy:PrivacyController
   - smarter_dev.web.api_native.search_previews:SearchPreviewPersistenceController
   # Signed-link per-channel bot config (no auth_guard: the link is the
   # authorization — see smarter_dev/shared/config_links.py).
@@ -111,6 +112,7 @@ controllers:
   - smarter_dev.web.bot_admin.help_conversations:HelpConversationsAdminController
   - smarter_dev.web.bot_admin.extensions:ExtensionsAdminController
   - smarter_dev.web.bot_admin.chat_memory:ChatMemoryAdminController
+  - smarter_dev.web.bot_admin.privacy_purge:PrivacyPurgeAdminController
   - smarter_dev.web.handlers_admin:HandlersAdminController
   - smarter_dev.web.quests_admin:QuestsAdminController
   - smarter_dev.web.chat_conversations_admin:ChatConversationsAdminController
@@ -177,6 +179,7 @@ workers:
     - smarter_dev.web.handlers_jobs
     - smarter_dev.web.admin_handlers_jobs
     - smarter_dev.web.web_search_jobs
+    - smarter_dev.web.chat_bot_purge_jobs
 
 agents:
   default_queue: agents

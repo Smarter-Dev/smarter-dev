@@ -185,6 +185,30 @@ class DiscordAdminClient(DiscordBotClient):
         return [channel for channel in channels if channel.supports_announcements]
 
 
+    async def get_user_names(self, user_id: str, guild_ids: list[str]) -> list[str]:
+        """Every name a user goes by: username, global display name, and their
+        nickname in each of ``guild_ids`` they are still a member of.
+
+        Used to prefill a purge request. A guild the user has left, or a user
+        Discord no longer knows, simply contributes nothing.
+        """
+        names: list[str] = []
+        try:
+            user = (await self._request("GET", f"/users/{user_id}")).json()
+            names.extend(n for n in (user.get("username"), user.get("global_name")) if n)
+        except DiscordAdminError:
+            pass
+        for guild_id in guild_ids:
+            try:
+                member = (
+                    await self._request("GET", f"/guilds/{guild_id}/members/{user_id}")
+                ).json()
+            except DiscordAdminError:
+                continue
+            if member.get("nick"):
+                names.append(member["nick"])
+        return names
+
 def get_admin_discord_client() -> DiscordAdminClient:
     """Build an admin Discord client from the configured bot token."""
     settings = get_settings()
