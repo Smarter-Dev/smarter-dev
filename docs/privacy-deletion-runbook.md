@@ -510,7 +510,7 @@ Setup. Add one `INSERT` per name noted in step 1:
 
 ```sql
 DROP FUNCTION IF EXISTS pg_temp.scrub_memory(json), pg_temp.scrub(json),
-  pg_temp.hit(text), pg_temp.mentions(text);
+  pg_temp.hit(text), pg_temp.mentions(text), pg_temp.mentions_json(jsonb);
 DROP TABLE IF EXISTS pg_temp.terms;
 CREATE TEMP TABLE terms (did text, jq text, name text);
 INSERT INTO terms VALUES (:'did', NULL, NULL);
@@ -535,6 +535,14 @@ CREATE FUNCTION pg_temp.mentions(t text) RETURNS boolean LANGUAGE sql STABLE AS 
                      OR coalesce(lower(t) ~ ('(^|[^[:alnum:]_])'
                           || regexp_replace(lower(name), '([^[:alnum:][:space:]])', '\\\1', 'g')
                           || '($|[^[:alnum:]_])'), false))
+$$;
+
+-- The same over every string and number in a JSON document, read with its
+-- escapes undone, so a name after a newline or quote is still found.
+CREATE FUNCTION pg_temp.mentions_json(j jsonb) RETURNS boolean LANGUAGE sql STABLE AS $$
+  SELECT EXISTS (SELECT 1 FROM jsonb_path_query(j, 'strict $.**') AS v
+                  WHERE jsonb_typeof(v) IN ('string', 'number')
+                    AND pg_temp.mentions(v #>> '{}'))
 $$;
 
 -- A map without the entries that carry the person, or a list without the
@@ -732,11 +740,11 @@ Collect the sessions. Run the last three `INSERT`s only with `uid` set:
 DROP TABLE IF EXISTS pg_temp.sessions;
 CREATE TEMP TABLE sessions (session_id text PRIMARY KEY);
 INSERT INTO sessions SELECT substr(key, 10) FROM worker_state
- WHERE key LIKE 'runstate:%' AND pg_temp.mentions(value::jsonb::text) ON CONFLICT DO NOTHING;
+ WHERE key LIKE 'runstate:%' AND pg_temp.mentions_json(value::jsonb) ON CONFLICT DO NOTHING;
 INSERT INTO sessions SELECT DISTINCT substr(key, 10) FROM worker_archive_snapshots
- WHERE key LIKE 'runstate:%' AND pg_temp.mentions(value::jsonb::text) ON CONFLICT DO NOTHING;
+ WHERE key LIKE 'runstate:%' AND pg_temp.mentions_json(value::jsonb) ON CONFLICT DO NOTHING;
 INSERT INTO sessions SELECT DISTINCT substr(stream, 12) FROM worker_events
- WHERE stream LIKE 'agents:run:%' AND pg_temp.mentions(event::jsonb::text) ON CONFLICT DO NOTHING;
+ WHERE stream LIKE 'agents:run:%' AND pg_temp.mentions_json(event::jsonb) ON CONFLICT DO NOTHING;
 -- site only:
 INSERT INTO sessions SELECT substr(key, 10) FROM worker_state
  WHERE key LIKE 'runstate:%' AND strpos(value::text, :'uid') > 0 ON CONFLICT DO NOTHING;
