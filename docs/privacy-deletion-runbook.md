@@ -1,8 +1,9 @@
 # Handling a data deletion request by hand
 
 Until deletion is automated (#75), a member asks for their data to be deleted
-by sending the admin a direct message on Discord, and the admin follows this
-runbook. The public promise is the notice at `/privacy`
+by sending a direct message on Discord to anyone with the @admin role, and the
+admin who receives it follows this runbook. The notice promises the deletion
+within 30 days of the request. The public promise is the notice at `/privacy`
 (`smarter_dev/shared/privacy_notice.md`); this runbook is how it is kept. If
 the two disagree, fix whichever is wrong in the same change.
 
@@ -14,10 +15,50 @@ help prepare or check a step, but does not run mutations.
 | | Stores |
 | --- | --- |
 | **Purge (agent)** | Everything the chat bot holds about the person: the guild memory, behavior and personality blocks, pending notes and retained revisions, both agents' working histories and their compaction summaries, the proactive recovery copy and watch instructions, and the external worker's history. The agent does the edit; see step 4. |
-| **Delete** | Bytes balances, squad memberships, quest and challenge submissions and quest progress, member activity dates, forum subscriptions, campaign signups, `/help` and `/tldr` records they started, legacy `/scan` records, rate-limit and DM caches, bot API security log rows whose request named them, and their site account with its chat, attachments, searches, resources questions, profile, linked logins (and their stored Discord tokens) and push subscriptions. |
-| **Anonymise** | Rows other people share. Bytes transfers the person sent or received keep their amount and date for the other member, with the person's id and username replaced and the reason cleared. Chat engagements they started lose the starter's id and username. Usage cost rows lose their Discord id and details. Shared audit rows (chat agent turns, handler runs, forum agent responses) have the person's id and names replaced. |
+| **Delete** | Bytes balances, squad memberships, quest and challenge submissions and quest progress, member activity dates, forum subscriptions, campaign signups, `/help` and `/tldr` records they started, legacy `/scan` profiles, rate-limit and DM caches, bot API security log rows whose request named them, and their site account with its chat, attachments, searches, resources questions, profile, linked logins (and their stored Discord tokens), push subscriptions, roles, API keys, second-factor enrollments, OAuth consent grants, republish links and membership rows. |
+| **Anonymise** | Rows other people share. Bytes transfers the person sent or received keep their amount and date for the other member, with the person's id and username replaced and the reason cleared. Chat engagements they started lose the starter's id and username. Usage cost rows lose their Discord id and details. Legacy `/scan` usage rows lose their user id. Chat agent turns and handler runs have the person's id and names replaced where they stand as values; forum agent responses have the author's display name replaced. Site page revisions they wrote lose their author when the account is deleted. |
 | **Keep** | Moderation history: `moderation_actions` and the bot's posts in the guild's moderation and audit log channels. Anonymised billing: usage cost rows with no person linked (the membership rows are deleted with the account; Polar keeps its payment records under its own terms). A bare receipt that the request was completed. The person's Discord id alone in `chat_bot_blocked_users`, written by the purge in step 4, so the chat bot sees their messages only as `[BLOCKED BY USER]` and does not respond to them. |
-| **Not covered yet** | **[PLACEHOLDER: short-lived copies (the 48-hour and 90-day windows). Zech has asked for that retention to be dropped rather than described; the stores and the wording are being confirmed on #71. Fill this in before the runbook is used.]** Queues with no time limit are also open, pending a decision with the same placeholder: the proactive pending list and dead-letter stream, batches the external worker claimed and never acknowledged, and Skrift dead letters left open (which keep handler fire payloads). |
+| **Not covered yet** | Everything in the list below. |
+
+### Not covered yet
+
+These can hold the person's id, name or words, and neither the purge nor the
+steps below remove them. Do not touch them by hand for a request.
+
+**[PLACEHOLDER: copies of message text and the queues with no time limit. #80 removes them (message text out of error bodies, handler errors and job payloads; time limits on the pending list, dead-letter, claimed and shadow queues; a prune job for Skrift dead letters). Rewrite this list from the #80 builder's facts; fill this in before the runbook is used.]**
+
+- **Audit prose that can name or quote the person:** `chat_agent_compaction_events`
+  (`original_content`, `summary`), `chat_agent_errors`,
+  `chat_agent_engagements.last_topic` and `last_notes`, the post text of
+  `forum_agent_responses` (`post_title`, `post_content`, `attachments`),
+  `handler_runs.error`, the AI's own text in `chat_agent_turns`,
+  `help_conversations` started by other members, and
+  `candidate_blog_topics.evidence`.
+- **Script-written handler memory:** `guild_handler_memory`, and the `memory`
+  JSON on `channel_handlers` and `admin_handlers`. Scripts decide what goes in
+  it.
+- **Queues and job stores:** the proactive wake stream, pending list,
+  dead-letter stream, claimed batches and shadow streams; Skrift's
+  `worker_queue`, `worker_state`, `worker_events`, `worker_dead_letters`,
+  `worker_archive_events` and `worker_archive_snapshots`; `work_dispatches`
+  payloads; `webhook_deliveries` and `webhook_delivery_attempts`.
+- **Short-lived caches that age out:** `search_result_previews` (48 hours),
+  `chat_agent:guild:{guild}:events` (about an hour), `mediaread:*` (24 hours),
+  `hclaim:*` (up to 30 days; deleting one can make a handler act twice), the
+  anonymous web search keys (30 minutes) and in-process caches in the bot and
+  workers.
+- **Creator fields, only when the requester is an admin:** `created_by` on
+  `channel_handlers`, `admin_handlers`, `forum_agents`, `campaigns`,
+  `scheduled_messages`, `squad_sale_events` and `repeating_messages`;
+  `extension_installs.installed_by`; site pages and assets they authored (see
+  step 5).
+- **Logs:** Pydantic Logfire and server logs are not edited per person. The
+  notice discloses both.
+- **Outside our database:** copies held by AI model providers and the other
+  processors the notice names; the bot's Discord posts and DMs outside the
+  moderation and audit log channels; exports made for evaluation
+  (`scripts/proactive_eval/fetch_history.py`) and the historical copies from
+  #42.
 
 Do **not** reset, blank or hand-edit the chat bot's memory to satisfy a
 request. Only the agent edits its own memory, and the bot never resets it. Do
@@ -37,9 +78,15 @@ history change for a request.
 2. Copy the sender's user id (Developer Mode → right-click the user → Copy
    User ID). Call it `DID` below. Never look a person up by username, display
    name or email.
-3. Reply with the link to the notice and what the request keeps (moderation
-   history, anonymised billing, a bare receipt). Ask them to confirm they want to go ahead,
-   because deletion cannot be undone. Wait for a yes.
+3. Reply with the link to the notice and what the request keeps, matching
+   the notice: moderation history, anonymised billing, a bare receipt, and
+   their Discord id alone on the chat bot's blocked list, so the chat bot sees
+   their messages only as `[BLOCKED BY USER]` and does not respond to them.
+   Tell them the blocked list covers the chat bot only: other AI features
+   (`/help`, forum replies, server automations, moderation) still process
+   their new messages. Ask them to confirm they want to go ahead, because
+   deletion cannot be undone. Wait for a yes. The 30 days run from the
+   request.
 4. Note the names the person goes by on Discord: their username, display
    name and server nickname, as shown on their profile in the server. Step 6
    replaces them in shared audit rows. Keep them only until the request is
@@ -154,9 +201,13 @@ mentioning the id or the names in any store it touched.
 **[PLACEHOLDER: the page's final wording and report format, filled in from
 #79 when its PRs are up.]**
 
-Do not go on until the report shows nothing remaining, or every item it lists
-has been resolved through the agent (run the purge again with the names it
-flags). Never fix a leftover by editing memory or history by hand.
+If the report shows a step still pending (for example, the external worker
+is down), steps 5 to 7 may go ahead, but the request stays open: step 8 does
+not close it until the report is clean.
+
+Resolve every leftover the report lists through the agent (run the purge
+again with the names it flags). Never fix a leftover by editing memory or
+history by hand.
 
 ## 5. Delete the site account *(site)*
 
@@ -231,6 +282,10 @@ subscriptions. It does not touch searches, so remove those first.
 
    `status` must be `complete`. `error` means billing revocation is being
    retried; wait for it rather than finishing the request around it.
+
+If the person authored site pages or uploaded assets (admins only), those
+rows reference the account with no delete rule and the job fails on them; ask
+a developer to reassign them first.
 
 Deleting the account cascades to its profile, linked logins, roles, API keys,
 web chat (conversations, threads, turns, messages, documents, compactions,
@@ -346,7 +401,7 @@ usually change 0 rows. The handler run and forum updates are the ones that
 normally match. A name the model repeated in its own words is not matched.
 
 The AI-written text in these rows (replies, topics, notes, forum replies) is
-covered by the short-lived copies placeholder above.
+listed under "Not covered yet" above.
 
 Expected side effects, all accepted:
 
@@ -379,6 +434,12 @@ of this runbook).
 
 ## 8. Check and close
 
+Close the request only when the purge report from step 4 is clean: no step
+pending and nothing remaining. Until then the request stays open, the receipt
+row in point 2 is not written, and the member is not told it is complete. If
+the report is still not clean as the 30 days run out, tell the member what is
+left and that the request is open.
+
 1. Rerun the dry-run counts. Every deleted store reads 0; the anonymise rows
    read 0; moderation is unchanged; the agent purge rows match the purge
    report.
@@ -400,4 +461,4 @@ of this runbook).
 
 ## Retention windows
 
-**[PLACEHOLDER: short-lived copies (the 48-hour and 90-day windows). Zech has asked for that retention to be dropped rather than described; the stores and the wording are being confirmed on #71. Fill this in before the runbook is used.]**
+**[PLACEHOLDER: copies of message text and the queues with no time limit. #80 removes them (message text out of error bodies, handler errors and job payloads; time limits on the pending list, dead-letter, claimed and shadow queues; a prune job for Skrift dead letters). Filled in from the #80 builder's facts; fill this in before the runbook is used.]**

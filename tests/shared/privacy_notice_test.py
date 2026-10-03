@@ -37,7 +37,15 @@ def test_the_short_version_carries_the_required_statements():
     assert "Moderation history is kept" in points
     assert "only anonymous usage and cost records stay" in points
     assert "including from the chat bot's memories" in points
-    assert "send a direct message to" in points
+    assert "send a direct message to anyone with the @admin role" in points
+    assert "within 30 days" in points
+
+
+def test_every_deletion_request_goes_to_the_admin_role(notice):
+    assert notice.count("anyone with the @admin role") == 3
+    deleting = notice.split("## Deleting your data", 1)[1]
+    assert "within 30 days of your request" in deleting
+    assert "backup" not in notice.lower()
 
 
 def test_the_notice_does_not_describe_an_opt_out_as_available(notice):
@@ -76,8 +84,8 @@ def test_bytes_transfers_are_anonymised_not_deleted(notice):
 
 @pytest.mark.xfail(
     strict=True,
-    reason="short-lived copy wording is on hold for Zech (#71); remove this "
-    "marker together with the placeholders",
+    reason="message-copy wording waits on #80 and the security-log wording on "
+    "Zech (#71); remove this marker together with the placeholders",
 )
 def test_no_placeholder_is_left_in_the_notice(notice):
     assert "[PLACEHOLDER" not in notice
