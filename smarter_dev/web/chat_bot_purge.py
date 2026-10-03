@@ -109,10 +109,12 @@ async def add_blocked_user(
 
 
 async def read_blocked_users(session: AsyncSession) -> BlockedUsers:
+    # Revision first: if a block commits between the two reads, the list is
+    # newer than its revision (safe) rather than older (a runtime would report
+    # enforcing a revision whose user it is still reading).
+    revision = await block_list_revision(session)
     user_ids = (await session.scalars(select(ChatBotBlockedUser.discord_user_id))).all()
-    return BlockedUsers(
-        revision=await block_list_revision(session), user_ids=sorted(user_ids)
-    )
+    return BlockedUsers(revision=revision, user_ids=sorted(user_ids))
 
 
 async def runtimes_enforcing(redis) -> dict[str, int | None]:
@@ -215,7 +217,7 @@ async def _update_request(
     """Apply ``change`` under a row lock if ``run_id`` is still the current run."""
     async with session_factory() as session:
         request = await session.get(ChatBotPurgeRequest, request_id, with_for_update=True)
-        if request is None or request.run_id != run_id:
+        if request is None or request.run_id != run_id or request.status == STATUS_CLOSED:
             return False
         change(request)
         _touch_json(request)
@@ -259,6 +261,8 @@ async def run_purge(
     waited = 0.0
     while not all_enforcing(await runtimes_enforcing(redis), list_revision):
         if waited >= wait_seconds:
+            if stale_entry:
+                await redis.xdel(PURGE_STREAM, stale_entry)
             await _update_request(
                 session_factory,
                 request_id,
@@ -289,7 +293,13 @@ async def run_purge(
                 memory_steps[guild_id] = result.as_step()
             except Exception as error:  # noqa: BLE001 — one guild must not stop the rest
                 await session.rollback()
-                logger.exception("Purge run %s: guild memory failed for guild %s", run_id, guild_id)
+                # Type only: a validation error's text can quote memory.
+                logger.error(
+                    "Purge run %s: guild memory failed for guild %s (%s)",
+                    run_id,
+                    guild_id,
+                    type(error).__name__,
+                )
                 memory_steps[guild_id] = {"outcome": "failed", "error": type(error).__name__}
 
     # 3. One command for the runtimes' working histories.
@@ -587,9 +597,10 @@ async def close_request(
     request = await session.get(ChatBotPurgeRequest, request_id, with_for_update=True)
     if request is None:
         return None
-    entry_id = (request.steps or {}).get("command_entry_id")
-    if entry_id and redis is not None:
-        await redis.xdel(PURGE_STREAM, entry_id)
+    steps = request.steps or {}
+    for key in ("command_entry_id", "stale_command_entry_id"):
+        if steps.get(key) and redis is not None:
+            await redis.xdel(PURGE_STREAM, steps[key])
     summary = receipt_summary(request)
     request.discord_user_id = None
     request.names = None
@@ -597,5 +608,7 @@ async def close_request(
     request.check_report = None
     request.status = STATUS_CLOSED
     request.closed_at = now
+    # A run still in flight fails its next write and deletes its own command.
+    request.run_id = None
     await session.flush()
     return request

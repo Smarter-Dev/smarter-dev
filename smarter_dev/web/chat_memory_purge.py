@@ -239,6 +239,15 @@ def compose_purge(
         ),
     }
     unresolved_locations = {item.location.strip() for item in output.unresolved}
+    valid_locations = {"memory", "behavior", "personality"} | {
+        f"note:{note_id}" for note_id, _ in context.notes
+    }
+    for location in unresolved_locations:
+        if location not in valid_locations:
+            raise refuse(
+                f"Unresolved location {location!r} is not one of memory, behavior, "
+                "personality or note:<id>."
+            )
 
     for name, (new, previous, limit) in blocks.items():
         if len(new) > limit:
@@ -280,6 +289,18 @@ def compose_purge(
     dropped: list[str] = []
     originals = dict(context.notes)
     for note_id, edit in edits.items():
+        # A note that never names the person is someone else's: dropping or
+        # rewriting it needs the agent to say why, like a shared name does.
+        if (
+            edit.action != "keep"
+            and not target.mentions(originals[note_id])
+            and f"note:{note_id}" not in unresolved_locations
+        ):
+            raise refuse(
+                f"Note {note_id!r} does not name this person; keep it, or if it is "
+                f"about them without naming them, list `note:{note_id}` in "
+                "unresolved and say why."
+            )
         if edit.action == "drop":
             dropped.append(note_id)
         elif edit.action == "rewrite":

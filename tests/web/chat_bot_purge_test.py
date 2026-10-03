@@ -299,3 +299,94 @@ def test_the_privacy_routes_require_the_bot_api_key():
         assert bot_api_auth_guard in guards
         assert any(isinstance(g, APIKeyOnly) for g in guards)
         assert any(isinstance(g, Permission) for g in guards)
+
+
+class _InterruptingAgent(_ScriptedAgent):
+    """Purges normally, but the admin acts while the model is thinking."""
+
+    def __init__(self, action):
+        self.action = action
+
+    async def run(self, user_prompt: str, *, deps: PurgeContext):
+        await self.action()
+        return await super().run(user_prompt, deps=deps)
+
+
+async def _seed_memory(db_session):
+    await upsert_guild_memory_blob(
+        db_session,
+        guild_id=_GUILD,
+        content=MEMORY,
+        notes_consumed=1,
+        model_name="stub",
+        dreamed_at=_NOW - timedelta(days=1),
+    )
+    await db_session.commit()
+
+
+async def test_closing_mid_run_stops_the_run_and_leaves_no_command(
+    db_session, session_factory, redis
+):
+    await _seed_memory(db_session)
+    request = await _open(db_session)
+    await _enforce(redis, 1)
+
+    async def close():
+        async with session_factory() as session:
+            await close_request(session, request.id, now=_NOW, redis=redis)
+            await session.commit()
+
+    status = await run_purge(
+        request.id, request.run_id, session_factory=session_factory, redis=redis,
+        now=lambda: _NOW, agent=_InterruptingAgent(close), sleep=_no_sleep,
+    )
+
+    assert status == "superseded"
+    assert await redis.xlen(PURGE_STREAM) == 0
+    async with session_factory() as session:
+        stored = await session.get(ChatBotPurgeRequest, request.id)
+        assert stored.status == STATUS_CLOSED
+        assert stored.discord_user_id is None
+        assert _KAI_ID not in json.dumps(stored.steps)
+        assert await record_ack(
+            session, request.run_id, PurgeAck(component="bot", guild_id=_GUILD, outcome="purged")
+        ) is None
+
+
+async def test_a_resubmit_mid_run_supersedes_it_without_a_stray_command(
+    db_session, session_factory, redis
+):
+    await _seed_memory(db_session)
+    request = await _open(db_session)
+    first_run = request.run_id
+    await _enforce(redis, 1)
+
+    async def resubmit():
+        async with session_factory() as session:
+            await open_purge_request(
+                session, discord_user_id=_KAI_ID, names=["kai"], requested_by="admin-1"
+            )
+            await session.commit()
+
+    status = await run_purge(
+        request.id, first_run, session_factory=session_factory, redis=redis,
+        now=lambda: _NOW, agent=_InterruptingAgent(resubmit), sleep=_no_sleep,
+    )
+
+    assert status == "superseded"
+    assert await redis.xlen(PURGE_STREAM) == 0
+
+
+async def test_the_check_reads_list_and_stream_keys_too(db_session, session_factory, redis):
+    from smarter_dev.shared.privacy_purge import PurgeTarget
+    from smarter_dev.web.chat_bot_purge import scan_stores
+
+    await redis.rpush("chat_agent:999000111222333444:history", "hello", f"kai {_KAI_ID}")
+    await redis.xadd("proactive:v1:dead-letter", {"payload": "kai was here"})
+
+    report = await scan_stores(db_session, redis, PurgeTarget.build(_KAI_ID, ["kai"]))
+
+    assert [hit["location"] for hit in report["remains"]] == [
+        "chat_agent:999000111222333444:history"
+    ]
+    assert [hit["location"] for hit in report["operational"]] == ["proactive:v1:dead-letter"]
