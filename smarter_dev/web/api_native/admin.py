@@ -151,10 +151,7 @@ class AdminController(Controller):
                 user_identifier=f"bot:{caller.display_name}",
                 request=request,
                 success=True,
-                details=(
-                    f"Conversation created for user {data.user_id} "
-                    f"in guild {data.guild_id}"
-                ),
+                details=f"Conversation created in guild {data.guild_id}",
             )
 
             return HelpConversationCreateResponse(

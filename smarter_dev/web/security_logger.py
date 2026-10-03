@@ -2,7 +2,9 @@
 
 This module provides comprehensive security logging capabilities for the API
 including authentication events, API key operations, rate limiting violations,
-and administrative actions.
+and administrative actions. Ordinary successful API requests are not logged
+(#81): rate limiting counts them in Redis. No event records a member's Discord
+id; paths are recorded as route templates.
 """
 
 from __future__ import annotations
@@ -33,6 +35,15 @@ class AuthenticatedKeyLike(Protocol):
     id: UUID
     key_prefix: str
     created_by: str
+
+
+def route_template(request: Request) -> Optional[str]:
+    """The matched route's template, e.g. ``/api/guilds/{guild_id}/bytes/config``.
+
+    Security logs record this instead of the concrete path, which carries the
+    Discord ids of the members a request is about. None when no route matched.
+    """
+    return request.scope.get("path_template") or None
 
 
 class SecurityLogger:
@@ -147,38 +158,9 @@ class SecurityLogger:
             request_id=request.headers.get("x-request-id"),
             event_metadata={
                 "bearer_presented": bearer_presented,
-                "endpoint": str(request.url.path),
+                "endpoint": route_template(request),
                 "method": request.method,
                 "reason": reason
-            }
-        )
-
-    async def log_api_request(
-        self,
-        session: AsyncSession,
-        api_key: AuthenticatedKeyLike,
-        request: Request,
-        success: bool = True
-    ) -> SecurityLog:
-        """Log an API request for rate limiting tracking.
-
-        Keeps query parameter names but not their values, which can carry
-        search terms and other user input.
-        """
-        return await self.log_event(
-            session=session,
-            action="api_request",
-            success=success,
-            details=f"API request to {request.method} {request.url.path}",
-            api_key_id=api_key.id,
-            user_identifier=api_key.created_by,
-            ip_address=request.client.host if request.client else None,
-            user_agent=request.headers.get("user-agent"),
-            request_id=request.headers.get("x-request-id"),
-            event_metadata={
-                "method": request.method,
-                "path": str(request.url.path),
-                "query_param_names": sorted(request.query_params.keys())
             }
         )
 
@@ -206,7 +188,7 @@ class SecurityLogger:
                 "api_key_prefix": api_key.key_prefix,
                 "current_usage": current_usage,
                 "rate_limit": limit,
-                "endpoint": str(request.url.path)
+                "endpoint": route_template(request)
             }
         )
 
@@ -234,7 +216,7 @@ class SecurityLogger:
             request_id=request.headers.get("x-request-id"),
             event_metadata={
                 "operation": operation,
-                "endpoint": str(request.url.path),
+                "endpoint": route_template(request),
                 "method": request.method
             }
         )

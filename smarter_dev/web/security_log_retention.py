@@ -1,8 +1,9 @@
 """Scheduled deletion of security-log rows past their 90-day window.
 
-``security_logs`` holds one row per bytes API call and per auth or admin event:
-IP address, user agent, request path and query, and whatever Discord ids those
-carry. The 90-day window is the one :meth:`SecurityLogger.cleanup_old_logs`
+``security_logs`` holds only failed authentications, rate-limit violations
+and admin operations: IP address, user agent, route template (never the
+concrete path) and the API key involved, no member Discord ids. Ordinary API
+requests stopped writing rows in #81. The 90-day window is the one :meth:`SecurityLogger.cleanup_old_logs`
 has always declared; nothing called it, so the table only grew. The hourly
 retention job (``scripts/retention_sweep.py``) now enforces it.
 

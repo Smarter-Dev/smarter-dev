@@ -3,13 +3,15 @@
 Parity contract (docs/v2/legacy-sunset/04-api-rewrite.md "Rate-limiting
 parity"): windows 10/s, 180/min, 2500/15 min per key, ``x-ratelimit-*``
 headers on success, 429 with the legacy ``{"detail": ...}`` body and
-escalated ``retry-after`` on violation, usage counting backed by
-``security_logs`` ``api_request`` rows. The bot's ``api_client`` reads the
-headers to self-throttle, so they are part of the wire contract.
+escalated ``retry-after`` on violation. Usage is counted in a Redis sorted
+set per key (#81); only violations write a ``security_logs`` row. The bot's
+``api_client`` reads the headers to self-throttle, so they are part of the
+wire contract.
 """
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from datetime import UTC
 from datetime import datetime
@@ -19,11 +21,13 @@ from unittest.mock import Mock
 from unittest.mock import patch
 from uuid import uuid4
 
+import fakeredis.aioredis as fakeredis_aioredis
 import pytest
 from litestar.di import Provide
 from litestar.plugins.pydantic import PydanticPlugin
 from litestar.testing import TestClient
 from litestar.testing import create_test_client
+from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,6 +39,7 @@ from smarter_dev.web.api_native import bytes as bytes_module
 from smarter_dev.web.api_native.bytes import BytesController
 from smarter_dev.web.api_native.rate_limiting import RATE_LIMIT_PER_SECOND
 from smarter_dev.web.api_native.rate_limiting import RateLimitedKey
+from smarter_dev.web.api_native.rate_limiting import rate_limit_redis_key
 from smarter_dev.web.api_native.rate_limiting import rate_limited_key_from_skrift
 from smarter_dev.web.models import SecurityLog
 
@@ -81,6 +86,15 @@ def skrift_key_row() -> FakeSkriftKeyRow:
 
 
 @pytest.fixture
+async def fake_redis():
+    client = fakeredis_aioredis.FakeRedis(decode_responses=True)
+    try:
+        yield client
+    finally:
+        await client.aclose()
+
+
+@pytest.fixture
 def config_ops_mock() -> Iterator[Mock]:
     """Serve GET /config from a canned config so handlers need no real DB."""
     with patch("smarter_dev.web.api_native.bytes.BytesConfigOperations") as factory:
@@ -106,12 +120,12 @@ def config_ops_mock() -> Iterator[Mock]:
 
 @pytest.fixture
 def rate_limited_client(
-    security_log_session_maker, skrift_key_row, config_ops_mock
+    security_log_session_maker, skrift_key_row, config_ops_mock, fake_redis
 ) -> Iterator[TestClient]:
     """Bytes controller behind the real middleware, guards bypassed.
 
-    The middleware's two session contexts are pointed at the test SQLite DB
-    and the Skrift key verification is stubbed: a request bearing
+    The middleware's session context is pointed at the test SQLite DB, its
+    Redis at ``fake_redis``, and the Skrift key verification is stubbed: a request bearing
     ``VALID_SKRIFT_TOKEN`` resolves to ``skrift_key_row``, anything else to
     ``None``. Guards are emptied (shared-list pattern from ``conftest.py``)
     because auth behavior is covered by the auth tests — here only the
@@ -140,8 +154,8 @@ def rate_limited_client(
                 side_effect=lambda: security_log_session_maker(),
             ),
             patch(
-                "smarter_dev.web.api_native.rate_limiting.get_db_session_context",
-                side_effect=lambda: security_log_session_maker(),
+                "smarter_dev.web.api_native.rate_limiting.get_redis_client",
+                return_value=fake_redis,
             ),
         ):
             with create_test_client(
@@ -156,23 +170,20 @@ def rate_limited_client(
         bytes_module.BOT_API_GUARDS[:] = original_guards
 
 
-async def _seed_api_request_rows(
-    session_maker, api_key_id, count: int, age_seconds: float = 0.0
+async def _seed_requests(
+    redis, key_row, count: int, age_seconds: float = 0.0
 ) -> None:
-    """Insert ``count`` api_request security-log rows for the key."""
+    """Record ``count`` earlier allowed requests for the key in Redis."""
     timestamp = datetime.now(UTC) - timedelta(seconds=age_seconds)
-    async with session_maker() as session:
-        for _ in range(count):
-            session.add(
-                SecurityLog(
-                    action="api_request",
-                    api_key_id=api_key_id,
-                    success=True,
-                    details="seeded",
-                    timestamp=timestamp,
-                )
-            )
-        await session.commit()
+    score = int(timestamp.timestamp() * 1000)
+    await redis.zadd(
+        rate_limit_redis_key(rate_limited_key_from_skrift(key_row)),
+        {f"seed-{index}": score for index in range(count)},
+    )
+
+
+async def _recorded_requests(redis, key_row) -> int:
+    return await redis.zcard(rate_limit_redis_key(rate_limited_key_from_skrift(key_row)))
 
 
 class TestSuccessHeaders:
@@ -196,10 +207,10 @@ class TestSuccessHeaders:
         assert int(response.headers["x-ratelimit-reset"]) > 0
 
     async def test_usage_decrements_remaining(
-        self, rate_limited_client, security_log_session_maker, skrift_key_row
+        self, rate_limited_client, security_log_session_maker, skrift_key_row, fake_redis
     ):
-        await _seed_api_request_rows(
-            security_log_session_maker, skrift_key_row.id, count=3
+        await _seed_requests(
+            fake_redis, skrift_key_row, count=3
         )
 
         response = rate_limited_client.get(
@@ -210,31 +221,39 @@ class TestSuccessHeaders:
         assert response.headers["x-ratelimit-remaining-second"] == "7"
         assert response.headers["x-ratelimit-remaining-minute"] == "177"
 
-    async def test_allowed_request_logs_api_request_row(
-        self, rate_limited_client, security_log_session_maker, skrift_key_row
+    async def test_allowed_request_counts_in_redis_and_writes_no_row(
+        self, rate_limited_client, security_log_session_maker, skrift_key_row, fake_redis
     ):
         rate_limited_client.get(
             CONFIG_PATH, headers={"Authorization": f"Bearer {VALID_SKRIFT_TOKEN}"}
         )
 
+        assert await _recorded_requests(fake_redis, skrift_key_row) == 1
         async with security_log_session_maker() as session:
-            count = await session.scalar(
-                select(func.count(SecurityLog.id)).where(
-                    SecurityLog.api_key_id == skrift_key_row.id,
-                    SecurityLog.action == "api_request",
-                )
-            )
-        assert count == 1
+            count = await session.scalar(select(func.count(SecurityLog.id)))
+        assert count == 0
+
+    async def test_counter_key_expires_with_the_longest_window(
+        self, rate_limited_client, skrift_key_row, fake_redis
+    ):
+        rate_limited_client.get(
+            CONFIG_PATH, headers={"Authorization": f"Bearer {VALID_SKRIFT_TOKEN}"}
+        )
+
+        ttl = await fake_redis.ttl(
+            rate_limit_redis_key(rate_limited_key_from_skrift(skrift_key_row))
+        )
+        assert 0 < ttl <= 900
 
 
 class TestRateLimitExceeded:
     """Violations answer the legacy 429 with escalation."""
 
     async def test_second_window_exceeded_escalates_to_minute(
-        self, rate_limited_client, security_log_session_maker, skrift_key_row
+        self, rate_limited_client, security_log_session_maker, skrift_key_row, fake_redis
     ):
-        await _seed_api_request_rows(
-            security_log_session_maker, skrift_key_row.id, count=RATE_LIMIT_PER_SECOND
+        await _seed_requests(
+            fake_redis, skrift_key_row, count=RATE_LIMIT_PER_SECOND
         )
 
         response = rate_limited_client.get(
@@ -255,37 +274,36 @@ class TestRateLimitExceeded:
         assert response.headers["x-ratelimit-remaining"] == "0"
 
     async def test_blocked_request_not_counted_and_violation_logged(
-        self, rate_limited_client, security_log_session_maker, skrift_key_row
+        self, rate_limited_client, security_log_session_maker, skrift_key_row, fake_redis
     ):
-        await _seed_api_request_rows(
-            security_log_session_maker, skrift_key_row.id, count=RATE_LIMIT_PER_SECOND
+        await _seed_requests(
+            fake_redis, skrift_key_row, count=RATE_LIMIT_PER_SECOND
         )
 
         rate_limited_client.get(
             CONFIG_PATH, headers={"Authorization": f"Bearer {VALID_SKRIFT_TOKEN}"}
         )
 
+        assert await _recorded_requests(fake_redis, skrift_key_row) == (
+            RATE_LIMIT_PER_SECOND  # only the seeds
+        )
         async with security_log_session_maker() as session:
-            api_request_count = await session.scalar(
-                select(func.count(SecurityLog.id)).where(
-                    SecurityLog.action == "api_request"
-                )
-            )
-            violation_count = await session.scalar(
-                select(func.count(SecurityLog.id)).where(
-                    SecurityLog.action == "rate_limit_exceeded"
-                )
-            )
-        assert api_request_count == RATE_LIMIT_PER_SECOND  # only the seeds
-        assert violation_count == 1
+            violations = list(await session.scalars(select(SecurityLog)))
+        assert [row.action for row in violations] == ["rate_limit_exceeded"]
+        # The route template, never the concrete path with its ids.
+        assert violations[0].event_metadata["endpoint"] == (
+            "/api/guilds/{guild_id}/bytes/config"
+        )
+        assert GUILD_ID not in json.dumps(violations[0].event_metadata)
+        assert GUILD_ID not in violations[0].details
 
     async def test_rows_outside_window_do_not_count(
-        self, rate_limited_client, security_log_session_maker, skrift_key_row
+        self, rate_limited_client, security_log_session_maker, skrift_key_row, fake_redis
     ):
         # Old enough to fall out of the second window but inside the minute.
-        await _seed_api_request_rows(
-            security_log_session_maker,
-            skrift_key_row.id,
+        await _seed_requests(
+            fake_redis,
+            skrift_key_row,
             count=RATE_LIMIT_PER_SECOND,
             age_seconds=5.0,
         )
@@ -297,6 +315,25 @@ class TestRateLimitExceeded:
         assert response.status_code == 200
         assert response.headers["x-ratelimit-remaining-second"] == "10"
         assert response.headers["x-ratelimit-remaining-minute"] == "170"
+
+
+class TestRedisUnreachable:
+    """Fails open: the bot keeps working, without rate-limit headers."""
+
+    async def test_request_passes_without_headers_or_rows(
+        self, rate_limited_client, security_log_session_maker, fake_redis
+    ):
+        fake_redis.eval = AsyncMock(side_effect=RedisConnectionError("down"))
+
+        response = rate_limited_client.get(
+            CONFIG_PATH, headers={"Authorization": f"Bearer {VALID_SKRIFT_TOKEN}"}
+        )
+
+        assert response.status_code == 200
+        assert "x-ratelimit-limit" not in response.headers
+        async with security_log_session_maker() as session:
+            count = await session.scalar(select(func.count(SecurityLog.id)))
+        assert count == 0
 
 
 class TestUnauthenticatedPassthrough:
