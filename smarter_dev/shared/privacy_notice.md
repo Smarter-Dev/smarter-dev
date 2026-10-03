@@ -5,12 +5,12 @@ Smarter Dev runs a Discord server, a Discord bot and the smarter.dev website. Th
 - The bot reads messages in the Discord servers it is in, so its features can work: the chat bot, moderation, bytes, squads, quests and challenges.
 - The chat bot keeps permanent memories about the people it talks with, written in its own words and naming people by username and Discord ID. It never resets them.
 - Moderation history is kept, even after you ask us to delete your data.
-- Billing records are kept in anonymised form.
-- To have your data deleted, including from the chat bot's memories, send a direct message to the Smarter Dev admin on our Discord server.
+- When your data is deleted, your membership record goes with it; only anonymous usage and cost records stay.
+- To have your data deleted, including from the chat bot's memories, send a direct message to **[PLACEHOLDER: the admin account or role to message]** on our Discord server.
 
 ## Who we are
 
-Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a direct message to the Smarter Dev admin on the [Smarter Dev Discord server](https://discord.gg/de8kajxbYS).
+Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a direct message to **[PLACEHOLDER: the admin account or role to message]** on the [Smarter Dev Discord server](https://discord.gg/de8kajxbYS).
 
 ## What the Discord bot stores
 
@@ -34,7 +34,7 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a dire
 
 ## What the website stores
 
-**Your account.** You sign in with Discord. We receive your Discord ID, username, avatar and email address, and keep them with your account and profile, along with the sign-in tokens Discord gives us. You stay signed in until 30 days after your last visit. If you turn on browser notifications, we keep your browser's notification address.
+**Your account.** You sign in with Discord. We receive your Discord ID, username, avatar and email address, and keep them with your account and profile, along with the sign-in tokens Discord gives us. You stay signed in until 30 days after your last visit. If you turn on browser notifications, we keep your browser's notification address. Accounts created before the site moved to Discord-only sign-in may instead hold the name, email address, avatar and sign-in tokens GitHub or Google gave us, and any passkeys added to them; these accounts can no longer sign in, and we delete them on request like any other.
 
 **Chat, search and the AI features.** Your chat conversations, the files you attach, and the AI's answers and summaries are kept until you delete them or your account. Searches you make from your dashboard (the query, the results and the answer) are kept. Search links you share let other people search, and their searches are kept for 30 minutes. Questions you ask about our resources are kept with your account.
 
@@ -59,13 +59,13 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a dire
 
 ## Deleting your data
 
-Send a direct message to the Smarter Dev admin on our Discord server. We check that you own the Discord account, then an admin deletes your data.
+Send a direct message to **[PLACEHOLDER: the admin account or role to message]** on our Discord server. We check that you own the Discord account, then an admin deletes your data.
 
-**What we delete.** Everything the chat bot holds about you: it removes you from its memories, rewrites its conversation summaries without you and drops the conversation history that holds your messages. Your bytes balance, your squad memberships, quest and challenge submissions, activity dates, forum subscriptions and `/help` records, and your website account with its chat conversations, attachments, searches and profile. Security log entries that name your Discord ID are deleted too. Records that you share with other people are kept with you removed: bytes transfers you sent or received stay in the other member's history with your ID, username and the reason removed, and records of the bot's conversations and automations that involve other people have your ID and names replaced.
+**What we delete.** Everything the chat bot holds about you: it removes you from its memories, rewrites its conversation summaries without you and drops the conversation history that holds your messages. Your bytes balance, your squad memberships, quest and challenge submissions, activity dates, forum subscriptions and `/help` records, and your website account with its chat conversations, attachments, searches and profile. **[PLACEHOLDER: security log entries that name your Discord ID; wording waits on the decision about the 90-day logs, see #71.]** Records that you share with other people are kept with you removed: bytes transfers you sent or received stay in the other member's history with your ID, username and the reason removed, and records of the bot's conversations and automations that involve other people have your ID and names replaced.
 
-**What we keep.** Moderation history. Billing records, in anonymised form. A bare record that your request was completed, with nothing that identifies you. Your Discord ID, with nothing else attached, on the chat bot's blocked list, so the chat bot never reads your messages again: from then on it sees them only as `[BLOCKED BY USER]` and does not respond to them. Copies held by AI providers and Discord are governed by their own terms.
+**What we keep.** Moderation history. Anonymous usage and cost records that cannot be linked back to you. A bare record that your request was completed, with nothing that identifies you. Your Discord ID, with nothing else attached, on the chat bot's blocked list. From then on your messages reach the chat bot only as `[BLOCKED BY USER]`, and it does not respond to you. Copies held by AI providers and Discord are governed by their own terms.
 
-If you stay in the server, the bot's other features, such as bytes and activity dates, start new records the next time you post.
+If you stay in the server, the bot's other features, such as bytes and activity dates, start new records the next time you post. The blocked list covers the chat bot only: other AI features, such as `/help`, forum replies, server automations and moderation, still process your new messages.
 
 **[PLACEHOLDER: short-lived copies. Wording on hold for Zech's decision on the 48-hour and 90-day copies; see #71. Do not publish with this line.]**
 

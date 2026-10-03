@@ -15,6 +15,7 @@ from smarter_dev.shared.privacy_notice import LAST_UPDATED
 from smarter_dev.shared.privacy_notice import NOTICE_TITLE
 from smarter_dev.shared.privacy_notice import PRIVACY_PATH
 from smarter_dev.shared.privacy_notice import notice_markdown
+from smarter_dev.shared.privacy_notice import privacy_url
 
 _DESCRIPTION = (
     "What Smarter Dev stores from Discord and smarter.dev, why, for how long, "
@@ -24,7 +25,7 @@ _DESCRIPTION = (
 
 @get(PRIVACY_PATH)
 async def privacy_notice() -> Template:
-    url = f"https://smarter.dev{PRIVACY_PATH}"
+    url = privacy_url()
     return Template(
         "privacy.html",
         context={
