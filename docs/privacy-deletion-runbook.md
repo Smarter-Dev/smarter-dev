@@ -13,10 +13,11 @@ help prepare or check a step, but does not run mutations.
 
 | | Stores |
 | --- | --- |
-| **Delete** | Bytes balances and every transfer the person sent or received, squad memberships, quest and challenge submissions and quest progress, member activity dates, forum subscriptions, campaign signups, `/help` and `/tldr` records they started, legacy `/scan` records, rate-limit and DM caches, and their site account with its chat, attachments, searches, resources questions, profile, linked logins, push subscriptions and security log rows. |
-| **Detach** | Audit rows other people share: the person's id and username are replaced on chat engagements they started, and their Discord id and details are cleared from usage cost rows. The rows and their numbers stay. |
+| **Purge (agent)** | Everything the chat bot holds about the person: the guild memory, behavior and personality blocks, pending notes and retained revisions, both agents' working histories and their compaction summaries, the proactive recovery copy and watch instructions, and the external worker's history. The agent does the edit; see step 4. |
+| **Delete** | Bytes balances, squad memberships, quest and challenge submissions and quest progress, member activity dates, forum subscriptions, campaign signups, `/help` and `/tldr` records they started, legacy `/scan` records, rate-limit and DM caches, and their site account with its chat, attachments, searches, resources questions, profile, linked logins, push subscriptions and security log rows. |
+| **Anonymise** | Rows other people share. Bytes transfers the person sent or received keep their amount and date for the other member, with the person's id and username replaced and the reason cleared. Chat engagements they started lose the starter's id and username. Usage cost rows lose their Discord id and details. |
 | **Keep** | Moderation history (`moderation_actions`, the guild's mod-log posts). Billing in anonymised form: usage cost rows with no person linked, and Polar's own order records. A bare receipt that the request was completed. |
-| **Cannot remove yet** | The chat bot's permanent memory, its revisions and notes, the compaction summaries inside both agents' working histories, the proactive agents' raw histories and queues, the external worker's copies, ids inside shared audit JSON (chat turns, handler runs), forum agent rows that name a post's author only by display name, Skrift worker job records, logs, backups, and copies held by AI providers or Discord. |
+| **Not covered by this runbook** | **[PLACEHOLDER: short-lived copies (the 48-hour and 90-day windows). Zech has asked for that retention to be dropped rather than described; the stores and the wording are being confirmed on #71. Fill this in before the runbook is used.]** |
 
 Do **not** reset, blank or hand-edit the chat bot's memory to satisfy a
 request. Only the agent edits its own memory, and the bot never resets it. Do
@@ -24,7 +25,8 @@ not delete or rewrite a guild's proactive history or its Redis keys either:
 it is the proactive agent's memory for the whole guild, and the external
 worker falls back to `proactive:guild-history:{guild}` and to the
 `proactive_agent_histories` row, so removing one copy does not remove the
-history. These wait for the agent purge (#73, #75).
+history. The agent purge in step 4 is the only way the chat bot's memory and
+history change for a request.
 
 ## 1. Take the request
 
@@ -35,8 +37,8 @@ history. These wait for the agent purge (#73, #75).
 2. Copy the sender's user id (Developer Mode → right-click the user → Copy
    User ID). Call it `DID` below. Never look a person up by username, display
    name or email.
-3. Reply with the link to the notice and what the request will not remove (the
-   rows in the table above). Ask them to confirm they want to go ahead,
+3. Reply with the link to the notice and what the request keeps (moderation
+   history, anonymised billing, a bare receipt). Ask them to confirm they want to go ahead,
    because deletion cannot be undone. Wait for a yes.
 4. Start a private note for this request with a random receipt id
    (`uuidgen`), the date received and the date confirmed. The note never holds
@@ -76,7 +78,7 @@ Run the counts and keep the numbers in the receipt note. Nothing changes.
 ```sql
 BEGIN READ ONLY;
 SELECT 'bytes_balances' AS store, count(*) FROM bytes_balances WHERE user_id = :'did'
-UNION ALL SELECT 'bytes_transactions', count(*) FROM bytes_transactions WHERE giver_id = :'did' OR receiver_id = :'did'
+UNION ALL SELECT 'bytes_transactions (anonymise)', count(*) FROM bytes_transactions WHERE giver_id = :'did' OR receiver_id = :'did'
 UNION ALL SELECT 'squad_memberships', count(*) FROM squad_memberships WHERE user_id = :'did'
 UNION ALL SELECT 'quest_submissions', count(*) FROM quest_submissions WHERE user_id = :'did'
 UNION ALL SELECT 'quest_progress', count(*) FROM quest_progress WHERE user_id = :'did'
@@ -88,24 +90,24 @@ UNION ALL SELECT 'help_conversations', count(*) FROM help_conversations WHERE us
 UNION ALL SELECT 'research_sessions', count(*) FROM research_sessions WHERE user_id = :'did'
 UNION ALL SELECT 'scan_user_profiles', count(*) FROM scan_user_profiles WHERE user_id = :'did'
 UNION ALL SELECT 'scan_service_usage', count(*) FROM scan_service_usage WHERE user_id = :'did'
-UNION ALL SELECT 'chat_agent_engagements (detach)', count(*) FROM chat_agent_engagements WHERE activation_user_id = :'did'
-UNION ALL SELECT 'usage_cost_rows (detach)', count(*) FROM usage_cost_rows WHERE discord_user_id = :'did'
+UNION ALL SELECT 'chat_agent_engagements (anonymise)', count(*) FROM chat_agent_engagements WHERE activation_user_id = :'did'
+UNION ALL SELECT 'usage_cost_rows (anonymise)', count(*) FROM usage_cost_rows WHERE discord_user_id = :'did'
 UNION ALL SELECT 'security_logs', count(*) FROM security_logs WHERE user_identifier = :'did'
 -- kept:
 UNION ALL SELECT 'moderation_actions (kept)', count(*) FROM moderation_actions WHERE target_user_id = :'did' OR moderator_user_id = :'did'
--- cannot remove yet; counted so the reply to the member is accurate:
-UNION ALL SELECT 'chat memory mentions (not removed)', count(*) FROM chat_agent_guild_memory WHERE content LIKE '%' || :'did' || '%' OR behavior LIKE '%' || :'did' || '%' OR personality LIKE '%' || :'did' || '%'
-UNION ALL SELECT 'memory revisions mentioning (not removed)', count(*) FROM chat_agent_memory_revisions WHERE content LIKE '%' || :'did' || '%'
-UNION ALL SELECT 'memory notes mentioning (not removed)', count(*) FROM chat_agent_memory_notes WHERE content LIKE '%' || :'did' || '%'
-UNION ALL SELECT 'proactive histories mentioning (not removed)', count(*) FROM proactive_agent_histories WHERE history::text LIKE '%' || :'did' || '%'
-UNION ALL SELECT 'chat turns mentioning (not removed)', count(*) FROM chat_agent_turns WHERE triggering_messages::text LIKE '%' || :'did' || '%'
-UNION ALL SELECT 'handler runs mentioning (not removed)', count(*) FROM handler_runs WHERE trigger_context::text LIKE '%' || :'did' || '%';
+-- chat bot stores, purged by the agent in step 4; counted to compare after:
+UNION ALL SELECT 'chat memory mentions (agent purge)', count(*) FROM chat_agent_guild_memory WHERE content LIKE '%' || :'did' || '%' OR behavior LIKE '%' || :'did' || '%' OR personality LIKE '%' || :'did' || '%'
+UNION ALL SELECT 'memory revisions mentioning (agent purge)', count(*) FROM chat_agent_memory_revisions WHERE content LIKE '%' || :'did' || '%'
+UNION ALL SELECT 'memory notes mentioning (agent purge)', count(*) FROM chat_agent_memory_notes WHERE content LIKE '%' || :'did' || '%'
+UNION ALL SELECT 'proactive histories mentioning (agent purge)', count(*) FROM proactive_agent_histories WHERE history::text LIKE '%' || :'did' || '%'
+UNION ALL SELECT 'chat turns mentioning (agent purge)', count(*) FROM chat_agent_turns WHERE triggering_messages::text LIKE '%' || :'did' || '%'
+UNION ALL SELECT 'handler runs mentioning (agent purge)', count(*) FROM handler_runs WHERE trigger_context::text LIKE '%' || :'did' || '%';
 ROLLBACK;
 ```
 
 A zero for the memory and history rows only means the id is not written
 there. The bot may still remember the person by name. Treat those counts as
-"at least", never as proof the bot holds nothing.
+"at least"; the purge's own check in step 4 is the one that counts.
 
 *Site*, with `uid` set:
 
@@ -126,7 +128,23 @@ ROLLBACK;
 If the person has an open subscription, tell them it will be cancelled
 before going on.
 
-## 4. Delete the site account *(site)*
+## 4. Purge the chat bot
+
+Run the admin purge for `DID` that #79 adds. It asks the agent to remove
+everything tied to the person from its memory blocks, notes and revisions,
+forces a compaction of both agents' working histories that leaves them out
+and drops the raw history holding their messages, and reaches the external
+worker's history. It is safe to run twice. Its report lists anything still
+mentioning the id or the person's known names in any store it touched.
+
+**[PLACEHOLDER: the exact command and its report format, filled in when #79
+lands.]**
+
+Do not go on until the report shows nothing remaining, or every item it lists
+has been resolved through the agent (run the purge again with the names it
+flags). Never fix a leftover by editing memory or history by hand.
+
+## 5. Delete the site account *(site)*
 
 The site's own account deletion does this part, and it is the one path that
 also removes private chat attachments from storage and cancels Polar
@@ -168,17 +186,22 @@ web chat (conversations, threads, turns, messages, documents, compactions,
 subagents, attachments rows), resources questions and spending windows. Its
 membership rows go with it; the anonymised usage cost rows stay.
 
-## 5. Delete what is keyed by Discord id
+## 6. Delete what is keyed by Discord id
 
 One transaction. Compare each `DELETE n` / `UPDATE n` with the dry run before
 committing.
 
 ```sql
 BEGIN;
--- Bytes: delete every transfer the person sent or received. The other
--- member's balance and totals are stored, not summed from this table, so
--- they do not change; the transfer simply leaves their history.
-DELETE FROM bytes_transactions WHERE giver_id = :'did' OR receiver_id = :'did';
+-- Bytes: anonymise every transfer the person sent or received. The row
+-- stays in the other member's history with its amount and date; 'DELETED'
+-- stands in for the id the way 'SYSTEM' does for system rewards.
+UPDATE bytes_transactions
+   SET giver_id = 'DELETED', giver_username = '[deleted user]', reason = NULL
+ WHERE giver_id = :'did';
+UPDATE bytes_transactions
+   SET receiver_id = 'DELETED', receiver_username = '[deleted user]', reason = NULL
+ WHERE receiver_id = :'did';
 DELETE FROM bytes_balances WHERE user_id = :'did';
 DELETE FROM squad_memberships WHERE user_id = :'did';
 DELETE FROM quest_submissions WHERE user_id = :'did';
@@ -204,8 +227,8 @@ COMMIT;
 
 Expected side effects, all accepted:
 
-- Another member who sent bytes to this person recently may be able to send
-  again sooner, because the send cooldown reads recent transfers.
+- Anonymised transfers keep the other member's balance, totals, history and
+  send cooldown exactly as they were. They show as "[deleted user]".
 - Squad scoreboards are summed from submissions, so the person's squad loses
   the points they earned.
 - Their Discord squad and sudo roles are not touched by this; remove them in
@@ -214,7 +237,7 @@ Expected side effects, all accepted:
 Do not touch `moderation_actions`, including rows where the person was the
 moderator.
 
-## 6. Clear Redis caches
+## 7. Clear Redis caches
 
 These expire on their own within hours to days; delete them so nothing
 waits on a clock. With `redis-cli` against the bot's Redis:
@@ -229,10 +252,11 @@ Repeat each `SCAN` from the cursor it returns until it returns `0`. Do not
 touch `chat_agent:*`, `proactive:*` or `chat_agent:guild:*` keys (see the top
 of this runbook).
 
-## 7. Check and close
+## 8. Check and close
 
-1. Rerun the dry-run counts. Every deleted store reads 0; the detach rows
-   read 0; moderation and the "not removed" rows are unchanged.
+1. Rerun the dry-run counts. Every deleted store reads 0; the anonymise rows
+   read 0; moderation is unchanged; the agent purge rows match the purge
+   report.
 2. *Site:* strip the deletion job's row down to the receipt:
 
    ```sql
@@ -243,17 +267,11 @@ of this runbook).
    ```
 
 3. Finish the receipt note: receipt id, dates, "completed", and the classes
-   handled (deleted, detached, kept, not removable yet). No id, username,
+   handled (purged, deleted, anonymised, kept). No id, username,
    counts per person or message text.
-4. Reply to the member with the receipt id, and repeat what was kept and what
-   cannot be removed yet. Once they have it, you may delete the DM thread on
+4. Reply to the member with the receipt id, and repeat what was kept. Once they have it, you may delete the DM thread on
    your side.
 
 ## Retention windows
 
-Copies that this runbook cannot reach expire on their own: chat agent
-working history 2 hours after it goes quiet, AI-written audit text 48 hours,
-proactive wake streams 48 hours, Skrift worker job records 7 to 90 days, the
-remaining security logs (by IP address only) 90 days. They are left to
-expire rather than edited by hand, and the reply to the member says so.
-Backups and logs are not edited.
+**[PLACEHOLDER: short-lived copies (the 48-hour and 90-day windows). Zech has asked for that retention to be dropped rather than described; the stores and the wording are being confirmed on #71. Fill this in before the runbook is used.]**
