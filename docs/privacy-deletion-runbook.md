@@ -537,12 +537,15 @@ CREATE FUNCTION pg_temp.mentions(t text) RETURNS boolean LANGUAGE sql STABLE AS 
                           || '($|[^[:alnum:]_])'), false))
 $$;
 
--- The same over every string and number in a JSON document, read with its
--- escapes undone, so a name after a newline or quote is still found.
+-- The same over every key, string and number in a JSON document, read with
+-- its escapes undone, so a name after a newline or quote is still found.
 CREATE FUNCTION pg_temp.mentions_json(j jsonb) RETURNS boolean LANGUAGE sql STABLE AS $$
   SELECT EXISTS (SELECT 1 FROM jsonb_path_query(j, 'strict $.**') AS v
                   WHERE jsonb_typeof(v) IN ('string', 'number')
                     AND pg_temp.mentions(v #>> '{}'))
+      OR EXISTS (SELECT 1 FROM jsonb_path_query(j, 'strict $.**') AS v,
+                               jsonb_object_keys(CASE WHEN jsonb_typeof(v) = 'object' THEN v ELSE '{}'::jsonb END) AS k
+                  WHERE pg_temp.mentions(k))
 $$;
 
 -- A map without the entries that carry the person, or a list without the
