@@ -664,6 +664,12 @@ async def compact_agent_history(
     if not old:
         return history
     summary = await summarize(old)
+    return [*memory_note_pair(summary), *tail]
+
+
+def memory_note_pair(summary: str) -> list[ModelMessage]:
+    """The two messages a compaction folds history into: the note, and the
+    agent's acknowledgement that the note is its own memory."""
     return [
         ModelRequest(
             parts=[
@@ -684,7 +690,6 @@ async def compact_agent_history(
                 )
             ]
         ),
-        *tail,
     ]
 
 
