@@ -502,14 +502,16 @@ handler sweep re-arms it, one period plus 15 minutes later.
 Run this step and step 8 in **one** `psql` session: they share the
 temporary table and functions set up here, which vanish when the session
 ends. The setup starts by dropping its own leftovers, so it is safe to run
-again, and you must run it again if you reconnect.
+again, and you must run it again if you reconnect. In a fresh session those
+drops print `NOTICE: schema "pg_temp" does not exist, skipping`; that is
+expected.
 
 Setup. Add one `INSERT` per name noted in step 1:
 
 ```sql
 DROP FUNCTION IF EXISTS pg_temp.scrub_memory(json), pg_temp.scrub(json),
   pg_temp.hit(text), pg_temp.mentions(text);
-DROP TABLE IF EXISTS terms;
+DROP TABLE IF EXISTS pg_temp.terms;
 CREATE TEMP TABLE terms (did text, jq text, name text);
 INSERT INTO terms VALUES (:'did', NULL, NULL);
 \set name 'their_username'
@@ -525,12 +527,14 @@ CREATE FUNCTION pg_temp.hit(t text) RETURNS boolean LANGUAGE sql STABLE AS $$
 $$;
 
 -- Whether free text mentions the person: their id as a whole number, or one
--- of their names anywhere, ignoring case. Used for run errors and AI agent
--- sessions in step 8, where names stand inside sentences.
+-- of their names as a whole word, ignoring case. Used for run errors and AI
+-- agent sessions in step 8, where names stand inside sentences.
 CREATE FUNCTION pg_temp.mentions(t text) RETURNS boolean LANGUAGE sql STABLE AS $$
   SELECT EXISTS (SELECT 1 FROM pg_temp.terms
                   WHERE coalesce(t ~ ('(^|[^0-9])' || did || '([^0-9]|$)'), false)
-                     OR coalesce(strpos(lower(t), lower(name)) > 0, false))
+                     OR coalesce(lower(t) ~ ('(^|[^[:alnum:]_])'
+                          || regexp_replace(lower(name), '([^[:alnum:][:space:]])', '\\\1', 'g')
+                          || '($|[^[:alnum:]_])'), false))
 $$;
 
 -- A map without the entries that carry the person, or a list without the
@@ -576,7 +580,7 @@ progress cannot write its old copy of the memory back over the edit:
 
 ```sql
 BEGIN;
-DROP TABLE IF EXISTS paused;
+DROP TABLE IF EXISTS pg_temp.paused;
 CREATE TEMP TABLE paused AS
   SELECT 'channel' AS tier, id FROM channel_handlers
    WHERE enabled AND pg_temp.hit(memory::jsonb::text)
@@ -659,7 +663,7 @@ UNION ALL SELECT 'dead letters (delete)', count(*) FROM worker_dead_letters WHER
 UNION ALL SELECT 'job state (delete)', count(*) FROM worker_state
  WHERE key LIKE 'workers:jobs:%' AND pg_temp.hit(value::jsonb::text)
 UNION ALL SELECT 'run errors (clear)', count(*) FROM worker_events
- WHERE stream = 'workers:lifecycle' AND pg_temp.mentions(event::jsonb::text)
+ WHERE stream = 'workers:lifecycle' AND pg_temp.mentions(event::jsonb ->> 'error')
 UNION ALL SELECT 'archive events, all (expect 0)', count(*) FROM worker_archive_events
 UNION ALL SELECT 'webhook deliveries, all (expect 0)', count(*) FROM webhook_deliveries;
 ROLLBACK;
@@ -685,7 +689,7 @@ DELETE FROM worker_state
    AND (substr(key, 14) IN (SELECT job_id FROM gone_jobs) OR pg_temp.hit(value::jsonb::text))
    AND substr(key, 14) NOT IN (SELECT job_id FROM worker_queue);
 UPDATE worker_events SET event = jsonb_set(event::jsonb, '{error}', '"[removed]"')::json
- WHERE stream = 'workers:lifecycle' AND pg_temp.mentions(event::jsonb::text);
+ WHERE stream = 'workers:lifecycle' AND pg_temp.mentions(event::jsonb ->> 'error');
 -- stop here: compare each count with the dry run (job state may be lower: the
 -- state of a job still in the queue, such as a timer due later, stays with its
 -- job), then run COMMIT; or ROLLBACK;
@@ -725,7 +729,7 @@ progress.
 Collect the sessions. Run the last three `INSERT`s only with `uid` set:
 
 ```sql
-DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS pg_temp.sessions;
 CREATE TEMP TABLE sessions (session_id text PRIMARY KEY);
 INSERT INTO sessions SELECT substr(key, 10) FROM worker_state
  WHERE key LIKE 'runstate:%' AND pg_temp.mentions(value::jsonb::text) ON CONFLICT DO NOTHING;
@@ -759,8 +763,11 @@ DELETE FROM worker_archive_snapshots WHERE key IN (SELECT 'runstate:' || session
 -- stop here: compare each count with the dry run, then run COMMIT; or ROLLBACK;
 ```
 
-A name matched anywhere can also match a common word or another member's
-name. If the session count is higher than you expect, stop and ask a
+A name is matched as a whole word, so a name that is also a common word
+(`user`, `content`, `agents`) matches sessions that have nothing to do with
+the person. Before deleting, compare the session count with how many
+sessions you would expect (the person's Resources questions and blog runs
+that drew on their conversations); if it is much higher, stop and ask a
 developer.
 
 ## 9. Clear Redis caches
@@ -786,7 +793,8 @@ are not done, and the member is not told it is complete. If
 the report is still not clean as the 30 days run out, tell the member what is
 left and that the request is open.
 
-1. Rerun the dry-run counts of steps 3, 7 and 8. Every deleted store reads
+1. Rerun the dry-run counts of steps 3, 7 and 8 (for agent sessions, rerun
+   the collect block first, or the count shows the old list). Every deleted store reads
    0; the anonymise rows read 0; moderation is unchanged; the agent purge rows
    match the purge report. Then, for each name (`\set name` as in step 6),
    count it inside longer text in automation memory. Judge any hit by reading
