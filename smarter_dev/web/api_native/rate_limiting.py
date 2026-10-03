@@ -12,9 +12,16 @@ Behavior kept byte-compatible with the legacy implementation:
 - Three windows per API key: 10 req/s, 180 req/min, 2500 req/15 min — the
   fixed values the legacy ``AuthenticatedKey`` applied to Skrift-native keys
   (the ``skrift.api_keys`` table carries no per-window limits).
-- Usage counting is DB-backed: ``security_logs`` rows with
-  ``action == "api_request"`` for the key's id, and every allowed request
-  logs one such row (the counter's own data source).
+- Usage counting is a sliding window in Redis: one sorted set per API key
+  holding the times of its allowed requests over the last 15 minutes, checked
+  and updated by one Lua script so concurrent requests cannot both take the
+  last slot. Blocked requests are not counted. Nothing is written to the
+  database for an allowed request (#81); ``security_logs`` gets a row only
+  when a window is exceeded.
+- Redis unreachable: the request is let through without rate-limit headers
+  and a warning is logged. The only key holder is the bot's own service key,
+  so failing open costs nothing in abuse protection while failing closed
+  would take every bot feature that calls the API down with Redis.
 - Success responses carry ``x-ratelimit-limit/remaining/reset`` plus the
   per-window ``-second`` / ``-minute`` / ``-15min`` variants.
 - Exceeding any window answers 429 with the legacy ``{"detail": ...}`` body,
@@ -35,6 +42,7 @@ from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
 from uuid import UUID
+from uuid import uuid4
 
 from litestar import Request
 from litestar.datastructures import MutableScopeHeaders
@@ -43,16 +51,13 @@ from litestar.types import Message
 from litestar.types import Receive
 from litestar.types import Scope
 from litestar.types import Send
+from redis.asyncio import Redis
+from redis.exceptions import RedisError
 from skrift.db.services import api_key_service as skrift_api_key_service
 from skrift.lib.client_ip import get_client_ip
-from sqlalchemy import and_
-from sqlalchemy import func
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.database import get_db_session_context
-from smarter_dev.shared.database import get_db_session_context
-from smarter_dev.web.models import SecurityLog
+from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.security_logger import get_security_logger
 
 logger = logging.getLogger(__name__)
@@ -112,23 +117,54 @@ def _next_tier_window(exceeded: RateLimitWindow) -> RateLimitWindow:
     return exceeded
 
 
-async def _usage_count_for_window(
-    api_key: RateLimitedKey,
-    session: AsyncSession,
-    window: RateLimitWindow,
-    current_time: datetime,
-) -> int:
-    """Count ``api_request`` security-log rows for the key within the window."""
-    window_start = current_time - timedelta(seconds=window.duration_seconds)
-    count_stmt = select(func.count(SecurityLog.id)).where(
-        and_(
-            SecurityLog.api_key_id == api_key.id,
-            SecurityLog.action == "api_request",
-            SecurityLog.timestamp >= window_start,
-        )
+# Checks every window strictest first and records the request only when all
+# of them have room, atomically. KEYS[1] is the key's sorted set (member per
+# allowed request, scored by its time in ms). ARGV: now ms, the new member,
+# the longest window in ms, then (window ms, limit) pairs strictest first.
+# Returns the count per window checked; counting stops at the first exceeded
+# window, like the per-window loop it replaced.
+_SLIDING_WINDOW_SCRIPT = """
+local now = tonumber(ARGV[1])
+local longest = tonumber(ARGV[3])
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', '(' .. (now - longest))
+local result = {}
+for i = 4, #ARGV, 2 do
+  local count = redis.call('ZCOUNT', KEYS[1], now - tonumber(ARGV[i]), '+inf')
+  table.insert(result, count)
+  if count >= tonumber(ARGV[i + 1]) then
+    return result
+  end
+end
+redis.call('ZADD', KEYS[1], now, ARGV[2])
+redis.call('PEXPIRE', KEYS[1], longest)
+return result
+"""
+
+
+def rate_limit_redis_key(api_key: RateLimitedKey) -> str:
+    """The sorted set holding one API key's recent allowed requests."""
+    return f"bot-api:rate-limit:{api_key.id}"
+
+
+async def _check_and_record(
+    redis: Redis, api_key: RateLimitedKey, current_time: datetime
+) -> list[int]:
+    """Run the sliding-window script; returns each window's prior count."""
+    now_ms = int(current_time.timestamp() * 1000)
+    window_args: list[int] = []
+    for window in RATE_LIMIT_WINDOWS:
+        window_args.extend((window.duration_seconds * 1000, window.limit))
+    longest_ms = max(window.duration_seconds for window in RATE_LIMIT_WINDOWS) * 1000
+    result = await redis.eval(
+        _SLIDING_WINDOW_SCRIPT,
+        1,
+        rate_limit_redis_key(api_key),
+        now_ms,
+        f"{now_ms}-{uuid4().hex}",
+        longest_ms,
+        *window_args,
     )
-    result = await session.execute(count_stmt)
-    return result.scalar() or 0
+    return [int(count) for count in result]
 
 
 def _success_headers(
@@ -195,28 +231,38 @@ class RateLimitDecision:
 
 async def check_rate_limits(
     api_key: RateLimitedKey,
-    session: AsyncSession,
     request: Request,
+    redis: Redis | None = None,
 ) -> RateLimitDecision:
-    """Check all windows (strictest first) and log the request if allowed."""
-    current_time = datetime.now(UTC)
-    remaining_by_window: list[tuple[RateLimitWindow, int]] = []
+    """Check all windows (strictest first) and count the request if allowed.
 
-    for window in RATE_LIMIT_WINDOWS:
-        usage_count = await _usage_count_for_window(
-            api_key, session, window, current_time
+    Fails open when Redis is unreachable: allowed, no headers, a warning.
+    """
+    current_time = datetime.now(UTC)
+    try:
+        counts = await _check_and_record(
+            redis or get_redis_client(), api_key, current_time
         )
+    except (RedisError, OSError) as redis_error:
+        logger.warning(
+            "Bot API rate limiting skipped, Redis unreachable: %s", redis_error
+        )
+        return RateLimitDecision(allowed=True, headers={})
+
+    remaining_by_window: list[tuple[RateLimitWindow, int]] = []
+    for window, usage_count in zip(RATE_LIMIT_WINDOWS, counts):
         if usage_count >= window.limit:
             remaining_by_window.append((window, 0))
             escalated_window = _next_tier_window(window)
-            await get_security_logger().log_rate_limit_exceeded(
-                session=session,
-                api_key=api_key,
-                request=request,
-                current_usage=usage_count,
-                limit=window.limit,
-                window=window.name,
-            )
+            async with get_db_session_context() as log_session:
+                await get_security_logger().log_rate_limit_exceeded(
+                    session=log_session,
+                    api_key=api_key,
+                    request=request,
+                    current_usage=usage_count,
+                    limit=window.limit,
+                    window=window.name,
+                )
             escalated_name = (
                 escalated_window.name if escalated_window != window else window.name
             )
@@ -236,9 +282,6 @@ async def check_rate_limits(
             )
         remaining_by_window.append((window, max(0, window.limit - usage_count)))
 
-    await get_security_logger().log_api_request(
-        session=session, api_key=api_key, request=request, success=True
-    )
     return RateLimitDecision(
         allowed=True,
         headers=_success_headers(remaining_by_window, current_time),
@@ -284,8 +327,7 @@ class MultiTierRateLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        async with get_db_session_context() as log_session:
-            decision = await check_rate_limits(api_key, log_session, request)
+        decision = await check_rate_limits(api_key, request)
 
         if not decision.allowed:
             await _send_rate_limited_response(send, decision)

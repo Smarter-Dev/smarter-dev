@@ -76,7 +76,7 @@ async def bot_api_auth_guard(
     and re-raises unchanged. Success-path per-request usage logging
     (``log_api_key_used``) is intentionally dropped: its only consumer was the
     legacy admin stats over the retired legacy key table, and the rate limiter
-    keeps its own ``api_request`` rows for the windows it counts.
+    counts requests in Redis.
     """
     from smarter_dev.web.security_logger import get_security_logger
 
