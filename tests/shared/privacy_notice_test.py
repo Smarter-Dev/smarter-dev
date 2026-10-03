@@ -36,25 +36,39 @@ def test_the_short_version_carries_the_required_statements():
     assert "never resets" in points
     assert "Moderation history is kept" in points
     assert "anonymised" in points
+    assert "including from the chat bot's memories" in points
     assert "direct message to the Smarter Dev admin" in points
 
 
-def test_the_notice_never_promises_what_does_not_exist(notice):
+def test_the_notice_does_not_describe_an_opt_out_as_available(notice):
     lowered = notice.lower()
-    assert "no opt-out or automatic deletion yet" in lowered
-    assert "opt out of" not in lowered
+    assert "once the chat bot has an opt-out" in lowered
+    assert "you can opt out" not in lowered
     assert "forget" not in lowered
     assert "blank" not in lowered
     assert "the bot never resets them" in lowered
 
 
-def test_the_notice_says_what_a_deletion_request_cannot_remove_yet(notice):
-    cannot = notice.split("**What we cannot remove yet.**", 1)[1]
-    cannot = cannot.split("##", 1)[0]
-    assert "What the chat bot remembers about you" in cannot
-    assert "summaries" in cannot
-    assert "logs, backups" in cannot.lower()
-    assert "proactive agent's history has no timer" in cannot
+def test_a_deletion_request_removes_the_person_from_the_chat_bot(notice):
+    deleted = notice.split("**What we delete.**", 1)[1].split("**", 1)[0]
+    assert "removes you from its memories" in deleted
+    assert "conversation summaries" in deleted
+    assert "cannot remove" not in notice.lower()
+
+
+def test_bytes_transfers_are_anonymised_not_deleted(notice):
+    deleted = notice.split("**What we delete.**", 1)[1].split("**What we keep", 1)[0]
+    assert "bytes transfers you sent or received stay" in deleted
+    assert "username and the reason removed" in deleted
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="short-lived copy wording is on hold for Zech (#71); remove this "
+    "marker together with the placeholders",
+)
+def test_no_placeholder_is_left_in_the_notice(notice):
+    assert "[PLACEHOLDER" not in notice
 
 
 def test_the_notice_names_what_a_deletion_keeps(notice):

@@ -1,4 +1,4 @@
-Smarter Dev runs a Discord server, a Discord bot and the smarter.dev website. This notice says what we store about you in each of them, why, for how long, who else handles it, and how to ask us to delete it. It describes what the software does today. Where something is not built yet, it says so.
+Smarter Dev runs a Discord server, a Discord bot and the smarter.dev website. This notice says what we store about you in each of them, why, for how long, who else handles it, and how to ask us to delete it.
 
 ## The short version
 
@@ -6,7 +6,7 @@ Smarter Dev runs a Discord server, a Discord bot and the smarter.dev website. Th
 - The chat bot keeps permanent memories about the people it talks with, written in its own words and naming people by username and Discord ID. It never resets them.
 - Moderation history is kept, even after you ask us to delete your data.
 - Billing records are kept in anonymised form.
-- To have your data deleted, send a direct message to the Smarter Dev admin on our Discord server. There is no opt-out or automatic deletion yet.
+- To have your data deleted, including from the chat bot's memories, send a direct message to the Smarter Dev admin on our Discord server.
 
 ## Who we are
 
@@ -18,24 +18,24 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a dire
 
 - The chat agent's conversation history expires 2 hours after the conversation goes quiet. Older parts of a long conversation are folded into an AI-written summary.
 - The proactive agent, which watches some channels and joins in when it has something useful to say, keeps a running history of what it has read. That history has no time limit. When it grows large, older parts are folded into an AI-written summary.
-- Messages waiting to be handed to the proactive agent are normally cleared within 48 hours. A few queues have no time limit. The proactive agent also runs as a separate service that reads channel messages from Discord directly and keeps its own copy of its history.
-- Error records that may quote a message are cleared after 48 hours. Background jobs for server automations can hold the message that triggered them for up to 90 days.
+- The proactive agent also runs as a separate service that reads channel messages from Discord directly and keeps its own copy of its history.
+- **[PLACEHOLDER: short-lived copies. Wording on hold for Zech's decision on the 48-hour and 90-day copies; see #71. Do not publish with this line.]**
 
-**The chat bot's memories.** The chat bot keeps a permanent memory for each server: what it knows about the people there, running jokes, opinions it has formed, how it should behave there and who it is there. It writes these in its own words, not as quotes, and it is told not to keep anything private, sensitive or shared in confidence. It names people by username and Discord ID. It also keeps short notes during conversations, which are folded into the memory overnight, and the last five versions of each memory. These memories are permanent, the bot never resets them, and only the bot edits them.
+**The chat bot's memories.** The chat bot keeps a permanent memory for each server: what it knows about the people there, running jokes, opinions it has formed, how it should behave there and who it is there. It writes these in its own words, not as quotes, and it is told not to keep anything private, sensitive or shared in confidence. It names people by username and Discord ID. It also keeps short notes during conversations, which are folded into the memory overnight, and the last five versions of each memory. These memories are permanent and the bot never resets them. Only the bot edits them, including when it removes someone who asked us to delete their data.
 
-**Records of what the AI did.** When an AI feature answers or acts, we keep a record of it: who and which channel it concerned (IDs and usernames), when, which model, how much it cost and what it decided. Text the AI wrote, such as its replies and summaries, is cleared from these records after 48 hours. The IDs, usernames and numbers stay.
+**Records of what the AI did.** When an AI feature answers or acts, we keep a record of it: who and which channel it concerned (IDs and usernames), when, which model, how much it cost and what it decided. The IDs, usernames and numbers stay. **[PLACEHOLDER: short-lived copies. Wording on hold for Zech's decision on the 48-hour and 90-day copies; see #71. Do not publish with this line.]**
 
-**Moderation.** We keep a permanent record of every moderation action: who it concerned, who took it, the reason, how long it lasted and when. The bot also posts moderation actions to the server's moderation log channels. Moderation history is kept even after you ask us to delete your data.
+**Moderation.** We keep a permanent record of every moderation action taken on a member: who it concerned, who took it, the reason, how long it lasted and when. The bot also posts these actions to the server's moderation log channel. Moderation history is kept even after you ask us to delete your data.
 
 **Games and community features.** Your bytes balance and the bytes you have sent and received (with the usernames and reasons), your squad membership, your quest and challenge submissions, and the dates of your first and latest message in each server. Leaving a server removes your bytes balance and squad membership there. The rest is kept until you ask us to delete it.
 
-**Commands and automations.** Questions you ask with `/help` and the bot's answers (the text is cleared after 48 hours; who asked, and when, stays), message counts used for rate limits (kept for a few hours), and automations that server admins set up.
+**Commands and automations.** Questions you ask with `/help` and the bot's answers, who asked and when, message counts used for rate limits (kept for a few hours), and automations that server admins set up.
 
 ## What the website stores
 
 **Your account.** You sign in with Discord. We receive your Discord ID, username, avatar and email address, and keep them with your account and profile. You stay signed in for up to 30 days.
 
-**Chat, search and the AI features.** Your chat conversations, the files you attach, and the AI's answers and summaries are kept until you delete them or your account. Searches you make from your dashboard (the query, the results and the answer) are kept. Search links you share let other people search, and their searches are kept for 30 minutes. Search previews the bot links to in Discord are deleted after 48 hours. Questions you ask about our resources are kept with your account.
+**Chat, search and the AI features.** Your chat conversations, the files you attach, and the AI's answers and summaries are kept until you delete them or your account. Searches you make from your dashboard (the query, the results and the answer) are kept. Search links you share let other people search, and their searches are kept for 30 minutes. Questions you ask about our resources are kept with your account.
 
 **Education products.** We are building education products, Gym and Labs. They are not open yet. Before they collect anything new, we will update this notice to say what they store.
 
@@ -43,7 +43,7 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a dire
 
 **Email.** If you sign up for a campaign or waitlist, we keep your email address or Discord ID and send a confirmation email.
 
-**Security.** For security and abuse prevention we log your IP address, browser and the pages you request. These logs are deleted after 90 days.
+**Security.** For security and abuse prevention we log your IP address, browser and the pages you request. **[PLACEHOLDER: short-lived copies. Wording on hold for Zech's decision on the 48-hour and 90-day copies; see #71. Do not publish with this line.]**
 
 ## Who else handles your data
 
@@ -52,19 +52,21 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a dire
 - **Payments.** Polar.
 - **Discord.** Everything you post on Discord is also held by Discord under its own privacy policy.
 
-We keep server logs, which can contain IDs and sometimes text, and database backups. We cannot yet delete one person's data from logs or backups.
+**[PLACEHOLDER: short-lived copies. Wording on hold for Zech's decision on the 48-hour and 90-day copies; see #71. Do not publish with this line.]**
 
 ## Deleting your data
 
-Send a direct message to the Smarter Dev admin on our Discord server. We check that you own the Discord account, then an admin deletes your data by hand.
+Send a direct message to the Smarter Dev admin on our Discord server. We check that you own the Discord account, then an admin deletes your data.
 
-**What we delete.** Your bytes balance and every bytes transfer you sent or received, your squad memberships, quest and challenge submissions, activity dates, forum subscriptions and `/help` records, and your website account with its chat conversations, attachments, searches and profile. Security log entries under your account are deleted too. Records of what the AI did that other people share, like a chat the bot had with several people, are kept, and we remove your ID and username where they record you as the person who started it.
+**What we delete.** Everything the chat bot holds about you: it removes you from its memories, rewrites its conversation summaries without you and drops the conversation history that holds your messages. Your bytes balance, your squad memberships, quest and challenge submissions, activity dates, forum subscriptions and `/help` records, and your website account with its chat conversations, attachments, searches and profile. Security log entries under your account are deleted too. Records that you share with other people are kept with you removed: bytes transfers you sent or received stay in the other member's history with your ID, username and the reason removed, and records of a chat the bot had with several people no longer say you started it.
 
-**What we keep.** Moderation history. Billing records, in anonymised form. A bare record that your request was completed, with nothing that identifies you.
+**What we keep.** Moderation history. Billing records, in anonymised form. A bare record that your request was completed, with nothing that identifies you. Copies held by AI providers and Discord are governed by their own terms.
 
-**What we cannot remove yet.** What the chat bot remembers about you, and the summaries in its working history. These are written as shared prose for the whole server and are not yet linked to the people they came from, so we cannot remove one person from them without resetting the bot, which we do not do. We are building a way for the bot to remove everything tied to your ID from its own memories. The same goes for the proactive agent's history and for records that mention your ID inside other people's records. Some copies we cannot reach by hand clear themselves on a timer, from 2 hours for the chat agent's conversation history to 90 days for background job records. The proactive agent's history has no timer. Logs, backups and copies held by AI providers or Discord are not edited.
+Once the chat bot has an opt-out, anyone whose data we deleted stays opted out of it.
 
-Deleting your website account from your account settings removes the account and its chat conversations and attachments straight away. It does not remove anything the Discord bot stores, searches you made from your dashboard, or the chat bot's memories. For those, message the admin.
+**[PLACEHOLDER: short-lived copies. Wording on hold for Zech's decision on the 48-hour and 90-day copies; see #71. Do not publish with this line.]**
+
+Deleting your website account from your account settings removes the account and its chat conversations and attachments straight away. It does not remove anything the Discord bot stores, the chat bot's memories, or searches you made from your dashboard. For those, message the admin.
 
 ## Changes
 
