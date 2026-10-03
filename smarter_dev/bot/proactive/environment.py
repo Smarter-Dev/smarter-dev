@@ -31,7 +31,10 @@ class ChannelEnvironment:
     bot_user_id: str
 
     def __post_init__(self) -> None:
-        self._by_id = {message.id: message for message in self.visible}
+        # Blocked placeholders carry no id and are never addressable.
+        self._by_id = {
+            message.id: message for message in self.visible if not message.blocked
+        }
         self._tags = speaker_tags([m.to_record() for m in self.visible])
 
     def lookup(self, message_id: str) -> ChannelMessage | None:
@@ -42,14 +45,20 @@ class ChannelEnvironment:
     ) -> list[ChannelMessage]:
         pool = self.visible
         if before_id is not None:
-            positions = [i for i, m in enumerate(pool) if m.id == before_id]
+            positions = [
+                i for i, m in enumerate(pool) if m.id == before_id and not m.blocked
+            ]
             pool = pool[: positions[0]] if positions else []
         return pool[-limit:]
 
     def slice_around(
         self, message_id: str, *, radius: int
     ) -> list[ChannelMessage]:
-        positions = [i for i, m in enumerate(self.visible) if m.id == message_id]
+        positions = [
+            i
+            for i, m in enumerate(self.visible)
+            if m.id == message_id and not m.blocked
+        ]
         if not positions:
             return []
         position = positions[0]

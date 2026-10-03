@@ -29,6 +29,7 @@ from smarter_dev.bot.agents.chat_models import (
 )
 from smarter_dev.bot.agents.url_registry import register_escaped_url
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
+from smarter_dev.shared.privacy_purge import BLOCKED_PLACEHOLDER
 
 # Wire model id -> human label, for the per-turn ``<your-model>`` metadata tag.
 _MODEL_LABEL_BY_ID: dict[str, str] = {
@@ -289,6 +290,11 @@ def _render_memory_chunks(
 
 
 def _render_message(msg: Message, *, me: Me, authors_by_id: dict[str, Author]) -> str:
+    """One ``<message>`` tag; the single place a Discord message is rendered
+    for the chat agent, so a blocked author's message becomes exactly
+    ``[BLOCKED BY USER]`` here and nowhere else."""
+    if msg.blocked:
+        return BLOCKED_PLACEHOLDER
     is_self = msg.author_id == me.user_id
     attrs: dict[str, str | bool | None] = {
         "id": msg.message_id,

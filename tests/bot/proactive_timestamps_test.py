@@ -29,7 +29,7 @@ def test_transcript_includes_message_sent_time():
         "reply_to_id": None, "content": "hello",
     }
     assert render_transcript_line(record, {"456": "A"}) == (
-        "[2026-09-01T19:32:03Z] [id=123] A·Alice: hello"
+        "[2026-09-01T19:32:03Z] [id=123] A·Alice (uid=456): hello"
     )
 
 

@@ -193,6 +193,8 @@ class TestRedactChatAgentMessages:
             "reply_to_attachments",
             "sent_at",
             "mentions_bot",
+            # A flag, no content: a blocked author's message is already empty.
+            "blocked",
         }
 
 
