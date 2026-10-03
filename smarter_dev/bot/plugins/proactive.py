@@ -923,6 +923,21 @@ async def _run_producer_once(
     )
 
 
+async def _guild_privacy_locked(run: ProactiveRuntime, guild_id: str) -> bool:
+    """Whether a privacy purge holds the guild's lock (purge contract v1)."""
+    from smarter_dev.bot.privacy.purge import privacy_lock_key
+
+    redis_client = run.bot.d.get("chat_memory_redis")
+    if redis_client is None:
+        return False
+    try:
+        return bool(await redis_client.exists(privacy_lock_key(guild_id)))
+    except RedisError:
+        # Cannot tell: wait rather than risk writing over a purge.
+        logger.warning("privacy lock check failed guild=%s", guild_id)
+        return True
+
+
 async def _consume_guild_once(state: GuildAgentState) -> None:
     """Drain one guild wake and route every action to its named channel."""
     run = _runtime()
@@ -933,6 +948,13 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
             "proactive wake deferred guild=%s: blocked-users list not loaded",
             state.guild_id,
         )
+        await asyncio.sleep(SETTINGS_RETRY_BACKOFF_SECONDS)
+        return
+    if await _guild_privacy_locked(run, state.guild_id):
+        # A purge (here or in the worker) is rewriting this guild's history;
+        # the wake waits so it neither reads nor writes back the old copy.
+        logger.info("proactive wake deferred guild=%s: privacy purge running",
+                    state.guild_id)
         await asyncio.sleep(SETTINGS_RETRY_BACKOFF_SECONDS)
         return
     service = run.settings_service()

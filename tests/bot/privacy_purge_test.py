@@ -454,7 +454,8 @@ async def test_second_purge_is_safe(world):
     await _publish(world.redis, _command())
     await _consume_once(world)
 
-    assert [ack.outcome for _run, ack in world.acks] == ["purged", "purged"]
+    # A new request finds every store already clean: nothing is re-folded.
+    assert [ack.outcome for _run, ack in world.acks] == ["purged", "unchanged"]
     _assert_clean(_prompt_text(await world.memory.read_history(LIVE_CHANNEL)))
     _assert_clean(_prompt_text(world.guild_state.agent_runner.history))
     assert await world.redis.get(purge_epoch_key(GUILD)) == b"2"
@@ -549,6 +550,181 @@ async def test_logs_never_carry_the_target(world, caplog):
 
     assert KAI not in caplog.text
     assert "kai" not in caplog.text.lower()
+
+
+def _calls(world, marker: str) -> int:
+    return sum(1 for call in world.summarizer.calls if marker in call)
+
+
+CHAT_MARK = "working memory for one"
+PROACTIVE_MARK = "being compacted because a person asked"
+
+
+async def test_unattributed_history_is_folded_once_per_request(world):
+    """Lines rendered before uid= existed hold kai only as "kaizen", a nickname
+    the purge does not know: they force one fold, and a second run of the
+    same request leaves the result alone (no model call, no write)."""
+    legacy_lines = [
+        ModelRequest(
+            parts=[
+                UserPromptPart(
+                    "[2026-09-01T10:00:00Z] [id=5] A·nia: tokio?\n"
+                    "[2026-09-01T10:01:00Z] [id=6] B·kaizen: my private numbers"
+                )
+            ]
+        ),
+        ModelResponse(parts=[TextPart("noted")]),
+    ]
+    await world.store.write_guild(int(GUILD), legacy_lines)
+    world.guild_state.agent_runner.history = list(legacy_lines)
+    chat_legacy = [
+        ModelRequest(
+            parts=[UserPromptPart('<message id="7">\nkaizen: secret\n</message>')]
+        ),
+        ModelResponse(parts=[TextPart("ok")]),
+    ]
+    for channel in (LIVE_CHANNEL, STORED_CHANNEL, UNPLACED_CHANNEL):
+        await world.memory.write_history(channel, chat_legacy)
+        await world.redis.delete(
+            f"chat_agent:{channel}:topic", f"chat_agent:{channel}:notes"
+        )
+    await world.redis.delete("proactive:10:history")
+    payload = _command()
+
+    await _publish(world.redis, payload)
+    await _consume_once(world)
+
+    guild_text = _prompt_text(await world.store.read_guild(int(GUILD)))
+    assert "kaizen" not in guild_text and NIA_NOTE in guild_text
+    assert "kaizen" not in _prompt_text(await world.memory.read_history(LIVE_CHANNEL))
+    assert _calls(world, PROACTIVE_MARK) == 1
+    assert _calls(world, CHAT_MARK) == 3
+
+    before = await _snapshot(world.redis)
+    calls_before = len(world.summarizer.calls)
+    await _publish(world.redis, {**payload, "run_id": str(uuid4())})
+    await _consume_once(world)
+
+    assert len(world.summarizer.calls) == calls_before
+    assert await _snapshot(world.redis) == before
+    first, second = world.acks
+    assert second[0] != first[0]  # re-posted under the new run id
+    assert second[1] == first[1]
+
+
+async def test_attributed_history_without_target_is_left_alone(world):
+    clean = [
+        ModelRequest(
+            parts=[
+                UserPromptPart(
+                    f"[2026-10-03T10:00:00Z] [id=5] A·nia (uid={NIA}): tokio?"
+                )
+            ]
+        ),
+        ModelResponse(parts=[TextPart("answered nia")]),
+    ]
+    await world.store.write_guild(int(GUILD), clean)
+    world.guild_state.agent_runner.history = list(clean)
+    raw_before = await world.redis.get(f"proactive:guild-history:{GUILD}")
+    await _publish(world.redis, _command())
+
+    await _consume_once(world)
+
+    assert await world.redis.get(f"proactive:guild-history:{GUILD}") == raw_before
+    assert world.guild_state.agent_runner.history == clean
+    assert _calls(world, PROACTIVE_MARK) == 1  # only the legacy channel key
+
+
+async def test_redelivery_after_failed_ack_reposts_without_refolding(world):
+    posted = []
+
+    async def flaky(run_id, ack):
+        if not posted:
+            posted.append(None)
+            raise ConnectionError("web down")
+        world.acks.append((run_id, ack))
+        return True
+
+    world.deps.post_ack = flaky
+    stream_id = await _publish(world.redis, _command())
+    await _consume_once(world)
+    assert await _pending(world.redis) == 1
+    calls = len(world.summarizer.calls)
+
+    entries = await world.redis.xrange(PURGE_STREAM)
+    await purge.process_entry(world.deps, stream_id, entries[0][1])
+
+    assert len(world.summarizer.calls) == calls
+    assert [ack.outcome for _run, ack in world.acks] == ["purged"]
+    assert await _pending(world.redis) == 0
+    ttl = await world.redis.ttl(purge.purge_done_key(_request_id(entries)))
+    assert 29 * 24 * 3600 < ttl <= 30 * 24 * 3600
+
+
+def _request_id(entries) -> str:
+    return json.loads(entries[0][1][b"payload"])["request_id"]
+
+
+async def test_purge_waits_for_a_foreign_privacy_lock(world, monkeypatch):
+    lock = purge.privacy_lock_key(GUILD)
+    await world.redis.set(lock, "worker-token", ex=600)
+    monkeypatch.setattr(purge, "PRIVACY_LOCK_WAIT_SECONDS", 0.05)
+    monkeypatch.setattr(purge, "PRIVACY_LOCK_POLL_SECONDS", 0.01)
+    guild_before = await world.redis.get(f"proactive:guild-history:{GUILD}")
+    await _publish(world.redis, _command())
+
+    await _consume_once(world)
+
+    _run, ack = world.acks[0]
+    assert ack.outcome == "failed" and "PrivacyLockBusy" in ack.detail
+    assert await world.redis.get(f"proactive:guild-history:{GUILD}") == guild_before
+    assert await world.redis.get(lock) == b"worker-token"  # never released
+
+
+async def test_purge_takes_and_releases_its_own_privacy_lock(world):
+    lock = purge.privacy_lock_key(GUILD)
+    seen = []
+    original = world.deps.proactive_model
+
+    def watching_model():
+        seen.append(asyncio.get_event_loop().create_task(world.redis.ttl(lock)))
+        return original()
+
+    world.deps.proactive_model = watching_model
+    await _publish(world.redis, _command())
+
+    await _consume_once(world)
+
+    assert [await task for task in seen][0] > 0  # held while folding
+    assert await world.redis.get(lock) is None
+
+
+async def test_embedded_wake_waits_while_a_purge_holds_the_lock(world, monkeypatch):
+    world.run.bot.d["chat_memory_redis"] = world.redis
+    monkeypatch.setattr(proactive, "runtime", world.run)
+    monkeypatch.setattr(proactive, "SETTINGS_RETRY_BACKOFF_SECONDS", 0)
+    await world.redis.set(purge.privacy_lock_key(GUILD), "worker-token", ex=600)
+    listed = []
+    world.settings.list_enabled_channels = lambda guild_id: listed.append(guild_id)
+    queued = list(world.guild_state.queue.items)
+
+    await proactive._consume_guild_once(world.guild_state)
+
+    assert listed == []  # the wake never started
+    assert world.guild_state.queue.items == queued
+
+
+async def test_dropped_entries_are_deleted_from_the_stream(world):
+    async def unknown(run_id, ack):
+        return False
+
+    world.deps.post_ack = unknown
+    # Both before one read: fakeredis can reuse an emptied stream's last id.
+    await _publish(world.redis, "not json kai")
+    await _publish(world.redis, _command())
+    await _consume_once(world)
+
+    assert await world.redis.xlen(PURGE_STREAM) == 0
 
 
 def test_plugin_wires_live_bot_into_purge_deps():
