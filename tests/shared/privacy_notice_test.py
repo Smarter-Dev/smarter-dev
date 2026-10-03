@@ -35,9 +35,9 @@ def test_the_short_version_carries_the_required_statements():
     assert "permanent memories" in points
     assert "never resets" in points
     assert "Moderation history is kept" in points
-    assert "anonymised" in points
+    assert "only anonymous usage and cost records stay" in points
     assert "including from the chat bot's memories" in points
-    assert "direct message to the Smarter Dev admin" in points
+    assert "send a direct message to" in points
 
 
 def test_the_notice_does_not_describe_an_opt_out_as_available(notice):
@@ -59,8 +59,13 @@ def test_a_deletion_request_removes_the_person_from_the_chat_bot(notice):
 def test_a_deleted_person_stays_on_the_chat_bots_blocked_list(notice):
     kept = notice.split("**What we keep.**", 1)[1].split("\n\n", 1)[0]
     assert "chat bot's blocked list" in kept
-    assert "`[BLOCKED BY USER]`" in kept
-    assert "does not respond" in kept
+    assert "reach the chat bot only as `[BLOCKED BY USER]`" in kept
+    assert "does not respond to you" in kept
+    assert "never reads" not in notice
+
+
+def test_the_notice_says_the_blocked_list_covers_the_chat_bot_only(notice):
+    assert "The blocked list covers the chat bot only" in notice
 
 
 def test_bytes_transfers_are_anonymised_not_deleted(notice):
@@ -81,7 +86,7 @@ def test_no_placeholder_is_left_in_the_notice(notice):
 def test_the_notice_names_what_a_deletion_keeps(notice):
     kept = notice.split("**What we keep.**", 1)[1].split("**", 1)[0]
     assert "Moderation history" in kept
-    assert "anonymised" in kept
+    assert "Anonymous usage and cost records" in kept
     assert "completed" in kept
 
 

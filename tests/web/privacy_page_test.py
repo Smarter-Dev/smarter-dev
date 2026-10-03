@@ -21,6 +21,7 @@ from litestar.template.config import TemplateConfig
 from litestar.testing import TestClient
 from skrift.markdown import render_markdown
 
+from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.privacy_notice import PRIVACY_PATH
 from smarter_dev.shared.privacy_notice import short_version
 from smarter_dev.web.privacy_controller import privacy_notice
@@ -44,7 +45,8 @@ def _environment() -> Environment:
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
+    monkeypatch.setattr(get_settings(), "site_base_url", "https://smarter.dev")
     app = Litestar(
         route_handlers=[privacy_notice],
         middleware=[CookieBackendConfig(secret=b"0" * 16).middleware],
@@ -81,8 +83,8 @@ def test_the_page_shows_the_whole_notice(client):
         assert heading in text
     assert "permanent" in text
     assert "Moderation history is kept" in text
-    assert "anonymised" in text
-    assert "direct message to the Smarter Dev admin" in text
+    assert "anonymous usage and cost records" in text
+    assert "direct message to" in text
 
 
 def test_the_short_version_on_the_page_is_the_one_the_command_quotes(client):

@@ -86,7 +86,9 @@ Run the counts and keep the numbers in the receipt note. Nothing changes.
 ```sql
 BEGIN READ ONLY;
 SELECT 'bytes_balances' AS store, count(*) FROM bytes_balances WHERE user_id = :'did'
-UNION ALL SELECT 'bytes_transactions (anonymise)', count(*) FROM bytes_transactions WHERE giver_id = :'did' OR receiver_id = :'did'
+UNION ALL SELECT 'bytes_transactions (delete, no other member)', count(*) FROM bytes_transactions WHERE (giver_id = :'did' AND receiver_id IN ('SYSTEM', 'DELETED')) OR (receiver_id = :'did' AND giver_id IN ('SYSTEM', 'DELETED'))
+UNION ALL SELECT 'bytes_transactions (anonymise as giver)', count(*) FROM bytes_transactions WHERE giver_id = :'did' AND receiver_id NOT IN ('SYSTEM', 'DELETED')
+UNION ALL SELECT 'bytes_transactions (anonymise as receiver)', count(*) FROM bytes_transactions WHERE receiver_id = :'did' AND giver_id NOT IN ('SYSTEM', 'DELETED')
 UNION ALL SELECT 'squad_memberships', count(*) FROM squad_memberships WHERE user_id = :'did'
 UNION ALL SELECT 'quest_submissions', count(*) FROM quest_submissions WHERE user_id = :'did'
 UNION ALL SELECT 'quest_progress', count(*) FROM quest_progress WHERE user_id = :'did'
@@ -100,9 +102,9 @@ UNION ALL SELECT 'scan_user_profiles', count(*) FROM scan_user_profiles WHERE us
 UNION ALL SELECT 'scan_service_usage', count(*) FROM scan_service_usage WHERE user_id = :'did'
 UNION ALL SELECT 'chat_agent_engagements (anonymise)', count(*) FROM chat_agent_engagements WHERE activation_user_id = :'did'
 UNION ALL SELECT 'usage_cost_rows (anonymise)', count(*) FROM usage_cost_rows WHERE discord_user_id = :'did'
-UNION ALL SELECT 'security_logs', count(*) FROM security_logs WHERE details LIKE '%' || :'did' || '%' OR event_metadata::text LIKE '%' || :'did' || '%'
-UNION ALL SELECT 'chat_agent_turns (anonymise)', count(*) FROM chat_agent_turns WHERE triggering_messages::text LIKE '%' || :'did' || '%' OR model_messages_delta::text LIKE '%' || :'did' || '%' OR agent_output::text LIKE '%' || :'did' || '%'
-UNION ALL SELECT 'handler_runs (anonymise)', count(*) FROM handler_runs WHERE trigger_context::text LIKE '%' || :'did' || '%'
+UNION ALL SELECT 'security_logs', count(*) FROM security_logs WHERE details ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR event_metadata::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
+UNION ALL SELECT 'chat_agent_turns (anonymise)', count(*) FROM chat_agent_turns WHERE triggering_messages::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR model_messages_delta::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR agent_output::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
+UNION ALL SELECT 'handler_runs (anonymise)', count(*) FROM handler_runs WHERE trigger_context::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
 -- kept:
 UNION ALL SELECT 'moderation_actions (kept)', count(*) FROM moderation_actions WHERE target_user_id = :'did' OR moderator_user_id = :'did'
 -- chat bot stores, purged by the agent in step 4; counted to compare after:
@@ -281,39 +283,67 @@ UPDATE chat_agent_turns SET
    triggering_messages = regexp_replace(triggering_messages::text, '(?<![0-9])' || :'did' || '(?![0-9])', '0', 'g')::json,
    model_messages_delta = regexp_replace(model_messages_delta::text, '(?<![0-9])' || :'did' || '(?![0-9])', '0', 'g')::json,
    agent_output = regexp_replace(agent_output::text, '(?<![0-9])' || :'did' || '(?![0-9])', '0', 'g')::json
- WHERE triggering_messages::text LIKE '%' || :'did' || '%'
-    OR model_messages_delta::text LIKE '%' || :'did' || '%'
-    OR agent_output::text LIKE '%' || :'did' || '%';
+ WHERE triggering_messages::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
+    OR model_messages_delta::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
+    OR agent_output::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)');
 UPDATE handler_runs SET
    trigger_context = regexp_replace(trigger_context::text, '(?<![0-9])' || :'did' || '(?![0-9])', '0', 'g')::json
- WHERE trigger_context::text LIKE '%' || :'did' || '%';
+ WHERE trigger_context::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)');
 -- Bot API calls that named the person in their path.
 DELETE FROM security_logs
- WHERE details LIKE '%' || :'did' || '%' OR event_metadata::text LIKE '%' || :'did' || '%';
+ WHERE details ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR event_metadata::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)');
 COMMIT;
 ```
 
-Then, for **each** name noted in step 1, set it and replace it where shared
-audit rows record it as an exact value. Run the dry-run line first; it shows
-how many rows each name touches, and a common word as a nickname is a reason
-to stop and ask a developer. The app may have written non-ASCII characters in
-this JSON as `\u` escapes, so a name with any non-ASCII character can match
-nothing here; if the count is 0 for such a name, ask a developer.
+Then, for **each** name noted in step 1 (username, display name, server
+nickname), set it and replace it where shared audit rows record it. The first
+query turns the name into the form the app's JSON holds (non-ASCII characters
+as `\u` escapes) and prints how many rows each update will touch. Stop and ask
+a developer when:
+
+- the forum count is higher than the number of forum posts the person made,
+  because another member shares that display name;
+- the name is a common word (`send`, `content`, `kind`), which can also be a
+  JSON key or an ordinary value;
+- the name contains an emoji or another character outside the Basic
+  Multilingual Plane, which the escape below does not produce.
 
 ```sql
 \set name 'their_username'
+SELECT string_agg(CASE WHEN ascii(c) < 128 THEN c
+                       ELSE '\u' || lpad(to_hex(ascii(c)), 4, '0') END, '' ORDER BY n) AS jq
+  FROM regexp_split_to_table(to_json(:'name'::text)::text, '') WITH ORDINALITY AS t(c, n) \gset
+SELECT substr(:'jq', 2, length(:'jq') - 2) AS jin \gset
+BEGIN READ ONLY;
+SELECT 'turns: name as a value' AS what, count(*) FROM chat_agent_turns WHERE strpos(triggering_messages::text, :'jq') > 0
+UNION ALL SELECT 'turns: name in prompt text', count(*) FROM chat_agent_turns
+ WHERE strpos(coalesce(model_messages_delta::text, ''), 'username=\"' || :'jin' || '\"') > 0
+    OR strpos(coalesce(model_messages_delta::text, ''), 'nickname=\"' || :'jin' || '\"') > 0
+UNION ALL SELECT 'handler runs', count(*) FROM handler_runs WHERE strpos(trigger_context::text, :'jq') > 0
+UNION ALL SELECT 'forum responses', count(*) FROM forum_agent_responses WHERE author_display_name = :'name';
+ROLLBACK;
 BEGIN;
-SELECT count(*) FROM chat_agent_turns WHERE triggering_messages::text LIKE '%' || to_json(:'name'::text)::text || '%';
 UPDATE chat_agent_turns
-   SET triggering_messages = replace(triggering_messages::text, to_json(:'name'::text)::text, '"[deleted user]"')::json
- WHERE triggering_messages::text LIKE '%' || to_json(:'name'::text)::text || '%';
+   SET triggering_messages = replace(triggering_messages::text, :'jq', '"[deleted user]"')::json
+ WHERE strpos(triggering_messages::text, :'jq') > 0;
+UPDATE chat_agent_turns
+   SET model_messages_delta = replace(replace(model_messages_delta::text,
+         'username=\"' || :'jin' || '\"', 'username=\"[deleted user]\"'),
+         'nickname=\"' || :'jin' || '\"', 'nickname=\"[deleted user]\"')::json
+ WHERE strpos(coalesce(model_messages_delta::text, ''), 'username=\"' || :'jin' || '\"') > 0
+    OR strpos(coalesce(model_messages_delta::text, ''), 'nickname=\"' || :'jin' || '\"') > 0;
 UPDATE handler_runs
-   SET trigger_context = replace(trigger_context::text, to_json(:'name'::text)::text, '"[deleted user]"')::json
- WHERE trigger_context::text LIKE '%' || to_json(:'name'::text)::text || '%';
+   SET trigger_context = replace(trigger_context::text, :'jq', '"[deleted user]"')::json
+ WHERE strpos(trigger_context::text, :'jq') > 0;
 UPDATE forum_agent_responses SET author_display_name = '[deleted user]'
  WHERE author_display_name = :'name';
+-- each UPDATE count must equal its line above; otherwise ROLLBACK
 COMMIT;
 ```
+
+The name in prompt text covers the `username="…"`, `reply-to-username="…"`
+and `nickname="…"` attributes the chat agent's transcript writes; a name the
+model repeated in its own words is not matched.
 
 The AI-written text in these rows (replies, topics, notes, forum replies) is
 covered by the short-lived copies placeholder above.
