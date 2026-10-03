@@ -240,13 +240,19 @@ async def world(monkeypatch):
         acks.append((run_id, ack))
         return True
 
+    registry = {LIVE_CHANNEL: engine}
+
     async def engines():
-        return [engine]
+        return list(registry.values())
+
+    async def engine_for(channel_id):
+        return registry.get(channel_id)
 
     deps = purge.PurgeDeps(
         redis=redis,
         chat_memory=memory,
         chat_engines=engines,
+        chat_engine=engine_for,
         channel_guild=guilds.get,
         proactive=lambda: run,
         chat_model=lambda: summarizer.model,
@@ -261,6 +267,7 @@ async def world(monkeypatch):
         run=run,
         guild_state=guild_state,
         engine=engine,
+        registry=registry,
         settings=settings,
         deps=deps,
         acks=acks,
@@ -458,7 +465,8 @@ async def test_second_purge_is_safe(world):
     assert [ack.outcome for _run, ack in world.acks] == ["purged", "unchanged"]
     _assert_clean(_prompt_text(await world.memory.read_history(LIVE_CHANNEL)))
     _assert_clean(_prompt_text(world.guild_state.agent_runner.history))
-    assert await world.redis.get(purge_epoch_key(GUILD)) == b"2"
+    # Nothing proactive was rewritten the second time: the epoch stays.
+    assert await world.redis.get(purge_epoch_key(GUILD)) == b"1"
     assert await _pending(world.redis) == 0
 
 
@@ -725,6 +733,154 @@ async def test_dropped_entries_are_deleted_from_the_stream(world):
     await _consume_once(world)
 
     assert await world.redis.xlen(PURGE_STREAM) == 0
+
+
+async def test_engine_created_mid_purge_does_not_write_old_history_back(
+    world, monkeypatch
+):
+    """STORED_CHANNEL has no engine when the purge starts. While the purge is
+    folding it, a mention creates one and its turn fires: the turn sees the
+    guild's chat privacy lock and defers without reading or writing history,
+    keeping its queue."""
+    from smarter_dev.bot.services import chat_engine as chat_engine_module
+    from smarter_dev.bot.services import chat_memory as chat_memory_module
+    from smarter_dev.bot.services.chat_engine import ChannelEngine
+
+    monkeypatch.setattr(chat_engine_module, "get_chat_memory", lambda: world.memory)
+    monkeypatch.setattr(chat_memory_module, "_memory", world.memory)
+    reads = []
+    original_read = world.memory.read_history
+
+    async def counting_read(channel_id):
+        reads.append(channel_id)
+        return await original_read(channel_id)
+
+    turns = []
+    original_model = world.deps.chat_model
+
+    def model_while_engine_appears():
+        if not turns and len(world.summarizer.calls) >= 1:
+            engine = ChannelEngine(
+                bot=SimpleNamespace(),
+                channel_id=STORED_CHANNEL,
+                guild_id=int(GUILD),
+                voice_send=None,
+                on_deactivate=None,
+            )
+            engine.queue.append(SimpleNamespace(message=SimpleNamespace(
+                id=77, author=SimpleNamespace(id=int(NIA), is_bot=False))))
+            world.registry[STORED_CHANNEL] = engine
+            world.memory.read_history = counting_read
+            turns.append(
+                asyncio.ensure_future(engine._run_once(first_activation=False))
+            )
+        return original_model()
+
+    world.deps.chat_model = model_while_engine_appears
+    await _publish(world.redis, _command())
+
+    await _consume_once(world)
+    consumed = await turns[0]
+    engine = world.registry[STORED_CHANNEL]
+    if engine._idle_task is not None:
+        engine._idle_task.cancel()
+
+    assert consumed is False  # deferred, not run
+    assert len(engine.queue) == 1  # nothing dropped
+    assert STORED_CHANNEL not in reads
+    for channel in (LIVE_CHANNEL, STORED_CHANNEL):
+        _assert_clean(_prompt_text(await world.memory.read_history(channel)))
+    lock = f"privacy:v1:chat-lock:{GUILD}"
+    assert await world.redis.get(lock) is None  # released
+
+
+async def test_history_changed_during_fold_is_folded_again(world):
+    """A concurrent writer replaces LIVE_CHANNEL's history mid-fold with new
+    turns that still name kai: the compare-and-set refuses the stale fold
+    and the purge folds the new history instead of overwriting it."""
+    newer = _chat_history(LIVE_CHANNEL) + [
+        ModelRequest(parts=[UserPromptPart(f"kai ({KAI}) is back")])
+    ]
+    original_model = world.deps.chat_model
+    swapped = []
+
+    async def swap():
+        await world.memory.write_history(LIVE_CHANNEL, newer)
+
+    def model_with_concurrent_write():
+        if not swapped:
+            swapped.append(asyncio.ensure_future(swap()))
+        return original_model()
+
+    world.deps.chat_model = model_with_concurrent_write
+    await _publish(world.redis, _command())
+
+    await _consume_once(world)
+
+    _assert_clean(_prompt_text(await world.memory.read_history(LIVE_CHANNEL)))
+    folded_live = [
+        c for c in world.summarizer.calls
+        if CHAT_MARK in c and f"(#{LIVE_CHANNEL})" in c
+    ]
+    assert len(folded_live) == 2
+    assert "is back" in folded_live[1]
+
+
+async def test_external_legacy_only_guild_is_left_to_the_worker(world, monkeypatch):
+    monkeypatch.setattr(world.run, "execution_mode_for", lambda guild_id: "external")
+    await world.redis.delete(f"chat_agent:{LIVE_CHANNEL}:history")
+    guild_key = f"proactive:guild-history:{GUILD}"
+    legacy_before = await world.redis.get(guild_key)
+    channel_before = await world.redis.get(f"proactive:{LIVE_CHANNEL}:history")
+    await _publish(world.redis, _command())
+
+    await _consume_once(world)
+
+    assert await world.redis.get(purge_epoch_key(GUILD)) is None
+    assert await world.redis.get(guild_key) == legacy_before
+    assert await world.redis.get(f"proactive:{LIVE_CHANNEL}:history") == channel_before
+    assert not _calls(world, PROACTIVE_MARK)
+
+
+async def test_unchanged_embedded_guild_gets_no_epoch_bump(world):
+    for key in (f"proactive:guild-history:{GUILD}", f"proactive:{LIVE_CHANNEL}:history"):
+        await world.redis.delete(key)
+    world.guild_state.agent_runner.history = []
+    await _publish(world.redis, _command())
+
+    await _consume_once(world)
+
+    assert await world.redis.get(purge_epoch_key(GUILD)) is None
+
+
+async def test_long_purge_keeps_its_entry_claimed(world, monkeypatch):
+    monkeypatch.setattr(purge, "CLAIM_RENEW_SECONDS", 0.01)
+    claims = []
+    original_xclaim = world.redis.xclaim
+
+    async def spy(*args, **kwargs):
+        claims.append((args, kwargs))
+        return await original_xclaim(*args, **kwargs)
+
+    monkeypatch.setattr(world.redis, "xclaim", spy)
+    async def slow_ack(run_id, ack):
+        await asyncio.sleep(0.08)
+        world.acks.append((run_id, ack))
+        return True
+
+    world.deps.post_ack = slow_ack
+    await _publish(world.redis, _command())
+
+    entries = await purge.read_batch(world.redis, "consumer-a", block_ms=10)
+    for stream_id, fields in entries:
+        await purge.process_entry(world.deps, stream_id, fields, consumer="consumer-a")
+
+    assert len(claims) >= 3
+    args, kwargs = claims[0]
+    assert args[2] == "consumer-a" and args[3] == 0 and kwargs == {"justid": True}
+    count = len(claims)
+    await asyncio.sleep(0.05)
+    assert len(claims) == count  # the renewer stopped with the entry
 
 
 def test_plugin_wires_live_bot_into_purge_deps():

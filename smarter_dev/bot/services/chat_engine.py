@@ -85,6 +85,7 @@ from smarter_dev.bot.services.chat_conversation_persistence import end_engagemen
 from smarter_dev.bot.services.chat_conversation_persistence import persist_error
 from smarter_dev.bot.services.chat_conversation_persistence import persist_turn
 from smarter_dev.bot.services.chat_conversation_persistence import start_engagement
+from smarter_dev.bot.services.chat_memory import chat_privacy_locked
 from smarter_dev.bot.services.chat_memory import get_chat_memory
 from smarter_dev.bot.services.default_model_override import read_default_model_override
 from smarter_dev.bot.services.exceptions import APIError
@@ -488,6 +489,17 @@ class ChannelEngine:
                     "loaded",
                     self.channel_id,
                 )
+                self._schedule_idle_fire()
+                return False
+            if await self._privacy_purge_running():
+                # A privacy purge is rewriting this guild's chat memory: read
+                # nothing now (a stale copy would be written back after the
+                # turn) and keep the queue for a turn once it is done.
+                logger.info(
+                    "Chat turn deferred for channel %s: privacy purge running",
+                    self.channel_id,
+                )
+                self._schedule_idle_fire()
                 return False
             turn_started_at = datetime.now(UTC)
             # Snapshot queue; new messages can keep arriving while we run.
@@ -2298,6 +2310,16 @@ class ChannelEngine:
             await self.bot.rest.create_message(self.channel_id, **kwargs)
         except Exception:
             log_exception(logger, "Failed to post notice message", level=logging.DEBUG)
+
+    async def _privacy_purge_running(self) -> bool:
+        try:
+            return await chat_privacy_locked(self.guild_id)
+        except RedisError:
+            # Cannot tell: wait rather than risk writing over a purge.
+            logger.warning(
+                "privacy lock check failed for channel %s", self.channel_id
+            )
+            return True
 
     async def _maybe_refire(self) -> None:
         async with self.queue_lock:
