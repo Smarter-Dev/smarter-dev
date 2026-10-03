@@ -54,6 +54,7 @@ def build_purge_deps(bot) -> PurgeDeps | None:
         redis=redis_client,
         chat_memory=ChatMemory(redis_client),
         chat_engines=get_chat_engine_registry().engines,
+        chat_engine=get_chat_engine_registry().get,
         channel_guild=channel_guild,
         # Read at call time: the proactive plugin may load after this one.
         proactive=lambda: proactive.runtime,

@@ -15,6 +15,7 @@ from smarter_dev.bot.privacy.blocked_users import BlockedUsersSnapshot
 from smarter_dev.bot.privacy.blocked_users import redact_blocked_mentions
 from smarter_dev.bot.privacy.blocked_users import refresh_loop
 from smarter_dev.bot.privacy.blocked_users import refresh_once
+from smarter_dev.bot.privacy.blocked_users import report_enforcing
 from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.privacy_service import MalformedBlockedUsersResponse
 from smarter_dev.bot.services.privacy_service import PrivacyApiService
@@ -35,6 +36,76 @@ def test_cold_cache_blocks_everyone_until_a_list_loads():
     assert cache.loaded and cache.revision == 3
     assert cache.is_blocked(int(KAI))
     assert not cache.is_blocked(NIA)
+
+
+async def test_standby_cannot_raise_the_aggregate_above_a_stale_acting_process():
+    redis = fakeredis.aioredis.FakeRedis()
+    # The acting process loaded revision 4 and has not refreshed since.
+    await report_enforcing(redis, 4, process_id="acting-1")
+    # A standby (or a new pod) fetches the newer revision 5.
+    await report_enforcing(redis, 5, process_id="standby-2")
+
+    assert await redis.get(ENFORCING_KEY) == b"4"
+    assert await redis.get(f"{ENFORCING_KEY}:standby-2") == b"5"
+    assert 0 < await redis.ttl(f"{ENFORCING_KEY}:acting-1") <= 180
+
+    # Once the acting process's own key expires (it stopped fetching), the
+    # aggregate follows the processes still reporting.
+    await redis.delete(f"{ENFORCING_KEY}:acting-1")
+    await report_enforcing(redis, 5, process_id="standby-2")
+    assert await redis.get(ENFORCING_KEY) == b"5"
+
+
+async def test_stale_list_gives_the_model_no_input():
+    now = [1000.0]
+    cache = BlockedUsersCache(clock=lambda: now[0])
+    cache.load(3, [KAI])
+    assert cache.loaded and not cache.is_blocked(NIA)
+
+    now[0] += 179
+    assert cache.loaded
+    now[0] += 2  # last successful fetch is now older than the 180 s report
+    assert not cache.loaded
+    assert cache.is_blocked(NIA)  # every author: no Discord input at all
+
+    await refresh_once(
+        cache, AsyncMock(return_value=BlockedUsersSnapshot(3, frozenset({KAI}))), None
+    )
+    assert cache.loaded and not cache.is_blocked(NIA)
+
+
+async def test_stale_process_routes_nobody_to_the_chat_or_proactive_model(
+    monkeypatch,
+):
+    from smarter_dev.bot.plugins import mention
+    from smarter_dev.bot.plugins import proactive
+    from smarter_dev.bot.privacy import blocked_users as module
+
+    now = [0.0]
+    stale = BlockedUsersCache(clock=lambda: now[0])
+    stale.load(3, [])
+    now[0] = 500.0
+    monkeypatch.setattr(mention, "get_blocked_users", lambda: stale)
+    monkeypatch.setattr(proactive, "get_blocked_users", lambda: stale)
+    assert module.get_blocked_users is not None
+    registry = AsyncMock()
+    monkeypatch.setattr(mention, "get_chat_engine_registry", registry)
+    message = SimpleNamespace(
+        id=1, author=SimpleNamespace(id=int(NIA), is_bot=False), content="hi"
+    )
+
+    await mention.on_message_create(
+        SimpleNamespace(message=message, guild_id=2, channel_id=1, content="hi")
+    )
+    converted = proactive.channel_message_from_hikari(
+        SimpleNamespace(
+            id=1, created_at=None, author=message.author, content="hi",
+            referenced_message=None,
+        )
+    )
+
+    registry.assert_not_called()
+    assert converted.blocked and converted.content == ""
 
 
 async def test_refresh_sets_enforcing_key_with_ttl():

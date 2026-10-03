@@ -35,6 +35,17 @@ NOTES_TTL_SECONDS = int(timedelta(hours=2).total_seconds())
 HISTORY_TTL_SECONDS = int(timedelta(hours=2).total_seconds())
 COUNTER_TTL_SECONDS = int(timedelta(hours=24).total_seconds())
 
+# Held per guild by a privacy purge while it rewrites chat memory; a turn
+# that would read history defers while it exists (see ChannelEngine).
+CHAT_PRIVACY_LOCK_PREFIX = "privacy:v1:chat-lock"
+
+# Compare-and-set for a purge rewrite: only replace the history if it is
+# still byte-for-byte what the purge folded.
+_REPLACE_IF_UNCHANGED = (
+    "if redis.call('get', KEYS[1]) == ARGV[1] then "
+    "redis.call('set', KEYS[1], ARGV[2], 'KEEPTTL') return 1 else return 0 end"
+)
+
 TOPIC_STALE_AFTER = timedelta(hours=6)
 TOPIC_STALE_AFTER_MESSAGES = 25
 
@@ -140,6 +151,31 @@ class ChatMemory:
         payload = ModelMessagesTypeAdapter.dump_json(messages)
         await self._redis.set(self._history_key(channel_id), payload, keepttl=True)
 
+    async def read_history_raw(self, channel_id: int) -> bytes | None:
+        raw = await self._redis.get(self._history_key(channel_id))
+        if isinstance(raw, str):
+            raw = raw.encode("utf-8")
+        return raw
+
+    async def replace_history_if_unchanged(
+        self, channel_id: int, expected_raw: bytes, messages: list[ModelMessage]
+    ) -> bool:
+        """Replace the history only if it still equals ``expected_raw``."""
+        payload = ModelMessagesTypeAdapter.dump_json(messages)
+        return bool(
+            await self._redis.eval(
+                _REPLACE_IF_UNCHANGED,
+                1,
+                self._history_key(channel_id),
+                expected_raw,
+                payload,
+            )
+        )
+
+    async def privacy_locked(self, guild_id: int | str) -> bool:
+        """Whether a privacy purge is rewriting this guild's chat memory."""
+        return bool(await self._redis.exists(chat_privacy_lock_key(guild_id)))
+
     async def replace_topic(self, channel_id: int, text: str) -> None:
         """Rewrite the topic text, keeping its written-at stamp and expiry."""
         await self._redis.set(self._topic_key(channel_id), text, keepttl=True)
@@ -176,6 +212,10 @@ class ChatMemory:
         return topic.text
 
 
+def chat_privacy_lock_key(guild_id: int | str) -> str:
+    return f"{CHAT_PRIVACY_LOCK_PREFIX}:{guild_id}"
+
+
 def _decode(value: bytes | str | None) -> str:
     if value is None:
         return ""
@@ -192,6 +232,14 @@ def init_chat_memory(client: redis.Redis) -> ChatMemory:
     global _memory
     _memory = ChatMemory(client)
     return _memory
+
+
+async def chat_privacy_locked(guild_id: int | str) -> bool:
+    """Whether a privacy purge holds this guild's chat lock. False when no
+    chat memory is installed: then there is no stored history to protect."""
+    if _memory is None:
+        return False
+    return await _memory.privacy_locked(guild_id)
 
 
 def get_chat_memory() -> ChatMemory:
