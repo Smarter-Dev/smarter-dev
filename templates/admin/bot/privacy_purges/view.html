@@ -1,0 +1,106 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Privacy Purge - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Privacy Purge</h1>
+            <p><a href="/admin/bot/privacy-purges">&larr; All purges</a></p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="sk-panel" style="margin-bottom:1.5rem;">
+            <div class="sk-panel-head">Request</div>
+            <div class="sk-panel-body">
+                <p>
+                    <strong>Status:</strong> {{ purge.status }}
+                    &middot; asked {{ purge.created_at.strftime('%Y-%m-%d %H:%M UTC') }}
+                    {% if purge.completed_at %}&middot; finished {{ purge.completed_at.strftime('%Y-%m-%d %H:%M UTC') }}{% endif %}
+                    {% if purge.closed_at %}&middot; closed {{ purge.closed_at.strftime('%Y-%m-%d %H:%M UTC') }}{% endif %}
+                </p>
+                {% if purge.discord_user_id %}
+                <p><strong>User:</strong> {{ purge.discord_user_id }} &middot; <strong>Names:</strong> {{ (purge.names or []) | join(", ") or "none" }}</p>
+                {% else %}
+                <p class="sk-text-muted">Closed: only this receipt remains. {{ steps.receipt }}</p>
+                {% endif %}
+                {% if purge.status != "closed" %}
+                <div style="display:flex; gap:.5rem;">
+                    <form method="post" action="/admin/bot/privacy-purges/{{ purge.id }}/rerun">{{ csrf_field() }}<button class="sk-btn-outline sk-btn-small" type="submit">Run the purge again</button></form>
+                    <form method="post" action="/admin/bot/privacy-purges/{{ purge.id }}/check">{{ csrf_field() }}<button class="sk-btn-outline sk-btn-small" type="submit">Run the check again</button></form>
+                    <form method="post" action="/admin/bot/privacy-purges/{{ purge.id }}/close" onsubmit="return confirm('Strip this request to a receipt? The user stays on the block list.');">{{ csrf_field() }}<button class="sk-btn-outline sk-btn-small" type="submit">Close to a receipt</button></form>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        {% if purge.discord_user_id %}
+        <div class="sk-panel" style="margin-bottom:1.5rem;">
+            <div class="sk-panel-head">Steps ({{ (steps.guild_ids or []) | length }} guilds)</div>
+            <div class="sk-panel-body">
+                <table class="sk-admin-table">
+                    <thead><tr><th>Guild</th><th>Memory</th><th>Bot history</th><th>Worker history</th></tr></thead>
+                    <tbody>
+                        {% for guild_id in steps.guild_ids or [] %}
+                        {% set memory = (steps.memory or {}).get(guild_id) %}
+                        {% set bot = (steps.bot or {}).get(guild_id) %}
+                        {% set worker = (steps.worker or {}).get(guild_id) %}
+                        <tr>
+                            <td><code>{{ guild_id }}</code></td>
+                            <td>
+                                {% if memory %}{{ memory.outcome }}{% if memory.error %} ({{ memory.error }}){% endif %}
+                                {% for item in memory.unresolved or [] %}<br><span class="sk-badge sk-badge-danger">unresolved</span> {{ item.location }}: {{ item.reason }}{% endfor %}
+                                {% else %}pending{% endif %}
+                            </td>
+                            <td>{% if bot %}{{ bot.outcome }}{% if bot.detail %} &mdash; {{ bot.detail }}{% endif %}{% else %}pending{% endif %}</td>
+                            <td>{% if worker %}{{ worker.outcome }}{% if worker.detail %} &mdash; {{ worker.detail }}{% endif %}{% else %}pending{% endif %}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Check</div>
+            <div class="sk-panel-body">
+                {% if report %}
+                <p class="sk-text-muted">Searched {{ report.stores_checked }} stores at {{ report.checked_at }} for the ID and the names. Locations and counts only.</p>
+                <h4>Still found where the purge rewrites ({{ (report.remains or []) | length }})</h4>
+                {% if report.remains %}
+                <table class="sk-admin-table">
+                    <thead><tr><th>Store</th><th>Location</th><th>ID hits</th><th>Name hits</th></tr></thead>
+                    <tbody>
+                        {% for hit in report.remains %}
+                        <tr><td>{{ hit.store }}</td><td><code>{{ hit.location }}</code></td><td>{{ hit.id_hits }}</td><td>{{ hit.name_hits }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <p class="sk-text-muted" style="font-size:0.85rem;">An ID hit is a remain. A name hit can be a different person who shares the name; judge it from the guild's memory page.</p>
+                {% else %}
+                <p>Nothing found.</p>
+                {% endif %}
+                <h4>Raw operational copies, not rewritten by this purge ({{ (report.operational or []) | length }})</h4>
+                {% if report.operational %}
+                <ul>{% for hit in report.operational %}<li><code>{{ hit.location }}</code>: {{ hit.id_hits }} ID, {{ hit.name_hits }} name</li>{% endfor %}</ul>
+                {% else %}
+                <p>Nothing found.</p>
+                {% endif %}
+                {% else %}
+                <p class="sk-text-muted">Runs when every guild is acknowledged, or on demand.</p>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

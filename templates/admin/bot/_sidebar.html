@@ -3,6 +3,7 @@
     <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:0.25rem;">
         <li><a href="/admin/bot" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'overview' %} font-weight:bold;{% endif %}">Overview</a></li>
         <li><a href="/admin/bot/guilds" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'guilds' %} font-weight:bold;{% endif %}">Guilds</a></li>
+        <li><a href="/admin/bot/privacy-purges" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'privacy_purges' %} font-weight:bold;{% endif %}">Privacy Purges</a></li>
         {% if guild_id %}
         <li><a href="/admin/bot/guilds/{{ guild_id }}/bytes" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'bytes' %} font-weight:bold;{% endif %}">Bytes Config</a></li>
         <li><a href="/admin/bot/guilds/{{ guild_id }}/squads" class="sk-btn-outline sk-btn-small" style="display:block; text-align:left;{% if active_page == 'squads' %} font-weight:bold;{% endif %}">Squads</a></li>
