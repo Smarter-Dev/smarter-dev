@@ -68,6 +68,10 @@ class ChannelMessage:
     # Attachment details for live messages; fixtures predating this field
     # carry only ``attachment_count``.
     attachments: tuple[ChannelAttachment, ...] = ()
+    # A message whose author is on the blocked-users list: it keeps its
+    # position (and its timestamp, for ordering) and nothing else. Every
+    # renderer shows it as ``[BLOCKED BY USER]`` and no tool can address it.
+    blocked: bool = False
 
     @classmethod
     def from_record(cls, record: dict) -> ChannelMessage:
@@ -91,11 +95,12 @@ class ChannelMessage:
                 ChannelAttachment.from_record(attachment)
                 for attachment in record.get("attachments", ())
             ),
+            blocked=bool(record.get("blocked", False)),
         )
 
     def to_record(self) -> dict:
         """Dict shaped like a fixture JSONL line (for transcript rendering)."""
-        return {
+        record = {
             "id": self.id,
             "timestamp": utc_timestamp(self.timestamp),
             "author_id": self.author_id,
@@ -115,6 +120,29 @@ class ChannelMessage:
                 attachment.to_record() for attachment in self.attachments
             ],
         }
+        if self.blocked:
+            record["blocked"] = True
+        return record
+
+
+def blocked_channel_message(timestamp: datetime) -> ChannelMessage:
+    """A blocked author's message: a placeholder with no id, author or text."""
+    return ChannelMessage(
+        id="",
+        timestamp=timestamp,
+        author_id="",
+        author_name="",
+        author_display="",
+        is_bot=False,
+        content="",
+        reply_to_id=None,
+        mention_user_ids=(),
+        mention_everyone=False,
+        attachment_count=0,
+        sticker_count=0,
+        message_type=0,
+        blocked=True,
+    )
 
 
 @dataclass(frozen=True)
