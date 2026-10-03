@@ -5957,7 +5957,7 @@ async def upsert_guild_memory_blob(
     UNIQUE violation.
 
     ``memory_enabled`` is deliberately absent from the update set — a dream must
-    never undo the per-guild forget button. ``behavior`` and ``personality``
+    never undo the per-guild pause switch. ``behavior`` and ``personality``
     left as ``None`` are absent from it too, so a caller that does not name a
     block can never wipe it.
     """
@@ -6199,8 +6199,8 @@ async def guilds_needing_dream(session: AsyncSession, cutoff: datetime) -> list[
     ``last_dream_at`` stamped, which is also what makes a CronJob retry a no-op.
 
     Guilds whose ``memory_enabled`` is false are filtered out of both halves:
-    that flag is the per-guild forget button, and a dream would rebuild exactly
-    what it was pressed to erase.
+    that flag is the per-guild pause switch, and a paused guild's memory must
+    stay exactly as it was when the switch was flipped.
     """
     guilds_with_pending_notes = await session.scalars(
         select(ChatAgentMemoryNote.guild_id)

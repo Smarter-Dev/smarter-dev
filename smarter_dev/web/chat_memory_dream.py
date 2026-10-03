@@ -800,8 +800,8 @@ async def run_guild_dream(
     await lock_guild_memory(session, guild_id)
     memory = await get_guild_memory_blob(session, guild_id)
     if memory is not None and not memory.memory_enabled:
-        # The per-guild forget button. Rebuilding what it was pressed to erase
-        # would be the one unrecoverable bug in this system.
+        # The per-guild pause switch. A paused guild's memory stays exactly as
+        # it was: no rewrite, and its notes are kept rather than consumed.
         logger.info("Guild %s has memory disabled; skipping dream", guild_id)
         return GuildDreamResult(
             guild_id=guild_id, outcome=DreamOutcome.SKIPPED_DISABLED
