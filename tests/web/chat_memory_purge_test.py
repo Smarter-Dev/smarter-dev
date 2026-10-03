@@ -398,3 +398,23 @@ async def test_the_agent_is_asked_again_when_its_first_answer_keeps_the_id():
 
     assert len(calls) == 2
     assert result.output.memory == MEMORY_WITHOUT_KAI
+
+
+def test_an_unrelated_note_is_only_dropped_or_rewritten_with_a_stated_reason():
+    drop = _output(notes=[NoteEdit(id="n1", action="drop")])
+    with pytest.raises(PurgeRefused):
+        compose_purge(drop, _context(), retries_left=0)
+    rewrite = _output(notes=[NoteEdit(id="n1", action="rewrite", text="pineapple pizza is law.")])
+    with pytest.raises(PurgeRefused):
+        compose_purge(rewrite, _context(), retries_left=0)
+    explained = _output(
+        notes=[NoteEdit(id="n1", action="drop")],
+        unresolved=[UnresolvedItem(location="note:n1", reason="about the person without naming them")],
+    )
+    assert compose_purge(explained, _context(), retries_left=0).dropped_notes == ("n1",)
+
+
+def test_unresolved_locations_must_name_a_real_place():
+    output = _output(unresolved=[UnresolvedItem(location="<script>", reason="shared name")])
+    with pytest.raises(PurgeRefused):
+        compose_purge(output, _context(), retries_left=0)
