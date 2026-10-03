@@ -45,6 +45,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.bot.agents.model_router import build_model_for
 from smarter_dev.bot.agents.model_router import model_settings_for
+from smarter_dev.shared.privacy_purge import PurgeTarget
 from smarter_dev.web.chat_memory_dream import DEFAULT_DREAM_MODEL
 from smarter_dev.web.chat_memory_dream import DREAM_MODEL_ENV_VAR
 from smarter_dev.web.chat_memory_dream import DREAM_REASONING_LEVEL
@@ -61,63 +62,14 @@ from smarter_dev.web.crud import record_memory_revision
 from smarter_dev.web.models import MAX_BEHAVIOR_CHARS
 from smarter_dev.web.models import MAX_MEMORY_BLOB_CHARS
 from smarter_dev.web.models import MAX_MEMORY_NOTE_CHARS
-from smarter_dev.web.models import MAX_PERSONALITY_CHARS
 from smarter_dev.web.models import MAX_NOTES_PER_GUILD_PER_DAY
+from smarter_dev.web.models import MAX_PERSONALITY_CHARS
 
 logger = logging.getLogger(__name__)
 
 PURGE_OUTPUT_RETRIES = 2
-# Names shorter than this match too much ordinary text to be checked
-# deterministically; the agent still sees them in the prompt.
-MIN_CHECKED_NAME_CHARS = 2
 # Every note the guild holds is reviewed, and a day is capped at this many.
 PURGE_NOTES_LIMIT = MAX_NOTES_PER_GUILD_PER_DAY * 3
-
-
-# -- the target ----------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class PurgeTarget:
-    """The person being removed: their Discord ID and the names they went by.
-
-    Matching is deliberately dumb and deterministic — it is the check that does
-    not take the agent's word for it. The ID matches as a whole number, a name
-    as a whole word in any case. A name can match a different person, which is
-    why name hits are something the agent must explain, not an automatic fail.
-    """
-
-    user_id: str
-    names: tuple[str, ...] = ()
-
-    @classmethod
-    def build(cls, user_id: str, names: list[str] | tuple[str, ...]) -> PurgeTarget:
-        seen: dict[str, str] = {}
-        for name in names:
-            cleaned = " ".join(name.split())
-            if cleaned and cleaned.casefold() not in seen:
-                seen[cleaned.casefold()] = cleaned
-        return cls(user_id=user_id.strip(), names=tuple(seen.values()))
-
-    @property
-    def checked_names(self) -> tuple[str, ...]:
-        return tuple(n for n in self.names if len(n) >= MIN_CHECKED_NAME_CHARS)
-
-    def id_hits(self, text: str) -> int:
-        if not text or not self.user_id:
-            return 0
-        return len(re.findall(rf"(?<!\d){re.escape(self.user_id)}(?!\d)", text))
-
-    def name_hits(self, text: str) -> int:
-        if not text:
-            return 0
-        return sum(
-            len(re.findall(rf"(?<!\w){re.escape(name)}(?!\w)", text, re.IGNORECASE))
-            for name in self.checked_names
-        )
-
-    def mentions(self, text: str) -> bool:
-        return bool(self.id_hits(text) or self.name_hits(text))
 
 
 # -- model output --------------------------------------------------------------

@@ -22,11 +22,11 @@ from pydantic_ai.models.function import AgentInfo
 from pydantic_ai.models.function import FunctionModel
 from sqlalchemy import select
 
+from smarter_dev.shared.privacy_purge import PurgeTarget
 from smarter_dev.web.chat_memory_purge import NoteEdit
 from smarter_dev.web.chat_memory_purge import PurgeContext
 from smarter_dev.web.chat_memory_purge import PurgeOutput
 from smarter_dev.web.chat_memory_purge import PurgeRefused
-from smarter_dev.web.chat_memory_purge import PurgeTarget
 from smarter_dev.web.chat_memory_purge import UnresolvedItem
 from smarter_dev.web.chat_memory_purge import build_purge_agent
 from smarter_dev.web.chat_memory_purge import compose_purge
@@ -161,7 +161,7 @@ async def _seed(session, *, memory=MEMORY_WITH_KAI, behavior=BEHAVIOR_WITH_KAI):
 async def _snapshot(session) -> tuple:
     memory = await get_guild_memory_blob(session, _GUILD)
     notes = sorted(
-        (note.content for note in (await session.scalars(select(ChatAgentMemoryNote))).all())
+        note.content for note in (await session.scalars(select(ChatAgentMemoryNote))).all()
     )
     revisions = sorted(
         (r.revision, r.content, r.behavior, r.personality)
@@ -284,24 +284,24 @@ async def test_a_failed_purge_leaves_every_row_as_it_was(db_session, agent):
 
 
 def _context(**overrides) -> PurgeContext:
-    values = dict(
-        target=KAI,
-        memory=MEMORY_WITH_KAI,
-        behavior=BEHAVIOR,
-        personality=PERSONALITY,
-        notes=(("n1", NIA_NOTE),),
-    )
+    values = {
+        "target": KAI,
+        "memory": MEMORY_WITH_KAI,
+        "behavior": BEHAVIOR,
+        "personality": PERSONALITY,
+        "notes": (("n1", NIA_NOTE),),
+    }
     values.update(overrides)
     return PurgeContext(**values)
 
 
 def _output(**overrides) -> PurgeOutput:
-    values = dict(
-        memory=MEMORY_WITHOUT_KAI,
-        behavior=BEHAVIOR,
-        personality=PERSONALITY,
-        notes=[NoteEdit(id="n1", action="keep")],
-    )
+    values = {
+        "memory": MEMORY_WITHOUT_KAI,
+        "behavior": BEHAVIOR,
+        "personality": PERSONALITY,
+        "notes": [NoteEdit(id="n1", action="keep")],
+    }
     values.update(overrides)
     return PurgeOutput(**values)
 
