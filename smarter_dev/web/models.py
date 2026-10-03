@@ -6304,3 +6304,78 @@ class WebSearchLink(Base):
     open_addresses: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+
+
+class ChatBotBlockedUser(Base):
+    """A Discord user whose messages the chat bot must never read again.
+
+    Written when an admin starts a purge for the user, because a purge that
+    lets the next wake re-read the person's old Discord messages would be
+    undone within hours. Both runtimes (the bot and the external proactive
+    worker) read the list through the bot API and replace the person's
+    messages with ``[BLOCKED BY USER]`` before anything reaches a model.
+
+    ``source`` says why the person is on the list; ``purge`` is the only
+    source today, and the dashboard opt-out (#74) is meant to add its own.
+    The row outlives the purge request that wrote it: the request is stripped
+    to a bare receipt, this is what keeps the deletion true.
+    """
+
+    __tablename__ = "chat_bot_blocked_users"
+
+    discord_user_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    source: Mapped[str] = mapped_column(String(20), nullable=False)
+
+
+class ChatBotBlockedUsersRevision(Base):
+    """One row holding the block list's revision, bumped on every change.
+
+    Runtimes report the revision they enforce, and a purge waits until both
+    report at least the revision that added its user, so the order of "stop
+    reading the person" and "rewrite what was read" is checked, not assumed.
+    """
+
+    __tablename__ = "chat_bot_blocked_users_revision"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    revision: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0, server_default="0"
+    )
+
+
+class ChatBotPurgeRequest(Base):
+    """An admin's request to remove one Discord user from the chat bot.
+
+    The target's ID and names are needed only while the purge runs and the
+    admin reviews its check. Closing the request clears both, leaving a bare
+    receipt: when it was asked, when it finished and how it went, in counts.
+
+    ``steps`` holds the per-guild outcome of each part of the current run
+    (guild memory here, history acknowledgements from the bot and the worker)
+    and ``check_report`` the last deterministic search of every store. Both
+    record locations and counts, never stored content.
+    """
+
+    __tablename__ = "chat_bot_purge_requests"
+    __table_args__ = (
+        Index("ix_chat_bot_purge_requests_discord_user_id", "discord_user_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    discord_user_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    names: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    run_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True), nullable=True
+    )
+    steps: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    check_report: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    requested_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
