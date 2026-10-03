@@ -42,7 +42,7 @@ def test_the_short_version_carries_the_required_statements():
 
 def test_the_notice_does_not_describe_an_opt_out_as_available(notice):
     lowered = notice.lower()
-    assert "once the chat bot has an opt-out" in lowered
+    assert "opt-out" not in lowered
     assert "you can opt out" not in lowered
     assert "forget" not in lowered
     assert "blank" not in lowered
@@ -54,6 +54,13 @@ def test_a_deletion_request_removes_the_person_from_the_chat_bot(notice):
     assert "removes you from its memories" in deleted
     assert "conversation summaries" in deleted
     assert "cannot remove" not in notice.lower()
+
+
+def test_a_deleted_person_stays_on_the_chat_bots_blocked_list(notice):
+    kept = notice.split("**What we keep.**", 1)[1].split("\n\n", 1)[0]
+    assert "chat bot's blocked list" in kept
+    assert "`[BLOCKED BY USER]`" in kept
+    assert "does not respond" in kept
 
 
 def test_bytes_transfers_are_anonymised_not_deleted(notice):

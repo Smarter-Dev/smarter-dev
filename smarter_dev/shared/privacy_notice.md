@@ -48,7 +48,7 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a dire
 
 ## Who else handles your data
 
-- **AI model providers.** Messages, files and questions sent to an AI feature are processed by the model provider serving that request: Google, OpenAI, Anthropic, OpenRouter, OpenCode Zen or DigitalOcean. Some messages and searches are also processed by TypeSafe's classifier, which decides things like whether the bot should respond. Web searches go to Brave and web page reads go to Jina. How long they keep it is set by their own terms.
+- **AI model providers.** Messages, files and questions sent to an AI feature are processed by the model provider serving that request. The chat bot sends each message with its author's Discord user ID, so IDs reach the provider along with the text. The providers are Google, OpenAI, Anthropic, OpenRouter, OpenCode Zen or DigitalOcean. Some messages and searches are also processed by TypeSafe's classifier, which decides things like whether the bot should respond. Web searches go to Brave and web page reads go to Jina. How long they keep it is set by their own terms.
 - **Hosting.** Our servers, database and file storage run on DigitalOcean.
 - **Payments.** Polar.
 - **Email.** Confirmation emails are sent through Resend.
@@ -63,9 +63,9 @@ Send a direct message to the Smarter Dev admin on our Discord server. We check t
 
 **What we delete.** Everything the chat bot holds about you: it removes you from its memories, rewrites its conversation summaries without you and drops the conversation history that holds your messages. Your bytes balance, your squad memberships, quest and challenge submissions, activity dates, forum subscriptions and `/help` records, and your website account with its chat conversations, attachments, searches and profile. Security log entries that name your Discord ID are deleted too. Records that you share with other people are kept with you removed: bytes transfers you sent or received stay in the other member's history with your ID, username and the reason removed, and records of the bot's conversations and automations that involve other people have your ID and names replaced.
 
-**What we keep.** Moderation history. Billing records, in anonymised form. A bare record that your request was completed, with nothing that identifies you. Your Discord ID, with nothing else attached, on a list of people whose data we deleted, so that once the chat bot has an opt-out you stay opted out of it. Copies held by AI providers and Discord are governed by their own terms.
+**What we keep.** Moderation history. Billing records, in anonymised form. A bare record that your request was completed, with nothing that identifies you. Your Discord ID, with nothing else attached, on the chat bot's blocked list, so the chat bot never reads your messages again: from then on it sees them only as `[BLOCKED BY USER]` and does not respond to them. Copies held by AI providers and Discord are governed by their own terms.
 
-If you stay in the server, the bot starts new records the next time you post.
+If you stay in the server, the bot's other features, such as bytes and activity dates, start new records the next time you post.
 
 **[PLACEHOLDER: short-lived copies. Wording on hold for Zech's decision on the 48-hour and 90-day copies; see #71. Do not publish with this line.]**
 

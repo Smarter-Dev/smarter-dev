@@ -16,7 +16,7 @@ help prepare or check a step, but does not run mutations.
 | **Purge (agent)** | Everything the chat bot holds about the person: the guild memory, behavior and personality blocks, pending notes and retained revisions, both agents' working histories and their compaction summaries, the proactive recovery copy and watch instructions, and the external worker's history. The agent does the edit; see step 4. |
 | **Delete** | Bytes balances, squad memberships, quest and challenge submissions and quest progress, member activity dates, forum subscriptions, campaign signups, `/help` and `/tldr` records they started, legacy `/scan` records, rate-limit and DM caches, bot API security log rows whose request named them, and their site account with its chat, attachments, searches, resources questions, profile, linked logins (and their stored Discord tokens) and push subscriptions. |
 | **Anonymise** | Rows other people share. Bytes transfers the person sent or received keep their amount and date for the other member, with the person's id and username replaced and the reason cleared. Chat engagements they started lose the starter's id and username. Usage cost rows lose their Discord id and details. Shared audit rows (chat agent turns, handler runs, forum agent responses) have the person's id and names replaced. |
-| **Keep** | Moderation history: `moderation_actions` and the bot's posts in the guild's moderation and audit log channels. Anonymised billing: usage cost rows with no person linked (the membership rows are deleted with the account; Polar keeps its payment records under its own terms). A bare receipt that the request was completed. The person's Discord id alone on the deletion suppression list, so that they stay opted out of the chat bot once an opt-out exists. |
+| **Keep** | Moderation history: `moderation_actions` and the bot's posts in the guild's moderation and audit log channels. Anonymised billing: usage cost rows with no person linked (the membership rows are deleted with the account; Polar keeps its payment records under its own terms). A bare receipt that the request was completed. The person's Discord id alone in `chat_bot_blocked_users`, written by the purge in step 4, so the chat bot sees their messages only as `[BLOCKED BY USER]` and does not respond to them. |
 | **Not covered yet** | **[PLACEHOLDER: short-lived copies (the 48-hour and 90-day windows). Zech has asked for that retention to be dropped rather than described; the stores and the wording are being confirmed on #71. Fill this in before the runbook is used.]** Queues with no time limit are also open, pending a decision with the same placeholder: the proactive pending list and dead-letter stream, batches the external worker claimed and never acknowledged, and Skrift dead letters left open (which keep handler fire payloads). |
 
 Do **not** reset, blank or hand-edit the chat bot's memory to satisfy a
@@ -137,15 +137,20 @@ before going on.
 
 ## 4. Purge the chat bot
 
-Run the admin purge for `DID` that #79 adds. It asks the agent to remove
-everything tied to the person from its memory blocks, notes and revisions,
-forces a compaction of both agents' working histories that leaves them out
-and drops the raw history holding their messages, and reaches the external
-worker's history. It is safe to run twice. Its report lists anything still
-mentioning the id or the person's known names in any store it touched.
+Open Admin → Bot → Privacy purge (#79), enter `DID` and the names noted in
+step 1, and start the purge. Creating the request writes `DID` to
+`chat_bot_blocked_users`, where it stays: from then on the chat bot sees the
+person's messages only as `[BLOCKED BY USER]` and does not respond to them.
+The agent then removes everything tied to the person from its memory blocks,
+notes and revisions, a forced compaction of both agents' working histories
+leaves them out and drops the raw history holding their messages, and the
+external worker's history is purged too. The page refuses to start unless
+both the bot and the worker are enforcing the blocked list. It is safe to run
+twice. When it finishes, read its check report, which lists anything still
+mentioning the id or the names in any store it touched.
 
-**[PLACEHOLDER: the exact command and its report format, filled in when #79
-lands.]**
+**[PLACEHOLDER: the page's final wording and report format, filled in from
+#79 when its PRs are up.]**
 
 Do not go on until the report shows nothing remaining, or every item it lists
 has been resolved through the agent (run the purge again with the names it
@@ -327,15 +332,7 @@ Expected side effects, all accepted:
 Do not touch `moderation_actions`, including rows where the person was the
 moderator.
 
-## 7. Add them to the suppression list
-
-Add `DID` alone, with no name, date or receipt id, to the deletion
-suppression list: the admin's private list of Discord ids until the opt-out
-(#74) gives it a table and imports it. It is the one place the id is kept,
-and it exists only so that the person stays opted out of the chat bot once an
-opt-out exists.
-
-## 8. Clear Redis caches
+## 7. Clear Redis caches
 
 These expire on their own within hours to days; delete them so nothing
 waits on a clock. With `redis-cli` against the bot's Redis:
@@ -350,7 +347,7 @@ Repeat each `SCAN` from the cursor it returns until it returns `0`. Do not
 touch `chat_agent:*`, `proactive:*` or `chat_agent:guild:*` keys (see the top
 of this runbook).
 
-## 9. Check and close
+## 8. Check and close
 
 1. Rerun the dry-run counts. Every deleted store reads 0; the anonymise rows
    read 0; moderation is unchanged; the agent purge rows match the purge
