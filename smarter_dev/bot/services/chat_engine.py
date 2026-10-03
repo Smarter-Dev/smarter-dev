@@ -73,6 +73,8 @@ from smarter_dev.bot.agents.response_fitting import fit_writer_message
 from smarter_dev.bot.agents.response_fitting import split_for_discord
 from smarter_dev.bot.agents.writer_agent import build_writer_prompt
 from smarter_dev.bot.agents.writer_agent import get_writer_agent
+from smarter_dev.bot.privacy.blocked_users import get_blocked_users
+from smarter_dev.bot.privacy.blocked_users import redact_blocked_mentions
 from smarter_dev.bot.services.channel_token_budget import add_fallback_usage
 from smarter_dev.bot.services.channel_token_budget import add_usage
 from smarter_dev.bot.services.channel_token_budget import fallback_ended_key
@@ -477,11 +479,34 @@ class ChannelEngine:
         ``first_activation`` set and retries the initial turn on the next fire.
         """
         async with self.run_lock:
+            blocked = get_blocked_users()
+            if not blocked.loaded:
+                # No blocked-users list yet: nothing from Discord may reach the
+                # model. Leave the queue for a turn after the list loads.
+                logger.info(
+                    "Chat turn deferred for channel %s: blocked-users list not "
+                    "loaded",
+                    self.channel_id,
+                )
+                return False
             turn_started_at = datetime.now(UTC)
             # Snapshot queue; new messages can keep arriving while we run.
             async with self.queue_lock:
                 drained = [q.message for q in self.queue]
                 self.queue.clear()
+            # Messages queued before their author was blocked never turn into
+            # model input (and a blocked trigger never starts a turn).
+            drained = [m for m in drained if not _author_blocked(blocked, m)]
+            if (
+                first_activation
+                and self.activation_message is not None
+                and _author_blocked(blocked, self.activation_message)
+            ):
+                logger.info(
+                    "Chat activation in channel %s dropped: blocked author",
+                    self.channel_id,
+                )
+                return True
 
             memory = get_chat_memory()
             if first_activation:
@@ -1823,7 +1848,9 @@ class ChannelEngine:
             )
         # The gate judges text, so name each attachment in it — otherwise a
         # file-only message reads as empty and is filtered out unseen.
-        content = getattr(message, "content", None) or ""
+        content = redact_blocked_mentions(
+            getattr(message, "content", None) or "", get_blocked_users()
+        )
         attachment_lines = [
             f"[attachment: {getattr(att, 'filename', None) or 'file'}"
             + (f", {att.media_type}" if getattr(att, "media_type", None) else "")
@@ -1863,7 +1890,14 @@ class ChannelEngine:
             )
             return []
         fetched.reverse()
-        return [self._to_gate_message(message) for message in fetched]
+        # Grounding is optional context: a blocked author's message is
+        # dropped from it entirely.
+        blocked = get_blocked_users()
+        return [
+            self._to_gate_message(message)
+            for message in fetched
+            if not _author_blocked(blocked, message)
+        ]
 
     async def _fetch_gate_channel_name(self) -> str | None:
         """The channel's name for the response gate — a forum post's title.
@@ -2274,6 +2308,12 @@ class ChannelEngine:
             self.fire_event.set()
         else:
             self._schedule_idle_fire()
+
+
+def _author_blocked(blocked: Any, message: Any) -> bool:
+    """Whether a hikari message's author is on the blocked-users list."""
+    author = getattr(message, "author", None)
+    return author is not None and blocked.is_blocked(getattr(author, "id", None))
 
 
 def _extract_tokens(usage: RunUsage | None) -> int:

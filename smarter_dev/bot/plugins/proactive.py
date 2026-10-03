@@ -45,6 +45,8 @@ from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
 from smarter_dev.bot.agents.response_fitting import fit_writer_message
 from smarter_dev.bot.agents.response_fitting import split_for_discord
 from smarter_dev.bot.plugins.admin_gate import is_admin
+from smarter_dev.bot.privacy.blocked_users import get_blocked_users
+from smarter_dev.bot.privacy.blocked_users import redact_blocked_mentions
 from smarter_dev.bot.proactive.adapter import JEV_WATCHER_CONTEXT_SIZE
 from smarter_dev.bot.proactive.adapter import WATCHER_CONTEXT_SIZE
 from smarter_dev.bot.proactive.adapter import AgentConsumer
@@ -79,6 +81,7 @@ from smarter_dev.bot.proactive.redis_queue import RedisNotificationQueue
 from smarter_dev.bot.proactive.types import ActivationContext
 from smarter_dev.bot.proactive.types import ChannelAttachment
 from smarter_dev.bot.proactive.types import ChannelMessage
+from smarter_dev.bot.proactive.types import blocked_channel_message
 from smarter_dev.bot.proactive.watcher import JevWatcherRunner
 from smarter_dev.bot.proactive.watcher import SkimRunner
 from smarter_dev.bot.proactive.watcher import WatcherRunner
@@ -315,8 +318,18 @@ async def load_memory_block(run: ProactiveRuntime, guild_id: str) -> str:
 
 
 def channel_message_from_hikari(message) -> ChannelMessage:
-    """Convert a hikari message (or a test stub) to the shared shape."""
+    """Convert a hikari message (or a test stub) to the shared shape.
+
+    The only door from Discord into the proactive pipeline, so the blocked-
+    users list applies here: a blocked author's message becomes a placeholder
+    with no id, author, text, reply, mentions or attachments; a reply to one
+    loses its reply marker, and ``<@id>`` mentions of a blocked user in
+    anyone's text are redacted.
+    """
     author = message.author
+    blocked = get_blocked_users()
+    if blocked.is_blocked(author.id):
+        return blocked_channel_message(message.created_at)
     member = getattr(message, "member", None)
     nickname = getattr(member, "nickname", None) if member else None
     role_names: tuple[str, ...] = ()
@@ -328,10 +341,19 @@ def channel_message_from_hikari(message) -> ChannelMessage:
             role_names = ()
     display = nickname or getattr(author, "global_name", None) or author.username
     referenced = getattr(message, "referenced_message", None)
-    reply_to_id = str(referenced.id) if referenced else None
+    referenced_author = getattr(referenced, "author", None) if referenced else None
+    reply_to_id = (
+        str(referenced.id)
+        if referenced
+        and not (
+            referenced_author is not None and blocked.is_blocked(referenced_author.id)
+        )
+        else None
+    )
     mention_ids = tuple(
         str(mention_id)
         for mention_id in (getattr(message, "user_mentions_ids", None) or ())
+        if not blocked.is_blocked(mention_id)
     )
     try:
         message_type = int(message.type)
@@ -345,7 +367,7 @@ def channel_message_from_hikari(message) -> ChannelMessage:
         author_name=author.username,
         author_display=display,
         is_bot=bool(author.is_bot),
-        content=message.content or "",
+        content=redact_blocked_mentions(message.content or "", blocked),
         reply_to_id=reply_to_id,
         mention_user_ids=mention_ids,
         mention_everyone=bool(getattr(message, "mentions_everyone", False)),
@@ -747,7 +769,12 @@ async def _run_producer(state: ChannelProducerState, *, passive: bool = False) -
         try:
             await _run_producer_once(state, passive=passive)
         finally:
-            if _runtime().uses_jev_batching and state.buffer and not passive:
+            if (
+                _runtime().uses_jev_batching
+                and state.buffer
+                and not passive
+                and get_blocked_users().loaded
+            ):
                 _schedule_producer(state)
 
 
@@ -756,6 +783,9 @@ async def _run_producer_once(
 ) -> None:
     """Review the next buffered batch and enqueue any watcher wake."""
     run = _runtime()
+    if not get_blocked_users().loaded:
+        # Deferred, not dropped: the buffer waits for the list to load.
+        return
     service = run.settings_service()
     if service is None:
         return
@@ -893,6 +923,15 @@ async def _run_producer_once(
 async def _consume_guild_once(state: GuildAgentState) -> None:
     """Drain one guild wake and route every action to its named channel."""
     run = _runtime()
+    if not get_blocked_users().loaded:
+        # No blocked-users list yet: no Discord message may reach the model.
+        # The wake stays queued and runs once the list has loaded.
+        logger.info(
+            "proactive wake deferred guild=%s: blocked-users list not loaded",
+            state.guild_id,
+        )
+        await asyncio.sleep(SETTINGS_RETRY_BACKOFF_SECONDS)
+        return
     service = run.settings_service()
     if service is None:
         state.queue.drain()
@@ -1267,6 +1306,10 @@ async def _restore_active_window(
 async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
     if not event.author or event.author.is_bot or not event.guild_id:
         return
+    # A blocked author (or any author before the list has loaded) never
+    # reaches the watcher or the agent: no buffer entry, no wake, no reply.
+    if get_blocked_users().is_blocked(event.author.id):
+        return
     run = runtime
     if run is None:
         return
@@ -1368,6 +1411,8 @@ async def on_guild_reaction(event: hikari.GuildReactionAddEvent) -> None:
     run = runtime
     if run is None or not event.guild_id:
         return
+    if get_blocked_users().is_blocked(event.user_id):
+        return  # a blocked reactor's reaction is dropped entirely
     me = run.bot.get_me()
     if me is None or str(event.user_id) == str(me.id):
         return
@@ -1499,7 +1544,11 @@ async def _fetch_missed(
     fetched.sort(key=lambda message: int(message.id))
     cutoff = datetime.now(UTC) - timedelta(seconds=CATCHUP_MAX_AGE_SECONDS)
     converted = [channel_message_from_hikari(m) for m in fetched]
-    return [m for m in converted if not m.is_bot and m.timestamp >= cutoff]
+    return [
+        m
+        for m in converted
+        if not m.is_bot and not m.blocked and m.timestamp >= cutoff
+    ]
 
 
 async def _recovery_channel_settings(
@@ -1526,6 +1575,8 @@ async def _recover_channels(run: ProactiveRuntime) -> None:
     store = run.history_store()
     if store is None:
         return
+    # Recovery feeds the watcher; it waits for the blocked-users list.
+    await get_blocked_users().wait_loaded()
     cursors = {}
     for channel_id in await store.cursor_channel_ids():
         cursor = await store.read_cursor(channel_id)
