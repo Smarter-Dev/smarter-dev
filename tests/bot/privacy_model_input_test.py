@@ -624,3 +624,102 @@ async def test_proactive_producer_defers_buffer_on_cold_start(proactive_run):
     await proactive._run_producer_once(state)
 
     assert len(state.buffer) == 1
+
+
+async def test_external_guild_publishes_nothing_for_blocked_reply_or_reaction(
+    kai_blocked, proactive_run, monkeypatch
+):
+    monkeypatch.setenv(proactive.EXTERNAL_GUILDS_ENV_VAR, str(GUILD))
+    run = proactive.ProactiveRuntime(proactive_run.bot, start_consumers=False)
+    monkeypatch.setattr(proactive, "runtime", run)
+    published = []
+    run.redis_notification_queue = lambda: SimpleNamespace(
+        set_execution_owner=AsyncMock(),
+        publish=AsyncMock(side_effect=published.append),
+        publish_shadow=AsyncMock(side_effect=published.append),
+    )
+    bot_message = _channel_messages()[3]
+    kai_reply = _message(
+        2005, KAI_USER, KAI_WORDS, reply_to=bot_message, minutes=8,
+        attachments=[KAI_ATTACHMENT],
+    )
+
+    await proactive.on_guild_message(_event(kai_reply))
+    await proactive.on_guild_reaction(
+        SimpleNamespace(
+            guild_id=GUILD, channel_id=CHANNEL, user_id=KAI, message_id=1004,
+            member=SimpleNamespace(display_name="kai"), emoji_name="👍",
+        )
+    )
+
+    assert published == []
+    assert not run.channel_states  # nothing buffered for a later watcher batch
+
+
+async def test_raw_mentions_of_blocked_user_are_scrubbed_everywhere(
+    kai_blocked, chat_bot
+):
+    """Even outside the mention list: a code block in nia's message and the
+    bot's own earlier message."""
+    code = _message(
+        1008, NIA_USER, f"```\nping(<@!{KAI}>)\n```", minutes=5, mentions=()
+    )
+    own = _message(1009, BOT_USER, f"thanks <@{KAI}>!", minutes=6)
+    bot = _fake_bot([*chat_bot, code, own])
+
+    agent_input = await chat_context.build_followup_input(
+        bot=bot, channel_id=CHANNEL, guild_id=GUILD, queued=[code, own],
+        memory=_Memory(),
+    )
+    prompt, history = build_agent_call(agent_input, [])
+    chat_text = prompt + ModelMessagesTypeAdapter.dump_json(history).decode()
+    proactive_text = "\n".join(
+        proactive.channel_message_from_hikari(m).content for m in (code, own)
+    )
+
+    for text in (chat_text, proactive_text):
+        assert text.count("@[blocked user]") == 2
+        _assert_no_trace(text)
+
+
+async def test_watcher_summary_envelope_carries_no_blocked_content(
+    kai_blocked, proactive_run, monkeypatch
+):
+    """A watcher that quotes everything it saw still has nothing of kai's to
+    quote: its input held only the placeholder."""
+    monkeypatch.setenv(proactive.EXTERNAL_GUILDS_ENV_VAR, str(GUILD))
+    run = proactive.ProactiveRuntime(proactive_run.bot, start_consumers=False)
+    monkeypatch.setattr(proactive, "runtime", run)
+    published = []
+    run.redis_notification_queue = lambda: SimpleNamespace(
+        set_execution_owner=AsyncMock(),
+        publish=AsyncMock(side_effect=published.append),
+        publish_shadow=AsyncMock(side_effect=published.append),
+    )
+
+    class _Parrot:
+        async def decide(self, **kwargs):
+            return (
+                WatcherDecision(
+                    wake=True,
+                    reason="parrot",
+                    summary=kwargs["context_transcript"] + kwargs["new_transcript"],
+                    relevant_message_ids=list(kwargs["new_message_ids"]),
+                ),
+                {"input_tokens": 1, "output_tokens": 1, "cache_read_tokens": 0},
+            )
+
+    monkeypatch.setattr(run, "watcher", lambda: _Parrot())
+    state = run.state_for(GUILD, CHANNEL)
+    state.buffer.append(
+        proactive.channel_message_from_hikari(
+            _message(2006, NIA_USER, "what was that benchmark?", minutes=9)
+        )
+    )
+
+    await proactive._run_producer_once(state, passive=True)
+
+    bodies = "\n".join(envelope.body for envelope in published)
+    assert "what was that benchmark?" in bodies
+    assert BLOCKED_PLACEHOLDER in bodies
+    _assert_no_trace(bodies)
