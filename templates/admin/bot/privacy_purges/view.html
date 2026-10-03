@@ -57,7 +57,7 @@
                         <tr>
                             <td><code>{{ guild_id }}</code></td>
                             <td>
-                                {% if memory %}{{ memory.outcome }}{% if memory.error %} ({{ memory.error }}){% endif %}
+                                {% if memory %}{{ memory.outcome }}{% if memory.earlier_run %} (earlier run){% endif %}{% if memory.error %} ({{ memory.error }}){% endif %}
                                 {% for item in memory.unresolved or [] %}<br><span class="sk-badge sk-badge-danger">unresolved</span> {{ item.location }}: {{ item.reason }}{% endfor %}
                                 {% else %}pending{% endif %}
                             </td>
