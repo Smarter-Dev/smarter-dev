@@ -15,9 +15,9 @@ Behavior kept byte-compatible with the legacy implementation:
 - Usage counting is a sliding window in Redis: one sorted set per API key
   holding the times of its allowed requests over the last 15 minutes, checked
   and updated by one Lua script so concurrent requests cannot both take the
-  last slot. Blocked requests are not counted. Nothing is written to the
-  database for an allowed request (#81); ``security_logs`` gets a row only
-  when a window is exceeded.
+  last slot. Blocked requests are not counted. Nothing is logged for an
+  allowed request (#81); exceeding a window emits a ``rate_limit_exceeded``
+  security event (:mod:`smarter_dev.web.security_logger`).
 - Redis unreachable: the request is let through without rate-limit headers
   and a warning is logged. The only key holder is the bot's own service key,
   so failing open costs nothing in abuse protection while failing closed
@@ -254,15 +254,13 @@ async def check_rate_limits(
         if usage_count >= window.limit:
             remaining_by_window.append((window, 0))
             escalated_window = _next_tier_window(window)
-            async with get_db_session_context() as log_session:
-                await get_security_logger().log_rate_limit_exceeded(
-                    session=log_session,
-                    api_key=api_key,
-                    request=request,
-                    current_usage=usage_count,
-                    limit=window.limit,
-                    window=window.name,
-                )
+            await get_security_logger().log_rate_limit_exceeded(
+                api_key=api_key,
+                request=request,
+                current_usage=usage_count,
+                limit=window.limit,
+                window=window.name,
+            )
             escalated_name = (
                 escalated_window.name if escalated_window != window else window.name
             )

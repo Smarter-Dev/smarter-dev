@@ -24,7 +24,6 @@ import pytest
 from litestar.di import Provide
 from litestar.plugins.pydantic import PydanticPlugin
 from litestar.testing import TestClient, create_test_client
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -33,7 +32,6 @@ from smarter_dev.shared.database import Base
 from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 from smarter_dev.web.api_native import admin as admin_module
 from smarter_dev.web.api_native.admin import AdminController
-from smarter_dev.web.models import SecurityLog
 
 CALLER_KEY_NAME = "Test Admin Key"
 
@@ -128,18 +126,17 @@ def test_create_and_get_conversation(client):
     assert data["is_resolved"] is False
 
 
-async def test_admin_operation_rows_hold_no_member_id(client, db_session):
+def test_admin_operation_events_hold_no_member_id(client, security_events):
     created = client.post(
         "/api/admin/conversations", json=_conversation_body(user_id="U-member-1")
     )
     client.get(f"/api/admin/conversations/{created.json()['id']}")
 
-    rows = list(await db_session.scalars(select(SecurityLog)))
-    assert {row.action for row in rows} == {"admin_operation"}
-    assert len(rows) == 2
-    for row in rows:
-        assert "U-member-1" not in f"{row.details} {row.event_metadata}"
-    assert {row.event_metadata["endpoint"] for row in rows} == {
+    assert {event["event"] for event in security_events} == {"admin_operation"}
+    assert len(security_events) == 2
+    for event in security_events:
+        assert "U-member-1" not in repr(event)
+    assert {event["route"] for event in security_events} == {
         "/api/admin/conversations",
         "/api/admin/conversations/{conversation_id}",
     }

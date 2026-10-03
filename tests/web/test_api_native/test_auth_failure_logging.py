@@ -1,7 +1,7 @@
 """Tests for the failed-auth security-log hookup in ``bot_api_auth_guard``.
 
 Parity with the legacy ``verify_api_key``: every rejected bot-API request
-recorded an ``authentication_failed`` row in ``security_logs``
+recorded an ``authentication_failed`` security event (a log since #81)
 (docs/v2/legacy-sunset/04-api-rewrite.md, "Cross-cutting deletions").
 """
 
@@ -60,7 +60,6 @@ class TestAuthenticationFailureLogging:
         security_logger_mock.log_authentication_failed.assert_awaited_once()
         call_kwargs = security_logger_mock.log_authentication_failed.await_args.kwargs
         assert call_kwargs["bearer_presented"] is False
-        assert call_kwargs["session"] is None
 
     async def test_rejected_key_401_and_logged_without_any_of_it(
         self, guarded_client: TestClient, security_logger_mock: Mock
