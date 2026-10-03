@@ -147,3 +147,9 @@ class PurgeTarget:
 
     def mentions(self, text: str) -> bool:
         return bool(self.id_hits(text) or self.name_hits(text))
+
+    def __repr__(self) -> str:
+        # Never print who is being purged, even by accident in a traceback.
+        return f"PurgeTarget(names={len(self.names)})"
+
+    __str__ = __repr__
