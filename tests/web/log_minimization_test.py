@@ -46,33 +46,28 @@ def _session() -> MagicMock:
     return session
 
 
-def _written_row(session: MagicMock):
-    session.add.assert_called_once()
-    return session.add.call_args.args[0]
-
-
 @pytest.mark.asyncio
-async def test_rejected_bearer_leaves_no_fragment_in_row_or_stdout(caplog):
-    session = _session()
+async def test_rejected_bearer_leaves_no_fragment_in_the_event(caplog):
     caplog.set_level(logging.INFO)
 
     await SecurityLogger().log_authentication_failed(
-        session=session,
         bearer_presented=True,
         request=_request(),
         reason="Invalid API key",
     )
 
-    row = _written_row(session)
-    assert row.event_metadata["bearer_presented"] is True
-    assert "failed_key_prefix" not in row.event_metadata
-    assert "presented bearer" in row.details
+    (record,) = caplog.records
+    event = record.security_event
+    assert event["security.event"] == "authentication_failed"
+    assert event["bearer_presented"] is True
+    assert event["route"] == "/api/guilds/{guild_id}/members"
+    assert "failed_key_prefix" not in event
     assert "***" not in caplog.text
 
 
 @pytest.mark.asyncio
 async def test_rejected_bearer_through_real_guard_and_logger(monkeypatch):
-    """One rejected request, real guard and real security logger, row and stdout."""
+    """One rejected request, real guard and real security logger, no DB write."""
     from litestar.di import Provide
     from litestar.plugins.pydantic import PydanticPlugin
     from litestar.testing import create_test_client
@@ -115,16 +110,17 @@ async def test_rejected_bearer_through_real_guard_and_logger(monkeypatch):
     logged = "\n".join(record.getMessage() for record in records)
 
     assert response.status_code == 401
-    row = _written_row(stored)
-    assert row.action == "authentication_failed"
-    assert row.event_metadata["bearer_presented"] is True
-    fragment = TOKEN[:6]
-    assert fragment not in f"{row.details} {row.event_metadata}"
+    stored.add.assert_not_called()  # events are logs, not rows (#81)
+    (record,) = records
+    event = record.security_event
+    assert event["security.event"] == "authentication_failed"
+    assert event["bearer_presented"] is True
     # The route template, never the concrete path with its Discord ids (#81).
-    assert row.event_metadata["endpoint"] == "/api/guilds/{guild_id}/bytes/config"
-    assert "123456789012345678" not in f"{row.details} {row.event_metadata}"
+    assert event["route"] == "/api/guilds/{guild_id}/bytes/config"
+    fragment = TOKEN[:6]
     assert "Security event: authentication_failed" in logged
     assert fragment not in logged
+    assert "123456789012345678" not in logged
 
 
 @pytest.mark.asyncio
