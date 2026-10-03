@@ -19,13 +19,14 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a dire
 - The chat agent's conversation history expires 2 hours after the conversation goes quiet. Older parts of a long conversation are folded into an AI-written summary.
 - The proactive agent, which watches some channels and joins in when it has something useful to say, keeps a running history of what it has read. That history has no time limit. When it grows large, older parts are folded into an AI-written summary.
 - The proactive agent also runs as a separate service that reads channel messages from Discord directly and keeps its own copy of its history.
+- A few queues that hand messages between parts of the bot have no time limit.
 - **[PLACEHOLDER: short-lived copies. Wording on hold for Zech's decision on the 48-hour and 90-day copies; see #71. Do not publish with this line.]**
 
 **The chat bot's memories.** The chat bot keeps a permanent memory for each server: what it knows about the people there, running jokes, opinions it has formed, how it should behave there and who it is there. It writes these in its own words, not as quotes, and it is told not to keep anything private, sensitive or shared in confidence. It names people by username and Discord ID. It also keeps short notes during conversations, which are folded into the memory overnight, and the last five versions of each memory. These memories are permanent and the bot never resets them. Only the bot edits them, including when it removes someone who asked us to delete their data.
 
 **Records of what the AI did.** When an AI feature answers or acts, we keep a record of it: who and which channel it concerned (IDs and usernames), when, which model, how much it cost and what it decided. The IDs, usernames and numbers stay. **[PLACEHOLDER: short-lived copies. Wording on hold for Zech's decision on the 48-hour and 90-day copies; see #71. Do not publish with this line.]**
 
-**Moderation.** We keep a permanent record of every moderation action taken on a member: who it concerned, who took it, the reason, how long it lasted and when. The bot also posts these actions to the server's moderation log channel. Moderation history is kept even after you ask us to delete your data.
+**Moderation.** We keep a permanent record of every moderation action taken on a member: who it concerned, who took it, the reason, how long it lasted and when. The bot also posts these actions to the server's moderation log channel, and posts edited and deleted messages, with the old and new text and who wrote them, to the server's audit log channel. Moderation history, including those posts, is kept even after you ask us to delete your data.
 
 **Games and community features.** Your bytes balance and the bytes you have sent and received (with the usernames and reasons), your squad membership, your quest and challenge submissions, and the dates of your first and latest message in each server. Leaving a server removes your bytes balance and squad membership there. The rest is kept until you ask us to delete it.
 
@@ -33,23 +34,25 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a dire
 
 ## What the website stores
 
-**Your account.** You sign in with Discord. We receive your Discord ID, username, avatar and email address, and keep them with your account and profile. You stay signed in for up to 30 days.
+**Your account.** You sign in with Discord. We receive your Discord ID, username, avatar and email address, and keep them with your account and profile, along with the sign-in tokens Discord gives us. You stay signed in until 30 days after your last visit. If you turn on browser notifications, we keep your browser's notification address.
 
 **Chat, search and the AI features.** Your chat conversations, the files you attach, and the AI's answers and summaries are kept until you delete them or your account. Searches you make from your dashboard (the query, the results and the answer) are kept. Search links you share let other people search, and their searches are kept for 30 minutes. Questions you ask about our resources are kept with your account.
 
 **Education products.** We are building education products, Gym and Labs. They are not open yet. Before they collect anything new, we will update this notice to say what they store.
 
-**Billing.** Payments are handled by Polar. We keep a record of your membership. When your data is deleted, we keep billing records only in anonymised form.
+**Billing.** Payments are handled by Polar. We keep a record of your membership while you have an account. When your data is deleted, the membership record is deleted and we keep only anonymous usage and cost records that cannot be linked back to you. Polar keeps its payment records under its own terms.
 
 **Email.** If you sign up for a campaign or waitlist, we keep your email address or Discord ID and send a confirmation email.
 
-**Security.** For security and abuse prevention we log your IP address, browser and the pages you request. **[PLACEHOLDER: short-lived copies. Wording on hold for Zech's decision on the 48-hour and 90-day copies; see #71. Do not publish with this line.]**
+**Security.** We log the bot's requests to our own API for security, and a request made on your behalf includes your Discord ID in its address. **[PLACEHOLDER: short-lived copies. Wording on hold for Zech's decision on the 48-hour and 90-day copies; see #71. Do not publish with this line.]**
 
 ## Who else handles your data
 
-- **AI model providers.** Messages, files and questions sent to an AI feature are processed by the model provider serving that request: Google, OpenAI, Anthropic, OpenRouter, OpenCode Zen or DigitalOcean. Web searches go to Brave and web page reads go to Jina. How long they keep it is set by their own terms.
+- **AI model providers.** Messages, files and questions sent to an AI feature are processed by the model provider serving that request: Google, OpenAI, Anthropic, OpenRouter, OpenCode Zen or DigitalOcean. Some messages and searches are also processed by TypeSafe's classifier, which decides things like whether the bot should respond. Web searches go to Brave and web page reads go to Jina. How long they keep it is set by their own terms.
 - **Hosting.** Our servers, database and file storage run on DigitalOcean.
 - **Payments.** Polar.
+- **Email.** Confirmation emails are sent through Resend.
+- **Monitoring.** Errors and performance traces from the bot and the website go to Pydantic Logfire, and can include IDs.
 - **Discord.** Everything you post on Discord is also held by Discord under its own privacy policy.
 
 **[PLACEHOLDER: short-lived copies. Wording on hold for Zech's decision on the 48-hour and 90-day copies; see #71. Do not publish with this line.]**
@@ -58,11 +61,11 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a dire
 
 Send a direct message to the Smarter Dev admin on our Discord server. We check that you own the Discord account, then an admin deletes your data.
 
-**What we delete.** Everything the chat bot holds about you: it removes you from its memories, rewrites its conversation summaries without you and drops the conversation history that holds your messages. Your bytes balance, your squad memberships, quest and challenge submissions, activity dates, forum subscriptions and `/help` records, and your website account with its chat conversations, attachments, searches and profile. Security log entries under your account are deleted too. Records that you share with other people are kept with you removed: bytes transfers you sent or received stay in the other member's history with your ID, username and the reason removed, and records of a chat the bot had with several people no longer say you started it.
+**What we delete.** Everything the chat bot holds about you: it removes you from its memories, rewrites its conversation summaries without you and drops the conversation history that holds your messages. Your bytes balance, your squad memberships, quest and challenge submissions, activity dates, forum subscriptions and `/help` records, and your website account with its chat conversations, attachments, searches and profile. Security log entries that name your Discord ID are deleted too. Records that you share with other people are kept with you removed: bytes transfers you sent or received stay in the other member's history with your ID, username and the reason removed, and records of the bot's conversations and automations that involve other people have your ID and names replaced.
 
-**What we keep.** Moderation history. Billing records, in anonymised form. A bare record that your request was completed, with nothing that identifies you. Copies held by AI providers and Discord are governed by their own terms.
+**What we keep.** Moderation history. Billing records, in anonymised form. A bare record that your request was completed, with nothing that identifies you. Your Discord ID, with nothing else attached, on a list of people whose data we deleted, so that once the chat bot has an opt-out you stay opted out of it. Copies held by AI providers and Discord are governed by their own terms.
 
-Once the chat bot has an opt-out, anyone whose data we deleted stays opted out of it.
+If you stay in the server, the bot starts new records the next time you post.
 
 **[PLACEHOLDER: short-lived copies. Wording on hold for Zech's decision on the 48-hour and 90-day copies; see #71. Do not publish with this line.]**
 

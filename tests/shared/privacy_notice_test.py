@@ -80,7 +80,15 @@ def test_the_notice_names_what_a_deletion_keeps(notice):
 
 @pytest.mark.parametrize(
     "product",
-    ["Gym and Labs", "Chat, search and the AI features", "Your account"],
+    [
+        "Gym and Labs",
+        "Chat, search and the AI features",
+        "Your account",
+        "TypeSafe",
+        "Resend",
+        "Pydantic Logfire",
+        "Polar",
+    ],
 )
 def test_the_notice_covers_the_site(notice, product):
     assert product in notice
