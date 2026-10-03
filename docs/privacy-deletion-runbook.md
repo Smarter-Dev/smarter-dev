@@ -172,8 +172,7 @@ subscriptions. It does not touch searches, so remove those first.
    DELETE FROM web_search_links WHERE owner_user_id = :'uid';
    DELETE FROM web_search_runs WHERE owner_user_id = :'uid';
    DELETE FROM push_subscriptions WHERE user_id = :'uid';
-   -- the row counts must equal the dry run; otherwise ROLLBACK and recheck
-   COMMIT;
+   -- stop here: compare each count with the dry run, then run COMMIT; or ROLLBACK;
    ```
 
 2. Ask the person to sign in and delete the account themselves from Account →
@@ -240,8 +239,9 @@ membership rows go with it; the anonymised usage cost rows stay.
 
 ## 6. Delete what is keyed by Discord id
 
-One transaction. Compare each `DELETE n` / `UPDATE n` with the dry run before
-committing.
+One transaction. The blocks below end without `COMMIT;` on purpose: paste a
+block, compare each `DELETE n` / `UPDATE n` psql prints with the dry run, and
+only then type `COMMIT;`. Anything unexpected: `ROLLBACK;`.
 
 ```sql
 BEGIN;
@@ -292,7 +292,7 @@ UPDATE handler_runs SET
 -- Bot API calls that named the person in their path.
 DELETE FROM security_logs
  WHERE details ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR event_metadata::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)');
-COMMIT;
+-- stop here: compare each count with the dry run, then run COMMIT; or ROLLBACK;
 ```
 
 Then, for **each** name noted in step 1 (username, display name, server
@@ -337,13 +337,13 @@ UPDATE handler_runs
  WHERE strpos(trigger_context::text, :'jq') > 0;
 UPDATE forum_agent_responses SET author_display_name = '[deleted user]'
  WHERE author_display_name = :'name';
--- each UPDATE count must equal its line above; otherwise ROLLBACK
-COMMIT;
+-- stop here: compare each UPDATE count with its line above, then run COMMIT; or ROLLBACK;
 ```
 
-The name in prompt text covers the `username="…"`, `reply-to-username="…"`
-and `nickname="…"` attributes the chat agent's transcript writes; a name the
-model repeated in its own words is not matched.
+The chat turn updates are a safety net: turns are written with member text
+already redacted and their triggering messages carry ids, not names, so they
+usually change 0 rows. The handler run and forum updates are the ones that
+normally match. A name the model repeated in its own words is not matched.
 
 The AI-written text in these rows (replies, topics, notes, forum replies) is
 covered by the short-lived copies placeholder above.
@@ -389,7 +389,7 @@ of this runbook).
    UPDATE account_deletion_requests
       SET user_id = gen_random_uuid(), subscription_ids = '[]', error = NULL
     WHERE user_id = :'uid' AND status = 'complete';
-   COMMIT;
+   -- expect UPDATE 1, then run COMMIT; (anything else: ROLLBACK;)
    ```
 
 3. Finish the receipt note: receipt id, dates, "completed", and the classes
