@@ -147,7 +147,7 @@ class AdminController(Controller):
 
             await get_security_logger().log_admin_operation(
                 operation="create_help_conversation",
-                user_identifier=f"bot:{caller.display_name}",
+                api_key=caller,
                 request=request,
                 success=True,
                 details=f"Conversation created in guild {data.guild_id}",
@@ -226,7 +226,7 @@ class AdminController(Controller):
 
             await get_security_logger().log_admin_operation(
                 operation="list_help_conversations",
-                user_identifier=caller.display_name,
+                api_key=caller,
                 request=request,
                 success=True,
                 details=(
@@ -353,7 +353,7 @@ class AdminController(Controller):
 
             await get_security_logger().log_admin_operation(
                 operation="view_help_conversation_stats",
-                user_identifier=caller.display_name,
+                api_key=caller,
                 request=request,
                 success=True,
                 details=(
@@ -404,7 +404,7 @@ class AdminController(Controller):
 
             await get_security_logger().log_admin_operation(
                 operation="view_help_conversation",
-                user_identifier=caller.display_name,
+                api_key=caller,
                 request=request,
                 success=True,
                 details=f"Viewed conversation {parsed_conversation_id}",

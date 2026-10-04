@@ -13,7 +13,11 @@ Event names, attribute names and fixed values avoid the words Logfire's
 default scrubber redacts (``auth``, ``api key``, ``session``, ``secret`` and
 the like), so events arrive readable: ``login_failed`` rather than
 "authentication failed", ``key_id`` rather than "api key id". Each event
-method's values are fixed codes for the same reason.
+method's values are fixed codes for the same reason. Values we do not
+choose go under keys Logfire never scrubs: the route template and method as
+``http.route`` and ``http.method`` (``/api/auth/validate`` would otherwise be
+redacted for containing "auth"). The calling key is identified by id and
+prefix, not by its free-text name.
 
 No event records a member's Discord id. Paths are recorded as route
 templates (``/api/guilds/{guild_id}/bytes/balance/{user_id}``), never the
@@ -41,12 +45,17 @@ class AuthenticatedKeyLike(Protocol):
     """The slice of an authenticated API key the logger consumes.
 
     Satisfied by ``api_native.rate_limiting.RateLimitedKey`` (built from the
-    Skrift-native key).
+    Skrift-native key) and by the Skrift key row itself.
     """
 
     id: UUID
     key_prefix: str
-    created_by: str
+
+
+def _http(request: Request) -> dict[str, Any]:
+    """Route template and method, under OpenTelemetry's names. Logfire treats
+    both keys as safe, so a template like ``/api/auth/status`` arrives intact."""
+    return {"http.route": route_template(request), "http.method": request.method}
 
 
 def route_template(request: Request) -> str | None:
@@ -105,9 +114,8 @@ class SecurityLogger:
             False,
             bearer_presented=bearer_presented,
             reason=reason,
-            route=route_template(request),
-            method=request.method,
             client_ip=get_client_ip(request.scope),
+            **_http(request),
         )
 
     async def log_rate_limit_exceeded(
@@ -127,31 +135,32 @@ class SecurityLogger:
             current_usage=current_usage,
             rate_limit=limit,
             window=window,
-            route=route_template(request),
-            method=request.method,
+            **_http(request),
         )
 
     async def log_admin_operation(
         self,
         operation: str,
-        user_identifier: str,
+        api_key: AuthenticatedKeyLike,
         request: Request,
         success: bool = True,
         details: str | None = None,
     ) -> None:
-        """Log an administrative operation.
+        """Log an administrative operation by the calling API key.
 
-        ``details`` must not name a member; callers describe the operation's
-        scope (a guild, a page, a conversation id) and nothing more.
+        The key is identified by id and prefix; its display name is free text
+        that Logfire's scrubber may redact. ``details`` must not name a
+        member; callers describe the operation's scope (a guild, a page, a
+        conversation id) and nothing more.
         """
         self.emit(
             "admin_operation",
             success,
             operation=operation,
-            caller=user_identifier,
+            key_id=str(api_key.id),
+            key_prefix=api_key.key_prefix,
             details=details or f"Admin operation: {operation}",
-            route=route_template(request),
-            method=request.method,
+            **_http(request),
         )
 
 

@@ -63,7 +63,7 @@ async def test_rejected_bearer_leaves_no_fragment_in_the_event(caplog):
     event = record.security_event
     assert event["security.event"] == "login_failed"
     assert event["bearer_presented"] is True
-    assert event["route"] == "/api/guilds/{guild_id}/members"
+    assert event["http.route"] == "/api/guilds/{guild_id}/members"
     assert "failed_key_prefix" not in event
     assert "***" not in caplog.text
 
@@ -119,7 +119,7 @@ async def test_rejected_bearer_through_real_guard_and_logger(monkeypatch):
     assert event["security.event"] == "login_failed"
     assert event["bearer_presented"] is True
     # The route template, never the concrete path with its Discord ids (#81).
-    assert event["route"] == "/api/guilds/{guild_id}/bytes/config"
+    assert event["http.route"] == "/api/guilds/{guild_id}/bytes/config"
     fragment = TOKEN[:6]
     assert "Security event: login_failed" in logged
     assert fragment not in logged

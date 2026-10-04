@@ -291,8 +291,8 @@ class TestRateLimitExceeded:
                 "rate_limit": RATE_LIMIT_PER_SECOND,
                 "window": "second",
                 # The route template, never the concrete path with its ids.
-                "route": "/api/guilds/{guild_id}/bytes/config",
-                "method": "GET",
+                "http.route": "/api/guilds/{guild_id}/bytes/config",
+                "http.method": "GET",
             }
         ]
 
@@ -391,6 +391,19 @@ class TestRedisUnreachable:
         await check_rate_limits(key, request, redis=fake_redis)
         assert len(caplog.records) == 2
         assert "for 5 request(s)" in caplog.records[1].getMessage()
+
+        # Two more go unlimited inside the interval, then Redis recovers: the
+        # first good check reports them rather than leaving them unreported.
+        for _ in range(2):
+            await check_rate_limits(key, request, redis=fake_redis)
+        del fake_redis.eval  # back to the real script
+        decision = await check_rate_limits(key, request, redis=fake_redis)
+        assert decision.headers
+        assert len(caplog.records) == 3
+        assert "2 more request(s)" in caplog.records[2].getMessage()
+
+        await check_rate_limits(key, request, redis=fake_redis)
+        assert len(caplog.records) == 3  # healthy checks log nothing
 
 
 class TestUnauthenticatedPassthrough:

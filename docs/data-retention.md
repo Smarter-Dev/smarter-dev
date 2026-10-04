@@ -248,12 +248,14 @@ emitted (`smarter_dev/web/security_logger.py`), named in the `security.event`
 attribute: `login_failed` (with `bearer_presented`, a `reason` code and the
 `client_ip`, the source of the attempt), `rate_limit_exceeded` (with the
 `key_id` and `key_prefix` of the API key, the `window`, `current_usage` and
-`rate_limit`), and `admin_operation` (with `operation`, `caller` and
-`details`). Each also carries `success`, the `route` template
-(`/api/guilds/{guild_id}/bytes/balance/{user_id}`, never the
-concrete path) and the `method`. No event
+`rate_limit`), and `admin_operation` (with `operation`, the calling key's
+`key_id` and `key_prefix`, and `details`). Each also carries `success`, the
+`http.route` template (`/api/guilds/{guild_id}/bytes/balance/{user_id}`,
+never the
+concrete path) and the `http.method`. No event
 records a member's Discord id. The names avoid the words Logfire's default
-scrubber redacts, so the events arrive readable. They go to Pydantic Logfire
+scrubber redacts, and route templates sit under a key it never scrubs, so the
+events arrive readable. They go to Pydantic Logfire
 when the process has a `LOGFIRE_TOKEN` and are kept for the Logfire project's
 retention period; without Logfire they go to the standard logger (container
 stdout). Ordinary successful API requests are not logged at all.
