@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import uuid
 from collections.abc import Awaitable
 from collections.abc import Callable
@@ -73,6 +74,8 @@ from smarter_dev.bot.agents.response_fitting import fit_writer_message
 from smarter_dev.bot.agents.response_fitting import split_for_discord
 from smarter_dev.bot.agents.writer_agent import build_writer_prompt
 from smarter_dev.bot.agents.writer_agent import get_writer_agent
+from smarter_dev.bot.privacy.blocked_users import get_blocked_users
+from smarter_dev.bot.privacy.blocked_users import redact_blocked_mentions
 from smarter_dev.bot.services.channel_token_budget import add_fallback_usage
 from smarter_dev.bot.services.channel_token_budget import add_usage
 from smarter_dev.bot.services.channel_token_budget import fallback_ended_key
@@ -83,6 +86,8 @@ from smarter_dev.bot.services.chat_conversation_persistence import end_engagemen
 from smarter_dev.bot.services.chat_conversation_persistence import persist_error
 from smarter_dev.bot.services.chat_conversation_persistence import persist_turn
 from smarter_dev.bot.services.chat_conversation_persistence import start_engagement
+from smarter_dev.bot.services.chat_memory import HISTORY_UNREADABLE
+from smarter_dev.bot.services.chat_memory import chat_privacy_locked
 from smarter_dev.bot.services.chat_memory import get_chat_memory
 from smarter_dev.bot.services.default_model_override import read_default_model_override
 from smarter_dev.bot.services.exceptions import APIError
@@ -249,6 +254,13 @@ class ChannelEngine:
     # the turn that carried ``<what-i-remember>``, which would silently amputate
     # the bot's identity mid-engagement, so the next turn re-emits the blob once.
     _reemit_long_term_memory: bool = False
+
+    # Set by a privacy purge of this guild: the blocks held above (and read
+    # before the purge) may carry the removed person, so the next turn
+    # re-reads them from the (purged) guild memory and re-emits the fresh copy.
+    _guild_memory_stale: bool = False
+    # The exact stored history this turn loaded, for a compare-and-set write.
+    _loaded_history_raw: bytes | None | object = None
 
     # Set once this engine has told the channel its pinned model is gone. Backs
     # up the Redis throttle so a channel still gets the notice exactly once when
@@ -477,11 +489,45 @@ class ChannelEngine:
         ``first_activation`` set and retries the initial turn on the next fire.
         """
         async with self.run_lock:
+            blocked = get_blocked_users()
+            if not blocked.loaded:
+                # No blocked-users list yet: nothing from Discord may reach the
+                # model. Leave the queue for a turn after the list loads.
+                logger.info(
+                    "Chat turn deferred for channel %s: blocked-users list not "
+                    "loaded",
+                    self.channel_id,
+                )
+                self._schedule_idle_fire()
+                return False
+            if await self._privacy_purge_running():
+                # A privacy purge is rewriting this guild's chat memory: read
+                # nothing now (a stale copy would be written back after the
+                # turn) and keep the queue for a turn once it is done.
+                logger.info(
+                    "Chat turn deferred for channel %s: privacy purge running",
+                    self.channel_id,
+                )
+                self._schedule_idle_fire()
+                return False
             turn_started_at = datetime.now(UTC)
             # Snapshot queue; new messages can keep arriving while we run.
             async with self.queue_lock:
                 drained = [q.message for q in self.queue]
                 self.queue.clear()
+            # Messages queued before their author was blocked never turn into
+            # model input (and a blocked trigger never starts a turn).
+            drained = [m for m in drained if not _author_blocked(blocked, m)]
+            if (
+                first_activation
+                and self.activation_message is not None
+                and _author_blocked(blocked, self.activation_message)
+            ):
+                logger.info(
+                    "Chat activation in channel %s dropped: blocked author",
+                    self.channel_id,
+                )
+                return True
 
             memory = get_chat_memory()
             if first_activation:
@@ -587,6 +633,12 @@ class ChannelEngine:
                         guild_events=await self._drain_guild_events(),
                     )
                     history = []
+                    # Not read into the turn, only checked: an unreadable
+                    # stored history must not be overwritten by this one.
+                    (
+                        _ignored,
+                        self._loaded_history_raw,
+                    ) = await memory.read_history_versioned(self.channel_id)
                 else:
                     if not drained:
                         # Engine fired with nothing new to react to. Skip.
@@ -595,6 +647,14 @@ class ChannelEngine:
                     # follow-up normally sends none of it — unless the previous
                     # turn's compaction summarised that history away, in which
                     # case it goes out once more and the flag is spent.
+                    if self._guild_memory_stale:
+                        self._guild_memory_stale = False
+                        snapshot = await self._load_guild_memory()
+                        self._long_term_memory = snapshot.long_term_memory
+                        self._long_term_memory_updated_at = snapshot.updated_at
+                        self._behavior = snapshot.behavior
+                        self._personality = snapshot.personality
+                        self._reemit_long_term_memory = True
                     reemit_memory = self._reemit_long_term_memory
                     self._reemit_long_term_memory = False
                     agent_input = await build_followup_input(
@@ -613,7 +673,10 @@ class ChannelEngine:
                         personality=self._personality if reemit_memory else None,
                         new_guild_events=await self._drain_guild_events(),
                     )
-                    history = await memory.read_history(self.channel_id)
+                    (
+                        history,
+                        self._loaded_history_raw,
+                    ) = await memory.read_history_versioned(self.channel_id)
             except Exception:
                 log_exception(
                     logger,
@@ -1016,9 +1079,32 @@ class ChannelEngine:
 
             # Persist the post-processor history for the next turn.
             try:
-                await memory.write_history(
-                    self.channel_id, list(result.all_messages())
-                )
+                if self._loaded_history_raw is HISTORY_UNREADABLE:
+                    logger.info(
+                        "[%s] Chat history of channel %s is unreadable; this "
+                        "turn's history is not stored",
+                        request_id,
+                        self.channel_id,
+                    )
+                elif first_activation:
+                    # A fresh engagement starts its own history.
+                    await memory.write_history(
+                        self.channel_id, list(result.all_messages())
+                    )
+                elif not await memory.write_history(
+                    self.channel_id,
+                    list(result.all_messages()),
+                    expected_raw=self._loaded_history_raw,
+                ):
+                    # A privacy purge rewrote the history while this turn ran
+                    # (possibly in another process during a deploy): its copy
+                    # wins, this turn's stale one is dropped.
+                    logger.info(
+                        "[%s] Chat history of channel %s changed during the "
+                        "turn; this turn's history write dropped",
+                        request_id,
+                        self.channel_id,
+                    )
             except Exception:
                 log_exception(
                     logger,
@@ -1586,7 +1672,15 @@ class ChannelEngine:
             )
             return []
         self._event_cursor = cursor
-        return [GuildEventView.from_guild_event(event) for event in events]
+        # An action on or by a blocked member (a timeout, a DM) would name
+        # them; any blocked id in the event's text is a backstop. Only the
+        # copy shown to the model is filtered; the stored log is untouched.
+        blocked = get_blocked_users()
+        return [
+            GuildEventView.from_guild_event(event)
+            for event in events
+            if not _event_involves_blocked(event, blocked)
+        ]
 
     def _unavailable_model_key(
         self, override: Any | None, *, fallback_active: bool
@@ -1823,7 +1917,9 @@ class ChannelEngine:
             )
         # The gate judges text, so name each attachment in it — otherwise a
         # file-only message reads as empty and is filtered out unseen.
-        content = getattr(message, "content", None) or ""
+        content = redact_blocked_mentions(
+            getattr(message, "content", None) or "", get_blocked_users()
+        )
         attachment_lines = [
             f"[attachment: {getattr(att, 'filename', None) or 'file'}"
             + (f", {att.media_type}" if getattr(att, "media_type", None) else "")
@@ -1863,7 +1959,14 @@ class ChannelEngine:
             )
             return []
         fetched.reverse()
-        return [self._to_gate_message(message) for message in fetched]
+        # Grounding is optional context: a blocked author's message is
+        # dropped from it entirely.
+        blocked = get_blocked_users()
+        return [
+            self._to_gate_message(message)
+            for message in fetched
+            if not _author_blocked(blocked, message)
+        ]
 
     async def _fetch_gate_channel_name(self) -> str | None:
         """The channel's name for the response gate — a forum post's title.
@@ -2265,6 +2368,25 @@ class ChannelEngine:
         except Exception:
             log_exception(logger, "Failed to post notice message", level=logging.DEBUG)
 
+    def invalidate_guild_memory(self) -> None:
+        """A privacy purge rewrote this guild's memory: drop the held blocks
+        now and re-read them before the next turn."""
+        self._long_term_memory = None
+        self._long_term_memory_updated_at = None
+        self._behavior = None
+        self._personality = None
+        self._guild_memory_stale = True
+
+    async def _privacy_purge_running(self) -> bool:
+        try:
+            return await chat_privacy_locked(self.guild_id)
+        except RedisError:
+            # Cannot tell: wait rather than risk writing over a purge.
+            logger.warning(
+                "privacy lock check failed for channel %s", self.channel_id
+            )
+            return True
+
     async def _maybe_refire(self) -> None:
         async with self.queue_lock:
             queued = len(self.queue)
@@ -2274,6 +2396,36 @@ class ChannelEngine:
             self.fire_event.set()
         else:
             self._schedule_idle_fire()
+
+
+_DIGIT_RUN = re.compile(r"[0-9]{15,22}")
+
+
+def _event_involves_blocked(event: Any, blocked: Any) -> bool:
+    """A guild event whose target or actor is blocked, or whose text holds a
+    blocked id as a digit run."""
+    for user_id in (event.target_user_id, event.actor_user_id):
+        if user_id and blocked.is_blocked(user_id):
+            return True
+    texts = (
+        event.summary,
+        event.target_username,
+        event.moderator_username,
+        event.reason,
+        event.channel_name,
+    )
+    return any(
+        blocked.is_blocked(run)
+        for text in texts
+        if text
+        for run in _DIGIT_RUN.findall(text)
+    )
+
+
+def _author_blocked(blocked: Any, message: Any) -> bool:
+    """Whether a hikari message's author is on the blocked-users list."""
+    author = getattr(message, "author", None)
+    return author is not None and blocked.is_blocked(getattr(author, "id", None))
 
 
 def _extract_tokens(usage: RunUsage | None) -> int:

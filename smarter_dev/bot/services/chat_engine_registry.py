@@ -29,6 +29,11 @@ class ChatEngineRegistry:
         async with self._lock:
             return self._engines.get(channel_id)
 
+    async def engines(self) -> list[ChannelEngine]:
+        """Every registered engine (the privacy purge locks each one's turn)."""
+        async with self._lock:
+            return list(self._engines.values())
+
     async def has_active(self, channel_id: int) -> bool:
         async with self._lock:
             engine = self._engines.get(channel_id)

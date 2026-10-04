@@ -98,6 +98,13 @@ class Message(BaseModel):
             "bot are tracked separately via reply_to_is_self."
         ),
     )
+    blocked: bool = Field(
+        default=False,
+        description=(
+            "The author is on the blocked-users list. Such a message carries "
+            "no id, author, time or content and renders as [BLOCKED BY USER]."
+        ),
+    )
 
 
 class ChannelInfo(BaseModel):

@@ -156,4 +156,4 @@ def test_reply_envelope_body_carries_the_attachment():
 def test_message_without_attachments_renders_unchanged():
     message = channel_message_from_hikari(_hikari_message(content="hello"))
     line = ChannelEnvironment(visible=[message], bot_user_id="999").render([message])
-    assert line.endswith("·Ally: hello")
+    assert line.endswith("·Ally (uid=901): hello")

@@ -17,6 +17,8 @@ The agent run itself is patched out — these tests verify the *plumbing*:
 
 from __future__ import annotations
 
+import functools
+
 import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -167,6 +169,11 @@ def fake_memory():
     m.write_notes = AsyncMock()
     m.clear_notes = AsyncMock()
     m.read_history = AsyncMock(return_value=[])
+    # The engine reads history with the stored bytes for its
+    # compare-and-set write; derived from read_history's stub.
+    m.read_history_versioned = AsyncMock(
+        side_effect=functools.partial(_versioned, m)
+    )
     m.write_history = AsyncMock()
     m.clear_history = AsyncMock()
     m.topic_for_activation = AsyncMock(return_value=None)
@@ -352,6 +359,43 @@ async def test_followup_turn_loads_history_and_uses_followup_builder(
     [turn_one_request] = history_calls[0]
     assert isinstance(turn_one_request, ModelRequest)
     assert history_calls[1] == ["prior_a", "prior_b"]
+    # The follow-up's write is a compare-and-set against the bytes it loaded,
+    # so a privacy purge's rewrite in between is never overwritten.
+    first_write, *later_writes = fake_memory.write_history.await_args_list
+    assert "expected_raw" not in first_write.kwargs  # a fresh engagement
+    assert later_writes and all(
+        call.kwargs["expected_raw"] == b"loaded" for call in later_writes
+    )
+
+
+@pytest.mark.asyncio
+async def test_unreadable_stored_history_is_never_written_over(
+    fake_bot, fake_memory
+):
+    """Privacy (#79): a stored history the engine cannot parse may be memory
+    a purge still has to see. Turns run without it and write none back,
+    neither on the activation nor on follow-ups."""
+    from smarter_dev.bot.services.chat_memory import HISTORY_UNREADABLE
+
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
+        return _result(_send("ack", topic="t", notes="n"), all_messages=["m"])
+
+    fake_memory.read_history_versioned = AsyncMock(
+        return_value=([], HISTORY_UNREADABLE)
+    )
+    patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
+    with patches[0], patches[1], patches[2], patches[3]:
+        engine, _ = await _build_engine(fake_bot)
+        engine.start()
+        engine.trigger_initial(_fake_trigger_message())
+        await asyncio.sleep(0.05)
+        for i in range(QUEUE_FIRE_THRESHOLD):
+            await engine.observe(_make_event(3000 + i, 200, f"chatter {i}"))
+        await asyncio.sleep(0.1)
+        await engine.shutdown()
+
+    assert fake_memory.read_history_versioned.await_count >= 2
+    fake_memory.write_history.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -996,3 +1040,7 @@ async def test_rate_limited_model_says_so(fake_bot, fake_memory):
     assert error_url in posted
     assert "poolside" not in posted.lower()
     assert "429" not in posted
+
+
+async def _versioned(memory, channel_id):
+    return await memory.read_history(channel_id), b"loaded"

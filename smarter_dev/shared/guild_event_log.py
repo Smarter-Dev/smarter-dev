@@ -133,6 +133,12 @@ class GuildEvent:
     reason: str | None = None
     duration_seconds: int | None = None
     source: str | None = None
+    # The moderated member's Discord id, so a reader can honour the
+    # privacy blocked-users list (it lists ids, not names).
+    target_user_id: str | None = None
+    # Who performed it (the moderator), when known: a blocked member as the
+    # actor must not reach a model either.
+    actor_user_id: str | None = None
 
     def __post_init__(self) -> None:
         if self.at.tzinfo is None:
@@ -204,6 +210,10 @@ def mod_action_event(
         reason=_optional_text(context.get("reason"), MAX_REASON_CHARS),
         duration_seconds=int(duration) if isinstance(duration, int | float) else None,
         source=_optional_text(context.get("source"), MAX_SUMMARY_CHARS),
+        target_user_id=_optional_text(context.get("target_user_id"), MAX_SUMMARY_CHARS),
+        actor_user_id=_optional_text(
+            context.get("moderator_user_id"), MAX_SUMMARY_CHARS
+        ),
     )
 
 
@@ -217,6 +227,7 @@ def bot_message_event(
     target_username: str | None = None,
     source: str | None = None,
     at: datetime | None = None,
+    target_user_id: str | None = None,
 ) -> GuildEvent:
     """Build the event for something the bot's account said.
 
@@ -235,6 +246,7 @@ def bot_message_event(
         channel_name=_optional_text(channel_name, MAX_SUMMARY_CHARS),
         target_username=_optional_text(target_username, MAX_SUMMARY_CHARS),
         source=_optional_text(source, MAX_SUMMARY_CHARS),
+        target_user_id=_optional_text(target_user_id, MAX_SUMMARY_CHARS),
     )
 
 
@@ -284,6 +296,8 @@ def _deserialized(member: bytes | str) -> GuildEvent | None:
                 else None
             ),
             source=_nullable_string(payload.get("source")),
+            target_user_id=_nullable_string(payload.get("target_user_id")),
+            actor_user_id=_nullable_string(payload.get("actor_user_id")),
         )
     except (UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError, ValueError):
         logger.debug("skipping malformed guild event member", exc_info=True)

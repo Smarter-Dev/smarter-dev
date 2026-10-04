@@ -654,6 +654,23 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             )
             chat_memory_redis = None
 
+        # Blocked-users list (privacy, #79): refreshed every 60 s for the life
+        # of the process. Until it first loads, no Discord message reaches the
+        # chat or proactive model.
+        from smarter_dev.bot.privacy.blocked_users import get_blocked_users
+        from smarter_dev.bot.privacy.blocked_users import refresh_loop
+        from smarter_dev.bot.services.privacy_service import PrivacyApiService
+
+        privacy_service = PrivacyApiService(api_client)
+        bot.d["privacy_service"] = privacy_service
+        bot.d["blocked_users_task"] = asyncio.create_task(
+            refresh_loop(
+                get_blocked_users(),
+                privacy_service.fetch_blocked_users,
+                chat_memory_redis,
+            )
+        )
+
         # Initialize services
         logger.info("Initializing bytes service...")
         await bytes_service.initialize()
@@ -1182,6 +1199,9 @@ async def cleanup_bot_services(bot: lightbulb.BotApp) -> None:
     logger.info("Cleaning up bot services...")
 
     try:
+        if hasattr(bot, "d") and bot.d.get("blocked_users_task") is not None:
+            bot.d["blocked_users_task"].cancel()
+
         # Clean up services
         if hasattr(bot, "d") and "challenge_service" in bot.d:
             await bot.d["challenge_service"].cleanup()
@@ -1416,6 +1436,10 @@ def load_plugins(bot: lightbulb.BotApp) -> None:
         logger.info("Loading proactive plugin...")
         bot.load_extensions("smarter_dev.bot.plugins.proactive")
         logger.info("✓ Loaded proactive plugin")
+
+        logger.info("Loading privacy plugin...")
+        bot.load_extensions("smarter_dev.bot.plugins.privacy")
+        logger.info("✓ Loaded privacy plugin")
 
         logger.info("Loading configure plugin...")
         bot.load_extensions("smarter_dev.bot.plugins.configure")

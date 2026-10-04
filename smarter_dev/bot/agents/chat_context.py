@@ -38,6 +38,8 @@ from smarter_dev.bot.agents.chat_models import (
     Message,
     MessageAttachment,
 )
+from smarter_dev.bot.privacy.blocked_users import get_blocked_users
+from smarter_dev.bot.privacy.blocked_users import redact_blocked_mentions
 from smarter_dev.bot.services.chat_memory import ChatMemory
 from smarter_dev.bot.utils.messages import (
     fetch_channel_info,
@@ -206,16 +208,30 @@ async def _convert(
     bot_user = bot.get_me()
     bot_user_id = bot_user.id if bot_user else None
 
+    blocked = get_blocked_users()
     window_ids = {msg.id for msg in raw_messages}
     messages: list[Message] = []
     for msg in raw_messages:
+        if blocked.is_blocked(msg.author.id):
+            # Position only: no id, author, time, reply, mentions or files.
+            messages.append(
+                Message(message_id="", author_id="", body="", blocked=True)
+            )
+            continue
         body = msg.content or ""
         if bot_user_id is not None and msg.author.id == bot_user_id and not body.strip():
             continue
-        resolved_body = await resolve_mentions(body, bot, guild_id)
+        # Redact before resolution, which would turn the id into a name.
+        resolved_body = await resolve_mentions(
+            redact_blocked_mentions(body, blocked), bot, guild_id
+        )
         ref = getattr(msg, "referenced_message", None)
-        reply_to = str(ref.id) if ref else None
         ref_author = getattr(ref, "author", None) if ref is not None else None
+        if ref_author is not None and blocked.is_blocked(ref_author.id):
+            # A reply to a blocked author's message names nothing about it.
+            ref = None
+            ref_author = None
+        reply_to = str(ref.id) if ref else None
         reply_to_author_id = str(ref_author.id) if ref_author else None
         reply_to_is_self = (
             bot_user_id is not None
@@ -300,9 +316,15 @@ async def _build_authors(
     guild_id: int,
     messages: list[hikari.Message],
 ) -> list[Author]:
-    """Build Author entries for everyone referenced in ``messages``."""
+    """Build Author entries for everyone referenced in ``messages``.
+
+    Blocked authors get no entry: their name, roles and id stay out.
+    """
+    blocked = get_blocked_users()
     seen: dict[int, hikari.User] = {}
     for msg in messages:
+        if blocked.is_blocked(msg.author.id):
+            continue
         if msg.author.id not in seen:
             seen[msg.author.id] = msg.author
 

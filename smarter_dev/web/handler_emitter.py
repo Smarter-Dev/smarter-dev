@@ -254,12 +254,19 @@ class DiscordEmitter(DiscordBotClient):
         # The purpose of the DM, never its body: the bot may recall that it wrote
         # to someone, not what it said to them privately.
         await self._remember_send(
-            summary=f"a handler message to user {user_id}", kind=BOT_DM_KIND
+            summary=f"a handler message to user {user_id}",
+            kind=BOT_DM_KIND,
+            target_user_id=str(user_id),
         )
         return str(response.json().get("id", ""))
 
     async def _remember_send(
-        self, *, summary: str, kind: str, channel_id: str | None = None
+        self,
+        *,
+        summary: str,
+        kind: str,
+        channel_id: str | None = None,
+        target_user_id: str | None = None,
     ) -> None:
         """Note a delivered handler send in the guild's short-term event log.
 
@@ -277,6 +284,7 @@ class DiscordEmitter(DiscordBotClient):
                 kind=kind,
                 channel_id=channel_id,
                 source="handler",
+                target_user_id=target_user_id,
             )
         )
 

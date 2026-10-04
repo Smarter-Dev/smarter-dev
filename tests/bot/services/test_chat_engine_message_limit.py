@@ -8,6 +8,8 @@ nothing else is.
 
 from __future__ import annotations
 
+import functools
+
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -119,6 +121,11 @@ def _fake_memory():
     m.write_notes = AsyncMock()
     m.clear_notes = AsyncMock()
     m.read_history = AsyncMock(return_value=[])
+    # The engine reads history with the stored bytes for its
+    # compare-and-set write; derived from read_history's stub.
+    m.read_history_versioned = AsyncMock(
+        side_effect=functools.partial(_versioned, m)
+    )
     m.write_history = AsyncMock()
     m.clear_history = AsyncMock()
     return m
@@ -261,3 +268,7 @@ async def test_ranked_message_pings_for_a_new_usage_warning():
         ),
         user_mentions=[200],
     )
+
+
+async def _versioned(memory, channel_id):
+    return await memory.read_history(channel_id), b"loaded"

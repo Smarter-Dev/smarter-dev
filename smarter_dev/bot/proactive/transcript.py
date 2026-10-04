@@ -1,7 +1,12 @@
 """Transcript rendering shared by the eval labeler and the proactive bot.
 
-Stable single-letter speaker tags plus real display names, message ids,
-reply markers and a [BOT] prefix for bot-authored lines.
+Stable single-letter speaker tags plus real display names, author ids,
+message ids, reply markers and a [BOT] prefix for bot-authored lines.
+
+``render_transcript_line`` is the one place a Discord message becomes a
+transcript line, so who may appear (the blocked-users list today, #74's
+opt-out tomorrow) is decided here: a blocked author's message renders as
+exactly ``[BLOCKED BY USER]`` with no id, name, tag, time or content.
 """
 
 from __future__ import annotations
@@ -9,12 +14,15 @@ from __future__ import annotations
 from datetime import datetime
 
 from smarter_dev.bot.proactive.timestamps import utc_timestamp
+from smarter_dev.shared.privacy_purge import BLOCKED_PLACEHOLDER
 
 
 def speaker_tags(records: list[dict]) -> dict[str, str]:
     """Stable per-author letter tags (A, B, … AA, AB) by first appearance."""
     tags: dict[str, str] = {}
     for record in records:
+        if record.get("blocked"):
+            continue
         author_id = record["author_id"]
         if author_id not in tags:
             tags[author_id] = _letter_tag(len(tags))
@@ -33,6 +41,10 @@ def _letter_tag(index: int) -> str:
 def render_transcript_line(
     record: dict, tags: dict[str, str], *, attachment_urls: bool = True
 ) -> str:
+    """``[time] [id=…] {tag}·{author_display} (uid={author_id}): text``, or
+    ``[BLOCKED BY USER]`` for a blocked author."""
+    if record.get("blocked"):
+        return BLOCKED_PLACEHOLDER
     bot_marker = "[BOT] " if record["is_bot"] else ""
     reply_marker = (
         f" (reply to id={record['reply_to_id']})" if record["reply_to_id"] else ""
@@ -41,7 +53,7 @@ def render_transcript_line(
     stamp = utc_timestamp(datetime.fromisoformat(record["timestamp"]))
     return (
         f"[{stamp}] [id={record['id']}] {bot_marker}{tag}·{record['author_display']}"
-        f"{reply_marker}: {with_attachments(record, urls=attachment_urls)}"
+        f" (uid={record['author_id']}){reply_marker}: {with_attachments(record, urls=attachment_urls)}"
     )
 
 

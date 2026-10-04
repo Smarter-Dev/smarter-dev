@@ -1311,6 +1311,7 @@ def _spam_action_event(
         {
             "action_type": action_type,
             "target_username": event.author.username,
+            "target_user_id": str(event.author.id),
             "reason": ", ".join(reasons),
             "source": MOD_ACTION_SOURCE,
             "channel_id": str(event.channel_id),
