@@ -36,7 +36,6 @@ name matching goes through ``PurgeTarget``.
 from __future__ import annotations
 
 import html
-import json
 import math
 import re
 from collections.abc import Iterable
@@ -44,6 +43,7 @@ from dataclasses import dataclass
 
 from pydantic_ai.messages import ModelMessage
 
+from smarter_dev.bot.privacy.attribution import decoded_texts
 from smarter_dev.shared.privacy_purge import PurgeTarget
 
 FOLD_MIN_CHARS = 40
@@ -65,18 +65,20 @@ _UID_VALUE = re.compile(r"uid=([0-9]{1,22})")
 _NAME_BESIDE_UID = re.compile(r"·([^\n·]*?) \(uid=([0-9]{1,22})\)")
 # The bot's one extension (input format only): chat transcripts attribute
 # authors as <message ... user-id="N" username="u" nickname="n">, not uid=.
-_CHAT_MESSAGE_TAG = re.compile(r"<message\b([^>]*)>")
+# Anchored: the chat renderer writes each tag as a whole line.
+_CHAT_MESSAGE_TAG = re.compile(r"^<message\b([^>\n]*)>$", re.MULTILINE)
 _CHAT_ATTRIBUTE = re.compile(r'\b(user-id|username|nickname)="([^"]*)"')
 
 
 @dataclass(frozen=True)
 class FoldField:
     """One output field and the input parts it replaces; ``output`` is None
-    when the model left the field out."""
+    when the model left the field out; ``xml_input`` marks chat XML."""
 
     name: str
     inputs: tuple[str, ...]
     output: str | None
+    xml_input: bool = False
 
 
 def fold_input_texts(messages: list[ModelMessage]) -> list[str]:
@@ -88,17 +90,25 @@ def fold_input_texts(messages: list[ModelMessage]) -> list[str]:
             if kind not in ("user-prompt", "tool-return", "text"):
                 continue
             content = getattr(part, "content", None)
-            if isinstance(content, str):
-                texts.append(content)
-            elif content is not None:
-                texts.append(json.dumps(content, ensure_ascii=False, default=str))
+            if content is None:
+                continue
+            # Decoded leaves, never json.dumps: a name with a quote, a
+            # backslash or a tab must still match in B.
+            texts.append("\n".join(decoded_texts(content)))
     return texts
 
 
 def fold_plausibility_problem(
-    input_texts: Iterable[str], target: PurgeTarget, output: str
+    input_texts: Iterable[str],
+    target: PurgeTarget,
+    output: str,
+    *,
+    xml_input: bool = False,
 ) -> str | None:
-    """Why ``output`` cannot replace its input store, or None."""
+    """Why ``output`` cannot replace its input store, or None.
+
+    ``xml_input`` (chat folds only): input lines are XML-escaped, so the
+    id/name test for B reads them unescaped."""
     input_texts = list(input_texts)
     text = output.strip()
     if not any(part.strip() for part in input_texts):
@@ -106,7 +116,12 @@ def fold_plausibility_problem(
     if target.id_hits(output):
         return "it still contains the user id"
     lines = [line for part in input_texts for line in part.splitlines()]
-    bystander = "\n".join(line for line in lines if not target.mentions(line))
+    def decoded(line: str) -> str:
+        return html.unescape(line) if xml_input else line
+
+    bystander = "\n".join(
+        line for line in lines if not target.mentions(decoded(line))
+    )
     folded = text.casefold()
     if any(phrase in folded for phrase in FOLD_REFUSALS):
         return "it reads as a refusal"
@@ -195,7 +210,9 @@ def plausibility_rejection(
             if has_input:
                 return f"the {field.name} field is missing"
             continue
-        problem = fold_plausibility_problem(field.inputs, target, field.output)
+        problem = fold_plausibility_problem(
+            field.inputs, target, field.output, xml_input=field.xml_input
+        )
         if problem is not None:
             return f"{field.name}: {problem}"
     return None

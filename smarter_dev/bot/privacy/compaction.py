@@ -271,7 +271,8 @@ async def purge_chat_memory(
     def plausible(output: ChatPurgeOutput) -> str | None:
         return plausibility_rejection(
             [
-                FoldField("summary", summary_inputs, output.summary),
+                # Chat input is XML-escaped: B reads it unescaped.
+                FoldField("summary", summary_inputs, output.summary, xml_input=True),
                 FoldField("topic", (topic or "",), output.topic),
                 FoldField("notes", (notes or "",), output.notes),
             ],

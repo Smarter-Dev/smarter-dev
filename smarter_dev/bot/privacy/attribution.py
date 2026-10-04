@@ -23,6 +23,7 @@ them for the id and names.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterator
 
@@ -31,6 +32,8 @@ from pydantic_ai.messages import ModelRequest
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.messages import ToolReturnPart
 from pydantic_ai.messages import UserPromptPart
+
+from smarter_dev.shared.privacy_purge import string_leaves
 
 ATTRIBUTION_MARK = "[attribution:v1]"
 # Must match chat_compaction.COMPACTED_PREFIX (a test checks it).
@@ -51,18 +54,60 @@ MEMBER_READING_TOOLS = frozenset(
 _LINE_START = re.compile(r"^\[[^\]\n]+\] \[id=[^\]\n]*\] ")
 _ATTRIBUTED_LINE = re.compile(
     r"^\[[^\]\n]+\] \[id=[^\]\n]*\] (?:\[BOT\] )?[A-Z]+·"
-    r"(?P<display>(?:(?!: )[^\n])*?) \(uid=(?P<uid>[0-9]+)\)"
+    r"(?P<display>(?:(?!: |\(uid=)[^\n])*) \(uid=(?P<uid>[0-9]{1,22})\)"
     r"(?: \(reply to id=[^)\n]*\))?: "
 )
 # Chat transcript attribution: <message ... user-id="N" username="name">.
+# Anchored: the renderer writes each tag as a whole line of its own.
 _CHAT_AUTHOR = re.compile(
-    r'<message\b[^>]*?\buser-id="(?P<uid>[0-9]+)"(?P<rest>[^>]*)>'
+    r'^<message\b[^>\n]*?\buser-id="(?P<uid>[0-9]{1,22})"(?P<rest>[^>\n]*)>$',
+    re.MULTILINE,
 )
+_CHAT_TAG_LINE = re.compile(r"^<message\b[^>\n]*>$")
 _CHAT_USERNAME = re.compile(r'\busername="(?P<name>[^"]*)"')
 
 
+def decoded_texts(value: object) -> list[str]:
+    """The decoded strings a part's content or args carry, never a
+    serialised form: a str as is, a JSON string decoded, structured content
+    (dicts, lists) as its string leaves. Searching ``json.dumps`` or a repr
+    would miss a name holding ``"``, ``\\``, a tab or a newline, or one
+    right after an escape (``\nKai``)."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, bytes):
+        return [value.decode("utf-8", errors="replace")]
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(mode="python")
+    return list(string_leaves(value))
+
+
+def json_text_leaves(value: str) -> list[str]:
+    """Tool-call args arrive as a JSON string: decode them, else keep it."""
+    try:
+        decoded = json.loads(value)
+    except (ValueError, RecursionError):
+        return [value]
+    if isinstance(decoded, dict | list):
+        return list(string_leaves(decoded))
+    return [value]
+
+
+def part_texts(part: object) -> list[str]:
+    """Decoded texts of one message part (content, or tool-call args)."""
+    content = getattr(part, "content", None)
+    if content is not None:
+        return decoded_texts(content)
+    args = getattr(part, "args", None)
+    if isinstance(args, str):
+        return json_text_leaves(args)
+    return decoded_texts(args)
+
+
 def _text(content: object) -> str:
-    return content if isinstance(content, str) else str(content)
+    return "\n".join(decoded_texts(content))
 
 
 def attributed_line(line: str) -> re.Match[str] | None:
@@ -120,9 +165,12 @@ def chat_history_attributed(messages: list[ModelMessage]) -> bool:
                 if index != 0 or not chat_summary_marked(text):
                     return False
                 continue
-            for chunk in text.split("<message")[1:]:
-                tag = chunk.split(">", 1)[0]
-                if 'user-id="' not in tag and 'self="true"' not in tag:
+            for line in text.splitlines():
+                if not line.startswith("<message"):
+                    continue
+                if not _CHAT_TAG_LINE.match(line) or (
+                    'user-id="' not in line and 'self="true"' not in line
+                ):
                     return False
     return True
 
