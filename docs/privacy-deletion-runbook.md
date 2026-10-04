@@ -57,7 +57,8 @@ deployed and the one-off clean-up in their descriptions has been run:
   what it expects or no handler-fire job state exists. `COMMIT;` only if every
   "deleted" count equals its count above it and "finished fire rows left" is
   0; otherwise `ROLLBACK;`. On production a zero count means stop and ask a
-  developer, not "nothing to clean".
+  developer, not "nothing to clean". The count of wedged agent sessions is a
+  report only, and may be 0; the hourly prune removes those sessions.
 - **Redis:** the pending-list `EXPIRE` loop in PR 135's description, and the
   claimed-batch `EXPIRE` loop and `DEL proactive:v1:dead-letter` in
   proactive-agent PR 7's.
@@ -68,7 +69,9 @@ Check that the clean-up was done before taking the first request.
   verbatim message that set off an automation (1 hour; a fire that finds it
   gone is skipped); the proactive pending lists (each message is dropped once
   it is 48 hours old, on the bot's 15-minute tick, so at most 48 hours 15
-  minutes; the list's own expiry is a backstop); claimed proactive batches,
+  minutes while the bot runs; if the tick stops while messages keep
+  arriving, older ones stay until it resumes or 48 hours 30 minutes after
+  the last one arrived); claimed proactive batches,
   by the bot or the external worker (48 hours after the claim); the
   proactive wake and shadow streams (trimmed to 48 hours). The external
   worker's dead-letter stream holds ids and an error type only (trimmed to
@@ -78,24 +81,25 @@ Check that the clean-up was done before taking the first request.
   `proactive:v1:{guild:*}:pending-dropped` counters have no limit: the bot
   deletes a control entry once it has processed it, and a wake deletes the
   counter, so one that stays is escalated, not waited out.
-- **Cleared by the hourly retention sweep 48 hours after they are written:**
-  the bot's replies and working records, which can quote a member (not its
-  memory, which step 4 covers):
-  `chat_agent_turns.agent_output` and the model's reply text and tool-call
-  arguments in turn transcripts (a search query lifted from a message, for
-  example), `chat_agent_engagements.last_topic` and `last_notes` (48 hours
-  after the engagement's last turn), `forum_agent_responses` replies and
-  reasons, the text of `help_conversations` (including other members' names
-  in a conversation someone else started), and
-  `moderation_actions.ai_context_summary`. Member text is written as
-  `[message content]` everywhere else: every `chat_agent_errors` message and
+- **Records of what the AI did** hold no words, the bot's own included
+  (not its memory, which step 4 covers). Written as `[message content]`:
+  the chat agent's reply, voice summary, running topic and notes and
+  ranking reasons in `chat_agent_turns.agent_output` and
+  `chat_agent_engagements`; the reply text and tool-call arguments (a search
+  query, for example) in turn transcripts; `/help` answers; and the forum
+  agent's reasons and replies. Rows written before #80 are redacted the same
+  way by the hourly retention sweep's first run after the deploy, at any
+  age. The sweep also clears, 48 hours after they are written:
+  `help_conversations` questions (a question typed as a `/help` argument is
+  stored as typed) and `moderation_actions.ai_context_summary` (a message
+  count). Member text is written as `[message content]` everywhere else: every `chat_agent_errors` message and
   provider body (its traceback keeps exception types and stack frames only),
   and `handler_runs.error` (the exception type and the script's frames, or
   the cap name; a compile error keeps its message, since the script is
   compiled before it sees any message). Rows written before #80 that still
   hold member text (compaction summaries, error messages and tracebacks,
-  `handler_runs.error`, model reasoning in turn transcripts) are cleared by
-  the same sweep.
+  `handler_runs.error`) are cleared by the same sweep at 48 hours; model
+  reasoning in their turn transcripts goes with the first run's redaction.
 - **Skrift worker tables, pruned by the hourly retention job:** finished,
   dead-lettered and unresumable work 7 days after it was written: job state,
   queue rows, dead letters, events and snapshots. Skrift's own error text for
@@ -104,7 +108,9 @@ Check that the clean-up was done before taking the first request.
   copied text into it: that stays until the timer fires, then up to 7 days.
   Live work is never pruned: a queued or pending job, an AI agent session
   Skrift can still resume, and an unfinished job that belongs to such a
-  session or changed in the last 7 days. Step 8 removes the person's part of
+  session or changed in the last 7 days. A session from before Skrift gave
+  sessions an expiry counts as live only while it changed in the last 7
+  days. Step 8 removes the person's part of
   it.
 - **Caches:** `search_result_previews` (48 hours),
   `chat_agent:guild:{guild}:events` (about an hour), `mediaread:*` (24 hours),
@@ -335,7 +341,7 @@ still being deleted, wait and run the check again; do not start a purge.
    - **"Chat audit tables, for the #71 deletion runbook"**
      (`chat_agent_turns`, `chat_agent_engagements`,
      `chat_agent_compaction_events`, `chat_agent_errors`): expected at this
-     point. Step 6 and the 48-hour sweep clear them, and step 10 checks
+     point. Step 6 and the hourly sweep clear them, and step 10 checks
      again.
    - **"Possible remains reported by the runtimes"**: press "Run the purge
      again"; it purges the guilds listed.
@@ -594,10 +600,11 @@ DELETE FROM candidate_blog_topics
 The chat turn updates are a safety net: turns are written with member text
 already redacted and their triggering messages carry ids, not names, so they
 usually change 0 rows. The handler run and forum updates are the ones that
-normally match. A name the model repeated in its own words is not matched.
+normally match.
 
-The AI-written text in these rows (replies, forum replies) is cleared by the
-48-hour sweep; see "Ages out" at the top.
+The AI's own words in these rows (replies, notes, forum replies) are written
+as the placeholder, and rows from before #80 are redacted by the sweep's first
+hourly run after the deploy; see "Ages out" at the top.
 
 Expected side effects, all accepted:
 
@@ -965,9 +972,9 @@ run out, tell the member what is left and that the request is open.
    - **"Chat audit tables"**: rerun the step 3 counts (point 2) and, for
      each name, step 6's read-only name counts. If they find rows, clear
      them the step 6 way and run the check again. If they read 0, the hit is
-     in text the 48-hour sweep clears (the bot's own replies in turns,
-     compaction summaries): wait until those rows are 48 hours old and run
-     the check again. A name hit in a column neither clears, such as another
+     in older text the sweep clears at 48 hours (rows written before #80,
+     such as compaction summaries): run the check again once those rows are
+     48 hours old. A name hit in a column neither clears, such as another
      member's `activation_username`, is a namesake: note the count and ask a
      developer to decide.
    - **"Raw operational copies"**: wait for them to age out (the limits are

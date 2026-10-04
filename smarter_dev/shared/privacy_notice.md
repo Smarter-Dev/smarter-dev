@@ -25,13 +25,13 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a dire
 
 **The chat bot's memories.** The chat bot keeps a permanent memory for each server: what it knows about the people there, running jokes, opinions it has formed, how it should behave there and who it is there. It writes these in its own words, not as quotes, and it is told not to keep anything private, sensitive or shared in confidence. It names people by username and Discord ID. It also keeps short notes during conversations, which are folded into the memory overnight, and the last five versions of each memory. These memories are permanent and the bot never resets them. Only the bot edits them, including when it removes someone who asked us to delete their data.
 
-**Records of what the AI did.** When an AI feature answers or acts, we keep a record of it: who and which channel it concerned (IDs and usernames), when, which model, how much it cost and what it decided. The IDs, usernames and numbers stay. Where these records would hold the words of your messages, a placeholder is saved instead. The AI's replies and working records in them, such as the searches it ran, its running notes on what a conversation is about, its reasons for answering a forum post and its summary of a moderation case, can quote what people wrote. They are cleared 48 hours after they were written; a conversation's running notes are cleared 48 hours after its last reply. This does not cover the chat bot's memories, described above, which are kept until the bot rewrites them.
+**Records of what the AI did.** When an AI feature answers or acts, we keep a record of it: who and which channel it concerned (IDs and usernames), when, which model, how much it cost and what it decided, such as which messages it looked at and whether it replied. The IDs, usernames and numbers stay. The words do not: your messages, and the AI's own replies, running notes, reasoning and what it passed to its tools, are saved as a placeholder instead. Moderation, below, is the exception. When the chat bot searches the web, the search and the results it saw are kept for 48 hours at an unlisted link it can post in Discord. This does not cover the chat bot's memories, described above, which are kept until the bot rewrites them.
 
 **Moderation.** We keep a permanent record of every moderation action taken on a member: who it concerned, who took it, the reason, how long it lasted and when. The bot also posts these actions to the server's moderation log channel, and posts edited and deleted messages, with the old and new text and who wrote them, to the server's audit log channel. Moderation history, including those posts, is kept even after you ask us to delete your data.
 
 **Games and community features.** Your bytes balance and the bytes you have sent and received (with the usernames and reasons), your squad membership, your quest and challenge submissions, and the dates of your first and latest message in each server. Leaving a server removes your bytes balance and squad membership there. The rest is kept until you ask us to delete it.
 
-**Commands and automations.** Questions you ask with `/help` and the bot's answers, who asked and when, message counts used for rate limits (kept for a few hours), and automations that server admins set up.
+**Commands and automations.** Questions you ask with `/help` (kept for up to 49 hours; the bot's answers are not kept), who asked and when, message counts used for rate limits (kept for a few hours), and automations that server admins set up.
 
 ## What the website stores
 
@@ -53,7 +53,7 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a dire
 - **Hosting.** Our servers, database and file storage run on DigitalOcean.
 - **Payments.** Polar.
 - **Email.** Confirmation emails are sent through Resend.
-- **Monitoring.** Errors and performance traces from the bot and the website, and security events from the website's API, go to Pydantic Logfire. Errors and traces can include IDs.
+- **Monitoring.** Errors and performance traces from the bot and the website, and security events from the website's API, go to Pydantic Logfire. Errors and traces can include IDs, and some can include the text of a message.
 - **Discord.** Everything you post on Discord is also held by Discord under its own privacy policy.
 
 ## Deleting your data

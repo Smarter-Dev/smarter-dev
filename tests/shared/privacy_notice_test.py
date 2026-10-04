@@ -92,12 +92,19 @@ def test_the_notice_gives_each_message_hand_off_its_limit(notice):
     assert "no time limit" not in messages.replace("That history has no time limit", "")
 
 
-def test_ai_records_say_the_ais_words_can_quote_people(notice):
+def test_ai_records_keep_no_words(notice):
     records = notice.split("**Records of what the AI did.**", 1)[1].split("**Moderation", 1)[0]
-    assert "a placeholder is saved instead" in records
-    assert "can quote what people wrote" in records
-    assert "cleared 48 hours after they were written" in records
-    assert "not kept in these records" not in records
+    assert "The words do not" in records
+    assert "the AI's own replies, running notes, reasoning and what it passed to its tools" in records
+    assert "the search and the results it saw are kept for 48 hours" in records
+    assert "are saved as a placeholder instead" in records
+    assert "can quote" not in records
+    commands = notice.split("**Commands and automations.**", 1)[1].split("\n", 1)[0]
+    assert "the bot's answers are not kept" in commands
+
+
+def test_the_notice_does_not_call_logs_text_free(notice):
+    assert "some can include the text of a message" in notice
 
 
 def test_security_events_name_no_member(notice):
