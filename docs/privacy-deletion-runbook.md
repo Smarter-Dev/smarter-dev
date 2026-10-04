@@ -15,13 +15,13 @@ help prepare or check a step, but does not run mutations.
 | | Stores |
 | --- | --- |
 | **Purge (agent)** | Everything the chat bot holds about the person: the guild memory, behavior and personality blocks, pending notes and retained revisions, both agents' working histories and their compaction summaries, the proactive recovery copy and watch instructions, and the external worker's history. The agent does the edit; see step 4. |
-| **Delete** | Bytes balances, squad memberships, quest and challenge submissions and quest progress, member activity dates, forum subscriptions, campaign signups, `/help` and `/tldr` records they started, legacy `/scan` profiles, rate-limit and DM caches, bot API security log rows whose request named them, and their site account with its chat, attachments, searches, resources questions, profile, linked logins (and their stored Discord tokens), push subscriptions, roles, API keys, second-factor enrollments, OAuth consent grants, republish links and membership rows. Also these, which have no time limit of their own: AI error messages that name them, engagement topics and notes rewritten after the 48-hour sweep, blog topic candidates from their conversations or naming them, entries in automation memory that carry them, automation jobs about them in Skrift's job stores, AI agent sessions that mention them, and their site jobs. |
+| **Delete** | Bytes balances, squad memberships, quest and challenge submissions and quest progress, member activity dates, forum subscriptions, campaign signups, `/help` and `/tldr` records they started, legacy `/scan` profiles, rate-limit and DM caches, bot API security log rows whose request named them, and their site account with its chat, attachments, searches, resources questions, profile, linked logins (and their stored Discord tokens), push subscriptions, roles, API keys, second-factor enrollments, OAuth consent grants, republish links and membership rows. Also these, which can outlast the limits under "Ages out": AI error messages that name them, the running topic and notes of engagements that name them, blog topic candidates from their conversations or naming them, entries in automation memory that carry them, automation jobs about them still waiting in Skrift's job stores (and any not yet pruned), AI agent sessions that mention them, and their site jobs. |
 | **Anonymise** | Rows other people share. Bytes transfers the person sent or received keep their amount and date for the other member, with the person's id and username replaced and the reason cleared. Chat engagements they started lose the starter's id and username. Usage cost rows lose their Discord id and details. Legacy `/scan` usage rows lose their user id. Chat agent turns and handler runs have the person's id and names replaced where they stand as values; forum agent responses have the author's display name replaced. Site page revisions they wrote lose their author when the account is deleted. |
 | **Keep** | Moderation history: `moderation_actions` and the bot's posts in the guild's moderation and audit log channels. Anonymised billing: usage cost rows with no person linked (the membership rows are deleted with the account; Polar keeps its payment records under its own terms). A bare receipt that the request was completed. The person's Discord id alone in `chat_bot_blocked_users`, written by the purge in step 4, so the chat bot sees their messages only as `[BLOCKED BY USER]` and does not respond to them. |
-| **Ages out** | Short-lived records listed below. Nothing in them lasts past 30 days, so a request does not touch them. |
+| **Ages out** | Short-lived records listed below. Nothing in them lasts past 30 days, so a request does not touch them, apart from the live work steps 6 to 8 clear. |
 
-The Delete and Anonymise rows also cover records with no time limit that the
-steps below edit: AI error messages and engagement topics (step 6), blog
+The Delete and Anonymise rows also cover records that can outlast those
+limits, which the steps below edit: AI error messages and engagement topics (step 6), blog
 topic candidates (step 6), automation memory (step 7) and job stores
 (step 8).
 
@@ -42,22 +42,44 @@ and copies of channel conversations exported to test the bot's AI
 
 These can hold the person's id, name or words for a short time. Each has a
 limit, and the longest is 30 days, which the notice states. Do not touch them
-for a request.
+for a request. The exception is live work, which has no limit while it lasts:
+an engagement still running, an automation job or timer still waiting, an AI
+agent session still running or paused. Steps 6 to 8 clear the person's part of
+it.
 
-**[PLACEHOLDER: copies of message text and the queues with no time limit. #80 removes them (message text out of error bodies, handler errors and job payloads; time limits on the pending list, dead-letter, claimed and shadow queues; a prune job for Skrift dead letters). Rewrite this list from the #80 builder's facts; fill this in before the runbook is used.]**
+The limits hold once smarter-dev PR 135 and proactive-agent PR 7 (#80) are
+deployed and the one-off clean-up in their descriptions has been run:
+deleting finished handler-fire `worker_state` rows and handler-fire dead
+letters, `EXPIRE 172800` on every `proactive:v1:{guild:*}:pending*` and
+`:batch:*` key with no TTL, and `DEL proactive:v1:dead-letter`. Check that
+the clean-up was done before taking the first request.
 
+- **Message text in hand-offs:** `handler-fire:context:*` in Redis, the
+  verbatim message that set off an automation (1 hour; a fire that finds it
+  gone is skipped); the proactive pending lists (48 hours after the first
+  message is queued); claimed proactive batches, by the bot or the external
+  worker (48 hours after the claim); the proactive wake and shadow streams
+  (trimmed to 48 hours). The external worker's dead-letter stream holds ids
+  and an error type only (48 hours).
 - **Cleared by the hourly retention sweep 48 hours after they are written:**
-  the AI's own text in `chat_agent_turns`, `chat_agent_compaction_events`
-  (`original_content`, `summary`), `chat_agent_errors.provider_body`,
-  `chat_agent_engagements.last_topic` and `last_notes` (once, 48 hours
-  after the engagement started; step 6 clears what is written later),
-  `handler_runs.error` on `error` and `cap_exceeded` rows, the text of
-  `help_conversations` (including other
-  members' names in a conversation someone else started) and the post text of
-  `forum_agent_responses`.
-- **Queues and hand-offs:** the proactive wake stream (48 hours); the pending
-  list, dead-letter stream, claimed batches and shadow streams (limits from
-  #80); Skrift `worker_state` rows for finished jobs (7 days).
+  the bot's own words: `chat_agent_turns.agent_output`,
+  `chat_agent_engagements.last_topic` and `last_notes` (48 hours after the
+  engagement's last turn), `forum_agent_responses` replies and reasons, the
+  text of `help_conversations` (including other members' names in a
+  conversation someone else started), and
+  `moderation_actions.ai_context_summary`. Member text is written as
+  `[message content]` everywhere else; rows written before #80 that still
+  hold it (compaction summaries, provider error bodies with the error
+  message and traceback, `handler_runs.error`, model reasoning in turn
+  transcripts) are cleared by the same sweep.
+- **Skrift worker tables, pruned by the hourly retention job:**
+  `worker_state` once a row's own expiry passes (7 days for a finished job,
+  24 hours for a finished agent run); dead-lettered jobs and dead letters
+  after 7 days; events and snapshots of finished work after 7 days. Job
+  payloads hold ids and names, not message text, except a timer whose
+  automation script copied text into it: that stays until the timer fires,
+  then up to 7 days. Live work is kept until it finishes; step 8 removes the
+  person's.
 - **Caches:** `search_result_previews` (48 hours),
   `chat_agent:guild:{guild}:events` (about an hour), `mediaread:*` (24 hours),
   `hclaim:*` (up to 30 days; deleting one can make a handler act twice), the
@@ -350,7 +372,7 @@ DELETE FROM help_conversations WHERE user_id = :'did';
 DELETE FROM research_sessions WHERE user_id = :'did';
 DELETE FROM scan_user_profiles WHERE user_id = :'did';
 UPDATE scan_service_usage SET user_id = NULL WHERE user_id = :'did';
--- Records with no time limit that can name them. Blog topic candidates go
+-- Records that can name them past the 48-hour sweep. Blog topic candidates go
 -- first: they are found through the engagement the person started, which
 -- the statements after them anonymise.
 DELETE FROM candidate_blog_topics
@@ -647,9 +669,11 @@ those for you to judge.
 ## 8. Remove them from job stores
 
 Skrift's job tables keep each automation run's trigger: who wrote the message
-or joined, their names and the moderation target. Finished jobs' state ages
-out in 7 days, but jobs still waiting, dead letters, run errors and AI agent
-sessions have no limit. Use the same `psql` session as step 7.
+or joined, their names and the moderation target. The hourly retention job
+deletes finished work after 7 days (a finished agent run's state after 24
+hours), but a job still waiting, such as a timer, and an AI agent session
+still live have no limit, and a request should not wait on the rest. Use the
+same `psql` session as step 7.
 
 Deleting a waiting job cancels it. That includes an automation's timer or
 recurring fire about the person that is already due; one due later is left
@@ -840,4 +864,5 @@ left and that the request is open.
 
 ## Retention windows
 
-**[PLACEHOLDER: copies of message text and the queues with no time limit. #80 removes them (message text out of error bodies, handler errors and job payloads; time limits on the pending list, dead-letter, claimed and shadow queues; a prune job for Skrift dead letters). Filled in from the #80 builder's facts; fill this in before the runbook is used.]**
+The limits a request relies on are under "Ages out" at the top. The full list,
+with what enforces each one, is `docs/data-retention.md`.

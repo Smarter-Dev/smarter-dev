@@ -82,10 +82,25 @@ def test_bytes_transfers_are_anonymised_not_deleted(notice):
     assert "username and the reason removed" in deleted
 
 
+def test_the_notice_gives_each_message_hand_off_its_limit(notice):
+    messages = notice.split("**Messages.**", 1)[1].split("**The chat bot's", 1)[0]
+    assert "server automation, its text is handed to the job" in messages
+    assert "kept for 1 hour" in messages
+    assert "kept for up to 48 hours" in messages
+    assert "until the reminder runs, and for up to 7 days after" in messages
+    assert "no time limit" not in messages.replace("That history has no time limit", "")
+
+
+def test_ai_records_keep_no_member_words(notice):
+    records = notice.split("**Records of what the AI did.**", 1)[1].split("**Moderation", 1)[0]
+    assert "The words of your messages are not kept in these records" in records
+    assert "cleared 48 hours after they were written" in records
+
+
 @pytest.mark.xfail(
     strict=True,
-    reason="message-copy wording waits on #80 and the security-log wording on "
-    "Zech (#71); remove this marker together with the placeholders",
+    reason="the security-log wording waits on #81's facts (#71); remove this "
+    "marker together with the placeholder",
 )
 def test_no_placeholder_is_left_in_the_notice(notice):
     assert "[PLACEHOLDER" not in notice
