@@ -570,7 +570,7 @@ UNION ALL SELECT 'handler runs', count(*) FROM handler_runs WHERE strpos(trigger
 UNION ALL SELECT 'forum responses', count(*) FROM forum_agent_responses WHERE author_display_name = :'name'
 UNION ALL SELECT 'errors: name in text', count(*) FROM chat_agent_errors WHERE (strpos(lower(error_message), lower(:'name')) > 0 OR strpos(error_message, :'jin') > 0) OR (strpos(lower(traceback), lower(:'name')) > 0 OR strpos(traceback, :'jin') > 0) OR (strpos(lower(coalesce(provider_body, '')), lower(:'name')) > 0 OR strpos(coalesce(provider_body, ''), :'jin') > 0)
 UNION ALL SELECT 'engagement topics: name', count(*) FROM chat_agent_engagements WHERE (strpos(lower(coalesce(last_topic, '')), lower(:'name')) > 0 OR strpos(coalesce(last_topic, ''), :'jin') > 0) OR (strpos(lower(coalesce(last_notes, '')), lower(:'name')) > 0 OR strpos(coalesce(last_notes, ''), :'jin') > 0)
-UNION ALL SELECT 'blog topics: name', count(*) FROM candidate_blog_topics WHERE (strpos(lower(headline || ' ' || observation || ' ' || scope), lower(:'name')) > 0 OR strpos(headline || ' ' || observation || ' ' || scope, :'jin') > 0);
+UNION ALL SELECT 'blog topics: name', count(*) FROM candidate_blog_topics WHERE (strpos(lower(headline || ' ' || observation || ' ' || scope || ' ' || evidence::text), lower(:'name')) > 0 OR strpos(headline || ' ' || observation || ' ' || scope || ' ' || evidence::text, :'jin') > 0);
 ROLLBACK;
 BEGIN;
 UPDATE chat_agent_turns
@@ -593,7 +593,7 @@ UPDATE chat_agent_errors
 UPDATE chat_agent_engagements SET last_topic = NULL, last_notes = NULL
  WHERE (strpos(lower(coalesce(last_topic, '')), lower(:'name')) > 0 OR strpos(coalesce(last_topic, ''), :'jin') > 0) OR (strpos(lower(coalesce(last_notes, '')), lower(:'name')) > 0 OR strpos(coalesce(last_notes, ''), :'jin') > 0);
 DELETE FROM candidate_blog_topics
- WHERE (strpos(lower(headline || ' ' || observation || ' ' || scope), lower(:'name')) > 0 OR strpos(headline || ' ' || observation || ' ' || scope, :'jin') > 0);
+ WHERE (strpos(lower(headline || ' ' || observation || ' ' || scope || ' ' || evidence::text), lower(:'name')) > 0 OR strpos(headline || ' ' || observation || ' ' || scope || ' ' || evidence::text, :'jin') > 0);
 -- stop here: compare each UPDATE and DELETE count with its line above, then run COMMIT; or ROLLBACK;
 ```
 
