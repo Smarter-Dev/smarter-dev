@@ -207,8 +207,10 @@ sentence, or a part of a sentence). For every segment listed under
   `unresolved` for that block or note.
 
 Everything that is not a listed segment stays exactly as written; you cannot
-change it, and you cannot add anything. Do not write that someone was removed,
-forgotten or asked anything.
+change it, and you cannot add anything. Never remove every segment of a block
+(`memory`, `behavior`, `personality`) that has text: keep or rewrite at least
+one. A note may lose every segment; it is then deleted. Do not write that
+someone was removed, forgotten or asked anything.
 
 `# Notes, read only` are notes that do not name the person. You cannot change
 them. If one is about this person without naming them, list it in `unresolved`
@@ -289,9 +291,35 @@ def compose_purge(
     texts = {name: getattr(context, name) for name in BLOCK_NAMES}
     texts.update({f"note:{note_id}": content for note_id, content in context.notes})
     try:
-        rebuilt = apply_edits(texts, output.edits, target, unresolved=unresolved_locations)
+        rebuilt = apply_edits(texts, output.edits, target)
     except SegmentEditError as error:
         raise refuse(str(error)) from None
+
+    # Never reset: a block (live or a revision's) that had text keeps some.
+    # A note may go entirely; it is deleted as a row.
+    for name in context.editable:
+        if getattr(context, name).strip() and not rebuilt[name].strip():
+            raise refuse(
+                f"`{name}` would be left empty; memory is never reset. Keep or rewrite at "
+                "least one of its segments."
+            )
+
+    # A listed name that survives is asked about again, then stored and
+    # reported as unresolved (the request ends in review); it never fails
+    # the step. The ID never survives: apply_edits refuses it.
+    unresolved = list(output.unresolved)
+    mentioning = [*context.editable, *(f"note:{i}" for i in context.mentioning_notes)]
+    for location in mentioning:
+        if target.name_hits(rebuilt[location]) and location not in unresolved_locations:
+            if retries_left > 0:
+                raise ModelRetry(
+                    f"`{location}` still names this person. Remove or rewrite that segment, "
+                    f"or if it is a different person who shares the name, list `{location}` "
+                    "in unresolved and say why."
+                )
+            unresolved.append(
+                UnresolvedItem(location=location, reason="A listed name is still present.")
+            )
 
     final: dict[str, str] = {}
     changed: set[str] = set()
@@ -326,7 +354,7 @@ def compose_purge(
         changed_blocks=frozenset(changed),
         rewritten_notes=rewritten,
         dropped_notes=tuple(dropped),
-        unresolved=tuple(output.unresolved),
+        unresolved=tuple(unresolved),
     )
 
 

@@ -16,15 +16,23 @@ its items between ``,``. A cut that would split a name is not made.
 Edits: exactly one per mentioning segment, by id ``{location}:{n}``.
 
 - ``remove``;
-- ``rewrite`` with ``text``: one line, no ID or name (the shared matcher), not
-  a placeholder, not longer and with no more sentences than the original; the
-  segment's indentation and list marker are kept;
-- ``keep``: only for a name hit (never the ID), and only when the location is
-  in ``unresolved`` (a different person who shares the name).
+- ``rewrite`` with ``text``: one line (``str.splitlines`` gives one, no
+  control characters), not a placeholder, not longer and with no more
+  sentences than the original; the segment's indentation and list marker are
+  kept;
+- ``keep``.
 
-A line whose segments are all removed goes with its line break. A text that
-still mentions the person after the rebuild (a name no segment holds, such as
-one spanning a line break) is refused unless its location is unresolved.
+Removing a segment takes the separator before it (or after it, when it was
+first); the first segment's prefix moves to the first survivor; each line's
+trailing whitespace and line ending are kept. A line whose segments are all
+removed goes with its line break.
+
+Refused (:class:`SegmentEditError`): edits that do not match the listed
+segments one to one, a rewrite that is not one line, the person's ID left
+anywhere in a text. A text may come back empty (a note about only the person
+is deleted); the caller refuses that for blocks, which are never reset. A
+surviving name is not refused here; the caller retries, then stores the text
+and reports the name hit.
 
 Imports only the stdlib, pydantic and the shared matcher.
 Test vectors: ``contracts/privacy/v1/segment_edit_vectors.json``.
@@ -33,7 +41,7 @@ Test vectors: ``contracts/privacy/v1/segment_edit_vectors.json``.
 from __future__ import annotations
 
 import re
-from collections.abc import Collection
+import unicodedata
 from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -100,8 +108,25 @@ def _split_mentioning(sentence: str, target: PurgeTarget) -> list[str]:
     return out
 
 
+_TAIL = re.compile(r"\s*\Z")
+
+
+def _split_tail(line: str) -> tuple[str, str]:
+    """A line's text and its trailing whitespace (``\r`` of a CRLF included),
+    which no edit ever touches."""
+    tail = _TAIL.search(line).group(0)
+    return line[: len(line) - len(tail)], tail
+
+
 def _line_pieces(line: str, target: PurgeTarget) -> list[str]:
-    sentences = _join_cut_names(_SENTENCE_SPLIT.split(line), target)
+    """Pieces (segment, separator, segment, ...) of a line without its tail.
+
+    The list marker is set aside first, so "1. " is never taken for the end
+    of a sentence; it stays at the front of the first segment.
+    """
+    prefix = _PREFIX.match(line).group(0)
+    sentences = _join_cut_names(_SENTENCE_SPLIT.split(line[len(prefix) :]), target)
+    sentences[0] = prefix + sentences[0]
     out: list[str] = []
     for i, piece in enumerate(sentences):
         if i % 2:
@@ -130,7 +155,8 @@ def segments(location: str, text: str, target: PurgeTarget) -> list[Segment]:
     """Every segment of ``text``, numbered in order; ids are ``{location}:{n}``."""
     out: list[Segment] = []
     for line in text.split("\n"):
-        for piece in _line_pieces(line, target)[0::2]:
+        body, _tail = _split_tail(line)
+        for piece in _line_pieces(body, target)[0::2]:
             out.append(Segment(id=f"{location}:{len(out)}", index=len(out), text=piece))
     return out
 
@@ -143,16 +169,20 @@ def editable_segments(location: str, text: str, target: PurgeTarget) -> list[Seg
 def rebuild(text: str, target: PurgeTarget, decisions: Mapping[int, str | None]) -> str:
     """``text`` with segment ``i`` removed (``None``) or replaced, all else byte for byte.
 
-    A line whose segments are all removed goes with its line break. Removing
-    a segment takes its own following separator, or the one before it when
-    it was the last left on its line.
+    Removing a segment takes the separator before it, or the one after it
+    when nothing is left before it on the line; so between two survivors
+    stands the separator that stood right before the second. The first
+    segment's indentation and list marker move to the first survivor. A
+    line's trailing whitespace and line ending are always kept. A line whose
+    segments are all removed goes with its line break.
     """
     if not decisions:
         return text
     out_lines: list[str] = []
     index = 0
     for line in text.split("\n"):
-        pieces = _line_pieces(line, target)
+        body, tail = _split_tail(line)
+        pieces = _line_pieces(body, target)
         segs, seps = pieces[0::2], pieces[1::2]
         positions = range(index, index + len(segs))
         index += len(segs)
@@ -169,11 +199,22 @@ def rebuild(text: str, target: PurgeTarget, decisions: Mapping[int, str | None])
             continue
         parts: list[str] = []
         for n, (text_, j) in enumerate(survivors):
+            if n == 0:
+                if j > 0:
+                    # The line's first segment went: its prefix stays.
+                    prefix = _PREFIX.match(segs[0]).group(0)
+                    text_ = prefix + text_[len(_PREFIX.match(text_).group(0)) :]
+            else:
+                parts.append(seps[j - 1])
             parts.append(text_)
-            if n < len(survivors) - 1:
-                parts.append(seps[j] if j < len(seps) else " ")
-        out_lines.append("".join(parts))
+        out_lines.append("".join(parts) + tail)
     return "\n".join(out_lines)
+
+
+def _single_line(text: str) -> bool:
+    return len(text.splitlines()) == 1 and not any(
+        unicodedata.category(ch) in ("Cc", "Zl", "Zp") for ch in text
+    )
 
 
 def editable_by_location(
@@ -191,18 +232,17 @@ def apply_edits(
     texts: Mapping[str, str],
     edits: Sequence[SegmentEdit],
     target: PurgeTarget,
-    *,
-    unresolved: Collection[str] = (),
 ) -> dict[str, str]:
     """Validate ``edits`` against ``texts`` and rebuild every text from them.
 
     ``texts`` maps a location (``memory``, ``note:<id>``, ``topic``...) to its
     current text. Returns every location's new text (unchanged ones byte for
-    byte). Raises :class:`SegmentEditError` on any problem.
+    byte). Raises :class:`SegmentEditError` when the edits do not fit the
+    segments, a rewrite is not one line, or the person's ID survives. A
+    surviving *name* is not an error here: the caller reports it.
     """
     by_location = editable_by_location(texts, target)
     by_id = {seg.id: (location, seg) for location, segs in by_location.items() for seg in segs}
-    unresolved = {location.strip() for location in unresolved}
 
     decisions: dict[str, dict[int, str | None]] = {location: {} for location in by_location}
     seen: set[str] = set()
@@ -220,37 +260,22 @@ def apply_edits(
             decisions[location][seg.index] = None
         elif edit.action == "rewrite":
             text = (edit.text or "").strip()
-            if not text or text in PLACEHOLDERS or "\n" in text:
+            if not text or text in PLACEHOLDERS or not _single_line(text):
                 raise SegmentEditError(
-                    f"Rewritten segment {edit.id!r} must be one line of real text; "
-                    "remove it if nothing is left."
-                )
-            if target.mentions(text):
-                raise SegmentEditError(
-                    f"Rewritten segment {edit.id!r} still names this person or carries "
-                    "their ID."
+                    f"Rewritten segment {edit.id!r} must be one line of real text with no "
+                    "control characters; remove it if nothing is left."
                 )
             body = _PREFIX.sub("", text, count=1) if seg.prefix.strip() else text
             # A rewrite takes something out; it never adds a sentence or grows.
-            if len(body) > len(seg.body.strip()) or len(_SENTENCE_SPLIT.split(body)) > len(
-                _SENTENCE_SPLIT.split(seg.body.strip())
+            original = seg.body.strip()
+            if len(body) > len(original) or len(_SENTENCE_SPLIT.split(body)) > len(
+                _SENTENCE_SPLIT.split(original)
             ):
                 raise SegmentEditError(
                     f"Rewritten segment {edit.id!r} is longer or has more sentences than the "
                     "original; a rewrite only takes this person out."
                 )
             decisions[location][seg.index] = seg.prefix + body
-        else:  # keep
-            if target.id_hits(seg.text):
-                raise SegmentEditError(
-                    f"Segment {edit.id!r} carries this person's ID; it cannot stay."
-                )
-            if location not in unresolved:
-                raise SegmentEditError(
-                    f"Segment {edit.id!r} names this person. Remove or rewrite it, or if "
-                    f"it is a different person who shares the name, list `{location}` "
-                    "in unresolved and say why."
-                )
     missing = [seg_id for seg_id in by_id if seg_id not in seen]
     if missing:
         raise SegmentEditError(
@@ -261,14 +286,7 @@ def apply_edits(
     for location, text in texts.items():
         new = rebuild(text, target, decisions.get(location, {}))
         if location in by_location:
-            # A hit no segment holds (a name spanning a line break) cannot be
-            # decided segment by segment: refuse rather than call it clean.
             if target.id_hits(new):
                 raise SegmentEditError(f"`{location}` still carries this person's ID.")
-            if target.name_hits(new) and location not in unresolved:
-                raise SegmentEditError(
-                    f"`{location}` still names this person in a place no segment covers; "
-                    f"list `{location}` in unresolved if it is a different person."
-                )
         result[location] = new
     return result
