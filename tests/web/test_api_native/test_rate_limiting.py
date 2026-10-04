@@ -11,10 +11,14 @@ wire contract.
 
 from __future__ import annotations
 
+import logging
+import socket
+import time
 from collections.abc import Iterator
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import Mock
 from unittest.mock import patch
@@ -26,13 +30,17 @@ from litestar.di import Provide
 from litestar.plugins.pydantic import PydanticPlugin
 from litestar.testing import TestClient
 from litestar.testing import create_test_client
+from redis.asyncio import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.shared.redis_client import create_redis_client
 from smarter_dev.web.api_native import bytes as bytes_module
+from smarter_dev.web.api_native import rate_limiting
 from smarter_dev.web.api_native.bytes import BytesController
 from smarter_dev.web.api_native.rate_limiting import RATE_LIMIT_PER_SECOND
 from smarter_dev.web.api_native.rate_limiting import RateLimitedKey
+from smarter_dev.web.api_native.rate_limiting import check_rate_limits
 from smarter_dev.web.api_native.rate_limiting import rate_limit_redis_key
 from smarter_dev.web.api_native.rate_limiting import rate_limited_key_from_skrift
 
@@ -60,6 +68,12 @@ class _NullSessionContext:
 
     async def __aexit__(self, *exc_info):
         return False
+
+
+@pytest.fixture(autouse=True)
+def _reset_redis_warning_throttle(monkeypatch):
+    monkeypatch.setattr(rate_limiting, "_last_redis_warning_at", None)
+    monkeypatch.setattr(rate_limiting, "_redis_failures_since_warning", 0)
 
 
 @pytest.fixture
@@ -271,8 +285,8 @@ class TestRateLimitExceeded:
             {
                 "event": "rate_limit_exceeded",
                 "success": False,
-                "api_key_id": str(skrift_key_row.id),
-                "api_key_prefix": skrift_key_row.key_prefix,
+                "key_id": str(skrift_key_row.id),
+                "key_prefix": skrift_key_row.key_prefix,
                 "current_usage": RATE_LIMIT_PER_SECOND,
                 "rate_limit": RATE_LIMIT_PER_SECOND,
                 "window": "second",
@@ -317,6 +331,66 @@ class TestRedisUnreachable:
         assert response.status_code == 200
         assert "x-ratelimit-limit" not in response.headers
         assert security_events == []
+
+    async def test_hung_redis_does_not_hold_the_request(self, rate_limited_client):
+        """A Redis that accepts connections and never answers."""
+        with socket.socket() as silent:
+            silent.bind(("127.0.0.1", 0))
+            silent.listen(8)  # connections queue in the backlog, never served
+            host, port = silent.getsockname()
+            hung = Redis(host=host, port=port, decode_responses=True)
+            with patch(
+                "smarter_dev.web.api_native.rate_limiting.get_redis_client",
+                return_value=hung,
+            ):
+                started = time.monotonic()
+                response = rate_limited_client.get(
+                    CONFIG_PATH,
+                    headers={"Authorization": f"Bearer {VALID_SKRIFT_TOKEN}"},
+                )
+                elapsed = time.monotonic() - started
+
+        assert response.status_code == 200
+        assert "x-ratelimit-limit" not in response.headers
+        assert elapsed < rate_limiting.REDIS_TIMEOUT_SECONDS + 1.0
+
+    async def test_malformed_redis_url_fails_open_not_500(self, rate_limited_client):
+        def malformed_client():
+            return create_redis_client(
+                SimpleNamespace(effective_redis_url="not-a-redis-url")
+            )
+
+        with patch(
+            "smarter_dev.web.api_native.rate_limiting.get_redis_client",
+            side_effect=malformed_client,
+        ):
+            response = rate_limited_client.get(
+                CONFIG_PATH, headers={"Authorization": f"Bearer {VALID_SKRIFT_TOKEN}"}
+            )
+
+        assert response.status_code == 200
+        assert "x-ratelimit-limit" not in response.headers
+
+    async def test_warning_is_throttled_per_interval(
+        self, fake_redis, skrift_key_row, caplog, monkeypatch
+    ):
+        caplog.set_level(logging.WARNING, logger=rate_limiting.__name__)
+        fake_redis.eval = AsyncMock(side_effect=RedisConnectionError("down"))
+        key = rate_limited_key_from_skrift(skrift_key_row)
+        request = Mock()
+
+        for _ in range(5):
+            await check_rate_limits(key, request, redis=fake_redis)
+        assert len(caplog.records) == 1
+
+        monkeypatch.setattr(
+            rate_limiting,
+            "_last_redis_warning_at",
+            time.monotonic() - rate_limiting.REDIS_WARNING_INTERVAL_SECONDS - 1,
+        )
+        await check_rate_limits(key, request, redis=fake_redis)
+        assert len(caplog.records) == 2
+        assert "for 5 request(s)" in caplog.records[1].getMessage()
 
 
 class TestUnauthenticatedPassthrough:

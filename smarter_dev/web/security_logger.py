@@ -9,6 +9,12 @@ route template and the method. The client IP is recorded only for failed
 authentication, where it identifies the source of the attempt; the other
 events come from the bot's own authenticated key.
 
+Event names, attribute names and fixed values avoid the words Logfire's
+default scrubber redacts (``auth``, ``api key``, ``session``, ``secret`` and
+the like), so events arrive readable: ``login_failed`` rather than
+"authentication failed", ``key_id`` rather than "api key id". Each event
+method's values are fixed codes for the same reason.
+
 No event records a member's Discord id. Paths are recorded as route
 templates (``/api/guilds/{guild_id}/bytes/balance/{user_id}``), never the
 concrete path, and ordinary successful requests are not logged at all: rate
@@ -24,6 +30,7 @@ from uuid import UUID
 
 import logfire
 from litestar import Request
+from skrift.lib.client_ip import get_client_ip
 
 from smarter_dev.shared.observability import logfire_enabled
 
@@ -85,20 +92,22 @@ class SecurityLogger:
         request: Request,
         reason: str,
     ) -> None:
-        """Log a failed authentication attempt.
+        """Log a failed authentication attempt as ``login_failed``.
 
         Records only whether a bearer was presented, never any part of it: a
         rejected token may be a real key sent to the wrong place, and a prefix
-        of it is a credential fragment.
+        of it is a credential fragment. ``reason`` is a code
+        (``no_valid_key``, ``insufficient_permissions``). The client IP is the
+        one the limiter and Skrift use, resolved through trusted proxies.
         """
         self.emit(
-            "authentication_failed",
+            "login_failed",
             False,
             bearer_presented=bearer_presented,
             reason=reason,
             route=route_template(request),
             method=request.method,
-            client_ip=request.client.host if request.client else None,
+            client_ip=get_client_ip(request.scope),
         )
 
     async def log_rate_limit_exceeded(
@@ -113,8 +122,8 @@ class SecurityLogger:
         self.emit(
             "rate_limit_exceeded",
             False,
-            api_key_id=str(api_key.id),
-            api_key_prefix=api_key.key_prefix,
+            key_id=str(api_key.id),
+            key_prefix=api_key.key_prefix,
             current_usage=current_usage,
             rate_limit=limit,
             window=window,
