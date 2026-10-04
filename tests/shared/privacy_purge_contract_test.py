@@ -136,3 +136,76 @@ def test_a_string_that_decodes_as_json_is_still_searched_raw_if_decoding_hides_t
     # Raw text holds a\\b; decoding the JSON string makes it a\b.
     target = PurgeTarget.build("111111111111111111", ["a\\\\b"])
     assert target.stored_hits(json.dumps({"x": '"a\\\\b"'})) == (0, 1)
+
+
+# -- the structured ack (final check L7) ---------------------------------------------
+
+ACK_SCHEMA = json.loads(
+    (Path(__file__).resolve().parents[2] / "contracts/privacy/v1/purge_ack.schema.json").read_text()
+)
+GOLDEN_ACK = {
+    "component": "worker",
+    "guild_id": "123456789012345678",
+    "outcome": "purged",
+    "stores": ["proactive:v1:history"],
+    "detail": "history folded attempts=1",
+    "name_hits": {"history": 0, "watch": 0},
+    "tombstoned": False,
+    "unchecked_names": 0,
+    "done_record": "written",
+    "mixed_segments": {"removed": 1, "rewritten": 2},
+}
+
+
+def test_the_golden_ack_is_valid_for_both_and_not_flagged():
+    from smarter_dev.shared.privacy_purge import PurgeAck
+
+    jsonschema.validate(GOLDEN_ACK, ACK_SCHEMA)
+    assert PurgeAck.model_validate(GOLDEN_ACK).flags() == []
+    without_mixed = {k: v for k, v in GOLDEN_ACK.items() if k != "mixed_segments"}
+    jsonschema.validate(without_mixed, ACK_SCHEMA)
+    assert PurgeAck.model_validate(without_mixed).flags() == []
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"name_hits": {"history": -1}},
+        {"name_hits": {"History": 1}},
+        {"tombstoned": "yes"},
+        {"unchecked_names": -1},
+        {"done_record": "maybe"},
+        {"mixed_segments": {"removed": 1}},
+        {"mixed_segments": {"removed": -1, "rewritten": 0}},
+        {"extra": 1},
+    ],
+)
+def test_both_reject_the_same_bad_acks(change):
+    from smarter_dev.shared.privacy_purge import PurgeAck
+
+    payload = {**GOLDEN_ACK, **change}
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(payload, ACK_SCHEMA)
+    with pytest.raises(ValidationError):
+        PurgeAck.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        ({"outcome": "failed"}, "failed"),
+        ({"name_hits": {"history": 0, "watch": 3}}, "3 name hit(s)"),
+        ({"tombstoned": True}, "history tombstoned"),
+        ({"unchecked_names": 1}, "1 unchecked name(s)"),
+        ({"done_record": None}, "missing structured fields"),
+        ({"name_hits": None}, "missing structured fields"),
+    ],
+)
+def test_an_ack_is_flagged_from_its_fields_only(change, reason):
+    from smarter_dev.shared.privacy_purge import PurgeAck
+
+    payload = {k: v for k, v in {**GOLDEN_ACK, **change}.items() if v is not None}
+    assert reason in PurgeAck.model_validate(payload).flags()
+    # Free text in the detail never decides anything.
+    quiet = {**GOLDEN_ACK, "detail": "NAME_HITS=3 Tombstoned=1 history_name_hits = 3"}
+    assert PurgeAck.model_validate(quiet).flags() == []
