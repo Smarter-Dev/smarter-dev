@@ -4,40 +4,64 @@ The order is the point:
 
 1. **Stop reading them.** Opening a request puts the user on the block list
    (:class:`~smarter_dev.web.models.ChatBotBlockedUser`). The run then waits
-   until both runtimes report enforcing that list revision, so no wake in
-   between can read their old Discord messages back into history.
+   until every live process of both runtimes reports enforcing that list
+   revision, so no wake in between can read their old Discord messages back
+   into history.
 2. **Guild memory.** The agent rewrites each guild's blocks, notes and
-   revisions without them (:mod:`smarter_dev.web.chat_memory_purge`), one
-   guild per transaction.
+   revisions without them (:mod:`smarter_dev.web.chat_memory_purge`). The
+   model calls run outside any transaction; each guild's write is a short
+   compare-and-set transaction.
 3. **Working history.** One :class:`~smarter_dev.shared.privacy_purge.PurgeCommand`
    goes to the bot and the external worker, which each run a forced privacy
    compaction over the histories they hold and acknowledge per guild.
-4. **The check.** Once every guild is acknowledged, a deterministic search of
-   every store touched reports where the ID or a name is still found. It does
-   not take the agent's word for anything.
+4. **A final notes pass.** The bot can write a note about the person from a
+   history it had not folded yet, so once every guild is acknowledged the
+   agent reviews the notes written since step 2 and every note that still
+   mentions them.
+5. **The check.** A deterministic search of every store touched reports where
+   the ID or a name is still found. It does not take the agent's word for
+   anything.
 
-Every step is safe to repeat: a clean store comes back unchanged. Closing a
-request strips the ID and names, leaving a bare receipt; the block-list row
-stays, because it is what keeps the deletion true.
+Every step is safe to repeat: a clean store comes back unchanged. A re-run
+skips a guild whose memory this request already purged with the same names,
+unless the last check, an unresolved item or a runtime's ack flagged it.
+Closing a request strips the ID and names, leaving a bare receipt; the
+block-list row stays, because it is what keeps the deletion true.
+
+A run holds a lease on its request (``steps["lease"]``), and re-checks before
+every guild and inside every guild's write that it is still the request's
+current run and the request is not closed. A second execution of the same job
+(the job queue can re-claim a run that outlives its visibility timeout) finds
+the lease held and does nothing.
 
 This module is imported by the web tier (admin page, bot API), so it must stay
-light: the agent stack is imported only inside :func:`run_purge`.
+light: the agent stack is imported only inside the run and the check.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
+import re
+from collections.abc import AsyncIterator
 from collections.abc import Awaitable
 from collections.abc import Callable
+from datetime import UTC
 from datetime import datetime
+from datetime import timedelta
 from typing import Any
 from uuid import UUID
 from uuid import uuid4
 
+from pydantic import ValidationError
 from sqlalchemy import select
+from sqlalchemy import update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -47,11 +71,15 @@ from smarter_dev.shared.privacy_purge import BlockedUsers
 from smarter_dev.shared.privacy_purge import PurgeAck
 from smarter_dev.shared.privacy_purge import PurgeCommand
 from smarter_dev.shared.privacy_purge import PurgeTarget
-from smarter_dev.shared.privacy_purge import enforcing_key
+from smarter_dev.shared.privacy_purge import consumer_pattern
+from smarter_dev.shared.privacy_purge import enforcing_process_pattern
+from smarter_dev.web.models import ChatAgentCompactionEvent
 from smarter_dev.web.models import ChatAgentEngagement
+from smarter_dev.web.models import ChatAgentError
 from smarter_dev.web.models import ChatAgentGuildMemory
 from smarter_dev.web.models import ChatAgentMemoryNote
 from smarter_dev.web.models import ChatAgentMemoryRevision
+from smarter_dev.web.models import ChatAgentTurn
 from smarter_dev.web.models import ChatBotBlockedUser
 from smarter_dev.web.models import ChatBotBlockedUsersRevision
 from smarter_dev.web.models import ChatBotPurgeRequest
@@ -67,6 +95,7 @@ STATUS_WAITING = "waiting_for_runtimes"
 STATUS_PURGING = "purging"
 STATUS_AWAITING_ACKS = "awaiting_acks"
 STATUS_CHECKING = "checking"
+STATUS_FINISHING = "finishing"
 STATUS_COMPLETE = "complete"
 STATUS_NEEDS_REVIEW = "needs_review"
 STATUS_CLOSED = "closed"
@@ -76,8 +105,29 @@ MAX_NAMES = 20
 # How long a run waits for both runtimes to enforce the new block list.
 ENFORCING_WAIT_SECONDS = 600
 ENFORCING_POLL_SECONDS = 5
+# A run's hold on its request. Renewed before every guild; longer than the
+# enforcing wait and than one guild's model calls are expected to take.
+LEASE_SECONDS = 1200
+# Commands older than this are trimmed from the stream by every XADD
+# (``MINID``, exact), so an entry that every delete path missed still goes.
+COMMAND_RETENTION = timedelta(days=7)
+STREAM_PAGE = 500
+
+# The stores that make up a guild's memory: a check hit here flags the guild.
+MEMORY_STORES = frozenset(
+    {"chat_agent_guild_memory", "chat_agent_memory_notes", "chat_agent_memory_revisions"}
+)
+# Ack details report name hits per step, segments separated by "; ":
+# "history folded attempts=M history_name_hits=N",
+# "watch channels_rewritten=M watch_name_hits=N"; the bare "name_hits=N" form
+# is matched too.
+_NAME_HITS_IN_DETAIL = re.compile(r"(?:\b|_)name_hits=(\d+)\b")
 
 SessionFactory = Callable[[], contextlib.AbstractAsyncContextManager[AsyncSession]]
+
+
+def _insert(session: AsyncSession):
+    return pg_insert if session.bind.dialect.name == "postgresql" else sqlite_insert
 
 
 # -- the block list ---------------------------------------------------------------
@@ -94,18 +144,30 @@ async def add_blocked_user(
     """Put ``discord_user_id`` on the block list; return the list's revision.
 
     Adding someone already listed changes nothing and returns the current
-    revision, which is what makes a repeated request safe.
+    revision, which is what makes a repeated request safe. Both inserts are
+    ``ON CONFLICT DO NOTHING`` and the revision is bumped by the database, so
+    two admins blocking at once never collide.
     """
-    if await session.get(ChatBotBlockedUser, discord_user_id) is not None:
+    insert = _insert(session)
+    added = await session.execute(
+        insert(ChatBotBlockedUser)
+        .values(discord_user_id=discord_user_id, source=source)
+        .on_conflict_do_nothing(index_elements=["discord_user_id"])
+    )
+    if not added.rowcount:
         return await block_list_revision(session)
-    session.add(ChatBotBlockedUser(discord_user_id=discord_user_id, source=source))
-    row = await session.get(ChatBotBlockedUsersRevision, 1, with_for_update=True)
-    if row is None:
-        row = ChatBotBlockedUsersRevision(id=1, revision=0)
-        session.add(row)
-    row.revision += 1
-    await session.flush()
-    return row.revision
+    await session.execute(
+        insert(ChatBotBlockedUsersRevision)
+        .values(id=1, revision=0)
+        .on_conflict_do_nothing(index_elements=["id"])
+    )
+    revision = await session.scalar(
+        update(ChatBotBlockedUsersRevision)
+        .where(ChatBotBlockedUsersRevision.id == 1)
+        .values(revision=ChatBotBlockedUsersRevision.revision + 1)
+        .returning(ChatBotBlockedUsersRevision.revision)
+    )
+    return int(revision)
 
 
 async def read_blocked_users(session: AsyncSession) -> BlockedUsers:
@@ -117,20 +179,79 @@ async def read_blocked_users(session: AsyncSession) -> BlockedUsers:
     return BlockedUsers(revision=revision, user_ids=sorted(user_ids))
 
 
+# -- the runtimes ------------------------------------------------------------------
+
+
+def _decode(value) -> str:
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+async def _live_values(redis, pattern: str) -> list[str | None]:
+    keys = [key async for key in redis.scan_iter(match=pattern, count=500)]
+    if not keys:
+        return []
+    return [None if v is None else _decode(v) for v in await redis.mget(keys)]
+
+
+async def runtime_status(redis) -> dict[str, dict]:
+    """Per component: live processes, the MIN revision they enforce, live consumers.
+
+    Computed from the per-process keys (``privacy:v1:enforcing:{c}:{host-pid}``
+    and ``privacy:v1:consumer:{c}:{host-pid}``, each EX 180), never from the
+    aggregate key a runtime publishes: a stale aggregate cannot outlive a
+    lower process. A component with no live process key is not enforcing.
+    A process that has never reported (cold start, or a build that predates
+    per-process reporting) has no key and is not counted; its own
+    fail-closed rule keeps Discord input from its models until it loads the
+    list, but an old build never reports at all, which is why the page tells
+    the admin to start a first purge only once every pod runs a privacy build.
+    """
+    status: dict[str, dict] = {}
+    for component in RUNTIME_COMPONENTS:
+        revisions = []
+        values = await _live_values(redis, enforcing_process_pattern(component))
+        for raw in values:
+            try:
+                revisions.append(int(raw))
+            except (TypeError, ValueError):
+                continue
+        consumers = [v for v in await _live_values(redis, consumer_pattern(component)) if v]
+        status[component] = {
+            "processes": len(revisions),
+            "revision": min(revisions) if revisions else None,
+            "consumers": len(consumers),
+        }
+    return status
+
+
 async def runtimes_enforcing(redis) -> dict[str, int | None]:
-    """The block-list revision each runtime last reported enforcing, if any."""
-    values = await redis.mget([enforcing_key(c) for c in RUNTIME_COMPONENTS])
-    enforcing: dict[str, int | None] = {}
-    for component, raw in zip(RUNTIME_COMPONENTS, values, strict=True):
-        try:
-            enforcing[component] = int(raw) if raw is not None else None
-        except (TypeError, ValueError):
-            enforcing[component] = None
-    return enforcing
+    """The block-list revision each runtime enforces: the MIN over its live processes."""
+    return {c: s["revision"] for c, s in (await runtime_status(redis)).items()}
 
 
 def all_enforcing(enforcing: dict[str, int | None], revision: int = 0) -> bool:
     return all(value is not None and value >= revision for value in enforcing.values())
+
+
+def start_refusal(status: dict[str, dict]) -> str | None:
+    """Why a purge may not start now, as a sentence for the admin, or ``None``."""
+    not_enforcing = [c for c, s in status.items() if s["revision"] is None]
+    if not_enforcing:
+        return (
+            f"Not enforcing the block list yet: {', '.join(not_enforcing)}. A purge started "
+            "now could be undone by the next wake, so it is not started. Deploy or restart "
+            "that runtime, wait a minute and try again."
+        )
+    no_consumer = [c for c, s in status.items() if not s["consumers"]]
+    if no_consumer:
+        return (
+            f"No live purge consumer: {', '.join(no_consumer)}. Nothing would purge that "
+            "runtime's history, so the purge is not started. Deploy or restart it, wait a "
+            "minute and try again."
+        )
+    return None
 
 
 # -- opening a request --------------------------------------------------------------
@@ -139,6 +260,17 @@ def all_enforcing(enforcing: dict[str, int | None], revision: int = 0) -> bool:
 def clean_names(names: list[str]) -> list[str]:
     target = PurgeTarget.build("0", [n[:100] for n in names])
     return list(target.names[:MAX_NAMES])
+
+
+async def _open_request_for(session: AsyncSession, discord_user_id: str):
+    return await session.scalar(
+        select(ChatBotPurgeRequest)
+        .where(
+            ChatBotPurgeRequest.discord_user_id == discord_user_id,
+            ChatBotPurgeRequest.status != STATUS_CLOSED,
+        )
+        .with_for_update()
+    )
 
 
 async def open_purge_request(
@@ -152,30 +284,76 @@ async def open_purge_request(
 
     A user with an open request gets that request back with a new run, so a
     second submit restarts the same purge instead of starting a parallel one.
+    A partial unique index allows one open request per user; losing the race
+    to insert it reuses the winner's row.
     """
     revision = await add_blocked_user(session, discord_user_id)
-    request = await session.scalar(
-        select(ChatBotPurgeRequest)
-        .where(
-            ChatBotPurgeRequest.discord_user_id == discord_user_id,
-            ChatBotPurgeRequest.status != STATUS_CLOSED,
-        )
-        .with_for_update()
-    )
+    request = await _open_request_for(session, discord_user_id)
     if request is None:
         request = ChatBotPurgeRequest(
-            discord_user_id=discord_user_id, requested_by=requested_by, names=[]
+            discord_user_id=discord_user_id,
+            requested_by=requested_by,
+            names=[],
+            status=STATUS_QUEUED,
+            steps={},
         )
-        session.add(request)
+        try:
+            async with session.begin_nested():
+                session.add(request)
+        except IntegrityError:
+            request = await _open_request_for(session, discord_user_id)
+            if request is None:
+                raise
     request.names = clean_names([*(request.names or []), *names])
     start_new_run(request, list_revision=revision)
     await session.flush()
     return request
 
 
+def ack_name_hits(detail: str | None) -> int:
+    """The largest ``<step>_name_hits=N`` (or ``name_hits=N``) in an ack detail, 0 if none."""
+    return max((int(n) for n in _NAME_HITS_IN_DETAIL.findall(detail or "")), default=0)
+
+
+def possible_remains(steps: dict) -> list[dict]:
+    """Acks that say "purged" (or anything) but still counted name hits."""
+    found = []
+    for component in RUNTIME_COMPONENTS:
+        for guild_id, ack in sorted((steps.get(component) or {}).items()):
+            hits = ack_name_hits(ack.get("detail"))
+            if hits:
+                found.append({"guild_id": guild_id, "component": component, "name_hits": hits})
+    return found
+
+
+def flagged_guilds(steps: dict, report: dict | None) -> set[str]:
+    """Guilds a re-run must purge again even if this request already did.
+
+    The last check found the ID or a name in the guild's memory stores, or a
+    memory step (or the final notes pass) left something unresolved, or a
+    runtime's ack still counted name hits.
+    """
+    flagged = {
+        hit["guild_id"]
+        for hit in (report or {}).get("remains") or []
+        if hit.get("store") in MEMORY_STORES and hit.get("guild_id")
+    }
+    for section in ("memory", "final_notes"):
+        for guild_id, step in (steps.get(section) or {}).items():
+            if step.get("unresolved"):
+                flagged.add(guild_id)
+    flagged.update(item["guild_id"] for item in possible_remains(steps))
+    return flagged
+
+
 def start_new_run(request: ChatBotPurgeRequest, *, list_revision: int) -> None:
-    previous_entry = (request.steps or {}).get("command_entry_id")
-    memory_done = (request.steps or {}).get("memory_done") or {}
+    steps = request.steps or {}
+    flagged = flagged_guilds(steps, request.check_report)
+    memory_done = {
+        guild_id: done
+        for guild_id, done in (steps.get("memory_done") or {}).items()
+        if guild_id not in flagged
+    }
     request.run_id = uuid4()
     request.status = STATUS_QUEUED
     request.completed_at = None
@@ -184,19 +362,90 @@ def start_new_run(request: ChatBotPurgeRequest, *, list_revision: int) -> None:
         "list_revision": list_revision,
         "guild_ids": [],
         "memory": {},
+        "final_notes": {},
         "bot": {},
         "worker": {},
-        # A superseded run's command is deleted when the new one is sent.
-        "stale_command_entry_id": previous_entry,
         # Guilds whose memory this request already purged, and with which
         # names: a re-run skips them rather than have the agent rewrite other
-        # members' memory again, unless the admin has added a name since.
+        # members' memory again, unless a name was added since or the guild
+        # was flagged (see :func:`flagged_guilds`).
         "memory_done": memory_done,
     }
 
 
 def names_key(target: PurgeTarget) -> str:
-    return "\n".join(sorted(name.casefold() for name in target.names))
+    """A digest of the name list: ``steps`` must not hold the names themselves
+    (a failed UPDATE quotes its parameters in the error text)."""
+    joined = "\n".join(sorted(name.casefold() for name in target.names))
+    return hashlib.sha256(joined.encode()).hexdigest()
+
+
+# -- the command stream ------------------------------------------------------------
+
+
+async def _stream_entries(redis, key: str) -> AsyncIterator[tuple[str, dict]]:
+    """Every entry of a stream, in pages, oldest first."""
+    start = "-"
+    while True:
+        page = await redis.xrange(key, min=start, count=STREAM_PAGE)
+        if not page:
+            return
+        for entry_id, fields in page:
+            yield _decode(entry_id), fields
+        if len(page) < STREAM_PAGE:
+            return
+        start = f"({_decode(page[-1][0])}"
+
+
+def _payload(fields: dict) -> dict:
+    raw = fields.get(b"payload", fields.get("payload"))
+    if raw is None:
+        return {}
+    try:
+        value = json.loads(_decode(raw))
+    except ValueError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+async def delete_commands(
+    redis,
+    *,
+    request_id: UUID | None = None,
+    run_id: UUID | None = None,
+    except_run: UUID | None = None,
+) -> int:
+    """XDEL every purge command of ``request_id`` (but ``except_run``'s) or of ``run_id``.
+
+    Found by reading the stream, not by a remembered entry ID, so a command
+    whose ID was lost (the job died between XADD and recording it) is found
+    too. The stream is small: entries are deleted once acknowledged and
+    trimmed by age on every XADD.
+    """
+    doomed = []
+    async for entry_id, fields in _stream_entries(redis, PURGE_STREAM):
+        payload = _payload(fields)
+        entry_request, entry_run = payload.get("request_id"), payload.get("run_id")
+        if request_id is not None and entry_request == str(request_id):
+            if except_run is None or entry_run != str(except_run):
+                doomed.append(entry_id)
+        elif run_id is not None and entry_run == str(run_id):
+            doomed.append(entry_id)
+    if doomed:
+        await redis.xdel(PURGE_STREAM, *doomed)
+    return len(doomed)
+
+
+async def send_command(redis, command: PurgeCommand, *, now: datetime) -> str:
+    """XADD the command, trimming entries older than :data:`COMMAND_RETENTION`."""
+    cutoff_ms = int((now - COMMAND_RETENTION).timestamp() * 1000)
+    entry_id = await redis.xadd(
+        PURGE_STREAM,
+        {"payload": command.model_dump_json()},
+        minid=f"{max(cutoff_ms, 0)}-0",
+        approximate=False,
+    )
+    return _decode(entry_id)
 
 
 # -- running a request ---------------------------------------------------------------
@@ -217,18 +466,28 @@ async def affected_guild_ids(session: AsyncSession) -> list[str]:
     return sorted(guilds)
 
 
+def _is_current(request: ChatBotPurgeRequest | None, run_id: UUID) -> bool:
+    return request is not None and request.run_id == run_id and request.status != STATUS_CLOSED
+
+
 async def _update_request(
     session_factory: SessionFactory,
     request_id: UUID,
     run_id: UUID,
-    change: Callable[[ChatBotPurgeRequest], None],
+    change: Callable[[ChatBotPurgeRequest], bool | None],
 ) -> bool:
-    """Apply ``change`` under a row lock if ``run_id`` is still the current run."""
+    """Apply ``change`` under a row lock if ``run_id`` is still the current run.
+
+    ``change`` returning ``False`` means "not mine after all": nothing is written.
+    """
     async with session_factory() as session:
         request = await session.get(ChatBotPurgeRequest, request_id, with_for_update=True)
-        if request is None or request.run_id != run_id or request.status == STATUS_CLOSED:
+        if not _is_current(request, run_id):
+            await session.rollback()
             return False
-        change(request)
+        if change(request) is False:
+            await session.rollback()
+            return False
         _touch_json(request)
         await session.commit()
         return True
@@ -237,6 +496,48 @@ async def _update_request(
 def _touch_json(request: ChatBotPurgeRequest) -> None:
     # A plain JSON column does not notice in-place mutation.
     flag_modified(request, "steps")
+
+
+def _lease_free(steps: dict, token: str, now: datetime) -> bool:
+    lease = steps.get("lease") or {}
+    if not lease or lease.get("token") == token:
+        return True
+    try:
+        until = datetime.fromisoformat(lease["until"])
+    except (KeyError, TypeError, ValueError):
+        return True
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=UTC)
+    return until <= now
+
+
+def _take_lease(token: str, now: datetime) -> Callable[[ChatBotPurgeRequest], bool]:
+    def change(request: ChatBotPurgeRequest) -> bool:
+        if not _lease_free(request.steps, token, now):
+            return False
+        request.steps["lease"] = {
+            "token": token,
+            "until": (now + timedelta(seconds=LEASE_SECONDS)).isoformat(),
+        }
+        return True
+
+    return change
+
+
+def _holds(steps: dict, token: str) -> bool:
+    return (steps.get("lease") or {}).get("token") == token
+
+
+def _still_current(request_id: UUID, run_id: UUID, token: str):
+    """Checked inside each guild's write transaction, holding the request row."""
+
+    async def check(session: AsyncSession) -> bool:
+        request = await session.get(
+            ChatBotPurgeRequest, request_id, with_for_update=True, populate_existing=True
+        )
+        return _is_current(request, run_id) and _holds(request.steps, token)
+
+    return check
 
 
 async def run_purge(
@@ -254,104 +555,178 @@ async def run_purge(
     """Run one purge to the point where only the runtimes' acks are missing.
 
     Returns the status the request was left in. A run superseded by a newer
-    submit stops at its next step without touching anything.
+    submit, or whose request was closed, stops at its next check without
+    writing and deletes its own command if it sent one. A second execution of
+    a run that is still going returns ``"already_running"``.
     """
+    from smarter_dev.web.chat_memory_purge import PurgeStopped
     from smarter_dev.web.chat_memory_purge import purge_guild_memory
 
     async with session_factory() as session:
         request = await session.get(ChatBotPurgeRequest, request_id)
-        if request is None or request.run_id != run_id or request.discord_user_id is None:
+        if not _is_current(request, run_id) or request.discord_user_id is None:
             return "superseded"
         target = PurgeTarget.build(request.discord_user_id, request.names or [])
         list_revision = int(request.steps.get("list_revision", 0))
-        stale_entry = request.steps.get("stale_command_entry_id")
         memory_done = dict(request.steps.get("memory_done") or {})
+
+    token = str(uuid4())
+    take = _take_lease(token, now())
+
+    def start(request: ChatBotPurgeRequest) -> bool:
+        # A run that already sent its command is past this job: a second
+        # execution of the same job (re-claimed by the queue) must not redo it.
+        if request.status not in (STATUS_QUEUED, STATUS_WAITING, STATUS_PURGING):
+            return False
+        return take(request)
+
+    if not await _update_request(session_factory, request_id, run_id, start):
+        async with session_factory() as session:
+            request = await session.get(ChatBotPurgeRequest, request_id)
+            current = _is_current(request, run_id)
+        return "already_running" if current else "superseded"
+
+    async def superseded() -> str:
+        await delete_commands(redis, run_id=run_id)
+        return "superseded"
+
+    def mine(change: Callable[[ChatBotPurgeRequest], Any]):
+        def guarded(request: ChatBotPurgeRequest):
+            if not _holds(request.steps, token):
+                return False
+            return change(request)
+
+        return guarded
 
     # 1. Both runtimes must be enforcing the list that blocks this user.
     waited = 0.0
     while not all_enforcing(await runtimes_enforcing(redis), list_revision):
         if waited >= wait_seconds:
-            if stale_entry:
-                await redis.xdel(PURGE_STREAM, stale_entry)
             await _update_request(
                 session_factory,
                 request_id,
                 run_id,
-                lambda r: setattr(r, "status", STATUS_WAITING),
+                mine(lambda r: setattr(r, "status", STATUS_WAITING)),
             )
             logger.warning("Purge run %s: runtimes are not enforcing the block list", run_id)
             return STATUS_WAITING
         await sleep(poll_seconds)
         waited += poll_seconds
 
-    if not await _update_request(
-        session_factory, request_id, run_id, lambda r: setattr(r, "status", STATUS_PURGING)
-    ):
-        return "superseded"
-
-    # 2. Guild memory, one transaction per guild.
+    # The command is built and validated before any memory is touched, so a
+    # bad guild ID cannot fail the run after memory was rewritten.
     async with session_factory() as session:
         guild_ids = await affected_guild_ids(session)
-    memory_steps: dict[str, dict] = {}
+    command = None
+    if guild_ids:
+        try:
+            command = PurgeCommand(
+                schema_version=1,
+                request_id=request_id,
+                run_id=run_id,
+                user_id=target.user_id,
+                names=list(target.names),
+                guild_ids=guild_ids,
+                created_at=now(),
+            )
+        except ValidationError as error:
+            # Count only: the error text quotes the ID and names.
+            logger.error(
+                "Purge run %s: the purge command is invalid (%d errors)",
+                run_id,
+                error.error_count(),
+            )
+
+            def invalid(r: ChatBotPurgeRequest) -> None:
+                r.status = STATUS_NEEDS_REVIEW
+                r.steps["error"] = "The purge command could not be built (an invalid guild ID?)."
+
+            await _update_request(session_factory, request_id, run_id, mine(invalid))
+            return STATUS_NEEDS_REVIEW
+
+    memory_started_at = now()
+
+    def purging(request: ChatBotPurgeRequest) -> None:
+        request.status = STATUS_PURGING
+        request.steps["guild_ids"] = guild_ids
+        request.steps["memory_started_at"] = memory_started_at.isoformat()
+
+    if not await _update_request(session_factory, request_id, run_id, mine(purging)):
+        return await superseded()
+
+    # 2. Guild memory, one compare-and-set write per guild.
     current_names = names_key(target)
+    still_current = _still_current(request_id, run_id, token)
     for guild_id in guild_ids:
+        # Before each guild: still this run, not closed, lease renewed.
+        if not await _update_request(
+            session_factory, request_id, run_id, _take_lease(token, now())
+        ):
+            return await superseded()
         done = memory_done.get(guild_id)
         if done and done.get("names") == current_names:
-            memory_steps[guild_id] = {**done["step"], "earlier_run": True}
-            continue
-        async with session_factory() as session:
+            step = {**done["step"], "earlier_run": True}
+            new_done = None
+        else:
             try:
                 result = await purge_guild_memory(
-                    session, guild_id=guild_id, target=target, now=now(), agent=agent
+                    session_factory,
+                    guild_id=guild_id,
+                    target=target,
+                    now=now(),
+                    agent=agent,
+                    still_current=still_current,
                 )
-                await session.commit()
-                memory_steps[guild_id] = result.as_step()
-                memory_done[guild_id] = {"names": current_names, "step": result.as_step()}
+                step = result.as_step()
+                new_done = {"names": current_names, "step": step}
+            except PurgeStopped:
+                return await superseded()
             except Exception as error:  # noqa: BLE001 — one guild must not stop the rest
-                await session.rollback()
-                # Type only: a validation error's text can quote memory.
+                # Type only: a validation or database error's text can quote
+                # memory, the ID or a name.
                 logger.error(
                     "Purge run %s: guild memory failed for guild %s (%s)",
                     run_id,
                     guild_id,
                     type(error).__name__,
                 )
-                memory_steps[guild_id] = {"outcome": "failed", "error": type(error).__name__}
+                step = {"outcome": "failed", "error": type(error).__name__}
+                new_done = None
 
-    # 3. One command for the runtimes' working histories.
+        def record_guild(r: ChatBotPurgeRequest, guild_id=guild_id, step=step, new_done=new_done):
+            r.steps.setdefault("memory", {})[guild_id] = step
+            if new_done is not None:
+                r.steps.setdefault("memory_done", {})[guild_id] = new_done
+
+        if not await _update_request(session_factory, request_id, run_id, mine(record_guild)):
+            return await superseded()
+
+    # 3. One command for the runtimes' working histories. The intent is
+    # recorded first; every path that ends a run finds the entry by reading
+    # the stream for this request or run, so a lost entry ID orphans nothing.
+    await delete_commands(redis, request_id=request_id, except_run=run_id)
     entry_id = None
-    if stale_entry:
-        await redis.xdel(PURGE_STREAM, stale_entry)
-    if guild_ids:
-        command = PurgeCommand(
-            schema_version=1,
-            request_id=request_id,
-            run_id=run_id,
-            user_id=target.user_id,
-            names=list(target.names),
-            guild_ids=guild_ids,
-            created_at=now(),
-        )
-        entry_id = await redis.xadd(PURGE_STREAM, {"payload": command.model_dump_json()})
-        if isinstance(entry_id, bytes):
-            entry_id = entry_id.decode()
-
-    def record(request: ChatBotPurgeRequest) -> None:
-        request.steps["guild_ids"] = guild_ids
-        request.steps["memory"] = memory_steps
-        request.steps["memory_done"] = memory_done
-        request.steps["command_entry_id"] = entry_id
-        request.steps["stale_command_entry_id"] = None
-        # A fast runtime can acknowledge before this commit lands.
-        done = acks_complete(request.steps)
-        request.status = STATUS_CHECKING if done else STATUS_AWAITING_ACKS
-        settled.append(request.status)
+    if command is not None:
+        if not await _update_request(
+            session_factory,
+            request_id,
+            run_id,
+            mine(lambda r: r.steps.__setitem__("command_intent", str(run_id))),
+        ):
+            return await superseded()
+        entry_id = await send_command(redis, command, now=now())
 
     settled: list[str] = []
-    if not await _update_request(session_factory, request_id, run_id, record):
-        if entry_id:
-            await redis.xdel(PURGE_STREAM, entry_id)
-        return "superseded"
+
+    def record(request: ChatBotPurgeRequest) -> None:
+        request.steps["command_entry_id"] = entry_id
+        request.steps.pop("lease", None)
+        # A fast runtime can acknowledge before this commit lands.
+        request.status = STATUS_CHECKING if acks_complete(request.steps) else STATUS_AWAITING_ACKS
+        settled.append(request.status)
+
+    if not await _update_request(session_factory, request_id, run_id, mine(record)):
+        return await superseded()
     return settled[0]
 
 
@@ -370,14 +745,15 @@ async def record_ack(
     """Store one runtime's result for one guild; the caller commits.
 
     Returns the request, or ``None`` for a run that is unknown or superseded
-    (the runtime drops its command). A repeated ack replaces the earlier one.
+    (the runtime drops its command, and the API deletes it from the stream).
+    A repeated ack replaces the earlier one.
     """
     request = await session.scalar(
         select(ChatBotPurgeRequest)
         .where(ChatBotPurgeRequest.run_id == run_id)
         .with_for_update()
     )
-    if request is None:
+    if request is None or request.status == STATUS_CLOSED:
         return None
     request.steps.setdefault(ack.component, {})[ack.guild_id] = {
         "outcome": ack.outcome,
@@ -406,53 +782,101 @@ HISTORY_KEY_PATTERNS = (
 INFO_KEY_PATTERNS = (
     "proactive:v1:{guild:*}:wake",
     "proactive:v1:{guild:*}:pending",
+    "proactive:v1:{guild:*}:pending-dropped",
     "proactive:v1:{guild:*}:batch:*",
     "proactive:v1:dead-letter",
     "proactive:v1:shadow",
+    "proactive:v1:control",
+    "proactive:v1:control-processed*",
     "chat_agent:guild:*:events",
 )
-STREAM_READ_LIMIT = 5000
+# Tables the #71 runbook deletes from; the check only reports them.
+INFO_TABLES = (
+    (ChatAgentTurn, ("triggering_messages", "agent_output", "model_messages_delta")),
+    (
+        ChatAgentEngagement,
+        ("activation_user_id", "activation_username", "last_topic", "last_notes"),
+    ),
+    (ChatAgentCompactionEvent, ("original_content", "summary")),
+    (ChatAgentError, ("error_message", "traceback", "provider_body", "error_context")),
+)
+TABLE_PAGE = 500
+
+# What the check does not search, shown on the request page.
+OUTSIDE_THE_CHECK = (
+    "Discord itself (messages, nicknames, the member list).",
+    "Logs and traces: pod logs, Logfire, the job queue's records.",
+    "Database backups, snapshots and Redis persistence files.",
+    "What model providers retain from earlier calls.",
+    "Redis keys outside the listed patterns and tables not listed here, "
+    "such as bytes transactions and squad records.",
+    "A runtime's in-process memory before it reloads from the stores.",
+)
 
 
-def _decode(value) -> str:
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    return str(value)
-
-
-async def _redis_text(redis, key: str) -> str:
-    kind = _decode(await redis.type(key))
-    if kind == "string":
-        return _decode(await redis.get(key) or b"")
-    if kind == "list":
-        return "\n".join(_decode(v) for v in await redis.lrange(key, 0, -1))
-    if kind == "stream":
-        entries = await redis.xrange(key, count=STREAM_READ_LIMIT)
-        return "\n".join(
-            _decode(v) for _, fields in entries for v in fields.values()
-        )
-    if kind == "hash":
-        return "\n".join(_decode(v) for v in (await redis.hgetall(key)).values())
-    if kind == "zset":
-        return "\n".join(_decode(v) for v in await redis.zrange(key, 0, -1))
-    if kind == "set":
-        return "\n".join(_decode(v) for v in await redis.smembers(key))
-    return ""
-
-
-def _hit(store: str, location: str, target: PurgeTarget, text: str) -> dict | None:
-    ids, names = target.id_hits(text), target.name_hits(text)
+def _hit(store: str, location: str, ids: int, names: int, guild_id: str | None = None):
     if not ids and not names:
         return None
-    return {"store": store, "location": location, "id_hits": ids, "name_hits": names}
+    hit = {"store": store, "location": location, "id_hits": ids, "name_hits": names}
+    if guild_id:
+        hit["guild_id"] = guild_id
+    return hit
+
+
+async def _redis_hits(redis, key: str, target: PurgeTarget) -> tuple[int, int]:
+    """(id hits, name hits) in one key, every value JSON-decoded where it is JSON."""
+    kind = _decode(await redis.type(key))
+    values: list = []
+    if kind == "string":
+        values = [await redis.get(key) or b""]
+    elif kind == "list":
+        values = await redis.lrange(key, 0, -1)
+    elif kind == "hash":
+        for field_name, value in (await redis.hgetall(key)).items():
+            values.extend((field_name, value))
+    elif kind == "zset":
+        values = await redis.zrange(key, 0, -1)
+    elif kind == "set":
+        values = list(await redis.smembers(key))
+    elif kind == "stream":
+        async for _entry_id, fields in _stream_entries(redis, key):
+            values.extend(fields.values())
+    ids = names = 0
+    for value in values:
+        i, n = target.stored_hits(value)
+        ids += i
+        names += n
+    return ids, names
+
+
+async def _table_hits(session: AsyncSession, model, columns, target: PurgeTarget):
+    """Hits per row of one table, read in keyset pages."""
+    store = model.__tablename__
+    last = None
+    while True:
+        query = select(model.id, *(getattr(model, c) for c in columns)).order_by(model.id)
+        if last is not None:
+            query = query.where(model.id > last)
+        rows = (await session.execute(query.limit(TABLE_PAGE))).all()
+        for row in rows:
+            ids, names = target.value_hits([v for v in row[1:] if v is not None])
+            hit = _hit(store, f"{store}:{row[0]}", ids, names)
+            if hit:
+                yield hit
+        if len(rows) < TABLE_PAGE:
+            return
+        last = rows[-1][0]
 
 
 async def scan_stores(session: AsyncSession, redis, target: PurgeTarget) -> dict:
     """Search every store the purge touched for the ID and the names.
 
     Returns locations and counts, never the text. ``remains`` are hits in
-    stores the purge rewrites; ``operational`` are hits in raw copies it does
-    not (queues, dead letters, event log), reported for the admin.
+    stores the purge rewrites; ``operational`` are hits in raw Redis copies it
+    does not rewrite (queues, dead letters, event log); ``information`` are
+    hits in the chat audit tables the #71 runbook deletes from. JSON values
+    are decoded and every string searched, so an escape character never hides
+    a name.
     """
     remains: list[dict] = []
     checked = 0
@@ -460,11 +884,13 @@ async def scan_stores(session: AsyncSession, redis, target: PurgeTarget) -> dict
     for memory in (await session.scalars(select(ChatAgentGuildMemory))).all():
         checked += 1
         for field_name in ("content", "behavior", "personality"):
+            text = getattr(memory, field_name) or ""
             hit = _hit(
                 "chat_agent_guild_memory",
                 f"guild:{memory.guild_id}/{field_name}",
-                target,
-                getattr(memory, field_name) or "",
+                target.id_hits(text),
+                target.name_hits(text),
+                memory.guild_id,
             )
             if hit:
                 remains.append(hit)
@@ -473,80 +899,164 @@ async def scan_stores(session: AsyncSession, redis, target: PurgeTarget) -> dict
         hit = _hit(
             "chat_agent_memory_notes",
             f"guild:{note.guild_id}/note:{note.id}",
-            target,
-            note.content,
+            target.id_hits(note.content),
+            target.name_hits(note.content),
+            note.guild_id,
         )
         if hit:
             remains.append(hit)
     for revision in (await session.scalars(select(ChatAgentMemoryRevision))).all():
         checked += 1
+        ids, names = target.value_hits(
+            [revision.content or "", revision.behavior or "", revision.personality or ""]
+        )
         hit = _hit(
             "chat_agent_memory_revisions",
             f"guild:{revision.guild_id}/revision:{revision.revision}",
-            target,
-            f"{revision.content}\n{revision.behavior}\n{revision.personality}",
+            ids,
+            names,
+            revision.guild_id,
         )
         if hit:
             remains.append(hit)
     for settings in (await session.scalars(select(ProactiveChannelSettings))).all():
         checked += 1
+        text = settings.watch_addendum or ""
         hit = _hit(
             "proactive_channel_settings.watch_addendum",
             f"guild:{settings.guild_id}/channel:{settings.channel_id}",
-            target,
-            settings.watch_addendum or "",
+            target.id_hits(text),
+            target.name_hits(text),
+            settings.guild_id,
         )
         if hit:
             remains.append(hit)
     for history in (await session.scalars(select(ProactiveAgentHistory))).all():
         checked += 1
-        hit = _hit(
-            "proactive_agent_histories",
-            f"guild:{history.guild_id}",
-            target,
-            json.dumps(history.history, ensure_ascii=False),
-        )
+        ids, names = target.value_hits(history.history)
+        hit = _hit("proactive_agent_histories", f"guild:{history.guild_id}", ids, names, history.guild_id)
         if hit:
             remains.append(hit)
 
     seen: set[str] = set()
-    for pattern in HISTORY_KEY_PATTERNS:
-        async for raw_key in redis.scan_iter(match=pattern, count=500):
-            key = _decode(raw_key)
-            if key in seen:
-                continue
-            seen.add(key)
-            checked += 1
-            hit = _hit("redis", key, target, await _redis_text(redis, key))
-            if hit:
-                remains.append(hit)
 
+    async def scan(patterns, into: list[dict]) -> int:
+        count = 0
+        for pattern in patterns:
+            async for raw_key in redis.scan_iter(match=pattern, count=500):
+                key = _decode(raw_key)
+                if key in seen:
+                    continue
+                seen.add(key)
+                count += 1
+                hit = _hit("redis", key, *await _redis_hits(redis, key, target))
+                if hit:
+                    into.append(hit)
+        return count
+
+    checked += await scan(HISTORY_KEY_PATTERNS, remains)
     operational: list[dict] = []
-    for pattern in INFO_KEY_PATTERNS:
-        async for raw_key in redis.scan_iter(match=pattern, count=500):
-            key = _decode(raw_key)
-            if key in seen:
-                continue
-            seen.add(key)
-            checked += 1
-            hit = _hit("redis", key, target, await _redis_text(redis, key))
-            if hit:
-                operational.append(hit)
+    checked += await scan(INFO_KEY_PATTERNS, operational)
 
-    return {"stores_checked": checked, "remains": remains, "operational": operational}
+    information: list[dict] = []
+    for model, columns in INFO_TABLES:
+        checked += 1
+        async for hit in _table_hits(session, model, columns, target):
+            information.append(hit)
+
+    return {
+        "stores_checked": checked,
+        "remains": remains,
+        "operational": operational,
+        "information": information,
+    }
 
 
 def run_outcome(steps: dict, report: dict) -> str:
     """``complete`` only when every step succeeded and nothing remains to review."""
-    memory = steps.get("memory") or {}
-    failed = any(step.get("outcome") == "failed" for step in memory.values())
-    unresolved = any(step.get("unresolved") for step in memory.values())
+    failed = bool(steps.get("error"))
+    unresolved = False
+    for section in ("memory", "final_notes"):
+        for step in (steps.get(section) or {}).values():
+            failed = failed or step.get("outcome") == "failed"
+            unresolved = unresolved or bool(step.get("unresolved"))
     for component in RUNTIME_COMPONENTS:
         acks = steps.get(component) or {}
         failed = failed or any(ack.get("outcome") == "failed" for ack in acks.values())
-    if failed or unresolved or report.get("remains"):
+    if failed or unresolved or report.get("remains") or possible_remains(steps):
         return STATUS_NEEDS_REVIEW
     return STATUS_COMPLETE
+
+
+def _claim_finishing(token: str, now: datetime) -> Callable[[ChatBotPurgeRequest], bool]:
+    """Only one check job runs the final notes pass; a dead one's lease expires."""
+    take = _take_lease(token, now)
+
+    def change(request: ChatBotPurgeRequest) -> bool:
+        if request.status == STATUS_CHECKING or (
+            request.status == STATUS_FINISHING and _lease_free(request.steps, token, now)
+        ):
+            if not take(request):
+                return False
+            request.status = STATUS_FINISHING
+            return True
+        return False
+
+    return change
+
+
+async def _final_notes_pass(
+    request_id: UUID,
+    run_id: UUID,
+    token: str,
+    target: PurgeTarget,
+    steps: dict,
+    *,
+    session_factory: SessionFactory,
+    now: Callable[[], datetime],
+    agent=None,
+) -> bool:
+    """Review new and still-mentioning notes in every guild; False if stopped."""
+    from smarter_dev.web.chat_memory_purge import PurgeStopped
+    from smarter_dev.web.chat_memory_purge import purge_guild_notes
+
+    since = None
+    if steps.get("memory_started_at"):
+        since = datetime.fromisoformat(steps["memory_started_at"])
+    still_current = _still_current(request_id, run_id, token)
+    for guild_id in steps.get("guild_ids") or []:
+        if not await _update_request(
+            session_factory, request_id, run_id, _take_lease(token, now())
+        ):
+            return False
+        try:
+            result = await purge_guild_notes(
+                session_factory,
+                guild_id=guild_id,
+                target=target,
+                now=now(),
+                since=since,
+                agent=agent,
+                still_current=still_current,
+            )
+            step = result.as_step()
+        except PurgeStopped:
+            return False
+        except Exception as error:  # noqa: BLE001 — one guild must not stop the rest
+            logger.error(
+                "Purge run %s: final notes pass failed for guild %s (%s)",
+                run_id,
+                guild_id,
+                type(error).__name__,
+            )
+            step = {"outcome": "failed", "error": type(error).__name__}
+
+        def record(r: ChatBotPurgeRequest, guild_id=guild_id, step=step):
+            r.steps.setdefault("final_notes", {})[guild_id] = step
+
+        if not await _update_request(session_factory, request_id, run_id, record):
+            return False
+    return True
 
 
 async def run_check(
@@ -555,34 +1065,53 @@ async def run_check(
     session_factory: SessionFactory,
     redis,
     now: Callable[[], datetime],
+    agent=None,
 ) -> str | None:
-    """Search every store, store the report and settle the request's status."""
+    """Final notes pass (once per run), then search every store and settle the request.
+
+    Run by hand mid-run, it only stores a fresh report: it never ends a run
+    still waiting for acknowledgements or still in its final notes pass.
+    """
     async with session_factory() as session:
         request = await session.get(ChatBotPurgeRequest, request_id)
-        if request is None or request.discord_user_id is None:
+        if request is None or request.discord_user_id is None or request.run_id is None:
             return None
         run_id = request.run_id
         target = PurgeTarget.build(request.discord_user_id, request.names or [])
+        steps = dict(request.steps or {})
+
+    token = str(uuid4())
+    finishing = await _update_request(
+        session_factory, request_id, run_id, _claim_finishing(token, now())
+    )
+    if finishing and not await _final_notes_pass(
+        request_id, run_id, token, target, steps,
+        session_factory=session_factory, now=now, agent=agent,
+    ):
+        return None
+
+    async with session_factory() as session:
         report = await scan_stores(session, redis, target)
     report["checked_at"] = now().isoformat()
 
-    entry_to_delete: list[str] = []
+    acknowledged: list[bool] = []
 
     def settle(request: ChatBotPurgeRequest) -> None:
         request.check_report = report
-        # Re-running the check by hand mid-run must not end a run still
-        # waiting for acknowledgements.
-        if request.status in (STATUS_CHECKING, STATUS_COMPLETE, STATUS_NEEDS_REVIEW):
+        if request.status in (STATUS_COMPLETE, STATUS_NEEDS_REVIEW) or (
+            finishing and request.status == STATUS_FINISHING and _holds(request.steps, token)
+        ):
             request.status = run_outcome(request.steps, report)
             request.completed_at = now()
-        if acks_complete(request.steps) and request.steps.get("command_entry_id"):
-            entry_to_delete.append(request.steps["command_entry_id"])
+            request.steps.pop("lease", None)
+        if acks_complete(request.steps):
+            acknowledged.append(True)
             request.steps["command_entry_id"] = None
 
     if not await _update_request(session_factory, request_id, run_id, settle):
         return None
-    for entry_id in entry_to_delete:
-        await redis.xdel(PURGE_STREAM, entry_id)
+    if acknowledged:
+        await delete_commands(redis, request_id=request_id)
     async with session_factory() as session:
         request = await session.get(ChatBotPurgeRequest, request_id)
         return request.status if request else None
@@ -599,6 +1128,7 @@ def receipt_summary(request: ChatBotPurgeRequest) -> dict:
         "outcome": request.status,
         "remains": len(report.get("remains") or []),
         "operational": len(report.get("operational") or []),
+        "information": len(report.get("information") or []),
     }
 
 
@@ -610,14 +1140,13 @@ async def close_request(
     The ID, names, per-guild details and check locations go. What remains is
     when it was asked, when it finished, and counts. The block-list row is
     untouched: it is what keeps the person out of the chat bot from now on.
+    Every command this request put on the stream is deleted.
     """
     request = await session.get(ChatBotPurgeRequest, request_id, with_for_update=True)
     if request is None:
         return None
-    steps = request.steps or {}
-    for key in ("command_entry_id", "stale_command_entry_id"):
-        if steps.get(key) and redis is not None:
-            await redis.xdel(PURGE_STREAM, steps[key])
+    if redis is not None:
+        await delete_commands(redis, request_id=request_id)
     summary = receipt_summary(request)
     request.discord_user_id = None
     request.names = None
@@ -625,7 +1154,7 @@ async def close_request(
     request.check_report = None
     request.status = STATUS_CLOSED
     request.closed_at = now
-    # A run still in flight fails its next write and deletes its own command.
+    # A run still in flight fails its next check and deletes its own command.
     request.run_id = None
     await session.flush()
     return request
