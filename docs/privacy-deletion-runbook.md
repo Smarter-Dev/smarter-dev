@@ -73,6 +73,11 @@ Check that the clean-up was done before taking the first request.
   proactive wake and shadow streams (trimmed to 48 hours). The external
   worker's dead-letter stream holds ids and an error type only (trimmed to
   48 hours on every write and every 15 minutes).
+  `proactive:v1:control-processed*` markers last 7 days and hold only a
+  command id. `proactive:v1:control` entries and
+  `proactive:v1:{guild:*}:pending-dropped` counters have no limit: the bot
+  deletes a control entry once it has processed it, and a wake deletes the
+  counter, so one that stays is escalated, not waited out.
 - **Cleared by the hourly retention sweep 48 hours after they are written:**
   the bot's replies and working records, which can quote a member (not its
   memory, which step 4 covers):
