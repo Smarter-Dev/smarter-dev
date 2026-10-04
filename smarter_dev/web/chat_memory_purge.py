@@ -149,9 +149,24 @@ def _split_mentioning(sentence: str, target: PurgeTarget) -> list[str]:
     return out
 
 
+def _join_cut_names(pieces: list[str], target: PurgeTarget) -> list[str]:
+    """Re-join neighbouring pieces where the cut between them split a name
+    ("Dr. Kai" must not become "Dr." and "Kai")."""
+    out = [pieces[0]]
+    for i in range(1, len(pieces), 2):
+        sep, nxt = pieces[i], pieces[i + 1]
+        joined = out[-1] + sep + nxt
+        if _hits(target, joined) > _hits(target, out[-1]) + _hits(target, nxt):
+            out[-1] = joined
+        else:
+            out.extend((sep, nxt))
+    return out
+
+
 def _line_pieces(line: str, target: PurgeTarget) -> list[str]:
+    sentences = _join_cut_names(_SENTENCE_SPLIT.split(line), target)
     out: list[str] = []
-    for i, piece in enumerate(_SENTENCE_SPLIT.split(line)):
+    for i, piece in enumerate(sentences):
         if i % 2:
             out.append(piece)
         else:
@@ -448,11 +463,24 @@ def compose_purge(
     if missing:
         raise refuse(f"Every listed segment needs one entry. Missing: {', '.join(missing)}.")
 
+    def still_names(location: str, text: str) -> None:
+        # A hit no segment holds (a name spanning a line break) cannot be
+        # decided segment by segment: refuse rather than call it clean.
+        if target.id_hits(text):
+            raise refuse(f"`{location}` still carries this person's ID.")
+        if target.name_hits(text) and location not in unresolved_locations:
+            raise refuse(
+                f"`{location}` still names this person in a place no segment covers; "
+                f"list `{location}` in unresolved if it is a different person."
+            )
+
     final: dict[str, str] = {}
     changed: set[str] = set()
     for name in BLOCK_NAMES:
         previous = getattr(context, name)
         new = rebuild(previous, target, decisions.get(name, {}))
+        if name in context.editable:
+            still_names(name, new)
         final[name] = new
         if new != previous:
             if len(new.strip()) > _BLOCK_LIMITS[name]:
@@ -466,6 +494,8 @@ def compose_purge(
     for note_id, content in context.notes:
         location = f"note:{note_id}"
         new = rebuild(content, target, decisions.get(location, {}))
+        if target.mentions(content):
+            still_names(location, new)
         if new == content:
             continue
         if not new.strip():

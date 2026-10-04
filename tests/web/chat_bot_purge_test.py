@@ -1499,3 +1499,65 @@ async def test_the_page_view_applies_the_ack_timeout(db_session, session_factory
     # "Run the purge again" works from here.
     rerun_id = await _rerun(session_factory, request.id)
     assert (await _stored(session_factory, request.id)).status == "queued" and rerun_id
+
+
+# -- names with JSON-special characters, in every store the check reads ---------------
+
+
+@pytest.mark.parametrize(
+    "name",
+    ['Kai "the Rustacean"', "back\\slash", "tab\there", "new\nline"],
+    ids=["quote", "backslash", "tab", "newline"],
+)
+async def test_the_check_finds_special_character_names_in_serialised_stores(
+    db_session, redis, name
+):
+    import uuid
+
+    from smarter_dev.shared.privacy_purge import PurgeTarget
+    from smarter_dev.web.chat_bot_purge import scan_stores
+    from smarter_dev.web.models import ChatAgentEngagement
+    from smarter_dev.web.models import ChatAgentError
+    from smarter_dev.web.models import ProactiveAgentHistory
+
+    target = PurgeTarget.build(_KAI_ID, [name])
+    text = f"later {name} asked again"
+    history = [{"parts": [{"content": text}]}]
+    await redis.set("chat_agent:999000111222333444:history", json.dumps(history))
+    await redis.rpush("proactive:v1:{guild:1}:history", json.dumps({"m": text}, ensure_ascii=True))
+    await redis.hset("chat_agent:999000111222333445:notes", "k", json.dumps([text]))
+    await redis.xadd("proactive:v1:dead-letter", {"payload": json.dumps({"body": text})})
+    await redis.set("chat_agent:999000111222333446:topic", text)  # plain text, searched raw
+    db_session.add(
+        ProactiveAgentHistory(
+            guild_id=_GUILD, schema_version=1, revision=1, checksum="x", history=history
+        )
+    )
+    engagement = ChatAgentEngagement(
+        id=uuid.uuid4(), guild_id=_GUILD, channel_id="1", activation_user_id="3",
+        activation_username="x", activation_message_id="2", started_at=_NOW,
+    )
+    db_session.add(engagement)
+    db_session.add(
+        ChatAgentError(
+            id=uuid.uuid4(), engagement_id=engagement.id, request_id="r1", guild_id=_GUILD,
+            channel_id="1", error_type="X", error_message="boom", traceback="",
+            provider_body=json.dumps({"input": text}), error_context={"last": text},
+            occurred_at=_NOW,
+        )
+    )
+    await db_session.commit()
+
+    report = await scan_stores(db_session, redis, target)
+
+    remains = {hit["location"] for hit in report["remains"]}
+    assert remains == {
+        "chat_agent:999000111222333444:history",
+        "proactive:v1:{guild:1}:history",
+        "chat_agent:999000111222333445:notes",
+        "chat_agent:999000111222333446:topic",
+        f"guild:{_GUILD}",
+    }
+    assert [hit["location"] for hit in report["operational"]] == ["proactive:v1:dead-letter"]
+    errors = [hit for hit in report["information"] if hit["store"] == "chat_agent_errors"]
+    assert len(errors) == 1 and errors[0]["name_hits"] == 2

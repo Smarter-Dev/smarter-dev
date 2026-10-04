@@ -105,3 +105,34 @@ def test_json_inside_json_strings_is_searched_to_depth_five():
     for _ in range(5):
         value = json.dumps({"args": value})
     assert target.stored_hits(value) == (0, 1)
+
+
+# -- names with JSON-special characters (proactive-agent#6 finding) ----------------
+
+SPECIAL_NAMES = ['Kai "the Rustacean"', "back\\slash", "tab\there", "new\nline"]
+
+
+@pytest.mark.parametrize("name", SPECIAL_NAMES, ids=["quote", "backslash", "tab", "newline"])
+def test_a_name_with_json_special_characters_is_found_in_every_stored_form(name):
+    from smarter_dev.shared.privacy_purge import PurgeTarget
+
+    target = PurgeTarget.build("111111111111111111", [name])
+    assert target.names == (name,)  # stripped only: inner tabs/newlines are kept
+    text = f"seen: {name} again"
+    assert target.name_hits(text) == 1
+    history = [{"parts": [{"content": text, "args": json.dumps({"note": text})}]}]
+    serialized = json.dumps(history)
+    assert target.name_hits(serialized) == 0  # the serialised form hides it
+    assert target.value_hits(history) == (0, 2)
+    assert target.stored_hits(serialized) == (0, 2)
+    assert target.stored_hits(serialized.encode()) == (0, 2)
+    assert target.stored_hits(json.dumps(history, ensure_ascii=True)) == (0, 2)
+    assert target.stored_hits(text) == (0, 1)  # not JSON: searched raw
+
+
+def test_a_string_that_decodes_as_json_is_still_searched_raw_if_decoding_hides_the_name():
+    from smarter_dev.shared.privacy_purge import PurgeTarget
+
+    # Raw text holds a\\b; decoding the JSON string makes it a\b.
+    target = PurgeTarget.build("111111111111111111", ["a\\\\b"])
+    assert target.stored_hits(json.dumps({"x": '"a\\\\b"'})) == (0, 1)

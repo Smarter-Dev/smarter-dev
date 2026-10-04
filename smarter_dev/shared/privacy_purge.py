@@ -147,7 +147,9 @@ def normalize_for_match(text: str) -> str:
 
 
 def _clean_name(name: str) -> str:
-    return " ".join(name.split())
+    # Strip only: a nickname can hold a tab, a newline, a quote or a
+    # backslash, and the matcher must look for exactly that.
+    return name.strip()
 
 
 @dataclass(frozen=True)
@@ -159,8 +161,8 @@ class PurgeTarget:
     bot and copied by the worker with ``contracts/privacy/v1/name_matcher_vectors.json``):
 
     - The ID matches as a whole number (no digit on either side).
-    - Names are stripped (inner whitespace collapsed to one space) and empty
-      ones dropped. Text and names are both NFC-normalised, then casefolded.
+    - Names are stripped (nothing inside them changes: a tab, newline, quote
+      or backslash in a nickname is matched as itself) and empty ones dropped. Text and names are both NFC-normalised, then casefolded.
     - A name made only of ASCII ``[a-z0-9_]`` and spaces matches where it is
       not preceded or followed by an ASCII letter: ``alice2``, ``alice_dev``
       and ``2alice`` hit, ``malice`` and ``alicea`` do not.
@@ -232,13 +234,38 @@ class PurgeTarget:
     def mentions(self, text: str) -> bool:
         return bool(self.id_hits(text) or self.name_hits(text))
 
-    def value_hits(self, value: object) -> tuple[int, int]:
-        """(id hits, name hits) over every string leaf of a decoded JSON value."""
-        ids = names = 0
-        for leaf in string_leaves(value):
-            ids += self.id_hits(leaf)
-            names += self.name_hits(leaf)
-        return ids, names
+    def value_hits(self, value: object, *, _depth: int = 0) -> tuple[int, int]:
+        """(id hits, name hits) over every string in a decoded JSON value.
+
+        Never searches a serialised form: a name holding ``"``, ``\\``, a tab
+        or a newline is escaped there and would not match. A string that is
+        itself JSON is decoded and searched (up to :data:`MAX_JSON_DEPTH`
+        levels); if decoding leaves no hit the raw string is searched too, so
+        decoding can never hide one. A string that is not JSON is searched raw.
+        """
+        if isinstance(value, str):
+            raw = (self.id_hits(value), self.name_hits(value))
+            inner = _embedded_json(value) if _depth < MAX_JSON_DEPTH else None
+            if inner is None or inner == value:
+                return raw
+            decoded = self.value_hits(inner, _depth=_depth + 1)
+            return (max(raw[0], decoded[0]), max(raw[1], decoded[1]))
+        if isinstance(value, dict):
+            ids = names = 0
+            for key, child in value.items():
+                for part in (str(key), child):
+                    i, n = self.value_hits(part, _depth=_depth)
+                    ids, names = ids + i, names + n
+            return ids, names
+        if isinstance(value, list | tuple):
+            ids = names = 0
+            for child in value:
+                i, n = self.value_hits(child, _depth=_depth)
+                ids, names = ids + i, names + n
+            return ids, names
+        if isinstance(value, int | float) and not isinstance(value, bool):
+            return self.id_hits(str(value)), 0
+        return 0, 0
 
     def stored_hits(self, raw: str | bytes) -> tuple[int, int]:
         """(id hits, name hits) in one stored value.
@@ -255,7 +282,11 @@ class PurgeTarget:
         if not isinstance(value, dict | list | str):
             # A bare number: the ID itself can be one.
             return self.id_hits(text), self.name_hits(text)
-        return self.value_hits(value)
+        decoded = self.value_hits(value, _depth=1)
+        if decoded != (0, 0):
+            return decoded
+        # Decoding hid nothing it found; the raw text gets its own look.
+        return self.id_hits(text), self.name_hits(text)
 
     def __repr__(self) -> str:
         # Never print who is being purged, even by accident in a traceback.
