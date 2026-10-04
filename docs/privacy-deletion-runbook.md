@@ -74,7 +74,8 @@ Check that the clean-up was done before taking the first request.
   worker's dead-letter stream holds ids and an error type only (trimmed to
   48 hours on every write and every 15 minutes).
 - **Cleared by the hourly retention sweep 48 hours after they are written:**
-  the bot's own words, which can quote a member:
+  the bot's replies and working records, which can quote a member (not its
+  memory, which step 4 covers):
   `chat_agent_turns.agent_output` and the model's reply text and tool-call
   arguments in turn transcripts (a search query lifted from a message, for
   example), `chat_agent_engagements.last_topic` and `last_notes` (48 hours
