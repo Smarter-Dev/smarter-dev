@@ -192,8 +192,7 @@ ROLLBACK;
 
 Until migration `f3a8d1c6b2e4` (#81) drops `security_logs`, old bot API
 security log rows can still name the person in their path; nothing new is
-written there. Count them only while the table exists. The `\gset` line
-also sets the flag step 6 uses, so run it again in a new `psql` session:
+written there. Count them only while the table exists:
 
 ```sql
 SELECT to_regclass('security_logs') IS NOT NULL AS has_security_logs \gset
@@ -413,7 +412,8 @@ UPDATE handler_runs SET
  WHERE trigger_context::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)');
 -- Bot API calls that named the person in their path, written before #81
 -- stopped per-request logging. Skipped once #81's migration has dropped the
--- table (the flag comes from the \gset line in step 3).
+-- table.
+SELECT to_regclass('security_logs') IS NOT NULL AS has_security_logs \gset
 \if :has_security_logs
 DELETE FROM security_logs
  WHERE details ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR event_metadata::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)');
