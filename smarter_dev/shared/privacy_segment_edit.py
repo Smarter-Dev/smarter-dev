@@ -169,14 +169,18 @@ def rebuild(text: str, target: PurgeTarget, decisions: Mapping[int, str | None])
     when nothing is left before it on the line; so between two survivors
     stands the separator that stood right before the second. The first
     segment's indentation and list marker move to the first survivor. A
-    line's trailing whitespace and line ending are always kept. A line whose
-    segments are all removed goes with its line break.
+    line's trailing whitespace and line ending are kept, except that when the
+    last line goes, the line left last loses its whole terminator (``\r\n``
+    as well as ``\n``). A line whose segments are all removed goes with its
+    line break.
     """
     if not decisions:
         return text
     out_lines: list[str] = []
+    lines = text.split("\n")
+    last_kept = -1
     index = 0
-    for line in text.split("\n"):
+    for number, line in enumerate(lines):
         body, tail = _split_tail(line)
         pieces = _line_pieces(body, target)
         segs, seps = pieces[0::2], pieces[1::2]
@@ -184,6 +188,7 @@ def rebuild(text: str, target: PurgeTarget, decisions: Mapping[int, str | None])
         index += len(segs)
         if not any(i in decisions for i in positions):
             out_lines.append(line)
+            last_kept = number
             continue
         survivors: list[tuple[str, int]] = []
         for j, i in enumerate(positions):
@@ -197,13 +202,19 @@ def rebuild(text: str, target: PurgeTarget, decisions: Mapping[int, str | None])
         for n, (text_, j) in enumerate(survivors):
             if n == 0:
                 if j > 0:
-                    # The line's first segment went: its prefix stays.
-                    prefix = _PREFIX.match(segs[0]).group(0)
-                    text_ = prefix + text_[len(_PREFIX.match(text_).group(0)) :]
+                    # The line's first segment went: the line's own prefix
+                    # (indentation, list marker) moves to the first survivor,
+                    # whose text is kept whole (a "1) " inside it is its own).
+                    text_ = _PREFIX.match(segs[0]).group(0) + text_
             else:
                 parts.append(seps[j - 1])
             parts.append(text_)
         out_lines.append("".join(parts) + tail)
+        last_kept = number
+    if out_lines and last_kept < len(lines) - 1 and out_lines[-1].endswith("\r"):
+        # The old last line went, so the line now last loses its terminator
+        # whole: the "\r" of its "\r\n" goes with the "\n".
+        out_lines[-1] = out_lines[-1][:-1]
     return "\n".join(out_lines)
 
 
