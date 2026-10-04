@@ -22,6 +22,7 @@ import hikari
 import lightbulb
 from redis.exceptions import RedisError
 
+from smarter_dev.bot.privacy.blocked_users import get_blocked_users
 from smarter_dev.bot.services.chat_engine_registry import get_chat_engine_registry
 from smarter_dev.bot.services.chat_memory import get_chat_memory
 from smarter_dev.bot.services.rate_limiter import rate_limiter
@@ -345,6 +346,11 @@ async def on_message_create(event: hikari.GuildMessageCreateEvent) -> None:
     if event.message.author.is_bot:
         return
     if not event.guild_id:
+        return
+    # A blocked author engaging the bot gets no response and no model call
+    # (no notice either; that is #74). Before the blocked-users list has
+    # loaded everyone counts as blocked, so a cold start answers no one.
+    if get_blocked_users().is_blocked(event.message.author.id):
         return
 
     bot_user = plugin.bot.get_me()

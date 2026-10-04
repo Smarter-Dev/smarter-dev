@@ -19,6 +19,7 @@ from smarter_dev.bot.plugins import proactive
 from smarter_dev.bot.proactive.adapter import AgentConsumer
 from smarter_dev.bot.proactive.adapter import WatcherProducer
 from smarter_dev.bot.proactive.contracts import ControlCommand
+from smarter_dev.bot.proactive.history_store import HistoryUnreadable
 from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
 from smarter_dev.bot.proactive.notifications import watcher_summary_notification
 from smarter_dev.bot.proactive.types import ActivationResult
@@ -1547,8 +1548,10 @@ async def test_history_store_round_trips_and_survives_garbage():
     loaded = await store.read(1)
     assert "wake one" in str(loaded[0])
 
+    # Unreadable is not empty: it is reported, never silently replaced.
     store._redis.data[ProactiveHistoryStore._history_key(1)] = b"not json"
-    assert await store.read(1) == []
+    with pytest.raises(HistoryUnreadable):
+        await store.read(1)
 
 
 async def test_guild_history_store_uses_a_distinct_key_and_survives_garbage():
@@ -1693,7 +1696,8 @@ async def test_history_writes_never_expire():
     assert ProactiveHistoryStore._history_key(2) not in redis.data
 
     redis.data[ProactiveHistoryStore._guild_history_key(2)] = b"not json"
-    assert await store.read_guild(2) == []
+    with pytest.raises(HistoryUnreadable):
+        await store.read_guild(2)
 
 
 @pytest.fixture

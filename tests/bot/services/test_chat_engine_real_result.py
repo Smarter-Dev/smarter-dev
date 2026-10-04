@@ -145,6 +145,7 @@ def _memory() -> MagicMock:
     ):
         setattr(memory, name, AsyncMock())
     memory.read_history = AsyncMock(return_value=[])
+    memory.read_history_versioned = AsyncMock(return_value=([], None))
     memory.topic_for_activation = AsyncMock(return_value=None)
     memory.get_notes = AsyncMock(return_value=None)
     return memory

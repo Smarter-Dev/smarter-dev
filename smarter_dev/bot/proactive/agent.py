@@ -30,6 +30,8 @@ from pydantic_ai.messages import UserPromptPart
 from pydantic_ai.models import Model
 
 from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
+from smarter_dev.bot.privacy.attribution import ATTRIBUTION_MARK
+from smarter_dev.bot.privacy.attribution import proactive_history_attributed
 from smarter_dev.bot.proactive.environment import ChannelEnvironment
 from smarter_dev.bot.proactive.environment import InstructionStore
 from smarter_dev.bot.proactive.environment import WakeActions
@@ -664,6 +666,20 @@ async def compact_agent_history(
     if not old:
         return history
     summary = await summarize(old)
+    # A note written from attributed input is attributed too; one written
+    # from pre-attribution lines (or an unmarked note) never is.
+    attributed = proactive_history_attributed(old)
+    return [*memory_note_pair(summary, attributed=attributed), *tail]
+
+
+def memory_note_pair(
+    summary: str, *, attributed: bool = False
+) -> list[ModelMessage]:
+    """The two messages a compaction folds history into: the note, and the
+    agent's acknowledgement that the note is its own memory. ``attributed``
+    marks a note written only from attributed input (see
+    ``privacy.attribution``)."""
+    mark = f" {ATTRIBUTION_MARK}" if attributed else ""
     return [
         ModelRequest(
             parts=[
@@ -671,7 +687,8 @@ async def compact_agent_history(
                     "[COMPACTION MEMORY NOTE — you wrote this yourself when "
                     "your earlier transcript was folded. It is NOT a user "
                     "message: attribute its contents only to the users and "
-                    "channels it names, never to whoever engages you next]\n"
+                    "channels it names, never to whoever engages you next]"
+                    f"{mark}\n"
                     f"{summary}"
                 )
             ]
@@ -684,7 +701,6 @@ async def compact_agent_history(
                 )
             ]
         ),
-        *tail,
     ]
 
 

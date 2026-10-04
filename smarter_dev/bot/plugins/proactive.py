@@ -24,6 +24,7 @@ persists in Redis.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import os
 import socket
@@ -45,6 +46,8 @@ from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
 from smarter_dev.bot.agents.response_fitting import fit_writer_message
 from smarter_dev.bot.agents.response_fitting import split_for_discord
 from smarter_dev.bot.plugins.admin_gate import is_admin
+from smarter_dev.bot.privacy.blocked_users import get_blocked_users
+from smarter_dev.bot.privacy.blocked_users import redact_blocked_mentions
 from smarter_dev.bot.proactive.adapter import JEV_WATCHER_CONTEXT_SIZE
 from smarter_dev.bot.proactive.adapter import WATCHER_CONTEXT_SIZE
 from smarter_dev.bot.proactive.adapter import AgentConsumer
@@ -79,6 +82,7 @@ from smarter_dev.bot.proactive.redis_queue import RedisNotificationQueue
 from smarter_dev.bot.proactive.types import ActivationContext
 from smarter_dev.bot.proactive.types import ChannelAttachment
 from smarter_dev.bot.proactive.types import ChannelMessage
+from smarter_dev.bot.proactive.types import blocked_channel_message
 from smarter_dev.bot.proactive.watcher import JevWatcherRunner
 from smarter_dev.bot.proactive.watcher import SkimRunner
 from smarter_dev.bot.proactive.watcher import WatcherRunner
@@ -315,8 +319,18 @@ async def load_memory_block(run: ProactiveRuntime, guild_id: str) -> str:
 
 
 def channel_message_from_hikari(message) -> ChannelMessage:
-    """Convert a hikari message (or a test stub) to the shared shape."""
+    """Convert a hikari message (or a test stub) to the shared shape.
+
+    The only door from Discord into the proactive pipeline, so the blocked-
+    users list applies here: a blocked author's message becomes a placeholder
+    with no id, author, text, reply, mentions or attachments; a reply to one
+    loses its reply marker, and ``<@id>`` mentions of a blocked user in
+    anyone's text are redacted.
+    """
     author = message.author
+    blocked = get_blocked_users()
+    if blocked.is_blocked(author.id):
+        return blocked_channel_message(message.created_at)
     member = getattr(message, "member", None)
     nickname = getattr(member, "nickname", None) if member else None
     role_names: tuple[str, ...] = ()
@@ -328,10 +342,19 @@ def channel_message_from_hikari(message) -> ChannelMessage:
             role_names = ()
     display = nickname or getattr(author, "global_name", None) or author.username
     referenced = getattr(message, "referenced_message", None)
-    reply_to_id = str(referenced.id) if referenced else None
+    referenced_author = getattr(referenced, "author", None) if referenced else None
+    reply_to_id = (
+        str(referenced.id)
+        if referenced
+        and not (
+            referenced_author is not None and blocked.is_blocked(referenced_author.id)
+        )
+        else None
+    )
     mention_ids = tuple(
         str(mention_id)
         for mention_id in (getattr(message, "user_mentions_ids", None) or ())
+        if not blocked.is_blocked(mention_id)
     )
     try:
         message_type = int(message.type)
@@ -345,8 +368,16 @@ def channel_message_from_hikari(message) -> ChannelMessage:
         author_name=author.username,
         author_display=display,
         is_bot=bool(author.is_bot),
-        content=message.content or "",
+        content=redact_blocked_mentions(message.content or "", blocked),
         reply_to_id=reply_to_id,
+        reply_to_author_id=(
+            str(referenced_author.id)
+            if reply_to_id is not None and referenced_author is not None
+            else None
+        ),
+        replies_to_blocked=bool(
+            referenced_author is not None and blocked.is_blocked(referenced_author.id)
+        ),
         mention_user_ids=mention_ids,
         mention_everyone=bool(getattr(message, "mentions_everyone", False)),
         attachment_count=len(attachments),
@@ -364,6 +395,43 @@ def channel_message_from_hikari(message) -> ChannelMessage:
             if isinstance(getattr(attachment, "url", None), str)
         ),
     )
+
+
+def recheck_against_blocked_list(
+    messages: list[ChannelMessage], blocked
+) -> list[ChannelMessage]:
+    """Drop messages whose author is blocked now and redact mentions of
+    blocked users that were added to the list after conversion."""
+    rechecked: list[ChannelMessage] = []
+    for message in messages:
+        if message.blocked or blocked.is_blocked(message.author_id):
+            continue
+        content = redact_blocked_mentions(message.content, blocked)
+        mentions = tuple(
+            user_id for user_id in message.mention_user_ids
+            if not blocked.is_blocked(user_id)
+        )
+        reply_to_id = message.reply_to_id
+        if message.reply_to_author_id and blocked.is_blocked(
+            message.reply_to_author_id
+        ):
+            reply_to_id = None
+        if (
+            content != message.content
+            or mentions != message.mention_user_ids
+            or reply_to_id != message.reply_to_id
+        ):
+            message = dataclasses.replace(
+                message,
+                content=content,
+                mention_user_ids=mentions,
+                reply_to_id=reply_to_id,
+                reply_to_author_id=(
+                    message.reply_to_author_id if reply_to_id else None
+                ),
+            )
+        rechecked.append(message)
+    return rechecked
 
 
 @dataclass
@@ -400,6 +468,9 @@ class GuildAgentState:
     history_loaded: bool = False
     memory_refreshed_at: float = 0.0
     pending_passive_wake: bool = False
+    # Held for a whole wake; a privacy purge takes it to rewrite the history
+    # and watch instructions without a wake writing stale copies back.
+    wake_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 def _channel_name_for_id(bot, channel_id: str) -> str:
@@ -747,7 +818,12 @@ async def _run_producer(state: ChannelProducerState, *, passive: bool = False) -
         try:
             await _run_producer_once(state, passive=passive)
         finally:
-            if _runtime().uses_jev_batching and state.buffer and not passive:
+            if (
+                _runtime().uses_jev_batching
+                and state.buffer
+                and not passive
+                and get_blocked_users().loaded
+            ):
                 _schedule_producer(state)
 
 
@@ -756,6 +832,9 @@ async def _run_producer_once(
 ) -> None:
     """Review the next buffered batch and enqueue any watcher wake."""
     run = _runtime()
+    if not get_blocked_users().loaded:
+        # Deferred, not dropped: the buffer waits for the list to load.
+        return
     service = run.settings_service()
     if service is None:
         return
@@ -778,6 +857,10 @@ async def _run_producer_once(
         buffered_ids = {message.id for message in buffered}
         live_notified_directed_ids = state.pending_directed_ids & buffered_ids
         state.pending_directed_ids.difference_update(buffered_ids)
+    # The list may have changed since these were buffered: re-check them now,
+    # as the chat engine re-checks its queue, so a message buffered before its
+    # author was blocked never reaches the watcher or an envelope.
+    buffered = recheck_against_blocked_list(buffered, get_blocked_users())
     new_messages = [
         message
         for message in buffered
@@ -890,9 +973,40 @@ async def _run_producer_once(
     )
 
 
+async def _guild_privacy_locked(run: ProactiveRuntime, guild_id: str) -> bool:
+    """Whether a privacy purge holds the guild's lock (purge contract v1)."""
+    from smarter_dev.bot.privacy.purge import privacy_lock_key
+
+    redis_client = run.bot.d.get("chat_memory_redis")
+    if redis_client is None:
+        return False
+    try:
+        return bool(await redis_client.exists(privacy_lock_key(guild_id)))
+    except RedisError:
+        # Cannot tell: wait rather than risk writing over a purge.
+        logger.warning("privacy lock check failed guild=%s", guild_id)
+        return True
+
+
 async def _consume_guild_once(state: GuildAgentState) -> None:
     """Drain one guild wake and route every action to its named channel."""
     run = _runtime()
+    if not get_blocked_users().loaded:
+        # No blocked-users list yet: no Discord message may reach the model.
+        # The wake stays queued and runs once the list has loaded.
+        logger.info(
+            "proactive wake deferred guild=%s: blocked-users list not loaded",
+            state.guild_id,
+        )
+        await asyncio.sleep(SETTINGS_RETRY_BACKOFF_SECONDS)
+        return
+    if await _guild_privacy_locked(run, state.guild_id):
+        # A purge (here or in the worker) is rewriting this guild's history;
+        # the wake waits so it neither reads nor writes back the old copy.
+        logger.info("proactive wake deferred guild=%s: privacy purge running",
+                    state.guild_id)
+        await asyncio.sleep(SETTINGS_RETRY_BACKOFF_SECONDS)
+        return
     service = run.settings_service()
     if service is None:
         state.queue.drain()
@@ -943,9 +1057,20 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
     if history_store is not None and not state.history_loaded:
         try:
             runner.history = await history_store.read_guild(int(state.guild_id))
-        except Exception:  # noqa: BLE001 — stored history is a cache
-            log_exception(logger, "failed to load proactive guild history")
-        state.history_loaded = True
+            state.history_loaded = True
+        except Exception as error:  # noqa: BLE001 — never fatal to the wake
+            # Unreadable (or Redis failed): the wake runs without history and
+            # does NOT write one back, so an unreadable key (which may hold
+            # memory a purge must still see) is never replaced by [] plus
+            # this wake. The next wake tries to load again. Type only: the
+            # error text could quote the stored content.
+            logger.warning(
+                "proactive guild history not loaded guild=%s (%s); this wake "
+                "keeps no history",
+                state.guild_id,
+                type(error).__name__,
+            )
+            runner.history = []
 
     brief_preamble = ""
     now = time.monotonic()
@@ -1108,10 +1233,11 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
             log_exception(logger, "proactive image post failed")
 
     if history_store is not None:
-        try:
-            await history_store.write_guild(int(state.guild_id), runner.history)
-        except Exception:  # noqa: BLE001 — persistence is best-effort
-            log_exception(logger, "failed to persist proactive guild history")
+        if state.history_loaded:
+            try:
+                await history_store.write_guild(int(state.guild_id), runner.history)
+            except Exception:  # noqa: BLE001 — persistence is best-effort
+                log_exception(logger, "failed to persist proactive guild history")
         for producer_state in run.channel_states.values():
             if (
                 producer_state.guild_id != state.guild_id
@@ -1160,7 +1286,8 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
 
 async def _consumer_loop_iteration(state: GuildAgentState) -> None:
     await state.queue.wait_for_wake()
-    await _consume_guild_once(state)
+    async with state.wake_lock:
+        await _consume_guild_once(state)
 
 
 async def _consumer_loop(state: GuildAgentState) -> None:
@@ -1199,6 +1326,17 @@ def _engagement_notification(
         channel_id=state.channel_id,
         channel_name=channel_name,
     )
+
+
+def _reaction_preview(message) -> str:
+    """The reacted-to bot message, as the agent may see it: blocked ids
+    redacted, and nothing at all when it replied to a blocked member."""
+    blocked = get_blocked_users()
+    referenced = getattr(message, "referenced_message", None)
+    referenced_author = getattr(referenced, "author", None) if referenced else None
+    if referenced_author is not None and blocked.is_blocked(referenced_author.id):
+        return ""
+    return redact_blocked_mentions(getattr(message, "content", "") or "", blocked)
 
 
 def _schedule_producer(state: ChannelProducerState) -> None:
@@ -1266,6 +1404,10 @@ async def _restore_active_window(
 @plugin.listener(hikari.GuildMessageCreateEvent)
 async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
     if not event.author or event.author.is_bot or not event.guild_id:
+        return
+    # A blocked author (or any author before the list has loaded) never
+    # reaches the watcher or the agent: no buffer entry, no wake, no reply.
+    if get_blocked_users().is_blocked(event.author.id):
         return
     run = runtime
     if run is None:
@@ -1368,6 +1510,8 @@ async def on_guild_reaction(event: hikari.GuildReactionAddEvent) -> None:
     run = runtime
     if run is None or not event.guild_id:
         return
+    if get_blocked_users().is_blocked(event.user_id):
+        return  # a blocked reactor's reaction is dropped entirely
     me = run.bot.get_me()
     if me is None or str(event.user_id) == str(me.id):
         return
@@ -1409,7 +1553,9 @@ async def on_guild_reaction(event: hikari.GuildReactionAddEvent) -> None:
             reactor_id=str(event.user_id),
             emoji=emoji,
             message_id=str(event.message_id),
-            message_preview=getattr(message, "content", "") or "",
+            # Through the single door: blocked mentions redacted, and no
+            # preview at all of a bot reply to a blocked member.
+            message_preview=_reaction_preview(message),
             created_at=datetime.now(UTC),
             channel_id=str(event.channel_id),
             channel_name=_channel_name_for_id(run.bot, str(event.channel_id)),
@@ -1499,7 +1645,11 @@ async def _fetch_missed(
     fetched.sort(key=lambda message: int(message.id))
     cutoff = datetime.now(UTC) - timedelta(seconds=CATCHUP_MAX_AGE_SECONDS)
     converted = [channel_message_from_hikari(m) for m in fetched]
-    return [m for m in converted if not m.is_bot and m.timestamp >= cutoff]
+    return [
+        m
+        for m in converted
+        if not m.is_bot and not m.blocked and m.timestamp >= cutoff
+    ]
 
 
 async def _recovery_channel_settings(
@@ -1526,6 +1676,8 @@ async def _recover_channels(run: ProactiveRuntime) -> None:
     store = run.history_store()
     if store is None:
         return
+    # Recovery feeds the watcher; it waits for the blocked-users list.
+    await get_blocked_users().wait_loaded()
     cursors = {}
     for channel_id in await store.cursor_channel_ids():
         cursor = await store.read_cursor(channel_id)

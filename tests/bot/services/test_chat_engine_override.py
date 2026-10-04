@@ -7,6 +7,8 @@ skips a turn for budget, and when it meters usage.
 
 from __future__ import annotations
 
+import functools
+
 import asyncio
 import json
 from datetime import UTC, datetime
@@ -109,6 +111,11 @@ def fake_memory():
     m.write_notes = AsyncMock()
     m.clear_notes = AsyncMock()
     m.read_history = AsyncMock(return_value=[])
+    # The engine reads history with the stored bytes for its
+    # compare-and-set write; derived from read_history's stub.
+    m.read_history_versioned = AsyncMock(
+        side_effect=functools.partial(_versioned, m)
+    )
     m.write_history = AsyncMock()
     m.clear_history = AsyncMock()
     return m
@@ -1143,3 +1150,7 @@ def test_channel_pins_on_restored_flash_lite_resolve_again(fake_redis):
     assert engine._unavailable_model_key(retired, fallback_active=False) == (
         "gemini-3-6-flash"
     )
+
+
+async def _versioned(memory, channel_id):
+    return await memory.read_history(channel_id), b"loaded"
