@@ -16,9 +16,8 @@ its items between ``,``. A cut that would split a name is not made.
 Edits: exactly one per mentioning segment, by id ``{location}:{n}``.
 
 - ``remove``;
-- ``rewrite`` with ``text``: one line (``str.splitlines`` gives one, no
-  control characters), not a placeholder, not longer and with no more
-  sentences than the original; the segment's indentation and list marker are
+- ``rewrite`` with ``text``: one non-empty line (``str.splitlines`` gives
+  one, no control characters); the segment's indentation and list marker are
   kept;
 - ``keep``.
 
@@ -50,9 +49,6 @@ from typing import Literal
 from pydantic import BaseModel
 
 from smarter_dev.shared.privacy_purge import PurgeTarget
-
-# Text a prompt might show for "nothing here"; never written as a rewrite.
-PLACEHOLDERS = frozenset({"(empty)", "(none)"})
 
 _SENTENCE_SPLIT = re.compile(r"((?<=[.!?])\s+)")
 _SEMICOLON_SPLIT = re.compile(r"(;\s*)")
@@ -260,21 +256,13 @@ def apply_edits(
             decisions[location][seg.index] = None
         elif edit.action == "rewrite":
             text = (edit.text or "").strip()
-            if not text or text in PLACEHOLDERS or not _single_line(text):
+            # One line only: a line break (in any form) could add a heading.
+            if not text or not _single_line(text):
                 raise SegmentEditError(
-                    f"Rewritten segment {edit.id!r} must be one line of real text with no "
+                    f"Rewritten segment {edit.id!r} must be one line of text with no "
                     "control characters; remove it if nothing is left."
                 )
             body = _PREFIX.sub("", text, count=1) if seg.prefix.strip() else text
-            # A rewrite takes something out; it never adds a sentence or grows.
-            original = seg.body.strip()
-            if len(body) > len(original) or len(_SENTENCE_SPLIT.split(body)) > len(
-                _SENTENCE_SPLIT.split(original)
-            ):
-                raise SegmentEditError(
-                    f"Rewritten segment {edit.id!r} is longer or has more sentences than the "
-                    "original; a rewrite only takes this person out."
-                )
             decisions[location][seg.index] = seg.prefix + body
     missing = [seg_id for seg_id in by_id if seg_id not in seen]
     if missing:

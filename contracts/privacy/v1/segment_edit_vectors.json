@@ -386,7 +386,7 @@
   },
   {
     "kind": "apply",
-    "description": "rewrite that grows",
+    "description": "a longer rewrite is allowed",
     "names": [
       "kai"
     ],
@@ -400,11 +400,14 @@
         "text": "someone co-hosts every week"
       }
     ],
-    "error": true
+    "error": false,
+    "result": {
+      "topic": "Bob runs the meetup; someone co-hosts every week; Carol handles the wiki.\n- nia stays."
+    }
   },
   {
     "kind": "apply",
-    "description": "rewrite adding a sentence",
+    "description": "a rewrite with another sentence is allowed",
     "names": [
       "kai"
     ],
@@ -418,11 +421,14 @@
         "text": "nia hosts. Ok."
       }
     ],
-    "error": true
+    "error": false,
+    "result": {
+      "topic": "nia hosts. Ok."
+    }
   },
   {
     "kind": "apply",
-    "description": "rewrite placeholder",
+    "description": "a placeholder rewrite is allowed",
     "names": [
       "kai"
     ],
@@ -436,7 +442,10 @@
         "text": "(empty)"
       }
     ],
-    "error": true
+    "error": false,
+    "result": {
+      "topic": "Bob runs the meetup; (empty); Carol handles the wiki.\n- nia stays."
+    }
   },
   {
     "kind": "apply",

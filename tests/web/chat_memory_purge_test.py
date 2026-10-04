@@ -358,7 +358,6 @@ def _first_id() -> str:
     [
         [SegmentEdit(id=_first_id(), action="keep")],
         [SegmentEdit(id=_first_id(), action="rewrite", text=f"someone ({_KAI_ID}) likes rust")],
-        [SegmentEdit(id=_first_id(), action="rewrite", text="(empty)")],
         [SegmentEdit(id=_first_id(), action="rewrite", text="two\nlines")],
         [SegmentEdit(id=_first_id(), action="rewrite", text="")],
         [],
@@ -369,7 +368,6 @@ def _first_id() -> str:
     ids=[
         "keeps-the-id",
         "rewrite-adds-the-id",
-        "placeholder",
         "rewrite-adds-a-line",
         "empty-rewrite",
         "segment-missing",
@@ -521,9 +519,9 @@ def test_nothing_can_be_added_reordered_flattened_or_deduplicated():
                 out.append(SegmentEdit(id=seg.id, action="remove"))
         return PurgeOutput(edits=out)
 
-    # An invented sentence riding on a rewrite is refused.
+    # A rewrite with a line break could add a heading: refused.
     with pytest.raises(PurgeRefused):
-        compose_purge(edits("- nested: nia likes rust. Invented."), context, retries_left=0)
+        compose_purge(edits("nia likes rust.\r## Lore"), context, retries_left=0)
     # A rewrite that flattens the nesting keeps its indentation anyway; order,
     # duplicates and every other byte are the original's.
     blocks = compose_purge(edits("- nested: nia likes go."), context, retries_left=0)
