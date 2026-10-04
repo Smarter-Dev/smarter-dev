@@ -255,36 +255,80 @@ web release first (it serves the list), then the bot and the external
 worker, in either order. Each refuses to send any Discord message to a model
 until it has loaded the list once. A purge run before both enforce it can be
 undone within hours, because the next wake reads the person's old messages
-back into history. The page refuses to start until both report enforcing.
+back into history.
 
-1. Open Admin → Bot Admin → Privacy Purges.
+The page refuses to start until both runtimes report enforcing, but it sees
+only processes new enough to report. A pod still on an image from before #79
+reports nothing, does not enforce the list, and could write the person's
+messages back. So before the **first** purge, and again after any rollback of
+these deployments, confirm that every pod runs the #79 release and no
+rollout is still in progress:
+
+```sh
+for d in smarter-dev-bot smarter-dev-proactive-agent smarter-dev-agent-worker smarter-dev-chat-child-worker; do
+  kubectl -n smarter-dev rollout status deployment/$d --timeout=10s
+done
+kubectl -n smarter-dev get pods \
+  -l 'app in (smarter-dev-bot,smarter-dev-proactive-agent,smarter-dev-agent-worker,smarter-dev-chat-child-worker)' \
+  -o custom-columns='APP:.metadata.labels.app,POD:.metadata.name,DELETING:.metadata.deletionTimestamp,IMAGE:.spec.containers[*].image'
+```
+
+Every rollout must report "successfully rolled out". Every pod listed must
+show `<none>` under DELETING and, under IMAGE, the tag of a release that
+includes #79: `zzmmrmn/smarter-dev-bot:<tag>` for the bot,
+`zzmmrmn/smarter-dev-proactive-agent:<tag>` for the external worker, and
+`zzmmrmn/smarter-dev-website:<tag>` for the agent worker (which runs the
+purge itself) and the chat child worker. If any pod shows an older tag or is
+still being deleted, wait and run the check again; do not start a purge.
+
+1. Open Admin → Bot Admin → Privacy Purges (`/admin/bot/privacy-purges`).
+   Only administrators can open it.
 2. Enter `DID`, press "Look up names", and add every name noted in step 1
    that the lookup did not find.
-3. Start the purge. This writes `DID` to `chat_bot_blocked_users`, where it
-   stays: from then on the chat bot sees the person's messages only as
-   `[BLOCKED BY USER]` and does not respond to them. The chat bot's own
-   model then rewrites the guild memory, behavior and personality blocks,
-   that day's notes and the retained past versions without them, keeping
-   everything else word for word. Both agents' working histories, topics and
-   notes, and the external worker's history with its recovery and legacy
-   copies, are folded into new summaries without them and the raw messages
-   dropped. Watch instructions are reviewed the same way, and queued wake
-   notifications about them are dropped.
-4. Wait until every guild shows its memory, bot and worker steps.
-5. Read the check report. It lists, by location and count only, anything
-   still holding the id or the names you entered.
-   - An id hit is a leftover: run the purge again.
-   - A name hit may be another member with the same name: judge it from
-     the guild's Chat Memory page, and run the purge again if it is them.
+3. Press "Start purge for `DID`". This writes `DID` to
+   `chat_bot_blocked_users`, where it stays: from then on the chat bot sees
+   the person's messages only as `[BLOCKED BY USER]` and does not respond to
+   them. The chat bot's own model then rewrites the guild memory, behavior
+   and personality blocks, that day's notes and the retained past versions
+   without them, keeping everything else word for word. Both agents' working
+   histories, topics and notes, and the external worker's history with its
+   recovery and legacy copies, are folded into new summaries without them
+   and the raw messages dropped. Watch instructions are reviewed the same
+   way, and the guild's queued wake, pending, claimed and dead-letter
+   entries are discarded.
+4. Wait while the status moves through `queued`, `waiting_for_runtimes`,
+   `purging`, `awaiting_acks`, `finishing` and `checking`. It ends in
+   `complete` or `needs_review`. If it ends in `failed`, press "Run the
+   purge again".
+5. Read the check report. It lists each store with a hit by name, location,
+   id-hit count and name-hit count, never the text. At this point expect
+   hits in the four database tables it searches (`chat_agent_turns`,
+   `chat_agent_engagements`, `chat_agent_compaction_events`,
+   `chat_agent_errors`): step 6 and the 48-hour sweep clear them, and step
+   10 checks again.
+   - A hit in the memory, notes, revisions, watch instructions or a history
+     (the stores the purge rewrites):
+     - an id hit is a leftover: press "Run the purge again";
+     - a name hit may be another member with the same name: judge it from
+       the guild's Chat Memory page, and run the purge again if it is them.
+   - A hit in a Redis queue or stream (wake, pending, batch, dead-letter,
+     shadow, control, the guild event log): these are short-lived copies the
+     purge does not rewrite. Do not edit them; step 10 waits for them to
+     age out.
+   - A name the page says it cannot check (a single character), or a
+     server whose history is marked unusable after a failed write: run the
+     purge again, and ask a developer if it stays.
 
-If the report shows a step still pending (for example, the external worker
-is down), steps 5 to 9 may go ahead, but the request stays open: step 10 does
-not close it until the report is clean.
+Whatever the status, go on with steps 5 to 9. The request stays open until
+step 10 sees `complete`.
 
 Never fix a leftover by editing memory, history or Redis by hand. The purge
 finds the person by id and by the names you give it; something that only
 paraphrases them, or names them another way, is found only if the agent
-recognises it, so give it every name you know.
+recognises it, so give it every name you know. The check does not search
+the other tables steps 6 to 8 clear, Discord, logs and traces, what
+providers keep, or a process's memory before it reloads; the page lists
+these.
 
 ## 5. Delete the site account *(site)*
 
@@ -858,16 +902,32 @@ of this runbook).
 
 ## 10. Check and close
 
-Close the request only when the purge report from step 4 is clean: no step
-pending and nothing remaining. Until then the request stays open, points 2 and 3
-are not done, and the member is not told it is complete. If
-the report is still not clean as the 30 days run out, tell the member what is
-left and that the request is open.
+Close the request only when the purge page shows `complete` after the check
+below. `needs_review` is not done, and neither is `closed` on its own: a
+closed purge is only a receipt. Until the page shows `complete`, points 3 to
+6 are not done and the member is not told it is complete. If it still does
+not show `complete` as the 30 days run out, tell the member what is left and
+that the request is open.
 
-1. Rerun the dry-run counts of steps 3, 7 and 8 (for agent sessions, rerun
+1. On the request's Privacy Purge page, press "Run the check again". It runs
+   only the check, with no model calls. Read the report:
+   - `complete`: go on.
+   - A hit in one of the four database tables: rerun step 6's counts (point
+     2). If they find rows, clear them the step 6 way and run the check
+     again. If they read 0, the hit is in text the 48-hour sweep clears (the
+     bot's own replies in turns, compaction summaries): wait until the rows
+     are 48 hours old and run the check again.
+   - A hit in a Redis queue or stream (wake, pending, batch, dead-letter,
+     shadow, control, the guild event log): wait for it to age out (the
+     limits are under "Ages out") and run the check again. Do not close on
+     it. If it is still there after its limit, or the store has no limit
+     listed there, ask a developer.
+   - A hit in a store the purge rewrites: handle it as in step 4, point 5.
+
+2. Rerun the dry-run counts of steps 3, 7 and 8 (for agent sessions, rerun
    the collect block first, or the count shows the old list). Every deleted store reads
    0; the anonymise rows read 0; moderation is unchanged; the agent purge rows
-   match the purge report. Then, for each name (`\set name` as in step 6),
+   match the purge page. Then, for each name (`\set name` as in step 6),
    count it inside longer text in automation memory. Judge any hit by reading
    the memory: the handler's admin page shows it, and a guild key is read
    with `SELECT key, value FROM guild_handler_memory WHERE …`. Remove a real
@@ -880,7 +940,7 @@ left and that the request is open.
      UNION ALL SELECT value::jsonb::text FROM guild_handler_memory) m
     WHERE strpos(lower(t), lower(:'name')) > 0;
    ```
-2. *Site:* strip the deletion job's row down to the receipt:
+3. *Site:* strip the deletion job's row down to the receipt:
 
    ```sql
    BEGIN;
@@ -890,12 +950,14 @@ left and that the request is open.
    -- expect UPDATE 1, then run COMMIT; (anything else: ROLLBACK;)
    ```
 
-3. Close the purge on the Privacy Purges page. This strips it to a bare
-   receipt (times, outcome, counts); the blocked-list entry stays.
-4. Finish the receipt note: receipt id, dates, "completed", and the classes
+4. Press "Close to a receipt" and confirm. This strips the request to a
+   bare receipt (times, outcome, counts); the blocked-list entry stays. If
+   the page refuses because a server's history is marked unusable, run the
+   purge again first.
+5. Finish the receipt note: receipt id, dates, "completed", and the classes
    handled (purged, deleted, anonymised, kept). No id, username,
    counts per person or message text. Discard the names noted in step 1.
-5. Reply to the member with the receipt id, and repeat what was kept. Once
+6. Reply to the member with the receipt id, and repeat what was kept. Once
    they have it, you may delete the DM thread on your side.
 
 ## Retention windows
