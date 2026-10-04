@@ -70,3 +70,38 @@ def test_stored_values_are_searched_leaf_by_leaf():
     assert target.stored_hits("not json, Alice") == (0, 1)
     assert target.stored_hits(json.dumps({"uid": 111111111111111111})) == (1, 0)
     assert target.stored_hits("111111111111111111") == (1, 0)
+
+
+VECTORS = json.loads(
+    (
+        Path(__file__).resolve().parents[2]
+        / "contracts/privacy/v1/name_matcher_vectors.json"
+    ).read_text(encoding="utf-8")
+)
+
+
+@pytest.mark.parametrize("vector", VECTORS, ids=[v["text"] for v in VECTORS])
+def test_the_name_matcher_vectors(vector):
+    from smarter_dev.shared.privacy_purge import PurgeTarget
+
+    target = PurgeTarget.build("999999999999999999", vector["names"])
+    assert (target.name_hits(vector["text"]) > 0) == vector["hit"]
+    assert (target.mentions(vector["text"])) == vector["hit"]
+    assert list(target.unchecked_names) == vector["unchecked"]
+
+
+def test_the_vectors_cover_the_required_cases():
+    texts = " ".join(v["text"] for v in VECTORS)
+    for needle in ("alice_dev", "alice2", "malice", "🦀", "李", "rustacean", "KAI"):
+        assert needle in texts
+    assert any(v["unchecked"] for v in VECTORS)
+
+
+def test_json_inside_json_strings_is_searched_to_depth_five():
+    from smarter_dev.shared.privacy_purge import PurgeTarget
+
+    target = PurgeTarget.build("111111111111111111", ["Zoë"])
+    value = "line\nZoë"
+    for _ in range(5):
+        value = json.dumps({"args": value})
+    assert target.stored_hits(value) == (0, 1)
