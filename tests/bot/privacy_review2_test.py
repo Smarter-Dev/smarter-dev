@@ -513,3 +513,94 @@ async def test_unchecked_names_are_reported_first(world):
     await _consume_once(world)
 
     assert world.acks[0][1].detail.startswith("unchecked_names=1; ")
+
+
+# -- chat retention (bot-only, input-format extension) ----------------------------
+
+
+def _chat_message(uid: str, name: str, body: str, msg: int) -> str:
+    return (
+        f'<message id="{msg}" user-id="{uid}" username="{name}">\n{body}\n</message>'
+    )
+
+
+async def _chat_world_with_bystanders(world):
+    history = [
+        ModelRequest(
+            parts=[
+                UserPromptPart(_chat_message(NIA, "nia", "tokio benchmarks?", 1)),
+            ]
+        ),
+        ModelResponse(parts=[TextPart("use criterion")]),
+        ModelRequest(
+            parts=[UserPromptPart(_chat_message(OMAR, "omar", "async-std too", 2))]
+        ),
+        ModelRequest(
+            parts=[UserPromptPart(_chat_message(LIN, "lin", "flamegraphs!", 3))]
+        ),
+        ModelRequest(
+            parts=[UserPromptPart(_chat_message(KAI, "kai", "my secret", 4))]
+        ),
+        ModelResponse(parts=[TextPart("thanks all")]),
+    ]
+    for channel in (10, 11, 12, 13):
+        await world.redis.delete(
+            f"chat_agent:{channel}:topic", f"chat_agent:{channel}:notes"
+        )
+    await world.memory.write_history(LIVE_CHANNEL, history)
+    return history
+
+
+async def test_chat_fold_that_drops_every_bystander_fails_untouched(world):
+    await _chat_world_with_bystanders(world)
+    raw_before = await world.redis.get(f"chat_agent:{LIVE_CHANNEL}:history")
+    summary = (
+        "Participants: several people. They discussed runtime benchmarking "
+        "tools at length and settled on profiling approaches."
+    )
+    world.deps.chat_model = lambda: _chat_model(
+        {"summary": summary, "topic": "", "notes": ""}
+    )
+    await _publish(world.redis, _command())
+
+    await _consume_once(world)
+
+    assert await world.redis.get(f"chat_agent:{LIVE_CHANNEL}:history") == raw_before
+    assert world.acks[0][1].outcome == "failed"
+
+
+async def test_chat_fold_that_keeps_half_the_bystanders_passes(world):
+    await _chat_world_with_bystanders(world)
+    summary = (
+        f"Participants: nia (uid={NIA}), omar (user-id={OMAR}). nia asked about "
+        "tokio benchmarks; omar added async-std."
+    )
+    world.deps.chat_model = lambda: _chat_model(
+        {"summary": summary, "topic": "", "notes": ""}
+    )
+    await _publish(world.redis, _command())
+
+    await _consume_once(world)
+
+    text = _prompt_text(await world.memory.read_history(LIVE_CHANNEL))
+    assert "omar added async-std" in text
+    _assert_clean(text)
+
+
+def test_chat_retention_counts_display_names_and_user_id_forms():
+    from smarter_dev.bot.privacy.plausibility import fold_plausibility_problem
+
+    inputs = [
+        _chat_message(NIA, "nia", "tokio?", 1),
+        _chat_message(OMAR, "omar", "async-std", 2),
+        _chat_message(LIN, "lin &amp; co", "flamegraphs", 3),
+        _chat_message(KAI, "kai", "secret", 4),
+    ]
+    filler = " talked about runtimes and profiling in some detail."
+    assert fold_plausibility_problem(inputs, TARGET, "nia and omar" + filler) is None
+    assert fold_plausibility_problem(
+        inputs, TARGET, f"user-id={NIA} and lin & co" + filler
+    ) is None
+    assert "1 of the 3 other chat participants" in fold_plausibility_problem(
+        inputs, TARGET, "omar" + filler
+    )
