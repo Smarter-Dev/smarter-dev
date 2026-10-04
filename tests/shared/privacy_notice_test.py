@@ -102,7 +102,7 @@ def test_security_events_name_no_member(notice):
     assert "failed authentication" in security
     assert "over a rate limit" in security
     assert "admin operations" in security
-    assert "never a member's Discord ID" in security
+    assert "None records a member's Discord ID" in security
     assert "Ordinary requests are not logged" in security
     assert "Pydantic Logfire" in security
 
