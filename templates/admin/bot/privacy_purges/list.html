@@ -23,29 +23,20 @@
             <div class="sk-panel-head">Block list enforcement</div>
             <div class="sk-panel-body">
                 <p class="sk-text-muted" style="font-size:0.85rem;">
-                    A purge starts only when both runtimes report enforcing the block list
-                    (revision {{ list_revision }}). Otherwise their next wake could read the
-                    person's old messages back into history.
+                    A purge starts only when every live process of both runtimes reports enforcing
+                    the block list (revision {{ list_revision }}) and each runtime has a live purge
+                    consumer. Otherwise their next wake could read the person's old messages back
+                    into history, or nothing would purge their history.
                 </p>
-                <ul>
-                    {% for component, revision in enforcing.items() %}
-                    <li>
-                        {{ component }}:
-                        {% if revision is none %}
-                        <span class="sk-badge sk-badge-danger">not enforcing</span>
-                        {% else %}
-                        enforcing revision {{ revision }}
-                        {% endif %}
-                    </li>
-                    {% endfor %}
-                </ul>
+                {% include "admin/bot/privacy_purges/_runtimes.html" %}
             </div>
         </div>
 
         <div class="sk-panel" style="margin-bottom:1.5rem;">
             <div class="sk-panel-head">New purge</div>
             <div class="sk-panel-body">
-                <form method="get" action="/admin/bot/privacy-purges" style="display:flex; gap:.5rem; align-items:end; margin-bottom:1rem;">
+                <form method="post" action="/admin/bot/privacy-purges/lookup" style="display:flex; gap:.5rem; align-items:end; margin-bottom:1rem;">
+                    {{ csrf_field() }}
                     <label style="flex:1;">Discord user ID
                         <input type="text" name="user_id" value="{{ lookup_id }}" inputmode="numeric" required>
                     </label>

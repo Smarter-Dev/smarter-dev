@@ -28,6 +28,7 @@
                     {% if purge.completed_at %}&middot; finished {{ purge.completed_at.strftime('%Y-%m-%d %H:%M UTC') }}{% endif %}
                     {% if purge.closed_at %}&middot; closed {{ purge.closed_at.strftime('%Y-%m-%d %H:%M UTC') }}{% endif %}
                 </p>
+                {% if steps.error %}<p><span class="sk-badge sk-badge-danger">error</span> {{ steps.error }}</p>{% endif %}
                 {% if purge.discord_user_id %}
                 <p><strong>User:</strong> {{ purge.discord_user_id }} &middot; <strong>Names:</strong> {{ (purge.names or []) | join(", ") or "none" }}</p>
                 {% else %}
@@ -40,6 +41,10 @@
                     <form method="post" action="/admin/bot/privacy-purges/{{ purge.id }}/close" onsubmit="return confirm('Strip this request to a receipt? The user stays on the block list.');">{{ csrf_field() }}<button class="sk-btn-outline sk-btn-small" type="submit">Close to a receipt</button></form>
                 </div>
                 {% endif %}
+                {% if purge.status != "closed" %}
+                <h4>Runtimes</h4>
+                {% include "admin/bot/privacy_purges/_runtimes.html" %}
+                {% endif %}
             </div>
         </div>
 
@@ -48,12 +53,13 @@
             <div class="sk-panel-head">Steps ({{ (steps.guild_ids or []) | length }} guilds)</div>
             <div class="sk-panel-body">
                 <table class="sk-admin-table">
-                    <thead><tr><th>Guild</th><th>Memory</th><th>Bot history</th><th>Worker history</th></tr></thead>
+                    <thead><tr><th>Guild</th><th>Memory</th><th>Bot history</th><th>Worker history</th><th>Final notes pass</th></tr></thead>
                     <tbody>
                         {% for guild_id in steps.guild_ids or [] %}
                         {% set memory = (steps.memory or {}).get(guild_id) %}
                         {% set bot = (steps.bot or {}).get(guild_id) %}
                         {% set worker = (steps.worker or {}).get(guild_id) %}
+                        {% set final = (steps.final_notes or {}).get(guild_id) %}
                         <tr>
                             <td><code>{{ guild_id }}</code></td>
                             <td>
@@ -63,6 +69,11 @@
                             </td>
                             <td>{% if bot %}{{ bot.outcome }}{% if bot.detail %} &mdash; {{ bot.detail }}{% endif %}{% else %}pending{% endif %}</td>
                             <td>{% if worker %}{{ worker.outcome }}{% if worker.detail %} &mdash; {{ worker.detail }}{% endif %}{% else %}pending{% endif %}</td>
+                            <td>
+                                {% if final %}{{ final.outcome }}{% if final.error %} ({{ final.error }}){% endif %}
+                                {% for item in final.unresolved or [] %}<br><span class="sk-badge sk-badge-danger">unresolved</span> {{ item.location }}: {{ item.reason }}{% endfor %}
+                                {% else %}pending{% endif %}
+                            </td>
                         </tr>
                         {% endfor %}
                     </tbody>
@@ -95,9 +106,24 @@
                 {% else %}
                 <p>Nothing found.</p>
                 {% endif %}
+                <h4>Chat audit tables, for the #71 deletion runbook ({{ (report.information or []) | length }})</h4>
+                {% if report.information %}
+                <ul>{% for hit in report.information %}<li><code>{{ hit.location }}</code>: {{ hit.id_hits }} ID, {{ hit.name_hits }} name</li>{% endfor %}</ul>
+                {% else %}
+                <p>Nothing found.</p>
+                {% endif %}
                 {% else %}
                 <p class="sk-text-muted">Runs when every guild is acknowledged, or on demand.</p>
                 {% endif %}
+                <h4>Possible remains reported by the runtimes ({{ possible_remains | length }})</h4>
+                {% if possible_remains %}
+                <ul>{% for item in possible_remains %}<li>guild <code>{{ item.guild_id }}</code>, {{ item.component }}: its ack still counted {{ item.name_hits }} name hit{{ "s" if item.name_hits != 1 else "" }}. "Run the purge again" purges this guild again.</li>{% endfor %}</ul>
+                {% else %}
+                <p>None.</p>
+                {% endif %}
+                <h4>Outside the check</h4>
+                <p class="sk-text-muted" style="font-size:0.85rem;">The check searches guild memory (blocks, notes, revisions), watch instructions, proactive histories, the Redis history, queue and event keys listed in the code, and the chat audit tables. It does not search:</p>
+                <ul>{% for item in outside_the_check %}<li>{{ item }}</li>{% endfor %}</ul>
             </div>
         </div>
         {% endif %}
