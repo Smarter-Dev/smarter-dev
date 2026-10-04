@@ -1319,6 +1319,21 @@ async def test_a_plain_tombstone_counts_as_unknown_run(redis):
     assert await tombstoned_guilds(redis, uuid.uuid4(), [_GUILD, _GUILDS[0]]) == [_GUILD]
 
 
+async def test_a_tombstone_with_extra_keys_is_still_attributed_to_its_request(redis):
+    import uuid
+
+    from smarter_dev.shared.privacy_purge import history_tombstone_key
+    from smarter_dev.web.chat_bot_purge import tombstoned_guilds
+
+    mine, other = uuid.uuid4(), uuid.uuid4()
+    await redis.set(
+        history_tombstone_key(_GUILD),
+        json.dumps({"run_id": str(uuid.uuid4()), "request_id": str(mine), "revision": 7}),
+    )
+    assert await tombstoned_guilds(redis, mine, [_GUILD]) == [_GUILD]
+    assert await tombstoned_guilds(redis, other, [_GUILD]) == []
+
+
 def test_tombstoned_acks_are_flagged():
     from smarter_dev.web.chat_bot_purge import ack_flagged
     from smarter_dev.web.chat_bot_purge import flagged_guilds
