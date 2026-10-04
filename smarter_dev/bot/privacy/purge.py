@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import html
 import logging
 import socket
 import uuid
@@ -62,6 +63,7 @@ from pydantic_ai.models import Model
 
 from smarter_dev.bot import leadership
 from smarter_dev.bot.privacy.attribution import chat_history_attributed
+from smarter_dev.bot.privacy.attribution import part_texts
 from smarter_dev.bot.privacy.attribution import proactive_history_attributed
 from smarter_dev.bot.privacy.blocked_users import consumer_key
 from smarter_dev.bot.privacy.compaction import PrivacyCompactionFailed
@@ -318,16 +320,12 @@ async def _channel_ids_with_keys(redis: Any, prefix: str, suffix: str) -> set[in
 def _part_texts(history: list[ModelMessage]) -> list[str]:
     """Every text a stored history carries: system prompt, member input,
     replies, tool calls and returns. All of it is searched for the person."""
-    texts: list[str] = []
-    for message in history:
-        for part in message.parts:
-            content = getattr(part, "content", None)
-            if content is None:
-                content = getattr(part, "args", None)
-            if content is None:
-                continue
-            texts.append(content if isinstance(content, str) else str(content))
-    return texts
+    return [
+        text
+        for message in history
+        for part in message.parts
+        for text in part_texts(part)
+    ]
 
 
 def _mentions_target(texts: list[str], target: PurgeTarget) -> bool:
@@ -352,7 +350,13 @@ def chat_memory_is_clean(
 ) -> bool:
     """The chat-memory version. The system prompt and other host-written
     parts are only searched; member input must be attributed."""
-    texts = [*_part_texts(history), topic or "", notes or ""]
+    # Chat input is XML: search the unescaped text, so a nickname holding
+    # `"`, `&` or `<` (stored as &quot; &amp; &lt;) is still found.
+    texts = [
+        *(html.unescape(text) for text in _part_texts(history)),
+        topic or "",
+        notes or "",
+    ]
     if _mentions_target(texts, target):
         return False
     return chat_history_attributed(history)
