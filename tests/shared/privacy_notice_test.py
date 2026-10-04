@@ -108,13 +108,9 @@ def test_security_events_name_no_member(notice):
     assert "None records a member's Discord ID" in security
     assert "Ordinary requests are not logged" in security
     assert "Pydantic Logfire" in security
+    assert "kept for 30 days." in security
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="the Logfire retention period for security events waits on the "
-    "Logfire org settings (#71); remove this marker together with the placeholder",
-)
 def test_no_placeholder_is_left_in_the_notice(notice):
     assert "[PLACEHOLDER" not in notice
 

@@ -45,7 +45,7 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a dire
 
 **Email.** If you sign up for a campaign or waitlist, we keep your email address or Discord ID and send a confirmation email.
 
-**Security.** The API our bot uses records three kinds of security event: failed authentication, requests refused for going over a rate limit, and admin operations. Each records what happened and the kind of request. Rate-limit and admin events also record which API key made the request, and a failed authentication records the IP address it came from. None records a member's Discord ID. Ordinary requests are not logged. These events go to Pydantic Logfire and are kept for **[PLACEHOLDER: the Logfire project's retention period, from the Logfire org settings. Do not publish with this line.]**
+**Security.** The API our bot uses records three kinds of security event: failed authentication, requests refused for going over a rate limit, and admin operations. Each records what happened and the kind of request. Rate-limit and admin events also record which API key made the request, and a failed authentication records the IP address it came from. None records a member's Discord ID. Ordinary requests are not logged. These events go to Pydantic Logfire and are kept for 30 days.
 
 ## Who else handles your data
 
