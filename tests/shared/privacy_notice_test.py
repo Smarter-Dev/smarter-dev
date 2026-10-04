@@ -89,7 +89,14 @@ def test_the_notice_gives_each_message_hand_off_its_limit(notice):
     assert "dropped once they are 48 hours old (checked every 15 minutes)" in messages
     assert "up to 48 hours after it picks them up" in messages
     assert "until the reminder runs, and for up to 7 days after" in messages
-    assert "no time limit" not in messages.replace("That history has no time limit", "")
+    assert "up to 16 KB" in messages
+    assert "That memory has no time limit: it lasts as long as the automation exists" in messages
+    assert "can paraphrase or quote members" in messages
+    assert "the old ones have no time limit" in messages
+    unbounded = ("That history has no time limit", "That memory has no time limit", "the old ones have no time limit")
+    for phrase in unbounded:
+        messages = messages.replace(phrase, "")
+    assert "no time limit" not in messages
 
 
 def test_ai_records_keep_no_words(notice):
