@@ -192,7 +192,12 @@ class _Summarizer:
 
 
 @pytest.fixture
-async def world(monkeypatch):
+async def world():
+    return await build_world()
+
+
+async def build_world():
+    """The purge test world (also used by privacy_review_test)."""
     redis = fakeredis.aioredis.FakeRedis()
     memory = ChatMemory(redis)
     for channel in (LIVE_CHANNEL, STORED_CHANNEL, OTHER_CHANNEL, UNPLACED_CHANNEL):
@@ -349,9 +354,8 @@ async def test_purge_removes_kai_from_every_store_and_keeps_nia(world):
         assert NIA_NOTE in text
         assert len(history) == 2  # the memory-note pair, no verbatim tail
     assert world.guild_state.memory_refreshed_at == 0.0
-    assert [n.body for n in world.guild_state.queue.items] == [
-        f"You were @mentioned by nia (id {NIA})"
-    ]
+    # Everything queued before the purge is discarded, nia's too.
+    assert world.guild_state.queue.items == []
 
     # watch instructions: kai's dropped, nia's kept, persisted once
     assert len(world.settings.saved) == 1
@@ -449,8 +453,9 @@ async def test_persistent_name_hit_is_accepted_and_counted(world):
 
     _run_id, ack = world.acks[0]
     assert ack.outcome == "purged"
-    assert "name mentions kept after re-ask:" in ack.detail
-    _assert_clean(ack.detail.replace("name mentions", ""))
+    assert "chat_name_hits=3" in ack.detail
+    assert "history_name_hits=1" in ack.detail
+    _assert_clean(ack.detail.replace("name_hits", ""))
     text = _prompt_text(await world.memory.read_history(LIVE_CHANNEL))
     assert KAI not in text
 
@@ -608,16 +613,21 @@ async def test_unattributed_history_is_folded_once_per_request(world):
     assert _calls(world, PROACTIVE_MARK) == 1
     assert _calls(world, CHAT_MARK) == 3
 
+    # A new run re-inspects every store: the folded ones are marked
+    # attributed and clean now, so none is folded again or written.
     before = await _snapshot(world.redis)
-    calls_before = len(world.summarizer.calls)
     await _publish(world.redis, {**payload, "run_id": str(uuid4())})
     await _consume_once(world)
 
-    assert len(world.summarizer.calls) == calls_before
-    assert await _snapshot(world.redis) == before
+    assert _calls(world, PROACTIVE_MARK) == 1
+    assert _calls(world, CHAT_MARK) == 3
+    after = await _snapshot(world.redis)
+    assert {k: v for k, v in after.items() if b"purge-done" not in k} == {
+        k: v for k, v in before.items() if b"purge-done" not in k
+    }
     first, second = world.acks
-    assert second[0] != first[0]  # re-posted under the new run id
-    assert second[1] == first[1]
+    assert second[0] != first[0]
+    assert second[1].outcome == "unchanged"
 
 
 async def test_attributed_history_without_target_is_left_alone(world):
@@ -665,12 +675,12 @@ async def test_redelivery_after_failed_ack_reposts_without_refolding(world):
     assert len(world.summarizer.calls) == calls
     assert [ack.outcome for _run, ack in world.acks] == ["purged"]
     assert await _pending(world.redis) == 0
-    ttl = await world.redis.ttl(purge.purge_done_key(_request_id(entries)))
+    ttl = await world.redis.ttl(purge.purge_done_key(_run_id(entries)))
     assert 29 * 24 * 3600 < ttl <= 30 * 24 * 3600
 
 
-def _request_id(entries) -> str:
-    return json.loads(entries[0][1][b"payload"])["request_id"]
+def _run_id(entries) -> str:
+    return json.loads(entries[0][1][b"payload"])["run_id"]
 
 
 async def test_purge_waits_for_a_foreign_privacy_lock(world, monkeypatch):

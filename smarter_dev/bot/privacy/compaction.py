@@ -18,6 +18,7 @@ Nothing here logs the id, the names or any memory text; never log a
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Awaitable
 from collections.abc import Callable
@@ -39,6 +40,7 @@ from smarter_dev.bot.agents.chat_compaction import COMPACTED_PREFIX
 from smarter_dev.bot.agents.chat_compaction import MAX_SUMMARY_CHARS
 from smarter_dev.bot.agents.chat_compaction import _collect_system_parts
 from smarter_dev.bot.agents.chat_compaction import _render_transcript
+from smarter_dev.bot.privacy.attribution import ATTRIBUTION_MARK
 from smarter_dev.bot.proactive.agent import memory_note_pair
 from smarter_dev.bot.proactive.environment import InstructionStore
 from smarter_dev.bot.proactive.environment import WatchInstruction
@@ -47,6 +49,10 @@ from smarter_dev.shared.privacy_purge import PurgeTarget
 logger = logging.getLogger(__name__)
 
 ID_RETRIES = 2
+# One model call of a purge. Purges run while holding the chat run lock, the
+# proactive wake lock and the guild privacy lock, so a hung provider must not
+# hold them: a timeout fails the step at once and nothing is written.
+MODEL_TIMEOUT_SECONDS = 120
 T = TypeVar("T")
 
 ID_FEEDBACK = (
@@ -105,8 +111,15 @@ async def generate_validated(
     while True:
         attempts += 1
         try:
-            output = await produce(feedback)
+            output = await asyncio.wait_for(
+                produce(feedback), timeout=MODEL_TIMEOUT_SECONDS
+            )
             written = "\n".join(texts(output))
+        except TimeoutError:
+            logger.warning(
+                "privacy compaction attempt %d timed out; step failed", attempts
+            )
+            raise PrivacyCompactionFailed("model call timed out") from None
         except Exception as error:  # noqa: BLE001 — an invalid attempt
             logger.warning(
                 "privacy compaction attempt %d produced no usable output (%s)",
@@ -244,7 +257,12 @@ async def purge_chat_memory(
             ModelRequest(
                 parts=[
                     *_collect_system_parts(history),
-                    UserPromptPart(content=f"{COMPACTED_PREFIX} {output.summary}"),
+                    UserPromptPart(
+                        content=(
+                            f"{COMPACTED_PREFIX} {ATTRIBUTION_MARK} "
+                            f"{output.summary}"
+                        )
+                    ),
                 ]
             )
         ]
@@ -299,7 +317,10 @@ async def purge_proactive_history(
         return note
 
     validated = await generate_validated(produce, lambda note: (note,), target)
-    return memory_note_pair(validated.output), validated.name_hits
+    return (
+        memory_note_pair(validated.output, attributed=True),
+        validated.name_hits,
+    )
 
 
 # -- proactive watch instructions ---------------------------------------------

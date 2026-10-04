@@ -14,9 +14,9 @@ import logging
 import hikari
 import lightbulb
 
-from smarter_dev.bot import leadership
 from smarter_dev.bot.privacy.purge import PurgeDeps
 from smarter_dev.bot.privacy.purge import purge_consumer_loop
+from smarter_dev.bot.privacy.purge import supervise
 
 logger = logging.getLogger(__name__)
 
@@ -73,8 +73,8 @@ async def on_started(event: hikari.StartedEvent) -> None:
     if deps is None:
         logger.warning("privacy purge consumer not started: no Redis or bot API")
         return
-    _task = asyncio.create_task(purge_consumer_loop(deps))
-    leadership.on_stop(_task.cancel)
+    # Supervised: if the loop ever dies it is restarted, never left dead.
+    _task = asyncio.create_task(supervise(lambda: purge_consumer_loop(deps)))
 
 
 def load(bot: lightbulb.BotApp) -> None:

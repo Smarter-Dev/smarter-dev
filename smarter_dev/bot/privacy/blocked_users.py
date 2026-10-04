@@ -21,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import socket
 import time
 from collections.abc import Awaitable
@@ -36,6 +37,8 @@ from smarter_dev.shared.privacy_purge import enforcing_key
 logger = logging.getLogger(__name__)
 
 REFRESH_SECONDS = 60
+# A Discord user mention; a fixed pattern, the ids come from the list.
+_USER_MENTION = re.compile(r"<@!?([0-9]{15,22})>")
 ENFORCING_KEY = enforcing_key("bot")
 PROCESS_ID = f"{socket.gethostname()}-{os.getpid()}"
 __all__ = ["BLOCKED_PLACEHOLDER", "BlockedUsersCache", "get_blocked_users"]
@@ -155,6 +158,11 @@ async def refresh_once(
     return True
 
 
+def consumer_key(process_id: str | None = None) -> str:
+    """This process's purge-consumer heartbeat (read by the web page)."""
+    return f"privacy:v1:consumer:bot:{process_id or PROCESS_ID}"
+
+
 def process_key(process_id: str | None = None) -> str:
     """This process's own enforcing report."""
     return f"{ENFORCING_KEY}:{process_id or PROCESS_ID}"
@@ -202,30 +210,14 @@ async def refresh_loop(
 def redact_blocked_mentions(text: str, blocked: BlockedUsersCache) -> str:
     """Replace ``<@id>`` / ``<@!id>`` mentions of blocked users in ``text``.
 
-    A bystander's message can carry a blocked user's id as mention syntax;
-    the mention becomes ``@[blocked user]`` so neither the id nor (after
-    mention resolution) the name reaches the model. No regex: the ids come
-    from the list, never from a pattern.
+    A bystander's message (or a code block, or a bot's own message) can carry
+    a blocked user's id as mention syntax; it becomes ``@[blocked user]`` so
+    neither the id nor (after mention resolution) the name reaches the model.
     """
     if "<@" not in text:
         return text
-    out: list[str] = []
-    index = 0
-    while True:
-        start = text.find("<@", index)
-        if start < 0:
-            out.append(text[index:])
-            break
-        end = text.find(">", start)
-        if end < 0:
-            out.append(text[index:])
-            break
-        inner = text[start + 2 : end]
-        user_id = inner[1:] if inner.startswith("!") else inner
-        out.append(text[index:start])
-        if user_id.isdigit() and blocked.is_blocked(user_id):
-            out.append("@[blocked user]")
-        else:
-            out.append(text[start : end + 1])
-        index = end + 1
-    return "".join(out)
+
+    def replace(match: re.Match[str]) -> str:
+        return "@[blocked user]" if blocked.is_blocked(match.group(1)) else match[0]
+
+    return _USER_MENTION.sub(replace, text)
