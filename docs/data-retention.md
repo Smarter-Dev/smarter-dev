@@ -244,15 +244,19 @@ token is stored. Preview pages are read-only, unlisted, and marked `noindex`.
 ## Security logs
 
 Security events are structured logs, not database rows. Three kinds are
-emitted (`smarter_dev/web/security_logger.py`): failed authentication, rate
-limit exceeded, and admin operations. Each carries the event name, outcome,
-route template (`/api/guilds/{guild_id}/bytes/balance/{user_id}`, never the
-concrete path), method, and the API key id where there is one; failed
-authentications also carry the client IP, the source of the attempt. No event
-records a member's Discord id. They go to Pydantic Logfire when the process has
-a `LOGFIRE_TOKEN` and are kept for the Logfire project's retention period;
-without Logfire they go to the standard logger (container stdout). Ordinary
-successful API requests are not logged at all.
+emitted (`smarter_dev/web/security_logger.py`), named in the `security.event`
+attribute: `login_failed` (with `bearer_presented`, a `reason` code and the
+`client_ip`, the source of the attempt), `rate_limit_exceeded` (with the
+`key_id` and `key_prefix` of the API key, the `window`, `current_usage` and
+`rate_limit`), and `admin_operation` (with `operation`, `caller` and
+`details`). Each also carries `success`, the `route` template
+(`/api/guilds/{guild_id}/bytes/balance/{user_id}`, never the
+concrete path) and the `method`. No event
+records a member's Discord id. The names avoid the words Logfire's default
+scrubber redacts, so the events arrive readable. They go to Pydantic Logfire
+when the process has a `LOGFIRE_TOKEN` and are kept for the Logfire project's
+retention period; without Logfire they go to the standard logger (container
+stdout). Ordinary successful API requests are not logged at all.
 
 Rate limiting keeps one Redis sorted set per API key: the times of its allowed
 requests, keyed by the key's id, expiring 15 minutes after the last request.

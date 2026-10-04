@@ -33,7 +33,10 @@ def _request(query: dict[str, str] | None = None) -> MagicMock:
     request.client = SimpleNamespace(host="203.0.113.7")
     request.headers = {"user-agent": "pytest"}
     request.url.path = "/api/guilds/1/members"
-    request.scope = {"path_template": "/api/guilds/{guild_id}/members"}
+    request.scope = {
+        "path_template": "/api/guilds/{guild_id}/members",
+        "state": {"client_ip": "203.0.113.7"},
+    }
     request.method = "GET"
     request.query_params = query or {}
     return request
@@ -53,12 +56,12 @@ async def test_rejected_bearer_leaves_no_fragment_in_the_event(caplog):
     await SecurityLogger().log_authentication_failed(
         bearer_presented=True,
         request=_request(),
-        reason="Invalid API key",
+        reason="no_valid_key",
     )
 
     (record,) = caplog.records
     event = record.security_event
-    assert event["security.event"] == "authentication_failed"
+    assert event["security.event"] == "login_failed"
     assert event["bearer_presented"] is True
     assert event["route"] == "/api/guilds/{guild_id}/members"
     assert "failed_key_prefix" not in event
@@ -113,12 +116,12 @@ async def test_rejected_bearer_through_real_guard_and_logger(monkeypatch):
     stored.add.assert_not_called()  # events are logs, not rows (#81)
     (record,) = records
     event = record.security_event
-    assert event["security.event"] == "authentication_failed"
+    assert event["security.event"] == "login_failed"
     assert event["bearer_presented"] is True
     # The route template, never the concrete path with its Discord ids (#81).
     assert event["route"] == "/api/guilds/{guild_id}/bytes/config"
     fragment = TOKEN[:6]
-    assert "Security event: authentication_failed" in logged
+    assert "Security event: login_failed" in logged
     assert fragment not in logged
     assert "123456789012345678" not in logged
 

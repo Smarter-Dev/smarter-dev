@@ -63,6 +63,14 @@ from smarter_dev.web.api_native.errors import (
 BOT_API_PERMISSION = "bot-api"
 
 
+def _login_failure_reason(auth_error: NotAuthorizedException) -> str:
+    """A fixed code for the failure; Skrift's own wording contains "auth",
+    which Logfire's scrubber would redact."""
+    if "permission" in str(auth_error.detail).lower():
+        return "insufficient_permissions"
+    return "no_valid_key"
+
+
 async def bot_api_auth_guard(
     connection: ASGIConnection, route_handler: BaseRouteHandler
 ) -> None:
@@ -91,7 +99,7 @@ async def bot_api_auth_guard(
             await get_security_logger().log_authentication_failed(
                 bearer_presented=bearer_presented,
                 request=Request(connection.scope),
-                reason=str(auth_error.detail),
+                reason=_login_failure_reason(auth_error),
             )
         except Exception as log_error:
             # Never let audit logging mask the 401 itself.

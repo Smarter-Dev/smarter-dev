@@ -18,10 +18,12 @@ Behavior kept byte-compatible with the legacy implementation:
   last slot. Blocked requests are not counted. Nothing is logged for an
   allowed request (#81); exceeding a window emits a ``rate_limit_exceeded``
   security event (:mod:`smarter_dev.web.security_logger`).
-- Redis unreachable: the request is let through without rate-limit headers
-  and a warning is logged. The only key holder is the bot's own service key,
-  so failing open costs nothing in abuse protection while failing closed
-  would take every bot feature that calls the API down with Redis.
+- Redis unreachable, hung (no answer within ``REDIS_TIMEOUT_SECONDS``) or
+  misconfigured (a malformed ``REDIS_URL``): the request is let through
+  without rate-limit headers, and a warning is logged at most once a minute
+  per process. The only key holder is the bot's own service key, so failing
+  open costs nothing in abuse protection while failing closed would take
+  every bot feature that calls the API down with Redis.
 - Success responses carry ``x-ratelimit-limit/remaining/reset`` plus the
   per-window ``-second`` / ``-minute`` / ``-15min`` variants.
 - Exceeding any window answers 429 with the legacy ``{"detail": ...}`` body,
@@ -35,8 +37,10 @@ rate limiting), unauthenticated traffic never consumes or reports windows.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
@@ -52,7 +56,6 @@ from litestar.types import Receive
 from litestar.types import Scope
 from litestar.types import Send
 from redis.asyncio import Redis
-from redis.exceptions import RedisError
 from skrift.db.services import api_key_service as skrift_api_key_service
 from skrift.lib.client_ip import get_client_ip
 
@@ -61,6 +64,14 @@ from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.security_logger import get_security_logger
 
 logger = logging.getLogger(__name__)
+
+# Budget for the whole Redis round trip (connect, script, reply). A hung Redis
+# must not hold every bytes request; past this the request is let through.
+REDIS_TIMEOUT_SECONDS = 0.5
+# At most one "rate limiting skipped" warning per process in this interval.
+REDIS_WARNING_INTERVAL_SECONDS = 60.0
+_last_redis_warning_at: float | None = None
+_redis_failures_since_warning = 0
 
 # Rate-limit windows applied to Skrift-native keys — identical to the legacy
 # ``dependencies.SKRIFT_KEY_RATE_LIMIT_*`` defaults (strictest first).
@@ -229,6 +240,26 @@ class RateLimitDecision:
     retry_after_seconds: int | None = None
 
 
+def _warn_rate_limiting_skipped(error: Exception) -> None:
+    """Log that a request went unlimited, at most once per interval."""
+    global _last_redis_warning_at, _redis_failures_since_warning
+    _redis_failures_since_warning += 1
+    now = time.monotonic()
+    if (
+        _last_redis_warning_at is not None
+        and now - _last_redis_warning_at < REDIS_WARNING_INTERVAL_SECONDS
+    ):
+        return
+    logger.warning(
+        "Bot API rate limiting skipped for %d request(s), Redis failed: %s: %s",
+        _redis_failures_since_warning,
+        type(error).__name__,
+        error,
+    )
+    _last_redis_warning_at = now
+    _redis_failures_since_warning = 0
+
+
 async def check_rate_limits(
     api_key: RateLimitedKey,
     request: Request,
@@ -236,17 +267,17 @@ async def check_rate_limits(
 ) -> RateLimitDecision:
     """Check all windows (strictest first) and count the request if allowed.
 
-    Fails open when Redis is unreachable: allowed, no headers, a warning.
+    Fails open when Redis cannot answer in time for any reason (down, hung,
+    misconfigured): allowed, no headers, a throttled warning.
     """
     current_time = datetime.now(UTC)
     try:
-        counts = await _check_and_record(
-            redis or get_redis_client(), api_key, current_time
+        counts = await asyncio.wait_for(
+            _check_and_record(redis or get_redis_client(), api_key, current_time),
+            timeout=REDIS_TIMEOUT_SECONDS,
         )
-    except (RedisError, OSError) as redis_error:
-        logger.warning(
-            "Bot API rate limiting skipped, Redis unreachable: %s", redis_error
-        )
+    except Exception as redis_error:
+        _warn_rate_limiting_skipped(redis_error)
         return RateLimitDecision(allowed=True, headers={})
 
     remaining_by_window: list[tuple[RateLimitWindow, int]] = []
