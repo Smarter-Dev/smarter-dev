@@ -25,15 +25,16 @@ from sqlalchemy import select
 
 from smarter_dev.shared.database import async_sessionmaker
 from smarter_dev.shared.privacy_purge import PurgeTarget
-from smarter_dev.web.chat_memory_purge import NoteEdit
 from smarter_dev.web.chat_memory_purge import PurgeContext
 from smarter_dev.web.chat_memory_purge import PurgeOutput
 from smarter_dev.web.chat_memory_purge import PurgeRefused
+from smarter_dev.web.chat_memory_purge import SegmentEdit
 from smarter_dev.web.chat_memory_purge import UnresolvedItem
 from smarter_dev.web.chat_memory_purge import build_purge_agent
 from smarter_dev.web.chat_memory_purge import build_purge_user_message
 from smarter_dev.web.chat_memory_purge import compose_purge
 from smarter_dev.web.chat_memory_purge import purge_guild_memory
+from smarter_dev.web.chat_memory_purge import segments
 from smarter_dev.web.crud import create_memory_note
 from smarter_dev.web.crud import get_guild_memory_blob
 from smarter_dev.web.crud import record_memory_revision
@@ -62,7 +63,7 @@ PERSONALITY = "The one who remembered the thing nobody else did."
 
 KAI_NOTE = "kai shipped the shader in #dev-help."
 MIXED_NOTE = "kai and nia argued about cmake; nia won."
-MIXED_NOTE_CLEAN = "nia argued about cmake and won."
+MIXED_NOTE_CLEAN = "nia argued about cmake; nia won."
 NIA_NOTE = "nia is building a synth."
 
 
@@ -78,12 +79,26 @@ class _Result:
     output: PurgeOutput
 
 
+def scripted_edits(deps: PurgeContext, *, keep_ids: bool = False) -> list[SegmentEdit]:
+    """What a well-behaved model decides: a segment mixing kai with nia is
+    rewritten to be only about nia, any other segment naming kai is removed."""
+    edits = []
+    for segs in deps.editable_by_location().values():
+        for seg in segs:
+            if keep_ids and deps.target.id_hits(seg.text):
+                edits.append(SegmentEdit(id=seg.id, action="keep"))
+            elif "nia" in seg.body:
+                edits.append(
+                    SegmentEdit(id=seg.id, action="rewrite", text=seg.body.replace("kai and ", ""))
+                )
+            else:
+                edits.append(SegmentEdit(id=seg.id, action="remove"))
+    return edits
+
+
 @dataclass
 class _ScriptedPurgeAgent:
-    """Removes kai the way a well-behaved model would, from whatever it is given.
-
-    Like the real agent it returns only the blocks it was shown.
-    """
+    """Removes kai the way a well-behaved model would, from whatever it is given."""
 
     prompts: list[str] = field(default_factory=list)
     contexts: list[PurgeContext] = field(default_factory=list)
@@ -99,30 +114,14 @@ class _ScriptedPurgeAgent:
             await self.before_answer()
         if self.raise_error:
             raise RuntimeError("provider is down")
-        memory = deps.memory.replace(f"\n{KAI_LINE}", "")
-        if self.leave_id_in_memory:
-            memory = deps.memory
-        behavior = deps.behavior.replace(" kai wants code, not prose.", "")
         unresolved = []
         if self.unresolved_for_revisions and not deps.notes and "memory" in deps.editable:
             unresolved.append(
                 UnresolvedItem(location="memory", reason="a line may be about them unnamed")
             )
-        notes = []
-        for note_id, content in deps.notes:
-            if content == KAI_NOTE:
-                notes.append(NoteEdit(id=note_id, action="drop"))
-            elif content == MIXED_NOTE:
-                notes.append(NoteEdit(id=note_id, action="rewrite", text=MIXED_NOTE_CLEAN))
-            else:
-                notes.append(NoteEdit(id=note_id, action="keep"))
-        editable = deps.editable
         return _Result(
             PurgeOutput(
-                memory=memory if "memory" in editable else None,
-                behavior=behavior if "behavior" in editable else None,
-                personality=deps.personality if "personality" in editable else None,
-                notes=notes,
+                edits=scripted_edits(deps, keep_ids=self.leave_id_in_memory),
                 unresolved=unresolved,
             )
         )
@@ -332,13 +331,13 @@ def _context(**overrides) -> PurgeContext:
     return PurgeContext(**values)
 
 
-def _output(**overrides) -> PurgeOutput:
-    values = {
-        "memory": MEMORY_WITHOUT_KAI,
-        "behavior": BEHAVIOR,
-        "personality": PERSONALITY,
-        "notes": [NoteEdit(id="n1", action="keep")],
-    }
+def _ids(context: PurgeContext) -> list[str]:
+    return [seg.id for segs in context.editable_by_location().values() for seg in segs]
+
+
+def _output(context: PurgeContext | None = None, **overrides) -> PurgeOutput:
+    context = context or _context()
+    values = {"edits": scripted_edits(context)}
     values.update(overrides)
     return PurgeOutput(**values)
 
@@ -346,109 +345,77 @@ def _output(**overrides) -> PurgeOutput:
 def test_a_clean_purge_is_accepted():
     blocks = compose_purge(_output(), _context(), retries_left=0)
     assert blocks.memory == MEMORY_WITHOUT_KAI
+    assert blocks.changed_blocks == {"memory"}
+    assert blocks.behavior == BEHAVIOR and blocks.personality == PERSONALITY
+
+
+def _first_id() -> str:
+    return _ids(_context())[0]
 
 
 @pytest.mark.parametrize(
-    "output",
+    "edits",
     [
-        _output(memory=MEMORY_WITH_KAI),
-        _output(behavior=f"{BEHAVIOR} Ask {_KAI_ID} first."),
-        _output(notes=[NoteEdit(id="n1", action="rewrite", text=f"{NIA_NOTE} kai too.")]),
-        _output(personality=""),
-        _output(memory="ok."),
-        _output(notes=[]),
-        _output(notes=[NoteEdit(id="n9", action="keep")]),
-        _output(memory=MEMORY_WITHOUT_KAI + "\n" + "x" * 2000),
-        _output(
-            unresolved=[UnresolvedItem(location="memory", reason=f"maybe {_KAI_ID}")]
-        ),
+        [SegmentEdit(id=_first_id(), action="keep")],
+        [SegmentEdit(id=_first_id(), action="rewrite", text=f"someone ({_KAI_ID}) likes rust")],
+        [SegmentEdit(id=_first_id(), action="rewrite", text="kai likes rust")],
+        [SegmentEdit(id=_first_id(), action="rewrite", text="(empty)")],
+        [SegmentEdit(id=_first_id(), action="rewrite", text="two\nlines")],
+        [SegmentEdit(id=_first_id(), action="rewrite", text="")],
+        [],
+        [SegmentEdit(id=_first_id(), action="remove")] * 2,
+        [SegmentEdit(id=_first_id(), action="remove"), SegmentEdit(id="memory:0", action="remove")],
+        [SegmentEdit(id=_first_id(), action="remove"), SegmentEdit(id="behavior:0", action="remove")],
     ],
     ids=[
-        "id-left",
-        "id-added",
-        "name-in-note",
-        "unrelated-block-emptied",
-        "memory-collapsed",
-        "note-missing",
-        "unknown-note",
-        "over-limit",
-        "id-in-reason",
+        "keeps-the-id",
+        "rewrite-adds-the-id",
+        "rewrite-keeps-the-name",
+        "placeholder",
+        "rewrite-adds-a-line",
+        "empty-rewrite",
+        "segment-missing",
+        "segment-twice",
+        "heading-not-editable",
+        "unshown-block",
     ],
 )
-def test_unclean_output_is_retried_then_refused(output):
+def test_unclean_output_is_retried_then_refused(edits):
+    output = PurgeOutput(edits=edits)
     with pytest.raises(ModelRetry):
         compose_purge(output, _context(), retries_left=1)
     with pytest.raises(PurgeRefused):
         compose_purge(output, _context(), retries_left=0)
 
 
-def test_a_shared_name_is_accepted_only_when_the_agent_says_why():
-    other_kai = MEMORY_WITHOUT_KAI + "\n- kai from the other server runs the meetup."
+def test_unresolved_reasons_never_carry_the_id_or_a_name():
+    for reason in (f"maybe {_KAI_ID}", "maybe Kai"):
+        output = _output(unresolved=[UnresolvedItem(location="memory", reason=reason)])
+        with pytest.raises(PurgeRefused):
+            compose_purge(output, _context(), retries_left=0)
+
+
+def test_a_shared_name_is_kept_only_when_the_agent_says_why():
+    other = MEMORY_WITHOUT_KAI + "\n- kai from the other server runs the meetup."
+    context = _context(memory=other)
+    keep = PurgeOutput(edits=[SegmentEdit(id=_ids(context)[0], action="keep")])
     with pytest.raises(PurgeRefused):
-        compose_purge(_output(memory=other_kai), _context(), retries_left=0)
+        compose_purge(keep, context, retries_left=0)
     blocks = compose_purge(
-        _output(
-            memory=other_kai,
+        PurgeOutput(
+            edits=keep.edits,
             unresolved=[UnresolvedItem(location="memory", reason="a different member shares the name")],
         ),
-        _context(),
+        context,
         retries_left=0,
     )
-    assert blocks.unresolved[0].location == "memory"
+    assert blocks.memory == other and not blocks.changed_blocks
 
 
 def test_a_block_that_was_only_about_the_person_may_become_empty():
-    blocks = compose_purge(
-        _output(behavior=""),
-        _context(behavior="kai wants code, not prose."),
-        retries_left=0,
-    )
+    context = _context(behavior="kai wants code, not prose.")
+    blocks = compose_purge(_output(context), context, retries_left=0)
     assert blocks.behavior == ""
-
-
-# -- the real agent wiring --------------------------------------------------------
-
-
-async def test_the_agent_is_asked_again_when_its_first_answer_keeps_the_id():
-    """Unmocked validator path: pydantic-ai retries on the refusal, then accepts."""
-    calls: list[int] = []
-
-    def respond(messages, info: AgentInfo) -> ModelResponse:
-        calls.append(1)
-        memory = MEMORY_WITH_KAI if len(calls) == 1 else MEMORY_WITHOUT_KAI
-        return ModelResponse(
-            parts=[
-                ToolCallPart(
-                    info.output_tools[0].name,
-                    {
-                        "memory": memory,
-                        "behavior": BEHAVIOR,
-                        "personality": PERSONALITY,
-                        "notes": [{"id": "n1", "action": "keep"}],
-                    },
-                )
-            ]
-        )
-
-    agent = build_purge_agent(FunctionModel(respond))
-    result = await agent.run("purge", deps=_context())
-
-    assert len(calls) == 2
-    assert result.output.memory == MEMORY_WITHOUT_KAI
-
-
-def test_an_unrelated_note_is_only_dropped_or_rewritten_with_a_stated_reason():
-    drop = _output(notes=[NoteEdit(id="n1", action="drop")])
-    with pytest.raises(PurgeRefused):
-        compose_purge(drop, _context(), retries_left=0)
-    rewrite = _output(notes=[NoteEdit(id="n1", action="rewrite", text="pineapple pizza is law.")])
-    with pytest.raises(PurgeRefused):
-        compose_purge(rewrite, _context(), retries_left=0)
-    explained = _output(
-        notes=[NoteEdit(id="n1", action="drop")],
-        unresolved=[UnresolvedItem(location="note:n1", reason="about the person without naming them")],
-    )
-    assert compose_purge(explained, _context(), retries_left=0).dropped_notes == ("n1",)
 
 
 def test_unresolved_locations_must_name_a_real_place():
@@ -457,57 +424,132 @@ def test_unresolved_locations_must_name_a_real_place():
         compose_purge(output, _context(), retries_left=0)
 
 
-# -- bystanders are never rewritten (review item 2) --------------------------------
+# -- the real agent wiring --------------------------------------------------------
 
 
-def test_a_block_that_does_not_mention_the_person_is_not_shown_and_must_not_change():
-    context = _context()
-    assert context.editable == ("memory",)
-    prompt = build_purge_user_message(context)
-    assert PERSONALITY not in prompt and BEHAVIOR not in prompt
-    # Echoing it back unchanged, or leaving it out, is fine; any change is not.
-    assert compose_purge(_output(personality=None), context, retries_left=0).personality == PERSONALITY
+async def test_the_agent_is_asked_again_when_its_first_answer_keeps_the_id():
+    """Unmocked validator path: pydantic-ai retries on the refusal, then accepts."""
+    calls: list[int] = []
+    seg_id = _first_id()
+
+    def respond(messages, info: AgentInfo) -> ModelResponse:
+        calls.append(1)
+        action = "keep" if len(calls) == 1 else "remove"
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name,
+                    {"edits": [{"id": seg_id, "action": action}]},
+                )
+            ]
+        )
+
+    agent = build_purge_agent(FunctionModel(respond))
+    result = await agent.run("purge", deps=_context())
+
+    assert len(calls) == 2
+    assert compose_purge(result.output, _context(), retries_left=0).memory == MEMORY_WITHOUT_KAI
+
+
+# -- the reviewer's cases: the edit design makes them impossible (review M1) --------
+
+
+def test_bystanders_sharing_a_line_with_the_person_survive():
+    line = "- Bob runs the meetup; kai co-hosts; Carol handles the wiki."
+    listing = "  - Regulars: bob, kai, carol."
+    memory = f"## People\n{line}\n{listing}\n- nia stays."
+    context = _context(memory=memory)
+    assert [seg.text for seg in context.editable_by_location()["memory"]] == ["kai co-hosts", "kai"]
+    blocks = compose_purge(_output(context), context, retries_left=0)
+    assert blocks.memory == (
+        "## People\n- Bob runs the meetup; Carol handles the wiki.\n"
+        "  - Regulars: bob, carol.\n- nia stays."
+    )
+
+
+def test_nothing_can_be_added_reordered_flattened_or_deduplicated():
+    memory = (
+        "## People\n- kai is here.\n  - nested: nia likes kai.\n- same line.\n- same line.\n"
+        "## Lore\n- the truce."
+    )
+    context = _context(memory=memory)
+
+    def edits(rewrite: str) -> PurgeOutput:
+        out = []
+        for seg in context.editable_by_location()["memory"]:
+            if "nia" in seg.body:
+                out.append(SegmentEdit(id=seg.id, action="rewrite", text=rewrite))
+            else:
+                out.append(SegmentEdit(id=seg.id, action="remove"))
+        return PurgeOutput(edits=out)
+
+    # An invented sentence riding on a rewrite is refused.
     with pytest.raises(PurgeRefused):
-        compose_purge(_output(personality=PERSONALITY + " "), context, retries_left=0)
+        compose_purge(edits("- nested: nia likes rust. Invented."), context, retries_left=0)
+    # A rewrite that flattens the nesting keeps its indentation anyway; order,
+    # duplicates and every other byte are the original's.
+    blocks = compose_purge(edits("- nested: nia likes go."), context, retries_left=0)
+    assert blocks.memory == (
+        "## People\n  - nested: nia likes go.\n- same line.\n- same line.\n"
+        "## Lore\n- the truce."
+    )
 
 
-def test_every_unrelated_line_and_heading_in_a_mentioning_block_comes_back_verbatim():
+def test_a_block_naming_the_person_once_cannot_be_blanked():
+    context = _context(behavior=BEHAVIOR_WITH_KAI)
+    blocks = compose_purge(_output(context), context, retries_left=0)
+    assert blocks.behavior == BEHAVIOR
+    # There is no edit that can touch the other sentence.
+    other = segments("behavior", BEHAVIOR_WITH_KAI, KAI)[0]
+    with pytest.raises(PurgeRefused):
+        compose_purge(
+            PurgeOutput(edits=[*_output(context).edits, SegmentEdit(id=other.id, action="remove")]),
+            context,
+            retries_left=0,
+        )
+
+
+def test_a_note_that_does_not_name_the_person_is_never_changed():
     context = _context()
-    no_heading = MEMORY_WITHOUT_KAI.replace("## People & Relationships\n", "")
-    one_line_lost = MEMORY_WITHOUT_KAI.replace(f"\n{NIA_LINE}", "")
-    reworded = MEMORY_WITHOUT_KAI.replace("truce of August", "truce in August")
-    for memory in (no_heading, one_line_lost, reworded):
+    for edit in (
+        SegmentEdit(id="note:n1:0", action="remove"),
+        SegmentEdit(id="note:n1", action="remove"),
+    ):
+        output = _output(
+            edits=[*scripted_edits(context), edit],
+            unresolved=[UnresolvedItem(location="note:n1", reason="about them unnamed")],
+        )
         with pytest.raises(PurgeRefused):
-            compose_purge(_output(memory=memory), context, retries_left=0)
-    # A sentence next to the person's, on the same line, is kept too.
-    mixed = _context(behavior=BEHAVIOR_WITH_KAI)
-    with pytest.raises(PurgeRefused):
-        compose_purge(_output(behavior=""), mixed, retries_left=0)
-    assert compose_purge(_output(behavior=BEHAVIOR), mixed, retries_left=0).behavior == BEHAVIOR
+            compose_purge(output, context, retries_left=0)
+    flagged = _output(unresolved=[UnresolvedItem(location="note:n1", reason="about them unnamed")])
+    blocks = compose_purge(flagged, context, retries_left=0)
+    assert not blocks.dropped_notes and not blocks.rewritten_notes
+    assert blocks.unresolved[0].location == "note:n1"
 
 
-def test_an_empty_block_stays_empty_and_a_placeholder_is_never_accepted():
+def test_an_empty_block_stays_empty_and_unshown_blocks_are_not_in_the_prompt():
     context = _context(behavior="")
     prompt = build_purge_user_message(context)
-    assert "(empty)" not in prompt
-    with pytest.raises(PurgeRefused):
-        compose_purge(_output(behavior="(empty)"), context, retries_left=0)
-    only_kai = _context(behavior="kai wants code, not prose.")
-    with pytest.raises(PurgeRefused):
-        compose_purge(_output(behavior="(empty)"), only_kai, retries_left=0)
-    rewrite = _output(
-        notes=[NoteEdit(id="n1", action="rewrite", text="(empty)")],
-        unresolved=[UnresolvedItem(location="note:n1", reason="about them unnamed")],
-    )
-    with pytest.raises(PurgeRefused):
-        compose_purge(rewrite, _context(), retries_left=0)
+    assert "(empty)" not in prompt and PERSONALITY not in prompt
+    blocks = compose_purge(_output(context), context, retries_left=0)
+    assert blocks.behavior == "" and blocks.personality == PERSONALITY
 
 
-def test_the_old_fifty_percent_share_no_longer_passes():
-    """With the fix disabled (a share of unrelated lines), this output passed."""
-    memory = f"{IDENTITY}\n\n## People & Relationships\n{NIA_LINE}"  # lore dropped
+async def test_a_refused_purge_leaves_the_bytes_untouched(db_session, session_factory):
+    await _seed(db_session)
+    before = await _snapshot(db_session)
+
+    class _Invents(_ScriptedPurgeAgent):
+        async def run(self, user_prompt, *, deps):
+            edits = scripted_edits(deps)
+            edits.append(SegmentEdit(id="memory:0", action="rewrite", text="## New heading"))
+            return _Result(PurgeOutput(edits=edits))
+
     with pytest.raises(PurgeRefused):
-        compose_purge(_output(memory=memory), _context(), retries_left=0)
+        await purge_guild_memory(
+            session_factory, guild_id=_GUILD, target=KAI, now=_NOW, agent=_Invents()
+        )
+    assert await _snapshot(db_session) == before
 
 
 async def test_a_revision_without_the_person_gets_no_model_call_and_no_write(
@@ -737,3 +779,12 @@ async def test_the_final_notes_pass_reviews_new_and_mentioning_notes_only(
     reviewed = sorted(content for content_pair in agent.contexts for _, content in content_pair.notes)
     assert reviewed == sorted([KAI_NOTE, "someone new asked about embedded rust."])
     assert result.notes_dropped == 1
+
+
+def test_a_segment_carrying_the_id_cannot_be_kept_even_with_a_reason():
+    output = PurgeOutput(
+        edits=[SegmentEdit(id=_first_id(), action="keep")],
+        unresolved=[UnresolvedItem(location="memory", reason="shares a name")],
+    )
+    with pytest.raises(PurgeRefused):
+        compose_purge(output, _context(), retries_left=0)

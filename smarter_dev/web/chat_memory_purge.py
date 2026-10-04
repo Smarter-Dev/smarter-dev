@@ -17,9 +17,11 @@ The rules from the privacy plan shape everything here:
 2. **Bystanders are never rewritten.** A block (or a revision's block) that
    mentions neither the ID nor a listed name is not shown to the model as
    editable at all and is never written. In a block that does mention them,
-   every line and sentence that does not must come back word for word,
-   headings included. An empty block stays empty; a placeholder such as
-   ``(empty)`` is never written.
+   the model decides only the segments that mention them (keep, remove or
+   rewrite); code rebuilds the block from the original bytes, so everything
+   else comes back byte for byte and in order, and nothing can be added. A
+   note that does not name them is never changed. An empty block stays
+   empty; a placeholder such as ``(empty)`` is never written.
 3. **A failure changes nothing.** Any refusal or exception leaves the blocks,
    notes and revisions exactly as they were. There is no fallback that blanks
    a block to make a purge "succeed".
@@ -109,12 +111,127 @@ PLACEHOLDERS = frozenset({"(empty)", "(none)"})
 StillCurrent = Callable[[AsyncSession], Awaitable[bool]]
 
 
+# -- segments --------------------------------------------------------------------
+#
+# The model never returns a block. It returns one decision per segment that
+# mentions the person (keep, remove, or rewrite with new text), and code
+# rebuilds the block from the original bytes. A segment is a line, a sentence
+# within a line, and, inside a sentence that mentions the person, a part
+# between semicolons and (in a list of three or more) a part between commas.
+# Everything that does not mention the person comes back byte for byte, in
+# its order, with its duplicates; nothing can be added.
+
+_SENTENCE_SPLIT = re.compile(r"((?<=[.!?])\s+)")
+_SEMICOLON_SPLIT = re.compile(r"(;\s*)")
+_COMMA_SPLIT = re.compile(r"(,\s*)")
+# What a rewrite never touches: indentation and a list marker.
+_PREFIX = re.compile(r"\s*(?:[-*+•]\s+|\d+[.)]\s+)?")
+
+
+def _hits(target: PurgeTarget, text: str) -> int:
+    return target.id_hits(text) + target.name_hits(text)
+
+
+def _split_mentioning(sentence: str, target: PurgeTarget) -> list[str]:
+    """Pieces (segment, separator, segment, ...) of one sentence."""
+    if not target.mentions(sentence):
+        return [sentence]
+    out: list[str] = []
+    for i, part in enumerate(_SEMICOLON_SPLIT.split(sentence)):
+        if i % 2 or not target.mentions(part) or part.count(",") < 2:
+            out.append(part)
+        else:
+            out.extend(_COMMA_SPLIT.split(part))
+    segments = out[0::2]
+    # A name that itself contains a separator must not be cut in two.
+    if sum(_hits(target, seg) for seg in segments) != _hits(target, sentence):
+        return [sentence]
+    return out
+
+
+def _line_pieces(line: str, target: PurgeTarget) -> list[str]:
+    out: list[str] = []
+    for i, piece in enumerate(_SENTENCE_SPLIT.split(line)):
+        if i % 2:
+            out.append(piece)
+        else:
+            out.extend(_split_mentioning(piece, target))
+    return out
+
+
+@dataclass(frozen=True)
+class Segment:
+    id: str
+    index: int
+    text: str
+
+    @property
+    def prefix(self) -> str:
+        return _PREFIX.match(self.text).group(0)
+
+    @property
+    def body(self) -> str:
+        return self.text[len(self.prefix) :]
+
+
+def segments(location: str, text: str, target: PurgeTarget) -> list[Segment]:
+    """Every segment of ``text``, numbered in order; ids are ``{location}:{n}``."""
+    out: list[Segment] = []
+    for line in text.split("\n"):
+        for piece in _line_pieces(line, target)[0::2]:
+            out.append(Segment(id=f"{location}:{len(out)}", index=len(out), text=piece))
+    return out
+
+
+def editable_segments(location: str, text: str, target: PurgeTarget) -> list[Segment]:
+    """The segments that mention the person: the only ones the agent decides."""
+    return [seg for seg in segments(location, text, target) if target.mentions(seg.text)]
+
+
+def rebuild(text: str, target: PurgeTarget, decisions: dict[int, str | None]) -> str:
+    """``text`` with segment ``i`` removed (``None``) or replaced, all else byte for byte.
+
+    A line whose segments are all removed goes with its line break. Removing
+    a segment takes its own following separator, or the one before it when
+    it was the last left on its line.
+    """
+    if not decisions:
+        return text
+    out_lines: list[str] = []
+    index = 0
+    for line in text.split("\n"):
+        pieces = _line_pieces(line, target)
+        segs, seps = pieces[0::2], pieces[1::2]
+        positions = range(index, index + len(segs))
+        index += len(segs)
+        if not any(i in decisions for i in positions):
+            out_lines.append(line)
+            continue
+        survivors: list[tuple[str, int]] = []
+        for j, i in enumerate(positions):
+            if i not in decisions:
+                survivors.append((segs[j], j))
+            elif decisions[i] is not None:
+                survivors.append((decisions[i], j))
+        if not any(text_.strip() for text_, _ in survivors):
+            continue
+        parts: list[str] = []
+        for n, (text_, j) in enumerate(survivors):
+            parts.append(text_)
+            if n < len(survivors) - 1:
+                parts.append(seps[j] if j < len(seps) else " ")
+        out_lines.append("".join(parts))
+    return "\n".join(out_lines)
+
+
 # -- model output --------------------------------------------------------------
 
 
-class NoteEdit(BaseModel):
+class SegmentEdit(BaseModel):
+    """The decision for one segment that mentions the person."""
+
     id: str
-    action: Literal["keep", "rewrite", "drop"]
+    action: Literal["keep", "remove", "rewrite"]
     text: str | None = None
 
 
@@ -126,12 +243,7 @@ class UnresolvedItem(BaseModel):
 
 
 class PurgeOutput(BaseModel):
-    """Only the blocks the agent was given come back; the others stay ``None``."""
-
-    memory: str | None = None
-    behavior: str | None = None
-    personality: str | None = None
-    notes: list[NoteEdit] = Field(default_factory=list)
+    edits: list[SegmentEdit] = Field(default_factory=list)
     unresolved: list[UnresolvedItem] = Field(default_factory=list)
 
 
@@ -149,6 +261,17 @@ class PurgeContext:
     def editable(self) -> tuple[str, ...]:
         """The blocks that mention the target: the only ones the agent sees."""
         return tuple(name for name in BLOCK_NAMES if self.target.mentions(getattr(self, name)))
+
+    @property
+    def mentioning_notes(self) -> tuple[str, ...]:
+        return tuple(i for i, content in self.notes if self.target.mentions(content))
+
+    def editable_by_location(self) -> dict[str, list[Segment]]:
+        out = {name: editable_segments(name, getattr(self, name), self.target) for name in self.editable}
+        for note_id, content in self.notes:
+            if self.target.mentions(content):
+                out[f"note:{note_id}"] = editable_segments(f"note:{note_id}", content, self.target)
+        return out
 
     @property
     def needs_model(self) -> bool:
@@ -182,45 +305,31 @@ PURGE_SYSTEM_PROMPT = """\
 You are the Smarter Dev Discord bot, going back over what you remember about one
 server because someone has asked to be forgotten.
 
-You are given one person's Discord user ID and the names they went by. Remove
-everything in what you are shown that came from them or is about them: lines
-about who they are, running bits and threads that are theirs, opinions you
-formed because of them, things they told you, and every mention of their name
-or ID. Afterwards nothing you keep should let anyone tell they were here.
+You are given one person's Discord user ID and the names they went by, and the
+parts of your memory that mention them, cut into numbered segments (a line, a
+sentence, or a part of a sentence). For every segment listed under
+`# Segments to decide`, decide one of:
 
-Everything else stays exactly as you wrote it. This is not a rewrite and not a
-chance to tidy up. Every line and every sentence that does not mention this
-person comes back word for word, headings included; only the lines and
-sentences that mention them may change or go. Where one sentence mixes this
-person with someone else, rewrite just enough of it that it is only about the
-other person. Do not write that someone was removed, forgotten or asked
-anything; leave no trace of the request either.
+- `remove` — it is about this person, or came from them;
+- `rewrite` — it mixes this person with someone else: give the new `text` for
+  that segment only, about the other person, without the person's name or ID
+  (do not repeat a list marker such as "- "; it is kept for you);
+- `keep` — the name belongs to a different person who shares it. Say so in
+  `unresolved` for that block or note.
 
-# What you're given
+Everything that is not a listed segment stays exactly as written; you cannot
+change it, and you cannot add anything. Do not write that someone was removed,
+forgotten or asked anything.
 
-- `# The person` — their user ID and names. Private; never write them down.
-- Only the blocks that mention this person, under `# My personality`,
-  `# My behavior` and `# What I remember`. `# What I remember` includes your
-  `## Identity & Voice` section; return it as part of `memory`, with its
-  heading. A block you are not shown is not yours to change this time.
-- `# Notes` — notes you kept, each with an id (maybe none this time).
+`# Notes, read only` are notes that do not name the person. You cannot change
+them. If one is about this person without naming them, list it in `unresolved`
+as `note:<id>` with a short reason, so the admin can look.
 
-# What to return
+`unresolved` items are `location` (`memory`, `behavior`, `personality` or
+`note:<id>`) and a short `reason`. Never quote the text and never write the
+person's name or ID in a reason.
 
-- For each block you were shown (`memory`, `behavior`, `personality`): the whole
-  block as it should now read. Leave out every block you were not shown.
-- `notes`: one entry per note id: `keep`, `drop`, or `rewrite` with the new
-  `text` (a note mixing this person with someone else keeps only the other).
-- `unresolved`: anything you cannot settle, as `location` (`memory`, `behavior`,
-  `personality`, or `note:<id>`) and a short `reason`. Use it when a name might
-  belong to a different person who shares it, or when something might be about
-  this person but does not name them (leave it in place and list it here).
-  Never quote the text and never write the person's name or ID in a reason.
-
-Limits still hold: memory at most 2000 characters (Identity & Voice at most 800
-of them), behavior at most 750, personality at most 250, a note at most 500.
-
-Return only the structured output.
+Return only the structured output: one entry in `edits` per listed segment id.
 """
 
 
@@ -229,12 +338,24 @@ def build_purge_user_message(context: PurgeContext) -> str:
     parts = [f"# The person\n\nDiscord user ID {context.target.user_id}; names: {names}"]
     for name in ("personality", "behavior", "memory"):
         if name in context.editable:
-            parts.append(f"{_BLOCK_HEADINGS[name]}\n\n{getattr(context, name).strip()}")
-    if context.notes:
-        notes = "\n".join(f"[{note_id}] {content}" for note_id, content in context.notes)
-        parts.append(f"# Notes\n\n{notes}")
-    else:
-        parts.append("# Notes\n\nNo notes this time; return an empty `notes` list.")
+            parts.append(f"{_BLOCK_HEADINGS[name]}\n\n{getattr(context, name)}")
+    mentioning = [(i, c) for i, c in context.notes if context.target.mentions(c)]
+    if mentioning:
+        parts.append(
+            "# Notes that mention the person\n\n"
+            + "\n".join(f"[note:{i}] {c}" for i, c in mentioning)
+        )
+    decide = [
+        f"[{seg.id}] {seg.body}"
+        for segs in context.editable_by_location().values()
+        for seg in segs
+    ]
+    parts.append("# Segments to decide\n\n" + ("\n".join(decide) or "None this time."))
+    read_only = [(i, c) for i, c in context.notes if not context.target.mentions(c)]
+    if read_only:
+        parts.append(
+            "# Notes, read only\n\n" + "\n".join(f"[note:{i}] {c}" for i, c in read_only)
+        )
     return "\n\n".join(parts)
 
 
@@ -248,30 +369,14 @@ def _identity_chars(memory: str) -> int:
     return len("## Identity & Voice\n" + "\n".join(f"- {t}" for t in traits))
 
 
-def _segments(text: str) -> list[str]:
-    """Lines, and sentences within a line: the units a purge keeps or drops.
-
-    Headings are segments like any other line.
-    """
-    return [piece.strip() for piece in re.split(r"\n|(?<=[.!?])\s+", text) if piece.strip()]
-
-
-def lost_bystander_segments(previous: str, new: str, target: PurgeTarget) -> int:
-    """How many of ``previous``'s segments that do not mention the target are
-    missing, word for word, from ``new``."""
-    return sum(
-        1 for seg in _segments(previous) if not target.mentions(seg) and seg not in new
-    )
-
-
 def compose_purge(
     output: PurgeOutput, context: PurgeContext, *, retries_left: int
 ) -> PurgedBlocks:
-    """Accept the agent's purge, ask again, or refuse it.
+    """Accept the agent's decisions and rebuild the text from them, or refuse.
 
     Every problem is a :class:`ModelRetry` while retries remain and a
-    :class:`PurgeRefused` once they are gone. Nothing here edits the text, and
-    no problem message quotes stored text.
+    :class:`PurgeRefused` once they are gone. No problem message quotes
+    stored text.
     """
 
     def refuse(problem: str) -> PurgeRefused:
@@ -280,116 +385,95 @@ def compose_purge(
         return PurgeRefused(problem)
 
     target = context.target
-    editable = context.editable
+    by_location = context.editable_by_location()
+    by_id = {seg.id: (location, seg) for location, segs in by_location.items() for seg in segs}
     unresolved_locations = {item.location.strip() for item in output.unresolved}
-    valid_locations = set(editable) | {f"note:{note_id}" for note_id, _ in context.notes}
+    valid_locations = set(context.editable) | {f"note:{i}" for i, _ in context.notes}
     for location in unresolved_locations:
         if location not in valid_locations:
             raise refuse(
                 f"Unresolved location {location!r} is not one of the blocks you were "
                 "shown or a note:<id>."
             )
+    reasons = " ".join(item.reason for item in output.unresolved)
+    if target.mentions(reasons):
+        raise refuse("Unresolved reasons must not name the person or carry their ID.")
+
+    decisions: dict[str, dict[int, str | None]] = {location: {} for location in by_location}
+    seen: set[str] = set()
+    for edit in output.edits:
+        if edit.id not in by_id:
+            raise refuse(
+                f"{edit.id!r} is not a segment you were asked to decide; only listed "
+                "segments can change."
+            )
+        if edit.id in seen:
+            raise refuse(f"Segment {edit.id!r} has two entries; give it one.")
+        seen.add(edit.id)
+        location, seg = by_id[edit.id]
+        if edit.action == "remove":
+            decisions[location][seg.index] = None
+        elif edit.action == "rewrite":
+            text = (edit.text or "").strip()
+            if not text or text in PLACEHOLDERS or "\n" in text:
+                raise refuse(
+                    f"Rewritten segment {edit.id!r} must be one line of real text; "
+                    "remove it if nothing is left."
+                )
+            if target.mentions(text):
+                raise refuse(
+                    f"Rewritten segment {edit.id!r} still names this person or carries "
+                    "their ID."
+                )
+            body = _PREFIX.sub("", text, count=1) if seg.prefix.strip() else text
+            # A rewrite takes something out; it never adds a sentence or grows.
+            if len(body) > len(seg.body.strip()) or len(_SENTENCE_SPLIT.split(body)) > len(
+                _SENTENCE_SPLIT.split(seg.body.strip())
+            ):
+                raise refuse(
+                    f"Rewritten segment {edit.id!r} is longer or has more sentences than the "
+                    "original; a rewrite only takes this person out."
+                )
+            decisions[location][seg.index] = seg.prefix + body
+        else:  # keep
+            if target.id_hits(seg.text):
+                raise refuse(f"Segment {edit.id!r} carries this person's ID; it cannot stay.")
+            if location not in unresolved_locations:
+                raise refuse(
+                    f"Segment {edit.id!r} names this person. Remove or rewrite it, or if "
+                    f"it is a different person who shares the name, list `{location}` "
+                    "in unresolved and say why."
+                )
+    missing = [seg_id for seg_id in by_id if seg_id not in seen]
+    if missing:
+        raise refuse(f"Every listed segment needs one entry. Missing: {', '.join(missing)}.")
 
     final: dict[str, str] = {}
     changed: set[str] = set()
     for name in BLOCK_NAMES:
         previous = getattr(context, name)
-        new = getattr(output, name)
-        if name not in editable:
-            # Never shown, never written. Echoing it back unchanged is harmless.
-            if new is not None and new != previous:
-                raise refuse(f"`{name}` was not given to you; leave it out.")
-            final[name] = previous
-            continue
-        if new is None:
-            raise refuse(f"`{name}` is missing; return the whole block as it should now read.")
-        new = new.strip()
-        if new in PLACEHOLDERS:
-            raise refuse(
-                f"`{name}` must be the block's text, not a placeholder. Return an empty "
-                "string only if every line in it mentioned this person."
-            )
-        if len(new) > _BLOCK_LIMITS[name]:
-            raise refuse(
-                f"`{name}` is over its {_BLOCK_LIMITS[name]}-character limit. Remove only "
-                "what involves this person; everything else stays as it was."
-            )
-        lost = lost_bystander_segments(previous, new, target)
-        if lost:
-            raise refuse(
-                f"`{name}` lost or changed {lost} line(s) or sentence(s) that do not "
-                "mention this person. Everything that does not mention them comes back "
-                "word for word, headings included."
-            )
-        if new == previous.strip():
-            final[name] = previous
-        else:
-            final[name] = new
+        new = rebuild(previous, target, decisions.get(name, {}))
+        final[name] = new
+        if new != previous:
+            if len(new.strip()) > _BLOCK_LIMITS[name]:
+                raise refuse(f"`{name}` would be over its {_BLOCK_LIMITS[name]}-character limit.")
             changed.add(name)
     if "memory" in changed and _identity_chars(final["memory"]) > MAX_IDENTITY_CHARS:
-        raise refuse("Identity & Voice is over 800 characters; return it as given.")
+        raise refuse("Identity & Voice would be over 800 characters.")
 
-    note_ids = [note_id for note_id, _ in context.notes]
-    edits: dict[str, NoteEdit] = {}
-    for edit in output.notes:
-        if edit.id not in note_ids:
-            raise refuse(f"There is no note with id {edit.id!r}.")
-        if edit.id in edits:
-            raise refuse(f"Note {edit.id!r} has two entries; give it one.")
-        edits[edit.id] = edit
-    missing = [note_id for note_id in note_ids if note_id not in edits]
-    if missing:
-        raise refuse(
-            "Every note needs one entry (keep, drop or rewrite). "
-            f"Missing: {', '.join(missing)}."
-        )
     rewritten: dict[str, str] = {}
     dropped: list[str] = []
-    originals = dict(context.notes)
-    for note_id, edit in edits.items():
-        # A note that never names the person is someone else's: dropping or
-        # rewriting it needs the agent to say why, like a shared name does.
-        if (
-            edit.action != "keep"
-            and not target.mentions(originals[note_id])
-            and f"note:{note_id}" not in unresolved_locations
-        ):
-            raise refuse(
-                f"Note {note_id!r} does not name this person; keep it, or if it is "
-                f"about them without naming them, list `note:{note_id}` in "
-                "unresolved and say why."
-            )
-        if edit.action == "drop":
+    for note_id, content in context.notes:
+        location = f"note:{note_id}"
+        new = rebuild(content, target, decisions.get(location, {}))
+        if new == content:
+            continue
+        if not new.strip():
             dropped.append(note_id)
-        elif edit.action == "rewrite":
-            text = (edit.text or "").strip()
-            if not text or len(text) > MAX_MEMORY_NOTE_CHARS or text in PLACEHOLDERS:
-                raise refuse(
-                    f"Rewritten note {note_id!r} must be 1–{MAX_MEMORY_NOTE_CHARS} "
-                    "characters of real text; drop it if nothing is left."
-                )
-            if text != originals[note_id].strip():
-                rewritten[note_id] = text
-
-    kept_text = {name: final[name] for name in editable}
-    for note_id in note_ids:
-        if note_id not in dropped:
-            kept_text[f"note:{note_id}"] = rewritten.get(note_id, originals[note_id])
-    reasons = " ".join(item.reason for item in output.unresolved)
-    if target.id_hits(reasons) or target.name_hits(reasons):
-        raise refuse("Unresolved reasons must not name the person or carry their ID.")
-    for location, text in kept_text.items():
-        if target.id_hits(text):
-            raise refuse(
-                f"`{location}` still carries this person's ID. Remove what is "
-                "about them."
-            )
-        if target.name_hits(text) and location not in unresolved_locations:
-            raise refuse(
-                f"`{location}` still uses one of this person's names. Remove it, "
-                "or if it is a different person who shares the name, list "
-                f"`{location}` in unresolved and say why."
-            )
+        elif len(new.strip()) > MAX_MEMORY_NOTE_CHARS:
+            raise refuse(f"Note {note_id!r} would be over {MAX_MEMORY_NOTE_CHARS} characters.")
+        else:
+            rewritten[note_id] = new
 
     return PurgedBlocks(
         memory=final["memory"],
