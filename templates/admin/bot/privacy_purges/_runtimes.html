@@ -4,6 +4,9 @@
         {{ component }}:
         {% if state.revision is none %}
         <span class="sk-badge sk-badge-danger">not enforcing</span> (no live process reports)
+        {% elif list_revision is defined and state.revision < list_revision %}
+        <span class="sk-badge sk-badge-danger">behind the block list (holding revision {{ state.revision }} of {{ list_revision }})</span>
+        {{ state.processes }} live process{{ "es" if state.processes != 1 else "" }}. A purge started now waits for that process to catch up.
         {% else %}
         {{ state.processes }} live process{{ "es" if state.processes != 1 else "" }}, lowest enforced revision {{ state.revision }}
         {% endif %}

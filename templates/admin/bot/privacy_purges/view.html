@@ -23,7 +23,7 @@
             <div class="sk-panel-head">Request</div>
             <div class="sk-panel-body">
                 <p>
-                    <strong>Status:</strong> {{ purge.status }}
+                    <strong>Status:</strong> {{ purge.status }}{% if purge.status == "failed" %} <span class="sk-badge sk-badge-danger">stopped by an error: run the purge again</span>{% endif %}
                     &middot; asked {{ purge.created_at.strftime('%Y-%m-%d %H:%M UTC') }}
                     {% if purge.completed_at %}&middot; finished {{ purge.completed_at.strftime('%Y-%m-%d %H:%M UTC') }}{% endif %}
                     {% if purge.closed_at %}&middot; closed {{ purge.closed_at.strftime('%Y-%m-%d %H:%M UTC') }}{% endif %}
@@ -37,7 +37,7 @@
                 {% if purge.status != "closed" %}
                 <div style="display:flex; gap:.5rem;">
                     <form method="post" action="/admin/bot/privacy-purges/{{ purge.id }}/rerun">{{ csrf_field() }}<button class="sk-btn-outline sk-btn-small" type="submit">Run the purge again</button></form>
-                    <form method="post" action="/admin/bot/privacy-purges/{{ purge.id }}/check">{{ csrf_field() }}<button class="sk-btn-outline sk-btn-small" type="submit">Run the check again</button></form>
+                    <form method="post" action="/admin/bot/privacy-purges/{{ purge.id }}/check">{{ csrf_field() }}<button class="sk-btn-outline sk-btn-small" type="submit" title="The deterministic search only; the agent does not run.">Run the check again</button></form>
                     <form method="post" action="/admin/bot/privacy-purges/{{ purge.id }}/close" onsubmit="return confirm('Strip this request to a receipt? The user stays on the block list.');">{{ csrf_field() }}<button class="sk-btn-outline sk-btn-small" type="submit">Close to a receipt</button></form>
                 </div>
                 {% endif %}
@@ -86,6 +86,15 @@
             <div class="sk-panel-body">
                 {% if report %}
                 <p class="sk-text-muted">Searched {{ report.stores_checked }} stores at {{ report.checked_at }} for the ID and the names. Locations and counts only.</p>
+                {% if report.hit_counts %}
+                <p><span class="sk-badge sk-badge-danger">needs review</span> Hits by store: {% for store, count in report.hit_counts.items() %}{{ store }} ({{ count }}){% if not loop.last %}, {% endif %}{% endfor %}. Any hit, in any section below, keeps the request out of "complete".</p>
+                {% endif %}
+                {% if report.unchecked_names %}
+                <p><span class="sk-badge sk-badge-danger">unchecked</span> Too short to search for (ASCII, under 2 characters): {{ report.unchecked_names | join(", ") }}. The check cannot confirm these are gone, so the request stays in review.</p>
+                {% endif %}
+                {% if report.tombstoned %}
+                <p><span class="sk-badge sk-badge-danger">failed</span> The worker's history is tombstoned (half-written) in guild(s): {% for g in report.tombstoned %}<code>{{ g }}</code>{% if not loop.last %}, {% endif %}{% endfor %}. Run the purge again; the request cannot be closed until they are rewritten.</p>
+                {% endif %}
                 <h4>Still found where the purge rewrites ({{ (report.remains or []) | length }})</h4>
                 {% if report.remains %}
                 <table class="sk-admin-table">
@@ -117,7 +126,7 @@
                 {% endif %}
                 <h4>Possible remains reported by the runtimes ({{ possible_remains | length }})</h4>
                 {% if possible_remains %}
-                <ul>{% for item in possible_remains %}<li>guild <code>{{ item.guild_id }}</code>, {{ item.component }}: its ack still counted {{ item.name_hits }} name hit{{ "s" if item.name_hits != 1 else "" }}. "Run the purge again" purges this guild again.</li>{% endfor %}</ul>
+                <ul>{% for item in possible_remains %}<li>guild <code>{{ item.guild_id }}</code>, {{ item.component }}: {% if item.name_hits %}its ack still counted {{ item.name_hits }} name hit{{ "s" if item.name_hits != 1 else "" }}{% endif %}{% if item.name_hits and item.tombstoned %}; {% endif %}{% if item.tombstoned %}its history was left tombstoned{% endif %}. "Run the purge again" purges this guild again.</li>{% endfor %}</ul>
                 {% else %}
                 <p>None.</p>
                 {% endif %}

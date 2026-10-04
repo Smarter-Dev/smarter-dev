@@ -285,11 +285,156 @@ async def test_a_failed_purge_job_raises_without_the_error_text():
 
     error = IntegrityError("UPDATE chat_bot_purge_requests", {"id": _KAI_ID}, Exception(_KAI_ID))
     payload = chat_bot_purge_jobs.ChatBotPurgePayload(request_id=uuid.uuid4(), run_id=uuid.uuid4())
+    mark_failed = AsyncMock(return_value=True)
     with (
         patch.object(chat_bot_purge_jobs, "run_purge", new=AsyncMock(side_effect=error)),
         patch.object(chat_bot_purge_jobs, "get_redis_client"),
+        patch.object(chat_bot_purge_jobs, "mark_failed", new=mark_failed),
         pytest.raises(chat_bot_purge_jobs.PurgeJobFailed) as raised,
     ):
         await chat_bot_purge_jobs.run_chat_bot_purge(payload)
     assert str(raised.value) == "IntegrityError"
+    # The request is left "failed" (L5), with the type only.
+    assert mark_failed.await_args.args[1:] == (payload.request_id, payload.run_id, "IntegrityError")
     assert raised.value.__context__ is None and raised.value.__cause__ is None
+
+
+# == second review round ===========================================================
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("get", ""),
+        ("post", "/lookup"),
+        ("post", ""),
+        ("get", "/{rid}"),
+        ("post", "/{rid}/rerun"),
+        ("post", "/{rid}/check"),
+        ("post", "/{rid}/close"),
+    ],
+)
+def test_a_signed_in_non_admin_is_refused_on_every_route(method, path):
+    """HTTP level: a real session for a user without ``administrator``."""
+    import contextlib
+    import uuid
+
+    from litestar.middleware.session.server_side import ServerSideSessionConfig
+    from litestar.testing import create_test_client
+    from skrift.auth.services import UserPermissions
+    from skrift.auth.session_keys import SESSION_USER_ID
+
+    @contextlib.asynccontextmanager
+    async def null_session():
+        yield SimpleNamespace()
+
+    async def permissions(session, user_id):
+        return UserPermissions(user_id=str(user_id), permissions={"view-drafts"})
+
+    handler_called = AsyncMock()
+    session_config = ServerSideSessionConfig()
+    with (
+        patch("skrift.auth.services.get_user_permissions", side_effect=permissions),
+        patch(f"{_MODULE}.verify_csrf", new=handler_called),
+        patch(f"{_MODULE}.get_admin_context", new=handler_called),
+        create_test_client(
+            route_handlers=[PrivacyPurgeAdminController],
+            middleware=[session_config.middleware],
+            session_config=session_config,
+        ) as client,
+    ):
+        client.app.state.session_maker_class = null_session
+        client.set_session_data({SESSION_USER_ID: str(uuid.uuid4())})
+        url = "/admin/bot/privacy-purges" + path.format(rid=uuid.uuid4())
+        kwargs = {"data": {"user_id": _KAI_ID}} if method == "post" else {}
+        response = getattr(client, method)(url, **kwargs)
+    assert response.status_code == 401
+    handler_called.assert_not_awaited()
+
+
+async def test_the_stored_names_lookup_failure_logs_the_type_only(db_session, caplog):
+    from smarter_dev.web.bot_admin.privacy_purge import known_names
+
+    client = SimpleNamespace(get_user_names=AsyncMock(return_value=["kai"]))
+    with (
+        patch(f"{_MODULE}.get_admin_discord_client", return_value=client),
+        patch(f"{_MODULE}.affected_guild_ids", new=AsyncMock(return_value=[])),
+        patch.object(
+            db_session, "execute", new=AsyncMock(side_effect=RuntimeError(f"WHERE id = {_KAI_ID}"))
+        ),
+        patch.object(db_session, "rollback", new=AsyncMock()),
+        caplog.at_level(logging.DEBUG),
+    ):
+        assert await known_names(db_session, _KAI_ID) == ["kai"]
+    assert all(_KAI_ID not in record.getMessage() for record in caplog.records)
+    assert any("RuntimeError" in record.getMessage() for record in caplog.records)
+
+
+def test_a_component_behind_the_block_list_is_shown_as_such():
+    import jinja2
+
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader("templates"), autoescape=True)
+    html = env.get_template("admin/bot/privacy_purges/_runtimes.html").render(
+        runtimes={
+            "bot": {"processes": 2, "revision": 4, "consumers": 1},
+            "worker": {"processes": 1, "revision": 5, "consumers": 1},
+        },
+        list_revision=5,
+    )
+    assert "behind the block list (holding revision 4 of 5)" in html
+    assert "waits for that process" in html
+    assert html.count("behind the block list") == 1
+
+
+async def test_close_is_refused_while_a_guild_is_tombstoned(db_session, patched, redis):
+    from smarter_dev.shared.privacy_purge import history_tombstone_key
+
+    purge = await open_purge_request(
+        db_session, discord_user_id=_KAI_ID, names=["kai"], requested_by=None
+    )
+    purge.steps["guild_ids"] = [_GUILD]
+    from sqlalchemy.orm.attributes import flag_modified
+
+    flag_modified(purge, "steps")
+    await db_session.commit()
+    await redis.set(history_tombstone_key(_GUILD), "1")
+    purge_id = purge.id
+    with patch(f"{_MODULE}.verify_csrf", new=AsyncMock(return_value=True)):
+        await PrivacyPurgeAdminController.close.fn(
+            None, request=_Request(), db_session=db_session, request_id=purge_id
+        )
+    stored = await db_session.get(ChatBotPurgeRequest, purge_id, populate_existing=True)
+    assert stored.discord_user_id == _KAI_ID and stored.status != "closed"
+    assert any("tombstoned" in m and _GUILD in m for m in patched.flashes)
+
+
+async def test_run_the_check_again_submits_the_scan_only_check(db_session, patched, redis):
+    import uuid
+
+    from smarter_dev.web import bot_admin
+
+    with patch(f"{_MODULE}.verify_csrf", new=AsyncMock(return_value=True)):
+        await PrivacyPurgeAdminController.check.fn(
+            None, request=_Request(), db_session=db_session, request_id=uuid.uuid4()
+        )
+    submitted = bot_admin.privacy_purge.submit_check
+    assert submitted.await_args.kwargs == {"scan_only": True}
+
+
+def test_logfire_does_not_instrument_httpx_or_sqlalchemy_here():
+    """Tripwire: skrift instruments httpx and SQLAlchemy only with
+    ``logfire.enabled`` (off: app.yaml has no logfire section) and only if the
+    OpenTelemetry instrumentors are installed (they are not locked). Turning
+    either on puts Discord URLs (the user ID) into spans: scrub the purge's
+    lookups first."""
+    from pathlib import Path
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[2]
+    for name in ("app.yaml", "app.development.yaml"):
+        config = yaml.safe_load((root / name).read_text()) or {}
+        assert not (config.get("logfire") or {}).get("enabled")
+    lock = (root / "uv.lock").read_text()
+    assert 'name = "opentelemetry-instrumentation-httpx"' not in lock
+    assert 'name = "opentelemetry-instrumentation-sqlalchemy"' not in lock
