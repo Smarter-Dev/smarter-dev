@@ -19,7 +19,9 @@ names, so it is never logged and its stream entry is deleted once acknowledged.
 
 from __future__ import annotations
 
+import json
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Annotated
 from typing import Literal
@@ -53,8 +55,25 @@ AckOutcome = Literal["purged", "unchanged", "failed"]
 
 
 def enforcing_key(component: str) -> str:
-    """Redis key where a runtime reports the block-list revision it enforces."""
+    """Aggregate key a runtime publishes: the MIN over its live processes.
+
+    The web does not trust it; it reads :func:`enforcing_process_pattern`.
+    """
     return f"privacy:v1:enforcing:{component}"
+
+
+def enforcing_process_pattern(component: str) -> str:
+    """SCAN pattern for each process's own report, ``...:{component}:{host-pid}`` (EX 180)."""
+    return f"{enforcing_key(component)}:*"
+
+
+def consumer_key(component: str, process_id: str) -> str:
+    """Written (EX 180) by a runtime's purge consumer loop on every iteration."""
+    return f"privacy:v1:consumer:{component}:{process_id}"
+
+
+def consumer_pattern(component: str) -> str:
+    return f"privacy:v1:consumer:{component}:*"
 
 
 def purge_epoch_key(guild_id: str) -> str:
@@ -148,8 +167,54 @@ class PurgeTarget:
     def mentions(self, text: str) -> bool:
         return bool(self.id_hits(text) or self.name_hits(text))
 
+    def value_hits(self, value: object) -> tuple[int, int]:
+        """(id hits, name hits) over every string leaf of a decoded JSON value."""
+        ids = names = 0
+        for leaf in string_leaves(value):
+            ids += self.id_hits(leaf)
+            names += self.name_hits(leaf)
+        return ids, names
+
+    def stored_hits(self, raw: str | bytes) -> tuple[int, int]:
+        """(id hits, name hits) in one stored value.
+
+        A JSON value is decoded and every string leaf searched, so a name after
+        an escape (``\\nAlice``) or stored ASCII-escaped (``\\u00e9``) is found;
+        anything that is not JSON is searched as raw text.
+        """
+        text = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
+        try:
+            value = json.loads(text)
+        except (ValueError, RecursionError):
+            return self.id_hits(text), self.name_hits(text)
+        if not isinstance(value, dict | list | str):
+            # A bare number: the ID itself can be one.
+            return self.id_hits(text), self.name_hits(text)
+        return self.value_hits(value)
+
     def __repr__(self) -> str:
         # Never print who is being purged, even by accident in a traceback.
         return f"PurgeTarget(names={len(self.names)})"
 
     __str__ = __repr__
+
+
+def string_leaves(value: object) -> Iterator[str]:
+    """Every string in a decoded JSON value: dict keys, values, list items.
+
+    Numbers are yielded as their text too, since a Discord ID can be stored
+    as one.
+    """
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            yield item
+        elif isinstance(item, dict):
+            for key, child in item.items():
+                stack.append(str(key))
+                stack.append(child)
+        elif isinstance(item, list | tuple):
+            stack.extend(item)
+        elif isinstance(item, int | float) and not isinstance(item, bool):
+            yield str(item)
