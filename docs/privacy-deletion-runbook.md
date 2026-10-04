@@ -301,11 +301,15 @@ still being deleted, wait and run the check again; do not start a purge.
    histories, topics and notes, and the external worker's history with its
    recovery and legacy copies, are folded into new summaries without them
    and the raw messages dropped. Watch instructions are reviewed the same
-   way. Raw copies in the Redis queues and streams are not rewritten; the
-   check reports them.
+   way. The runtimes discard the guild's queued wake, pending, batch and
+   dead-letter entries; the shadow and control keys and the event log are
+   not rewritten, and the check reports whatever is left.
 4. Wait while the status moves through `queued`, `waiting_for_runtimes`,
    `purging`, `awaiting_acks`, `checking` and `finishing`. It ends in
-   `complete` or `needs_review`. If it ends in `failed`, press "Run the
+   `complete` or `needs_review`. A runtime listed as "behind the block list"
+   holds the run in `waiting_for_runtimes` until it catches up; if it never
+   does, the run ends `needs_review` with the reason. If the status reads
+   `failed` ("stopped by an error: run the purge again"), press "Run the
    purge again".
 5. Read the check report. It lists hits by store, location, id-hit count
    and name-hit count, never the text, in four sections:
@@ -318,10 +322,10 @@ still being deleted, wait and run the check again; do not start a purge.
      the page says a guild's memory step was refused for losing unrelated
      lines, the person may go by a name you did not enter: start a new purge
      with that name added.
-   - **"Raw operational copies, not rewritten by this purge"** (the
-     proactive wake, pending, pending-dropped, batch, dead-letter, shadow,
-     control and control-processed keys, and the guild event log): short-lived
-     copies. Do not edit them; step 10 waits for them to age out.
+   - **"Raw operational copies"** (the proactive wake, pending,
+     pending-dropped, batch, dead-letter, shadow, control and
+     control-processed keys, and the guild event log): copies the purge does
+     not rewrite. Do not edit them; step 10 waits for them to age out.
    - **"Chat audit tables, for the #71 deletion runbook"**
      (`chat_agent_turns`, `chat_agent_engagements`,
      `chat_agent_compaction_events`, `chat_agent_errors`): expected at this
@@ -330,11 +334,21 @@ still being deleted, wait and run the check again; do not start a purge.
    - **"Possible remains reported by the runtimes"**: press "Run the purge
      again"; it purges the guilds listed.
 
-   A name of one character is not searched at all, and the page does not
-   say so. Give the check a longer form of such a name too.
+   Above the sections, the page may also show:
+   - **"[unchecked] Too short to search for (ASCII, under 2 characters)"**:
+     the names listed cannot be searched. Press "Start purge for `DID`"
+     again with a longer form of each such name added; this reruns the same
+     request with the extra names. The short name stays on the request, so
+     it can never reach `complete`: step 10 says when it counts as done.
+   - **"[failed] The worker's history is tombstoned (half-written)"**: press
+     "Run the purge again". The request cannot be closed until the worker
+     has rewritten those guilds.
 
 Whatever the status, go on with steps 5 to 9. The request stays open until
-step 10 sees `complete`.
+step 10 sees `complete`. Any hit in any section, an unchecked name, a
+tombstoned history or a runtime still reporting name hits keeps it at
+`needs_review`, and a late runtime report can move a `complete` request back
+to `needs_review`.
 
 Never fix a leftover by editing memory, history or Redis by hand. The purge
 finds the person by id and by the names you give it; something that only
@@ -917,18 +931,17 @@ of this runbook).
 ## 10. Check and close
 
 Close the request only when, after the check below, the purge page shows
-`complete`, each of the report's three hit lists reads "Nothing found", and
-"Possible remains reported by the runtimes" reads "None".
-`needs_review` is not done, and neither is `closed` on its own: a closed
-purge is only a receipt. Until then, points 3 to 6 are not done and the
+`complete`: every hit list then reads "Nothing found" and "Possible remains
+reported by the runtimes" reads "None.". The one exception is a request held
+only by an unchecked name (point 1). Otherwise `needs_review` is not done,
+and neither is `closed` on its own: a closed purge is only a receipt. Until then, points 3 to 6 are not done and the
 member is not told it is complete. If it is still not done as the 30 days
 run out, tell the member what is left and that the request is open.
 
-1. On the request's Privacy Purge page, press "Run the check again". Once
-   the status is `complete` or `needs_review`, it runs only the check, with
-   no model calls. Read the report:
-   - `complete`, "Nothing found" in all three hit lists and "None" under
-     "Possible remains": go on.
+1. On the request's Privacy Purge page, press "Run the check again". It
+   runs only the search, with no model calls, and sets the status from what
+   it finds. Read the report:
+   - `complete`: go on.
    - **"Chat audit tables"**: rerun the step 3 counts (point 2) and, for
      each name, step 6's read-only name counts. If they find rows, clear
      them the step 6 way and run the check again. If they read 0, the hit is
@@ -941,8 +954,15 @@ run out, tell the member what is left and that the request is open.
      under "Ages out") and run the check again. Do not close on them. If one
      is still there after its limit, or its key has no limit listed there,
      ask a developer.
-   - **"Still found where the purge rewrites"** or **"Possible remains
-     reported by the runtimes"**: handle it as in step 4, point 5.
+   - **"Still found where the purge rewrites"**, **"Possible remains
+     reported by the runtimes"**, an unchecked name or a tombstoned history:
+     handle it as in step 4, point 5.
+   - **Only an unchecked name is left**: if the page reads `needs_review`
+     but every hit list reads "Nothing found", "Possible remains" reads
+     "None.", no history is tombstoned, no step shows `failed` or
+     `unresolved`, and the purge already ran with a longer form of each
+     unchecked name, treat it as `complete`. Write in the receipt note that
+     the short name went unchecked.
 
 2. Rerun the dry-run counts of steps 3, 7 and 8 (for agent sessions, rerun
    the collect block first, or the count shows the old list). Every deleted store reads
@@ -971,9 +991,12 @@ run out, tell the member what is left and that the request is open.
    ```
 
 4. Press "Close to a receipt" and confirm. This strips the request to a
-   bare receipt (times, outcome, counts); the blocked-list entry stays. If
-   the page refuses because a server's history is marked unusable, run the
-   purge again first.
+   bare receipt (times, outcome, counts); the blocked-list entry stays. The
+   page lets you close from any status, so check first that it reads
+   `complete` (or that point 1's unchecked-name case applies).
+   If it refuses with "Not closed: N guild(s) still have a tombstoned
+   history", press "Run the purge again" and close once the worker has
+   rewritten them.
 5. Finish the receipt note: receipt id, dates, "completed", and the classes
    handled (purged, deleted, anonymised, kept). No id, username,
    counts per person or message text. Discard the names noted in step 1.
