@@ -29,8 +29,21 @@
                     {% if purge.closed_at %}&middot; closed {{ purge.closed_at.strftime('%Y-%m-%d %H:%M UTC') }}{% endif %}
                 </p>
                 {% if steps.error %}<p><span class="sk-badge sk-badge-danger">error</span> {{ steps.error }}</p>{% endif %}
+                {% if missing_acks %}
+                <p><span class="sk-badge sk-badge-danger">no ack within 1 hour</span> These runtimes never acknowledged their guilds; each is recorded as failed. A late ack still counts. "Run the purge again" sends a new command.</p>
+                <ul>{% for component, guild_id in missing_acks %}<li>{{ component }}: guild <code>{{ guild_id }}</code></li>{% endfor %}</ul>
+                {% endif %}
                 {% if purge.discord_user_id %}
                 <p><strong>User:</strong> {{ purge.discord_user_id }} &middot; <strong>Names:</strong> {{ (purge.names or []) | join(", ") or "none" }}</p>
+                {% if unchecked_names and purge.status not in ("purging", "finishing") %}
+                <ul>
+                    {% for name in unchecked_names %}
+                    <li>"{{ name }}" is too short to search for, so it was never searched.
+                        <form method="post" action="/admin/bot/privacy-purges/{{ purge.id }}/names/remove" style="display:inline;">{{ csrf_field() }}<input type="hidden" name="name" value="{{ name }}"><button class="sk-btn-outline sk-btn-small" type="submit">Remove (never searched)</button></form>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
                 {% else %}
                 <p class="sk-text-muted">Closed: only this receipt remains. {{ steps.receipt }}</p>
                 {% endif %}

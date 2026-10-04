@@ -7,6 +7,8 @@ admin context, flash helpers and job submission patched. Synthetic user only.
 from __future__ import annotations
 
 import logging
+from datetime import UTC
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import patch
@@ -39,6 +41,7 @@ _HANDLERS = [
     PrivacyPurgeAdminController.rerun,
     PrivacyPurgeAdminController.check,
     PrivacyPurgeAdminController.close,
+    PrivacyPurgeAdminController.remove_name,
 ]
 
 
@@ -312,6 +315,7 @@ async def test_a_failed_purge_job_raises_without_the_error_text():
         ("post", "/{rid}/rerun"),
         ("post", "/{rid}/check"),
         ("post", "/{rid}/close"),
+        ("post", "/{rid}/names/remove"),
     ],
 )
 def test_a_signed_in_non_admin_is_refused_on_every_route(method, path):
@@ -438,3 +442,92 @@ def test_logfire_does_not_instrument_httpx_or_sqlalchemy_here():
     lock = (root / "uv.lock").read_text()
     assert 'name = "opentelemetry-instrumentation-httpx"' not in lock
     assert 'name = "opentelemetry-instrumentation-sqlalchemy"' not in lock
+
+
+# == third round: drop an unchecked name; ack timeout ===============================
+
+
+async def _request_with_names(db_session, names, status="needs_review"):
+    purge = await open_purge_request(
+        db_session, discord_user_id=_KAI_ID, names=names, requested_by=None
+    )
+    purge.status = status
+    await db_session.commit()
+    return purge.id
+
+
+@pytest.mark.parametrize(
+    ("name", "status", "lease", "removed"),
+    [
+        ("k", "needs_review", None, True),
+        ("kai", "needs_review", None, False),  # it was searched: never removable
+        ("k", "purging", None, False),
+        ("k", "finishing", None, False),
+        ("k", "awaiting_acks", "2099-01-01T00:00:00+00:00", False),  # a run holds it
+        ("k", "awaiting_acks", "2000-01-01T00:00:00+00:00", True),  # a dead run's lease
+    ],
+    ids=["unchecked", "searched", "purging", "finishing", "lease-held", "lease-expired"],
+)
+async def test_only_an_unchecked_name_is_removed_and_only_while_no_run_holds_it(
+    db_session, patched, name, status, lease, removed
+):
+    from sqlalchemy.orm.attributes import flag_modified
+
+    request_id = await _request_with_names(db_session, ["kai", "k"], status)
+    if lease:
+        purge = await db_session.get(ChatBotPurgeRequest, request_id)
+        purge.steps["lease"] = {"token": "other", "until": lease}
+        flag_modified(purge, "steps")
+        await db_session.commit()
+    with patch(f"{_MODULE}.verify_csrf", new=AsyncMock(return_value=True)):
+        response = await PrivacyPurgeAdminController.remove_name.fn(
+            None, request=_Request({"name": name}), db_session=db_session, request_id=request_id
+        )
+    _no_id_in(response)
+    purge = await db_session.get(ChatBotPurgeRequest, request_id, populate_existing=True)
+    expected = [n for n in ["kai", "k"] if not (removed and n == name)]
+    assert purge.names == expected
+
+
+async def test_name_removal_needs_csrf(db_session, patched):
+    request_id = await _request_with_names(db_session, ["kai", "k"])
+    with patch(f"{_MODULE}.verify_csrf", new=AsyncMock(return_value=False)):
+        await PrivacyPurgeAdminController.remove_name.fn(
+            None, request=_Request({"name": "k"}), db_session=db_session, request_id=request_id
+        )
+    purge = await db_session.get(ChatBotPurgeRequest, request_id, populate_existing=True)
+    assert purge.names == ["kai", "k"]
+
+
+async def test_a_removed_name_is_not_merged_back_unless_entered_again(db_session, patched):
+    from smarter_dev.web.chat_bot_purge import remove_unchecked_name
+
+    request_id = await _request_with_names(db_session, ["kai", "k"])
+    assert await remove_unchecked_name(db_session, request_id, "k", now=datetime.now(UTC)) is None
+    await db_session.commit()
+    again = await open_purge_request(
+        db_session, discord_user_id=_KAI_ID, names=["Kai the Rustacean"], requested_by=None
+    )
+    assert again.names == ["kai", "Kai the Rustacean"]
+    again = await open_purge_request(
+        db_session, discord_user_id=_KAI_ID, names=["k"], requested_by=None
+    )
+    assert again.names == ["kai", "Kai the Rustacean", "k"]
+
+
+def test_the_page_offers_removal_beside_each_unchecked_name():
+    import jinja2
+    from markupsafe import Markup
+
+    env = jinja2.Environment(loader=jinja2.FileSystemLoader("templates"), autoescape=True)
+    source = env.loader.get_source(env, "admin/bot/privacy_purges/view.html")[0]
+    start = source.index("{% if unchecked_names")
+    block = source[start : source.index("{% endif %}", start) + len("{% endif %}")]
+    html = env.from_string(block).render(
+        unchecked_names=("k",),
+        purge=SimpleNamespace(id="rid", status="needs_review"),
+        csrf_field=lambda: Markup("<csrf>"),
+    )
+    assert "Remove (never searched)" in html
+    assert 'action="/admin/bot/privacy-purges/rid/names/remove"' in html
+    assert '<input type="hidden" name="name" value="k">' in html and "<csrf>" in html

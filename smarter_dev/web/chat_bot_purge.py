@@ -324,6 +324,31 @@ async def open_purge_request(
     return request
 
 
+async def remove_unchecked_name(
+    session: AsyncSession, request_id: UUID, name: str, *, now: datetime
+) -> str | None:
+    """Drop one never-searched name from a request; the caller commits.
+
+    Only a name the matcher reports as unchecked (ASCII, under 2 characters)
+    can go, so this can never weaken what a purge searches for, and only
+    while no run holds the request. Returns a refusal sentence, or None.
+    A later submit merges the name back only if the admin enters it again.
+    """
+    request = await session.get(ChatBotPurgeRequest, request_id, with_for_update=True)
+    if request is None or request.discord_user_id is None or request.status == STATUS_CLOSED:
+        return "A closed request has no names to remove."
+    if request.status in (STATUS_PURGING, STATUS_FINISHING) or not _lease_free(
+        request.steps or {}, "", now
+    ):
+        return "A run is working on this request; remove the name once it has finished."
+    target = PurgeTarget.build(request.discord_user_id, request.names or [])
+    if name not in target.unchecked_names:
+        return "Only a name that was never searched (one ASCII character) can be removed."
+    request.names = [n for n in (request.names or []) if n != name]
+    await session.flush()
+    return None
+
+
 def ack_name_hits(detail: str | None) -> int:
     """The largest ``<step>_name_hits=N`` (or ``name_hits=N``) in an ack detail, 0 if none."""
     return max((int(n) for n in _NAME_HITS_IN_DETAIL.findall(detail or "")), default=0)
@@ -847,6 +872,7 @@ async def run_purge(
 
     def record(request: ChatBotPurgeRequest) -> None:
         request.steps["command_entry_id"] = entry_id
+        request.steps["command_sent_at"] = now().isoformat()
         request.steps.pop("lease", None)
         # A fast runtime can acknowledge before this commit lands.
         request.status = STATUS_CHECKING if acks_complete(request.steps) else STATUS_AWAITING_ACKS
@@ -857,17 +883,75 @@ async def run_purge(
     return settled[0]
 
 
-def acks_complete(steps: dict) -> bool:
-    guild_ids = steps.get("guild_ids") or []
-    return all(
-        guild_id in (steps.get(component) or {})
+def missing_acks(steps: dict) -> list[tuple[str, str]]:
+    """(component, guild) pairs with no real ack; a timeout's stand-in does not count."""
+    return [
+        (component, guild_id)
         for component in RUNTIME_COMPONENTS
-        for guild_id in guild_ids
+        for guild_id in steps.get("guild_ids") or []
+        if not (ack := (steps.get(component) or {}).get(guild_id)) or ack.get("synthetic")
+    ]
+
+
+def acks_complete(steps: dict) -> bool:
+    return not missing_acks(steps)
+
+
+ACK_TIMEOUT = timedelta(hours=1)
+ACK_TIMEOUT_DETAIL = "no ack within 1 hour"
+
+
+def _aware(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _ack_timeout(now: datetime) -> Callable[[ChatBotPurgeRequest], bool]:
+    def change(request: ChatBotPurgeRequest) -> bool:
+        steps = request.steps
+        if request.status != STATUS_AWAITING_ACKS:
+            return False
+        marks = [t for t in (steps.get("command_sent_at"), steps.get("last_ack_at")) if t]
+        if not marks or now - max(_aware(t) for t in marks) <= ACK_TIMEOUT:
+            return False
+        missing = missing_acks(steps)
+        for component, guild_id in missing:
+            steps.setdefault(component, {})[guild_id] = {
+                "outcome": "failed",
+                "stores": [],
+                "detail": ACK_TIMEOUT_DETAIL,
+                "synthetic": True,
+            }
+        steps["ack_timeout"] = {"at": now.isoformat(), "missing": [list(m) for m in missing]}
+        request.status = STATUS_NEEDS_REVIEW
+        request.completed_at = now
+        return True
+
+    return change
+
+
+async def expire_acks(session: AsyncSession, request_id: UUID, *, now: datetime) -> bool:
+    """Move an ``awaiting_acks`` request with no progress for an hour to review.
+
+    Progress is the command being sent or the latest ack. Every missing
+    (component, guild) ack is recorded as failed ("no ack within 1 hour"),
+    marked ``synthetic`` so a late real ack replaces it, and the command
+    stays on the stream for the runtimes. Evaluated lazily, on every page
+    view and check. Commits when it changes something.
+    """
+    request = await session.get(
+        ChatBotPurgeRequest, request_id, with_for_update=True, populate_existing=True
     )
+    if request is None or not _ack_timeout(now)(request):
+        await session.rollback()
+        return False
+    _touch_json(request)
+    await session.commit()
+    return True
 
 
 async def record_ack(
-    session: AsyncSession, run_id: UUID, ack: PurgeAck
+    session: AsyncSession, run_id: UUID, ack: PurgeAck, *, now: datetime | None = None
 ) -> ChatBotPurgeRequest | None:
     """Store one runtime's result for one guild; the caller commits.
 
@@ -887,7 +971,16 @@ async def record_ack(
         "stores": ack.stores,
         "detail": ack.detail,
     }
+    request.steps["last_ack_at"] = (now or datetime.now(UTC)).isoformat()
     if request.status == STATUS_AWAITING_ACKS and acks_complete(request.steps):
+        request.status = STATUS_CHECKING
+    elif (
+        request.status == STATUS_NEEDS_REVIEW
+        and request.steps.get("ack_timeout")
+        and acks_complete(request.steps)
+    ):
+        # The late acks replaced every stand-in: the run goes on to its check.
+        request.steps.pop("ack_timeout")
         request.status = STATUS_CHECKING
     elif request.status == STATUS_COMPLETE and ack_flagged(
         {"outcome": ack.outcome, "detail": ack.detail}
@@ -1289,6 +1382,8 @@ async def run_check(
     ``scan_only`` (the admin's "Run the check again") never runs the notes
     pass: only the deterministic search, re-settling a finished request.
     """
+    async with session_factory() as session:
+        await expire_acks(session, request_id, now=now())
     async with session_factory() as session:
         request = await session.get(ChatBotPurgeRequest, request_id)
         if request is None or request.discord_user_id is None or request.run_id is None:
