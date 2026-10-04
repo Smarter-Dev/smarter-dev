@@ -84,6 +84,8 @@ _POOL = ["bob", "nia", "likes", "tea", "rust", "the", "meetup", "runs", "on", "C
 _PREFIXES = ["", "- ", "  - ", "1. ", "* ", "    "]
 _SEPS = [" ", "  ", "\t", " \t "]
 _TAILS = ["", "\r", "  ", " \r", "\t"]
+# Marker-like text a later sentence may start with; it is that sentence's own.
+_INNER_MARKERS = ["", "", "1) ", "- ", "* "]
 
 
 def _random_sentence(rng, with_target: bool) -> list[str]:
@@ -100,13 +102,19 @@ def test_rebuild_keeps_every_byte_outside_the_edited_segments():
     target = PurgeTarget.build(USER_ID, ["kai"])
     for _ in range(3000):
         lines, expected_lines, edits = [], [], []
+        last_kept = -1
         index = 0
         for _line in range(rng.randint(1, 5)):
             prefix, tail = rng.choice(_PREFIXES), rng.choice(_TAILS)
             sentences = [
                 _random_sentence(rng, rng.random() < 0.4) for _ in range(rng.randint(1, 4))
             ]
-            bodies = [" ".join(words) + rng.choice([".", "!", "?"]) for words in sentences]
+            bodies = [
+                (rng.choice(_INNER_MARKERS) if k else "")
+                + " ".join(words)
+                + rng.choice([".", "!", "?"])
+                for k, words in enumerate(sentences)
+            ]
             seps = [rng.choice(_SEPS) for _ in bodies[1:]]
             line = prefix + bodies[0] + "".join(s + b for s, b in zip(seps, bodies[1:])) + tail
             lines.append(line)
@@ -118,7 +126,8 @@ def test_rebuild_keeps_every_byte_outside_the_edited_segments():
                     continue
                 kept = [w for w in words if w != "kai"]
                 if kept and rng.random() < 0.5:
-                    new_body = " ".join(kept) + body[-1]
+                    marker = body[: len(body) - len(body.lstrip("-*1) "))] if k else ""
+                    new_body = marker + " ".join(kept) + body[-1]
                     edits.append({"id": seg_id, "action": "rewrite", "text": new_body})
                     survivors.append((k, new_body))
                 else:
@@ -126,15 +135,47 @@ def test_rebuild_keeps_every_byte_outside_the_edited_segments():
             index += len(bodies)
             if not any(len(s) for s in sentences if "kai" in s):
                 expected_lines.append(line)
+                last_kept = _line
             elif survivors:
                 out = prefix + survivors[0][1]
                 for k, body in survivors[1:]:
                     out += seps[k - 1] + body
                 expected_lines.append(out + tail)
+                last_kept = _line
         trailing_newline = rng.random() < 0.5
+        if (
+            not trailing_newline
+            and expected_lines
+            and last_kept != len(lines) - 1
+            and expected_lines[-1].endswith("\r")
+        ):
+            expected_lines[-1] = expected_lines[-1][:-1]  # the last terminator goes whole
         text = "\n".join(lines + ([""] if trailing_newline else []))
         expected = "\n".join(expected_lines + ([""] if trailing_newline else []))
         result = apply_edits(
             {"memory": text}, [SegmentEdit(**e) for e in edits], target
         )["memory"]
         assert result == expected, (text, edits)
+
+
+def test_removing_the_last_crlf_line_leaves_no_dangling_carriage_return():
+    target = PurgeTarget.build(USER_ID, ["Alice"])
+    text = "Bob likes tea.\r\nAlice likes rust."
+    edits = [SegmentEdit(id="memory:1", action="remove")]
+    assert apply_edits({"memory": text}, edits, target)["memory"] == "Bob likes tea."
+    lf = apply_edits({"memory": text.replace("\r", "")}, edits, target)["memory"]
+    assert lf == "Bob likes tea."
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("Alice left. 1) Bob stays. 2) Carol too.", "1) Bob stays. 2) Carol too."),
+        ("Alice left; - Bob stays", "- Bob stays"),
+        ("  - Alice left. 1) Bob stays.", "  - 1) Bob stays."),
+    ],
+)
+def test_only_the_lines_own_prefix_moves_when_its_first_segment_goes(text, expected):
+    target = PurgeTarget.build(USER_ID, ["Alice"])
+    edits = [SegmentEdit(id="memory:0", action="remove")]
+    assert apply_edits({"memory": text}, edits, target)["memory"] == expected
