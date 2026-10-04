@@ -48,14 +48,21 @@ agent session still running or paused. Steps 6 to 8 clear the person's part of
 it.
 
 The limits hold once smarter-dev PR 135 and proactive-agent PR 7 (#80) are
-deployed and the one-off clean-up in their descriptions has been run. Use the
-verified SQL script in PR 135's description as written; do not retype it from
-memory. It runs inside `psql` with `\i` and leaves the transaction open for
-you to `COMMIT;` or `ROLLBACK;` by hand. It stops with nothing changed if the
-stored shape is not what it expects or no handler-fire job state exists. On
-production a zero count means stop and ask a developer, not "nothing to
-clean". The Redis commands are in the same descriptions. Check that the
-clean-up was done before taking the first request.
+deployed and the one-off clean-up in their descriptions has been run:
+
+- **SQL:** the verified script in smarter-dev PR 135's description
+  (`gh pr view 135 -R Smarter-Dev/smarter-dev --json body -q .body`), used as
+  written; do not retype it. It runs inside `psql` with `\i` and leaves the
+  transaction open. It stops with nothing changed if the stored shape is not
+  what it expects or no handler-fire job state exists. `COMMIT;` only if every
+  "deleted" count equals its count above it and "finished fire rows left" is
+  0; otherwise `ROLLBACK;`. On production a zero count means stop and ask a
+  developer, not "nothing to clean".
+- **Redis:** the pending-list `EXPIRE` loop in PR 135's description, and the
+  claimed-batch `EXPIRE` loop and `DEL proactive:v1:dead-letter` in
+  proactive-agent PR 7's.
+
+Check that the clean-up was done before taking the first request.
 
 - **Message text in hand-offs:** `handler-fire:context:*` in Redis, the
   verbatim message that set off an automation (1 hour; a fire that finds it
@@ -86,7 +93,7 @@ clean-up was done before taking the first request.
 - **Skrift worker tables, pruned by the hourly retention job:** finished,
   dead-lettered and unresumable work 7 days after it was written: job state,
   queue rows, dead letters, events and snapshots. Skrift's own error text for
-  automation jobs holds exception types and frames only. Job payloads hold
+  handler fire jobs holds exception types and frames only. Job payloads hold
   ids and names, not message text, except a timer whose automation script
   copied text into it: that stays until the timer fires, then up to 7 days.
   Live work is never pruned: a queued or pending job, an AI agent session
