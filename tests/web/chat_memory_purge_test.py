@@ -358,7 +358,6 @@ def _first_id() -> str:
     [
         [SegmentEdit(id=_first_id(), action="keep")],
         [SegmentEdit(id=_first_id(), action="rewrite", text=f"someone ({_KAI_ID}) likes rust")],
-        [SegmentEdit(id=_first_id(), action="rewrite", text="kai likes rust")],
         [SegmentEdit(id=_first_id(), action="rewrite", text="(empty)")],
         [SegmentEdit(id=_first_id(), action="rewrite", text="two\nlines")],
         [SegmentEdit(id=_first_id(), action="rewrite", text="")],
@@ -370,7 +369,6 @@ def _first_id() -> str:
     ids=[
         "keeps-the-id",
         "rewrite-adds-the-id",
-        "rewrite-keeps-the-name",
         "placeholder",
         "rewrite-adds-a-line",
         "empty-rewrite",
@@ -395,27 +393,67 @@ def test_unresolved_reasons_never_carry_the_id_or_a_name():
             compose_purge(output, _context(), retries_left=0)
 
 
-def test_a_shared_name_is_kept_only_when_the_agent_says_why():
+def test_a_surviving_name_is_retried_then_stored_and_reported():
+    """Scope-cut rule 3: a listed name that survives the retries is kept and
+    reported as unresolved (the request ends in review), never refused."""
     other = MEMORY_WITHOUT_KAI + "\n- kai from the other server runs the meetup."
     context = _context(memory=other)
-    keep = PurgeOutput(edits=[SegmentEdit(id=_ids(context)[0], action="keep")])
-    with pytest.raises(PurgeRefused):
-        compose_purge(keep, context, retries_left=0)
-    blocks = compose_purge(
-        PurgeOutput(
-            edits=keep.edits,
-            unresolved=[UnresolvedItem(location="memory", reason="a different member shares the name")],
-        ),
-        context,
-        retries_left=0,
+    for edits in (
+        [SegmentEdit(id=_ids(context)[0], action="keep")],
+        [SegmentEdit(id=_ids(context)[0], action="rewrite", text="kai runs the meetup.")],
+    ):
+        with pytest.raises(ModelRetry):
+            compose_purge(PurgeOutput(edits=edits), context, retries_left=1)
+        blocks = compose_purge(PurgeOutput(edits=edits), context, retries_left=0)
+        assert KAI.name_hits(blocks.memory) == 1
+        assert [item.location for item in blocks.unresolved] == ["memory"]
+    # The agent saying why up front is accepted without a retry.
+    said = PurgeOutput(
+        edits=[SegmentEdit(id=_ids(context)[0], action="keep")],
+        unresolved=[UnresolvedItem(location="memory", reason="a different member shares the name")],
     )
+    blocks = compose_purge(said, context, retries_left=1)
     assert blocks.memory == other and not blocks.changed_blocks
 
 
-def test_a_block_that_was_only_about_the_person_may_become_empty():
+def test_a_block_may_never_be_emptied():
+    """Scope-cut rule 1 (never reset): a block that had text keeps some."""
     context = _context(behavior="kai wants code, not prose.")
-    blocks = compose_purge(_output(context), context, retries_left=0)
-    assert blocks.behavior == ""
+    with pytest.raises(ModelRetry):
+        compose_purge(_output(context), context, retries_left=1)
+    with pytest.raises(PurgeRefused):
+        compose_purge(_output(context), context, retries_left=0)
+
+
+async def test_an_emptied_block_fails_the_guild_with_every_row_untouched(
+    db_session, session_factory
+):
+    await _seed(db_session, memory=f"## People\n{KAI_LINE}", behavior="kai wants code, not prose.")
+    before = await _snapshot(db_session)
+    with pytest.raises(PurgeRefused):
+        await purge_guild_memory(
+            session_factory, guild_id=_GUILD, target=KAI, now=_NOW, agent=_ScriptedPurgeAgent()
+        )
+    assert await _snapshot(db_session) == before
+
+
+async def test_a_note_only_about_the_person_is_deleted_and_the_rest_stay_byte_identical(
+    db_session, session_factory
+):
+    await _seed(db_session)
+    others_before = {
+        n.id: n.content
+        for n in (await db_session.scalars(select(ChatAgentMemoryNote))).all()
+        if n.content not in (KAI_NOTE, MIXED_NOTE)
+    }
+    result = await purge_guild_memory(
+        session_factory, guild_id=_GUILD, target=KAI, now=_NOW, agent=_ScriptedPurgeAgent()
+    )
+    assert result.notes_dropped == 1
+    db_session.expire_all()
+    after = {n.id: n.content for n in (await db_session.scalars(select(ChatAgentMemoryNote))).all()}
+    assert KAI_NOTE not in after.values()
+    assert {i: c for i, c in after.items() if i in others_before} == others_before
 
 
 def test_unresolved_locations_must_name_a_real_place():
@@ -812,14 +850,17 @@ def test_a_segment_naming_a_special_character_name_is_editable_and_removed(name)
     assert compose_purge(_output(notes), notes, retries_left=0).dropped_notes == ("n1",)
 
 
-def test_a_name_spanning_a_line_break_is_refused_not_called_clean():
+def test_a_name_spanning_a_line_break_is_stored_and_reported_not_called_clean():
     target = PurgeTarget.build(_KAI_ID, ["new\nline"])
     memory = f"## People\n- regular: new\nline joined in May.\n{NIA_LINE}"
     context = PurgeContext(target=target, memory=memory)
     assert context.editable == ("memory",)
     assert context.editable_by_location()["memory"] == []  # no single segment holds it
-    with pytest.raises(PurgeRefused):
-        compose_purge(PurgeOutput(edits=[]), context, retries_left=0)
+    with pytest.raises(ModelRetry):
+        compose_purge(PurgeOutput(edits=[]), context, retries_left=1)
+    blocks = compose_purge(PurgeOutput(edits=[]), context, retries_left=0)
+    assert blocks.memory == memory
+    assert [item.location for item in blocks.unresolved] == ["memory"]
 
 
 def test_a_name_with_a_full_stop_is_not_cut_into_two_sentences():
@@ -829,3 +870,28 @@ def test_a_name_with_a_full_stop_is_not_cut_into_two_sentences():
         "Ask Dr. Kai first."
     ]
     assert compose_purge(_output(context), context, retries_left=0).behavior == "Keep it short."
+
+
+async def test_a_model_timeout_fails_the_guild_with_every_row_untouched(
+    db_session, session_factory, monkeypatch
+):
+    import asyncio
+
+    from smarter_dev.web import chat_memory_purge
+
+    monkeypatch.setattr(chat_memory_purge, "PURGE_CALL_TIMEOUT_SECONDS", 0.05)
+    await _seed(db_session)
+    before = await _snapshot(db_session)
+
+    async def stall():
+        await asyncio.sleep(5)
+
+    with pytest.raises(TimeoutError):
+        await purge_guild_memory(
+            session_factory,
+            guild_id=_GUILD,
+            target=KAI,
+            now=_NOW,
+            agent=_ScriptedPurgeAgent(before_answer=stall),
+        )
+    assert await _snapshot(db_session) == before
