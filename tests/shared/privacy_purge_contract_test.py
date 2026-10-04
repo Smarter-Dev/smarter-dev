@@ -153,7 +153,6 @@ GOLDEN_ACK = {
     "tombstoned": False,
     "unchecked_names": 0,
     "done_record": "written",
-    "mixed_segments": {"removed": 1, "rewritten": 2},
 }
 
 
@@ -162,9 +161,6 @@ def test_the_golden_ack_is_valid_for_both_and_not_flagged():
 
     jsonschema.validate(GOLDEN_ACK, ACK_SCHEMA)
     assert PurgeAck.model_validate(GOLDEN_ACK).flags() == []
-    without_mixed = {k: v for k, v in GOLDEN_ACK.items() if k != "mixed_segments"}
-    jsonschema.validate(without_mixed, ACK_SCHEMA)
-    assert PurgeAck.model_validate(without_mixed).flags() == []
 
 
 @pytest.mark.parametrize(
@@ -175,8 +171,7 @@ def test_the_golden_ack_is_valid_for_both_and_not_flagged():
         {"tombstoned": "yes"},
         {"unchecked_names": -1},
         {"done_record": "maybe"},
-        {"mixed_segments": {"removed": 1}},
-        {"mixed_segments": {"removed": -1, "rewritten": 0}},
+        {"mixed_segments": {"removed": 1, "rewritten": 0}},  # withdrawn in the scope cut
         {"extra": 1},
     ],
 )

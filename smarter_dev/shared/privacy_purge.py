@@ -138,19 +138,10 @@ class PurgeAck(BaseModel):
     tombstoned: StrictBool | None = None
     unchecked_names: NonNegativeInt | None = None
     done_record: Literal["written", "replayed", "not_written"] | None = None
-    # Optional and never flags: the runtime's edits that touched other members.
-    mixed_segments: MixedSegments | None = None
 
     def flags(self) -> list[str]:
         """Why this ack needs review (empty when it does not)."""
         return ack_flags(self.model_dump())
-
-
-class MixedSegments(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    removed: NonNegativeInt
-    rewritten: NonNegativeInt
 
 
 STRUCTURED_ACK_FIELDS = ("name_hits", "tombstoned", "unchecked_names", "done_record")
