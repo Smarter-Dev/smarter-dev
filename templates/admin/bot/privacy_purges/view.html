@@ -109,7 +109,7 @@
                 {% else %}
                 <p>Nothing found.</p>
                 {% endif %}
-                <h4>Raw operational copies, not rewritten by this purge ({{ (report.operational or []) | length }})</h4>
+                <h4>Raw operational copies: the runtimes discard a purged guild's queued wake, pending, batch and dead-letter entries; shadow, control and the event log are only reported ({{ (report.operational or []) | length }})</h4>
                 {% if report.operational %}
                 <ul>{% for hit in report.operational %}<li><code>{{ hit.location }}</code>: {{ hit.id_hits }} ID, {{ hit.name_hits }} name</li>{% endfor %}</ul>
                 {% else %}
