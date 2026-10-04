@@ -203,21 +203,37 @@ allowed — that is a keyword watch, not a command.
 - `agent_conversations` / `agent_messages` — the website's own agent chat, not
   Discord.
 - `proactive_agent_histories` — the proactive agent's own working history,
-  bounded as described above; it is not an operator-facing audit trail.
+  with the bounds (and the missing ones) described above; it is not an
+  operator-facing audit trail.
 - The chat agent's own memory. Three tables, exempt for two different reasons:
 
   | Table | What it holds | Why it is exempt |
   | --- | --- | --- |
   | `chat_agent_guild_memory` | One ≤2000-character markdown document per guild: who the people here are to the bot, the running jokes, the opinions it has formed. Beside it, a ≤750-character behavior block (how the bot has learned to act there) and a ≤250-character personality block (who it is there). | Prose the bot wrote about itself, not message text it read. |
   | `chat_agent_memory_revisions` | The last five nights of that document and its two blocks, per guild. | Same — it is the history of the bot's own writing. |
-  | `chat_agent_memory_notes` | Notes the bot keeps mid-conversation, in its own words. | Deleted outright by the nightly job that folds them into the document — they live under a day and never reach a 48-hour cutoff. |
+  | `chat_agent_memory_notes` | Notes the bot keeps mid-conversation, in its own words. | Deleted outright by the nightly job that folds them into the document, so they normally live under a day. A night whose dream fails keeps its notes for the next night, and a guild whose memory is paused (below) keeps them indefinitely, because the dream that consumes them is skipped. |
 
   The rule the bot is held to when writing any of it is *remember the person,
   not the transcript*: no verbatim quotes, and nothing private, sensitive, or
   shared in confidence. So there is nobody's message content in here to scrub —
-  only what the bot made of a day. A guild that would rather it forgot has a
-  switch: `memory_enabled` on its row turns the memory off and blanks the
-  document.
+  only what the bot made of a day. It is still personal data: the dream asks
+  for people to be named by username and Discord id, and the document is about
+  them.
+
+  This memory is permanent and the bot never resets it. Only the agent edits
+  its own memory; no operator tool rewrites, blanks or deletes it, and none
+  should be added. `memory_enabled` on a guild's row is a pause, not a reset:
+  set false, the stored document, blocks, notes and revisions are all kept as
+  they are, the bot is not shown them and the nightly dream skips the guild.
+  Note writes do not check the flag, so a paused guild still accumulates
+  notes. Nothing in the application sets the flag today.
+
+  Removing one person from this memory is a purge the agent carries out
+  itself, given that person's id: it rewrites the lines of the document, its
+  blocks, notes and revisions that mention them and leaves everything else
+  intact. The admin starts it from the Privacy Purges page
+  (`/admin/bot/privacy-purges`, #79); nothing else may edit this memory for a
+  deletion request (`docs/privacy-deletion-runbook.md`).
 - Identity fields everywhere: user ids, usernames, display names, snowflakes.
   These come from the members intent, not the message-content intent, and an
   abuse record is worthless without knowing who it concerns.
@@ -237,6 +253,11 @@ allowed — that is a keyword watch, not a command.
   side does not log email addresses, any part of a rejected bearer token,
   query-string values of bot API requests, or httpx's outbound request URLs
   (capped at WARNING in `main.py`).
+- Model-written working notes beside the chat history: the running topic
+  (24-hour key) and notes (2-hour key) per channel, and the guild's recent
+  bot-event log (one-hour window, newest 200 events, holding usernames and
+  moderation reasons). These are the agent's prose and the bot's own events,
+  not message text, and they expire on their own clocks.
 - In-memory only, never written down: the spam engine's message buffer, the
   message gate, and the chat agent's live context window. These die with the
   process.
@@ -320,6 +341,22 @@ These snapshots have a separate fixed 48-hour lifecycle. The public controller
 rejects them as soon as `expires_at` is reached, and the same hourly retention
 job then hard-deletes the expired rows. Only a SHA-256 hash of the random URL
 token is stored. Preview pages are read-only, unlisted, and marked `noindex`.
+
+## Retention is not deletion
+
+Everything above bounds message *text*. None of it removes a person: the
+48-hour sweep blanks text but keeps each row with its Discord ids and
+usernames, the agent histories keep usernames and ids inside their prose, and
+bytes, squads, quests, challenge submissions, activity dates and moderation
+actions are game and moderation records keyed by Discord id with no clock at
+all. Deleting a site account removes the account and its site chat, but
+nothing keyed by Discord id (#45 tracks that gap). Member leave removes only
+that guild's bytes balance and squad memberships.
+
+Deleting one person's data is a manual request handled by the admin until it
+is automated, with the chat bot's part done by the agent purge (#79). The public notice is `/privacy`
+(`smarter_dev/shared/privacy_notice.md`); the admin's steps, including what is
+kept and what cannot be removed yet, are in `docs/privacy-deletion-runbook.md`.
 
 ## Security logs
 
