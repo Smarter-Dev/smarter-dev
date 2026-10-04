@@ -256,8 +256,9 @@ concrete path) and the `http.method`. No event
 records a member's Discord id. The names avoid the words Logfire's default
 scrubber redacts, and route templates sit under a key it never scrubs, so the
 events arrive readable. They go to Pydantic Logfire
-when the process has a `LOGFIRE_TOKEN` and are kept for the Logfire project's
-retention period; without Logfire they go to the standard logger (container
+when the process has a `LOGFIRE_TOKEN` and are kept there for 30 days, the
+default retention of the Logfire organisation's Personal plan (never
+configured otherwise); without Logfire they go to the standard logger (container
 stdout). Ordinary successful API requests are not logged at all.
 
 Rate limiting keeps one Redis sorted set per API key: the times of its allowed

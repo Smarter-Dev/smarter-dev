@@ -278,6 +278,7 @@ def test_retention_doc_describes_security_events_as_logs():
     assert "No event\nrecords a member's Discord id" in section
     assert "never the\nconcrete path" in section
     assert "Logfire" in section
+    assert "kept there for 30 days" in section
     assert "is no longer written" in section
     for name in ("`login_failed`", "`rate_limit_exceeded`", "`admin_operation`", "`key_id`", "`http.route`"):
         assert name in section
