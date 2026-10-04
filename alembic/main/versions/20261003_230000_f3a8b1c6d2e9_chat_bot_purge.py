@@ -43,7 +43,7 @@ def _timestamps() -> list[sa.Column]:
 def upgrade() -> None:
     op.create_table(
         "chat_bot_blocked_users",
-        sa.Column("discord_user_id", sa.String(20), nullable=False),
+        sa.Column("discord_user_id", sa.String(22), nullable=False),
         sa.Column("source", sa.String(20), nullable=False),
         *_timestamps(),
         sa.PrimaryKeyConstraint(
@@ -60,7 +60,7 @@ def upgrade() -> None:
     op.create_table(
         "chat_bot_purge_requests",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("discord_user_id", sa.String(20), nullable=True),
+        sa.Column("discord_user_id", sa.String(22), nullable=True),
         sa.Column("names", sa.JSON(), nullable=True),
         sa.Column("status", sa.String(20), nullable=False),
         sa.Column("run_id", postgresql.UUID(as_uuid=True), nullable=True),
@@ -72,16 +72,19 @@ def upgrade() -> None:
         *_timestamps(),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_chat_bot_purge_requests")),
     )
+    # One open request per user; closed requests keep no user ID at all.
     op.create_index(
-        op.f("ix_chat_bot_purge_requests_discord_user_id"),
+        "uq_chat_bot_purge_requests_open_user",
         "chat_bot_purge_requests",
         ["discord_user_id"],
+        unique=True,
+        postgresql_where=sa.text("status <> 'closed'"),
     )
 
 
 def downgrade() -> None:
     op.drop_index(
-        op.f("ix_chat_bot_purge_requests_discord_user_id"),
+        "uq_chat_bot_purge_requests_open_user",
         table_name="chat_bot_purge_requests",
     )
     op.drop_table("chat_bot_purge_requests")

@@ -8,6 +8,7 @@ prose quality. Two synthetic members throughout: ``kai`` is being purged,
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import UTC
@@ -22,6 +23,7 @@ from pydantic_ai.models.function import AgentInfo
 from pydantic_ai.models.function import FunctionModel
 from sqlalchemy import select
 
+from smarter_dev.shared.database import async_sessionmaker
 from smarter_dev.shared.privacy_purge import PurgeTarget
 from smarter_dev.web.chat_memory_purge import NoteEdit
 from smarter_dev.web.chat_memory_purge import PurgeContext
@@ -29,6 +31,7 @@ from smarter_dev.web.chat_memory_purge import PurgeOutput
 from smarter_dev.web.chat_memory_purge import PurgeRefused
 from smarter_dev.web.chat_memory_purge import UnresolvedItem
 from smarter_dev.web.chat_memory_purge import build_purge_agent
+from smarter_dev.web.chat_memory_purge import build_purge_user_message
 from smarter_dev.web.chat_memory_purge import compose_purge
 from smarter_dev.web.chat_memory_purge import purge_guild_memory
 from smarter_dev.web.crud import create_memory_note
@@ -77,20 +80,34 @@ class _Result:
 
 @dataclass
 class _ScriptedPurgeAgent:
-    """Removes kai the way a well-behaved model would, from whatever it is given."""
+    """Removes kai the way a well-behaved model would, from whatever it is given.
+
+    Like the real agent it returns only the blocks it was shown.
+    """
 
     prompts: list[str] = field(default_factory=list)
+    contexts: list[PurgeContext] = field(default_factory=list)
     leave_id_in_memory: bool = False
     raise_error: bool = False
+    unresolved_for_revisions: bool = False
+    before_answer: object = None
 
     async def run(self, user_prompt: str, *, deps: PurgeContext) -> _Result:
         self.prompts.append(user_prompt)
+        self.contexts.append(deps)
+        if self.before_answer is not None:
+            await self.before_answer()
         if self.raise_error:
             raise RuntimeError("provider is down")
         memory = deps.memory.replace(f"\n{KAI_LINE}", "")
         if self.leave_id_in_memory:
             memory = deps.memory
         behavior = deps.behavior.replace(" kai wants code, not prose.", "")
+        unresolved = []
+        if self.unresolved_for_revisions and not deps.notes and "memory" in deps.editable:
+            unresolved.append(
+                UnresolvedItem(location="memory", reason="a line may be about them unnamed")
+            )
         notes = []
         for note_id, content in deps.notes:
             if content == KAI_NOTE:
@@ -99,14 +116,28 @@ class _ScriptedPurgeAgent:
                 notes.append(NoteEdit(id=note_id, action="rewrite", text=MIXED_NOTE_CLEAN))
             else:
                 notes.append(NoteEdit(id=note_id, action="keep"))
+        editable = deps.editable
         return _Result(
             PurgeOutput(
-                memory=memory,
-                behavior=behavior,
-                personality=deps.personality,
+                memory=memory if "memory" in editable else None,
+                behavior=behavior if "behavior" in editable else None,
+                personality=deps.personality if "personality" in editable else None,
                 notes=notes,
+                unresolved=unresolved,
             )
         )
+
+
+@pytest.fixture
+def session_factory(test_engine):
+    maker = async_sessionmaker(test_engine, expire_on_commit=False)
+
+    @contextlib.asynccontextmanager
+    async def factory():
+        async with maker() as session:
+            yield session
+
+    return factory
 
 
 # -- seeding --------------------------------------------------------------------
@@ -159,6 +190,7 @@ async def _seed(session, *, memory=MEMORY_WITH_KAI, behavior=BEHAVIOR_WITH_KAI):
 
 
 async def _snapshot(session) -> tuple:
+    session.expire_all()
     memory = await get_guild_memory_blob(session, _GUILD)
     notes = sorted(
         note.content for note in (await session.scalars(select(ChatAgentMemoryNote))).all()
@@ -177,6 +209,7 @@ async def _snapshot(session) -> tuple:
 
 
 async def _everything_stored(session) -> str:
+    session.expire_all()
     memory = await get_guild_memory_blob(session, _GUILD)
     notes = (await session.scalars(select(ChatAgentMemoryNote))).all()
     revisions = (await session.scalars(select(ChatAgentMemoryRevision))).all()
@@ -203,16 +236,17 @@ def test_target_matches_the_id_as_a_whole_number_and_names_as_whole_words():
 # -- one guild, end to end -------------------------------------------------------
 
 
-async def test_purge_removes_the_person_from_every_layer_and_keeps_everyone_else(db_session):
+async def test_purge_removes_the_person_from_every_layer_and_keeps_everyone_else(
+    db_session, session_factory
+):
     await _seed(db_session)
     before = await get_guild_memory_blob(db_session, _GUILD)
     revision_before = before.revision
     agent = _ScriptedPurgeAgent()
 
     result = await purge_guild_memory(
-        db_session, guild_id=_GUILD, target=KAI, now=_NOW, agent=agent
+        session_factory, guild_id=_GUILD, target=KAI, now=_NOW, agent=agent
     )
-    await db_session.commit()
 
     assert result.outcome == "purged"
     assert result.notes_dropped == 1
@@ -227,6 +261,7 @@ async def test_purge_removes_the_person_from_every_layer_and_keeps_everyone_else
     assert IDENTITY in stored
     assert NIA_NOTE in stored
     assert MIXED_NOTE_CLEAN in stored
+    db_session.expire_all()
     memory = await get_guild_memory_blob(db_session, _GUILD)
     assert memory.content == MEMORY_WITHOUT_KAI
     assert memory.behavior == BEHAVIOR
@@ -236,27 +271,30 @@ async def test_purge_removes_the_person_from_every_layer_and_keeps_everyone_else
     assert all(_KAI_ID in prompt for prompt in agent.prompts)
 
 
-async def test_purging_a_clean_guild_again_changes_nothing(db_session):
+async def test_purging_a_clean_guild_again_changes_nothing(db_session, session_factory):
     await _seed(db_session)
     await purge_guild_memory(
-        db_session, guild_id=_GUILD, target=KAI, now=_NOW, agent=_ScriptedPurgeAgent()
+        session_factory, guild_id=_GUILD, target=KAI, now=_NOW, agent=_ScriptedPurgeAgent()
     )
-    await db_session.commit()
     after_first = await _snapshot(db_session)
+    agent = _ScriptedPurgeAgent()
 
     result = await purge_guild_memory(
-        db_session, guild_id=_GUILD, target=KAI, now=_NOW, agent=_ScriptedPurgeAgent()
+        session_factory, guild_id=_GUILD, target=KAI, now=_NOW, agent=agent
     )
-    await db_session.commit()
 
     assert result.outcome == "unchanged"
     assert await _snapshot(db_session) == after_first
+    # Nothing mentions kai any more: only the notes batch went to the model,
+    # with no block shown as editable.
+    assert len(agent.contexts) == 1
+    assert agent.contexts[0].editable == ()
 
 
-async def test_a_guild_with_no_memory_never_calls_the_model(db_session):
+async def test_a_guild_with_no_memory_never_calls_the_model(db_session, session_factory):
     agent = _ScriptedPurgeAgent()
     result = await purge_guild_memory(
-        db_session, guild_id=_GUILD, target=KAI, now=_NOW, agent=agent
+        session_factory, guild_id=_GUILD, target=KAI, now=_NOW, agent=agent
     )
     assert result.outcome == "empty"
     assert agent.prompts == []
@@ -267,15 +305,14 @@ async def test_a_guild_with_no_memory_never_calls_the_model(db_session):
     [_ScriptedPurgeAgent(leave_id_in_memory=True), _ScriptedPurgeAgent(raise_error=True)],
     ids=["id-left-behind", "provider-error"],
 )
-async def test_a_failed_purge_leaves_every_row_as_it_was(db_session, agent):
+async def test_a_failed_purge_leaves_every_row_as_it_was(db_session, session_factory, agent):
     await _seed(db_session)
     before = await _snapshot(db_session)
 
     with pytest.raises((PurgeRefused, RuntimeError)):
         await purge_guild_memory(
-            db_session, guild_id=_GUILD, target=KAI, now=_NOW, agent=agent
+            session_factory, guild_id=_GUILD, target=KAI, now=_NOW, agent=agent
         )
-    await db_session.rollback()
 
     assert await _snapshot(db_session) == before
 
@@ -418,3 +455,285 @@ def test_unresolved_locations_must_name_a_real_place():
     output = _output(unresolved=[UnresolvedItem(location="<script>", reason="shared name")])
     with pytest.raises(PurgeRefused):
         compose_purge(output, _context(), retries_left=0)
+
+
+# -- bystanders are never rewritten (review item 2) --------------------------------
+
+
+def test_a_block_that_does_not_mention_the_person_is_not_shown_and_must_not_change():
+    context = _context()
+    assert context.editable == ("memory",)
+    prompt = build_purge_user_message(context)
+    assert PERSONALITY not in prompt and BEHAVIOR not in prompt
+    # Echoing it back unchanged, or leaving it out, is fine; any change is not.
+    assert compose_purge(_output(personality=None), context, retries_left=0).personality == PERSONALITY
+    with pytest.raises(PurgeRefused):
+        compose_purge(_output(personality=PERSONALITY + " "), context, retries_left=0)
+
+
+def test_every_unrelated_line_and_heading_in_a_mentioning_block_comes_back_verbatim():
+    context = _context()
+    no_heading = MEMORY_WITHOUT_KAI.replace("## People & Relationships\n", "")
+    one_line_lost = MEMORY_WITHOUT_KAI.replace(f"\n{NIA_LINE}", "")
+    reworded = MEMORY_WITHOUT_KAI.replace("truce of August", "truce in August")
+    for memory in (no_heading, one_line_lost, reworded):
+        with pytest.raises(PurgeRefused):
+            compose_purge(_output(memory=memory), context, retries_left=0)
+    # A sentence next to the person's, on the same line, is kept too.
+    mixed = _context(behavior=BEHAVIOR_WITH_KAI)
+    with pytest.raises(PurgeRefused):
+        compose_purge(_output(behavior=""), mixed, retries_left=0)
+    assert compose_purge(_output(behavior=BEHAVIOR), mixed, retries_left=0).behavior == BEHAVIOR
+
+
+def test_an_empty_block_stays_empty_and_a_placeholder_is_never_accepted():
+    context = _context(behavior="")
+    prompt = build_purge_user_message(context)
+    assert "(empty)" not in prompt
+    with pytest.raises(PurgeRefused):
+        compose_purge(_output(behavior="(empty)"), context, retries_left=0)
+    only_kai = _context(behavior="kai wants code, not prose.")
+    with pytest.raises(PurgeRefused):
+        compose_purge(_output(behavior="(empty)"), only_kai, retries_left=0)
+    rewrite = _output(
+        notes=[NoteEdit(id="n1", action="rewrite", text="(empty)")],
+        unresolved=[UnresolvedItem(location="note:n1", reason="about them unnamed")],
+    )
+    with pytest.raises(PurgeRefused):
+        compose_purge(rewrite, _context(), retries_left=0)
+
+
+def test_the_old_fifty_percent_share_no_longer_passes():
+    """With the fix disabled (a share of unrelated lines), this output passed."""
+    memory = f"{IDENTITY}\n\n## People & Relationships\n{NIA_LINE}"  # lore dropped
+    with pytest.raises(PurgeRefused):
+        compose_purge(_output(memory=memory), _context(), retries_left=0)
+
+
+async def test_a_revision_without_the_person_gets_no_model_call_and_no_write(
+    db_session, session_factory
+):
+    clean_rev = f"{IDENTITY}\n\n## People & Relationships\n{NIA_LINE}"
+    await upsert_guild_memory_blob(
+        db_session,
+        guild_id=_GUILD,
+        content=MEMORY_WITH_KAI,
+        behavior=BEHAVIOR,
+        personality=PERSONALITY,
+        notes_consumed=1,
+        model_name="stub-model",
+        dreamed_at=_NOW - timedelta(hours=12),
+    )
+    await record_memory_revision(
+        db_session,
+        guild_id=_GUILD,
+        content=clean_rev,
+        behavior=BEHAVIOR,
+        personality=PERSONALITY,
+        revision=0,
+        notes_consumed=1,
+        model_name="stub-model",
+    )
+    await db_session.commit()
+    rev_row = (await db_session.scalars(select(ChatAgentMemoryRevision))).one()
+    updated_before = rev_row.updated_at
+    agent = _ScriptedPurgeAgent()
+
+    result = await purge_guild_memory(
+        session_factory, guild_id=_GUILD, target=KAI, now=_NOW, agent=agent
+    )
+
+    assert result.outcome == "purged"
+    assert result.model_calls == 1  # the live blocks only
+    db_session.expire_all()
+    revisions = (await db_session.scalars(select(ChatAgentMemoryRevision))).all()
+    kept = [r for r in revisions if r.revision == 0][0]
+    assert kept.content == clean_rev
+    assert kept.updated_at == updated_before
+
+
+# -- unresolved items from revision passes (review item 7) -------------------------
+
+
+async def test_unresolved_items_from_revision_passes_reach_the_step(db_session, session_factory):
+    await _seed(db_session)
+    agent = _ScriptedPurgeAgent(unresolved_for_revisions=True)
+
+    result = await purge_guild_memory(
+        session_factory, guild_id=_GUILD, target=KAI, now=_NOW, agent=agent
+    )
+
+    locations = [item["location"] for item in result.as_step()["unresolved"]]
+    assert any(loc.startswith("revision:") and loc.endswith("/memory") for loc in locations)
+
+
+# -- every note, in batches (review item 8) ----------------------------------------
+
+
+async def test_every_note_is_reviewed_in_batches_oldest_included(
+    db_session, session_factory, monkeypatch
+):
+    from smarter_dev.web import chat_memory_purge
+
+    monkeypatch.setattr(chat_memory_purge, "PURGE_NOTES_BATCH", 2)
+    contents = [KAI_NOTE, NIA_NOTE, "nia likes tea.", "nia likes rust.", "nia ships."]
+    for days_ago, content in enumerate(contents):
+        await create_memory_note(
+            db_session,
+            guild_id=_GUILD,
+            channel_id=_CHANNEL,
+            content=content,
+            created_at=_NOW - timedelta(days=30 - days_ago),
+            day_start=_NOW - timedelta(days=30 - days_ago, hours=1),
+        )
+    await db_session.commit()
+    agent = _ScriptedPurgeAgent()
+
+    result = await purge_guild_memory(
+        session_factory, guild_id=_GUILD, target=KAI, now=_NOW, agent=agent
+    )
+
+    assert result.model_calls == 3
+    assert result.notes_reviewed == 5
+    assert result.notes_dropped == 1
+    assert [len(c.notes) for c in agent.contexts] == [2, 2, 1]
+    db_session.expire_all()
+    left = sorted(n.content for n in (await db_session.scalars(select(ChatAgentMemoryNote))).all())
+    assert KAI_NOTE not in left and len(left) == 4
+
+
+# -- model calls outside the lock, compare-and-set write (review answer A) ----------
+
+
+async def test_the_model_runs_before_the_guild_lock_is_taken(
+    db_session, session_factory, monkeypatch
+):
+    from smarter_dev.web import chat_memory_purge
+
+    events: list[str] = []
+
+    async def record_lock(session, guild_id):
+        events.append("lock")
+
+    monkeypatch.setattr(chat_memory_purge, "lock_guild_memory", record_lock)
+    await _seed(db_session)
+
+    async def mark():
+        events.append("model")
+
+    await purge_guild_memory(
+        session_factory,
+        guild_id=_GUILD,
+        target=KAI,
+        now=_NOW,
+        agent=_ScriptedPurgeAgent(before_answer=mark),
+    )
+
+    assert events.count("lock") == 1
+    assert events[-1] == "lock" and "model" in events
+
+
+async def test_a_dream_during_the_purge_makes_it_redo_the_guild(db_session, session_factory):
+    await _seed(db_session)
+    dreamed = []
+
+    async def dream_once():
+        if dreamed:
+            return
+        dreamed.append(True)
+        async with session_factory() as session:
+            memory = await get_guild_memory_blob(session, _GUILD)
+            memory.content = memory.content + "\n- a new line from tonight."
+            memory.revision += 1
+            await session.commit()
+
+    agent = _ScriptedPurgeAgent(before_answer=dream_once)
+    result = await purge_guild_memory(
+        session_factory, guild_id=_GUILD, target=KAI, now=_NOW, agent=agent
+    )
+
+    assert result.outcome == "purged"
+    db_session.expire_all()
+    memory = await get_guild_memory_blob(db_session, _GUILD)
+    # The dream's line survives: the purge redid the guild from it.
+    assert "- a new line from tonight." in memory.content
+    assert KAI_LINE not in memory.content
+
+
+async def test_memory_that_keeps_changing_is_left_alone(db_session, session_factory):
+    from smarter_dev.web.chat_memory_purge import PurgeConflict
+
+    await _seed(db_session)
+
+    async def dream_every_time():
+        async with session_factory() as session:
+            memory = await get_guild_memory_blob(session, _GUILD)
+            memory.revision += 1
+            await session.commit()
+
+    before = await _snapshot(db_session)
+    with pytest.raises(PurgeConflict):
+        await purge_guild_memory(
+            session_factory,
+            guild_id=_GUILD,
+            target=KAI,
+            now=_NOW,
+            agent=_ScriptedPurgeAgent(before_answer=dream_every_time),
+        )
+    after = await _snapshot(db_session)
+    # Only the simulated dreams moved the revision; nothing of the purge landed.
+    assert after[0][:3] == before[0][:3] and after[1:] == before[1:]
+
+
+async def test_a_stopped_run_writes_nothing(db_session, session_factory):
+    from smarter_dev.web.chat_memory_purge import PurgeStopped
+
+    await _seed(db_session)
+    before = await _snapshot(db_session)
+
+    async def not_current(session):
+        return False
+
+    with pytest.raises(PurgeStopped):
+        await purge_guild_memory(
+            session_factory,
+            guild_id=_GUILD,
+            target=KAI,
+            now=_NOW,
+            agent=_ScriptedPurgeAgent(),
+            still_current=not_current,
+        )
+    assert await _snapshot(db_session) == before
+
+
+# -- the final notes pass ------------------------------------------------------------
+
+
+async def test_the_final_notes_pass_reviews_new_and_mentioning_notes_only(
+    db_session, session_factory
+):
+    from smarter_dev.web.chat_memory_purge import purge_guild_notes
+
+    for content, created in (
+        ("nia is old news.", _NOW - timedelta(days=3)),
+        (KAI_NOTE, _NOW - timedelta(days=3)),
+        ("someone new asked about embedded rust.", _NOW + timedelta(minutes=5)),
+    ):
+        await create_memory_note(
+            db_session,
+            guild_id=_GUILD,
+            channel_id=_CHANNEL,
+            content=content,
+            created_at=created,
+            day_start=created - timedelta(hours=1),
+        )
+    await db_session.commit()
+    agent = _ScriptedPurgeAgent()
+
+    result = await purge_guild_notes(
+        session_factory, guild_id=_GUILD, target=KAI, now=_NOW, since=_NOW, agent=agent
+    )
+
+    reviewed = sorted(content for content_pair in agent.contexts for _, content in content_pair.notes)
+    assert reviewed == sorted([KAI_NOTE, "someone new asked about embedded rust."])
+    assert result.notes_dropped == 1

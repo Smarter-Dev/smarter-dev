@@ -6323,7 +6323,8 @@ class ChatBotBlockedUser(Base):
 
     __tablename__ = "chat_bot_blocked_users"
 
-    discord_user_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    # Snowflakes are 15-22 digits (the purge contract's pattern).
+    discord_user_id: Mapped[str] = mapped_column(String(22), primary_key=True)
     source: Mapped[str] = mapped_column(String(20), nullable=False)
 
 
@@ -6358,13 +6359,20 @@ class ChatBotPurgeRequest(Base):
 
     __tablename__ = "chat_bot_purge_requests"
     __table_args__ = (
-        Index("ix_chat_bot_purge_requests_discord_user_id", "discord_user_id"),
+        # One open request per user: a second submit restarts it.
+        Index(
+            "uq_chat_bot_purge_requests_open_user",
+            "discord_user_id",
+            unique=True,
+            postgresql_where=text("status <> 'closed'"),
+            sqlite_where=text("status <> 'closed'"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
         PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
     )
-    discord_user_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    discord_user_id: Mapped[str | None] = mapped_column(String(22), nullable=True)
     names: Mapped[list | None] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     run_id: Mapped[UUID | None] = mapped_column(
