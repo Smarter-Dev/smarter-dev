@@ -67,6 +67,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.message_content import redact_chat_agent_messages
 from smarter_dev.shared.message_content import redact_model_message_parts
+from smarter_dev.shared.message_content import redact_provider_error
 from smarter_dev.shared.message_content import redact_text
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
@@ -347,7 +348,9 @@ def _compaction_event_row(
         event_kind=event.event_kind,
         tool_name=event.tool_name,
         original_content=redact_text(event.original_content),
-        summary=event.summary,
+        # A summary retells what members said, so it is stored as the
+        # placeholder like the content it summarises.
+        summary=redact_text(event.summary),
         original_chars=event.original_chars,
         summary_chars=event.summary_chars,
         chars_saved=event.original_chars - event.summary_chars,
@@ -564,6 +567,11 @@ class ChatConversationController(Controller):
         data: ChatAgentErrorCreate,
     ) -> ChatAgentErrorCreateResponse:
         """Persist a failed chat run and return its protected admin URL."""
+        redacted = redact_provider_error(
+            error_message=data.error_message,
+            traceback=data.traceback,
+            provider_body=data.provider_body,
+        )
         error = ChatAgentError(
             engagement_id=data.engagement_id,
             request_id=data.request_id,
@@ -572,10 +580,10 @@ class ChatConversationController(Controller):
             model_name=data.model_name,
             reasoning_level=data.reasoning_level,
             error_type=data.error_type,
-            error_message=data.error_message,
-            traceback=data.traceback,
+            error_message=redacted["error_message"],
+            traceback=redacted["traceback"],
             provider_status_code=data.provider_status_code,
-            provider_body=data.provider_body,
+            provider_body=redacted["provider_body"],
             error_context=data.error_context,
         )
         db_session.add(error)

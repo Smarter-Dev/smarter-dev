@@ -14,6 +14,8 @@ import uuid
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient
+from skrift.db.base import Base as SkriftBase
+from skrift.db.models import worker as skrift_worker_models
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -24,6 +26,18 @@ from smarter_dev.shared.config import override_settings
 from smarter_dev.shared.database import Base
 from smarter_dev.shared.database import async_sessionmaker
 from smarter_dev.shared.redis_client import RedisManager
+
+WORKER_TABLES = [
+    model.__table__
+    for model in (
+        skrift_worker_models.WorkerStateRecord,
+        skrift_worker_models.WorkerQueueRecord,
+        skrift_worker_models.WorkerDeadLetterRecord,
+        skrift_worker_models.WorkerEventRecord,
+        skrift_worker_models.WorkerArchiveEventRecord,
+        skrift_worker_models.WorkerArchiveSnapshotRecord,
+    )
+]
 
 
 # Test configuration
@@ -114,6 +128,9 @@ async def test_engine():
         # Create all tables
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            # The hourly retention job also prunes Skrift's worker tables,
+            # which live outside our metadata.
+            await conn.run_sync(SkriftBase.metadata.create_all, tables=WORKER_TABLES)
         
         yield engine
         

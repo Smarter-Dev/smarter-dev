@@ -7,8 +7,8 @@ trimmed exactly at the cutoff (approximate trimming skips a quiet stream whose
 entries all sit in the open macro node) on every publish and again by
 ``trim_expired_envelopes`` on the bot's passive tick. A claimed batch expires
 one window after the claim, not after the write, so its envelopes can outlive
-their own write cutoff by up to one more window. The pending list is bounded
-by count only and is the known exception; see ``publish``.
+their own write cutoff by up to one more window. The pending list expires one
+window after the push that created it; see ``publish``.
 """
 
 from __future__ import annotations
@@ -35,11 +35,17 @@ WAKE_PAYLOAD_FIELD = "payload"
 
 _PUSH_PENDING_LUA = """
 local length = redis.call('RPUSH', KEYS[1], ARGV[1])
+if redis.call('PTTL', KEYS[1]) < 0 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[3])
+end
 local limit = tonumber(ARGV[2])
 local overflow = math.max(0, length - limit)
 if overflow > 0 then
   redis.call('LTRIM', KEYS[1], overflow, -1)
   redis.call('INCRBY', KEYS[2], overflow)
+  if redis.call('PTTL', KEYS[2]) < 0 then
+    redis.call('PEXPIRE', KEYS[2], ARGV[3])
+  end
 end
 return overflow
 """
@@ -120,9 +126,11 @@ class RedisNotificationQueue:
     async def publish(self, envelope: NotificationEnvelope) -> str | None:
         """Queue a non-waking envelope, or wake the guild with a bounded stream.
 
-        The pending list a non-waking envelope enters is capped by count, not
-        age: it is drained by the next wake, and a guild that never wakes
-        again keeps up to ``pending_limit`` envelopes until it does.
+        The pending list a non-waking envelope enters is capped at
+        ``pending_limit`` envelopes and expires one retention window after the
+        push that created it; later pushes do not extend it, so no envelope
+        waits longer than the window for a wake. Its dropped counter expires
+        the same way.
         """
         payload = envelope.model_dump_json()
         if not envelope.wakes:
@@ -133,6 +141,7 @@ class RedisNotificationQueue:
                 pending_dropped_key(envelope.guild_id),
                 payload,
                 self._pending_limit,
+                CONTENT_RETENTION_MILLISECONDS,
             )
             return None
 

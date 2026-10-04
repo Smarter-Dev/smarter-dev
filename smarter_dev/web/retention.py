@@ -7,22 +7,22 @@ would otherwise carry it is written with the placeholder
 is built — see ``docs/data-retention.md`` for the per-table list. Verbatim text
 survives in the agents' own working history — the chat agent's Redis history
 and the proactive agent's history, with a recovery copy in
-``proactive_agent_histories`` — and in two columns no write-time rule can
-cover, ``chat_agent_errors.provider_body`` and ``handler_runs.error``, which
-this sweep clears. What bounds each of those, and what does not, is
-``docs/data-retention.md``'s to state; this docstring does not repeat it. The proactive Redis streams that carry
-notification envelopes are trimmed to the same
+``proactive_agent_histories`` — and in the Redis hand-offs that feed the
+proactive agent and the handler workers. What bounds each of those, and what
+does not, is ``docs/data-retention.md``'s to state; this docstring does not
+repeat it. The proactive Redis streams that carry notification envelopes are
+trimmed to the same
 :data:`~smarter_dev.shared.message_content.CONTENT_RETENTION_WINDOW` (48 hours)
 by the bot, not by this sweep.
 
-What this sweep owns is the other half: text an AI *wrote* about what it read.
-A summary quotes nobody and describes everything, so it gets the same 48-hour
-window message text used to get — ``agent_output``, the compaction ``summary``,
-``ai_context_summary``, ``provider_body``, ``bot_response``,
-``response_content``, ``decision_reason``, and a handler script's own error
-message. The sweep is also the back-fill path for rows written before write-time
-redaction landed, which is why it still nulls the columns the write path now
-placeholders. Each scrubbed row is stamped ``content_purged_at``; the row
+What this sweep owns is the bot's own words: ``agent_output``,
+``ai_context_summary``, ``bot_response``, ``response_content`` and
+``decision_reason`` get a 48-hour window. Text that retells what members said
+— the compaction ``summary``, ``chat_agent_errors.provider_body`` and
+``handler_runs.error`` — is written as the placeholder now, and the sweep
+still clears those columns only as the back-fill path for rows written before
+write-time redaction landed, which is why it still nulls the columns the write
+path now placeholders. Each scrubbed row is stamped ``content_purged_at``; the row
 itself stays — timestamps, token counts, cost, model name, the decision the
 agent took — so cost dashboards and abuse monitoring keep their long history
 without keeping anyone's words.
@@ -68,9 +68,11 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import case, select, update
+from sqlalchemy import case, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
+from smarter_dev.shared.message_content import redact_provider_error
 from smarter_dev.shared.message_content import redact_trigger_context
 from smarter_dev.web.models import (
     CONTENT_RETENTION_WINDOW,
@@ -190,18 +192,31 @@ async def scrub_chat_agent_turns(
 async def scrub_chat_agent_engagements(
     session: AsyncSession, cutoff: datetime, now: datetime
 ) -> int:
-    """Drop the denormalised topic/notes an engagement carries for the list view."""
-    return await _scrub(
-        session,
-        ChatAgentEngagement,
-        timestamp_column=ChatAgentEngagement.started_at,
-        cutoff=cutoff,
-        now=now,
-        values={
-            "last_topic": None,
-            "last_notes": None,
-        },
+    """Drop the denormalised topic/notes an engagement carries for the list view.
+
+    Every turn rewrites them, so they are due 48 hours after the engagement's
+    last turn, not its start, and cleared again whenever a later turn wrote
+    them after an earlier sweep.
+    """
+    later_turn = select(ChatAgentTurn.id).where(
+        ChatAgentTurn.engagement_id == ChatAgentEngagement.id,
+        ChatAgentTurn.started_at > cutoff,
     )
+    result = await session.execute(
+        update(ChatAgentEngagement)
+        .where(
+            ChatAgentEngagement.started_at <= cutoff,
+            or_(
+                ChatAgentEngagement.last_topic.is_not(None),
+                ChatAgentEngagement.last_notes.is_not(None),
+                ChatAgentEngagement.content_purged_at.is_(None),
+            ),
+            ~exists(later_turn),
+        )
+        .values(last_topic=None, last_notes=None, content_purged_at=now)
+        .execution_options(synchronize_session=False)
+    )
+    return result.rowcount or 0
 
 
 async def scrub_chat_agent_compaction_events(
@@ -227,8 +242,48 @@ async def scrub_chat_agent_compaction_events(
 async def scrub_chat_agent_errors(
     session: AsyncSession, cutoff: datetime, now: datetime
 ) -> int:
-    """Drop the raw provider error body, which can echo the prompt back."""
-    return await _scrub(
+    """Drop the raw provider error body, which can echo the prompt back.
+
+    A provider error's message and traceback repeat the body, so on a row from
+    a provider (a status code or a body) they are redacted the way the write
+    path now redacts them. That pass keys on the message rather than the
+    purge stamp, so it also reaches rows an earlier sweep stamped after
+    clearing only the body.
+    """
+    redacted = 0
+    while True:
+        due = (
+            await session.execute(
+                select(ChatAgentError.id, ChatAgentError.traceback)
+                .where(
+                    ChatAgentError.occurred_at <= cutoff,
+                    or_(
+                        ChatAgentError.provider_status_code.is_not(None),
+                        ChatAgentError.provider_body.is_not(None),
+                    ),
+                    ChatAgentError.error_message != MESSAGE_CONTENT_PLACEHOLDER,
+                )
+                .limit(_HANDLER_RUN_BATCH)
+            )
+        ).all()
+        for error_id, error_traceback in due:
+            text = redact_provider_error(
+                error_message="", traceback=error_traceback, provider_body=""
+            )
+            await session.execute(
+                update(ChatAgentError)
+                .where(ChatAgentError.id == error_id)
+                .values(
+                    error_message=MESSAGE_CONTENT_PLACEHOLDER,
+                    traceback=text["traceback"],
+                    provider_body=None,
+                    content_purged_at=now,
+                )
+            )
+        redacted += len(due)
+        if len(due) < _HANDLER_RUN_BATCH:
+            break
+    return redacted + await _scrub(
         session,
         ChatAgentError,
         timestamp_column=ChatAgentError.occurred_at,

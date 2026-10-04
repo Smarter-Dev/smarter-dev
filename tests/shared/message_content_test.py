@@ -31,8 +31,10 @@ from smarter_dev.shared.message_content import oldest_retained_stream_id
 from smarter_dev.shared.message_content import redact_chat_agent_messages
 from smarter_dev.shared.message_content import redact_forum_post
 from smarter_dev.shared.message_content import redact_help_context_messages
+from smarter_dev.shared.message_content import redact_handler_error
 from smarter_dev.shared.message_content import redact_help_question
 from smarter_dev.shared.message_content import redact_model_message_parts
+from smarter_dev.shared.message_content import redact_provider_error
 from smarter_dev.shared.message_content import redact_text
 from smarter_dev.shared.message_content import redact_trigger_context
 
@@ -184,6 +186,7 @@ class TestRedactChatAgentMessages:
             "body",
             "reactions",
             "attachments",
+            "reply_to_attachments",
             "sent_at",
             "mentions_bot",
         }
@@ -261,15 +264,24 @@ class TestRedactModelMessageParts:
         redacted = redact_model_message_parts(dump)
         assert len(list(ModelMessagesTypeAdapter.validate_python(redacted))) == 1
 
-    def test_reasoning_is_ai_authored_and_passes_through(self):
-        # Reasoning summaries are the model's own text, like agent_output; the
-        # retention sweep bounds them at 48h with the rest of the delta.
+    def test_reasoning_is_redacted_because_it_retells_members(self):
+        # Reasoning is model-authored but restates what members said, so it
+        # is stored as the placeholder rather than left to the sweep.
         dump = ModelMessagesTypeAdapter.dump_python(
             [ModelResponse(parts=[ThinkingPart(content="the user asked about uv")])],
             mode="json",
         )
-        [message] = redact_model_message_parts(dump)
-        assert message["parts"][0]["content"] == "the user asked about uv"
+        redacted = redact_model_message_parts(dump)
+        [message] = redacted
+        assert message["parts"][0]["part_kind"] == "thinking"
+        assert message["parts"][0]["content"] == MESSAGE_CONTENT_PLACEHOLDER
+        assert len(list(ModelMessagesTypeAdapter.validate_python(redacted))) == 1
+
+    def test_a_provider_compaction_part_is_redacted(self):
+        [message] = redact_model_message_parts(
+            [{"parts": [{"part_kind": "compaction", "content": "they said this"}]}]
+        )
+        assert message["parts"][0]["content"] == MESSAGE_CONTENT_PLACEHOLDER
 
     def test_redacts_a_retry_prompt(self):
         dump = ModelMessagesTypeAdapter.dump_python(
@@ -688,3 +700,80 @@ class TestOldestRetainedStreamId:
         earlier = datetime(2026, 7, 26, 12, 0, tzinfo=UTC)
         later = datetime(2026, 7, 26, 13, 0, tzinfo=UTC)
         assert oldest_retained_stream_id(later) > oldest_retained_stream_id(earlier)
+
+
+def _traceback_of(error: BaseException) -> str:
+    import traceback
+
+    try:
+        raise error
+    except BaseException as raised:
+        return "".join(
+            traceback.format_exception(type(raised), raised, raised.__traceback__)
+        )
+
+
+class TestRedactProviderError:
+    def test_a_provider_body_and_every_copy_of_it_are_redacted(self):
+        body = '{"error": {"message": "you said: what someone said"}}'
+        message = f"status_code: 400, model_name: m, body: {body}"
+        redacted = redact_provider_error(
+            error_message=message,
+            traceback=_traceback_of(RuntimeError(message)),
+            provider_body=body,
+        )
+        assert redacted["provider_body"] == MESSAGE_CONTENT_PLACEHOLDER
+        assert redacted["error_message"] == MESSAGE_CONTENT_PLACEHOLDER
+        assert "what someone said" not in redacted["traceback"]
+        assert redacted["traceback"].startswith("Traceback (most recent call last):")
+        assert '  File "' in redacted["traceback"]
+        assert redacted["traceback"].endswith(
+            f"RuntimeError: {MESSAGE_CONTENT_PLACEHOLDER}\n"
+        )
+
+    def test_a_chained_error_keeps_each_type_and_no_message(self):
+        try:
+            try:
+                raise ValueError("what someone said")
+            except ValueError as cause:
+                raise RuntimeError("and again what someone said") from cause
+        except RuntimeError as error:
+            import traceback
+
+            text = "".join(
+                traceback.format_exception(type(error), error, error.__traceback__)
+            )
+            message = str(error)
+        redacted = redact_provider_error(
+            error_message=message, traceback=text, provider_body="{}"
+        )
+        assert "what someone said" not in redacted["traceback"]
+        assert f"ValueError: {MESSAGE_CONTENT_PLACEHOLDER}" in redacted["traceback"]
+        assert f"RuntimeError: {MESSAGE_CONTENT_PLACEHOLDER}" in redacted["traceback"]
+        assert "direct cause" in redacted["traceback"]
+
+    def test_an_error_without_a_provider_body_is_kept(self):
+        text = _traceback_of(RuntimeError("boom"))
+        assert redact_provider_error(
+            error_message="boom", traceback=text, provider_body=None
+        ) == {"error_message": "boom", "traceback": text, "provider_body": None}
+
+
+class TestRedactHandlerError:
+    def test_keeps_the_runtime_labels_and_drops_the_message(self):
+        assert redact_handler_error(
+            "runtime: ValueError: bad value 'what someone said'"
+        ) == f"runtime: ValueError: {MESSAGE_CONTENT_PLACEHOLDER}"
+        assert redact_handler_error(
+            "KeyError: what someone said"
+        ) == f"KeyError: {MESSAGE_CONTENT_PLACEHOLDER}"
+
+    def test_a_message_with_no_labels_becomes_the_placeholder(self):
+        assert redact_handler_error(
+            "what someone said, with: a colon"
+        ) == MESSAGE_CONTENT_PLACEHOLDER
+
+    def test_absent_and_empty_stay_as_they_are(self):
+        assert redact_handler_error(None) is None
+        assert redact_handler_error("") == ""
+
