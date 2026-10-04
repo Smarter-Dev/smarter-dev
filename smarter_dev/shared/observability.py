@@ -68,6 +68,11 @@ def configure_observability(default_service_name: str) -> bool:
     return True
 
 
+def logfire_enabled() -> bool:
+    """Whether :func:`configure_observability` turned Logfire on in this process."""
+    return _configured
+
+
 def record_llm_failover(
     *, operation: str, primary_model: str, fallback_model: str, error: Exception
 ) -> None:

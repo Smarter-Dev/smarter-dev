@@ -243,12 +243,28 @@ token is stored. Preview pages are read-only, unlisted, and marked `noindex`.
 
 ## Security logs
 
-`security_logs` records one row per bytes API call and per authentication or
-admin event: IP address, user agent, request path and query, and whatever
-Discord ids those carry. Rows are kept for 90 days and then deleted outright by
-the same hourly retention job (`smarter_dev/web/security_log_retention.py`); a
-security log with its identifying columns blanked would have no audit value
-left, so there is nothing to scrub and keep. The delete runs in batches of
-1,000, each committed on its own, so the first run's backlog is never one long
-transaction and a run that dies partway keeps the batches it finished. Nothing
-reads further back than 90 days: rate limiting counts the last 15 minutes.
+Security events are structured logs, not database rows. Three kinds are
+emitted (`smarter_dev/web/security_logger.py`), named in the `security.event`
+attribute: `login_failed` (with `bearer_presented`, a `reason` code and the
+`client_ip`, the source of the attempt), `rate_limit_exceeded` (with the
+`key_id` of the API key, the `window`, `current_usage` and
+`rate_limit`), and `admin_operation` (with `operation`, the calling key's
+`key_id`, and `details`). Each also carries `success`, the
+`http.route` template (`/api/guilds/{guild_id}/bytes/balance/{user_id}`,
+never the
+concrete path) and the `http.method`. No event
+records a member's Discord id. The names avoid the words Logfire's default
+scrubber redacts, and route templates sit under a key it never scrubs, so the
+events arrive readable. They go to Pydantic Logfire
+when the process has a `LOGFIRE_TOKEN` and are kept there for 30 days, the
+default retention of the Logfire organisation's Personal plan (never
+configured otherwise); without Logfire they go to the standard logger (container
+stdout). Ordinary successful API requests are not logged at all.
+
+Rate limiting keeps one Redis sorted set per API key: the times of its allowed
+requests, keyed by the key's id, expiring 15 minutes after the last request.
+
+The `security_logs` table is no longer written. The rows it already holds
+(one per bytes API call before this change, with the Discord ids in request
+paths) are still deleted at 90 days by the hourly retention job
+(`smarter_dev/web/security_log_retention.py`) until the table is dropped.

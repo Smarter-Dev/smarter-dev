@@ -28,7 +28,7 @@ answered 403. Legacy ``sk-`` keys are rejected (Skrift's guard only accepts
 ``sk_``), matching the harness ``auth-legacy-key-401`` check.
 
 Failed-auth audit parity: :func:`bot_api_auth_guard` wraps Skrift's
-``auth_guard`` and records rejected requests in ``security_logs``, replacing
+``auth_guard`` and emits a security event for rejected requests, replacing
 the legacy ``verify_api_key`` hookup (see the guard's docstring for what was
 intentionally dropped).
 """
@@ -63,20 +63,27 @@ from smarter_dev.web.api_native.errors import (
 BOT_API_PERMISSION = "bot-api"
 
 
+def _login_failure_reason(auth_error: NotAuthorizedException) -> str:
+    """A fixed code for the failure; Skrift's own wording contains "auth",
+    which Logfire's scrubber would redact."""
+    if "permission" in str(auth_error.detail).lower():
+        return "insufficient_permissions"
+    return "no_valid_key"
+
+
 async def bot_api_auth_guard(
     connection: ASGIConnection, route_handler: BaseRouteHandler
 ) -> None:
     """Skrift ``auth_guard`` plus the legacy failed-auth security log.
 
     The legacy FastAPI ``verify_api_key`` recorded every failed authentication
-    in the ``security_logs`` table via
-    ``security_logger.log_authentication_failed``. Skrift's guard rejects
+    via ``security_logger.log_authentication_failed``. Skrift's guard rejects
     silently, so this wrapper ports that hookup: on ``NotAuthorizedException``
-    it writes the failure row (own short-lived session — never the request's)
-    and re-raises unchanged. Success-path per-request usage logging
+    it emits the failure event (Logfire, or the standard logger; no database
+    row since #81) and re-raises unchanged. Success-path per-request usage logging
     (``log_api_key_used``) is intentionally dropped: its only consumer was the
     legacy admin stats over the retired legacy key table, and the rate limiter
-    keeps its own ``api_request`` rows for the windows it counts.
+    counts requests in Redis.
     """
     from smarter_dev.web.security_logger import get_security_logger
 
@@ -90,10 +97,9 @@ async def bot_api_auth_guard(
         )
         try:
             await get_security_logger().log_authentication_failed(
-                session=None,  # Separate session for reliability
                 bearer_presented=bearer_presented,
                 request=Request(connection.scope),
-                reason=str(auth_error.detail),
+                reason=_login_failure_reason(auth_error),
             )
         except Exception as log_error:
             # Never let audit logging mask the 401 itself.
