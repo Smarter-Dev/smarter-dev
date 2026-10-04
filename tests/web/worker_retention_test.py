@@ -7,9 +7,12 @@ only their timestamps are moved back afterwards.
 
 from __future__ import annotations
 
+import importlib.util
+from contextlib import asynccontextmanager
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from skrift.agents.models import RunState
@@ -29,6 +32,7 @@ from skrift.workers.sqlalchemy import SQLAlchemyDeadLetterStore
 from skrift.workers.sqlalchemy import SQLAlchemyEventLog
 from skrift.workers.sqlalchemy import SQLAlchemyQueue
 from skrift.workers.sqlalchemy import SQLAlchemyStateStore
+from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -342,3 +346,43 @@ async def test_bookkeeping_snapshots_keep_their_newest_copy(skrift, db_session):
     await delete_expired_worker_rows(db_session, now=_NOW)
 
     assert await _remaining(db_session, WorkerArchiveSnapshotRecord.value) == [[2]]
+
+
+@pytest.mark.asyncio
+async def test_hourly_sweep_entrypoint_deletes_old_worker_dead_letters(
+    db_session, monkeypatch
+):
+    """The CronJob runs scripts/retention_sweep.py; running it clears old
+    worker dead letters."""
+    spec = importlib.util.spec_from_file_location(
+        "retention_sweep_script",
+        Path(__file__).resolve().parents[2] / "scripts" / "retention_sweep.py",
+    )
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+
+    @asynccontextmanager
+    async def session_context():
+        yield db_session
+
+    monkeypatch.setattr(script, "get_db_session_context", session_context)
+    old = datetime.now(UTC) - WORKER_RETENTION - timedelta(days=1)
+    db_session.add(
+        WorkerDeadLetterRecord(
+            entry_id="old-dead-letter",
+            queue="agents",
+            job_type="handlers.fire",
+            cause="retries_exhausted",
+            state="open",
+            entry={},
+            entry_created_at=old,
+            entry_updated_at=old,
+        )
+    )
+    await db_session.commit()
+
+    assert await script.main() == 0
+    assert (
+        await db_session.scalar(select(func.count()).select_from(WorkerDeadLetterRecord))
+        == 0
+    )

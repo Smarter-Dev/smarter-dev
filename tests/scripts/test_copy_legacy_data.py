@@ -1,6 +1,6 @@
 """Tests for scripts/copy_legacy_data.py (phase 02 — DB consolidation).
 
-Unit tests pin the copy set (23 tables, ``api_keys`` excluded) and its
+Unit tests pin the copy set (22 tables, ``api_keys`` and ``security_logs`` excluded) and its
 FK-dependency order. Integration tests run the copy end-to-end against a
 throwaway podman postgres with two databases (``copy_source`` playing
 bc_websites ``public``, ``copy_target`` playing the main DB ``skrift``
@@ -54,7 +54,6 @@ EXPECTED_COPY_ORDER = [
     "forum_user_subscriptions",
     "help_conversations",
     "repeating_messages",
-    "security_logs",
     "squad_sale_events",
     "squads",
     "advent_of_code_threads",
@@ -75,14 +74,17 @@ class TestCopySetDefinition:
         """Legacy ``public.api_keys`` must never be copied: the ``api_keys``
         name in the skrift schema belongs to Skrift's own table (phase 01)."""
         assert "api_keys" in LEGACY_SOURCE_TABLE_NAMES
-        assert COPY_EXCLUDED_TABLE_NAMES == frozenset({"api_keys"})
+        assert COPY_EXCLUDED_TABLE_NAMES == frozenset({"api_keys", "security_logs"})
         assert "api_keys" not in COPY_TABLE_NAMES
         assert "api_keys" not in {table.name for table in fk_ordered_copy_tables()}
 
-    def test_copy_set_covers_the_23_adopted_tables(self) -> None:
+    def test_copy_set_covers_the_22_adopted_tables(self) -> None:
         assert len(LEGACY_SOURCE_TABLE_NAMES) == 24
-        assert COPY_TABLE_NAMES == LEGACY_SOURCE_TABLE_NAMES - {"api_keys"}
-        assert len(COPY_TABLE_NAMES) == 23
+        assert COPY_TABLE_NAMES == LEGACY_SOURCE_TABLE_NAMES - {
+            "api_keys",
+            "security_logs",
+        }
+        assert len(COPY_TABLE_NAMES) == 22
 
     async def test_refuses_identical_source_and_target_urls(self) -> None:
         same_url = "postgresql+asyncpg://user:pass@localhost:5432/one_db"
@@ -159,10 +161,11 @@ def copy_test_postgres() -> None:
 
 @pytest.fixture
 async def source_engine(copy_test_postgres) -> AsyncGenerator[AsyncEngine, None]:
-    """Fresh source DB (public schema) with the 23 copyable legacy tables.
+    """Fresh source DB (public schema) with the 22 copyable legacy tables.
 
-    The 24th legacy table (``api_keys``) has no model anymore — its ORM class
-    was deleted with the legacy key system — so it cannot be created here.
+    The other two legacy tables have no model anymore, so they cannot be
+    created here: ``api_keys`` went with the legacy key system and
+    ``security_logs`` with #81.
     """
     engine = create_async_engine(SOURCE_URL)
     async with engine.begin() as connection:
@@ -184,7 +187,7 @@ async def source_engine(copy_test_postgres) -> AsyncGenerator[AsyncEngine, None]
 
 @pytest.fixture
 async def target_engine(copy_test_postgres) -> AsyncGenerator[AsyncEngine, None]:
-    """Fresh target DB with the 23 adopted tables in the skrift schema.
+    """Fresh target DB with the 22 adopted tables in the skrift schema.
 
     ``api_keys`` is deliberately NOT created in the target: in prod that name
     is Skrift's own (different-shaped) table, so a copy attempt would fail
