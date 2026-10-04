@@ -45,7 +45,7 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a dire
 
 **Email.** If you sign up for a campaign or waitlist, we keep your email address or Discord ID and send a confirmation email.
 
-**Security.** For security, we log failed sign-ins and failed API authentication, requests refused for going over a rate limit, and admin operations. These records do not include members' Discord IDs. **[PLACEHOLDER: exact categories and how long they are kept, from #81's facts. Do not publish with this line.]**
+**Security.** The API our bot uses records three kinds of security event: failed authentication, requests refused for going over a rate limit, and admin operations. Each records what happened, the kind of request and which API key made it, never a member's Discord ID. A failed authentication also records the IP address it came from. Ordinary requests are not logged. These events go to Pydantic Logfire and are kept for **[PLACEHOLDER: the Logfire project's retention period, from the Logfire org settings. Do not publish with this line.]**
 
 ## Who else handles your data
 
@@ -53,7 +53,7 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a dire
 - **Hosting.** Our servers, database and file storage run on DigitalOcean.
 - **Payments.** Polar.
 - **Email.** Confirmation emails are sent through Resend.
-- **Monitoring.** Errors and performance traces from the bot and the website go to Pydantic Logfire, and can include IDs.
+- **Monitoring.** Errors, performance traces and security events from the bot and the website go to Pydantic Logfire. Errors and traces can include IDs.
 - **Discord.** Everything you post on Discord is also held by Discord under its own privacy policy.
 
 ## Deleting your data
