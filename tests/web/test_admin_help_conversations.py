@@ -202,6 +202,23 @@ async def test_apply_filters_search_matches_question_response_username(db_sessio
     }
 
 
+
+async def test_apply_filters_search_skips_the_placeholder(db_session):
+    from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
+
+    redacted = _make_conversation(
+        user_question=MESSAGE_CONTENT_PLACEHOLDER,
+        bot_response=MESSAGE_CONTENT_PLACEHOLDER,
+        user_username="bob",
+    )
+    await _seed(db_session, redacted)
+
+    for term in ("message", "content", "["):
+        result = await _run_filter(
+            db_session, parse_conversation_filters({"search": term})
+        )
+        assert result == [], term
+
 # --- summarize_retention / delete_expired ------------------------------------
 
 

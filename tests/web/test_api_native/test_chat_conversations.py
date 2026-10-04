@@ -345,8 +345,65 @@ class TestCreateError:
         assert error.model_name == "kimi-k2.6"
         assert error.reasoning_level == "medium"
         assert error.provider_status_code == 503
-        assert "overloaded" in (error.provider_body or "")
+        assert error.error_type == "pydantic_ai.exceptions.ModelHTTPError"
         assert error.error_context == {"first_activation": True}
+
+    async def test_a_redacted_trace_is_kept_and_every_message_is_the_placeholder(
+        self, client: AsyncClient, session
+    ):
+        trace = (
+            "Traceback (most recent call last):\n"
+            '  File "engine.py", line 1, in run\n'
+            f"pydantic_ai.exceptions.ModelHTTPError: {MESSAGE_CONTENT_PLACEHOLDER}"
+        )
+        response = await client.post(
+            "/api/chat-conversations/errors",
+            json={
+                "request_id": "err-5678",
+                "guild_id": _GUILD,
+                "channel_id": _CHANNEL,
+                "error_type": "pydantic_ai.exceptions.ModelHTTPError",
+                "error_message": "status_code: 400, body: what someone actually said",
+                "traceback": trace,
+                "trace_redacted": True,
+                "provider_status_code": 400,
+                "provider_body": '{"error":{"message":"what someone actually said"}}',
+            },
+        )
+
+        assert response.status_code == 201
+        error = (await session.execute(select(ChatAgentError))).scalars().one()
+        assert error.provider_body == MESSAGE_CONTENT_PLACEHOLDER
+        assert error.error_message == MESSAGE_CONTENT_PLACEHOLDER
+        assert error.traceback == trace
+        assert error.provider_status_code == 400
+
+    async def test_an_error_with_no_provider_body_keeps_no_text_either(
+        self, client: AsyncClient, session
+    ):
+        # A validation error quotes its input; a Discord error its body.
+        response = await client.post(
+            "/api/chat-conversations/errors",
+            json={
+                "request_id": "err-9999",
+                "guild_id": _GUILD,
+                "channel_id": _CHANNEL,
+                "error_type": "pydantic_core._pydantic_core.ValidationError",
+                "error_message": "input_value='what someone said'",
+                "traceback": (
+                    "Traceback (most recent call last):\n"
+                    "ValidationError: input_value='what someone said'\n"
+                ),
+            },
+        )
+
+        assert response.status_code == 201
+        error = (await session.execute(select(ChatAgentError))).scalars().one()
+        assert error.error_message == MESSAGE_CONTENT_PLACEHOLDER
+        # Sent by a bot that predates trace_redacted: the raw trace is not kept.
+        assert error.traceback == MESSAGE_CONTENT_PLACEHOLDER
+        assert error.provider_body is None
+        assert error.error_type == "pydantic_core._pydantic_core.ValidationError"
 
 
 class TestCreateTurn:
@@ -374,8 +431,8 @@ class TestCreateTurn:
         await session.refresh(engagement)
         assert engagement.total_chat_tokens_input == 100
         assert engagement.total_chat_tokens_output == 50
-        assert engagement.last_topic == "greetings"
-        assert engagement.last_notes == "friendly"
+        assert engagement.last_topic == MESSAGE_CONTENT_PLACEHOLDER
+        assert engagement.last_notes == MESSAGE_CONTENT_PLACEHOLDER
 
     async def test_unknown_engagement_is_404(self, client: AsyncClient, session):
         response = await client.post(
@@ -775,17 +832,71 @@ class TestTurnStoresPlaceholdersForMessageText:
 
         assert (await _stored_turn(session)).triggering_messages == []
 
-    async def test_agent_output_survives_verbatim(self, client: AsyncClient, session):
+    async def test_agent_output_keeps_the_decision_without_its_words(
+        self, client: AsyncClient, session
+    ):
         engagement = await _seed_engagement(session)
         agent_output = {
+            "rankings": [{"message_id": "444", "score": 8, "reasoning": "they asked"}],
+            "response_language": "en",
             "topic": "greetings",
             "notes": "friendly",
-            "response": {"message": "hello there", "target_message_id": "444"},
+            "continue_watching": True,
+            "response": {
+                "target_message_id": "444",
+                "reply_directly": True,
+                "message": "hello there",
+                "voice_summary": "hi",
+                "voice_instruction": "warmly",
+                "not_cs_topic_brief_answer": False,
+            },
         }
 
         await _post_turn(client, engagement, agent_output=agent_output)
 
-        assert (await _stored_turn(session)).agent_output == agent_output
+        assert (await _stored_turn(session)).agent_output == {
+            "rankings": [{"message_id": "444", "score": 8, "reasoning": MESSAGE_CONTENT_PLACEHOLDER}],
+            "response_language": "en",
+            "topic": MESSAGE_CONTENT_PLACEHOLDER,
+            "notes": MESSAGE_CONTENT_PLACEHOLDER,
+            "continue_watching": True,
+            "response": {
+                "target_message_id": "444",
+                "reply_directly": True,
+                "message": MESSAGE_CONTENT_PLACEHOLDER,
+                "voice_summary": MESSAGE_CONTENT_PLACEHOLDER,
+                "voice_instruction": MESSAGE_CONTENT_PLACEHOLDER,
+                "not_cs_topic_brief_answer": False,
+            },
+        }
+
+    async def test_a_voice_error_keeps_its_type_only(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+
+        await _post_turn(
+            client,
+            engagement,
+            voice_sent_ok=False,
+            voice_send_error="HTTPException: 400 said hello there",
+        )
+
+        assert (await _stored_turn(session)).voice_send_error == MESSAGE_CONTENT_PLACEHOLDER
+
+    async def test_a_voice_error_type_is_stored(self, client: AsyncClient, session):
+        engagement = await _seed_engagement(session)
+
+        await _post_turn(
+            client,
+            engagement,
+            voice_sent_ok=False,
+            voice_send_error="hikari.errors.BadRequestError",
+        )
+
+        assert (
+            await _stored_turn(session)
+        ).voice_send_error == "hikari.errors.BadRequestError"
 
 
 class TestTurnDeltaRedaction:
@@ -805,7 +916,7 @@ class TestTurnDeltaRedaction:
         assert by_kind["user-prompt"]["content"] == MESSAGE_CONTENT_PLACEHOLDER
         assert by_kind["tool-return"]["content"] == {}
 
-    async def test_text_tool_call_and_system_parts_survive(
+    async def test_the_models_own_parts_keep_only_their_bookkeeping(
         self, client: AsyncClient, session
     ):
         engagement = await _seed_engagement(session)
@@ -818,10 +929,10 @@ class TestTurnDeltaRedaction:
             for part in message["parts"]
         ]
         by_kind = {part["part_kind"]: part for part in parts}
-        assert by_kind["text"]["content"] == "the agent reply"
+        assert by_kind["text"]["content"] == MESSAGE_CONTENT_PLACEHOLDER
         assert by_kind["tool-call"]["tool_name"] == "web_read"
-        assert by_kind["tool-call"]["args"] == {"query": "a phrase"}
-        assert by_kind["system-prompt"]["content"] == "you are a bot"
+        assert by_kind["tool-call"]["args"] == {}
+        assert by_kind["system-prompt"]["content"] == MESSAGE_CONTENT_PLACEHOLDER
         assert by_kind["tool-return"]["tool_name"] == "web_read"
 
     async def test_absent_delta_stays_null(self, client: AsyncClient, session):
@@ -847,7 +958,8 @@ class TestCompactionEventRedaction:
         events = await _stored_compaction_events(session)
         assert len(events) == 1
         assert events[0].original_content == MESSAGE_CONTENT_PLACEHOLDER
-        assert events[0].summary == "they said hello"
+        # The summary retells members, so it is the placeholder too.
+        assert events[0].summary == MESSAGE_CONTENT_PLACEHOLDER
         assert events[0].original_chars == 27
         assert events[0].summary_chars == 15
         assert events[0].chars_saved == 12
@@ -896,7 +1008,7 @@ class TestDetailTemplateRendersRedactedRows:
         assert MESSAGE_CONTENT_PLACEHOLDER in html
         assert "what someone actually said" not in html
         assert "everything the channel said" not in html
-        assert "they said hello" in html
+        assert "they said hello" not in html
         assert "search" in html
         assert "web_read" in html
         assert re.search(r"returned \d+ chars", html) is None

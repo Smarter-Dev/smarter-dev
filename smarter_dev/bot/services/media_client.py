@@ -427,7 +427,7 @@ class MediaClient:
             logger.warning(
                 "Media service connection to %s failed (%s); retrying once",
                 self.base_url,
-                exc,
+                type(exc).__name__,
             )
             await asyncio.sleep(self._retry_delay_seconds)
             try:

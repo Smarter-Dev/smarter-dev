@@ -34,6 +34,7 @@ from pydantic_ai.messages import ModelMessage
 
 from smarter_dev.bot.agents.chat_agent import build_agent_model
 from smarter_dev.bot.agents.model_router import model_settings_for
+from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import get_model
 
@@ -173,7 +174,7 @@ async def _shorten_with_agent(
             deps=tool_free_deps,
         )
     except Exception:
-        logger.exception("Shorten re-run failed — falling back to summarizer")
+        log_exception(logger, "Shorten re-run failed — falling back to summarizer")
         return _ShortenOutcome(None, 0, 0, [])
     usage = result.usage
     input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
@@ -190,7 +191,7 @@ async def _summarize_with_luna(message: str) -> str | None:
     try:
         result = await get_length_summarizer().run(user_prompt=message)
     except Exception:
-        logger.exception("Length summarizer failed — falling back to truncation")
+        log_exception(logger, "Length summarizer failed — falling back to truncation")
         return None
     usage = result.usage
     logger.info(

@@ -154,6 +154,10 @@ def do_run_migrations(connection: Connection) -> None:
     connection.execute(
         text(f"SET search_path TO {SCHEMA}, public")  # nosemgrep: avoid-sqlalchemy-text
     )
+    # SET is session-level, so it outlives this commit; committing hands the
+    # transaction to alembic, which an autocommit_block (a CONCURRENTLY index
+    # build) needs to be able to commit and reopen.
+    connection.commit()
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
@@ -171,7 +175,7 @@ async def run_async_migrations() -> None:
     cfg = config.get_section(config.config_ini_section, {})
     cfg["sqlalchemy.url"] = settings.effective_database_url
     connectable = async_engine_from_config(cfg, prefix="sqlalchemy.", poolclass=pool.NullPool)
-    async with connectable.begin() as connection:
+    async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)
     await connectable.dispose()
 

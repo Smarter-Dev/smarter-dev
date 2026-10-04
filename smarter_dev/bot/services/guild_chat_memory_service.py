@@ -40,6 +40,7 @@ from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.base import BaseService
 from smarter_dev.bot.services.cache_manager import CacheManager
 from smarter_dev.bot.services.exceptions import APIError
+from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.guild_event_log import chat_memory_enabled
 
 logger = logging.getLogger(__name__)
@@ -187,10 +188,11 @@ class GuildChatMemoryService(BaseService):
             response = await self._api_client.get(self._bundle_path(guild_id))
             return _parsed_snapshot(response.json())
         except (APIError, ValidationError, ValueError, TypeError):
-            logger.warning(
+            log_exception(
+                logger,
                 "Could not load chat memory for guild %s — running without it",
                 guild_id,
-                exc_info=True,
+                level=logging.WARNING,
             )
             return EMPTY_SNAPSHOT
 
@@ -224,8 +226,9 @@ class GuildChatMemoryService(BaseService):
                 )
             ).json()
         except APIError:
-            logger.warning(
-                "Could not save a chat memory note for guild %s", guild_id, exc_info=True
+            log_exception(
+                logger,
+                "Could not save a chat memory note for guild %s", guild_id, level=logging.WARNING
             )
             return NoteSaveResult(saved=False, reason=API_FAILURE_REASON)
         if not isinstance(body, dict) or not body.get("saved"):

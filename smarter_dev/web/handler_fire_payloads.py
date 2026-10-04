@@ -19,7 +19,10 @@ class HandlerFirePayload(BaseModel):
     """Job payload for one member-handler firing."""
 
     handler_id: str
+    # Redacted: the verbatim context is in Redis under ``context_ref``
+    # (handler_fire_context), so the worker tables never hold message text.
     trigger_context: dict = {}
+    context_ref: str | None = None
     # How many handler fires deep this fire is (0 = caused by a gateway event).
     # An explicit FIELD, never a trigger_context key: context goes to the sandbox
     # verbatim, so a depth in there would be script-readable and script-forgeable.
@@ -34,4 +37,5 @@ class AdminHandlerFirePayload(BaseModel):
     admin_handler_id: str
     channel_id: str = ""
     trigger_context: dict = {}
+    context_ref: str | None = None
     chain_depth: int = 0

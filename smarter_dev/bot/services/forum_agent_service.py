@@ -55,7 +55,7 @@ class ForumAgentService(BaseService):
             logger.debug(f"Loaded {len(agents)} forum agents for guild {guild_id}")
             return agents
         except Exception as e:
-            logger.error(f"Failed to load forum agents for guild {guild_id}: {e}")
+            logger.error(f"Failed to load forum agents for guild {guild_id}: {type(e).__name__}")
             raise APIError(f"Failed to load forum agents: {e}") from e
 
     def should_agent_monitor_forum(self, agent: dict[str, Any], channel_id: str) -> bool:
@@ -123,7 +123,7 @@ class ForumAgentService(BaseService):
             return decision, confidence, response_content, tokens_used
 
         except Exception as e:
-            logger.error(f"Error evaluating post with agent {agent.get('name', 'Unknown')}: {e}")
+            logger.error(f"Error evaluating post with agent {agent.get('name', 'Unknown')}: {type(e).__name__}")
             raise ServiceError(f"Post evaluation failed: {e}") from e
 
     async def record_response(
@@ -232,7 +232,7 @@ class ForumAgentService(BaseService):
             return result["id"]
 
         except Exception as e:
-            logger.error(f"Failed to record response for agent {agent.get('name', 'Unknown')}: {e}")
+            logger.error(f"Failed to record response for agent {agent.get('name', 'Unknown')}: {type(e).__name__}")
             raise APIError(f"Failed to record response: {e}") from e
 
     async def check_rate_limit(self, agent: dict[str, Any]) -> bool:
@@ -270,7 +270,7 @@ class ForumAgentService(BaseService):
             return current_count < max_responses
 
         except Exception as e:
-            logger.error(f"Failed to check rate limit for agent {agent.get('name', 'Unknown')}: {e}")
+            logger.error(f"Failed to check rate limit for agent {agent.get('name', 'Unknown')}: {type(e).__name__}")
             # On error, err on the side of caution and allow the request
             return True
 
@@ -297,7 +297,7 @@ class ForumAgentService(BaseService):
             logger.debug(f"Retrieved analytics for agent {agent_id}")
             return analytics
         except Exception as e:
-            logger.error(f"Failed to get analytics for agent {agent_id}: {e}")
+            logger.error(f"Failed to get analytics for agent {agent_id}: {type(e).__name__}")
             raise APIError(f"Failed to get agent analytics: {e}") from e
 
     async def get_user_subscriptions(self, guild_id: str, forum_channel_id: str) -> list[dict[str, Any]]:
@@ -326,7 +326,7 @@ class ForumAgentService(BaseService):
             logger.debug(f"Found {len(subscriptions)} user subscriptions for forum {forum_channel_id}")
             return subscriptions
         except Exception as e:
-            logger.error(f"Failed to get user subscriptions for forum {forum_channel_id}: {e}")
+            logger.error(f"Failed to get user subscriptions for forum {forum_channel_id}: {type(e).__name__}")
             raise APIError(f"Failed to get user subscriptions: {e}") from e
 
     async def get_notification_topics(self, guild_id: str, forum_channel_id: str) -> list[str]:
@@ -356,7 +356,7 @@ class ForumAgentService(BaseService):
             logger.debug(f"Found {len(topic_names)} notification topics for forum {forum_channel_id}")
             return topic_names
         except Exception as e:
-            logger.error(f"Failed to get notification topics for forum {forum_channel_id}: {e}")
+            logger.error(f"Failed to get notification topics for forum {forum_channel_id}: {type(e).__name__}")
             raise APIError(f"Failed to get notification topics: {e}") from e
 
     def determine_agent_operation_mode(self, agent: dict[str, Any]) -> str:
@@ -521,7 +521,7 @@ class ForumAgentService(BaseService):
                     })
 
                 except Exception as e:
-                    logger.error(f"Error processing post with agent {agent_data.get('name', 'Unknown')}: {e}")
+                    logger.error(f"Error processing post with agent {agent_data.get('name', 'Unknown')}: {type(e).__name__}")
                     # Continue processing other agents
                     continue
 
@@ -569,7 +569,7 @@ class ForumAgentService(BaseService):
             return responses, topic_user_map
 
         except Exception as e:
-            logger.error(f"Error processing forum post for guild {guild_id}: {e}")
+            logger.error(f"Error processing forum post for guild {guild_id}: {type(e).__name__}")
             raise ServiceError(f"Forum post processing failed: {e}") from e
 
     async def process_forum_post(self, guild_id: str, post: Any) -> list[dict[str, Any]]:
@@ -641,7 +641,7 @@ class ForumAgentService(BaseService):
                     })
 
                 except Exception as e:
-                    logger.error(f"Error processing post with agent {agent_data.get('name', 'Unknown')}: {e}")
+                    logger.error(f"Error processing post with agent {agent_data.get('name', 'Unknown')}: {type(e).__name__}")
                     # Continue processing other agents
                     continue
 
@@ -649,7 +649,7 @@ class ForumAgentService(BaseService):
             return responses
 
         except Exception as e:
-            logger.error(f"Error processing forum post for guild {guild_id}: {e}")
+            logger.error(f"Error processing forum post for guild {guild_id}: {type(e).__name__}")
             raise ServiceError(f"Forum post processing failed: {e}") from e
 
     async def health_check(self) -> ServiceHealth:

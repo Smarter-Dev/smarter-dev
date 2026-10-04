@@ -565,7 +565,7 @@ def test_record_agent_response_empty_post_title_stays_empty(
     assert row.post_title == ""
 
 
-def test_record_agent_response_keeps_everything_the_agent_decided(
+def test_record_agent_response_keeps_the_decision_without_its_words(
     forum_client: TestClient,
     forum_agent_ops_mock: Mock,
     session_mock: AsyncMock,
@@ -574,8 +574,8 @@ def test_record_agent_response_keeps_everything_the_agent_decided(
     row = _recorded_response_row(
         forum_client, forum_agent_ops_mock, session_mock, guild_id
     )
-    assert row.response_content == "check your event loop setup"
-    assert row.decision_reason == "question matches the agent's topic"
+    assert row.response_content == MESSAGE_CONTENT_PLACEHOLDER
+    assert row.decision_reason == MESSAGE_CONTENT_PLACEHOLDER
     assert row.post_tags == ["python", "help"]
     assert row.author_display_name == "Alice"
     assert row.channel_id == "222222222222222222"

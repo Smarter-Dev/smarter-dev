@@ -19,6 +19,7 @@ from datetime import datetime
 from typing import Any
 from typing import Protocol
 
+from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.guild_event_log import GuildEvent
 from smarter_dev.shared.guild_event_log import append_event
 
@@ -48,4 +49,4 @@ async def record_guild_event(
             return
         await append_event(chat_memory_redis, event, now=now)
     except Exception:  # noqa: BLE001 — recording must never break the action
-        logger.debug("guild event recording failed", exc_info=True)
+        log_exception(logger, "guild event recording failed", level=logging.DEBUG)

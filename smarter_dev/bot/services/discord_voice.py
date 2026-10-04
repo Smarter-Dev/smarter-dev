@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import logging
 import math
 import re
 import struct
@@ -24,6 +25,7 @@ from smarter_dev.bot.services.models import ServiceHealth
 from smarter_dev.llm_config import get_gemini_client_for_tts
 from smarter_dev.shared.config import Settings
 from smarter_dev.shared.config import get_settings
+from smarter_dev.shared.exception_logging import log_exception
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
 VOICE_MESSAGE_FLAG = 8192
@@ -313,7 +315,9 @@ class VoiceService(BaseService):
                 instruction,
             )
         except Exception:
-            self._logger.warning("TTS generation failed, retrying shorter text", exc_info=True)
+            log_exception(
+                self._logger, "TTS generation failed, retrying shorter text", level=logging.WARNING
+            )
             tts_result = await asyncio.to_thread(
                 generate_tts,
                 text[:400],

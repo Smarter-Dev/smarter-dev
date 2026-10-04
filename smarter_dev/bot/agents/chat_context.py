@@ -311,7 +311,9 @@ async def _build_authors(
         roles = await bot.rest.fetch_roles(guild_id)
         guild_roles = {r.id: r.name for r in roles}
     except Exception as e:
-        logger.debug("Could not fetch guild roles for %s: %s", guild_id, e)
+        logger.debug(
+            "Could not fetch guild roles for %s: %s", guild_id, type(e).__name__
+        )
 
     authors: list[Author] = []
     for user_id, user in seen.items():

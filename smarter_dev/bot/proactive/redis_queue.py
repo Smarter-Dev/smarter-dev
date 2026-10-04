@@ -7,8 +7,9 @@ trimmed exactly at the cutoff (approximate trimming skips a quiet stream whose
 entries all sit in the open macro node) on every publish and again by
 ``trim_expired_envelopes`` on the bot's passive tick. A claimed batch expires
 one window after the claim, not after the write, so its envelopes can outlive
-their own write cutoff by up to one more window. The pending list is bounded
-by count only and is the known exception; see ``publish``.
+their own write cutoff by up to one more window. The pending list is trimmed by
+entry age on the same tick, and each envelope it drops is counted in
+``pending-dropped`` so the agent is told; see ``trim_expired_envelopes``.
 """
 
 from __future__ import annotations
@@ -18,8 +19,12 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
+from datetime import timedelta
+
+from redis.exceptions import RedisError
 
 from smarter_dev.bot.proactive.contracts import NotificationEnvelope
+from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.message_content import CONTENT_RETENTION_MILLISECONDS
 from smarter_dev.shared.message_content import oldest_retained_stream_id
 
@@ -32,14 +37,26 @@ SHADOW_STREAM_KEY = f"{KEY_PREFIX}:shadow"
 PENDING_LIMIT = 20
 SHADOW_STREAM_MAX_ENTRIES = 10_000
 WAKE_PAYLOAD_FIELD = "payload"
+# The pending list's own expiry is only a backstop for a bot that stopped
+# ticking: two 15-minute passive ticks past its newest envelope's window. Every
+# push moves it out to the envelope it adds, and every trim to the newest one
+# left, so it never deletes an envelope the tick has not had a chance to drop
+# and count.
+PENDING_EXPIRY_SLACK_MILLISECONDS = 30 * 60 * 1000
 
 _PUSH_PENDING_LUA = """
 local length = redis.call('RPUSH', KEYS[1], ARGV[1])
+if redis.call('PTTL', KEYS[1]) < tonumber(ARGV[3]) then
+  redis.call('PEXPIRE', KEYS[1], ARGV[3])
+end
 local limit = tonumber(ARGV[2])
 local overflow = math.max(0, length - limit)
 if overflow > 0 then
   redis.call('LTRIM', KEYS[1], overflow, -1)
   redis.call('INCRBY', KEYS[2], overflow)
+  if redis.call('PTTL', KEYS[2]) < 0 then
+    redis.call('PEXPIRE', KEYS[2], ARGV[4])
+  end
 end
 return overflow
 """
@@ -60,6 +77,26 @@ local values = redis.call('LRANGE', KEYS[2], 0, -1)
 local dropped = redis.call('GET', KEYS[4]) or '0'
 table.insert(values, 1, dropped)
 return values
+"""
+
+# Drop the named envelopes (read and judged too old by the caller) and count
+# them, then move the list's backstop expiry to its newest remaining envelope.
+# A claim that took the list meanwhile leaves nothing to remove or expire.
+_TRIM_PENDING_LUA = """
+local removed = 0
+for i = 3, #ARGV do
+  removed = removed + redis.call('LREM', KEYS[1], 1, ARGV[i])
+end
+if removed > 0 then
+  redis.call('INCRBY', KEYS[2], removed)
+  if redis.call('PTTL', KEYS[2]) < 0 then
+    redis.call('PEXPIRE', KEYS[2], ARGV[2])
+  end
+end
+if ARGV[1] ~= '' and redis.call('EXISTS', KEYS[1]) == 1 then
+  redis.call('PEXPIREAT', KEYS[1], ARGV[1])
+end
+return removed
 """
 
 
@@ -120,9 +157,13 @@ class RedisNotificationQueue:
     async def publish(self, envelope: NotificationEnvelope) -> str | None:
         """Queue a non-waking envelope, or wake the guild with a bounded stream.
 
-        The pending list a non-waking envelope enters is capped by count, not
-        age: it is drained by the next wake, and a guild that never wakes
-        again keeps up to ``pending_limit`` envelopes until it does.
+        The pending list a non-waking envelope enters is capped at
+        ``pending_limit`` envelopes. ``trim_expired_envelopes`` drops each
+        envelope once it is older than the retention window and counts it; the
+        list's own expiry, moved out by each push to the envelope it adds and
+        reset by each trim to the newest one left, is a backstop for a bot that
+        stopped ticking. Its dropped counter
+        expires one window after its first count.
         """
         payload = envelope.model_dump_json()
         if not envelope.wakes:
@@ -133,6 +174,8 @@ class RedisNotificationQueue:
                 pending_dropped_key(envelope.guild_id),
                 payload,
                 self._pending_limit,
+                CONTENT_RETENTION_MILLISECONDS + PENDING_EXPIRY_SLACK_MILLISECONDS,
+                CONTENT_RETENTION_MILLISECONDS,
             )
             return None
 
@@ -176,8 +219,9 @@ class RedisNotificationQueue:
         ready index still names, so retention does not depend on the worker
         leaving that index untouched. The index is shared with the external
         worker, so a member that is not a snowflake is skipped with a warning
-        rather than aborting the trim of every well-formed guild. Returns the
-        number of envelopes dropped.
+        rather than aborting the trim of every well-formed guild. The same
+        guilds' pending lists are trimmed by envelope age
+        (:meth:`trim_expired_pending`). Returns the number of envelopes dropped.
         """
         age_bound = _exact_retention_age_bound()
         indexed_guild_ids = {
@@ -191,7 +235,60 @@ class RedisNotificationQueue:
             for guild_id in stream_guild_ids:
                 pipeline.xtrim(wake_stream_key(guild_id), **age_bound)
             pipeline.xtrim(SHADOW_STREAM_KEY, **age_bound)
-            return sum(await pipeline.execute())
+            dropped = sum(await pipeline.execute())
+        for guild_id in stream_guild_ids:
+            try:
+                dropped += await self.trim_expired_pending(guild_id)
+            except RedisError:
+                raise
+            except Exception:
+                # One guild's list must not stop the trim of every later one.
+                log_exception(logger, "pending trim failed guild=%s", guild_id)
+        return dropped
+
+    async def trim_expired_pending(self, guild_id: str, *, now: datetime | None = None) -> int:
+        """Drop and count the pending envelopes older than the retention window.
+
+        An envelope's age is its ``created_at``; one that does not parse is
+        dropped too, so is one carrying a field this version does not know.
+        Each drop is added to ``pending-dropped``, which the next claim hands
+        the agent. The list's backstop expiry is reset to two ticks past its
+        newest remaining envelope's window. Returns the number dropped.
+        """
+        now = now or datetime.now(UTC)
+        cutoff = now - timedelta(milliseconds=CONTENT_RETENTION_MILLISECONDS)
+        expired: list[str] = []
+        newest: datetime | None = None
+        for raw in await self._redis.lrange(pending_key(guild_id), 0, -1):
+            value = _decode(raw)
+            try:
+                created_at = NotificationEnvelope.model_validate_json(value).created_at
+            except ValueError:
+                expired.append(value)
+                continue
+            if created_at <= cutoff:
+                expired.append(value)
+            elif newest is None or created_at > newest:
+                newest = created_at
+        expire_at = (
+            ""
+            if newest is None
+            else int(newest.timestamp() * 1000)
+            + CONTENT_RETENTION_MILLISECONDS
+            + PENDING_EXPIRY_SLACK_MILLISECONDS
+        )
+        if not expired and newest is None:
+            return 0
+        removed = await self._redis.eval(
+            _TRIM_PENDING_LUA,
+            2,
+            pending_key(guild_id),
+            pending_dropped_key(guild_id),
+            expire_at,
+            CONTENT_RETENTION_MILLISECONDS,
+            *expired,
+        )
+        return int(removed)
 
     async def claim_pending(self, guild_id: str, wake_id: str) -> ClaimedPending:
         """Move the pending list into a batch that a retry of ``wake_id`` reads

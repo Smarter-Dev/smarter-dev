@@ -60,7 +60,7 @@ async def fetch_via_jina(url: str) -> dict[str, str] | None:
                 "url": data.get("url", url),
             }
     except Exception as e:
-        logger.debug("Jina Reader failed for %s: %s", url_for_log(url), e)
+        logger.debug("Jina Reader failed for %s: %s", url_for_log(url), type(e).__name__)
         return None
 
 
@@ -87,7 +87,7 @@ async def fetch_youtube_metadata(url: str) -> dict[str, str]:
                 if "title" not in metadata and data.get("title"):
                     metadata["title"] = data["title"]
     except Exception as e:
-        logger.debug("Could not fetch YouTube metadata for %s: %s", url, e)
+        logger.debug("Could not fetch YouTube metadata for %s: %s", url, type(e).__name__)
     return metadata
 
 
@@ -106,7 +106,7 @@ async def fetch_pdf_text(url: str, max_chars: int = 20_000) -> str | None:
     try:
         return await pdf_text.pdf_text_from_file(path, max_chars)
     except Exception as e:
-        logger.debug("PDF fetch failed for %s: %s", url_for_log(url), e)
+        logger.debug("PDF fetch failed for %s: %s", url_for_log(url), type(e).__name__)
         return None
 
 
@@ -183,7 +183,7 @@ async def fetch_bytes(
             body.discard()
         if not isinstance(e, Exception):
             raise
-        logger.debug("fetch_bytes failed for %s: %s", url_for_log(url), e)
+        logger.debug("fetch_bytes failed for %s: %s", url_for_log(url), type(e).__name__)
         return None
 
 

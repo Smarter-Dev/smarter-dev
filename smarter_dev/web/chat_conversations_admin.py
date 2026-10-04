@@ -40,6 +40,7 @@ from smarter_dev.web.models import (
     ChatAgentError,
     ChatAgentTurn,
 )
+from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +162,7 @@ class ChatConversationsAdminController(Controller):
             context={
                 "engagement": engagement,
                 "turns": engagement.turns,
+                "content_placeholder": MESSAGE_CONTENT_PLACEHOLDER,
                 "flash_messages": get_flash_messages(request),
                 **ctx,
             },
@@ -286,7 +288,7 @@ class ChatConversationsAdminController(Controller):
 
         agent_output = turn.agent_output or {}
         voice_summary = (agent_output.get("voice_summary") or "").strip()
-        if not voice_summary:
+        if not voice_summary or voice_summary == MESSAGE_CONTENT_PLACEHOLDER:
             raise NotFoundException(detail="Turn has no voice_summary")
 
         voice_instruction = agent_output.get("voice_instruction")

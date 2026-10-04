@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import UTC, datetime
 
+import fakeredis.aioredis as fakeredis_aioredis
 import pytest
 from litestar.di import Provide
 from litestar.plugins.pydantic import PydanticPlugin
@@ -19,11 +20,15 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 from smarter_dev.shared.database import Base
+from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 from smarter_dev.web import handler_dispatch as dispatch_module
 from smarter_dev.web import handler_recurrence
 from smarter_dev.web.api_native import handlers as handlers_module
 from smarter_dev.web.api_native.handlers import HandlerController
 from smarter_dev.web.handler_caps import MAX_HANDLERS_PER_CHANNEL
+from smarter_dev.web.handler_fire_context import FIRE_CONTEXT_TTL_SECONDS
+from smarter_dev.web.handler_fire_context import fire_context_key
+from smarter_dev.web.handler_fire_context import load_fire_context
 
 
 class _StubLimiter:
@@ -59,6 +64,12 @@ async def db_session():
     await engine.dispose()
 
 
+class _Submitted(list):
+    """The captured submits, plus the in-memory Redis dispatch handed off to."""
+
+    redis = None
+
+
 @pytest.fixture
 def submitted(monkeypatch) -> list[tuple]:
     """Capture ``worker_submit`` calls and stub the scheduling/limiter seams.
@@ -66,7 +77,7 @@ def submitted(monkeypatch) -> list[tuple]:
     Time-triggered fires are armed by the tier's ``RecurringFireChain``, so the
     submit seam for them lives in ``handler_recurrence``, not the controller.
     """
-    captured: list[tuple] = []
+    captured = _Submitted()
 
     async def _submit(payload, **kwargs):
         captured.append((payload, kwargs))
@@ -77,7 +88,10 @@ def submitted(monkeypatch) -> list[tuple]:
     # The dispatch fan-out lives in handler_dispatch (the controller is a thin
     # wrapper over it), so its submit/redis/limiter seams are stubbed there.
     monkeypatch.setattr(dispatch_module, "worker_submit", _submit)
-    monkeypatch.setattr(dispatch_module, "get_redis_client", lambda: None)
+    # The fire-context hand-off writes to Redis; give it an in-memory one.
+    fake_redis = fakeredis_aioredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(dispatch_module, "get_redis_client", lambda: fake_redis)
+    captured.redis = fake_redis
     monkeypatch.setattr(
         dispatch_module, "WindowedLimiter", lambda redis: _StubLimiter(allow=True)
     )
@@ -352,6 +366,52 @@ def test_dispatch_fires_all_standard_handlers_for_trigger(client):
     assert resp.json()["dispatched"] is True
     assert len(resp.json()["handler_ids"]) == 2
     assert len(client.submitted) == 2  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_keeps_message_text_out_of_the_fire_payload(client, submitted):
+    client.post("/api/handlers", json=_event_body(name="greeter"))
+    client.post("/api/handlers", json=_event_body(name="mood-tracker"))
+    client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "C1",
+            "trigger_type": "message",
+            "trigger_context": {"trigger_type": "message", "message_content": "huzzah"},
+        },
+    )
+
+    payloads = [payload for payload, _ in submitted]
+    assert len(payloads) == 2
+    for payload in payloads:
+        assert "huzzah" not in payload.model_dump_json()
+        assert payload.trigger_context["message_content"] == MESSAGE_CONTENT_PLACEHOLDER
+    # One hand-off, shared by both fires, holding the verbatim context for
+    # the hand-off window and no longer.
+    [context_ref] = {payload.context_ref for payload in payloads}
+    key = fire_context_key(context_ref)
+    restored = await load_fire_context(
+        submitted.redis, payloads[0].trigger_context, context_ref
+    )
+    assert restored["message_content"] == "huzzah"
+    assert 0 < await submitted.redis.ttl(key) <= FIRE_CONTEXT_TTL_SECONDS
+
+
+def test_dispatch_without_message_text_hands_nothing_off(client, submitted):
+    client.post("/api/handlers", json=_event_body(name="greeter"))
+    client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "C1",
+            "trigger_type": "message",
+            "trigger_context": {"trigger_type": "message"},
+        },
+    )
+
+    [(payload, _)] = submitted
+    assert payload.context_ref is None
 
 
 def test_dispatch_rate_limited(client, monkeypatch):

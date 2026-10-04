@@ -36,6 +36,7 @@ from smarter_dev.bot.utils.stop_detection import (
     random_stop_ack,
     set_channel_cooldown,
 )
+from smarter_dev.shared.exception_logging import log_exception
 
 if TYPE_CHECKING:
     pass
@@ -107,10 +108,11 @@ async def _reject_when_over_limit(bot: Any, event: hikari.MessageCreateEvent) ->
     try:
         status = await over_limit_status(redis, user_id)
     except RedisError:
-        logger.warning(
+        log_exception(
+            logger,
             "Failed to check message limit for user %s — allowing message",
             user_id,
-            exc_info=True,
+            level=logging.WARNING,
         )
         return False
     if status is None:
@@ -121,10 +123,11 @@ async def _reject_when_over_limit(bot: Any, event: hikari.MessageCreateEvent) ->
             redis, user_id, status.retry_epoch
         )
     except RedisError:
-        logger.warning(
+        log_exception(
+            logger,
             "Failed to claim limit-notice throttle for user %s",
             user_id,
-            exc_info=True,
+            level=logging.WARNING,
         )
         first_rejection_of_episode = False
     if first_rejection_of_episode:
@@ -139,7 +142,7 @@ async def _reject_when_over_limit(bot: Any, event: hikari.MessageCreateEvent) ->
                 user_mentions=[event.message.author.id],
             )
         except Exception:
-            logger.exception("Failed to send message-limit notice")
+            log_exception(logger, "Failed to send message-limit notice")
     return True
 
 
@@ -161,10 +164,11 @@ async def _record_engaged_message(bot: Any, event: hikari.MessageCreateEvent) ->
             {str(event.message.id): event.message.created_at.timestamp()},
         )
     except RedisError:
-        logger.warning(
+        log_exception(
+            logger,
             "Failed to record message-limit charge for user %s",
             event.message.author.id,
-            exc_info=True,
+            level=logging.WARNING,
         )
         return
     for warning in warnings or ():
@@ -177,7 +181,8 @@ async def _record_engaged_message(bot: Any, event: hikari.MessageCreateEvent) ->
                 user_mentions=[event.message.author.id],
             )
         except Exception:
-            logger.exception(
+            log_exception(
+                logger,
                 "Failed to send %s%% message-limit warning to user %s",
                 warning.percentage,
                 event.message.author.id,
@@ -220,10 +225,11 @@ async def _channel_auto_responds(bot: Any, event: hikari.MessageCreateEvent) -> 
             str(event.guild_id), str(event.channel_id)
         )
     except Exception:
-        logger.warning(
+        log_exception(
+            logger,
             "Failed to read model override for channel %s — no auto-respond",
             event.channel_id,
-            exc_info=True,
+            level=logging.WARNING,
         )
         return False
     return bool(override and override.auto_respond)
@@ -253,10 +259,11 @@ async def _proactive_channel(bot: Any, event: hikari.MessageCreateEvent) -> bool
             str(event.guild_id), str(event.channel_id)
         )
     except Exception:
-        logger.warning(
+        log_exception(
+            logger,
             "Failed to read proactive settings for channel %s — classic chat stays on",
             event.channel_id,
-            exc_info=True,
+            level=logging.WARNING,
         )
         return False
     return bool(settings.enabled)
@@ -296,7 +303,7 @@ async def _activate_engine(registry: Any, event: hikari.MessageCreateEvent) -> N
                 reply=event.message,
             )
         except Exception:
-            logger.exception("Failed to send rate-limit message")
+            log_exception(logger, "Failed to send rate-limit message")
         return
 
     if await _reject_when_over_limit(plugin.bot, event):
@@ -380,7 +387,7 @@ async def on_message_create(event: hikari.GuildMessageCreateEvent) -> None:
                     event.channel_id, ack, reply=event.message
                 )
             except Exception:
-                logger.exception("Failed to send stop ack")
+                log_exception(logger, "Failed to send stop ack")
             return
 
     if should_activate:
@@ -403,7 +410,7 @@ async def on_message_create(event: hikari.GuildMessageCreateEvent) -> None:
     try:
         await memory.increment_idle_counter(event.channel_id)
     except Exception:
-        logger.exception("Failed to bump idle counter for channel %s", event.channel_id)
+        log_exception(logger, "Failed to bump idle counter for channel %s", event.channel_id)
 
 
 def load(bot: lightbulb.BotApp) -> None:
@@ -418,7 +425,7 @@ def unload(bot: lightbulb.BotApp) -> None:
         loop = asyncio.get_event_loop()
         loop.create_task(get_chat_engine_registry().shutdown_all())
     except Exception:
-        logger.exception("Error shutting down chat engine registry")
+        log_exception(logger, "Error shutting down chat engine registry")
 
     bot.remove_plugin(plugin)
     logger.info("Mention plugin unloaded")

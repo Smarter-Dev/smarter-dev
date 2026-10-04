@@ -17,6 +17,7 @@ import dspy
 from smarter_dev.bot.agents.mod_tools import ActionTracker, create_moderation_tools
 from smarter_dev.bot.agents.models import DiscordMessage
 from smarter_dev.llm_config import get_llm_model, get_model_info
+from smarter_dev.shared.exception_logging import log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +139,7 @@ async def _enforce_channel_message(
             )
         tracker.channel_message = result.message
     except Exception:
-        logger.exception("Failed to generate follow-up channel message")
+        log_exception(logger, "Failed to generate follow-up channel message")
         # Fallback: generic message
         tracker.channel_message = (
             "Moderation action has been taken. A human moderator will review "
@@ -232,7 +233,7 @@ async def run_moderation_agent(
         return assessment, tracker
 
     except Exception as e:
-        logger.exception(f"Moderation triage failed for guild {guild_id}: {e}")
+        log_exception(logger, f"Moderation triage failed for guild {guild_id}: {type(e).__name__}")
         # Only the error class reaches the mod channel; the message can carry
         # provider internals. Not retried: actions may already have run.
         tracker.failure = type(e).__name__

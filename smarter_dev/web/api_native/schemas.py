@@ -686,6 +686,9 @@ class ChatAgentErrorCreate(BaseAPIModel):
     error_type: str
     error_message: str
     traceback: str
+    # True when ``traceback`` holds only exception types and frames
+    # (``exception_trace``); a raw traceback is not stored.
+    trace_redacted: bool = False
     provider_status_code: Optional[int] = None
     provider_body: Optional[str] = None
     error_context: dict = Field(default_factory=dict)

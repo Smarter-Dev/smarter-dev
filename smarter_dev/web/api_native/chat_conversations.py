@@ -65,9 +65,12 @@ from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.config import get_settings
+from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 from smarter_dev.shared.message_content import redact_chat_agent_messages
 from smarter_dev.shared.message_content import redact_model_message_parts
 from smarter_dev.shared.message_content import redact_text
+from smarter_dev.shared.message_content import redact_turn_decision
+from smarter_dev.shared.message_content import stored_error_type
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
@@ -347,7 +350,9 @@ def _compaction_event_row(
         event_kind=event.event_kind,
         tool_name=event.tool_name,
         original_content=redact_text(event.original_content),
-        summary=event.summary,
+        # A summary retells what members said, so it is stored as the
+        # placeholder like the content it summarises.
+        summary=redact_text(event.summary),
         original_chars=event.original_chars,
         summary_chars=event.summary_chars,
         chars_saved=event.original_chars - event.summary_chars,
@@ -494,8 +499,10 @@ def _engagement_totals_update(
         + compaction.cost_usd,
         "total_cost_usd": ChatAgentEngagement.total_cost_usd + total_cost_delta,
     }
-    last_topic = data.agent_output.get("topic")
-    last_notes = data.agent_output.get("notes")
+    # The engagement list shows that a turn wrote a topic, never the topic:
+    # it is the bot's own summary of the conversation.
+    last_topic = redact_text(data.agent_output.get("topic"))
+    last_notes = redact_text(data.agent_output.get("notes"))
     if last_topic is not None:
         update_values["last_topic"] = last_topic
     if last_notes is not None:
@@ -572,10 +579,17 @@ class ChatConversationController(Controller):
             model_name=data.model_name,
             reasoning_level=data.reasoning_level,
             error_type=data.error_type,
-            error_message=data.error_message,
-            traceback=data.traceback,
+            # Only types and frames are kept: any exception message can carry
+            # a member's words. A bot that predates trace_redacted sends the
+            # raw traceback, so it is not stored at all.
+            error_message=MESSAGE_CONTENT_PLACEHOLDER,
+            traceback=(
+                data.traceback if data.trace_redacted else MESSAGE_CONTENT_PLACEHOLDER
+            ),
             provider_status_code=data.provider_status_code,
-            provider_body=data.provider_body,
+            provider_body=(
+                None if data.provider_body is None else MESSAGE_CONTENT_PLACEHOLDER
+            ),
             error_context=data.error_context,
         )
         db_session.add(error)
@@ -622,7 +636,7 @@ class ChatConversationController(Controller):
             turn_kind=data.turn_kind,
             output_kind=data.output_kind,
             triggering_messages=redact_chat_agent_messages(data.triggering_messages),
-            agent_output=data.agent_output,
+            agent_output=redact_turn_decision(data.agent_output),
             model_messages_delta=redact_model_message_parts(data.model_messages_delta),
             duration_ms=data.duration_ms,
             chat_tokens_input=data.chat_tokens_input,
@@ -637,7 +651,7 @@ class ChatConversationController(Controller):
             voice_model_name=data.voice_model_name,
             voice_cost_usd=voice_cost,
             voice_sent_ok=data.voice_sent_ok,
-            voice_send_error=data.voice_send_error,
+            voice_send_error=stored_error_type(data.voice_send_error),
         )
         db_session.add(turn)
         await db_session.flush()  # populate turn.id for compaction-event FKs
