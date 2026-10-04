@@ -217,7 +217,7 @@ async def test_the_list_page_shows_processes_and_consumers(db_session, patched, 
     response = await PrivacyPurgeAdminController.list_requests.fn(
         None, request=_Request(), db_session=db_session
     )
-    assert response.context["runtimes"]["bot"] == {"processes": 1, "revision": 1, "consumers": 1}
+    assert response.context["runtimes"]["bot"] == {"processes": 1, "revision": 1, "consumers": 1, "unreadable": 0}
 
 
 # -- the Discord lookup never logs the ID -------------------------------------------
@@ -386,6 +386,11 @@ def test_a_component_behind_the_block_list_is_shown_as_such():
         list_revision=5,
     )
     assert "behind the block list (holding revision 4 of 5)" in html
+    unreadable = env.get_template("admin/bot/privacy_purges/_runtimes.html").render(
+        runtimes={"bot": {"processes": 1, "revision": None, "consumers": 1, "unreadable": 1}},
+        list_revision=5,
+    )
+    assert "1 process reported a revision that cannot be read" in unreadable
     assert "waits for that process" in html
     assert html.count("behind the block list") == 1
 

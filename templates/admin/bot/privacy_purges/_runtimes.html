@@ -3,7 +3,7 @@
     <li>
         {{ component }}:
         {% if state.revision is none %}
-        <span class="sk-badge sk-badge-danger">not enforcing</span> (no live process reports)
+        <span class="sk-badge sk-badge-danger">not enforcing</span> {% if state.unreadable %}({{ state.unreadable }} process{{ "es" if state.unreadable != 1 else "" }} reported a revision that cannot be read){% else %}(no live process reports){% endif %}
         {% elif list_revision is defined and state.revision < list_revision %}
         <span class="sk-badge sk-badge-danger">behind the block list (holding revision {{ state.revision }} of {{ list_revision }})</span>
         {{ state.processes }} live process{{ "es" if state.processes != 1 else "" }}. A purge started now waits for that process to catch up.
