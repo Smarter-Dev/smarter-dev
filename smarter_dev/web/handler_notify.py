@@ -19,6 +19,7 @@ from smarter_dev.web.handler_caps import (
     handler_error_notice_key,
 )
 from smarter_dev.web.handler_emitter import DiscordEmitter
+from smarter_dev.shared.exception_logging import log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,8 @@ async def notify_handler_error(
         await emitter.create_message(channel_id, format_error_notice(error))
         return True
     except Exception:  # noqa: BLE001 — a notice must never break the fire's audit
-        logger.warning(
-            "failed to post handler error notice (channel=%s)", channel_id, exc_info=True
+        log_exception(
+            logger,
+            "failed to post handler error notice (channel=%s)", channel_id, level=logging.WARNING
         )
         return False

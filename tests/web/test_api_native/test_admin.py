@@ -121,7 +121,7 @@ def test_create_and_get_conversation(client):
     data = detail.json()
     assert data["id"] == conversation_id
     assert data["user_question"] == MESSAGE_CONTENT_PLACEHOLDER
-    assert data["bot_response"] == "very well, thanks"
+    assert data["bot_response"] == MESSAGE_CONTENT_PLACEHOLDER
     assert data["tokens_used"] == 42
     assert data["is_resolved"] is False
 
@@ -268,7 +268,7 @@ def test_mention_question_is_stored_as_placeholder(client):
         user_question="hey bot, why is my deploy failing?",
     )
     assert stored["user_question"] == MESSAGE_CONTENT_PLACEHOLDER
-    assert stored["bot_response"] == "very well, thanks"
+    assert stored["bot_response"] == MESSAGE_CONTENT_PLACEHOLDER
 
 
 def test_slash_command_question_is_stored_verbatim(client):
@@ -349,6 +349,16 @@ def test_search_matches_a_slash_command_question_not_a_mention(client):
     assert found.json()["total"] == 1
     assert found.json()["items"][0]["interaction_type"] == "slash_command"
 
+
+
+def test_search_skips_the_placeholder(client):
+    _created_conversation(
+        client, interaction_type="mention", user_question="why is it failing?"
+    )
+
+    for term in ("message", "content"):
+        found = client.get("/api/admin/conversations", params={"search": term})
+        assert found.json()["total"] == 0, term
 
 def test_create_conversation_db_failure_500_rolls_back(client, db_session, monkeypatch):
     monkeypatch.setattr(

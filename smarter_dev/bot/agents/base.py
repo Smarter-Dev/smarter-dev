@@ -28,7 +28,7 @@ class BaseAgent:
                 logger.debug(f"DSPy usage data: {usage_data}, extracted tokens: {tokens_used}")
                 return tokens_used
         except (AttributeError, TypeError) as e:
-            logger.debug(f"DSPy get_lm_usage() not available or empty: {e}")
+            logger.debug(f"DSPy get_lm_usage() not available or empty: {type(e).__name__}")
 
         # Method 2: Fallback to token counting from prediction object
         # This handles Claude/Anthropic, Gemini, and other provider-specific response structures
@@ -47,7 +47,7 @@ class BaseAgent:
                     logger.debug(f"Completion usage: {usage}, extracted tokens: {tokens_used}")
                     return tokens_used
         except (AttributeError, TypeError) as e:
-            logger.debug(f"Failed to extract usage from completions: {e}")
+            logger.debug(f"Failed to extract usage from completions: {type(e).__name__}")
 
         # Method 3: Check for Claude/Anthropic specific response structure
         try:
@@ -61,7 +61,7 @@ class BaseAgent:
                         logger.debug(f"Claude usage extracted from completion.usage: {tokens_used}")
                         return tokens_used
         except (AttributeError, TypeError) as e:
-            logger.debug(f"Failed to extract Claude-specific usage: {e}")
+            logger.debug(f"Failed to extract Claude-specific usage: {type(e).__name__}")
 
         return tokens_used
 

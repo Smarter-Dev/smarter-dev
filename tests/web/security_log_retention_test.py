@@ -10,6 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from skrift.db.models.worker import WorkerDeadLetterRecord
 from sqlalchemy import func
 from sqlalchemy import select
 
@@ -116,7 +117,8 @@ async def test_commits_its_own_work(db_session, test_engine):
 async def test_hourly_sweep_entrypoint_deletes_expired_security_logs(
     db_session, monkeypatch
 ):
-    """The CronJob runs scripts/retention_sweep.py; running it clears old logs."""
+    """The CronJob runs scripts/retention_sweep.py; running it clears old logs
+    and old worker dead letters."""
     spec = importlib.util.spec_from_file_location(
         "retention_sweep_script",
         Path(__file__).resolve().parents[2] / "scripts" / "retention_sweep.py",
@@ -133,5 +135,23 @@ async def test_hourly_sweep_entrypoint_deletes_expired_security_logs(
     db_session.add_all([_log(old, "old"), _log(datetime.now(UTC), "fresh")])
     await db_session.commit()
 
+    db_session.add(
+        WorkerDeadLetterRecord(
+            entry_id="old-dead-letter",
+            queue="agents",
+            job_type="handlers.fire",
+            cause="retries_exhausted",
+            state="open",
+            entry={},
+            entry_created_at=old,
+            entry_updated_at=old,
+        )
+    )
+    await db_session.commit()
+
     assert await script.main() == 0
     assert await _remaining(db_session) == ["fresh"]
+    assert (
+        await db_session.scalar(select(func.count()).select_from(WorkerDeadLetterRecord))
+        == 0
+    )

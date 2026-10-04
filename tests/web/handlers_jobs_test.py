@@ -514,6 +514,143 @@ async def test_standard_fire_records_zero_role_changes(monkeypatch, test_engine)
     assert runs[0].role_changes == 0
 
 
+# -- message text stays out of the worker tables and the run row ---------------
+
+import fakeredis.aioredis as fakeredis_aioredis
+
+from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
+from smarter_dev.web.handler_fire_context import hand_off_fire_context
+from smarter_dev.web.handler_run_audit import EXPIRED_CONTEXT_ERROR
+
+
+async def _seed_std_handler(engine) -> str:
+    handler_id = str(uuid4())
+    async with async_sessionmaker(engine, expire_on_commit=False)() as s:
+        s.add(
+            ChannelHandler(
+                id=UUID(handler_id),
+                guild_id="G1",
+                channel_id="C1",
+                name="std-ctx",
+                trigger_type="message",
+                settings={},
+                description="d",
+                script="pass\n",
+                created_by="U1",
+            )
+        )
+        await s.commit()
+    return handler_id
+
+
+def _patch_std_fire(monkeypatch, engine, fake_run, redis):
+    async def fake_agent(*args, **kwargs):
+        return ""
+
+    async def fake_notify(**kwargs):
+        return None
+
+    monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
+    monkeypatch.setattr(handler_agent, "run_gathering_agent", fake_agent)
+    monkeypatch.setattr(handlers_jobs, "notify_handler_error", fake_notify)
+    monkeypatch.setattr(
+        handlers_jobs,
+        "get_settings",
+        lambda: SimpleNamespace(handlers_enabled=True, discord_bot_token="tok"),
+    )
+    monkeypatch.setattr(
+        handlers_jobs, "get_db_session_context", _RealSessionCtx(engine)
+    )
+    monkeypatch.setattr(handlers_jobs, "get_redis_client", lambda: redis)
+    monkeypatch.setattr(handlers_jobs, "WindowedLimiter", lambda **kwargs: object())
+
+
+async def test_fire_runs_the_handed_off_context_and_stores_none_of_it(
+    monkeypatch, test_engine
+):
+    handler_id = await _seed_std_handler(test_engine)
+    redis = fakeredis_aioredis.FakeRedis(decode_responses=True)
+    seen = []
+
+    async def fake_run(script, context, **kwargs):
+        seen.append(dict(context))
+        return HandlerResult(
+            outcome="error",
+            usage=dict(_USAGE),
+            duration_ms=1,
+            error=f"runtime: ValueError: {MESSAGE_CONTENT_PLACEHOLDER}",
+        )
+
+    _patch_std_fire(monkeypatch, test_engine, fake_run, redis)
+    redacted, context_ref = await hand_off_fire_context(
+        redis, {"trigger_type": "message", "content": "what someone said"}
+    )
+
+    await _fire(
+        HandlerFirePayload(
+            handler_id=handler_id, trigger_context=redacted, context_ref=context_ref
+        )
+    )
+
+    assert seen == [{"trigger_type": "message", "content": "what someone said"}]
+    [run] = await _load_runs(test_engine, handler_id)
+    assert run.trigger_context["content"] == MESSAGE_CONTENT_PLACEHOLDER
+    assert run.error == f"runtime: ValueError: {MESSAGE_CONTENT_PLACEHOLDER}"
+
+
+async def test_fire_whose_hand_off_expired_is_skipped_not_run(
+    monkeypatch, test_engine
+):
+    handler_id = await _seed_std_handler(test_engine)
+    redis = fakeredis_aioredis.FakeRedis(decode_responses=True)
+
+    async def fake_run(script, context, **kwargs):
+        raise AssertionError("a script must not run on the placeholder")
+
+    _patch_std_fire(monkeypatch, test_engine, fake_run, redis)
+
+    result = await _fire(
+        HandlerFirePayload(
+            handler_id=handler_id,
+            trigger_context={"content": MESSAGE_CONTENT_PLACEHOLDER},
+            context_ref="expired",
+        )
+    )
+
+    assert result == {"status": "skipped"}
+    [run] = await _load_runs(test_engine, handler_id)
+    assert run.outcome == "skipped"
+    assert run.error == EXPIRED_CONTEXT_ERROR
+
+
+async def test_admin_fire_whose_hand_off_expired_is_skipped_not_run(
+    monkeypatch, test_engine
+):
+    handler_id = await _seed_admin_handler(test_engine, "G1")
+
+    async def fake_run(script, context, **kwargs):
+        raise AssertionError("a script must not run on the placeholder")
+
+    _patch_admin_job(monkeypatch, test_engine, _ok_result())
+    monkeypatch.setattr(handler_runtime, "run_handler_script", fake_run)
+    redis = fakeredis_aioredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(admin_handlers_jobs, "get_redis_client", lambda: redis)
+
+    result = await _admin_fire(
+        AdminHandlerFirePayload(
+            admin_handler_id=handler_id,
+            channel_id="C1",
+            trigger_context={"content": MESSAGE_CONTENT_PLACEHOLDER},
+            context_ref="expired",
+        )
+    )
+
+    assert result == {"status": "skipped"}
+    [run] = await _load_runs(test_engine, handler_id)
+    assert run.outcome == "skipped"
+    assert run.error == EXPIRED_CONTEXT_ERROR
+
+
 # -- schedule_timer wiring (persisted one-shot self re-arm, E3) ----------------
 
 from datetime import datetime, timedelta, timezone

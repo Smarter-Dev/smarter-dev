@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.guild_event_log import GuildEvent
 from smarter_dev.shared.guild_event_log import append_event
 from smarter_dev.shared.redis_client import get_redis_client
@@ -31,4 +32,4 @@ async def record_guild_event(event: GuildEvent, *, now: datetime | None = None) 
     try:
         await append_event(get_redis_client(), event, now=now)
     except Exception:  # noqa: BLE001 — recording must never break the action
-        logger.debug("guild event recording failed", exc_info=True)
+        log_exception(logger, "guild event recording failed", level=logging.DEBUG)

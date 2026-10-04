@@ -1189,7 +1189,7 @@ async def _apply_timeout(
             "Spam engine could not time out %s in guild %s: %s",
             event.author.id,
             event.guild_id,
-            error,
+            type(error).__name__,
         )
         return False
     except hikari.BadRequestError as error:
@@ -1202,7 +1202,7 @@ async def _apply_timeout(
             duration_seconds,
             event.author.id,
             event.guild_id,
-            error,
+            type(error).__name__,
         )
         return False
 

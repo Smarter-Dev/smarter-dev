@@ -24,9 +24,13 @@ from pydantic_ai.messages import UserPromptPart
 
 from smarter_dev.bot.agents.chat_models import Message
 from smarter_dev.bot.agents.chat_models import MessageAttachment
+from smarter_dev.bot.agents.chat_models import MessageScore
+from smarter_dev.bot.agents.chat_models import ResponseBody
+from smarter_dev.bot.agents.chat_models import TurnDecision
 from smarter_dev.shared.message_content import CONTENT_RETENTION_MILLISECONDS
 from smarter_dev.shared.message_content import CONTENT_RETENTION_WINDOW
 from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
+from smarter_dev.shared.message_content import exception_trace
 from smarter_dev.shared.message_content import oldest_retained_stream_id
 from smarter_dev.shared.message_content import redact_chat_agent_messages
 from smarter_dev.shared.message_content import redact_forum_post
@@ -35,6 +39,8 @@ from smarter_dev.shared.message_content import redact_help_question
 from smarter_dev.shared.message_content import redact_model_message_parts
 from smarter_dev.shared.message_content import redact_text
 from smarter_dev.shared.message_content import redact_trigger_context
+from smarter_dev.shared.message_content import redact_turn_decision
+from smarter_dev.shared.message_content import stored_error_type
 
 
 def chat_message_dict(**overrides) -> dict:
@@ -184,6 +190,7 @@ class TestRedactChatAgentMessages:
             "body",
             "reactions",
             "attachments",
+            "reply_to_attachments",
             "sent_at",
             "mentions_bot",
         }
@@ -204,11 +211,20 @@ class TestRedactModelMessageParts:
         assert tool_return["tool_name"] == "search"
         assert tool_return["tool_call_id"] == "c1"
 
-    def test_keeps_system_text_and_tool_call_parts(self):
-        original = model_messages_dump()
-        messages = redact_model_message_parts(original)
-        assert messages[0]["parts"][0] == original[0]["parts"][0]
-        assert messages[1]["parts"] == original[1]["parts"]
+    def test_the_models_own_parts_keep_only_their_bookkeeping(self):
+        # The reply, the system prompt and a tool call's arguments are the
+        # bot's own words, and each can quote a member.
+        messages = redact_model_message_parts(model_messages_dump())
+        system, text, call = (
+            messages[0]["parts"][0],
+            messages[1]["parts"][0],
+            messages[1]["parts"][1],
+        )
+        assert system["content"] == MESSAGE_CONTENT_PLACEHOLDER
+        assert text["content"] == MESSAGE_CONTENT_PLACEHOLDER
+        assert call["args"] == {}
+        assert call["tool_name"] == "search"
+        assert call["tool_call_id"] == "c1"
 
     def test_keeps_message_level_fields(self):
         original = model_messages_dump()
@@ -261,15 +277,24 @@ class TestRedactModelMessageParts:
         redacted = redact_model_message_parts(dump)
         assert len(list(ModelMessagesTypeAdapter.validate_python(redacted))) == 1
 
-    def test_reasoning_is_ai_authored_and_passes_through(self):
-        # Reasoning summaries are the model's own text, like agent_output; the
-        # retention sweep bounds them at 48h with the rest of the delta.
+    def test_reasoning_is_redacted_because_it_retells_members(self):
+        # Reasoning is model-authored but restates what members said, so it
+        # is stored as the placeholder rather than left to the sweep.
         dump = ModelMessagesTypeAdapter.dump_python(
             [ModelResponse(parts=[ThinkingPart(content="the user asked about uv")])],
             mode="json",
         )
-        [message] = redact_model_message_parts(dump)
-        assert message["parts"][0]["content"] == "the user asked about uv"
+        redacted = redact_model_message_parts(dump)
+        [message] = redacted
+        assert message["parts"][0]["part_kind"] == "thinking"
+        assert message["parts"][0]["content"] == MESSAGE_CONTENT_PLACEHOLDER
+        assert len(list(ModelMessagesTypeAdapter.validate_python(redacted))) == 1
+
+    def test_a_provider_compaction_part_is_redacted(self):
+        [message] = redact_model_message_parts(
+            [{"parts": [{"part_kind": "compaction", "content": "they said this"}]}]
+        )
+        assert message["parts"][0]["content"] == MESSAGE_CONTENT_PLACEHOLDER
 
     def test_redacts_a_retry_prompt(self):
         dump = ModelMessagesTypeAdapter.dump_python(
@@ -688,3 +713,181 @@ class TestOldestRetainedStreamId:
         earlier = datetime(2026, 7, 26, 12, 0, tzinfo=UTC)
         later = datetime(2026, 7, 26, 13, 0, tzinfo=UTC)
         assert oldest_retained_stream_id(later) > oldest_retained_stream_id(earlier)
+
+
+def _raised(error: BaseException) -> BaseException:
+    try:
+        raise error
+    except BaseException as raised:
+        return raised
+
+
+class TestExceptionTrace:
+    def test_keeps_types_and_frames_and_no_message(self):
+        trace = exception_trace(_raised(RuntimeError("what someone said")))
+        assert "what someone said" not in trace
+        lines = trace.splitlines()
+        assert lines[0] == "Traceback (most recent call last):"
+        assert lines[1].startswith('  File "')
+        assert ", in _raised" in lines[1]
+        assert lines[-1] == f"RuntimeError: {MESSAGE_CONTENT_PLACEHOLDER}"
+
+    def test_a_chained_error_keeps_each_type_and_its_separator(self):
+        try:
+            try:
+                raise ValueError("what someone said")
+            except ValueError as cause:
+                raise RuntimeError("and again what someone said") from cause
+        except RuntimeError as error:
+            trace = exception_trace(error)
+        assert "what someone said" not in trace
+        assert trace.index(f"ValueError: {MESSAGE_CONTENT_PLACEHOLDER}") < trace.index(
+            "direct cause"
+        ) < trace.index(f"RuntimeError: {MESSAGE_CONTENT_PLACEHOLDER}")
+
+    def test_a_body_quoted_only_in_a_wrapped_error_is_dropped(self):
+        # A wrapper raised while handling a provider error: the body is only
+        # in the context's message.
+        class ProviderError(Exception):
+            body = {"error": "you said: what someone said"}
+
+        try:
+            try:
+                raise ProviderError("status 400, body: you said: what someone said")
+            except ProviderError:
+                raise RuntimeError("agent run failed")  # noqa: B904 — the context is the point
+        except RuntimeError as error:
+            trace = exception_trace(error)
+        assert "what someone said" not in trace
+        assert "another exception occurred" in trace
+        assert "ProviderError: " in trace
+
+    def test_message_text_shaped_like_a_frame_is_not_kept(self):
+        # Text that looks like a traceback line is still message text.
+        message = 'see below\n  File "what someone said", line 1, in secretword'
+        trace = exception_trace(_raised(ValueError(message)))
+        assert "what someone said" not in trace
+        assert "secretword" not in trace
+
+    def test_a_validation_error_drops_its_input(self):
+        from pydantic import BaseModel
+
+        class Reply(BaseModel):
+            count: int
+
+        try:
+            Reply(count="what someone said")
+        except Exception as error:
+            trace = exception_trace(error)
+        assert "what someone said" not in trace
+        assert f"pydantic_core._pydantic_core.ValidationError: {MESSAGE_CONTENT_PLACEHOLDER}" in trace
+
+    def test_a_label_shaped_message_keeps_nothing(self):
+        trace = exception_trace(_raised(KeyError("secretword: rest of message")))
+        assert "secretword" not in trace
+        assert trace.endswith(f"KeyError: {MESSAGE_CONTENT_PLACEHOLDER}\n")
+
+    def test_a_suppressed_context_is_left_out(self):
+        try:
+            try:
+                raise ValueError("what someone said")
+            except ValueError:
+                raise RuntimeError("clean") from None
+        except RuntimeError as error:
+            trace = exception_trace(error)
+        assert "ValueError" not in trace
+
+
+
+def turn_decision_dump() -> dict:
+    """A real serialised chat turn decision, every text field filled."""
+    return TurnDecision(
+        rankings=[MessageScore(message_id="1", score=9, reasoning="they asked x")],
+        response_language="english",
+        topic="what they talked about",
+        response=ResponseBody(
+            target_message_id="1",
+            reply_directly=True,
+            message="you said x, so",
+            voice_summary="you said x",
+            voice_instruction="warmly",
+        ),
+        continue_watching=True,
+        notes="they like x",
+    ).model_dump(mode="json")
+
+
+class TestRedactTurnDecision:
+    def test_keeps_the_decision_and_none_of_its_words(self):
+        redacted = redact_turn_decision(turn_decision_dump())
+        assert redacted["rankings"] == [
+            {"message_id": "1", "score": 9, "reasoning": MESSAGE_CONTENT_PLACEHOLDER}
+        ]
+        assert redacted["response_language"] == "english"
+        assert redacted["continue_watching"] is True
+        assert redacted["topic"] == MESSAGE_CONTENT_PLACEHOLDER
+        assert redacted["notes"] == MESSAGE_CONTENT_PLACEHOLDER
+        response = redacted["response"]
+        assert response["target_message_id"] == "1"
+        assert response["reply_directly"] is True
+        for key in ("message", "voice_summary", "voice_instruction"):
+            assert response[key] == MESSAGE_CONTENT_PLACEHOLDER
+
+    def test_no_text_survives_anywhere(self):
+        redacted = str(redact_turn_decision(turn_decision_dump()))
+        for text in ("they asked x", "what they talked about", "you said x", "warmly"):
+            assert text not in redacted
+
+    def test_the_serialised_shape_has_not_drifted(self):
+        # A field added to TurnDecision or ResponseBody is redacted until it is
+        # added to a keep-list; this test makes that a decision.
+        dump = turn_decision_dump()
+        assert set(dump) == {
+            "rankings",
+            "response_language",
+            "topic",
+            "response",
+            "continue_watching",
+            "notes",
+        }
+        assert set(dump["response"]) == {
+            "target_message_id",
+            "reply_directly",
+            "message",
+            "voice_summary",
+            "voice_instruction",
+            "not_cs_topic_brief_answer",
+        }
+
+    def test_redacts_a_key_it_has_never_seen(self):
+        redacted = redact_turn_decision({"blog_topic_candidates": [{"headline": "x"}]})
+        assert redacted == {"blog_topic_candidates": []}
+
+    def test_absent_and_null_stay_so(self):
+        assert redact_turn_decision({"notes": None, "response": None}) == {
+            "notes": None,
+            "response": None,
+        }
+
+    def test_is_idempotent_and_pure(self):
+        original = turn_decision_dump()
+        once = redact_turn_decision(original)
+        assert redact_turn_decision(once) == once
+        assert original == turn_decision_dump()
+
+
+class TestStoredErrorType:
+    @pytest.mark.parametrize(
+        "value", ["TimeoutError", "hikari.errors.BadRequestError", None]
+    )
+    def test_a_type_name_is_kept(self, value):
+        assert stored_error_type(value) == value
+
+    @pytest.mark.parametrize(
+        "value", ["BadRequestError: said hello", "said hello", "a.b c", "x."]
+    )
+    def test_anything_else_is_the_placeholder(self, value):
+        assert stored_error_type(value) == MESSAGE_CONTENT_PLACEHOLDER
+
+    def test_empty_stays_empty(self):
+        assert stored_error_type("") == ""

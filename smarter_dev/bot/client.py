@@ -37,6 +37,8 @@ from smarter_dev.bot.utils.embeds import create_error_embed
 from smarter_dev.bot.utils.image_embeds import close_generator
 from smarter_dev.shared.config import Settings
 from smarter_dev.shared.config import get_settings
+from smarter_dev.shared.exception_logging import log_exception
+from smarter_dev.shared.message_content import exception_trace
 from smarter_dev.shared.observability import configure_observability
 
 # Named, not __name__: the pod runs this module as __main__, which the bot's
@@ -211,7 +213,7 @@ async def store_streak_celebration(
                 return False
 
     except Exception as e:
-        logger.error(f"❌ Error storing streak celebration: {e}")
+        logger.error(f"❌ Error storing streak celebration: {type(e).__name__}")
         return False
 
 
@@ -952,7 +954,9 @@ async def post_agent_responses(
             response_posted = True
 
     except Exception as e:
-        logger.error(f"Error posting agent responses to thread {thread_id}: {e}")
+        logger.error(
+            f"Error posting agent responses to thread {thread_id}: {type(e).__name__}"
+        )
 
     return response_posted
 
@@ -1111,7 +1115,8 @@ async def handle_forum_thread_create(bot: lightbulb.BotApp, event) -> None:
                 )
         except Exception as e:
             logger.error(
-                f"Could not fetch initial message for thread {event.thread.id}: {e}"
+                f"Could not fetch initial message for thread {event.thread.id}: "
+                f"{type(e).__name__}"
             )
 
         # Log thread details for debugging
@@ -1155,8 +1160,8 @@ async def handle_forum_thread_create(bot: lightbulb.BotApp, event) -> None:
                 bot, event.thread.id, topic_user_map, response_posted
             )
 
-    except Exception as e:
-        logger.error(f"Error handling forum thread creation: {e}")
+    except Exception:
+        log_exception(logger, "Error handling forum thread creation")
 
 
 async def handle_forum_message_create(bot: lightbulb.BotApp, event) -> None:
@@ -1273,13 +1278,18 @@ def register_message_moderation_listeners(bot: lightbulb.BotApp) -> None:
             except hikari.HTTPError as discord_error:
                 logger.warning(
                     f"Discord call failed during the {stage_name} check "
-                    f"({message_context}): {discord_error}"
+                    f"({message_context}): {type(discord_error).__name__}"
                 )
             except Exception as unexpected_failure:
-                logger.exception(
-                    f"The {stage_name} check failed unexpectedly ({message_context})"
+                log_exception(
+                    logger,
+                    f"The {stage_name} check failed unexpectedly ({message_context})",
                 )
-                unexpected_stage_failures.append(unexpected_failure)
+                # Hikari logs whatever the listener raises in full, so only
+                # the failure's types and frames go back up.
+                unexpected_stage_failures.append(
+                    RuntimeError(exception_trace(unexpected_failure))
+                )
 
         if unexpected_stage_failures:
             raise ExceptionGroup(
@@ -1740,7 +1750,7 @@ async def run_bot() -> None:
                         # else is a bug and propagates.
                         logger.error(
                             f"Failed to generate or post streak celebration "
-                            f"message: {celebration_error}"
+                            f"message: {type(celebration_error).__name__}"
                         )
             else:
                 logger.debug(f"Daily reward not successful for {event.author}")
@@ -1796,7 +1806,7 @@ async def run_bot() -> None:
             logger.warning(
                 f"Discord call failed during the attachment filter check "
                 f"(guild {event.guild_id}, channel {event.channel_id}, "
-                f"message {event.message_id}): {discord_error}"
+                f"message {event.message_id}): {type(discord_error).__name__}"
             )
 
     # Content filters (blocked TLDs, invite links, webhook killer) followed by
@@ -2025,7 +2035,7 @@ async def run_bot() -> None:
         try:
             await log_message_edit(bot, event)
         except Exception as e:
-            logger.error(f"Failed to log message edit to audit log: {e}")
+            logger.error(f"Failed to log message edit to audit log: {type(e).__name__}")
 
     @bot.listen()
     async def on_message_delete(event: hikari.GuildMessageDeleteEvent) -> None:
@@ -2033,7 +2043,9 @@ async def run_bot() -> None:
         try:
             await log_message_delete(bot, event)
         except Exception as e:
-            logger.error(f"Failed to log message delete to audit log: {e}")
+            logger.error(
+                f"Failed to log message delete to audit log: {type(e).__name__}"
+            )
 
     @bot.listen()
     async def on_member_update(event: hikari.MemberUpdateEvent) -> None:

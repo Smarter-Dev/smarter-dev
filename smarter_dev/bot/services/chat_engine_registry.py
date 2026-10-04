@@ -13,6 +13,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from smarter_dev.bot.services.chat_engine import ChannelEngine
+from smarter_dev.shared.exception_logging import log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,8 @@ class ChatEngineRegistry:
             try:
                 await stale.expire()
             except Exception:
-                logger.exception(
+                log_exception(
+                    logger,
                     "Failed to expire stale chat engine for channel %s", channel_id
                 )
 
@@ -149,7 +151,7 @@ class ChatEngineRegistry:
             try:
                 await engine.shutdown()
             except Exception:
-                logger.exception("Error shutting down engine for %s", engine.channel_id)
+                log_exception(logger, "Error shutting down engine for %s", engine.channel_id)
 
 
 _registry: ChatEngineRegistry | None = None

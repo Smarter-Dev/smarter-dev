@@ -282,6 +282,17 @@ class TestModerationListenerOrdering:
         content_check.assert_awaited_once()
 
 
+def assert_redacted_failures(
+    group: ExceptionGroup, types: list[str], texts: list[str]
+) -> None:
+    """Hikari logs a listener's error in full, so it carries no message text."""
+    assert len(group.exceptions) == len(types)
+    for failure, type_name in zip(group.exceptions, types):
+        assert type_name in str(failure)
+    for text in texts:
+        assert all(text not in str(failure) for failure in group.exceptions)
+
+
 class TestUnexpectedModerationFailuresAreLoud:
     """A bug in a moderation stage must never be swallowed into a log line.
 
@@ -291,7 +302,8 @@ class TestUnexpectedModerationFailuresAreLoud:
     other listeners registered for the same event. Letting an unexpected
     exception propagate is therefore both safe and strictly louder than
     swallowing it, so the wiring only has to add the guild/channel/message
-    context hikari cannot know about.
+    context hikari cannot know about. Each failure goes up as its types and
+    frames only, because hikari prints whatever it catches.
     """
 
     async def test_unexpected_content_filter_failure_propagates(
@@ -306,7 +318,7 @@ class TestUnexpectedModerationFailuresAreLoud:
         with pytest.raises(ExceptionGroup) as raised:
             await moderation_listener(make_guild_message_event())
 
-        assert raised.value.exceptions == (misconfiguration,)
+        assert_redacted_failures(raised.value, ["ValueError"], ["mute duration"])
 
     async def test_unexpected_spam_engine_failure_propagates(
         self, monkeypatch: pytest.MonkeyPatch, moderation_listener
@@ -324,7 +336,7 @@ class TestUnexpectedModerationFailuresAreLoud:
         with pytest.raises(ExceptionGroup) as raised:
             await moderation_listener(make_guild_message_event())
 
-        assert raised.value.exceptions == (misconfiguration,)
+        assert_redacted_failures(raised.value, ["ValueError"], ["mute duration"])
 
     async def test_both_stage_failures_are_reported_together(
         self, monkeypatch: pytest.MonkeyPatch, moderation_listener
@@ -341,7 +353,11 @@ class TestUnexpectedModerationFailuresAreLoud:
         with pytest.raises(ExceptionGroup) as raised:
             await moderation_listener(make_guild_message_event())
 
-        assert raised.value.exceptions == (content_failure, spam_failure)
+        assert_redacted_failures(
+            raised.value,
+            ["ValueError", "ValueError"],
+            ["bad filter pattern", "bad mute duration"],
+        )
 
     async def test_unexpected_failure_is_logged_with_message_context(
         self,
@@ -363,7 +379,9 @@ class TestUnexpectedModerationFailuresAreLoud:
         ]
         assert failure_records, "the unexpected failure was not logged"
         logged = failure_records[0]
-        assert logged.exc_info is not None, "the traceback was not logged"
+        assert "ValueError" in logged.getMessage(), "the traceback was not logged"
+        assert "boom" not in logged.getMessage()
+        assert logged.exc_info is None
         assert "111" in logged.getMessage()
         assert "222" in logged.getMessage()
         assert "333" in logged.getMessage()
@@ -408,9 +426,10 @@ class TestExpectedDiscordFailuresStayContained:
             await moderation_listener(make_guild_message_event())
 
         assert any(
-            "333" in record.getMessage() and "connection reset" in record.getMessage()
+            "333" in record.getMessage() and "HTTPError" in record.getMessage()
             for record in caplog.records
         )
+        assert all("connection reset" not in r.getMessage() for r in caplog.records)
 
 
 class TestModerationListenerSkips:

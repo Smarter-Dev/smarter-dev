@@ -37,6 +37,7 @@ from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
 from smarter_dev.web.handler_run_audit import record_rearmed_run
 from smarter_dev.web.handler_schedule import ScheduleError, next_fire_at
 from smarter_dev.web.models import HandlerRun
+from smarter_dev.shared.exception_logging import log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -197,7 +198,7 @@ async def rearm_chain(
     try:
         nxt = next_fire_at(chain.settings, now)
     except ScheduleError:
-        logger.exception("cannot re-arm %s: unusable settings", chain.label)
+        log_exception(logger, "cannot re-arm %s: unusable settings", chain.label)
         return None
     if nxt is None:
         return None
@@ -234,7 +235,7 @@ async def sweep_schedule_chains(
         try:
             nxt = await rearm_chain(session, chain, now)
         except Exception:  # noqa: BLE001 — one bad handler mustn't stop the sweep
-            logger.exception("failed to re-arm %s", chain.label)
+            log_exception(logger, "failed to re-arm %s", chain.label)
             failed.append(chain.label)
             continue
         if nxt is None:

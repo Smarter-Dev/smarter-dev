@@ -421,7 +421,9 @@ async def test_summarize_web_content_fails_over_to_gemini_and_logs_critical(capl
     assert "GPT-6 Luna failed" in caplog.text
     assert "using Gemini 3.8 Flash" in caplog.text
     assert "https://e.test" in caplog.text
-    assert "Luna unavailable" in caplog.text
+    # Logged by type and frames; the error text can quote the page or prompt.
+    assert "RuntimeError" in caplog.text
+    assert "Luna unavailable" not in caplog.text
     record_failover.assert_called_once()
     assert record_failover.call_args.kwargs == {
         "operation": "web_summarizer",

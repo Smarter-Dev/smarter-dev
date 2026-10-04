@@ -97,8 +97,11 @@ from smarter_dev.bot.utils.stop_detection import set_channel_cooldown
 from smarter_dev.bot.views.model_override_views import (
     MODEL_BUDGET_FALLBACK_CUSTOM_ID_PREFIX,
 )
+from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.guild_event_log import read_since
 from smarter_dev.shared.guild_event_log import read_window
+from smarter_dev.shared.message_content import exception_trace
+from smarter_dev.shared.message_content import exception_type_name
 from smarter_dev.shared.model_catalog import get_model
 
 logger = logging.getLogger(__name__)
@@ -385,13 +388,15 @@ class ChannelEngine:
             try:
                 await memory.clear_notes(self.channel_id)
             except Exception:
-                logger.exception(
+                log_exception(
+                    logger,
                     "Failed to clear notes for channel %s", self.channel_id
                 )
         try:
             await memory.clear_history(self.channel_id)
         except Exception:
-            logger.exception(
+            log_exception(
+                logger,
                 "Failed to clear chat history for channel %s", self.channel_id
             )
         # Best-effort: tell the dashboard the engagement is over.
@@ -403,7 +408,8 @@ class ChannelEngine:
                     deactivation_reason=reason,
                 )
             except Exception:
-                logger.exception(
+                log_exception(
+                    logger,
                     "Failed to finalise chat engagement for channel %s",
                     self.channel_id,
                 )
@@ -460,7 +466,7 @@ class ChannelEngine:
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Chat engine crashed for channel %s", self.channel_id)
+            log_exception(logger, "Chat engine crashed for channel %s", self.channel_id)
             await self._deactivate(send_notes_clear=True, reason="crash")
 
     async def _run_once(self, *, first_activation: bool) -> bool:
@@ -609,7 +615,8 @@ class ChannelEngine:
                     )
                     history = await memory.read_history(self.channel_id)
             except Exception:
-                logger.exception(
+                log_exception(
+                    logger,
                     "Failed to build agent input for channel %s", self.channel_id
                 )
                 await self._post_error(
@@ -867,10 +874,13 @@ class ChannelEngine:
                 # Even a failed run (probably) hit the model — later turns
                 # inside the cache TTL should read warm.
                 self._last_model_call_at = datetime.now(UTC)
-                logger.exception(
-                    "[%s] Chat agent run failed for channel %s",
+                # Types and frames only: a provider error can quote the
+                # prompt, and so other members' messages.
+                logger.error(
+                    "[%s] Chat agent run failed for channel %s\n%s",
                     request_id,
                     self.channel_id,
+                    exception_trace(error),
                 )
                 drain_collection()  # discard
                 # The run may have crashed *after* generate_image already spent a
@@ -1010,7 +1020,8 @@ class ChannelEngine:
                     self.channel_id, list(result.all_messages())
                 )
             except Exception:
-                logger.exception(
+                log_exception(
+                    logger,
                     "[%s] Failed to persist chat history for channel %s",
                     request_id,
                     self.channel_id,
@@ -1082,7 +1093,8 @@ class ChannelEngine:
                         compaction_events=compaction_events,
                     )
             except Exception:
-                logger.exception(
+                log_exception(
+                    logger,
                     "[%s] Failed to persist chat agent turn", request_id
                 )
 
@@ -1117,7 +1129,8 @@ class ChannelEngine:
             try:
                 await memory.write_notes(self.channel_id, output.notes)
             except Exception:
-                logger.exception(
+                log_exception(
+                    logger,
                     "Failed to persist chat notes for channel %s", self.channel_id
                 )
 
@@ -1202,7 +1215,7 @@ class ChannelEngine:
                 if isinstance(res, BaseException):
                     voice_outcome = _VoiceOutcome(
                         sent_ok=False,
-                        error=f"{type(res).__name__}: {res}",
+                        error=exception_type_name(res),
                     )
                 else:
                     voice_outcome = res
@@ -1269,11 +1282,12 @@ class ChannelEngine:
                             reply_to=section_reply,
                         )
                     except Exception:
-                        logger.warning(
+                        log_exception(
+                            logger,
                             "Failed to render fenced LaTeX in channel %s; "
                             "sending source fallback",
                             self.channel_id,
-                            exc_info=True,
+                            level=logging.WARNING,
                         )
                 else:
                     logger.warning(
@@ -1311,10 +1325,11 @@ class ChannelEngine:
             await self.bot.rest.create_message(self.channel_id, **kwargs)
             return True
         except Exception:
-            logger.warning(
+            log_exception(
+                logger,
                 "Failed to post rendered LaTeX in channel %s",
                 self.channel_id,
-                exc_info=True,
+                level=logging.WARNING,
             )
             return False
 
@@ -1366,7 +1381,8 @@ class ChannelEngine:
             return True
         except Exception as err:
             if not attachments:
-                logger.exception(
+                log_exception(
+                    logger,
                     "Failed to send chat agent text in channel %s", self.channel_id
                 )
                 return False
@@ -1374,13 +1390,14 @@ class ChannelEngine:
             # Files" permission here (or the file is too big). Don't lose the
             # whole reply: resend the text alone so the answer still lands, and
             # note the missing permission when that's the cause.
-            logger.warning(
+            log_exception(
+                logger,
                 "Send with %d attachment(s) failed in channel %s (%s); "
                 "retrying text-only",
                 len(attachments),
                 self.channel_id,
                 type(err).__name__,
-                exc_info=True,
+                level=logging.WARNING,
             )
             text_only = dict(base_kwargs)
             if isinstance(err, hikari.ForbiddenError):
@@ -1389,7 +1406,8 @@ class ChannelEngine:
                 await self.bot.rest.create_message(self.channel_id, **text_only)
                 return True
             except Exception:
-                logger.exception(
+                log_exception(
+                    logger,
                     "Failed to send chat agent text (text-only fallback) in "
                     "channel %s",
                     self.channel_id,
@@ -1414,7 +1432,8 @@ class ChannelEngine:
             await self.bot.rest.create_message(self.channel_id, **kwargs)
             return True
         except Exception as err:
-            logger.exception(
+            log_exception(
+                logger,
                 "Failed to post generated image(s) in channel %s", self.channel_id
             )
             # No text body to fall back to — but if it's a permission problem,
@@ -1426,10 +1445,11 @@ class ChannelEngine:
                         note_kwargs["reply"] = reply_to
                     await self.bot.rest.create_message(self.channel_id, **note_kwargs)
                 except Exception:
-                    logger.debug(
+                    log_exception(
+                        logger,
                         "could not post attach-permission note in channel %s",
                         self.channel_id,
-                        exc_info=True,
+                        level=logging.DEBUG,
                     )
             return False
 
@@ -1480,10 +1500,11 @@ class ChannelEngine:
                 str(self.guild_id), str(self.channel_id)
             )
         except APIError:
-            logger.warning(
+            log_exception(
+                logger,
                 "Failed to read model override for channel %s — using default",
                 self.channel_id,
-                exc_info=True,
+                level=logging.WARNING,
             )
             return None
 
@@ -1526,10 +1547,11 @@ class ChannelEngine:
         try:
             return await service.load_snapshot(str(self.guild_id))
         except Exception:
-            logger.warning(
+            log_exception(
+                logger,
                 "Could not load guild memory for channel %s — running without it",
                 self.channel_id,
-                exc_info=True,
+                level=logging.WARNING,
             )
             return EMPTY_SNAPSHOT
 
@@ -1556,10 +1578,11 @@ class ChannelEngine:
                     redis, str(self.guild_id), self._event_cursor
                 )
         except Exception:
-            logger.debug(
+            log_exception(
+                logger,
                 "could not read the guild event log for channel %s",
                 self.channel_id,
-                exc_info=True,
+                level=logging.DEBUG,
             )
             return []
         self._event_cursor = cursor
@@ -1749,10 +1772,11 @@ class ChannelEngine:
         try:
             return bool(await redis.exists(self._fallback_flag_key()))
         except RedisError:
-            logger.debug(
+            log_exception(
+                logger,
                 "could not read fallback flag for channel %s",
                 self.channel_id,
-                exc_info=True,
+                level=logging.DEBUG,
             )
             return False
 
@@ -1831,10 +1855,11 @@ class ChannelEngine:
             async for message in iterator:
                 fetched.append(message)
         except Exception:
-            logger.debug(
+            log_exception(
+                logger,
                 "could not fetch response-filter grounding for channel %s",
                 self.channel_id,
-                exc_info=True,
+                level=logging.DEBUG,
             )
             return []
         fetched.reverse()
@@ -1849,11 +1874,12 @@ class ChannelEngine:
         try:
             info = await fetch_channel_info(self.bot, self.channel_id)
         except Exception:
-            logger.debug(
+            log_exception(
+                logger,
                 "could not fetch channel name for response-filter gate in "
                 "channel %s",
                 self.channel_id,
-                exc_info=True,
+                level=logging.DEBUG,
             )
             return None
         return info.get("channel_name") or None
@@ -1886,11 +1912,12 @@ class ChannelEngine:
                 channel_name=channel_name,
             )
         except Exception:
-            logger.warning(
+            log_exception(
+                logger,
                 "response filter gate errored for channel %s — running turn "
                 "unfiltered",
                 self.channel_id,
-                exc_info=True,
+                level=logging.WARNING,
             )
             return {message.message_id for message in candidate_messages}
         return set(allowed)
@@ -1908,10 +1935,11 @@ class ChannelEngine:
         try:
             cleared = await redis.delete(self._fallback_ended_key())
         except RedisError:
-            logger.debug(
+            log_exception(
+                logger,
                 "could not read fallback-ended marker for channel %s",
                 self.channel_id,
-                exc_info=True,
+                level=logging.DEBUG,
             )
             return
         if not cleared:
@@ -1946,10 +1974,11 @@ class ChannelEngine:
         try:
             await record(redis, str(self.channel_id), tokens)
         except RedisError:
-            logger.warning(
+            log_exception(
+                logger,
                 "Failed to record token budget usage for channel %s",
                 self.channel_id,
-                exc_info=True,
+                level=logging.WARNING,
             )
 
     async def _charge_directed_messages(
@@ -2004,10 +2033,11 @@ class ChannelEngine:
                     redis, user_id, message_epochs
                 )
             except RedisError:
-                logger.warning(
+                log_exception(
+                    logger,
                     "Failed to record message-limit charges for user %s",
                     user_id,
-                    exc_info=True,
+                    level=logging.WARNING,
                 )
                 continue
             for warning in warnings or ():
@@ -2018,7 +2048,8 @@ class ChannelEngine:
                         user_mentions=[int(user_id)],
                     )
                 except Exception:
-                    logger.exception(
+                    log_exception(
+                        logger,
                         "Failed to send %s%% message-limit warning to user %s",
                         warning.percentage,
                         user_id,
@@ -2050,10 +2081,11 @@ class ChannelEngine:
                 ex=BUDGET_NOTICE_COOLDOWN_SECONDS,
             )
         except RedisError:
-            logger.debug(
+            log_exception(
+                logger,
                 "could not claim budget-notice throttle for channel %s",
                 self.channel_id,
-                exc_info=True,
+                level=logging.DEBUG,
             )
             return
         if won:
@@ -2093,10 +2125,11 @@ class ChannelEngine:
                 ):
                     return
             except RedisError:
-                logger.debug(
+                log_exception(
+                    logger,
                     "could not claim model-unavailable throttle for channel %s",
                     self.channel_id,
-                    exc_info=True,
+                    level=logging.DEBUG,
                 )
                 if self._model_unavailable_notified:
                     return
@@ -2157,10 +2190,11 @@ class ChannelEngine:
             if resp.status_code < 400:
                 return resp.json()
         except Exception:
-            logger.debug(
+            log_exception(
+                logger,
                 "could not fetch image quota for guild %s",
                 self.guild_id,
-                exc_info=True,
+                level=logging.DEBUG,
             )
         return None
 
@@ -2175,10 +2209,14 @@ class ChannelEngine:
                 self.channel_id, voice_summary.strip(), reply_to, instruction
             )
         except Exception as e:
-            logger.exception(
-                "Voice send failed for channel %s", self.channel_id
+            # The voice summary is the bot's reply, which can quote a member,
+            # and a TTS or Discord error can echo it: log and keep the type.
+            logger.error(
+                "Voice send failed for channel %s\n%s",
+                self.channel_id,
+                exception_trace(e),
             )
-            return _VoiceOutcome(sent_ok=False, error=f"{type(e).__name__}: {e}")
+            return _VoiceOutcome(sent_ok=False, error=exception_type_name(e))
         # The voice_send callback returns a TTSUsage (from VoiceService) when
         # successful. Older callers may return None — handle both.
         tokens_in = int(getattr(usage, "tokens_input", 0) or 0)
@@ -2203,7 +2241,7 @@ class ChannelEngine:
                 kwargs["reply"] = reply_to
             await self.bot.rest.create_message(self.channel_id, **kwargs)
         except Exception:
-            logger.debug("Failed to post error message", exc_info=True)
+            log_exception(logger, "Failed to post error message", level=logging.DEBUG)
 
     async def _post_notice(
         self,
@@ -2225,7 +2263,7 @@ class ChannelEngine:
                 kwargs["components"] = components
             await self.bot.rest.create_message(self.channel_id, **kwargs)
         except Exception:
-            logger.debug("Failed to post notice message", exc_info=True)
+            log_exception(logger, "Failed to post notice message", level=logging.DEBUG)
 
     async def _maybe_refire(self) -> None:
         async with self.queue_lock:

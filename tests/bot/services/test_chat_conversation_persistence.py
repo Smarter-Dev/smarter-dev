@@ -7,6 +7,8 @@ mocked so failures and missing clients are exercised cleanly.
 
 from __future__ import annotations
 
+import json
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import MagicMock
@@ -156,8 +158,17 @@ async def test_persist_error_posts_full_diagnostics_and_returns_admin_url():
     assert payload["reasoning_level"] == "medium"
     assert payload["error_type"].endswith(".ModelHTTPError")
     assert payload["provider_status_code"] == 503
-    assert "upstream overloaded" in payload["provider_body"]
-    assert "ModelHTTPError" in payload["traceback"]
+    # Only types and frames leave the bot: a body can echo the prompt.
+    assert payload["provider_body"] == "[message content]"
+    assert payload["error_message"] == "[message content]"
+    assert payload["trace_redacted"] is True
+    assert "upstream overloaded" not in json.dumps(payload)
+    assert payload["traceback"].endswith(
+        "pydantic_ai.exceptions.ModelHTTPError: [message content]\n"
+    )
+    assert ", in test_persist_error_posts_full_diagnostics_and_returns_admin_url" in (
+        payload["traceback"]
+    )
     assert payload["error_context"] == {"first_activation": True}
 
 

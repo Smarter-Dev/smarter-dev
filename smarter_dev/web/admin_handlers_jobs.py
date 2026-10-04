@@ -34,6 +34,7 @@ from smarter_dev.web.handler_caps import (
     claim_handler_key,
 )
 from smarter_dev.web.handler_emitter import DiscordEmitter
+from smarter_dev.web.handler_fire_context import load_fire_context
 from smarter_dev.web.handler_fire_payloads import AdminHandlerFirePayload
 from smarter_dev.web.handler_guild_memory import (
     load_guild_memory,
@@ -42,11 +43,13 @@ from smarter_dev.web.handler_guild_memory import (
 from smarter_dev.web.handler_memory import persist_handler_memory
 from smarter_dev.web.handler_notify import notify_handler_error
 from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
+from smarter_dev.web.handler_run_audit import EXPIRED_CONTEXT_ERROR
 from smarter_dev.web.handler_run_audit import record_completed_run, record_skipped_run
 from smarter_dev.web.handler_script_services import (
     AdminScriptServices,
     HandlerTimerScheduler,
 )
+from smarter_dev.web.job_errors import redacted_job_errors
 from smarter_dev.web.models import AdminHandler
 
 __all__ = ["AdminHandlerFirePayload", "run_admin_handler_fire"]
@@ -68,18 +71,22 @@ _recurring_chain = RECURRING_CHAINS[HANDLER_KIND]
     retry_policy=RetryPolicy(max_attempts=3, backoff_seconds=30.0, jitter_seconds=10.0),
     visibility_timeout=180.0,
 )
-async def run_admin_handler_fire(
-    payload: AdminHandlerFirePayload, context: WorkerContext
-) -> dict:
-    """Load, run (with moderation powers), audit one admin-handler firing."""
+async def run_admin_handler_fire(payload: AdminHandlerFirePayload, context: WorkerContext) -> dict:
+    """Load, run (with moderation powers), audit one admin-handler firing.
+
+    An error leaves without its message text (``redacted_job_errors``): Skrift
+    keeps it for 7 days, and the fire holds a member's message.
+    """
+    with redacted_job_errors():
+        return await _run_admin_handler_fire(payload, context)
+
+
+async def _run_admin_handler_fire(payload: AdminHandlerFirePayload, context: WorkerContext) -> dict:
     settings = get_settings()
     if not settings.handlers_enabled:
         return {"status": "disabled"}
 
     handler_id = UUID(payload.admin_handler_id)
-    # Snapshot: the script is handed this same dict and may write into it.
-    # What may be KEPT of it is handler_run_audit's call, not this job's.
-    trigger_context_at_fire = deepcopy(payload.trigger_context)
     async with get_db_session_context() as session:
         record = await session.get(AdminHandler, handler_id)
         if record is None or not record.enabled:
@@ -138,6 +145,31 @@ async def run_admin_handler_fire(
         redis=redis, window_seconds=DM_USER_WINDOW_SECONDS
     )
 
+    # The payload carries the redacted context; the script runs against the
+    # verbatim one dispatch handed off in Redis. Gone means the fire waited
+    # past the hand-off, and a script given the placeholder could act on it.
+    trigger_context = await load_fire_context(
+        redis, payload.trigger_context, payload.context_ref
+    )
+    if trigger_context is None:
+        logger.warning(
+            "handler fire job %s found its trigger context expired; skipping",
+            context.job.id,
+        )
+        async with get_db_session_context() as session:
+            record_skipped_run(
+                session,
+                handler_id=handler_id,
+                handler_kind=HANDLER_KIND,
+                trigger_context=payload.trigger_context,
+                error=EXPIRED_CONTEXT_ERROR,
+            )
+            await session.commit()
+        return {"status": "skipped"}
+    # Snapshot: the script is handed this same dict and may write into it.
+    # What may be KEPT of it is handler_run_audit's call, not this job's.
+    trigger_context_at_fire = deepcopy(trigger_context)
+
     # At-most-once side effects across retries — claimed as late as possible so
     # only failures that reach the script suppress a re-run. See handler_caps.
     if not await claim_fire_attempt(redis, context.job.id):
@@ -172,7 +204,7 @@ async def run_admin_handler_fire(
 
     result = await run_handler_script(
         script,
-        payload.trigger_context,
+        trigger_context,
         channel_id=channel_id,
         guild_id=guild_id,
         channel_ids=channel_ids,

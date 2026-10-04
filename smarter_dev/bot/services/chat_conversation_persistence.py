@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import traceback
 from typing import Any
 from uuid import UUID
 
@@ -18,6 +17,9 @@ from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 from smarter_dev.bot.agents.chat_compaction import CompactionEvent
+from smarter_dev.shared.exception_logging import log_exception
+from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
+from smarter_dev.shared.message_content import exception_trace
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +82,7 @@ async def start_engagement(
         body = resp.json()
         return UUID(body["id"])
     except Exception:
-        logger.exception("Failed to start chat conversation engagement")
+        log_exception(logger, "Failed to start chat conversation engagement")
         return None
 
 
@@ -105,7 +107,7 @@ async def end_engagement(
                 resp.status_code,
             )
     except Exception:
-        logger.exception("Failed to end chat conversation engagement")
+        log_exception(logger, "Failed to end chat conversation engagement")
 
 
 async def persist_error(
@@ -130,11 +132,6 @@ async def persist_error(
     if api_client is None:
         return None
 
-    provider_body = getattr(error, "body", None)
-    if provider_body is not None and not isinstance(provider_body, str):
-        provider_body = json.dumps(
-            provider_body, ensure_ascii=False, default=str
-        )
     context = json.loads(
         json.dumps(error_context or {}, ensure_ascii=False, default=str)
     )
@@ -146,14 +143,19 @@ async def persist_error(
         "model_name": model_name,
         "reasoning_level": reasoning_level,
         "error_type": f"{type(error).__module__}.{type(error).__qualname__}",
-        "error_message": str(error),
-        "traceback": "".join(
-            traceback.format_exception(type(error), error, error.__traceback__)
-        ),
+        # Any exception message can carry a member's words, so only the
+        # exception types and frames leave the bot.
+        "error_message": MESSAGE_CONTENT_PLACEHOLDER,
+        "traceback": exception_trace(error),
+        "trace_redacted": True,
         "provider_status_code": (
             error.status_code if isinstance(error, ModelHTTPError) else None
         ),
-        "provider_body": provider_body,
+        "provider_body": (
+            None
+            if getattr(error, "body", None) is None
+            else MESSAGE_CONTENT_PLACEHOLDER
+        ),
         "error_context": context,
     }
     try:
@@ -168,7 +170,7 @@ async def persist_error(
         admin_url = response.json().get("admin_url")
         return str(admin_url) if admin_url else None
     except Exception:
-        logger.exception("Failed to persist chat agent error")
+        log_exception(logger, "Failed to persist chat agent error")
         return None
 
 
@@ -206,7 +208,7 @@ async def persist_turn(
         delta_json = ModelMessagesTypeAdapter.dump_json(new_model_messages)
         delta = json.loads(delta_json)
     except Exception:
-        logger.exception("Failed to serialise model_messages_delta; storing None")
+        log_exception(logger, "Failed to serialise model_messages_delta; storing None")
         delta = None
 
     compaction_payload = [
@@ -259,4 +261,4 @@ async def persist_turn(
                 resp.text[:200] if hasattr(resp, "text") else "",
             )
     except Exception:
-        logger.exception("Failed to persist chat conversation turn")
+        log_exception(logger, "Failed to persist chat conversation turn")

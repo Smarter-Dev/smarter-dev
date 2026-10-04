@@ -25,6 +25,7 @@ from datetime import UTC, datetime, timedelta
 
 import redis.asyncio as redis
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
+from smarter_dev.shared.exception_logging import log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,8 @@ class ChatMemory:
         try:
             return list(ModelMessagesTypeAdapter.validate_json(raw))
         except Exception:
-            logger.exception(
+            log_exception(
+                logger,
                 "Discarding malformed chat history for channel %s", channel_id
             )
             await self._redis.delete(self._history_key(channel_id))
