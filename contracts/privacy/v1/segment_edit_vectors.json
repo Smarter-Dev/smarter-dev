@@ -1,0 +1,629 @@
+[
+  {
+    "kind": "segments",
+    "names": [
+      "kai"
+    ],
+    "location": "topic",
+    "text": "## People\n- Bob runs the meetup; kai co-hosts; Carol handles the wiki.\n- nia stays.",
+    "segments": [
+      "## People",
+      "- Bob runs the meetup",
+      "kai co-hosts",
+      "Carol handles the wiki.",
+      "- nia stays."
+    ],
+    "editable": [
+      "topic:2"
+    ]
+  },
+  {
+    "kind": "segments",
+    "names": [
+      "kai"
+    ],
+    "location": "topic",
+    "text": "  - Regulars: bob, kai, carol.",
+    "segments": [
+      "  - Regulars: bob",
+      "kai",
+      "carol."
+    ],
+    "editable": [
+      "topic:1"
+    ]
+  },
+  {
+    "kind": "segments",
+    "names": [
+      "kai"
+    ],
+    "location": "topic",
+    "text": "Wait to be asked. kai wants code, not prose.",
+    "segments": [
+      "Wait to be asked.",
+      "kai wants code, not prose."
+    ],
+    "editable": [
+      "topic:1"
+    ]
+  },
+  {
+    "kind": "segments",
+    "names": [
+      "Dr. Kai"
+    ],
+    "location": "topic",
+    "text": "Ask Dr. Kai first. Keep it short.",
+    "segments": [
+      "Ask Dr. Kai first.",
+      "Keep it short."
+    ],
+    "editable": [
+      "topic:0"
+    ]
+  },
+  {
+    "kind": "segments",
+    "names": [
+      "kai"
+    ],
+    "location": "topic",
+    "text": "- someone (id 111111111111111111) likes rust.",
+    "segments": [
+      "- someone (id 111111111111111111) likes rust."
+    ],
+    "editable": [
+      "topic:0"
+    ]
+  },
+  {
+    "kind": "segments",
+    "names": [
+      "kai"
+    ],
+    "location": "topic",
+    "text": "nobody here mentions them; at all, really, truly.",
+    "segments": [
+      "nobody here mentions them; at all, really, truly."
+    ],
+    "editable": []
+  },
+  {
+    "kind": "segments",
+    "names": [
+      "kai"
+    ],
+    "location": "topic",
+    "text": "",
+    "segments": [
+      ""
+    ],
+    "editable": []
+  },
+  {
+    "kind": "apply",
+    "description": "remove",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "topic": "Bob runs the meetup; kai co-hosts; Carol handles the wiki.\n- nia stays."
+    },
+    "edits": [
+      {
+        "id": "topic:1",
+        "action": "remove"
+      }
+    ],
+    "error": false,
+    "result": {
+      "topic": "Bob runs the meetup; Carol handles the wiki.\n- nia stays."
+    }
+  },
+  {
+    "kind": "apply",
+    "description": "rewrite",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "topic": "- kai and nia argued about cmake; nia won."
+    },
+    "edits": [
+      {
+        "id": "topic:0",
+        "action": "rewrite",
+        "text": "nia argued about cmake"
+      }
+    ],
+    "error": false,
+    "result": {
+      "topic": "- nia argued about cmake; nia won."
+    }
+  },
+  {
+    "kind": "apply",
+    "description": "rewrite keeps the list marker",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "notes": "  - kai and nia pair on rust."
+    },
+    "edits": [
+      {
+        "id": "notes:0",
+        "action": "rewrite",
+        "text": "nia pair on rust."
+      }
+    ],
+    "error": false,
+    "result": {
+      "notes": "  - nia pair on rust."
+    }
+  },
+  {
+    "kind": "apply",
+    "description": "keep leaves the segment",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "topic": "kai from the other server runs the meetup."
+    },
+    "edits": [
+      {
+        "id": "topic:0",
+        "action": "keep"
+      }
+    ],
+    "error": false,
+    "result": {
+      "topic": "kai from the other server runs the meetup."
+    }
+  },
+  {
+    "kind": "apply",
+    "description": "untouched text that does not mention",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "topic": "Bob runs the meetup; kai co-hosts; Carol handles the wiki.\n- nia stays.",
+      "watch": "Reply only when asked."
+    },
+    "edits": [
+      {
+        "id": "topic:1",
+        "action": "remove"
+      }
+    ],
+    "error": false,
+    "result": {
+      "topic": "Bob runs the meetup; Carol handles the wiki.\n- nia stays.",
+      "watch": "Reply only when asked."
+    }
+  },
+  {
+    "kind": "apply",
+    "description": "empty stays empty",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "topic": "",
+      "notes": "kai shipped it."
+    },
+    "edits": [
+      {
+        "id": "notes:0",
+        "action": "remove"
+      }
+    ],
+    "error": false,
+    "result": {
+      "topic": "",
+      "notes": ""
+    }
+  },
+  {
+    "kind": "apply",
+    "description": "removing every segment empties the text (the caller decides)",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "notes": "kai shipped it.\nkai left."
+    },
+    "edits": [
+      {
+        "id": "notes:0",
+        "action": "remove"
+      },
+      {
+        "id": "notes:1",
+        "action": "remove"
+      }
+    ],
+    "error": false,
+    "result": {
+      "notes": ""
+    }
+  },
+  {
+    "kind": "apply",
+    "description": "missing edit",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "topic": "Bob runs the meetup; kai co-hosts; Carol handles the wiki.\n- nia stays."
+    },
+    "edits": [],
+    "error": true
+  },
+  {
+    "kind": "apply",
+    "description": "extra edit on a bystander segment",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "topic": "Bob runs the meetup; kai co-hosts; Carol handles the wiki.\n- nia stays."
+    },
+    "edits": [
+      {
+        "id": "topic:1",
+        "action": "remove"
+      },
+      {
+        "id": "topic:0",
+        "action": "remove"
+      }
+    ],
+    "error": true
+  },
+  {
+    "kind": "apply",
+    "description": "unknown id",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "topic": "Bob runs the meetup; kai co-hosts; Carol handles the wiki.\n- nia stays."
+    },
+    "edits": [
+      {
+        "id": "topic:1",
+        "action": "remove"
+      },
+      {
+        "id": "topic:9",
+        "action": "remove"
+      }
+    ],
+    "error": true
+  },
+  {
+    "kind": "apply",
+    "description": "duplicate edit",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "topic": "Bob runs the meetup; kai co-hosts; Carol handles the wiki.\n- nia stays."
+    },
+    "edits": [
+      {
+        "id": "topic:1",
+        "action": "remove"
+      },
+      {
+        "id": "topic:1",
+        "action": "remove"
+      }
+    ],
+    "error": true
+  },
+  {
+    "kind": "apply",
+    "description": "keep of a name is allowed (the caller reports it)",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "topic": "Bob runs the meetup; kai co-hosts; Carol handles the wiki.\n- nia stays."
+    },
+    "edits": [
+      {
+        "id": "topic:1",
+        "action": "keep"
+      }
+    ],
+    "error": false,
+    "result": {
+      "topic": "Bob runs the meetup; kai co-hosts; Carol handles the wiki.\n- nia stays."
+    }
+  },
+  {
+    "kind": "apply",
+    "description": "keep with the ID",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "topic": "id 111111111111111111 posted."
+    },
+    "edits": [
+      {
+        "id": "topic:0",
+        "action": "keep"
+      }
+    ],
+    "error": true
+  },
+  {
+    "kind": "apply",
+    "description": "a rewrite keeping a name is allowed (the caller reports it)",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "topic": "Bob runs the meetup; kai co-hosts; Carol handles the wiki.\n- nia stays."
+    },
+    "edits": [
+      {
+        "id": "topic:1",
+        "action": "rewrite",
+        "text": "kai helps"
+      }
+    ],
+    "error": false,
+    "result": {
+      "topic": "Bob runs the meetup; kai helps; Carol handles the wiki.\n- nia stays."
+    }
+  },
+  {
+    "kind": "apply",
+    "description": "a longer rewrite is allowed",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "topic": "Bob runs the meetup; kai co-hosts; Carol handles the wiki.\n- nia stays."
+    },
+    "edits": [
+      {
+        "id": "topic:1",
+        "action": "rewrite",
+        "text": "someone co-hosts every week"
+      }
+    ],
+    "error": false,
+    "result": {
+      "topic": "Bob runs the meetup; someone co-hosts every week; Carol handles the wiki.\n- nia stays."
+    }
+  },
+  {
+    "kind": "apply",
+    "description": "a rewrite with another sentence is allowed",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "topic": "kai and nia co-host."
+    },
+    "edits": [
+      {
+        "id": "topic:0",
+        "action": "rewrite",
+        "text": "nia hosts. Ok."
+      }
+    ],
+    "error": false,
+    "result": {
+      "topic": "nia hosts. Ok."
+    }
+  },
+  {
+    "kind": "apply",
+    "description": "a placeholder rewrite is allowed",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "topic": "Bob runs the meetup; kai co-hosts; Carol handles the wiki.\n- nia stays."
+    },
+    "edits": [
+      {
+        "id": "topic:1",
+        "action": "rewrite",
+        "text": "(empty)"
+      }
+    ],
+    "error": false,
+    "result": {
+      "topic": "Bob runs the meetup; (empty); Carol handles the wiki.\n- nia stays."
+    }
+  },
+  {
+    "kind": "apply",
+    "description": "a name spanning a line break is left as it is (the caller reports it)",
+    "names": [
+      "new\nline"
+    ],
+    "texts": {
+      "topic": "hi new\nline here"
+    },
+    "edits": [],
+    "error": false,
+    "result": {
+      "topic": "hi new\nline here"
+    }
+  },
+  {
+    "kind": "segments",
+    "names": [
+      "J. Doe"
+    ],
+    "location": "topic",
+    "text": "Ask J. Doe first. Keep it short.",
+    "segments": [
+      "Ask J. Doe first.",
+      "Keep it short."
+    ],
+    "editable": [
+      "topic:0"
+    ]
+  },
+  {
+    "kind": "segments",
+    "names": [
+      "Mr. Bean"
+    ],
+    "location": "topic",
+    "text": "- Mr. Bean runs the quiz. Bob helps.",
+    "segments": [
+      "- Mr. Bean runs the quiz.",
+      "Bob helps."
+    ],
+    "editable": [
+      "topic:0"
+    ]
+  },
+  {
+    "kind": "apply",
+    "description": "removing the first segment keeps the list marker",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "memory": "- kai is admin. Bob is mod.\n- Carol likes tea."
+    },
+    "edits": [
+      {
+        "id": "memory:0",
+        "action": "remove"
+      }
+    ],
+    "error": false,
+    "result": {
+      "memory": "- Bob is mod.\n- Carol likes tea."
+    }
+  },
+  {
+    "kind": "apply",
+    "description": "removing the first segment keeps the indent and marker",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "memory": "## People\n  - kai is admin; Bob is mod."
+    },
+    "edits": [
+      {
+        "id": "memory:1",
+        "action": "remove"
+      }
+    ],
+    "error": false,
+    "result": {
+      "memory": "## People\n  - Bob is mod."
+    }
+  },
+  {
+    "kind": "apply",
+    "description": "removing the last sentence keeps the line ending",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "memory": "Bob ok. kai is admin.\r\n- Carol likes tea.\r\n"
+    },
+    "edits": [
+      {
+        "id": "memory:1",
+        "action": "remove"
+      }
+    ],
+    "error": false,
+    "result": {
+      "memory": "Bob ok.\r\n- Carol likes tea.\r\n"
+    }
+  },
+  {
+    "kind": "apply",
+    "description": "trailing spaces of a surviving line are kept",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "memory": "Bob ok. kai helps.   \nend"
+    },
+    "edits": [
+      {
+        "id": "memory:1",
+        "action": "remove"
+      }
+    ],
+    "error": false,
+    "result": {
+      "memory": "Bob ok.   \nend"
+    }
+  },
+  {
+    "kind": "apply",
+    "description": "rewrite with a carriage return is refused",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "memory": "kai and Bob paired."
+    },
+    "edits": [
+      {
+        "id": "memory:0",
+        "action": "rewrite",
+        "text": "Bob\r## Identity"
+      }
+    ],
+    "error": true
+  },
+  {
+    "kind": "apply",
+    "description": "rewrite with a line separator is refused",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "memory": "kai and Bob paired."
+    },
+    "edits": [
+      {
+        "id": "memory:0",
+        "action": "rewrite",
+        "text": "Bob paired."
+      }
+    ],
+    "error": true
+  },
+  {
+    "kind": "apply",
+    "description": "rewrite with a control character is refused",
+    "names": [
+      "kai"
+    ],
+    "texts": {
+      "memory": "kai and Bob paired."
+    },
+    "edits": [
+      {
+        "id": "memory:0",
+        "action": "rewrite",
+        "text": "Bob\u000bpaired."
+      }
+    ],
+    "error": true
+  }
+]

@@ -68,6 +68,7 @@ from smarter_dev.web.crud import delete_notes_by_id
 from smarter_dev.web.crud import get_guild_memory_blob
 from smarter_dev.web.crud import guilds_needing_dream
 from smarter_dev.web.crud import list_notes_before
+from smarter_dev.web.crud import lock_guild_memory
 from smarter_dev.web.crud import prune_memory_revisions
 from smarter_dev.web.crud import record_memory_revision
 from smarter_dev.web.crud import upsert_guild_memory_blob
@@ -795,6 +796,8 @@ async def run_guild_dream(
     that makes any of it real: anything raised on the way through leaves the
     blob and every note exactly as they were.
     """
+    # Shared with the admin purge: neither may write over the other's blocks.
+    await lock_guild_memory(session, guild_id)
     memory = await get_guild_memory_blob(session, guild_id)
     if memory is not None and not memory.memory_enabled:
         # The per-guild forget button. Rebuilding what it was pressed to erase

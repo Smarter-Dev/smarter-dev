@@ -1,0 +1,154 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Privacy Purge - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Privacy Purge</h1>
+            <p><a href="/admin/bot/privacy-purges">&larr; All purges</a></p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="sk-panel" style="margin-bottom:1.5rem;">
+            <div class="sk-panel-head">Request</div>
+            <div class="sk-panel-body">
+                <p>
+                    <strong>Status:</strong> {{ purge.status }}{% if purge.status == "failed" %} <span class="sk-badge sk-badge-danger">stopped by an error: run the purge again</span>{% endif %}
+                    &middot; asked {{ purge.created_at.strftime('%Y-%m-%d %H:%M UTC') }}
+                    {% if purge.completed_at %}&middot; finished {{ purge.completed_at.strftime('%Y-%m-%d %H:%M UTC') }}{% endif %}
+                    {% if purge.closed_at %}&middot; closed {{ purge.closed_at.strftime('%Y-%m-%d %H:%M UTC') }}{% endif %}
+                </p>
+                {% if steps.error %}<p><span class="sk-badge sk-badge-danger">error</span> {{ steps.error }}</p>{% endif %}
+                {% if missing_acks %}
+                <p><span class="sk-badge sk-badge-danger">no ack within 1 hour</span> These runtimes never acknowledged their guilds; each is recorded as failed. A late ack still counts. "Run the purge again" sends a new command.</p>
+                <ul>{% for component, guild_id in missing_acks %}<li>{{ component }}: guild <code>{{ guild_id }}</code></li>{% endfor %}</ul>
+                {% endif %}
+                {% if purge.discord_user_id %}
+                <p><strong>User:</strong> {{ purge.discord_user_id }} &middot; <strong>Names:</strong> {{ (purge.names or []) | join(", ") or "none" }}</p>
+                {% if unchecked_names and purge.status not in ("purging", "finishing") %}
+                <ul>
+                    {% for name in unchecked_names %}
+                    <li>"{{ name }}" is too short to search for, so it was never searched.
+                        <form method="post" action="/admin/bot/privacy-purges/{{ purge.id }}/names/remove" style="display:inline;">{{ csrf_field() }}<input type="hidden" name="name" value="{{ name }}"><button class="sk-btn-outline sk-btn-small" type="submit">Remove (never searched)</button></form>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+                {% else %}
+                <p class="sk-text-muted">Closed: only this receipt remains. {{ steps.receipt }}</p>
+                {% endif %}
+                {% if purge.status != "closed" %}
+                <div style="display:flex; gap:.5rem;">
+                    <form method="post" action="/admin/bot/privacy-purges/{{ purge.id }}/rerun">{{ csrf_field() }}<button class="sk-btn-outline sk-btn-small" type="submit">Run the purge again</button></form>
+                    <form method="post" action="/admin/bot/privacy-purges/{{ purge.id }}/check">{{ csrf_field() }}<button class="sk-btn-outline sk-btn-small" type="submit" title="The deterministic search only; the agent does not run.">Run the check again</button></form>
+                    <form method="post" action="/admin/bot/privacy-purges/{{ purge.id }}/close" onsubmit="return confirm('Strip this request to a receipt? The user stays on the block list.');">{{ csrf_field() }}<button class="sk-btn-outline sk-btn-small" type="submit">Close to a receipt</button></form>
+                </div>
+                {% endif %}
+                {% if purge.status != "closed" %}
+                <h4>Runtimes</h4>
+                {% include "admin/bot/privacy_purges/_runtimes.html" %}
+                {% endif %}
+            </div>
+        </div>
+
+        {% if purge.discord_user_id %}
+        <div class="sk-panel" style="margin-bottom:1.5rem;">
+            <div class="sk-panel-head">Steps ({{ (steps.guild_ids or []) | length }} guilds)</div>
+            <div class="sk-panel-body">
+                <table class="sk-admin-table">
+                    <thead><tr><th>Guild</th><th>Memory</th><th>Bot history</th><th>Worker history</th><th>Final notes pass</th></tr></thead>
+                    <tbody>
+                        {% for guild_id in steps.guild_ids or [] %}
+                        {% set memory = (steps.memory or {}).get(guild_id) %}
+                        {% set bot = (steps.bot or {}).get(guild_id) %}
+                        {% set worker = (steps.worker or {}).get(guild_id) %}
+                        {% set final = (steps.final_notes or {}).get(guild_id) %}
+                        <tr>
+                            <td><code>{{ guild_id }}</code></td>
+                            <td>
+                                {% if memory %}{{ memory.outcome }}{% if memory.earlier_run %} (earlier run){% endif %}{% if memory.error %} ({{ memory.error }}){% endif %}
+                                {% for item in memory.unresolved or [] %}<br><span class="sk-badge sk-badge-danger">unresolved</span> {{ item.location }}: {{ item.reason }}{% endfor %}
+                                {% else %}pending{% endif %}
+                            </td>
+                            <td>{% if bot %}{{ bot.outcome }}{% if bot.detail %} &mdash; {{ bot.detail }}{% endif %}{% else %}pending{% endif %}</td>
+                            <td>{% if worker %}{{ worker.outcome }}{% if worker.detail %} &mdash; {{ worker.detail }}{% endif %}{% else %}pending{% endif %}</td>
+                            <td>
+                                {% if final %}{{ final.outcome }}{% if final.error %} ({{ final.error }}){% endif %}
+                                {% for item in final.unresolved or [] %}<br><span class="sk-badge sk-badge-danger">unresolved</span> {{ item.location }}: {{ item.reason }}{% endfor %}
+                                {% else %}pending{% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="sk-panel">
+            <div class="sk-panel-head">Check</div>
+            <div class="sk-panel-body">
+                {% if report %}
+                <p class="sk-text-muted">Searched {{ report.stores_checked }} stores at {{ report.checked_at }} for the ID and the names. Locations and counts only.</p>
+                {% if report.hit_counts %}
+                <p><span class="sk-badge sk-badge-danger">needs review</span> Hits by store: {% for store, count in report.hit_counts.items() %}{{ store }} ({{ count }}){% if not loop.last %}, {% endif %}{% endfor %}. Any hit, in any section below, keeps the request out of "complete".</p>
+                {% endif %}
+                {% if report.unchecked_names %}
+                <p><span class="sk-badge sk-badge-danger">unchecked</span> Too short to search for (ASCII, under 2 characters): {{ report.unchecked_names | join(", ") }}. The check cannot confirm these are gone, so the request stays in review.</p>
+                {% endif %}
+                {% if report.tombstoned %}
+                <p><span class="sk-badge sk-badge-danger">failed</span> The worker's history is tombstoned (half-written) in guild(s): {% for g in report.tombstoned %}<code>{{ g }}</code>{% if not loop.last %}, {% endif %}{% endfor %}. Run the purge again; the request cannot be closed until they are rewritten.</p>
+                {% endif %}
+                <h4>Still found where the purge rewrites ({{ (report.remains or []) | length }})</h4>
+                {% if report.remains %}
+                <table class="sk-admin-table">
+                    <thead><tr><th>Store</th><th>Location</th><th>ID hits</th><th>Name hits</th></tr></thead>
+                    <tbody>
+                        {% for hit in report.remains %}
+                        <tr><td>{{ hit.store }}</td><td><code>{{ hit.location }}</code></td><td>{{ hit.id_hits }}</td><td>{{ hit.name_hits }}</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                <p class="sk-text-muted" style="font-size:0.85rem;">An ID hit is a remain. A name hit can be a different person who shares the name; judge it from the guild's memory page.</p>
+                {% else %}
+                <p>Nothing found.</p>
+                {% endif %}
+                <h4>Raw operational copies: the runtimes discard a purged guild's queued wake, pending, batch and dead-letter entries; shadow, control and the event log are only reported ({{ (report.operational or []) | length }})</h4>
+                {% if report.operational %}
+                <ul>{% for hit in report.operational %}<li><code>{{ hit.location }}</code>: {{ hit.id_hits }} ID, {{ hit.name_hits }} name</li>{% endfor %}</ul>
+                {% else %}
+                <p>Nothing found.</p>
+                {% endif %}
+                <h4>Chat audit tables, for the #71 deletion runbook ({{ (report.information or []) | length }})</h4>
+                {% if report.information %}
+                <ul>{% for hit in report.information %}<li><code>{{ hit.location }}</code>: {{ hit.id_hits }} ID, {{ hit.name_hits }} name</li>{% endfor %}</ul>
+                {% else %}
+                <p>Nothing found.</p>
+                {% endif %}
+                {% else %}
+                <p class="sk-text-muted">Runs when every guild is acknowledged, or on demand.</p>
+                {% endif %}
+                <h4>Flagged by the runtimes' acks ({{ possible_remains | length }})</h4>
+                {% if possible_remains %}
+                <ul>{% for item in possible_remains %}<li>guild <code>{{ item.guild_id }}</code>, {{ item.component }}: {{ item.reasons | join("; ") }}. "Run the purge again" purges this guild again.</li>{% endfor %}</ul>
+                {% else %}
+                <p>None.</p>
+                {% endif %}
+                <h4>Outside the check</h4>
+                <p class="sk-text-muted" style="font-size:0.85rem;">The check searches guild memory (blocks, notes, revisions), watch instructions, proactive histories, the Redis history, queue and event keys listed in the code, and the chat audit tables. It does not search:</p>
+                <ul>{% for item in outside_the_check %}<li>{{ item }}</li>{% endfor %}</ul>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

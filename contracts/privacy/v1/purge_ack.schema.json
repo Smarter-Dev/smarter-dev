@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://smarter.dev/contracts/privacy/v1/purge_ack.schema.json",
+  "title": "Privacy purge acknowledgement",
+  "description": "One runtime's result for one guild. The web decides from the structured fields only; detail is display text. An ack missing name_hits, tombstoned, unchecked_names or done_record is accepted but flagged for review.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "component",
+    "guild_id",
+    "outcome"
+  ],
+  "properties": {
+    "component": {
+      "enum": [
+        "bot",
+        "worker"
+      ]
+    },
+    "guild_id": {
+      "type": "string",
+      "pattern": "^[0-9]{15,22}$"
+    },
+    "outcome": {
+      "enum": [
+        "purged",
+        "unchanged",
+        "failed"
+      ]
+    },
+    "stores": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "string",
+        "maxLength": 100
+      }
+    },
+    "detail": {
+      "type": "string",
+      "maxLength": 500
+    },
+    "name_hits": {
+      "type": "object",
+      "maxProperties": 10,
+      "propertyNames": {
+        "pattern": "^[a-z_]{1,32}$"
+      },
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      }
+    },
+    "tombstoned": {
+      "type": "boolean"
+    },
+    "unchecked_names": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "done_record": {
+      "enum": [
+        "written",
+        "replayed",
+        "not_written"
+      ]
+    }
+  }
+}

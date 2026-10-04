@@ -12,11 +12,38 @@ This replaces the read half of the legacy ``smarter_dev.web.admin.discord``
 
 from __future__ import annotations
 
+import logging
+import re
 from dataclasses import dataclass
 from typing import ClassVar
 
 from smarter_dev.shared.config import get_settings
-from smarter_dev.web.discord_rest import DiscordBotClient, DiscordRestError
+from smarter_dev.web.discord_rest import DiscordBotClient
+from smarter_dev.web.discord_rest import DiscordRestError
+
+# Discord REST paths that carry a user's ID: ``/users/{id}`` and
+# ``/guilds/{g}/members/{id}``. A purge looks the person up by ID, and the ID
+# must not reach a log line.
+_USER_PATH = re.compile(r"/(?:users|members)/\d")
+
+
+class _HideUserRequests(logging.Filter):
+    """Drop httpx's INFO request line for Discord user/member URLs.
+
+    httpx logs ``HTTP Request: GET <full URL> ...`` for every request; for
+    these paths the URL is the Discord user ID. (httpcore's DEBUG lines carry
+    no path.)
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        for arg in record.args or ():
+            path = getattr(getattr(arg, "url", arg), "path", None)
+            if isinstance(path, str) and _USER_PATH.search(path):
+                return False
+        return True
+
+
+logging.getLogger("httpx").addFilter(_HideUserRequests())
 
 
 class DiscordAdminError(DiscordRestError):
@@ -184,6 +211,32 @@ class DiscordAdminClient(DiscordBotClient):
         channels = await self.get_guild_channels(guild_id)
         return [channel for channel in channels if channel.supports_announcements]
 
+
+    async def get_user_names(self, user_id: str, guild_ids: list[str]) -> list[str]:
+        """Every name a user goes by: username, global display name, and their
+        nickname in each of ``guild_ids`` they are still a member of.
+
+        Used to prefill a purge request. A guild the user has left, or a user
+        Discord no longer knows, simply contributes nothing. Every failure is
+        swallowed without logging: an error's text quotes the path, which is
+        the user's ID.
+        """
+        names: list[str] = []
+        try:
+            user = (await self._request("GET", f"/users/{user_id}")).json()
+            names.extend(n for n in (user.get("username"), user.get("global_name")) if n)
+        except Exception:  # noqa: BLE001, S110 — see above
+            pass
+        for guild_id in guild_ids:
+            try:
+                member = (
+                    await self._request("GET", f"/guilds/{guild_id}/members/{user_id}")
+                ).json()
+            except Exception:  # noqa: BLE001, S112 — see above
+                continue
+            if member.get("nick"):
+                names.append(member["nick"])
+        return names
 
 def get_admin_discord_client() -> DiscordAdminClient:
     """Build an admin Discord client from the configured bot token."""
