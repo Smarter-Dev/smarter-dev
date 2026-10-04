@@ -1,0 +1,240 @@
+[
+  {
+    "names": [
+      "José"
+    ],
+    "text": "I talked to José yesterday",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "José"
+    ],
+    "text": "I talked to José yesterday",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "李"
+    ],
+    "text": "昨天我和李一起写代码。",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "李"
+    ],
+    "text": "昨天我和王一起写代码。",
+    "hit": false,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "🦀"
+    ],
+    "text": "the 🦀 posted again",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "🦀"
+    ],
+    "text": "the crab posted again",
+    "hit": false,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "alice"
+    ],
+    "text": "ping alice_dev about it",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "alice"
+    ],
+    "text": "alice2 joined",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "alice"
+    ],
+    "text": "2alice joined",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "alice"
+    ],
+    "text": "with malice aforethought",
+    "hit": false,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "alice"
+    ],
+    "text": "alicea is someone else",
+    "hit": false,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "Kai the Rustacean"
+    ],
+    "text": "ask kai the rustacean about lifetimes",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "Kai the Rustacean"
+    ],
+    "text": "ask kai about lifetimes",
+    "hit": false,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "kai"
+    ],
+    "text": "KAI shipped the shader",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "Straße"
+    ],
+    "text": "STRASSE is here",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "a"
+    ],
+    "text": "a cat and a dog",
+    "hit": false,
+    "unchecked": [
+      "a"
+    ]
+  },
+  {
+    "names": [
+      "a",
+      "kai"
+    ],
+    "text": "a cat and kai",
+    "hit": true,
+    "unchecked": [
+      "a"
+    ]
+  },
+  {
+    "names": [
+      " ",
+      "kai"
+    ],
+    "text": "nothing here",
+    "hit": false,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "Kai \"Crab\" Smith"
+    ],
+    "text": "ask Kai \"Crab\" Smith about lifetimes",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "Kai \"Crab\" Smith"
+    ],
+    "text": "ask Kai Crab Smith about lifetimes",
+    "hit": false,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "back\\slash"
+    ],
+    "text": "user BACK\\SLASH joined",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "back\\slash"
+    ],
+    "text": "user back/slash joined",
+    "hit": false,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "tab\tname"
+    ],
+    "text": "hello tab\tname!",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "tab\tname"
+    ],
+    "text": "hello tab name!",
+    "hit": false,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "line\nbreak"
+    ],
+    "text": "so line\nbreak said hi",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "line\nbreak"
+    ],
+    "text": "so line break said hi",
+    "hit": false,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "kai"
+    ],
+    "text": "\"kai\"\tsaid\\nothing",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "\tkai\n"
+    ],
+    "text": "ping kai\tnow",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "\"k\""
+    ],
+    "text": "the \"k\" key",
+    "hit": true,
+    "unchecked": []
+  }
+]

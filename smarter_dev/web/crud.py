@@ -12,7 +12,7 @@ from typing import Optional, List, Dict, Any, Tuple
 from uuid import UUID
 from datetime import UTC, datetime, timezone, date
 
-from sqlalchemy import select, update, delete, func, desc, and_, or_
+from sqlalchemy import select, update, delete, func, desc, and_, or_, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5908,6 +5908,22 @@ async def list_channel_model_overrides(
 # Every time boundary is a caller-supplied ``datetime``; nothing here reads the
 # clock. That keeps the midnight-UTC day policy in exactly one place per tier
 # and makes the whole layer trivially testable.
+
+
+async def lock_guild_memory(session: AsyncSession, guild_id: str) -> None:
+    """Hold the guild's memory lock until the caller's transaction ends.
+
+    The nightly dream and an admin purge both rewrite the same three blocks,
+    notes and revisions from what they read; the lock keeps one from writing
+    over the other. A Postgres transaction-scoped advisory lock, so a crash
+    releases it; SQLite (tests) has one writer anyway and skips it.
+    """
+    if session.bind.dialect.name != "postgresql":
+        return
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
+        {"key": f"chat_agent_guild_memory:{guild_id}"},
+    )
 
 
 async def get_guild_memory_blob(

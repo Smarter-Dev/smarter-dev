@@ -1,0 +1,22 @@
+<ul>
+    {% for component, state in runtimes.items() %}
+    <li>
+        {{ component }}:
+        {% if state.revision is none %}
+        <span class="sk-badge sk-badge-danger">not enforcing</span> {% if state.unreadable %}({{ state.unreadable }} process{{ "es" if state.unreadable != 1 else "" }} reported a revision that cannot be read){% else %}(no live process reports){% endif %}
+        {% elif list_revision is defined and state.revision < list_revision %}
+        <span class="sk-badge sk-badge-danger">behind the block list (holding revision {{ state.revision }} of {{ list_revision }})</span>
+        {{ state.processes }} live process{{ "es" if state.processes != 1 else "" }}. A purge started now waits for that process to catch up.
+        {% else %}
+        {{ state.processes }} live process{{ "es" if state.processes != 1 else "" }}, lowest enforced revision {{ state.revision }}
+        {% endif %}
+        &middot;
+        {% if state.consumers %}{{ state.consumers }} live purge consumer{{ "s" if state.consumers != 1 else "" }}{% else %}<span class="sk-badge sk-badge-danger">no live purge consumer</span>{% endif %}
+    </li>
+    {% endfor %}
+</ul>
+<p class="sk-text-muted" style="font-size:0.85rem;">
+    Rollout: a process from a build before per-process reporting never writes a key, so it is not
+    counted here and does not hold a purge back. For the first purge after rollout, start only once
+    every bot and worker pod runs the privacy build (all old pods gone).
+</p>

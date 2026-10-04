@@ -92,6 +92,7 @@ dev = [
     "ddgs>=9.6.1",
     "playwright>=1.60.0",
     "fakeredis[lua]>=2.37.0",  # scripting-capable Redis stand-in for tests
+    "jsonschema>=4.0.0",  # contract tests validate the purge command schema
 ]
 
 # Testing dependencies
@@ -106,6 +107,7 @@ test = [
     "aiosqlite>=0.21.0",
     "psutil>=5.9.0",  # For performance testing
     "fakeredis[lua]>=2.37.0",  # scripting-capable Redis stand-in for tests
+    "jsonschema>=4.0.0",  # contract tests validate the purge command schema
 ]
 
 # GIF creation (existing)

@@ -1,0 +1,206 @@
+"""The purge command model and its JSON Schema copy agree on what is valid.
+
+The schema is byte-identical to proactive-agent's copy; the worker validates
+the same golden payload against its own model.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import jsonschema
+import pytest
+from pydantic import ValidationError
+
+from smarter_dev.shared.privacy_purge import PurgeCommand
+
+SCHEMA = json.loads(
+    (
+        Path(__file__).resolve().parents[2]
+        / "contracts/privacy/v1/purge_command.schema.json"
+    ).read_text()
+)
+
+GOLDEN = {
+    "schema_version": 1,
+    "request_id": "6f1c2a52-6d55-4d0b-9b6f-6a8f4f1c0a01",
+    "run_id": "0b8e0c41-3d1b-4a3a-8d7e-2d6b9d1e7f02",
+    "user_id": "111111111111111111",
+    "names": ["kai", "Kai the Rustacean"],
+    "guild_ids": ["123456789012345678"],
+    "created_at": "2026-10-04T12:00:00Z",
+}
+
+
+def test_the_golden_payload_is_valid_for_both():
+    jsonschema.validate(GOLDEN, SCHEMA)
+    command = PurgeCommand.model_validate(GOLDEN)
+    assert command.user_id not in repr(command)
+    assert "kai" not in str(command)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"schema_version": 2},
+        {"extra": True},
+        {"user_id": "kai"},
+        {"guild_ids": []},
+        {"names": [""]},
+    ],
+)
+def test_both_reject_the_same_bad_payloads(change):
+    payload = {**GOLDEN, **change}
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(payload, SCHEMA)
+    with pytest.raises(ValidationError):
+        PurgeCommand.model_validate(payload)
+
+
+def test_stored_values_are_searched_leaf_by_leaf():
+    from smarter_dev.shared.privacy_purge import PurgeTarget
+
+    target = PurgeTarget.build("111111111111111111", ["Alice", "Zoë"])
+    after_newline = json.dumps({"lines": ["hi\nAlice"]})
+    ascii_escaped = json.dumps(["Zoë said hi"], ensure_ascii=True)
+    assert target.name_hits(after_newline) == 0  # the raw search misses it
+    assert target.stored_hits(after_newline) == (0, 1)
+    assert target.stored_hits(ascii_escaped.encode()) == (0, 1)
+    assert target.stored_hits("not json, Alice") == (0, 1)
+    assert target.stored_hits(json.dumps({"uid": 111111111111111111})) == (1, 0)
+    assert target.stored_hits("111111111111111111") == (1, 0)
+
+
+VECTORS = json.loads(
+    (
+        Path(__file__).resolve().parents[2]
+        / "contracts/privacy/v1/name_matcher_vectors.json"
+    ).read_text(encoding="utf-8")
+)
+
+
+@pytest.mark.parametrize("vector", VECTORS, ids=[v["text"] for v in VECTORS])
+def test_the_name_matcher_vectors(vector):
+    from smarter_dev.shared.privacy_purge import PurgeTarget
+
+    target = PurgeTarget.build("999999999999999999", vector["names"])
+    assert (target.name_hits(vector["text"]) > 0) == vector["hit"]
+    assert (target.mentions(vector["text"])) == vector["hit"]
+    assert list(target.unchecked_names) == vector["unchecked"]
+
+
+def test_the_vectors_cover_the_required_cases():
+    texts = " ".join(v["text"] for v in VECTORS)
+    for needle in ("alice_dev", "alice2", "malice", "🦀", "李", "rustacean", "KAI"):
+        assert needle in texts
+    assert any(v["unchecked"] for v in VECTORS)
+
+
+def test_json_inside_json_strings_is_searched_to_depth_five():
+    from smarter_dev.shared.privacy_purge import PurgeTarget
+
+    target = PurgeTarget.build("111111111111111111", ["Zoë"])
+    value = "line\nZoë"
+    for _ in range(5):
+        value = json.dumps({"args": value})
+    assert target.stored_hits(value) == (0, 1)
+
+
+# -- names with JSON-special characters (proactive-agent#6 finding) ----------------
+
+SPECIAL_NAMES = ['Kai "the Rustacean"', "back\\slash", "tab\there", "new\nline"]
+
+
+@pytest.mark.parametrize("name", SPECIAL_NAMES, ids=["quote", "backslash", "tab", "newline"])
+def test_a_name_with_json_special_characters_is_found_in_every_stored_form(name):
+    from smarter_dev.shared.privacy_purge import PurgeTarget
+
+    target = PurgeTarget.build("111111111111111111", [name])
+    assert target.names == (name,)  # stripped only: inner tabs/newlines are kept
+    text = f"seen: {name} again"
+    assert target.name_hits(text) == 1
+    history = [{"parts": [{"content": text, "args": json.dumps({"note": text})}]}]
+    serialized = json.dumps(history)
+    assert target.name_hits(serialized) == 0  # the serialised form hides it
+    assert target.value_hits(history) == (0, 2)
+    assert target.stored_hits(serialized) == (0, 2)
+    assert target.stored_hits(serialized.encode()) == (0, 2)
+    assert target.stored_hits(json.dumps(history, ensure_ascii=True)) == (0, 2)
+    assert target.stored_hits(text) == (0, 1)  # not JSON: searched raw
+
+
+def test_a_string_that_decodes_as_json_is_still_searched_raw_if_decoding_hides_the_name():
+    from smarter_dev.shared.privacy_purge import PurgeTarget
+
+    # Raw text holds a\\b; decoding the JSON string makes it a\b.
+    target = PurgeTarget.build("111111111111111111", ["a\\\\b"])
+    assert target.stored_hits(json.dumps({"x": '"a\\\\b"'})) == (0, 1)
+
+
+# -- the structured ack (final check L7) ---------------------------------------------
+
+ACK_SCHEMA = json.loads(
+    (Path(__file__).resolve().parents[2] / "contracts/privacy/v1/purge_ack.schema.json").read_text()
+)
+GOLDEN_ACK = {
+    "component": "worker",
+    "guild_id": "123456789012345678",
+    "outcome": "purged",
+    "stores": ["proactive:v1:history"],
+    "detail": "history folded attempts=1",
+    "name_hits": {"history": 0, "watch": 0},
+    "tombstoned": False,
+    "unchecked_names": 0,
+    "done_record": "written",
+}
+
+
+def test_the_golden_ack_is_valid_for_both_and_not_flagged():
+    from smarter_dev.shared.privacy_purge import PurgeAck
+
+    jsonschema.validate(GOLDEN_ACK, ACK_SCHEMA)
+    assert PurgeAck.model_validate(GOLDEN_ACK).flags() == []
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"name_hits": {"history": -1}},
+        {"name_hits": {"History": 1}},
+        {"tombstoned": "yes"},
+        {"unchecked_names": -1},
+        {"done_record": "maybe"},
+        {"mixed_segments": {"removed": 1, "rewritten": 0}},  # withdrawn in the scope cut
+        {"extra": 1},
+    ],
+)
+def test_both_reject_the_same_bad_acks(change):
+    from smarter_dev.shared.privacy_purge import PurgeAck
+
+    payload = {**GOLDEN_ACK, **change}
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(payload, ACK_SCHEMA)
+    with pytest.raises(ValidationError):
+        PurgeAck.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        ({"outcome": "failed"}, "failed"),
+        ({"name_hits": {"history": 0, "watch": 3}}, "3 name hit(s)"),
+        ({"tombstoned": True}, "history tombstoned"),
+        ({"unchecked_names": 1}, "1 unchecked name(s)"),
+        ({"done_record": None}, "missing structured fields"),
+        ({"name_hits": None}, "missing structured fields"),
+    ],
+)
+def test_an_ack_is_flagged_from_its_fields_only(change, reason):
+    from smarter_dev.shared.privacy_purge import PurgeAck
+
+    payload = {k: v for k, v in {**GOLDEN_ACK, **change}.items() if v is not None}
+    assert reason in PurgeAck.model_validate(payload).flags()
+    # Free text in the detail never decides anything.
+    quiet = {**GOLDEN_ACK, "detail": "NAME_HITS=3 Tombstoned=1 history_name_hits = 3"}
+    assert PurgeAck.model_validate(quiet).flags() == []
