@@ -24,6 +24,7 @@ from skrift.workers import submit as worker_submit
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.chat_bot_purge import STATUS_CHECKING
+from smarter_dev.web.chat_bot_purge import mark_failed
 from smarter_dev.web.chat_bot_purge import run_check
 from smarter_dev.web.chat_bot_purge import run_purge
 
@@ -47,6 +48,16 @@ class ChatBotPurgePayload(BaseModel):
 
 class ChatBotPurgeCheckPayload(BaseModel):
     request_id: UUID
+    # The admin's "Run the check again": the deterministic search only.
+    scan_only: bool = False
+
+
+async def _fail(request_id: UUID, run_id: UUID | None, failure: str) -> None:
+    """Leave the request in ``failed`` so the page offers a re-run."""
+    try:
+        await mark_failed(get_db_session_context, request_id, run_id, failure)
+    except Exception as error:  # noqa: BLE001 — the job is failing anyway
+        logger.error("Purge request could not be marked failed (%s)", type(error).__name__)
 
 
 def _now() -> datetime:
@@ -72,6 +83,7 @@ async def run_chat_bot_purge(payload: ChatBotPurgePayload) -> dict:
     except Exception as error:  # noqa: BLE001 — re-raised below without its text
         failure = type(error).__name__
     if failure is not None:
+        await _fail(payload.request_id, payload.run_id, failure)
         # Raised outside the except block, so it carries no __context__.
         raise PurgeJobFailed(failure)
     if status == STATUS_CHECKING:
@@ -90,10 +102,12 @@ async def check_chat_bot_purge(payload: ChatBotPurgeCheckPayload) -> dict:
             session_factory=get_db_session_context,
             redis=get_redis_client(),
             now=_now,
+            scan_only=payload.scan_only,
         )
     except Exception as error:  # noqa: BLE001 — re-raised below without its text
         failure = type(error).__name__
     if failure is not None:
+        await _fail(payload.request_id, None, failure)
         # Raised outside the except block, so it carries no __context__.
         raise PurgeJobFailed(failure)
     return {"status": status}
@@ -103,5 +117,5 @@ async def submit_run(request_id: UUID, run_id: UUID) -> None:
     await worker_submit(ChatBotPurgePayload(request_id=request_id, run_id=run_id))
 
 
-async def submit_check(request_id: UUID) -> None:
-    await worker_submit(ChatBotPurgeCheckPayload(request_id=request_id))
+async def submit_check(request_id: UUID, *, scan_only: bool = False) -> None:
+    await worker_submit(ChatBotPurgeCheckPayload(request_id=request_id, scan_only=scan_only))

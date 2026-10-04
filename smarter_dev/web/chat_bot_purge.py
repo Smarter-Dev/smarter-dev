@@ -67,12 +67,14 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from smarter_dev.shared.privacy_purge import PURGE_STREAM
 from smarter_dev.shared.privacy_purge import RUNTIME_COMPONENTS
+from smarter_dev.shared.privacy_purge import SNOWFLAKE_PATTERN
 from smarter_dev.shared.privacy_purge import BlockedUsers
 from smarter_dev.shared.privacy_purge import PurgeAck
 from smarter_dev.shared.privacy_purge import PurgeCommand
 from smarter_dev.shared.privacy_purge import PurgeTarget
 from smarter_dev.shared.privacy_purge import consumer_pattern
 from smarter_dev.shared.privacy_purge import enforcing_process_pattern
+from smarter_dev.shared.privacy_purge import history_tombstone_key
 from smarter_dev.web.models import ChatAgentCompactionEvent
 from smarter_dev.web.models import ChatAgentEngagement
 from smarter_dev.web.models import ChatAgentError
@@ -99,6 +101,8 @@ STATUS_FINISHING = "finishing"
 STATUS_COMPLETE = "complete"
 STATUS_NEEDS_REVIEW = "needs_review"
 STATUS_CLOSED = "closed"
+# A job raised and left the request mid-run; the page offers "Run the purge again".
+STATUS_FAILED = "failed"
 
 BLOCK_SOURCE_PURGE = "purge"
 MAX_NAMES = 20
@@ -112,6 +116,7 @@ LEASE_SECONDS = 1200
 # (``MINID``, exact), so an entry that every delete path missed still goes.
 COMMAND_RETENTION = timedelta(days=7)
 STREAM_PAGE = 500
+MAX_COMMAND_GUILDS = 500
 
 # The stores that make up a guild's memory: a check hit here flags the guild.
 MEMORY_STORES = frozenset(
@@ -122,6 +127,9 @@ MEMORY_STORES = frozenset(
 # "watch channels_rewritten=M watch_name_hits=N"; the bare "name_hits=N" form
 # is matched too.
 _NAME_HITS_IN_DETAIL = re.compile(r"(?:\b|_)name_hits=(\d+)\b")
+_TOMBSTONED_IN_DETAIL = re.compile(r"\btombstoned=(\d+)\b")
+# The worker's partial-write detail: "purge: postgres:purged v1:unpurged v1:tombstoned".
+_V1_TOMBSTONED_IN_DETAIL = re.compile(r"\bv1:tombstoned\b")
 
 SessionFactory = Callable[[], contextlib.AbstractAsyncContextManager[AsyncSession]]
 
@@ -188,13 +196,6 @@ def _decode(value) -> str:
     return str(value)
 
 
-async def _live_values(redis, pattern: str) -> list[str | None]:
-    keys = [key async for key in redis.scan_iter(match=pattern, count=500)]
-    if not keys:
-        return []
-    return [None if v is None else _decode(v) for v in await redis.mget(keys)]
-
-
 async def runtime_status(redis) -> dict[str, dict]:
     """Per component: live processes, the MIN revision they enforce, live consumers.
 
@@ -208,20 +209,33 @@ async def runtime_status(redis) -> dict[str, dict]:
     list, but an old build never reports at all, which is why the page tells
     the admin to start a first purge only once every pod runs a privacy build.
     """
+    # One SCAN for everything (L7); the per-component patterns are matched here.
+    keys: list[str] = []
+    async for raw_key in redis.scan_iter(match="privacy:v1:*", count=1000):
+        key = _decode(raw_key)
+        if key.startswith(("privacy:v1:enforcing:", "privacy:v1:consumer:")):
+            keys.append(key)
+    values = dict(zip(keys, await redis.mget(keys), strict=True)) if keys else {}
     status: dict[str, dict] = {}
     for component in RUNTIME_COMPONENTS:
+        enforcing_prefix = enforcing_process_pattern(component)[:-1]
+        consumer_prefix = consumer_pattern(component)[:-1]
         revisions = []
-        values = await _live_values(redis, enforcing_process_pattern(component))
-        for raw in values:
-            try:
-                revisions.append(int(raw))
-            except (TypeError, ValueError):
+        consumers = 0
+        for key, raw in values.items():
+            if raw is None:
                 continue
-        consumers = [v for v in await _live_values(redis, consumer_pattern(component)) if v]
+            if key.startswith(enforcing_prefix):
+                try:
+                    revisions.append(int(_decode(raw)))
+                except ValueError:
+                    continue
+            elif key.startswith(consumer_prefix):
+                consumers += 1
         status[component] = {
             "processes": len(revisions),
             "revision": min(revisions) if revisions else None,
-            "consumers": len(consumers),
+            "consumers": consumers,
         }
     return status
 
@@ -315,14 +329,35 @@ def ack_name_hits(detail: str | None) -> int:
     return max((int(n) for n in _NAME_HITS_IN_DETAIL.findall(detail or "")), default=0)
 
 
+def ack_tombstoned(detail: str | None) -> bool:
+    """The worker left the guild's v1 history tombstoned (``tombstoned=1``)."""
+    detail = detail or ""
+    return any(int(n) > 0 for n in _TOMBSTONED_IN_DETAIL.findall(detail)) or bool(
+        _V1_TOMBSTONED_IN_DETAIL.search(detail)
+    )
+
+
+def ack_flagged(ack: dict) -> bool:
+    detail = ack.get("detail")
+    return ack.get("outcome") == "failed" or ack_name_hits(detail) > 0 or ack_tombstoned(detail)
+
+
 def possible_remains(steps: dict) -> list[dict]:
-    """Acks that say "purged" (or anything) but still counted name hits."""
+    """Acks that still counted name hits, or left a tombstone, whatever their outcome."""
     found = []
     for component in RUNTIME_COMPONENTS:
         for guild_id, ack in sorted((steps.get(component) or {}).items()):
             hits = ack_name_hits(ack.get("detail"))
-            if hits:
-                found.append({"guild_id": guild_id, "component": component, "name_hits": hits})
+            tombstoned = ack_tombstoned(ack.get("detail"))
+            if hits or tombstoned:
+                found.append(
+                    {
+                        "guild_id": guild_id,
+                        "component": component,
+                        "name_hits": hits,
+                        "tombstoned": tombstoned,
+                    }
+                )
     return found
 
 
@@ -331,7 +366,8 @@ def flagged_guilds(steps: dict, report: dict | None) -> set[str]:
 
     The last check found the ID or a name in the guild's memory stores, or a
     memory step (or the final notes pass) left something unresolved, or a
-    runtime's ack still counted name hits.
+    runtime's ack still counted name hits or reported a tombstone, or the
+    check found the guild's history tombstoned.
     """
     flagged = {
         hit["guild_id"]
@@ -343,6 +379,7 @@ def flagged_guilds(steps: dict, report: dict | None) -> set[str]:
             if step.get("unresolved"):
                 flagged.add(guild_id)
     flagged.update(item["guild_id"] for item in possible_remains(steps))
+    flagged.update((report or {}).get("tombstoned") or [])
     return flagged
 
 
@@ -436,13 +473,71 @@ async def delete_commands(
     return len(doomed)
 
 
+async def find_command(redis, run_id: UUID) -> str | None:
+    """The stream entry ID of ``run_id``'s command, if it is still there."""
+    async for entry_id, fields in _stream_entries(redis, PURGE_STREAM):
+        if _payload(fields).get("run_id") == str(run_id):
+            return entry_id
+    return None
+
+
+def _cutoff_id(now: datetime) -> str:
+    cutoff_ms = int((now - COMMAND_RETENTION).timestamp() * 1000)
+    return f"{max(cutoff_ms, 0)}-0"
+
+
+async def trim_commands(redis, *, now: datetime) -> None:
+    """Drop commands older than :data:`COMMAND_RETENTION` (exact MINID).
+
+    Run on every XADD, on every enforcing poll, and whenever an admin page
+    reads the runtimes, so the bound holds even when no purge is sent.
+    """
+    try:
+        await redis.xtrim(PURGE_STREAM, minid=_cutoff_id(now), approximate=False)
+    except Exception as error:  # noqa: BLE001 — trimming is best effort, retried next time
+        logger.warning("Purge stream trim failed (%s)", type(error).__name__)
+
+
+async def delete_commands_retrying(
+    redis, *, attempts: int = 3, delay: float = 0.5, sleep=asyncio.sleep, **match
+) -> bool:
+    """:func:`delete_commands`, retried; False if every attempt failed."""
+    for attempt in range(attempts):
+        try:
+            await delete_commands(redis, **match)
+            return True
+        except Exception as error:  # noqa: BLE001 — retried, then reported
+            logger.warning(
+                "Purge command delete failed, attempt %d (%s)", attempt + 1, type(error).__name__
+            )
+            if attempt < attempts - 1:
+                await sleep(delay * 2**attempt)
+    return False
+
+
+def command_problem(guild_ids: list[str]) -> str | None:
+    """Why no valid command can carry ``guild_ids``, in the admin's words."""
+    bad = [g for g in guild_ids if not re.fullmatch(SNOWFLAKE_PATTERN, g)]
+    if bad:
+        shown = ", ".join(repr(g[:30]) for g in bad[:5])
+        return (
+            f"{len(bad)} stored guild ID(s) are not Discord snowflakes (15 to 22 digits): "
+            f"{shown}. Fix or remove those rows, then run the purge again."
+        )
+    if len(guild_ids) > MAX_COMMAND_GUILDS:
+        return (
+            f"The bot holds memory or history for {len(guild_ids)} guilds, more than the "
+            f"{MAX_COMMAND_GUILDS} one purge command can carry."
+        )
+    return None
+
+
 async def send_command(redis, command: PurgeCommand, *, now: datetime) -> str:
     """XADD the command, trimming entries older than :data:`COMMAND_RETENTION`."""
-    cutoff_ms = int((now - COMMAND_RETENTION).timestamp() * 1000)
     entry_id = await redis.xadd(
         PURGE_STREAM,
         {"payload": command.model_dump_json()},
-        minid=f"{max(cutoff_ms, 0)}-0",
+        minid=_cutoff_id(now),
         approximate=False,
     )
     return _decode(entry_id)
@@ -569,6 +664,7 @@ async def run_purge(
         target = PurgeTarget.build(request.discord_user_id, request.names or [])
         list_revision = int(request.steps.get("list_revision", 0))
         memory_done = dict(request.steps.get("memory_done") or {})
+        intent = request.steps.get("command_intent")
 
     token = str(uuid4())
     take = _take_lease(token, now())
@@ -599,17 +695,39 @@ async def run_purge(
         return guarded
 
     # 1. Both runtimes must be enforcing the list that blocks this user.
+    # A runtime that has loaded the list once keeps running on its last list
+    # through a list outage and keeps reporting the (possibly stale) revision
+    # it holds, so the MIN over live processes is exactly what to wait on.
     waited = 0.0
-    while not all_enforcing(await runtimes_enforcing(redis), list_revision):
+    while not all_enforcing(enforcing := await runtimes_enforcing(redis), list_revision):
         if waited >= wait_seconds:
+            behind = ", ".join(
+                f"{component} holds {'no list' if value is None else f'revision {value}'}"
+                for component, value in enforcing.items()
+                if value is None or value < list_revision
+            )
+            reason = (
+                f"Nothing was purged: the runtimes did not enforce block-list revision "
+                f"{list_revision} within {int(wait_seconds)} s ({behind}). Run the purge again "
+                "once every process has caught up."
+            )
+
+            def timed_out(r: ChatBotPurgeRequest, reason: str = reason) -> None:
+                r.status = STATUS_NEEDS_REVIEW
+                r.steps["error"] = reason
+                r.steps.pop("lease", None)
+
+            await _update_request(session_factory, request_id, run_id, mine(timed_out))
+            logger.warning("Purge run %s: runtimes are not enforcing the block list", run_id)
+            return STATUS_NEEDS_REVIEW
+        if waited == 0:
             await _update_request(
                 session_factory,
                 request_id,
                 run_id,
                 mine(lambda r: setattr(r, "status", STATUS_WAITING)),
             )
-            logger.warning("Purge run %s: runtimes are not enforcing the block list", run_id)
-            return STATUS_WAITING
+        await trim_commands(redis, now=now())
         await sleep(poll_seconds)
         waited += poll_seconds
 
@@ -618,7 +736,8 @@ async def run_purge(
     async with session_factory() as session:
         guild_ids = await affected_guild_ids(session)
     command = None
-    if guild_ids:
+    problem = command_problem(guild_ids)
+    if problem is None and guild_ids:
         try:
             command = PurgeCommand(
                 schema_version=1,
@@ -630,19 +749,20 @@ async def run_purge(
                 created_at=now(),
             )
         except ValidationError as error:
-            # Count only: the error text quotes the ID and names.
-            logger.error(
-                "Purge run %s: the purge command is invalid (%d errors)",
-                run_id,
-                error.error_count(),
+            # Field locations and messages only: the inputs are the ID and names.
+            problem = "The purge command failed validation: " + "; ".join(
+                f"{'.'.join(str(p) for p in item['loc'])}: {item['msg']}"
+                for item in error.errors(include_input=False, include_url=False)[:5]
             )
+    if problem is not None:
+        logger.error("Purge run %s: the purge command cannot be built", run_id)
 
-            def invalid(r: ChatBotPurgeRequest) -> None:
-                r.status = STATUS_NEEDS_REVIEW
-                r.steps["error"] = "The purge command could not be built (an invalid guild ID?)."
+        def invalid(r: ChatBotPurgeRequest) -> None:
+            r.status = STATUS_NEEDS_REVIEW
+            r.steps["error"] = problem
 
-            await _update_request(session_factory, request_id, run_id, mine(invalid))
-            return STATUS_NEEDS_REVIEW
+        await _update_request(session_factory, request_id, run_id, mine(invalid))
+        return STATUS_NEEDS_REVIEW
 
     memory_started_at = now()
 
@@ -664,6 +784,7 @@ async def run_purge(
         ):
             return await superseded()
         done = memory_done.get(guild_id)
+        step_started = now().isoformat()
         if done and done.get("names") == current_names:
             step = {**done["step"], "earlier_run": True}
             new_done = None
@@ -678,7 +799,9 @@ async def run_purge(
                     still_current=still_current,
                 )
                 step = result.as_step()
-                new_done = {"names": current_names, "step": step}
+                # The original time is kept across re-runs: the final notes
+                # pass reviews every note written since the earliest one.
+                new_done = {"names": current_names, "step": step, "at": step_started}
             except PurgeStopped:
                 return await superseded()
             except Exception as error:  # noqa: BLE001 — one guild must not stop the rest
@@ -714,7 +837,11 @@ async def run_purge(
             mine(lambda r: r.steps.__setitem__("command_intent", str(run_id))),
         ):
             return await superseded()
-        entry_id = await send_command(redis, command, now=now())
+        # A second execution of this run (the first died after XADD) finds
+        # the entry the first one sent instead of sending a second.
+        entry_id = await find_command(redis, run_id) if intent == str(run_id) else None
+        if entry_id is None:
+            entry_id = await send_command(redis, command, now=now())
 
     settled: list[str] = []
 
@@ -762,6 +889,11 @@ async def record_ack(
     }
     if request.status == STATUS_AWAITING_ACKS and acks_complete(request.steps):
         request.status = STATUS_CHECKING
+    elif request.status == STATUS_COMPLETE and ack_flagged(
+        {"outcome": ack.outcome, "detail": ack.detail}
+    ):
+        # A late failure or name hit reopens a finished request for review.
+        request.status = STATUS_NEEDS_REVIEW
     _touch_json(request)
     await session.flush()
     return request
@@ -972,8 +1104,21 @@ async def scan_stores(session: AsyncSession, redis, target: PurgeTarget) -> dict
     }
 
 
+def hit_counts(report: dict) -> dict[str, int]:
+    """Hits per store over remains, operational and information: names and counts only."""
+    counts: dict[str, int] = {}
+    for section in ("remains", "operational", "information"):
+        for hit in report.get(section) or []:
+            counts[hit["store"]] = counts.get(hit["store"], 0) + 1
+    return counts
+
+
 def run_outcome(steps: dict, report: dict) -> str:
-    """``complete`` only when every step succeeded and nothing remains to review."""
+    """``complete`` only when every step succeeded and no searched store hits.
+
+    Any hit (remains, operational copies, audit tables), a tombstoned guild,
+    an unchecked name, or a flagged ack ends in review.
+    """
     failed = bool(steps.get("error"))
     unresolved = False
     for section in ("memory", "final_notes"):
@@ -982,10 +1127,70 @@ def run_outcome(steps: dict, report: dict) -> str:
             unresolved = unresolved or bool(step.get("unresolved"))
     for component in RUNTIME_COMPONENTS:
         acks = steps.get(component) or {}
-        failed = failed or any(ack.get("outcome") == "failed" for ack in acks.values())
-    if failed or unresolved or report.get("remains") or possible_remains(steps):
+        failed = failed or any(ack_flagged(ack) for ack in acks.values())
+    if (
+        failed
+        or unresolved
+        or hit_counts(report)
+        or report.get("tombstoned")
+        or report.get("unchecked_names")
+        or possible_remains(steps)
+    ):
         return STATUS_NEEDS_REVIEW
     return STATUS_COMPLETE
+
+
+async def tombstoned_guilds(redis, request_id: UUID, guild_ids: list[str]) -> list[str]:
+    """Guilds whose v1 history the worker tombstoned for this request (or an unknown one)."""
+    if not guild_ids:
+        return []
+    values = await redis.mget([history_tombstone_key(g) for g in guild_ids])
+    found = []
+    for guild_id, raw in zip(guild_ids, values, strict=True):
+        if raw is None:
+            continue
+        try:
+            value = json.loads(_decode(raw))
+        except ValueError:
+            value = None
+        owner = value.get("request_id") if isinstance(value, dict) else None
+        # A plain (older) value names no run: it may be this request's.
+        if owner is None or owner == str(request_id):
+            found.append(guild_id)
+    return found
+
+
+class CloseRefused(Exception):
+    """A guild of the request is tombstoned; closing would drop its command."""
+
+    def __init__(self, guild_ids: list[str]):
+        super().__init__(f"{len(guild_ids)} tombstoned guild(s)")
+        self.guild_ids = guild_ids
+
+
+async def mark_failed(
+    session_factory: SessionFactory,
+    request_id: UUID,
+    run_id: UUID | None,
+    error_type: str,
+) -> bool:
+    """Leave a request whose job raised in ``failed`` (re-run allowed), type only.
+
+    ``run_id`` None means the request's current run (the check job knows no run).
+    """
+    if run_id is None:
+        async with session_factory() as session:
+            request = await session.get(ChatBotPurgeRequest, request_id)
+            if request is None or request.run_id is None:
+                return False
+            run_id = request.run_id
+
+    def change(request: ChatBotPurgeRequest) -> None:
+        request.status = STATUS_FAILED
+        request.steps["error"] = f"The purge job stopped with {error_type}. Run the purge again."
+        request.steps.pop("lease", None)
+
+    return await _update_request(session_factory, request_id, run_id, change)
 
 
 def _claim_finishing(token: str, now: datetime) -> Callable[[ChatBotPurgeRequest], bool]:
@@ -1005,6 +1210,17 @@ def _claim_finishing(token: str, now: datetime) -> Callable[[ChatBotPurgeRequest
     return change
 
 
+def notes_since(steps: dict) -> datetime | None:
+    """The earliest memory step of any guild in this request, this run or an earlier one."""
+    times = [steps.get("memory_started_at")]
+    guilds = set(steps.get("guild_ids") or [])
+    times += [
+        done.get("at") for g, done in (steps.get("memory_done") or {}).items() if g in guilds
+    ]
+    parsed = [datetime.fromisoformat(t) for t in times if t]
+    return min(parsed) if parsed else None
+
+
 async def _final_notes_pass(
     request_id: UUID,
     run_id: UUID,
@@ -1020,9 +1236,7 @@ async def _final_notes_pass(
     from smarter_dev.web.chat_memory_purge import PurgeStopped
     from smarter_dev.web.chat_memory_purge import purge_guild_notes
 
-    since = None
-    if steps.get("memory_started_at"):
-        since = datetime.fromisoformat(steps["memory_started_at"])
+    since = notes_since(steps)
     still_current = _still_current(request_id, run_id, token)
     for guild_id in steps.get("guild_ids") or []:
         if not await _update_request(
@@ -1066,11 +1280,14 @@ async def run_check(
     redis,
     now: Callable[[], datetime],
     agent=None,
+    scan_only: bool = False,
 ) -> str | None:
     """Final notes pass (once per run), then search every store and settle the request.
 
     Run by hand mid-run, it only stores a fresh report: it never ends a run
     still waiting for acknowledgements or still in its final notes pass.
+    ``scan_only`` (the admin's "Run the check again") never runs the notes
+    pass: only the deterministic search, re-settling a finished request.
     """
     async with session_factory() as session:
         request = await session.get(ChatBotPurgeRequest, request_id)
@@ -1081,7 +1298,7 @@ async def run_check(
         steps = dict(request.steps or {})
 
     token = str(uuid4())
-    finishing = await _update_request(
+    finishing = not scan_only and await _update_request(
         session_factory, request_id, run_id, _claim_finishing(token, now())
     )
     if finishing and not await _final_notes_pass(
@@ -1092,7 +1309,13 @@ async def run_check(
 
     async with session_factory() as session:
         report = await scan_stores(session, redis, target)
+    report["tombstoned"] = await tombstoned_guilds(
+        redis, request_id, list(steps.get("guild_ids") or [])
+    )
+    report["unchecked_names"] = list(target.unchecked_names)
+    report["hit_counts"] = hit_counts(report)
     report["checked_at"] = now().isoformat()
+    await trim_commands(redis, now=now())
 
     acknowledged: list[bool] = []
 
@@ -1104,14 +1327,21 @@ async def run_check(
             request.status = run_outcome(request.steps, report)
             request.completed_at = now()
             request.steps.pop("lease", None)
-        if acks_complete(request.steps):
+        # A tombstoned guild keeps its command: the worker retries it.
+        if acks_complete(request.steps) and not report["tombstoned"]:
             acknowledged.append(True)
             request.steps["command_entry_id"] = None
 
     if not await _update_request(session_factory, request_id, run_id, settle):
         return None
-    if acknowledged:
-        await delete_commands(redis, request_id=request_id)
+    if acknowledged and not await delete_commands_retrying(redis, request_id=request_id):
+        # Still on the stream: the next check or close deletes it.
+        await _update_request(
+            session_factory,
+            request_id,
+            run_id,
+            lambda r: r.steps.__setitem__("command_delete_pending", True),
+        )
     async with session_factory() as session:
         request = await session.get(ChatBotPurgeRequest, request_id)
         return request.status if request else None
@@ -1129,6 +1359,7 @@ def receipt_summary(request: ChatBotPurgeRequest) -> dict:
         "remains": len(report.get("remains") or []),
         "operational": len(report.get("operational") or []),
         "information": len(report.get("information") or []),
+        "tombstoned": len(report.get("tombstoned") or []),
     }
 
 
@@ -1145,7 +1376,12 @@ async def close_request(
     request = await session.get(ChatBotPurgeRequest, request_id, with_for_update=True)
     if request is None:
         return None
-    if redis is not None:
+    if redis is not None and request.status != STATUS_CLOSED:
+        tombstoned = await tombstoned_guilds(
+            redis, request_id, list((request.steps or {}).get("guild_ids") or [])
+        )
+        if tombstoned:
+            raise CloseRefused(tombstoned)
         await delete_commands(redis, request_id=request_id)
     summary = receipt_summary(request)
     request.discord_user_id = None
