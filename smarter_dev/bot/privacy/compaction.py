@@ -41,9 +41,6 @@ from smarter_dev.bot.agents.chat_compaction import MAX_SUMMARY_CHARS
 from smarter_dev.bot.agents.chat_compaction import _collect_system_parts
 from smarter_dev.bot.agents.chat_compaction import _render_transcript
 from smarter_dev.bot.privacy.attribution import ATTRIBUTION_MARK
-from smarter_dev.bot.privacy.plausibility import FoldField
-from smarter_dev.bot.privacy.plausibility import fold_input_texts
-from smarter_dev.bot.privacy.plausibility import plausibility_rejection
 from smarter_dev.bot.proactive.agent import memory_note_pair
 from smarter_dev.bot.proactive.environment import InstructionStore
 from smarter_dev.bot.proactive.environment import WatchInstruction
@@ -100,9 +97,18 @@ async def generate_validated(
     target: PurgeTarget,
     *,
     id_retries: int = ID_RETRIES,
-    plausible: Callable[[T], str | None] | None = None,
+    emptied: Callable[[T], str | None] | None = None,
 ) -> Validated[T]:
     """Ask the model until its output is free of the target's id.
+
+    The rewrite checks (privacy:v1), and nothing else:
+    1. ``emptied(output)`` names a field that came back empty although its
+       input was not: the step fails at once (never a reset);
+    2. the user id in the output: re-asked up to ``id_retries`` times, then
+       the step fails;
+    3. a listed name still present after one re-ask is accepted and counted;
+    4. a model timeout or error: the step fails (an error after the first
+       attempt is retried within the same budget as 2).
 
     ``produce(feedback)`` runs the model once; ``feedback`` is None on the
     first attempt and a correction afterwards. ``texts`` lists every string of
@@ -144,18 +150,14 @@ async def generate_validated(
             retries_left -= 1
             feedback = ID_FEEDBACK
             continue
-        reason = plausible(output) if plausible is not None else None
-        if reason is not None:
-            # The fold plausibility rule (privacy:v1): never accept an
-            # emptied memory. The reason is content-free.
+        field = emptied(output) if emptied is not None else None
+        if field is not None:
             logger.warning(
-                "privacy compaction attempt %d rejected: %s", attempts, reason
+                "privacy compaction attempt %d emptied %s; step failed",
+                attempts,
+                field,
             )
-            if retries_left <= 0:
-                raise PrivacyCompactionFailed("output not plausible")
-            retries_left -= 1
-            feedback = f"CORRECTION: {reason}."
-            continue
+            raise PrivacyCompactionFailed(f"{field} came back empty")
         hits = target.name_hits(written)
         if hits and not name_reask_used:
             name_reask_used = True
@@ -186,24 +188,23 @@ removed. Keep everything else, attributed exactly as before.
 Output three fields:
 - `summary`: the running summary the agent will read in place of the whole
   history. Same rules as always: attribute every kept question, claim,
-  request or decision as `username (uid=<user-id>)` for everyone except the
-  removed person; structure it as a
+  request or decision as `username (id <user-id>)`; structure it as a
   `Participants:` line, topic bullets, and an `Agent state:` section. At most
   {max_chars} characters. If there is no transcript, return an empty string.
   If nothing remains once the person is removed, say briefly that the
   conversation has no open threads.
-- `topic`: the channel's topic line (1-2 sentences, at least 40 characters)
-  rewritten the same way; an empty string if no topic was given.
-- `notes`: the channel's notes (1-5 sentences, at least 40 characters)
-  rewritten the same way; an empty string if no notes were given.
+- `topic`: the channel's topic line (1-2 sentences) rewritten the same way;
+  an empty string if no topic was given.
+- `notes`: the channel's notes (1-5 sentences) rewritten the same way; an
+  empty string if no notes were given.
 Always return all three fields.
 
 No preamble, no quoting, no apologies."""
 
 
 class ChatPurgeOutput(BaseModel):
-    # No defaults that could blank a store: a missing field stays None and
-    # the plausibility rule rejects it when its input was non-empty.
+    # No defaults that could blank a store: a missing field stays None, and
+    # a field whose input was non-empty must come back non-empty.
     summary: str | None = None
     topic: str | None = None
     notes: str | None = None
@@ -266,24 +267,21 @@ async def purge_chat_memory(
             notes=clean(output.notes),
         )
 
-    summary_inputs = tuple(fold_input_texts(history))
-
-    def plausible(output: ChatPurgeOutput) -> str | None:
-        return plausibility_rejection(
-            [
-                # Chat input is XML-escaped: B reads it unescaped.
-                FoldField("summary", summary_inputs, output.summary, xml_input=True),
-                FoldField("topic", (topic or "",), output.topic),
-                FoldField("notes", (notes or "",), output.notes),
-            ],
-            target,
-        )
+    def emptied(output: ChatPurgeOutput) -> str | None:
+        for name, had_input, value in (
+            ("summary", bool(history), output.summary),
+            ("topic", bool(topic), output.topic),
+            ("notes", bool(notes), output.notes),
+        ):
+            if had_input and not value:
+                return name
+        return None
 
     validated = await generate_validated(
         produce,
         lambda output: (output.summary or "", output.topic or "", output.notes or ""),
         target,
-        plausible=plausible,
+        emptied=emptied,
     )
     output = validated.output
     new_history: list[ModelMessage] = []
@@ -319,8 +317,7 @@ you write now. Write the memory your future self needs to continue
 seamlessly, exactly as you would for an ordinary compaction — conversations
 still in motion and who is in them, commitments or follow-ups you made, what
 you have learned about the people and channels you watch — attributing every
-statement to WHO said or did it as `Name (uid=N)`, and WHERE (channel name
-and id). Keep every other participant and their uid.
+statement to WHO said or did it and WHERE (channel name and id).
 
 Leave out every trace of the person below: their messages, what they asked,
 said, shared or decided, your replies to them, facts about them, and the fact
@@ -350,13 +347,11 @@ async def purge_proactive_history(
         )
         return (result.output or "").strip()
 
-    inputs = tuple(fold_input_texts(history))
-
-    def plausible(note: str) -> str | None:
-        return plausibility_rejection([FoldField("note", inputs, note)], target)
+    def emptied(note: str) -> str | None:
+        return "note" if history and not note else None
 
     validated = await generate_validated(
-        produce, lambda note: (note,), target, plausible=plausible
+        produce, lambda note: (note,), target, emptied=emptied
     )
     return (
         memory_note_pair(validated.output, attributed=True),

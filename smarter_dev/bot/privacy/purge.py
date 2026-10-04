@@ -270,26 +270,20 @@ class _Report:
         )
 
     def ack(self, guild_id: str) -> PurgeAck:
+        """The structured ack (Ack v1): the web decides from the fields; the
+        detail is display text only (counts and error types, no content)."""
         outcome = "failed" if self.failed else "purged" if self.purged else "unchanged"
-        # Segments the web reads come first and are never truncated:
-        # unchecked names, then one ``<step>_name_hits=N`` per step.
-        head = []
-        if self.unchecked_names:
-            head.append(f"unchecked_names={self.unchecked_names}")
-        for area in sorted(self.counts):
-            step = STEP_NAMES.get(area, area.replace(" ", "_"))
-            head.append(f"{step}_name_hits={self.name_hits.get(area, 0)}")
-        tail = []
+        parts = []
         for area in sorted(self.counts):
             values = " ".join(
                 f"{key.replace(' ', '_')}={value}"
                 for key, value in sorted(self.counts[area].items())
             )
-            tail.append(f"{area} {values}")
+            parts.append(f"{area} {values}")
         if self.errors:
-            tail.append(f"errors: {', '.join(sorted(self.errors))}")
-        detail = "; ".join(head)
-        for segment in tail:
+            parts.append(f"errors: {', '.join(sorted(self.errors))}")
+        detail = ""
+        for segment in parts:
             candidate = f"{detail}; {segment}" if detail else segment
             if len(candidate) > 500:
                 break
@@ -300,6 +294,16 @@ class _Report:
             outcome=outcome,
             stores=sorted(self.stores),
             detail=detail,
+            # One entry per step that ran.
+            name_hits={
+                STEP_NAMES[area]: self.name_hits.get(area, 0)
+                for area in sorted(self.counts)
+                if area in STEP_NAMES
+            },
+            tombstoned=False,  # the bot holds no tombstones
+            unchecked_names=self.unchecked_names,
+            # process_entry sets it once it knows whether the record was saved.
+            done_record="not_written",
         )
 
 
@@ -751,9 +755,12 @@ async def _purge_watch_instructions(
 
     service = run.settings_service()
     if service is None:
+        # Cannot read the stored instructions: a failed step, never a silent
+        # "unchanged".
+        report.count("watch instructions", "failed")
+        report.errors.add("SettingsServiceUnavailable")
         return
-    rows = await service.list_enabled_channels(guild_id)
-    for row in rows:
+    for row in await _all_watch_addenda(guild_id, run, service):
         done_field = f"watch_instructions:{guild_id}:{row.channel_id}"
         if await scope.status(done_field) == _DONE:
             report.count("watch instructions", "already done")
@@ -791,6 +798,24 @@ async def _purge_watch_instructions(
             )
             report.stores.add(STORE_WATCH_INSTRUCTIONS)
         await scope.mark(done_field)
+
+
+async def _all_watch_addenda(guild_id: str, run: Any, service: Any) -> list[Any]:
+    """Every channel's stored watch instructions: the enabled channels, plus
+    any disabled channel of the guild (from the bot cache) that still holds
+    instructions — they are stored text too."""
+    rows = list(await service.list_enabled_channels(guild_id))
+    seen = {str(row.channel_id) for row in rows}
+    view = getattr(run.bot.cache, "get_guild_channels_view_for_guild", None)
+    channel_ids = [str(c) for c in (view(int(guild_id)) if view else {})]
+    for channel_id in channel_ids:
+        if channel_id in seen:
+            continue
+        settings = await service.get_settings(guild_id, channel_id)
+        if settings.watch_addendum:
+            rows.append(settings)
+            seen.add(channel_id)
+    return rows
 
 
 def _clear_buffered_target_messages(run: Any, target: PurgeTarget) -> int:
@@ -916,6 +941,8 @@ async def _keep_claimed(redis: Any, consumer: str, stream_id: Any) -> None:
     reaches the 10-minute reclaim while this consumer is still on it."""
     while True:
         await asyncio.sleep(CLAIM_RENEW_SECONDS)
+        # A purge can outlast the heartbeat's 180 s: renew it here too.
+        await _heartbeat(redis)
         try:
             await redis.xclaim(
                 PURGE_STREAM,
@@ -990,10 +1017,22 @@ async def _process_entry(deps: PurgeDeps, stream_id: Any, fields: dict) -> None:
     all_acked = True
     for guild_id in command.guild_ids:
         ack = await scope.recorded_ack(guild_id)
-        if ack is None:
+        if ack is not None:
+            ack = ack.model_copy(update={"done_record": "replayed"})
+        else:
             ack = await purge_guild(guild_id, deps, scope)
             if ack.outcome != "failed":
-                await scope.mark(f"guild:{guild_id}", ack.model_dump_json())
+                ack = ack.model_copy(update={"done_record": "written"})
+                try:
+                    await scope.mark(f"guild:{guild_id}", ack.model_dump_json())
+                except Exception as error:  # noqa: BLE001 — still ack it
+                    logger.warning(
+                        "privacy purge run=%s guild=%s done record not saved (%s)",
+                        run_id,
+                        guild_id,
+                        type(error).__name__,
+                    )
+                    ack = ack.model_copy(update={"done_record": "not_written"})
         try:
             accepted = await deps.post_ack(run_id, ack)
         except Exception as error:  # noqa: BLE001 — retried on reclaim

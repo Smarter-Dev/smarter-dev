@@ -52,8 +52,6 @@ OTHER_CHANNEL = 12  # OTHER_GUILD: must stay untouched
 UNPLACED_CHANNEL = 13  # guild unknown to the cache: purged anyway
 
 NIA_SUMMARY = f"nia (id {NIA}) asked how to benchmark tokio; unresolved."
-# Topic and notes are at least 40 chars: the fold plausibility rule
-# rejects anything shorter that has bystander content to keep.
 NIA_TOPIC = "Benchmarking tokio runtimes and comparing results."
 NIA_NOTES = "nia wants reproducible numbers for tokio benchmarks."
 NIA_NOTE = f"nia (id {NIA}) in #general asked about tokio benchmarks."
@@ -456,9 +454,15 @@ async def test_persistent_name_hit_is_accepted_and_counted(world):
 
     _run_id, ack = world.acks[0]
     assert ack.outcome == "purged"
-    assert "chat_name_hits=3" in ack.detail
-    assert "history_name_hits=1" in ack.detail
-    _assert_clean(ack.detail.replace("name_hits", ""))
+    # Check 3: names left after the re-ask are stored and reported as
+    # structured name hits (Ack v1), which the web flags for review.
+    assert ack.name_hits == {
+        "chat": 3,
+        "history": 1,
+        "legacy_history": 1,
+        "watch_instructions": 1,
+    }
+    _assert_clean(ack.detail)
     text = _prompt_text(await world.memory.read_history(LIVE_CHANNEL))
     assert KAI not in text
 
