@@ -1113,8 +1113,7 @@ async def scan_stores(session: AsyncSession, redis, target: PurgeTarget) -> dict
             hit = _hit(
                 "chat_agent_guild_memory",
                 f"guild:{memory.guild_id}/{field_name}",
-                target.id_hits(text),
-                target.name_hits(text),
+                *target.value_hits(text),
                 memory.guild_id,
             )
             if hit:
@@ -1124,8 +1123,7 @@ async def scan_stores(session: AsyncSession, redis, target: PurgeTarget) -> dict
         hit = _hit(
             "chat_agent_memory_notes",
             f"guild:{note.guild_id}/note:{note.id}",
-            target.id_hits(note.content),
-            target.name_hits(note.content),
+            *target.value_hits(note.content),
             note.guild_id,
         )
         if hit:
@@ -1150,8 +1148,7 @@ async def scan_stores(session: AsyncSession, redis, target: PurgeTarget) -> dict
         hit = _hit(
             "proactive_channel_settings.watch_addendum",
             f"guild:{settings.guild_id}/channel:{settings.channel_id}",
-            target.id_hits(text),
-            target.name_hits(text),
+            *target.value_hits(text),
             settings.guild_id,
         )
         if hit:

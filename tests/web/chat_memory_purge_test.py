@@ -788,3 +788,44 @@ def test_a_segment_carrying_the_id_cannot_be_kept_even_with_a_reason():
     )
     with pytest.raises(PurgeRefused):
         compose_purge(output, _context(), retries_left=0)
+
+
+# -- names with JSON-special characters ------------------------------------------------
+
+SPECIAL_NAMES = ['Kai "the Rustacean"', "back\\slash", "tab\there"]
+
+
+@pytest.mark.parametrize("name", SPECIAL_NAMES, ids=["quote", "backslash", "tab"])
+def test_a_segment_naming_a_special_character_name_is_editable_and_removed(name):
+    target = PurgeTarget.build(_KAI_ID, [name])
+    memory = f"## People\n{NIA_LINE}\n- {name} is deep in embedded rust."
+    context = PurgeContext(target=target, memory=memory)
+    assert context.editable == ("memory",)
+    assert [seg.body for seg in context.editable_by_location()["memory"]] == [
+        f"{name} is deep in embedded rust."
+    ]
+    blocks = compose_purge(_output(context), context, retries_left=0)
+    assert blocks.memory == f"## People\n{NIA_LINE}"
+    # A note naming them is not read-only, and is dropped.
+    notes = PurgeContext(target=target, notes=(("n1", f"{name} shipped it."), ("n2", NIA_NOTE)))
+    assert notes.mentioning_notes == ("n1",)
+    assert compose_purge(_output(notes), notes, retries_left=0).dropped_notes == ("n1",)
+
+
+def test_a_name_spanning_a_line_break_is_refused_not_called_clean():
+    target = PurgeTarget.build(_KAI_ID, ["new\nline"])
+    memory = f"## People\n- regular: new\nline joined in May.\n{NIA_LINE}"
+    context = PurgeContext(target=target, memory=memory)
+    assert context.editable == ("memory",)
+    assert context.editable_by_location()["memory"] == []  # no single segment holds it
+    with pytest.raises(PurgeRefused):
+        compose_purge(PurgeOutput(edits=[]), context, retries_left=0)
+
+
+def test_a_name_with_a_full_stop_is_not_cut_into_two_sentences():
+    target = PurgeTarget.build(_KAI_ID, ["Dr. Kai"])
+    context = PurgeContext(target=target, behavior="Ask Dr. Kai first. Keep it short.")
+    assert [seg.text for seg in context.editable_by_location()["behavior"]] == [
+        "Ask Dr. Kai first."
+    ]
+    assert compose_purge(_output(context), context, retries_left=0).behavior == "Keep it short."
