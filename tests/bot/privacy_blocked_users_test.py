@@ -12,6 +12,7 @@ import pytest
 from smarter_dev.bot.privacy.blocked_users import ENFORCING_KEY
 from smarter_dev.bot.privacy.blocked_users import BlockedUsersCache
 from smarter_dev.bot.privacy.blocked_users import BlockedUsersSnapshot
+from smarter_dev.bot.privacy.blocked_users import process_key
 from smarter_dev.bot.privacy.blocked_users import redact_blocked_mentions
 from smarter_dev.bot.privacy.blocked_users import refresh_loop
 from smarter_dev.bot.privacy.blocked_users import refresh_once
@@ -56,56 +57,71 @@ async def test_standby_cannot_raise_the_aggregate_above_a_stale_acting_process()
     assert await redis.get(ENFORCING_KEY) == b"5"
 
 
-async def test_stale_list_gives_the_model_no_input():
+async def test_failing_fetches_keep_the_last_list_in_force_for_ten_minutes(
+    monkeypatch, caplog
+):
+    """Zech's decision: the bot keeps going on the last list it loaded. Ten
+    minutes of failed fetches later the models still get input, kai (on the
+    old list) is still blocked, and the per-process key still reports the
+    revision this process actually holds."""
+    from smarter_dev.bot.agents import chat_context
+    from smarter_dev.bot.agents.chat_input_format import build_agent_call
+    from smarter_dev.bot.plugins import proactive
+    from smarter_dev.bot.privacy import blocked_users as module
+    from tests.bot.privacy_model_input_test import _channel_messages
+    from tests.bot.privacy_model_input_test import _fake_bot
+    from tests.bot.privacy_model_input_test import _Memory
+
     now = [1000.0]
     cache = BlockedUsersCache(clock=lambda: now[0])
     cache.load(3, [KAI])
-    assert cache.loaded and not cache.is_blocked(NIA)
+    redis = fakeredis.aioredis.FakeRedis()
+    failing = AsyncMock(side_effect=ConnectionError("web down"))
+    monkeypatch.setattr(module, "_last_stale_log", {})
+    for _minute in range(11):
+        now[0] += 60
+        assert not await refresh_once(cache, failing, redis)
 
-    now[0] += 179
-    assert cache.loaded
-    now[0] += 2  # last successful fetch is now older than the 180 s report
-    assert not cache.loaded
-    assert cache.is_blocked(NIA)  # every author: no Discord input at all
+    assert cache.loaded and cache.age_seconds() >= 600
+    assert await redis.get(process_key()) == b"3"
+    assert 0 < await redis.ttl(process_key()) <= 180
+    assert await redis.get(ENFORCING_KEY) == b"3"
 
-    await refresh_once(
-        cache, AsyncMock(return_value=BlockedUsersSnapshot(3, frozenset({KAI}))), None
+    monkeypatch.setattr(chat_context, "get_blocked_users", lambda: cache)
+    monkeypatch.setattr(
+        chat_context,
+        "fetch_channel_info",
+        AsyncMock(return_value={"channel_name": "general"}),
     )
-    assert cache.loaded and not cache.is_blocked(NIA)
+    messages = _channel_messages()
+    agent_input = await chat_context.build_followup_input(
+        bot=_fake_bot(messages), channel_id=1, guild_id=2, queued=messages,
+        memory=_Memory(),
+    )
+    prompt, history = build_agent_call(agent_input, [])
+    rendered = prompt + str(history)
+    assert "anyone benchmarked tokio?" in rendered  # nia still reaches it
+    assert "[BLOCKED BY USER]" in rendered and KAI not in rendered
+
+    monkeypatch.setattr(proactive, "get_blocked_users", lambda: cache)
+    assert not proactive.channel_message_from_hikari(messages[0]).blocked
+    assert proactive.channel_message_from_hikari(messages[1]).blocked
 
 
-async def test_stale_process_routes_nobody_to_the_chat_or_proactive_model(
-    monkeypatch,
-):
-    from smarter_dev.bot.plugins import mention
-    from smarter_dev.bot.plugins import proactive
+async def test_stale_state_is_logged_at_most_once_a_minute(monkeypatch, caplog):
     from smarter_dev.bot.privacy import blocked_users as module
 
-    now = [0.0]
-    stale = BlockedUsersCache(clock=lambda: now[0])
-    stale.load(3, [])
-    now[0] = 500.0
-    monkeypatch.setattr(mention, "get_blocked_users", lambda: stale)
-    monkeypatch.setattr(proactive, "get_blocked_users", lambda: stale)
-    assert module.get_blocked_users is not None
-    registry = AsyncMock()
-    monkeypatch.setattr(mention, "get_chat_engine_registry", registry)
-    message = SimpleNamespace(
-        id=1, author=SimpleNamespace(id=int(NIA), is_bot=False), content="hi"
-    )
+    monkeypatch.setattr(module, "_last_stale_log", {})
+    cache = BlockedUsersCache()
+    cache.load(7, [KAI])
+    failing = AsyncMock(side_effect=ConnectionError())
+    for _ in range(5):
+        await refresh_once(cache, failing, None)
 
-    await mention.on_message_create(
-        SimpleNamespace(message=message, guild_id=2, channel_id=1, content="hi")
-    )
-    converted = proactive.channel_message_from_hikari(
-        SimpleNamespace(
-            id=1, created_at=None, author=message.author, content="hi",
-            referenced_message=None,
-        )
-    )
-
-    registry.assert_not_called()
-    assert converted.blocked and converted.content == ""
+    lines = [r for r in caplog.records if "refresh failed" in r.getMessage()]
+    assert len(lines) == 1
+    assert "revision=7" in lines[0].getMessage()
+    assert KAI not in caplog.text
 
 
 async def test_refresh_sets_enforcing_key_with_ttl():
@@ -124,7 +140,7 @@ async def test_refresh_sets_enforcing_key_with_ttl():
     assert 0 < await redis.ttl(ENFORCING_KEY) <= 180
 
 
-async def test_failed_refresh_keeps_last_list_and_sets_no_key(caplog):
+async def test_failed_refresh_keeps_last_list_and_still_reports_it(caplog):
     cache = BlockedUsersCache()
     cache.load(4, [KAI])
     redis = fakeredis.aioredis.FakeRedis()
@@ -133,7 +149,7 @@ async def test_failed_refresh_keeps_last_list_and_sets_no_key(caplog):
 
     assert not ok
     assert cache.revision == 4 and cache.is_blocked(KAI)
-    assert await redis.get(ENFORCING_KEY) is None
+    assert await redis.get(process_key()) == b"4"
     assert KAI not in caplog.text
 
 
@@ -207,5 +223,7 @@ def test_mentions_of_blocked_users_are_redacted():
     text = f"<@{KAI}> and <@!{KAI}> vs <@{NIA}> <@&{KAI}> <#{KAI}> <@ broken"
 
     assert redact_blocked_mentions(text, cache) == (
-        f"@[blocked user] and @[blocked user] vs <@{NIA}> <@&{KAI}> <#{KAI}> <@ broken"
+        # Any other blocked id as a digit run is replaced too.
+        f"@[blocked user] and @[blocked user] vs <@{NIA}> <@&[blocked user]> "
+        "<#[blocked user]> <@ broken"
     )

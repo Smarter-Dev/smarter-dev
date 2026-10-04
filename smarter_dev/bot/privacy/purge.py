@@ -73,6 +73,7 @@ from smarter_dev.bot.services.chat_memory import ChatMemory
 from smarter_dev.bot.services.chat_memory import chat_privacy_lock_key
 from smarter_dev.shared.privacy_purge import BOT_CONSUMER_GROUP
 from smarter_dev.shared.privacy_purge import PURGE_STREAM
+from smarter_dev.shared.privacy_purge import WORKER_CONSUMER_GROUP
 from smarter_dev.shared.privacy_purge import PurgeAck
 from smarter_dev.shared.privacy_purge import PurgeCommand
 from smarter_dev.shared.privacy_purge import PurgeTarget
@@ -135,6 +136,8 @@ _RENEW_LOCK = (
 _DONE = "done"
 _STARTED = "started"
 _SEEN_FIELD = "seen"
+# Groups that must have finished with an entry before it may be deleted.
+EXPECTED_OTHER_GROUPS = frozenset({WORKER_CONSUMER_GROUP})
 
 
 def privacy_lock_key(guild_id: str) -> str:
@@ -240,6 +243,8 @@ class _Report:
     errors: set[str] = field(default_factory=set)
     # A proactive history was rewritten: only then does the epoch move.
     proactive_written: bool = False
+    # Listed names too short to check deterministically (PurgeTarget).
+    unchecked_names: int = 0
 
     def add_name_hits(self, area: str, hits: int) -> None:
         self.name_hits[area] = self.name_hits.get(area, 0) + hits
@@ -264,19 +269,29 @@ class _Report:
 
     def ack(self, guild_id: str) -> PurgeAck:
         outcome = "failed" if self.failed else "purged" if self.purged else "unchanged"
-        parts = []
+        # Segments the web reads come first and are never truncated:
+        # unchecked names, then one ``<step>_name_hits=N`` per step.
+        head = []
+        if self.unchecked_names:
+            head.append(f"unchecked_names={self.unchecked_names}")
+        for area in sorted(self.counts):
+            step = STEP_NAMES.get(area, area.replace(" ", "_"))
+            head.append(f"{step}_name_hits={self.name_hits.get(area, 0)}")
+        tail = []
         for area in sorted(self.counts):
             values = " ".join(
                 f"{key.replace(' ', '_')}={value}"
                 for key, value in sorted(self.counts[area].items())
             )
-            step = STEP_NAMES.get(area, area.replace(" ", "_"))
-            parts.append(
-                f"{area} {values} {step}_name_hits={self.name_hits.get(area, 0)}"
-            )
+            tail.append(f"{area} {values}")
         if self.errors:
-            parts.append(f"errors: {', '.join(sorted(self.errors))}")
-        detail = "; ".join(parts)[:500]
+            tail.append(f"errors: {', '.join(sorted(self.errors))}")
+        detail = "; ".join(head)
+        for segment in tail:
+            candidate = f"{detail}; {segment}" if detail else segment
+            if len(candidate) > 500:
+                break
+            detail = candidate
         return PurgeAck(
             component="bot",
             guild_id=guild_id,
@@ -482,9 +497,20 @@ async def _fold_chat_channel(
             report.count("chat channels", "failed")
             report.stores.add(STORE_CHAT_HISTORY)
             return None
-    topic_record = await memory.get_topic(channel_id)
-    topic = topic_record.text if topic_record is not None else None
-    notes = await memory.get_notes(channel_id)
+    # The stored text, whatever its timestamp (a missing or malformed
+    # topic_ts hides the topic from turns, not from the purge).
+    try:
+        topic = await memory.get_topic_text(channel_id)
+        notes = await memory.get_notes_text(channel_id)
+    except UnicodeDecodeError as error:
+        logger.warning(
+            "privacy purge: chat topic or notes of channel %s unreadable (%s); "
+            "left untouched",
+            channel_id,
+            type(error).__name__,
+        )
+        report.count("chat channels", "failed")
+        return None
     if not history and not topic and not notes:
         report.count("chat channels", "unchanged")
         await scope.mark(done_field)
@@ -581,6 +607,7 @@ async def _fold_proactive_history(
     deps: PurgeDeps,
     scope: _CommandScope,
     report: _Report,
+    on_unreadable: Callable[[], None] | None = None,
 ) -> list[ModelMessage] | None:
     """Fold one proactive history; returns the new history when written."""
     already, force = await _skip(scope, done_field)
@@ -600,6 +627,8 @@ async def _fold_proactive_history(
             )
             report.count(area, "failed")
             report.stores.add(store_name)
+            if on_unreadable is not None:
+                on_unreadable()
             return None
     if not history or (
         not force and proactive_history_is_clean(history, scope.target)
@@ -635,9 +664,12 @@ async def _purge_proactive_guild_history(
     report: _Report,
 ) -> None:
     runner = getattr(state, "agent_runner", None) if state is not None else None
-    in_memory = (
-        list(runner.history) if runner is not None and state.history_loaded else None
-    )
+
+    def unreadable() -> None:
+        # The stored bytes are what count. Make the runtime re-read them
+        # before its next wake (and so not write its RAM copy over them).
+        if state is not None:
+            state.history_loaded = False
 
     async def write(new_history: list[ModelMessage]) -> None:
         await store.write_guild(int(guild_id), new_history)
@@ -649,8 +681,9 @@ async def _purge_proactive_guild_history(
         store_name=STORE_PROACTIVE_GUILD_HISTORY,
         done_field=f"proactive:guild-history:{guild_id}",
         read_raw=lambda: store.read_guild_raw(int(guild_id)),
-        in_memory=in_memory,
+        in_memory=None,
         write=write,
+        on_unreadable=unreadable,
         deps=deps,
         scope=scope,
         report=report,
@@ -724,7 +757,9 @@ async def _purge_watch_instructions(
         store = InstructionStore.from_stored(
             OPERATING_POLICY_BRIEF, row.watch_addendum
         )
-        if not store.entries:
+        if not any(scope.target.mentions(entry.text) for entry in store.entries):
+            # Nothing names the person: no model call, bytes untouched.
+            report.count("watch instructions", "unchanged")
             await scope.mark(done_field)
             continue
         try:
@@ -798,30 +833,53 @@ async def _purge_proactive(
     store = ProactiveHistoryStore(deps.redis)
     state = run.guild_states.get(int(guild_id))
     lock = state.wake_lock if state is not None else contextlib.nullcontext()
-    async with lock, _GuildPrivacyLock(deps.redis, guild_id):
-        if state is not None:
-            # Everything queued before the purge may carry the person's words
-            # or name in a form no matcher knows; it has not reached the model
-            # yet, so all of it is discarded. Later notifications are kept.
-            _items, _dropped = state.queue.drain()
-        _clear_buffered_target_messages(run, scope.target)
-        await _purge_proactive_guild_history(
-            guild_id, state, store, deps, scope, report
+    async with contextlib.AsyncExitStack() as held:
+        await held.enter_async_context(lock)
+        await held.enter_async_context(_GuildPrivacyLock(deps.redis, guild_id))
+        # A watcher call already in flight for one of the guild's channels
+        # would enqueue its summary after the drain below: wait for it.
+        for channel_state in list(run.channel_states.values()):
+            if channel_state.guild_id == guild_id:
+                await held.enter_async_context(channel_state.processing_lock)
+        await _purge_proactive_locked(
+            guild_id, run, state, store, deps, scope, report
         )
-        await _purge_legacy_channel_histories(
-            guild_id, run, store, deps, scope, report
-        )
-        await _purge_watch_instructions(guild_id, run, deps, scope, report)
-        if state is not None:
-            # Re-read the (purged) guild memory bundle on the next wake.
-            state.memory_refreshed_at = 0.0
+
+
+async def _purge_proactive_locked(
+    guild_id: str,
+    run: Any,
+    state: Any | None,
+    store: ProactiveHistoryStore,
+    deps: PurgeDeps,
+    scope: _CommandScope,
+    report: _Report,
+) -> None:
+    if state is not None:
+        # Everything queued before the purge may carry the person's words
+        # or name in a form no matcher knows; it has not reached the model
+        # yet, so all of it is discarded. Later notifications are kept.
+        _items, _dropped = state.queue.drain()
+    _clear_buffered_target_messages(run, scope.target)
+    await _purge_proactive_guild_history(
+        guild_id, state, store, deps, scope, report
+    )
+    await _purge_legacy_channel_histories(
+        guild_id, run, store, deps, scope, report
+    )
+    await _purge_watch_instructions(guild_id, run, deps, scope, report)
+    if state is not None:
+        # Re-read the (purged) guild memory bundle on the next wake.
+        state.memory_refreshed_at = 0.0
 
 
 async def purge_guild(
     guild_id: str, deps: PurgeDeps, scope: _CommandScope
 ) -> PurgeAck:
     """Purge one guild and return its ack (never raises)."""
-    report = _Report()
+    report = _Report(
+        unchecked_names=len(scope.target.names) - len(scope.target.checked_names)
+    )
     for step in (_purge_chat, _purge_proactive):
         try:
             await step(guild_id, deps, scope, report)
@@ -963,7 +1021,12 @@ async def _others_finished(redis: Any, stream_id: Any) -> bool:
     """Every other consumer group has read the entry and holds it pending
     nowhere (last-delivered-id >= entry, not in its XPENDING)."""
     entry = _stream_id_key(stream_id)
-    for group in await redis.xinfo_groups(PURGE_STREAM):
+    groups = await redis.xinfo_groups(PURGE_STREAM)
+    names = {_decode(group["name"]) for group in groups}
+    if not EXPECTED_OTHER_GROUPS <= names:
+        # The worker's group does not exist yet: it has not read the entry.
+        return False
+    for group in groups:
         name = _decode(group["name"])
         if name == BOT_CONSUMER_GROUP:
             continue
@@ -1034,13 +1097,13 @@ async def purge_consumer_loop(
 
     The live chat engines and the embedded proactive runtime belong to the
     acting process; a standby holds none and must not rewrite their stores.
-    Every iteration (idle ones too) refreshes this process's consumer
-    heartbeat; any error backs off and the loop carries on.
+    Only the acting consumer heartbeats, and only after a successful poll;
+    a missing group (NOGROUP) is recreated at id 0; any error backs off and
+    the loop carries on.
     """
     consumer = f"{socket.gethostname()}-{id(deps)}"
     group_ready = False
     while True:
-        await _heartbeat(deps.redis)
         try:
             if not leadership.is_acting():
                 await asyncio.sleep(IDLE_SECONDS)
@@ -1048,7 +1111,18 @@ async def purge_consumer_loop(
             if not group_ready:
                 await ensure_group(deps.redis)
                 group_ready = True
-            entries = await read_batch(deps.redis, consumer, block_ms=block_ms)
+            try:
+                entries = await read_batch(deps.redis, consumer, block_ms=block_ms)
+            except Exception as error:
+                if "NOGROUP" not in str(error):
+                    raise
+                logger.warning("privacy purge group missing; recreating it at 0")
+                group_ready = False
+                continue
+            await _heartbeat(deps.redis)
+            if not entries:
+                # Real Redis blocked in XREADGROUP; never spin the loop.
+                await asyncio.sleep(0)
             for stream_id, fields in entries:
                 if not leadership.is_acting():
                     break

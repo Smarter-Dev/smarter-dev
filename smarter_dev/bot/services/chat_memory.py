@@ -53,6 +53,8 @@ _WRITE_IF_UNCHANGED = (
     "redis.call('set', KEYS[1], ARGV[2], 'EX', ARGV[3]) return 1 end return 0"
 )
 _UNCONDITIONAL = object()
+# read_history_versioned's version for a stored history it could not parse.
+HISTORY_UNREADABLE = object()
 
 TOPIC_STALE_AFTER = timedelta(hours=6)
 TOPIC_STALE_AFTER_MESSAGES = 25
@@ -99,12 +101,43 @@ class ChatMemory:
             return None
         try:
             written_at = datetime.fromisoformat(_decode(ts_raw))
-        except ValueError:
-            logger.warning("Discarding malformed topic timestamp for channel %s", channel_id)
+            text = _decode(text_raw)
+        except (ValueError, UnicodeDecodeError) as error:
+            logger.warning(
+                "Ignoring unreadable topic for channel %s (%s)",
+                channel_id,
+                type(error).__name__,
+            )
             return None
-        return Topic(text=_decode(text_raw), written_at=written_at)
+        return Topic(text=text, written_at=written_at)
+
+    async def get_topic_text(self, channel_id: int) -> str | None:
+        """The stored topic text whatever its timestamp (privacy purge)."""
+        raw = await self._redis.get(self._topic_key(channel_id))
+        return _decode(raw) if raw else None
+
+    async def get_notes_text(self, channel_id: int) -> str | None:
+        """The stored notes; raises UnicodeDecodeError when unreadable
+        (privacy purge: unreadable is reported, never treated as empty)."""
+        raw = await self._redis.get(self._notes_key(channel_id))
+        return _decode(raw) if raw else None
+
+    async def _unreadable(self, key: str) -> bool:
+        """A stored text value that is not valid UTF-8. It is never
+        overwritten (or deleted) by a turn: it may be someone's memory."""
+        raw = await self._redis.get(key)
+        if not raw or isinstance(raw, str):
+            return False
+        try:
+            raw.decode("utf-8")
+        except UnicodeDecodeError:
+            logger.warning("Leaving unreadable chat memory in place (UnicodeDecodeError)")
+            return True
+        return False
 
     async def write_topic(self, channel_id: int, text: str) -> None:
+        if await self._unreadable(self._topic_key(channel_id)):
+            return
         now = datetime.now(UTC).isoformat()
         pipe = self._redis.pipeline()
         pipe.set(self._topic_key(channel_id), text, ex=TOPIC_TTL_SECONDS)
@@ -113,36 +146,42 @@ class ChatMemory:
 
     async def get_notes(self, channel_id: int) -> str | None:
         raw = await self._redis.get(self._notes_key(channel_id))
-        return _decode(raw) if raw else None
+        if not raw:
+            return None
+        try:
+            return _decode(raw)
+        except UnicodeDecodeError:
+            logger.warning(
+                "Ignoring unreadable notes for channel %s (UnicodeDecodeError)",
+                channel_id,
+            )
+            return None
 
     async def write_notes(self, channel_id: int, text: str) -> None:
+        if await self._unreadable(self._notes_key(channel_id)):
+            return
         await self._redis.set(self._notes_key(channel_id), text, ex=NOTES_TTL_SECONDS)
 
     async def clear_notes(self, channel_id: int) -> None:
         await self._redis.delete(self._notes_key(channel_id))
 
     async def read_history(self, channel_id: int) -> list[ModelMessage]:
-        """Return the persisted Pydantic AI message history, or [] if missing."""
-        raw = await self._redis.get(self._history_key(channel_id))
-        if not raw:
-            return []
-        if isinstance(raw, str):
-            raw = raw.encode("utf-8")
-        try:
-            return list(ModelMessagesTypeAdapter.validate_json(raw))
-        except Exception:
-            log_exception(
-                logger,
-                "Discarding malformed chat history for channel %s", channel_id
-            )
-            await self._redis.delete(self._history_key(channel_id))
-            return []
+        """Return the persisted Pydantic AI message history, or [] if missing
+        or unreadable (an unreadable one is left in place, see below)."""
+        messages, _raw = await self.read_history_versioned(channel_id)
+        return messages
 
     async def read_history_versioned(
         self, channel_id: int
-    ) -> tuple[list[ModelMessage], bytes | None]:
+    ) -> tuple[list[ModelMessage], bytes | None | object]:
         """The history plus the exact bytes it was read from (None if none),
-        for a later ``write_history(..., expected_raw=...)``."""
+        for a later ``write_history(..., expected_raw=...)``.
+
+        An unreadable history is never deleted (it may hold someone's memory
+        a purge must still see) and never logged beyond the error type: the
+        turn runs with an empty history and ``HISTORY_UNREADABLE`` as its
+        version, which makes the turn's write a no-op.
+        """
         raw = await self._redis.get(self._history_key(channel_id))
         if not raw:
             return [], None
@@ -150,12 +189,14 @@ class ChatMemory:
             raw = raw.encode("utf-8")
         try:
             return list(ModelMessagesTypeAdapter.validate_json(raw)), raw
-        except Exception:
-            logger.exception(
-                "Discarding malformed chat history for channel %s", channel_id
+        except Exception as error:  # noqa: BLE001 — any shape a build wrote
+            logger.warning(
+                "Chat history for channel %s is unreadable (%s); left in place, "
+                "this turn keeps no history",
+                channel_id,
+                type(error).__name__,
             )
-            await self._redis.delete(self._history_key(channel_id))
-            return [], None
+            return [], HISTORY_UNREADABLE
 
     async def write_history(
         self,
@@ -171,6 +212,8 @@ class ChatMemory:
         that rewrote it meanwhile wins and the turn's write is dropped.
         Returns whether it was written.
         """
+        if expected_raw is HISTORY_UNREADABLE:
+            return False
         payload = ModelMessagesTypeAdapter.dump_json(messages)
         if expected_raw is _UNCONDITIONAL:
             await self._redis.set(

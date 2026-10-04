@@ -72,6 +72,10 @@ class ChannelMessage:
     # position (and its timestamp, for ordering) and nothing else. Every
     # renderer shows it as ``[BLOCKED BY USER]`` and no tool can address it.
     blocked: bool = False
+    # Author of the replied-to message, when the converter saw it; kept in
+    # memory only (never rendered) so a later re-check can drop the reply
+    # marker once that author is blocked.
+    reply_to_author_id: str | None = None
 
     @classmethod
     def from_record(cls, record: dict) -> ChannelMessage:

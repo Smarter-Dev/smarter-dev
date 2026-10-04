@@ -9,9 +9,14 @@ proactive model. ``is_blocked`` answers True for everyone in that state, so a
 path that forgets to check ``loaded`` still feeds the model only
 ``[BLOCKED BY USER]``; the routing paths check ``loaded`` and skip or defer.
 
-After every successful fetch this process sets ``privacy:v1:enforcing:bot`` to
-the list's revision for ``ENFORCING_TTL_SECONDS``. The admin page and the
-purge job read it to know the bot enforces the list.
+Once a list has loaded, the process keeps going on the last list it loaded
+for as long as fetches fail (Zech's decision: "The bot should always keep
+going. The only case where it couldn't load the list would be during a
+broader failure."). Every refresh cycle, failed or not, renews
+``privacy:v1:enforcing:bot:{host-pid}`` (EX ``ENFORCING_TTL_SECONDS``) with
+the revision it actually holds, so the web's minimum over live processes
+stays at the stale revision and a purge that needs a newer one waits. The
+stale state is logged at most once a minute (age and revision only).
 
 The list is deliberately generic: #74 takes it over as the opt-out list.
 """
@@ -39,6 +44,7 @@ logger = logging.getLogger(__name__)
 REFRESH_SECONDS = 60
 # A Discord user mention; a fixed pattern, the ids come from the list.
 _USER_MENTION = re.compile(r"<@!?([0-9]{15,22})>")
+_BARE_ID = re.compile(r"(?<![0-9])([0-9]{15,22})(?![0-9])")
 ENFORCING_KEY = enforcing_key("bot")
 PROCESS_ID = f"{socket.gethostname()}-{os.getpid()}"
 __all__ = ["BLOCKED_PLACEHOLDER", "BlockedUsersCache", "get_blocked_users"]
@@ -64,11 +70,9 @@ class BlockedUsersSnapshot:
 class BlockedUsersCache:
     """In-process cache of the blocked-users list.
 
-    The list counts as loaded only while this process's last successful fetch
-    is younger than ``ENFORCING_TTL_SECONDS``: past that, the bot has stopped
-    reporting itself as enforcing (its per-process key expired), so it must
-    also stop sending Discord text to the models, exactly as on cold start,
-    until a fetch succeeds again.
+    ``loaded`` means a list has loaded at least once. After that the last
+    list stays in force however long fetches fail; only a process that has
+    never loaded one counts everyone as blocked.
     """
 
     def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
@@ -79,12 +83,12 @@ class BlockedUsersCache:
 
     @property
     def loaded(self) -> bool:
-        """Whether a list loaded within the last ``ENFORCING_TTL_SECONDS``."""
-        return (
-            self._snapshot is not None
-            and self._fetched_at is not None
-            and self._clock() - self._fetched_at < ENFORCING_TTL_SECONDS
-        )
+        """Whether a list has loaded at least once in this process."""
+        return self._snapshot is not None
+
+    def age_seconds(self) -> float | None:
+        """Seconds since the last successful fetch, or None before one."""
+        return None if self._fetched_at is None else self._clock() - self._fetched_at
 
     @property
     def revision(self) -> int | None:
@@ -93,9 +97,10 @@ class BlockedUsersCache:
     def is_blocked(self, user_id: Any) -> bool:
         """True when this user's messages must not reach a model.
 
-        Fails closed: with no fresh list every author counts as blocked.
+        Fails closed only on cold start: with no list ever loaded every
+        author counts as blocked.
         """
-        if self._snapshot is None or not self.loaded:
+        if self._snapshot is None:
             return True
         return str(user_id) in self._snapshot.user_ids
 
@@ -120,8 +125,6 @@ class BlockedUsersCache:
 
     async def wait_loaded(self) -> None:
         await self._loaded.wait()
-        while not self.loaded:  # loaded once, but stale now
-            await asyncio.sleep(1.0)
 
 
 _blocked_users = BlockedUsersCache()
@@ -140,22 +143,41 @@ async def refresh_once(
     """Fetch the list once; on failure keep the last one. Returns success."""
     try:
         snapshot = await fetch()
+        blocked.replace(snapshot)
+        ok = True
     except Exception as error:  # noqa: BLE001 — keep the last list, retry later
-        logger.warning(
-            "blocked-users refresh failed (%s); keeping the last list (loaded=%s)",
-            type(error).__name__,
-            blocked.loaded,
-        )
-        return False
-    blocked.replace(snapshot)
-    if redis is not None:
+        ok = False
+        _log_stale(blocked, type(error).__name__)
+    if redis is not None and blocked.revision is not None:
+        # Renewed every cycle with the revision actually held, fetched now or
+        # not: the key expires only when this process (or Redis) is gone.
         try:
-            await report_enforcing(redis, snapshot.revision)
+            await report_enforcing(redis, blocked.revision)
         except Exception as error:  # noqa: BLE001 — the keys just expire
             logger.warning(
                 "could not publish %s (%s)", ENFORCING_KEY, type(error).__name__
             )
-    return True
+    return ok
+
+
+STALE_LOG_INTERVAL_SECONDS = 60
+_last_stale_log: dict[int, float] = {}
+
+
+def _log_stale(blocked: BlockedUsersCache, error_type: str) -> None:
+    """At most once a minute per cache: the age and revision only."""
+    now = time.monotonic()
+    last = _last_stale_log.get(id(blocked))
+    if last is not None and now - last < STALE_LOG_INTERVAL_SECONDS:
+        return
+    _last_stale_log[id(blocked)] = now
+    age = blocked.age_seconds()
+    logger.warning(
+        "blocked-users refresh failed (%s); keeping revision=%s age=%s s",
+        error_type,
+        blocked.revision,
+        "n/a (never loaded)" if age is None else int(age),
+    )
 
 
 def consumer_key(process_id: str | None = None) -> str:
@@ -208,16 +230,23 @@ async def refresh_loop(
 
 
 def redact_blocked_mentions(text: str, blocked: BlockedUsersCache) -> str:
-    """Replace ``<@id>`` / ``<@!id>`` mentions of blocked users in ``text``.
+    """Replace ``<@id>`` / ``<@!id>`` mentions of blocked users in ``text``
+    with ``@[blocked user]``, and any other blocked id with
+    ``[blocked user]``.
 
     A bystander's message (or a code block, or a bot's own message) can carry
     a blocked user's id as mention syntax; it becomes ``@[blocked user]`` so
     neither the id nor (after mention resolution) the name reaches the model.
     """
-    if "<@" not in text:
-        return text
 
-    def replace(match: re.Match[str]) -> str:
+    def mention(match: re.Match[str]) -> str:
         return "@[blocked user]" if blocked.is_blocked(match.group(1)) else match[0]
 
-    return _USER_MENTION.sub(replace, text)
+    def bare(match: re.Match[str]) -> str:
+        return "[blocked user]" if blocked.is_blocked(match.group(1)) else match[0]
+
+    if "<@" in text:
+        text = _USER_MENTION.sub(mention, text)
+    # Any other appearance of a blocked id as a digit run: a bare id, an
+    # unclosed "<@id", "<@ id>", a profile URL.
+    return _BARE_ID.sub(bare, text)

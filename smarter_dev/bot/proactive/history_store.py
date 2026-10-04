@@ -23,6 +23,20 @@ def _decode(value) -> str:
     return value.decode() if isinstance(value, bytes) else value
 
 
+class HistoryUnreadable(ValueError):
+    """Stored history bytes that do not parse. Content-free on purpose."""
+
+
+def _parse(raw) -> list[ModelMessage]:
+    if not raw:
+        return []
+    try:
+        return list(ModelMessagesTypeAdapter.validate_json(raw))
+    except (pydantic.ValidationError, ValueError) as error:
+        # Never chain the validation error: its text quotes the stored input.
+        raise HistoryUnreadable(type(error).__name__) from None
+
+
 def _as_bytes(value) -> bytes | None:
     if value is None:
         return None
@@ -44,15 +58,10 @@ class ProactiveHistoryStore:
         return f"{KEY_PREFIX}:guild-history:{guild_id}"
 
     async def read(self, channel_id: int) -> list[ModelMessage]:
-        raw = await self._redis.get(self._history_key(channel_id))
-        if not raw:
-            return []
-        try:
-            return list(ModelMessagesTypeAdapter.validate_json(raw))
-        except pydantic.ValidationError:
-            # A pydantic-ai upgrade can invalidate stored messages; stale
-            # history is a cache, not a source of truth — start fresh.
-            return []
+        """The stored history; [] when absent. Raises ``HistoryUnreadable``
+        when the bytes do not parse: unreadable is not empty, and the caller
+        must not write over it (it may be memory a purge still has to see)."""
+        return _parse(await self._redis.get(self._history_key(channel_id)))
 
     async def read_raw(self, channel_id: int) -> bytes | None:
         """The stored bytes, unparsed (a purge must tell unreadable from
@@ -67,13 +76,9 @@ class ProactiveHistoryStore:
         await self._redis.set(self._history_key(channel_id), payload)
 
     async def read_guild(self, guild_id: int) -> list[ModelMessage]:
-        raw = await self._redis.get(self._guild_history_key(guild_id))
-        if not raw:
-            return []
-        try:
-            return list(ModelMessagesTypeAdapter.validate_json(raw))
-        except pydantic.ValidationError:
-            return []
+        """Like ``read``: [] when absent, ``HistoryUnreadable`` when the
+        stored bytes do not parse."""
+        return _parse(await self._redis.get(self._guild_history_key(guild_id)))
 
     async def write_guild(
         self, guild_id: int, messages: list[ModelMessage]
