@@ -578,7 +578,7 @@ async def test_fire_runs_the_handed_off_context_and_stores_none_of_it(
             outcome="error",
             usage=dict(_USAGE),
             duration_ms=1,
-            error="runtime: ValueError: no rule for 'what someone said'",
+            error=f"runtime: ValueError: {MESSAGE_CONTENT_PLACEHOLDER}",
         )
 
     _patch_std_fire(monkeypatch, test_engine, fake_run, redis)

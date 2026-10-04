@@ -29,8 +29,8 @@ Two things are deliberately excluded from the rule:
 
 The next section is the one list of every place verbatim text survives — the
 two histories, the Redis hand-offs that feed the proactive agent and the
-handler workers, and a handler timer's own payload — and what bounds each of
-them.
+handler workers, a handler timer's own payload, and the bot's own words, which
+can quote a member — and what bounds each of them.
 
 We keep the surrounding *row*: timestamps, token counts, cost, model name, the
 decision the agent reached, the moderation action taken. That is what pays for
@@ -69,9 +69,10 @@ all of that without the row holding anybody's words.
 | Proactive wake stream, one per guild (Redis) | The notification envelope that woke a guild, message text included. | Trimmed to 48 hours by stream id on every publish, and again on the passive tick for guilds that stopped publishing. |
 | Proactive shadow stream (Redis) | The same envelopes, copied where canary workers can read them. | The same 48-hour trim, plus a 10,000-entry cap. |
 | A claimed proactive batch (Redis) | Envelopes handed to a wake that has not acknowledged them. | Expires 48 hours after the claim, not after the write, so a claimed envelope can outlive its own write cutoff by up to one more window. |
-| Proactive pending list, one per guild (Redis) | Non-waking envelopes queued for the next wake, message text included. | Expires 48 hours after the push that created it; later pushes do not extend it. Also capped at 20 envelopes, and drained by the next wake. |
+| Proactive pending list, one per guild (Redis) | Non-waking envelopes queued for the next wake, message text included. | Each envelope is dropped once it is 48 hours old, on the bot's 15-minute passive tick, and counted in `pending-dropped` so the agent is told; so an envelope lasts at most 48 hours and 15 minutes. The list's own expiry is a backstop for a bot that stopped ticking, kept two ticks past its oldest envelope's 48 hours. Also capped at 20 envelopes, and drained by the next wake. |
 | Handler fire hand-off (Redis, `handler-fire:context:*`) | The verbatim trigger context of an event that fired a handler, read back by the fire job so the script sees the real message. | 1-hour key TTL, set once and never refreshed. The job payload in Skrift's worker tables carries the redacted context and a random reference to this key, never the text. A fire that finds the key gone is recorded as `skipped` and does not run. |
 | Handler timer payloads in the Skrift worker tables (`worker_queue`, `worker_state`) | What a handler script chose to carry to its own later fire. A script can copy the message it was reacting to into it. | Until the timer fires, however far ahead the script set it, then the 7 days Skrift keeps a finished job's state. Only a script that copies message text into a timer payload puts any there; the `handler_runs` audit row empties the payload whatever it holds. |
+| The bot's own words in the database: chat reply text, tool-call arguments and the running topic and notes (`chat_agent_turns`, `chat_agent_engagements`), `/help` answers, forum replies and decision reasons, and moderation's `ai_context_summary` | Text the model wrote. It is not a copy of a message, but it can quote or closely paraphrase one: a reply that quotes the question, a web search whose query is lifted from a message. | 48 hours, cleared by the hourly sweep (see What the sweep still clears); an engagement's topic and notes 48 hours after its last turn. |
 
 The two agent histories are the "chat bot history" the policy carves out: they
 are the bot's short-term working memory, they are not queryable by an operator,
@@ -88,7 +89,8 @@ keeps every verbatim message it has read, in Redis and in its
 `proactive_agent_histories` row, for as long as the channel stays enabled.
 
 Skrift's worker tables hold no handler fire's message text: the payload of a
-fire is redacted at dispatch. What they keep of finished work is deleted by the
+fire is redacted at dispatch, and a fire that fails leaves Skrift only its
+exception types and frames. What they keep of finished work is deleted by the
 hourly retention job (see How it runs).
 
 ## What the write path stores
@@ -101,10 +103,10 @@ only thing that decides what may go in them.
 | --- | --- | --- |
 | `chat_agent_turns` | every field of a triggering message except its ids, reply pointers, reactions, flags and timestamp; every part of the model transcript except the system prompt, reply text, tool calls and provider-side tool results, stripped down to its kind, tool name, call id, tool kind, outcome and timestamp. That includes the model's reasoning and a provider's compaction part: both are model-authored, but they retell what members said | `agent_output`, the model's own reply text, tool names and call arguments, tokens, cost, model, timing |
 | `chat_agent_compaction_events` | the compacted original content, and the compaction `summary`, which retells it | all char counts and the summariser's tokens and cost |
-| `chat_agent_errors` | when the error carries a provider body: the body itself, the exception message and every exception message in the traceback, since a provider body can echo the prompt and the message repeats it | the error type, the status code, the traceback's `File` lines, and the whole error when there is no provider body |
+| `chat_agent_errors` | every error's exception message and the provider body. Any of them can quote a member (a provider body echoing the prompt, a validation error quoting its input, a Discord API error), so the bot builds the traceback from the exception objects (each chained exception's type and stack frames) and never reads a message | the error type, the status code, and the traceback's types and frames (file, line, function) |
 | `help_conversations` | every scraped context message, whatever the interaction type; `user_question` for every interaction type except a slash command (today: mention and streak reply) | `user_question` when the member typed it as a slash-command argument, plus `bot_response`, tokens, latency |
 | `forum_agent_responses` | the post title, the post body, and the attachment list (emptied) | tags, confidence, `decision_reason`, `response_content`, responded flag |
-| `handler_runs` | every message-bearing key of `trigger_context`, including any future key following the `*_content` convention, plus a timer re-fire's `payload`, whose keys a handler script chose rather than the host, so the whole value is emptied; and a script's error message, which can quote the message the script tripped on, keeping only the `compile`/`runtime` label and exception type | trigger type, ids, flags, counters, role lists, outcome, the bot's own explanation on `skipped` and `rearmed` rows |
+| `handler_runs` | every message-bearing key of `trigger_context`, including any future key following the `*_content` convention, plus a timer re-fire's `payload`, whose keys a handler script chose rather than the host, so the whole value is emptied; and a script's error message, which can quote the message the script tripped on: the error is built from the exception (the `runtime` label, its type and the script frames, or the cap's name), never from its message. A `compile` error keeps its message, since a script is compiled before it sees any context | trigger type, ids, flags, counters, role lists, outcome, the bot's own explanation on `skipped` and `rearmed` rows |
 
 `help_conversations` redacts context for slash commands too: `/tldr` is a slash
 command whose context is a verbatim channel scrape. Only `user_question` is
@@ -120,9 +122,10 @@ audit row is redacted.
 `smarter_dev/web/retention.py` runs hourly and blanks text on rows older than
 48 hours, stamping `content_purged_at`. Its remaining job is the bot's own
 replies and decisions, plus back-filling rows written before write-time
-redaction landed. Nothing it clears holds a member's words any more: what
-retells them (summaries, reasoning, provider error bodies, script errors) is
-written as the placeholder.
+redaction landed. What it clears was written by the model, not copied from a
+message, but it can still quote a member, which is why it goes after 48 hours.
+What retells members wholesale (summaries, reasoning, error messages, script
+errors) is written as the placeholder.
 
 | Table | Cleared after 48h | Kept |
 | --- | --- | --- |
@@ -130,7 +133,7 @@ written as the placeholder.
 | `chat_agent_turns` | `agent_output` (the reply plus the agent's running topic and notes), plus the already-redacted triggering messages and transcript delta | tokens, cost, model, reasoning level, timing |
 | `chat_agent_engagements` | the denormalised running topic and notes, 48 hours after the engagement's last turn, and again whenever a later turn wrote them | activation ids, aggregate tokens/cost |
 | `chat_agent_compaction_events` | the compaction `summary` (back-fill only; written as the placeholder) | char counts, summariser cost |
-| `chat_agent_errors` | `provider_body`, and on a provider error the exception message and the traceback's messages (back-fill only; written redacted) | error type, the traceback's `File` lines, status code |
+| `chat_agent_errors` | the exception message and the whole traceback of every row not written redacted, whatever its status or body, and `provider_body` (back-fill only; written redacted) | error type, status code, and the types and frames of a row written redacted |
 | `forum_agent_responses` | `decision_reason`, `response_content`, plus the already-redacted title and body | confidence, tokens, responded flag |
 | `moderation_actions` | `ai_context_summary` | action, target, moderator, reason, duration, timestamp |
 | `handler_runs` | the script's error on `error` and `cap_exceeded` rows (back-fill only; written redacted) | trigger type, ids, flags, outcome, all counters |
@@ -199,7 +202,10 @@ allowed — that is a keyword watch, not a command.
 - Logs. The goal is that log lines name message ids, author ids and character
   counts, never message text, so the log stream is not a second copy of the
   thing this document is about. The bot does not meet it yet: some bot and
-  agent log sites still print text a member wrote (#47 tracks them). The web
+  agent log sites still print text a member wrote (#47 tracks them). A failed
+  chat run, a crashed handler script and a failed proactive wake log their
+  exception types and frames only, and the image generator logs its prompt's
+  length, not the prompt. The web
   side does not log email addresses, any part of a rejected bearer token,
   query-string values of bot API requests, or httpx's outbound request URLs
   (capped at WARNING in `main.py`).
@@ -230,25 +236,43 @@ The same job bounds Skrift's worker tables
 (`smarter_dev/web/worker_retention.py`), because Skrift's own pruner is not
 deployed and its Postgres backends never delete an expired or dead row by
 themselves. Job payloads, agent run state (a Resources question, an agent's
-prompt) and error text live there:
+prompt) and error text live there.
+
+Live work is never deleted, however old. Live work is what Skrift can still
+run or resume: a job with a queue row that was not dead-lettered (queued,
+claimed, paused with a wake time, or a handler timer due weeks ahead); an
+agent session whose hot run state has not expired and is not finished; and a
+job that is not finished and either belongs to such a session or changed in
+the last 7 days. Skrift resumes a session only from its hot run state, which
+it keeps for 7 days after the session's last write, so a session idle longer
+than that, or left running by a worker that died, can no longer resume and is
+no longer live.
 
 | Table | Deleted |
 | --- | --- |
-| `worker_state` | once the row's own expiry has passed (Skrift sets 7 days on a finished job's state and 24 hours on a finished agent run's) |
-| `worker_queue` | a dead-lettered job 7 days after it was dead-lettered; a pending job never, since a handler timer can be due weeks ahead |
+| `worker_state` | once the row's own expiry has passed (Skrift sets 7 days on a finished job's state and 24 hours on a finished agent run's), and a job's or session's state that is not live and has not changed in 7 days |
+| `worker_queue` | a dead-lettered job (it holds the job's payload) 7 days after it was dead-lettered; a pending job never |
 | `worker_dead_letters` | 7 days after it was written, open or resolved |
 | `worker_events`, `worker_archive_events`, `worker_archive_snapshots` | 7 days after they were written, unless they belong to live work |
 
-Live work is a job still queued, claimed, running or paused, and an agent
-session that is queued, running, awaiting approval or paused (read from its hot
-state, or from its newest snapshot once that has expired). A live session keeps
-its event stream, its newest snapshot and every stored blob its state or events
-name, however old. The blogging pipeline's admin timeline reads a run's event
-stream, so a run finished more than 7 days ago shows no timeline.
+A live session keeps its event stream, its newest snapshot and every stored
+blob its state or events name; its older snapshots are history and go. Skrift
+stores a job's or session's state wrapped as `{"__skrift_pydantic__": ...,
+"value": {...}}`, so its status is at `value -> 'value' ->> 'status'`. The
+blogging pipeline's admin timeline reads a run's event stream, so a run
+finished more than 7 days ago shows no timeline.
 
-The proactive Redis streams are not swept by that job. They are trimmed by the
-bot itself: on every publish, and on the passive ticker for the guilds that
-stopped publishing.
+Skrift also keeps a failed job's error, with its traceback, in the job's
+state, its attempt history, its dead letter and its lifecycle events. A
+handler fire holds a member's message while it runs, so both fire jobs replace
+any exception at the job boundary with one that carries only the original's
+types and frames (`smarter_dev/web/job_errors.py`).
+
+The proactive Redis streams and pending lists are not swept by that job. The
+bot trims the streams on every publish and on its 15-minute passive tick, for
+the guilds that stopped publishing too, and trims each pending list by
+envelope age on the same tick. The external proactive-agent worker trims its
+dead-letter stream to 48 hours on every write and every 15 minutes.
 
 ## Agent web-search previews
 

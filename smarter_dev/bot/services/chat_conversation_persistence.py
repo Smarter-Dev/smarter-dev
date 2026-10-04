@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import traceback
 from typing import Any
 from uuid import UUID
 
@@ -18,6 +17,8 @@ from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 from smarter_dev.bot.agents.chat_compaction import CompactionEvent
+from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
+from smarter_dev.shared.message_content import exception_trace
 
 logger = logging.getLogger(__name__)
 
@@ -130,11 +131,6 @@ async def persist_error(
     if api_client is None:
         return None
 
-    provider_body = getattr(error, "body", None)
-    if provider_body is not None and not isinstance(provider_body, str):
-        provider_body = json.dumps(
-            provider_body, ensure_ascii=False, default=str
-        )
     context = json.loads(
         json.dumps(error_context or {}, ensure_ascii=False, default=str)
     )
@@ -146,14 +142,19 @@ async def persist_error(
         "model_name": model_name,
         "reasoning_level": reasoning_level,
         "error_type": f"{type(error).__module__}.{type(error).__qualname__}",
-        "error_message": str(error),
-        "traceback": "".join(
-            traceback.format_exception(type(error), error, error.__traceback__)
-        ),
+        # Any exception message can carry a member's words, so only the
+        # exception types and frames leave the bot.
+        "error_message": MESSAGE_CONTENT_PLACEHOLDER,
+        "traceback": exception_trace(error),
+        "trace_redacted": True,
         "provider_status_code": (
             error.status_code if isinstance(error, ModelHTTPError) else None
         ),
-        "provider_body": provider_body,
+        "provider_body": (
+            None
+            if getattr(error, "body", None) is None
+            else MESSAGE_CONTENT_PLACEHOLDER
+        ),
         "error_context": context,
     }
     try:

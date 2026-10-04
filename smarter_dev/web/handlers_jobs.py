@@ -42,6 +42,7 @@ from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
 from smarter_dev.web.handler_run_audit import EXPIRED_CONTEXT_ERROR
 from smarter_dev.web.handler_run_audit import record_completed_run, record_skipped_run
 from smarter_dev.web.handler_script_services import HandlerTimerScheduler
+from smarter_dev.web.job_errors import redacted_job_errors
 from smarter_dev.web.models import ChannelHandler
 
 __all__ = ["HandlerFirePayload", "run_handler_fire"]
@@ -67,7 +68,16 @@ _recurring_chain = RECURRING_CHAINS[HANDLER_KIND]
     visibility_timeout=180.0,
 )
 async def run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) -> dict:
-    """Load, run, audit one handler firing; reschedule recurring schedules."""
+    """Load, run, audit one handler firing; reschedule recurring schedules.
+
+    An error leaves without its message text (``redacted_job_errors``): Skrift
+    keeps it for 7 days, and the fire holds a member's message.
+    """
+    with redacted_job_errors():
+        return await _run_handler_fire(payload, context)
+
+
+async def _run_handler_fire(payload: HandlerFirePayload, context: WorkerContext) -> dict:
     settings = get_settings()
     if not settings.handlers_enabled:
         return {"status": "disabled"}

@@ -49,6 +49,7 @@ from smarter_dev.web.handler_script_services import (
     AdminScriptServices,
     HandlerTimerScheduler,
 )
+from smarter_dev.web.job_errors import redacted_job_errors
 from smarter_dev.web.models import AdminHandler
 
 __all__ = ["AdminHandlerFirePayload", "run_admin_handler_fire"]
@@ -70,10 +71,17 @@ _recurring_chain = RECURRING_CHAINS[HANDLER_KIND]
     retry_policy=RetryPolicy(max_attempts=3, backoff_seconds=30.0, jitter_seconds=10.0),
     visibility_timeout=180.0,
 )
-async def run_admin_handler_fire(
-    payload: AdminHandlerFirePayload, context: WorkerContext
-) -> dict:
-    """Load, run (with moderation powers), audit one admin-handler firing."""
+async def run_admin_handler_fire(payload: AdminHandlerFirePayload, context: WorkerContext) -> dict:
+    """Load, run (with moderation powers), audit one admin-handler firing.
+
+    An error leaves without its message text (``redacted_job_errors``): Skrift
+    keeps it for 7 days, and the fire holds a member's message.
+    """
+    with redacted_job_errors():
+        return await _run_admin_handler_fire(payload, context)
+
+
+async def _run_admin_handler_fire(payload: AdminHandlerFirePayload, context: WorkerContext) -> dict:
     settings = get_settings()
     if not settings.handlers_enabled:
         return {"status": "disabled"}

@@ -126,6 +126,9 @@ from typing import Any
 
 import pydantic_monty as monty
 
+from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
+from smarter_dev.shared.message_content import exception_trace
+from smarter_dev.shared.message_content import exception_type_name
 from smarter_dev.web.handler_budget import CapExceeded, HandlerBudget
 from smarter_dev.web.handler_caps import (
     CHANNEL_MESSAGES_PER_MIN,
@@ -1124,6 +1127,32 @@ class HandlerExecution:
         return self.guild_memory.delete(str(key))
 
 
+
+def _cap_error(exc: CapExceeded) -> str:
+    """The stored error for a cap breach: the cap's name, never its message.
+
+    Some cap messages quote what the script was writing (a memory key, a
+    channel), which a script can take from the message it reacts to.
+    """
+    return f"CapExceeded: {exc.cap}"
+
+
+def _runtime_error(exc: monty.MontyError) -> str:
+    """The stored error for a script that raised: its type and script frames.
+
+    The message is never read: a script that trips over the message it is
+    reacting to puts that text in its exception message.
+    """
+    inner = exc.exception()
+    lines = [f"runtime: {type(inner).__name__}: {MESSAGE_CONTENT_PLACEHOLDER}"]
+    frames = getattr(exc, "traceback", None)
+    if callable(frames):
+        lines.extend(
+            f'  File "{frame.filename}", line {frame.line}, in {frame.function_name}'
+            for frame in frames()
+        )
+    return "\n".join(lines)
+
 async def run_handler_script(
     script: str,
     context: dict[str, Any],
@@ -1206,6 +1235,8 @@ async def run_handler_script(
     try:
         compiled = monty.Monty(script, inputs=["context"], type_check=False)
     except monty.MontyError as exc:
+        # Compiled before the script sees any context, so the message can only
+        # quote the script itself.
         return _result("error", error=f"compile: {type(exc).__name__}: {exc}")
 
     limits: dict[str, Any] = {
@@ -1222,15 +1253,19 @@ async def run_handler_script(
         )
     except CapExceeded as exc:  # defensive: a direct (non-sandbox) breach
         logger.info("handler hit cap %s (channel=%s)", exc.cap, channel_id)
-        return _result("cap_exceeded", error=str(exc), cap=exc.cap)
+        return _result("cap_exceeded", error=_cap_error(exc), cap=exc.cap)
     except monty.MontyError as exc:
         if execution.breach is not None:
             breach = execution.breach
             logger.info("handler hit cap %s (channel=%s)", breach.cap, channel_id)
-            return _result("cap_exceeded", error=str(breach), cap=breach.cap)
-        return _result("error", error=f"runtime: {type(exc).__name__}: {exc}")
+            return _result("cap_exceeded", error=_cap_error(breach), cap=breach.cap)
+        return _result("error", error=_runtime_error(exc))
     except Exception as exc:  # noqa: BLE001 — never let a fire crash the worker
-        logger.exception("handler script crashed (channel=%s)", channel_id)
-        return _result("error", error=f"{type(exc).__name__}: {exc}")
+        logger.error(
+            "handler script crashed (channel=%s)\n%s", channel_id, exception_trace(exc)
+        )
+        return _result(
+            "error", error=f"{exception_type_name(exc)}: {MESSAGE_CONTENT_PLACEHOLDER}"
+        )
 
     return _result("ok")

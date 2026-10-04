@@ -279,73 +279,48 @@ class TestChatAgent:
         ).scalar_one()
         assert event.original_content == "still inside the window"
 
-    async def test_scrubs_provider_body_but_keeps_the_traceback(self, db_session):
-        db_session.add(
-            ChatAgentError(
-                request_id="req123",
-                guild_id="111",
-                channel_id="222",
-                error_type="ModelAPIError",
-                error_message="502 from provider",
-                traceback="Traceback (most recent call last): ...",
-                provider_body='{"echo": "the prompt, with message text in it"}',
-                occurred_at=STALE,
-            )
-        )
+    @staticmethod
+    def _error(**overrides):
+        values = {
+            "request_id": "req123",
+            "guild_id": "111",
+            "channel_id": "222",
+            "error_type": "pydantic_ai.exceptions.ModelHTTPError",
+            "error_message": "status_code: 400, body: the prompt, with message text in it",
+            "traceback": (
+                "Traceback (most recent call last):\n"
+                '  File "engine.py", line 1, in run\n'
+                "ModelHTTPError: status_code: 400, body: the prompt, with message text in it\n"
+            ),
+            "provider_status_code": 400,
+            "provider_body": '{"echo": "the prompt, with message text in it"}',
+            "occurred_at": STALE,
+        }
+        return ChatAgentError(**{**values, **overrides})
+
+    async def test_an_old_provider_error_keeps_no_text(self, db_session):
+        db_session.add(self._error())
         await db_session.flush()
 
         await run_retention_sweep(db_session, now=NOW)
 
         error = (await db_session.execute(select(ChatAgentError))).scalar_one()
+        assert error.error_message == MESSAGE_CONTENT_PLACEHOLDER
+        assert error.traceback == MESSAGE_CONTENT_PLACEHOLDER
         assert error.provider_body is None
-        assert error.error_type == "ModelAPIError"
-        assert error.traceback.startswith("Traceback")
-        # A provider body means the message and traceback repeat it.
-        assert error.error_message == MESSAGE_CONTENT_PLACEHOLDER
-
-    async def test_redacts_the_message_and_traceback_of_an_already_purged_row(
-        self, db_session
-    ):
-        """Rows an earlier sweep stamped kept the copies the body left behind."""
-        echoed = "the prompt, with message text in it"
-        db_session.add(
-            ChatAgentError(
-                request_id="req123",
-                guild_id="111",
-                channel_id="222",
-                error_type="pydantic_ai.exceptions.ModelHTTPError",
-                error_message=f"status_code: 400, body: {echoed}",
-                traceback=(
-                    "Traceback (most recent call last):\n"
-                    '  File "engine.py", line 1, in run\n'
-                    f"ModelHTTPError: status_code: 400, body: {echoed}\n"
-                ),
-                provider_status_code=400,
-                provider_body=None,
-                occurred_at=STALE,
-                content_purged_at=STALE,
-            )
-        )
-        await db_session.flush()
-
-        await run_retention_sweep(db_session, now=NOW)
-
-        error = (await db_session.execute(select(ChatAgentError))).scalar_one()
-        assert error.error_message == MESSAGE_CONTENT_PLACEHOLDER
-        assert echoed not in error.traceback
-        assert '  File "engine.py", line 1, in run' in error.traceback
+        assert error.error_type == "pydantic_ai.exceptions.ModelHTTPError"
         assert error.provider_status_code == 400
+        assert error.content_purged_at is not None
 
-    async def test_keeps_a_non_provider_error_readable(self, db_session):
+    async def test_an_error_with_no_status_or_body_is_redacted_too(self, db_session):
+        # A validation or Discord error quotes text without any provider body.
         db_session.add(
-            ChatAgentError(
-                request_id="req123",
-                guild_id="111",
-                channel_id="222",
-                error_type="builtins.RuntimeError",
-                error_message="connection reset",
-                traceback="Traceback (most recent call last): ...",
-                occurred_at=STALE,
+            self._error(
+                error_type="pydantic_core._pydantic_core.ValidationError",
+                error_message="input_value='what someone said'",
+                traceback="ValidationError: input_value='what someone said'\n",
+                provider_status_code=None,
+                provider_body=None,
             )
         )
         await db_session.flush()
@@ -353,7 +328,49 @@ class TestChatAgent:
         await run_retention_sweep(db_session, now=NOW)
 
         error = (await db_session.execute(select(ChatAgentError))).scalar_one()
-        assert error.error_message == "connection reset"
+        assert error.error_message == MESSAGE_CONTENT_PLACEHOLDER
+        assert error.traceback == MESSAGE_CONTENT_PLACEHOLDER
+
+    async def test_an_already_purged_row_is_redacted(self, db_session):
+        """Rows an earlier sweep stamped kept the copies the body left behind."""
+        db_session.add(self._error(provider_body=None, content_purged_at=STALE))
+        await db_session.flush()
+
+        await run_retention_sweep(db_session, now=NOW)
+
+        error = (await db_session.execute(select(ChatAgentError))).scalar_one()
+        assert error.error_message == MESSAGE_CONTENT_PLACEHOLDER
+        assert error.traceback == MESSAGE_CONTENT_PLACEHOLDER
+
+    async def test_a_row_written_redacted_keeps_its_frames(self, db_session):
+        trace = (
+            "Traceback (most recent call last):\n"
+            '  File "engine.py", line 1, in run\n'
+            f"ModelHTTPError: {MESSAGE_CONTENT_PLACEHOLDER}\n"
+        )
+        db_session.add(
+            self._error(
+                error_message=MESSAGE_CONTENT_PLACEHOLDER,
+                traceback=trace,
+                provider_body=MESSAGE_CONTENT_PLACEHOLDER,
+            )
+        )
+        await db_session.flush()
+
+        await run_retention_sweep(db_session, now=NOW)
+
+        error = (await db_session.execute(select(ChatAgentError))).scalar_one()
+        assert error.traceback == trace
+        assert error.provider_body is None
+
+    async def test_a_recent_error_is_left_for_now(self, db_session):
+        db_session.add(self._error(occurred_at=NOW))
+        await db_session.flush()
+
+        await run_retention_sweep(db_session, now=NOW)
+
+        error = (await db_session.execute(select(ChatAgentError))).scalar_one()
+        assert "message text" in error.error_message
 
 
 class TestForumAgentResponses:
@@ -933,7 +950,8 @@ class TestDocumentedBehaviour:
         )
         assert f"{PENDING_LIMIT} envelopes" in bound
         assert states_hours(bound, RETENTION_WINDOW_HOURS)
-        assert "do not extend" in bound
+        assert "`pending-dropped`" in bound
+        assert "15 minutes" in bound
         assert retention_doc.count(f"{PENDING_LIMIT} envelopes") == 1
 
     def test_states_that_a_claimed_batch_is_bounded_from_its_claim(

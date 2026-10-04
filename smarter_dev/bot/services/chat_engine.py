@@ -99,6 +99,7 @@ from smarter_dev.bot.views.model_override_views import (
 )
 from smarter_dev.shared.guild_event_log import read_since
 from smarter_dev.shared.guild_event_log import read_window
+from smarter_dev.shared.message_content import exception_trace
 from smarter_dev.shared.model_catalog import get_model
 
 logger = logging.getLogger(__name__)
@@ -867,10 +868,13 @@ class ChannelEngine:
                 # Even a failed run (probably) hit the model — later turns
                 # inside the cache TTL should read warm.
                 self._last_model_call_at = datetime.now(UTC)
-                logger.exception(
-                    "[%s] Chat agent run failed for channel %s",
+                # Types and frames only: a provider error can quote the
+                # prompt, and so other members' messages.
+                logger.error(
+                    "[%s] Chat agent run failed for channel %s\n%s",
                     request_id,
                     self.channel_id,
+                    exception_trace(error),
                 )
                 drain_collection()  # discard
                 # The run may have crashed *after* generate_image already spent a

@@ -228,14 +228,31 @@ def _assert_ttl_is_inside_the_retention_window(ttl_milliseconds: int) -> None:
     assert 0 < ttl_milliseconds <= CONTENT_RETENTION_MILLISECONDS
 
 
+def _aged(body: str, age: timedelta) -> NotificationEnvelope:
+    return _envelope(body=body).model_copy(update={"created_at": _TRIM_NOW - age})
+
+
+_TRIM_NOW = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
+_WINDOW = timedelta(milliseconds=CONTENT_RETENTION_MILLISECONDS)
+_SLACK = timedelta(milliseconds=redis_queue.PENDING_EXPIRY_SLACK_MILLISECONDS)
+
+
+async def _pending_bodies(redis_client) -> list[str]:
+    return [
+        NotificationEnvelope.model_validate_json(value).body
+        for value in await redis_client.lrange(pending_key("111"), 0, -1)
+    ]
+
+
 @pytest.mark.asyncio
-async def test_pending_list_expires_inside_the_retention_window(redis_client):
+async def test_a_new_pending_list_gets_a_backstop_expiry(redis_client):
     queue = RedisNotificationQueue(redis_client, pending_limit=2)
     for index in range(3):
         await queue.publish(_envelope(body=f"notification-{index}"))
 
-    _assert_ttl_is_inside_the_retention_window(
-        await redis_client.pttl(pending_key("111"))
+    ttl = await redis_client.pttl(pending_key("111"))
+    assert CONTENT_RETENTION_MILLISECONDS < ttl <= (
+        CONTENT_RETENTION_MILLISECONDS + redis_queue.PENDING_EXPIRY_SLACK_MILLISECONDS
     )
     _assert_ttl_is_inside_the_retention_window(
         await redis_client.pttl(pending_dropped_key("111"))
@@ -243,14 +260,54 @@ async def test_pending_list_expires_inside_the_retention_window(redis_client):
 
 
 @pytest.mark.asyncio
-async def test_later_pushes_do_not_extend_the_pending_expiry(redis_client):
+async def test_the_trim_drops_and_counts_only_envelopes_past_the_window(redis_client):
     queue = RedisNotificationQueue(redis_client)
-    await queue.publish(_envelope(body="first"))
-    await redis_client.pexpire(pending_key("111"), 1_000)
+    for envelope in (
+        _aged("old", _WINDOW + timedelta(minutes=1)),
+        _aged("pushed-at-47h59m", _WINDOW - timedelta(minutes=1)),
+        _aged("new", timedelta(minutes=5)),
+    ):
+        await queue.publish(envelope)
 
-    await queue.publish(_envelope(body="second"))
+    dropped = await queue.trim_expired_pending("111", now=_TRIM_NOW)
 
-    assert 0 < await redis_client.pttl(pending_key("111")) <= 1_000
+    assert dropped == 1
+    assert await _pending_bodies(redis_client) == ["pushed-at-47h59m", "new"]
+    assert await redis_client.get(pending_dropped_key("111")) == b"1"
+    # The backstop now follows the oldest envelope left, so it cannot delete
+    # the young ones before the next trim counts them.
+    expected = _TRIM_NOW - _WINDOW + timedelta(minutes=1) + _WINDOW + _SLACK
+    assert await redis_client.pexpiretime(pending_key("111")) == int(
+        expected.timestamp() * 1000
+    )
+
+    # A minute later the 47h59m envelope is past the window: dropped and
+    # counted, never silently expired with the list.
+    later = _TRIM_NOW + timedelta(minutes=2)
+    assert await queue.trim_expired_pending("111", now=later) == 1
+    assert await _pending_bodies(redis_client) == ["new"]
+    assert await redis_client.get(pending_dropped_key("111")) == b"2"
+    claimed = await queue.claim_pending("111", "wake-1")
+    assert claimed.dropped == 2
+    assert [envelope.body for envelope in claimed.notifications] == ["new"]
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_pending_entry_is_dropped(redis_client):
+    queue = RedisNotificationQueue(redis_client)
+    await redis_client.rpush(pending_key("111"), "not an envelope")
+
+    assert await queue.trim_expired_pending("111", now=_TRIM_NOW) == 1
+    assert await redis_client.exists(pending_key("111")) == 0
+
+
+@pytest.mark.asyncio
+async def test_the_tick_trims_pending_lists_too(redis_client):
+    queue = RedisNotificationQueue(redis_client)
+    await queue.publish(_aged("old", 2 * _WINDOW))
+
+    assert await queue.trim_expired_envelopes(["111"]) == 1
+    assert await redis_client.exists(pending_key("111")) == 0
 
 
 @pytest.mark.asyncio
