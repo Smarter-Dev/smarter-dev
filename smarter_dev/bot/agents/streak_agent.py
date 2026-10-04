@@ -102,7 +102,9 @@ class StreakCelebrationAgent(BaseAgent):
             return f"-# {user_mention} {result.response}", tokens_used
 
         except Exception as e:
-            logger.error(f"Error generating streak celebration message: {e}")
+            logger.error(
+                f"Error generating streak celebration message: {type(e).__name__}"
+            )
             return "", 0
 
 

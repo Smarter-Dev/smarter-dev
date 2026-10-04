@@ -1215,7 +1215,7 @@ class ChannelEngine:
                 if isinstance(res, BaseException):
                     voice_outcome = _VoiceOutcome(
                         sent_ok=False,
-                        error=f"{type(res).__name__}: {res}",
+                        error=exception_type_name(res),
                     )
                 else:
                     voice_outcome = res

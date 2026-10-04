@@ -56,13 +56,14 @@ from datetime import datetime, timedelta, timezone
 from litestar import Controller, Request, get, post
 from litestar.params import Parameter
 from litestar.status_codes import HTTP_200_OK, HTTP_201_CREATED
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from skrift.auth.guards import APIKeyOnly, Permission
 
 from smarter_dev.shared.message_content import (
+    MESSAGE_CONTENT_PLACEHOLDER,
     redact_help_context_messages,
     redact_help_question,
 )
@@ -206,9 +207,16 @@ class AdminController(Controller):
                 query = query.where(HelpConversation.is_resolved.is_(True))
                 count_query = count_query.where(HelpConversation.is_resolved.is_(True))
             if search:
+                # The placeholder a redacted row holds never matches.
                 search_filter = or_(
-                    HelpConversation.user_question.ilike(f"%{search}%"),
-                    HelpConversation.bot_response.ilike(f"%{search}%"),
+                    and_(
+                        HelpConversation.user_question != MESSAGE_CONTENT_PLACEHOLDER,
+                        HelpConversation.user_question.ilike(f"%{search}%"),
+                    ),
+                    and_(
+                        HelpConversation.bot_response != MESSAGE_CONTENT_PLACEHOLDER,
+                        HelpConversation.bot_response.ilike(f"%{search}%"),
+                    ),
                     HelpConversation.user_username.ilike(f"%{search}%"),
                 )
                 query = query.where(search_filter)
