@@ -18,6 +18,13 @@ output is checked against the store it replaces; a rejection is a model retry
    is not empty, ceil(0.5 * |U|) of them must appear in the output as
    ``uid=N`` or as the display name rendered beside that uid in the input
    (``·<name> (uid=N)``, as a name hit).
+   Bot-only extension (input format only): chat transcripts carry no
+   ``uid=``; they attribute authors in ``<message user-id="N" username="u"
+   nickname="n">`` tags. For those, U is the distinct ``user-id`` values
+   other than the target's, and one counts as kept when the output holds
+   ``uid=N``, ``user-id=N`` or its username/nickname (as a name hit); the
+   same ceil(0.5 * |U|) share applies. The worker's ``uid=`` check is
+   unchanged and runs as well.
 5. Input parts are user prompts, tool returns and the agent's own text;
    system prompts and tool-call arguments are left out; structured content
    is read as JSON.
@@ -28,6 +35,7 @@ name matching goes through ``PurgeTarget``.
 
 from __future__ import annotations
 
+import html
 import json
 import math
 import re
@@ -55,6 +63,10 @@ FOLD_RETENTION_SHARE = 0.5
 
 _UID_VALUE = re.compile(r"uid=([0-9]{1,22})")
 _NAME_BESIDE_UID = re.compile(r"·([^\n·]*?) \(uid=([0-9]{1,22})\)")
+# The bot's one extension (input format only): chat transcripts attribute
+# authors as <message ... user-id="N" username="u" nickname="n">, not uid=.
+_CHAT_MESSAGE_TAG = re.compile(r"<message\b([^>]*)>")
+_CHAT_ATTRIBUTE = re.compile(r'\b(user-id|username|nickname)="([^"]*)"')
 
 
 @dataclass(frozen=True)
@@ -127,6 +139,49 @@ def fold_plausibility_problem(
         required = math.ceil(FOLD_RETENTION_SHARE * len(uids))
         if kept < required:
             return f"it keeps {kept} of the {len(uids)} other members (needs {required})"
+    return _chat_retention_problem(joined, target, text)
+
+
+def chat_authors(joined: str, target: PurgeTarget) -> dict[str, set[str]]:
+    """user-id -> display names (username, nickname) from chat ``<message>``
+    tags, the target excluded."""
+    authors: dict[str, set[str]] = {}
+    for match in _CHAT_MESSAGE_TAG.finditer(joined):
+        attributes = dict(_CHAT_ATTRIBUTE.findall(match.group(1)))
+        uid = attributes.get("user-id", "")
+        if not uid.isdigit() or uid == target.user_id:
+            continue
+        names = authors.setdefault(uid, set())
+        for key in ("username", "nickname"):
+            name = html.unescape(attributes.get(key, "")).strip()
+            if name:
+                names.add(name)
+    return authors
+
+
+def _chat_retention_problem(
+    joined: str, target: PurgeTarget, text: str
+) -> str | None:
+    """Rule 4 for chat input: U = distinct ``user-id="N"`` authors other than
+    the target; one counts as kept when the output holds ``uid=N``,
+    ``user-id=N`` or a display name rendered in its tag (as a name hit)."""
+    authors = chat_authors(joined, target)
+    if not authors:
+        return None
+    kept = sum(
+        1
+        for uid, names in authors.items()
+        if f"uid={uid}" in text
+        or f"user-id={uid}" in text
+        or f'user-id="{uid}"' in text
+        or any(PurgeTarget.build("", [name]).name_hits(text) for name in names)
+    )
+    required = math.ceil(FOLD_RETENTION_SHARE * len(authors))
+    if kept < required:
+        return (
+            f"it keeps {kept} of the {len(authors)} other chat participants "
+            f"(needs {required})"
+        )
     return None
 
 
