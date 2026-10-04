@@ -312,9 +312,11 @@ still being deleted, wait and run the check again; do not start a purge.
    starting "Nothing was purged": wait until the Runtimes list shows no
    runtime behind, then press "Run the purge again". If the status reads
    `failed` ("stopped by an error: run the purge again"), press "Run the
-   purge again". If it sits in `awaiting_acks` for more than an hour, a
-   runtime has not answered: check that its pods are running (the pod check
-   above) and ask a developer.
+   purge again". If a runtime does not answer within an hour of the last
+   progress, the run moves from `awaiting_acks` to `needs_review` with the
+   badge "no ack within 1 hour" and a line per missing answer, such as
+   `worker: guild …`. Run the pod check above, then press "Run the purge
+   again". A late answer still counts.
 5. Read the check report. It lists hits by store, location, id-hit count
    and name-hit count, never the text, in four sections:
    - **"Still found where the purge rewrites"** (memory, notes, revisions,
@@ -340,11 +342,16 @@ still being deleted, wait and run the check again; do not start a purge.
 
    Above the sections, the page may also show:
    - **"[unchecked] Too short to search for (ASCII, under 2 characters)"**:
-     the names listed cannot be searched. Back on the Privacy Purges list,
-     press "Look up names" for `DID` again, add a longer form of each such
-     name, and press "Start purge for `DID`"; this reruns the same request
-     with the extra names. The short name stays on the request, so
-     it can never reach `complete`: step 10 says when it counts as done.
+     the names listed cannot be searched. If the person also goes by a
+     longer form of such a name, first go back to the Privacy Purges list,
+     press "Look up names" for `DID` again, add the longer form and press
+     "Start purge for `DID`"; this reruns the same request with the extra
+     names. Either way, once the run has ended in `complete` or
+     `needs_review`, press "Remove (never searched)" beside each short name
+     at the top of the request page ("… is too short to search for, so it
+     was never searched."), then "Run the check again". Until a short name
+     is removed the request cannot reach `complete`. Write in the receipt
+     note that the short name went unchecked.
    - **"[failed] The worker's history is tombstoned (half-written)"**: press
      "Run the purge again". The request cannot be closed until the worker
      has rewritten those guilds.
@@ -944,9 +951,8 @@ of this runbook).
 
 Close the request only when, after the check below, the purge page shows
 `complete`: every hit list then reads "Nothing found" and "Possible remains
-reported by the runtimes" reads "None.". The one exception is a request held
-only by an unchecked name (point 1). Otherwise `needs_review` is not done,
-and neither is `closed` on its own: a closed purge is only a receipt. Until then, points 3 to 6 are not done and the
+reported by the runtimes" reads "None.". `needs_review` is not done, and
+neither is `closed` on its own: a closed purge is only a receipt. Until then, points 3 to 6 are not done and the
 member is not told it is complete. If it is still not done as the 30 days
 run out, tell the member what is left and that the request is open.
 
@@ -971,14 +977,6 @@ run out, tell the member what is left and that the request is open.
    - **"Still found where the purge rewrites"**, **"Possible remains
      reported by the runtimes"**, an unchecked name or a tombstoned history:
      handle it as in step 4, point 5.
-   - **Only an unchecked name is left**: treat a `needs_review` request as
-     `complete` only if all of these hold: there is no `error` line under
-     the status; the Steps table has a row for every guild and no cell reads
-     `pending` or `failed` or shows "unresolved"; every hit list reads
-     "Nothing found"; "Possible remains" reads "None."; no history is
-     tombstoned; and the run shown already included a longer form of each
-     unchecked name. Write in the receipt note that
-     the short name went unchecked.
 
 2. Rerun the dry-run counts of steps 3, 7 and 8 (for agent sessions, rerun
    the collect block first, or the count shows the old list). Every deleted store reads
@@ -1009,7 +1007,7 @@ run out, tell the member what is left and that the request is open.
 4. Press "Close to a receipt" and confirm. This strips the request to a
    bare receipt (times, outcome, counts); the blocked-list entry stays. The
    page lets you close from any status, so check first that it reads
-   `complete` (or that point 1's unchecked-name case applies).
+   `complete`.
    If it refuses with "Not closed: N guild(s) still have a tombstoned
    history", press "Run the purge again" and close once the worker has
    rewritten them.
