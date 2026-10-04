@@ -105,6 +105,14 @@ async def _open(db_session, names=("kai",)) -> ChatBotPurgeRequest:
     return request
 
 
+# The structured fields a current runtime sends with every ack (contract L7).
+_CLEAN_FIELDS = {"name_hits": {}, "tombstoned": False, "unchecked_names": 0, "done_record": "written"}
+
+
+def _ack(**fields) -> PurgeAck:
+    return PurgeAck(**{**_CLEAN_FIELDS, **fields})
+
+
 async def _no_sleep(_seconds):
     return None
 
@@ -199,7 +207,7 @@ async def test_a_full_run_purges_memory_sends_one_command_and_settles_after_the_
             acked = await record_ack(
                 session,
                 request.run_id,
-                PurgeAck(component=component, guild_id=_GUILD, outcome="purged"),
+                _ack(component=component, guild_id=_GUILD, outcome="purged"),
             )
             await session.commit()
     assert acked.status == STATUS_CHECKING
@@ -242,8 +250,8 @@ async def test_a_failed_ack_keeps_the_request_in_review(db_session, session_fact
         now=lambda: _NOW, agent=_ScriptedAgent(), sleep=_no_sleep,
     )
     async with session_factory() as session:
-        await record_ack(session, request.run_id, PurgeAck(component="bot", guild_id=_GUILD, outcome="failed"))
-        await record_ack(session, request.run_id, PurgeAck(component="worker", guild_id=_GUILD, outcome="unchanged"))
+        await record_ack(session, request.run_id, _ack(component="bot", guild_id=_GUILD, outcome="failed"))
+        await record_ack(session, request.run_id, _ack(component="worker", guild_id=_GUILD, outcome="unchanged"))
         await session.commit()
 
     status = await run_check(
@@ -267,7 +275,7 @@ async def test_a_superseded_run_touches_nothing(db_session, session_factory, red
     assert await redis.xlen(PURGE_STREAM) == 0
     async with session_factory() as session:
         assert await record_ack(
-            session, old_run, PurgeAck(component="bot", guild_id=_GUILD, outcome="purged")
+            session, old_run, _ack(component="bot", guild_id=_GUILD, outcome="purged")
         ) is None
 
 
@@ -356,7 +364,7 @@ async def test_closing_mid_run_stops_the_run_and_leaves_no_command(
         assert stored.discord_user_id is None
         assert _KAI_ID not in json.dumps(stored.steps)
         assert await record_ack(
-            session, request.run_id, PurgeAck(component="bot", guild_id=_GUILD, outcome="purged")
+            session, request.run_id, _ack(component="bot", guild_id=_GUILD, outcome="purged")
         ) is None
 
 
@@ -442,7 +450,7 @@ async def _ack_all(session_factory, run_id, guilds, details=None):
                 await record_ack(
                     session,
                     run_id,
-                    PurgeAck(
+                    _ack(
                         component=component,
                         guild_id=guild_id,
                         outcome="purged",
@@ -517,10 +525,7 @@ async def test_a_rerun_skips_clean_guilds_and_purges_flagged_ones_again(
         await session.commit()
     async with session_factory() as session:
         stored = await session.get(ChatBotPurgeRequest, request.id)
-        stored.steps["worker"][_GUILDS[2]]["detail"] = (
-            "history folded attempts=1 history_name_hits=0; "
-            "watch channels_rewritten=1 watch_name_hits=2"
-        )
+        stored.steps["worker"][_GUILDS[2]]["name_hits"] = {"history": 0, "watch": 2}
         flag_modified(stored, "steps")
         await session.commit()
     assert await _check(session_factory, redis, request.id, agent) == STATUS_NEEDS_REVIEW
@@ -547,7 +552,7 @@ async def test_a_guild_with_an_unresolved_item_is_purged_again(db_session, sessi
     steps = {
         "memory": {_GUILDS[0]: {"outcome": "purged", "unresolved": [{"location": "memory", "reason": "x"}]}},
         "final_notes": {_GUILDS[1]: {"outcome": "purged", "unresolved": [{"location": "note:1", "reason": "x"}]}},
-        "bot": {_GUILDS[2]: {"outcome": "purged", "detail": "name_hits=1"}},
+        "bot": {_GUILDS[2]: {**_CLEAN_FIELDS, "outcome": "purged", "name_hits": {"history": 1}}},
     }
     report = {
         "remains": [
@@ -558,26 +563,27 @@ async def test_a_guild_with_an_unresolved_item_is_purged_again(db_session, sessi
     assert flagged_guilds(steps, report) == {*_GUILDS, "999999999999999999"}
 
 
-def test_ack_name_hits_reads_every_step_and_the_bare_form():
-    from smarter_dev.web.chat_bot_purge import ack_name_hits
+def test_flags_come_from_the_structured_fields_not_the_detail():
     from smarter_dev.web.chat_bot_purge import possible_remains
     from smarter_dev.web.chat_bot_purge import run_outcome
 
-    assert ack_name_hits("history folded attempts=2 history_name_hits=0") == 0
-    assert ack_name_hits(
-        "history folded attempts=2 history_name_hits=0; watch channels_rewritten=1 watch_name_hits=3"
-    ) == 3
-    assert ack_name_hits("name_hits=4") == 4
-    assert ack_name_hits("") == 0
+    clean = {**_CLEAN_FIELDS, "outcome": "purged"}
     steps = {
         "guild_ids": [_GUILD],
         "memory": {_GUILD: {"outcome": "purged"}},
-        "bot": {_GUILD: {"outcome": "purged", "detail": "history folded attempts=1 history_name_hits=2"}},
-        "worker": {_GUILD: {"outcome": "purged", "detail": ""}},
+        "bot": {_GUILD: {**clean, "name_hits": {"history": 0, "watch": 2}}},
+        # Free text that once reopened requests decides nothing now.
+        "worker": {_GUILD: {**clean, "detail": "NAME_HITS=3 Tombstoned=1 history_name_hits = 3"}},
     }
     assert possible_remains(steps) == [
-        {"guild_id": _GUILD, "component": "bot", "name_hits": 2, "tombstoned": False}
+        {"guild_id": _GUILD, "component": "bot", "reasons": ["2 name hit(s)"]}
     ]
+    assert run_outcome(steps, {"remains": []}) == STATUS_NEEDS_REVIEW
+    steps["bot"][_GUILD]["name_hits"] = {"history": 0}
+    assert run_outcome(steps, {"remains": []}) == STATUS_COMPLETE
+    # An older runtime's ack without the fields is accepted but flagged.
+    steps["worker"][_GUILD] = {"outcome": "purged", "stores": [], "detail": ""}
+    assert possible_remains(steps)[0]["reasons"] == ["missing structured fields"]
     assert run_outcome(steps, {"remains": []}) == STATUS_NEEDS_REVIEW
 
 
@@ -1226,11 +1232,13 @@ async def test_the_scan_only_check_never_runs_the_notes_pass(db_session, session
 @pytest.mark.parametrize(
     "ack",
     [
-        {"outcome": "failed", "detail": ""},
-        {"outcome": "purged", "detail": "history folded attempts=1 history_name_hits=3"},
-        {"outcome": "purged", "detail": "tombstoned=1"},
+        {"outcome": "failed"},
+        {"outcome": "purged", "name_hits": {"history": 3}},
+        {"outcome": "purged", "tombstoned": True},
+        {"outcome": "purged", "unchecked_names": 1},
+        {"outcome": "purged", "done_record": None},
     ],
-    ids=["failed", "name-hits", "tombstoned"],
+    ids=["failed", "name-hits", "tombstoned", "unchecked", "missing-fields"],
 )
 async def test_a_late_flagged_ack_reopens_a_complete_request(
     db_session, session_factory, redis, ack
@@ -1244,11 +1252,23 @@ async def test_a_late_flagged_ack_reopens_a_complete_request(
 
     async with session_factory() as session:
         await record_ack(
-            session, request.run_id, PurgeAck(component="worker", guild_id=_GUILD, **ack)
+            session,
+            request.run_id,
+            PurgeAck(
+                **{
+                    k: v
+                    for k, v in {**_CLEAN_FIELDS, "component": "worker", "guild_id": _GUILD, **ack}.items()
+                    if v is not None
+                }
+            ),
         )
         await session.commit()
 
-    assert (await _stored(session_factory, request.id)).status == STATUS_NEEDS_REVIEW
+    stored = await _stored(session_factory, request.id)
+    assert stored.status == STATUS_NEEDS_REVIEW
+    # The structured fields are stored as sent; the page and run_outcome read them.
+    for field, value in ack.items():
+        assert stored.steps["worker"][_GUILD].get(field) == value
 
 
 # -- tombstones ---------------------------------------------------------------------
@@ -1300,14 +1320,12 @@ async def test_a_plain_tombstone_counts_as_unknown_run(redis):
 
 
 def test_tombstoned_acks_are_flagged():
-    from smarter_dev.web.chat_bot_purge import ack_tombstoned
+    from smarter_dev.web.chat_bot_purge import ack_flagged
     from smarter_dev.web.chat_bot_purge import flagged_guilds
 
-    assert ack_tombstoned("purge: postgres:purged v1:unpurged v1:tombstoned")
-    assert ack_tombstoned("tombstoned=1")
-    assert not ack_tombstoned("purge: postgres:purged v1:unpurged v1:not-tombstoned")
-    assert not ack_tombstoned("tombstoned=0")
-    steps = {"worker": {_GUILD: {"outcome": "failed", "detail": "tombstoned=1"}}}
+    assert ack_flagged({**_CLEAN_FIELDS, "outcome": "purged", "tombstoned": True})
+    assert not ack_flagged({**_CLEAN_FIELDS, "outcome": "purged"})
+    steps = {"worker": {_GUILD: {**_CLEAN_FIELDS, "outcome": "purged", "tombstoned": True}}}
     assert flagged_guilds(steps, {"tombstoned": [_GUILDS[0]]}) == {_GUILD, _GUILDS[0]}
 
 
@@ -1439,7 +1457,7 @@ async def test_acks_missing_for_an_hour_end_in_review_and_late_acks_still_count(
         await record_ack(
             session,
             request.run_id,
-            PurgeAck(component="bot", guild_id=_GUILD, outcome="purged"),
+            _ack(component="bot", guild_id=_GUILD, outcome="purged"),
             now=_NOW + timedelta(minutes=10),
         )
         await session.commit()
@@ -1462,7 +1480,7 @@ async def test_acks_missing_for_an_hour_end_in_review_and_late_acks_still_count(
     # The late real ack replaces the stand-in and the run goes on to its check.
     async with session_factory() as session:
         late = await record_ack(
-            session, request.run_id, PurgeAck(component="worker", guild_id=_GUILD, outcome="purged")
+            session, request.run_id, _ack(component="worker", guild_id=_GUILD, outcome="purged")
         )
         await session.commit()
     assert late.status == STATUS_CHECKING

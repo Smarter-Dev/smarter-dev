@@ -137,9 +137,9 @@
                 {% else %}
                 <p class="sk-text-muted">Runs when every guild is acknowledged, or on demand.</p>
                 {% endif %}
-                <h4>Possible remains reported by the runtimes ({{ possible_remains | length }})</h4>
+                <h4>Flagged by the runtimes' acks ({{ possible_remains | length }})</h4>
                 {% if possible_remains %}
-                <ul>{% for item in possible_remains %}<li>guild <code>{{ item.guild_id }}</code>, {{ item.component }}: {% if item.name_hits %}its ack still counted {{ item.name_hits }} name hit{{ "s" if item.name_hits != 1 else "" }}{% endif %}{% if item.name_hits and item.tombstoned %}; {% endif %}{% if item.tombstoned %}its history was left tombstoned{% endif %}. "Run the purge again" purges this guild again.</li>{% endfor %}</ul>
+                <ul>{% for item in possible_remains %}<li>guild <code>{{ item.guild_id }}</code>, {{ item.component }}: {{ item.reasons | join("; ") }}. "Run the purge again" purges this guild again.</li>{% endfor %}</ul>
                 {% else %}
                 <p>None.</p>
                 {% endif %}

@@ -32,6 +32,8 @@ from pydantic import AwareDatetime
 from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import Field
+from pydantic import NonNegativeInt
+from pydantic import StrictBool
 from pydantic import StringConstraints
 
 PURGE_STREAM = "privacy:v1:purge"
@@ -55,6 +57,7 @@ Snowflake = Annotated[str, StringConstraints(pattern=SNOWFLAKE_PATTERN)]
 PurgeName = Annotated[str, StringConstraints(min_length=1, max_length=100)]
 
 AckComponent = Literal["bot", "worker"]
+AckStep = Annotated[str, StringConstraints(pattern=r"^[a-z_]{1,32}$")]
 AckOutcome = Literal["purged", "unchanged", "failed"]
 
 
@@ -129,6 +132,47 @@ class PurgeAck(BaseModel):
         default_factory=list, max_length=50
     )
     detail: str = Field(default="", max_length=500)
+    # Structured results: the web decides from these alone (the detail is
+    # for display). Any of the first four missing flags the ack for review.
+    name_hits: dict[AckStep, NonNegativeInt] | None = Field(default=None, max_length=10)
+    tombstoned: StrictBool | None = None
+    unchecked_names: NonNegativeInt | None = None
+    done_record: Literal["written", "replayed", "not_written"] | None = None
+    # Optional and never flags: the runtime's edits that touched other members.
+    mixed_segments: MixedSegments | None = None
+
+    def flags(self) -> list[str]:
+        """Why this ack needs review (empty when it does not)."""
+        return ack_flags(self.model_dump())
+
+
+class MixedSegments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    removed: NonNegativeInt
+    rewritten: NonNegativeInt
+
+
+STRUCTURED_ACK_FIELDS = ("name_hits", "tombstoned", "unchecked_names", "done_record")
+
+
+def ack_flags(ack: dict) -> list[str]:
+    """Why a stored ack (a dict of PurgeAck fields) needs review: short reasons,
+    no content. Decided from the structured fields only, never the detail."""
+    reasons = []
+    if ack.get("outcome") == "failed":
+        reasons.append("failed")
+    missing = [f for f in STRUCTURED_ACK_FIELDS if ack.get(f) is None]
+    if missing:
+        reasons.append("missing structured fields")
+    hits = sum((ack.get("name_hits") or {}).values())
+    if hits:
+        reasons.append(f"{hits} name hit(s)")
+    if ack.get("tombstoned"):
+        reasons.append("history tombstoned")
+    if ack.get("unchecked_names"):
+        reasons.append(f"{ack['unchecked_names']} unchecked name(s)")
+    return reasons
 
 
 class BlockedUsers(BaseModel):

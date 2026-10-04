@@ -72,6 +72,7 @@ from smarter_dev.shared.privacy_purge import BlockedUsers
 from smarter_dev.shared.privacy_purge import PurgeAck
 from smarter_dev.shared.privacy_purge import PurgeCommand
 from smarter_dev.shared.privacy_purge import PurgeTarget
+from smarter_dev.shared.privacy_purge import ack_flags
 from smarter_dev.shared.privacy_purge import consumer_pattern
 from smarter_dev.shared.privacy_purge import enforcing_process_pattern
 from smarter_dev.shared.privacy_purge import history_tombstone_key
@@ -122,15 +123,6 @@ MAX_COMMAND_GUILDS = 500
 MEMORY_STORES = frozenset(
     {"chat_agent_guild_memory", "chat_agent_memory_notes", "chat_agent_memory_revisions"}
 )
-# Ack details report name hits per step, segments separated by "; ":
-# "history folded attempts=M history_name_hits=N",
-# "watch channels_rewritten=M watch_name_hits=N"; the bare "name_hits=N" form
-# is matched too.
-_NAME_HITS_IN_DETAIL = re.compile(r"(?:\b|_)name_hits=(\d+)\b")
-_TOMBSTONED_IN_DETAIL = re.compile(r"\btombstoned=(\d+)\b")
-# The worker's partial-write detail: "purge: postgres:purged v1:unpurged v1:tombstoned".
-_V1_TOMBSTONED_IN_DETAIL = re.compile(r"\bv1:tombstoned\b")
-
 SessionFactory = Callable[[], contextlib.AbstractAsyncContextManager[AsyncSession]]
 
 
@@ -349,40 +341,20 @@ async def remove_unchecked_name(
     return None
 
 
-def ack_name_hits(detail: str | None) -> int:
-    """The largest ``<step>_name_hits=N`` (or ``name_hits=N``) in an ack detail, 0 if none."""
-    return max((int(n) for n in _NAME_HITS_IN_DETAIL.findall(detail or "")), default=0)
-
-
-def ack_tombstoned(detail: str | None) -> bool:
-    """The worker left the guild's v1 history tombstoned (``tombstoned=1``)."""
-    detail = detail or ""
-    return any(int(n) > 0 for n in _TOMBSTONED_IN_DETAIL.findall(detail)) or bool(
-        _V1_TOMBSTONED_IN_DETAIL.search(detail)
-    )
-
-
 def ack_flagged(ack: dict) -> bool:
-    detail = ack.get("detail")
-    return ack.get("outcome") == "failed" or ack_name_hits(detail) > 0 or ack_tombstoned(detail)
+    """From the ack's structured fields only (see :func:`ack_flags`)."""
+    return bool(ack_flags(ack))
 
 
 def possible_remains(steps: dict) -> list[dict]:
-    """Acks that still counted name hits, or left a tombstone, whatever their outcome."""
+    """Every flagged ack, with its reasons: name hits, a tombstone, unchecked
+    names, missing structured fields, or a failure."""
     found = []
     for component in RUNTIME_COMPONENTS:
         for guild_id, ack in sorted((steps.get(component) or {}).items()):
-            hits = ack_name_hits(ack.get("detail"))
-            tombstoned = ack_tombstoned(ack.get("detail"))
-            if hits or tombstoned:
-                found.append(
-                    {
-                        "guild_id": guild_id,
-                        "component": component,
-                        "name_hits": hits,
-                        "tombstoned": tombstoned,
-                    }
-                )
+            reasons = ack_flags(ack)
+            if reasons:
+                found.append({"guild_id": guild_id, "component": component, "reasons": reasons})
     return found
 
 
@@ -966,11 +938,9 @@ async def record_ack(
     )
     if request is None or request.status == STATUS_CLOSED:
         return None
-    request.steps.setdefault(ack.component, {})[ack.guild_id] = {
-        "outcome": ack.outcome,
-        "stores": ack.stores,
-        "detail": ack.detail,
-    }
+    request.steps.setdefault(ack.component, {})[ack.guild_id] = ack.model_dump(
+        exclude={"component", "guild_id"}
+    )
     request.steps["last_ack_at"] = (now or datetime.now(UTC)).isoformat()
     if request.status == STATUS_AWAITING_ACKS and acks_complete(request.steps):
         request.status = STATUS_CHECKING
@@ -982,10 +952,8 @@ async def record_ack(
         # The late acks replaced every stand-in: the run goes on to its check.
         request.steps.pop("ack_timeout")
         request.status = STATUS_CHECKING
-    elif request.status == STATUS_COMPLETE and ack_flagged(
-        {"outcome": ack.outcome, "detail": ack.detail}
-    ):
-        # A late failure or name hit reopens a finished request for review.
+    elif request.status == STATUS_COMPLETE and ack.flags():
+        # A late failed or flagged ack reopens a finished request for review.
         request.status = STATUS_NEEDS_REVIEW
     _touch_json(request)
     await session.flush()
