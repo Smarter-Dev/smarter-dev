@@ -961,12 +961,13 @@ class TestDocumentedBehaviour:
         assert f"{HISTORY_TOKEN_LIMIT:,}" in history_row
         assert "no key TTL" in history_row
 
-    def test_names_the_proactive_history_as_the_one_place_with_no_age_bound(
-        self, retention_doc
-    ):
-        """The pending list is bounded now; the history is the gap left."""
-        gaps = paragraph_containing(retention_doc, "One place has no age bound")
+    def test_names_each_place_with_no_age_bound(self, retention_doc):
+        """The pending list is bounded now; the history, handler script
+        memory and old blog topics are the gaps left."""
+        gaps = paragraph_containing(retention_doc, "Three places have no age bound")
         assert "history" in gaps
+        assert "Handler script memory" in gaps
+        assert "candidate_blog_topics" in gaps
         assert "pending" not in gaps
 
     def test_states_each_proactive_bound_in_one_place(self, retention_doc):

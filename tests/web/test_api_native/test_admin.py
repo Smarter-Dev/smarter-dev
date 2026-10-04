@@ -334,6 +334,16 @@ def test_search_matches_a_slash_command_question_not_a_mention(client):
     assert found.json()["items"][0]["interaction_type"] == "slash_command"
 
 
+
+def test_search_skips_the_placeholder(client):
+    _created_conversation(
+        client, interaction_type="mention", user_question="why is it failing?"
+    )
+
+    for term in ("message", "content"):
+        found = client.get("/api/admin/conversations", params={"search": term})
+        assert found.json()["total"] == 0, term
+
 def test_create_conversation_db_failure_500_rolls_back(client, db_session, monkeypatch):
     monkeypatch.setattr(
         db_session,

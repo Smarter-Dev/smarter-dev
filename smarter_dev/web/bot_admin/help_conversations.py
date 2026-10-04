@@ -24,7 +24,7 @@ from litestar import Controller, Request, get, post
 from litestar.exceptions import NotFoundException
 from litestar.params import Parameter
 from litestar.response import Redirect, Template as TemplateResponse
-from sqlalchemy import Select, func, or_, select
+from sqlalchemy import Select, and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Annotated
 
@@ -33,6 +33,7 @@ from skrift.admin.navigation import ADMIN_NAV_TAG
 from skrift.auth.guards import Permission, auth_guard
 from skrift.flash import flash_success, get_flash_messages
 
+from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 from smarter_dev.web.discord_admin_client import (
     DiscordAdminError,
     DiscordGuildSummary,
@@ -108,13 +109,19 @@ def apply_conversation_filters(
         pattern = f"%{filters.search}%"
         stmt = stmt.where(
             or_(
-                HelpConversation.user_question.ilike(pattern),
-                HelpConversation.bot_response.ilike(pattern),
+                _text_matches(HelpConversation.user_question, pattern),
+                _text_matches(HelpConversation.bot_response, pattern),
                 HelpConversation.user_username.ilike(pattern),
             )
         )
     return stmt
 
+
+
+def _text_matches(column, pattern: str):
+    """``column ILIKE pattern``, never true of the placeholder a redacted row
+    holds, so a search for "message" does not return every conversation."""
+    return and_(column != MESSAGE_CONTENT_PLACEHOLDER, column.ilike(pattern))
 
 @dataclass(frozen=True)
 class RetentionBreakdown:

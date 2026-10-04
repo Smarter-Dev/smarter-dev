@@ -27,6 +27,7 @@ from smarter_dev.bot.plugins.model_override import handle_model_override_select
 from smarter_dev.bot.plugins.model_override import handle_model_override_drafter_select
 from smarter_dev.bot.utils.error_responses import respond_with_error_card
 from smarter_dev.bot.views.beacon_views import handle_beacon_modal_submit
+from smarter_dev.shared.exception_logging import log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -765,8 +766,8 @@ async def handle_tldr_share_interaction(event: hikari.InteractionCreateEvent) ->
 
         logger.info(f"TLDR summary shared publicly by {username} ({user_id})")
 
-    except Exception as e:
-        logger.exception(f"Error in TLDR share interaction: {e}")
+    except Exception:
+        log_exception(logger, "Error in TLDR share interaction")
 
         # Send error response
         try:
