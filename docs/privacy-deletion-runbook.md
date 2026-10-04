@@ -302,8 +302,10 @@ still being deleted, wait and run the check again; do not start a purge.
    `chat_bot_blocked_users`, where it stays: from then on the chat bot sees
    the person's messages only as `[BLOCKED BY USER]` and does not respond to
    them. The chat bot's own model then rewrites the guild memory, behavior
-   and personality blocks, that day's notes and the retained past versions
-   without them, keeping everything else word for word. Both agents' working
+   and personality blocks, every note the guild holds and the retained past
+   versions without them. Only the lines that mention them change; the rest
+   stays word for word, and the model's rewrite of those lines is stored as
+   given. A note entirely about them is deleted. Both agents' working
    histories, topics and notes, and the external worker's history with its
    recovery and legacy copies, are folded into new summaries without them
    and the raw messages dropped. Watch instructions are reviewed the same
@@ -313,10 +315,17 @@ still being deleted, wait and run the check again; do not start a purge.
 4. Wait while the status moves through `queued`, `waiting_for_runtimes`,
    `purging`, `awaiting_acks`, `checking` and `finishing`. It ends in
    `complete` or `needs_review`. A runtime listed as "behind the block list"
-   holds the run in `waiting_for_runtimes` until it catches up. If it has not
-   caught up after 10 minutes, the run ends `needs_review` with an error line
-   starting "Nothing was purged": wait until the Runtimes list shows no
-   runtime behind, then press "Run the purge again". If the status reads
+   holds the run in `waiting_for_runtimes` until it catches up. A runtime
+   listed as "not enforcing" holds it the same way, and while one is listed
+   "Start purge" and "Run the purge again" are refused with "Not enforcing
+   the block list yet". "(no live process reports)" means none of its
+   processes has reported in the last 3 minutes; "(N process(es) reported a revision that
+   cannot be read)" means it is running a build the page does not
+   understand. Run the pod check above, and ask a developer if it stays. If
+   a runtime has not caught up after 10 minutes, the run ends
+   `needs_review` with an error line starting "Nothing was purged": wait
+   until the Runtimes list shows no runtime behind or not enforcing, then
+   press "Run the purge again". If the status reads
    `failed` ("stopped by an error: run the purge again"), press "Run the
    purge again". If a runtime does not answer within an hour of the last
    progress, the run moves from `awaiting_acks` to `needs_review` with the
@@ -330,10 +339,7 @@ still being deleted, wait and run the check again; do not start a purge.
      the purge again". A name hit may be another member with the same name:
      judge it from the guild's Chat Memory page and run the purge again if
      it is them. If you judge it to be someone else, do not close on it:
-     write the count in the receipt note and ask a developer to decide. If
-     the page says a guild's memory step was refused for losing unrelated
-     lines, the person may go by a name you did not enter: start a new purge
-     with that name added.
+     write the count in the receipt note and ask a developer to decide.
    - **"Raw operational copies"** (the proactive wake, pending,
      pending-dropped, batch, dead-letter, shadow, control and
      control-processed keys, and the guild event log): copies the purge does
@@ -343,8 +349,10 @@ still being deleted, wait and run the check again; do not start a purge.
      `chat_agent_compaction_events`, `chat_agent_errors`): expected at this
      point. Step 6 and the hourly sweep clear them, and step 10 checks
      again.
-   - **"Possible remains reported by the runtimes"**: press "Run the purge
-     again"; it purges the guilds listed.
+   - **"Flagged by the runtimes' acks"**: each line names a guild, the
+     runtime and its reasons ("failed", "missing structured fields", "N name
+     hit(s)", "history tombstoned", "N unchecked name(s)"). Press "Run the
+     purge again"; it purges the guilds listed.
 
    Above the sections, the page may also show:
    - **"[unchecked] Too short to search for (ASCII, under 2 characters)"**:
@@ -367,7 +375,23 @@ still being deleted, wait and run the check again; do not start a purge.
    history, Worker history or Final notes pass column reads `failed`, shows
    "unresolved" or is still `pending`. Follow the error line if it says what
    to do; otherwise press "Run the purge again", and ask a developer if the
-   same step fails twice.
+   same step fails twice. Two results in the Memory or Final notes pass
+   column mean more:
+   - **"unresolved"**: the agent flagged that block or note for you. The
+     reason is either its own (for example, another member with the same
+     name, or a note about the person that does not name them) or "A
+     listed name is still present.", meaning a name was still there after
+     its retries. Either way, whatever it decided was stored.
+     Judge it from the guild's Chat Memory page as for a name hit above:
+     run the purge again if it is them, or note it in the receipt and ask a
+     developer if it is someone else.
+   - **"failed (PurgeRefused)"**: the agent's rewrite could not be accepted
+     after its retries, so that step changed nothing in the guild's memory.
+     Causes include a block it would leave empty, which is never allowed, a
+     block or note over its size limit, and the ID left in. Run
+     the purge again once; if it fails the same way, ask a developer. A
+     memory block in which every line is about the person can fail every
+     time.
 
 Whatever the status, go on with steps 5 to 9. The request stays open until
 step 10 sees `complete`. Any hit in any section, an unchecked name, a
@@ -378,10 +402,14 @@ to `needs_review`.
 Never fix a leftover by editing memory, history or Redis by hand. The purge
 finds the person by id and by the names you give it; something that only
 paraphrases them, or names them another way, is found only if the agent
-recognises it, so give it every name you know. The check does not search
-the other tables steps 6 to 8 clear, Discord, logs and traces, what
-providers keep, or a process's memory before it reloads; the page lists
-these.
+recognises it, so give it every name you know. The check matches each name
+as entered: it can miss plurals, a different accent form, look-alike or
+hidden characters, or different spacing, so enter each form the person
+uses. Nor does it search, among others, the other tables steps 6 to 8
+clear, Discord, logs and traces, what providers keep, a process's memory
+before it reloads, deeply nested or encoded values, JSON quoted inside text, or an ID that
+appears only in a Redis key's name; the page lists these under "Outside the
+check".
 
 ## 5. Delete the site account *(site)*
 
@@ -957,8 +985,8 @@ of this runbook).
 ## 10. Check and close
 
 Close the request only when, after the check below, the purge page shows
-`complete`: every hit list then reads "Nothing found" and "Possible remains
-reported by the runtimes" reads "None.". `needs_review` is not done, and
+`complete`: every hit list then reads "Nothing found" and "Flagged by the
+runtimes' acks" reads "None.". `needs_review` is not done, and
 neither is `closed` on its own: a closed purge is only a receipt. Until then, points 3 to 6 are not done and the
 member is not told it is complete. If it is still not done as the 30 days
 run out, tell the member what is left and that the request is open.
@@ -981,8 +1009,8 @@ run out, tell the member what is left and that the request is open.
      under "Ages out") and run the check again. Do not close on them. If one
      is still there after its limit, or its key has no limit listed there,
      ask a developer.
-   - **"Still found where the purge rewrites"**, **"Possible remains
-     reported by the runtimes"**, an unchecked name or a tombstoned history:
+   - **"Still found where the purge rewrites"**, **"Flagged by the
+     runtimes' acks"**, an unchecked name or a tombstoned history:
      handle it as in step 4, point 5.
 
 2. Rerun the dry-run counts of steps 3, 7 and 8 (for agent sessions, rerun
