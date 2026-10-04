@@ -86,15 +86,18 @@ def test_the_notice_gives_each_message_hand_off_its_limit(notice):
     messages = notice.split("**Messages.**", 1)[1].split("**The chat bot's", 1)[0]
     assert "server automation, its text is handed to the job" in messages
     assert "kept for 1 hour" in messages
-    assert "kept for up to 48 hours, and messages it has picked up to read for up to 48 hours more" in messages
+    assert "dropped once they are 48 hours old" in messages
+    assert "up to 48 hours after it picks them up" in messages
     assert "until the reminder runs, and for up to 7 days after" in messages
     assert "no time limit" not in messages.replace("That history has no time limit", "")
 
 
-def test_ai_records_keep_no_member_words(notice):
+def test_ai_records_say_the_ais_words_can_quote_people(notice):
     records = notice.split("**Records of what the AI did.**", 1)[1].split("**Moderation", 1)[0]
-    assert "The words of your messages are not kept in these records" in records
+    assert "a placeholder is saved instead" in records
+    assert "can quote what people wrote" in records
     assert "cleared 48 hours after they were written" in records
+    assert "not kept in these records" not in records
 
 
 def test_security_events_name_no_member(notice):

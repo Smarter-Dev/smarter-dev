@@ -48,38 +48,51 @@ agent session still running or paused. Steps 6 to 8 clear the person's part of
 it.
 
 The limits hold once smarter-dev PR 135 and proactive-agent PR 7 (#80) are
-deployed and the one-off clean-up in their descriptions has been run:
-deleting finished handler-fire `worker_state` rows and handler-fire dead
-letters, `EXPIRE 172800` on every `proactive:v1:{guild:*}:pending*` and
-`:batch:*` key with no TTL, and `DEL proactive:v1:dead-letter`. Check that
-the clean-up was done before taking the first request.
+deployed and the one-off clean-up in their descriptions has been run. Use the
+verified SQL script in PR 135's description as written; do not retype it from
+memory. It runs inside `psql` with `\i` and leaves the transaction open for
+you to `COMMIT;` or `ROLLBACK;` by hand. It stops with nothing changed if the
+stored shape is not what it expects or no handler-fire job state exists. On
+production a zero count means stop and ask a developer, not "nothing to
+clean". The Redis commands are in the same descriptions. Check that the
+clean-up was done before taking the first request.
 
 - **Message text in hand-offs:** `handler-fire:context:*` in Redis, the
   verbatim message that set off an automation (1 hour; a fire that finds it
-  gone is skipped); the proactive pending lists (48 hours after the first
-  message is queued); claimed proactive batches, by the bot or the external
-  worker (48 hours after the claim); the proactive wake and shadow streams
-  (trimmed to 48 hours). The external worker's dead-letter stream holds ids
-  and an error type only (48 hours).
+  gone is skipped); the proactive pending lists (each message is dropped once
+  it is 48 hours old, on the bot's 15-minute tick, so at most 48 hours 15
+  minutes; the list's own expiry is a backstop); claimed proactive batches,
+  by the bot or the external worker (48 hours after the claim); the
+  proactive wake and shadow streams (trimmed to 48 hours). The external
+  worker's dead-letter stream holds ids and an error type only (trimmed to
+  48 hours on every write and every 15 minutes).
 - **Cleared by the hourly retention sweep 48 hours after they are written:**
-  the bot's own words: `chat_agent_turns.agent_output`,
-  `chat_agent_engagements.last_topic` and `last_notes` (48 hours after the
-  engagement's last turn), `forum_agent_responses` replies and reasons, the
-  text of `help_conversations` (including other members' names in a
-  conversation someone else started), and
+  the bot's own words, which can quote a member:
+  `chat_agent_turns.agent_output` and the model's reply text and tool-call
+  arguments in turn transcripts (a search query lifted from a message, for
+  example), `chat_agent_engagements.last_topic` and `last_notes` (48 hours
+  after the engagement's last turn), `forum_agent_responses` replies and
+  reasons, the text of `help_conversations` (including other members' names
+  in a conversation someone else started), and
   `moderation_actions.ai_context_summary`. Member text is written as
-  `[message content]` everywhere else; rows written before #80 that still
-  hold it (compaction summaries, provider error bodies with the error
-  message and traceback, `handler_runs.error`, model reasoning in turn
-  transcripts) are cleared by the same sweep.
-- **Skrift worker tables, pruned by the hourly retention job:**
-  `worker_state` once a row's own expiry passes (7 days for a finished job,
-  24 hours for a finished agent run); dead-lettered jobs and dead letters
-  after 7 days; events and snapshots of finished work after 7 days. Job
-  payloads hold ids and names, not message text, except a timer whose
-  automation script copied text into it: that stays until the timer fires,
-  then up to 7 days. Live work is kept until it finishes; step 8 removes the
-  person's.
+  `[message content]` everywhere else: every `chat_agent_errors` message and
+  provider body (its traceback keeps exception types and stack frames only),
+  and `handler_runs.error` (the exception type and the script's frames, or
+  the cap name; a compile error keeps its message, since the script is
+  compiled before it sees any message). Rows written before #80 that still
+  hold member text (compaction summaries, error messages and tracebacks,
+  `handler_runs.error`, model reasoning in turn transcripts) are cleared by
+  the same sweep.
+- **Skrift worker tables, pruned by the hourly retention job:** finished,
+  dead-lettered and unresumable work 7 days after it was written: job state,
+  queue rows, dead letters, events and snapshots. Skrift's own error text for
+  automation jobs holds exception types and frames only. Job payloads hold
+  ids and names, not message text, except a timer whose automation script
+  copied text into it: that stays until the timer fires, then up to 7 days.
+  Live work is never pruned: a queued or pending job, an AI agent session
+  Skrift can still resume, and an unfinished job that belongs to such a
+  session or changed in the last 7 days. Step 8 removes the person's part of
+  it.
 - **Caches:** `search_result_previews` (48 hours),
   `chat_agent:guild:{guild}:events` (about an hour), `mediaread:*` (24 hours),
   `hclaim:*` (up to 30 days; deleting one can make a handler act twice), the
@@ -684,9 +697,10 @@ those for you to judge.
 
 Skrift's job tables keep each automation run's trigger: who wrote the message
 or joined, their names and the moderation target. The hourly retention job
-deletes finished work after 7 days (a finished agent run's state after 24
-hours), but a job still waiting, such as a timer, and an AI agent session
-still live have no limit, so this step removes the person's part of them.
+deletes finished, dead-lettered and unresumable work 7 days after it was
+written, but live work has no limit: a job still waiting, such as a timer,
+and an AI agent session Skrift can still resume. This step removes the
+person's part of it, and does not wait 7 days for the rest.
 Use the same `psql` session as step 7.
 
 Deleting a waiting job cancels it. That includes an automation's timer or
