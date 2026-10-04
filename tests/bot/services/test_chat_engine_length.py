@@ -8,6 +8,7 @@ tokens) before sending.
 
 from __future__ import annotations
 
+import functools
 from datetime import UTC
 from datetime import datetime
 from types import SimpleNamespace
@@ -84,6 +85,11 @@ def fake_memory():
     m.write_notes = AsyncMock()
     m.clear_notes = AsyncMock()
     m.read_history = AsyncMock(return_value=[])
+    # The engine reads history with the stored bytes for its
+    # compare-and-set write; derived from read_history's stub.
+    m.read_history_versioned = AsyncMock(
+        side_effect=functools.partial(_versioned, m)
+    )
     m.write_history = AsyncMock()
     m.clear_history = AsyncMock()
     return m
@@ -344,3 +350,7 @@ async def test_failed_continuation_still_counts_as_sent(fake_redis):
 
     assert ok is True
     assert len(engine.bot.rest.create_message.await_args_list) == 2
+
+
+async def _versioned(memory, channel_id):
+    return await memory.read_history(channel_id), b"loaded"

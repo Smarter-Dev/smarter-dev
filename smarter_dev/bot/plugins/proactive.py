@@ -24,6 +24,7 @@ persists in Redis.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import os
 import socket
@@ -386,6 +387,28 @@ def channel_message_from_hikari(message) -> ChannelMessage:
             if isinstance(getattr(attachment, "url", None), str)
         ),
     )
+
+
+def recheck_against_blocked_list(
+    messages: list[ChannelMessage], blocked
+) -> list[ChannelMessage]:
+    """Drop messages whose author is blocked now and redact mentions of
+    blocked users that were added to the list after conversion."""
+    rechecked: list[ChannelMessage] = []
+    for message in messages:
+        if message.blocked or blocked.is_blocked(message.author_id):
+            continue
+        content = redact_blocked_mentions(message.content, blocked)
+        mentions = tuple(
+            user_id for user_id in message.mention_user_ids
+            if not blocked.is_blocked(user_id)
+        )
+        if content != message.content or mentions != message.mention_user_ids:
+            message = dataclasses.replace(
+                message, content=content, mention_user_ids=mentions
+            )
+        rechecked.append(message)
+    return rechecked
 
 
 @dataclass
@@ -811,6 +834,10 @@ async def _run_producer_once(
         buffered_ids = {message.id for message in buffered}
         live_notified_directed_ids = state.pending_directed_ids & buffered_ids
         state.pending_directed_ids.difference_update(buffered_ids)
+    # The list may have changed since these were buffered: re-check them now,
+    # as the chat engine re-checks its queue, so a message buffered before its
+    # author was blocked never reaches the watcher or an envelope.
+    buffered = recheck_against_blocked_list(buffered, get_blocked_users())
     new_messages = [
         message
         for message in buffered

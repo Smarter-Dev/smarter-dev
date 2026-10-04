@@ -23,6 +23,12 @@ def _decode(value) -> str:
     return value.decode() if isinstance(value, bytes) else value
 
 
+def _as_bytes(value) -> bytes | None:
+    if value is None:
+        return None
+    return value.encode() if isinstance(value, str) else value
+
+
 class ProactiveHistoryStore:
     """Agent history and recovery cursors on the shared chat-memory Redis."""
 
@@ -47,6 +53,14 @@ class ProactiveHistoryStore:
             # A pydantic-ai upgrade can invalidate stored messages; stale
             # history is a cache, not a source of truth — start fresh.
             return []
+
+    async def read_raw(self, channel_id: int) -> bytes | None:
+        """The stored bytes, unparsed (a purge must tell unreadable from
+        empty, and never discard either)."""
+        return _as_bytes(await self._redis.get(self._history_key(channel_id)))
+
+    async def read_guild_raw(self, guild_id: int) -> bytes | None:
+        return _as_bytes(await self._redis.get(self._guild_history_key(guild_id)))
 
     async def write(self, channel_id: int, messages: list[ModelMessage]) -> None:
         payload = ModelMessagesTypeAdapter.dump_json(messages)

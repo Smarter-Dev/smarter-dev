@@ -253,6 +253,13 @@ class ChannelEngine:
     # the bot's identity mid-engagement, so the next turn re-emits the blob once.
     _reemit_long_term_memory: bool = False
 
+    # Set by a privacy purge of this guild: the blocks held above (and read
+    # before the purge) may carry the removed person, so the next turn
+    # re-reads them from the (purged) guild memory and re-emits the fresh copy.
+    _guild_memory_stale: bool = False
+    # The exact stored history this turn loaded, for a compare-and-set write.
+    _loaded_history_raw: bytes | None = None
+
     # Set once this engine has told the channel its pinned model is gone. Backs
     # up the Redis throttle so a channel still gets the notice exactly once when
     # Redis is unreachable, rather than on every activation (or never).
@@ -632,6 +639,14 @@ class ChannelEngine:
                     # follow-up normally sends none of it — unless the previous
                     # turn's compaction summarised that history away, in which
                     # case it goes out once more and the flag is spent.
+                    if self._guild_memory_stale:
+                        self._guild_memory_stale = False
+                        snapshot = await self._load_guild_memory()
+                        self._long_term_memory = snapshot.long_term_memory
+                        self._long_term_memory_updated_at = snapshot.updated_at
+                        self._behavior = snapshot.behavior
+                        self._personality = snapshot.personality
+                        self._reemit_long_term_memory = True
                     reemit_memory = self._reemit_long_term_memory
                     self._reemit_long_term_memory = False
                     agent_input = await build_followup_input(
@@ -650,7 +665,10 @@ class ChannelEngine:
                         personality=self._personality if reemit_memory else None,
                         new_guild_events=await self._drain_guild_events(),
                     )
-                    history = await memory.read_history(self.channel_id)
+                    (
+                        history,
+                        self._loaded_history_raw,
+                    ) = await memory.read_history_versioned(self.channel_id)
             except Exception:
                 log_exception(
                     logger,
@@ -1053,9 +1071,25 @@ class ChannelEngine:
 
             # Persist the post-processor history for the next turn.
             try:
-                await memory.write_history(
-                    self.channel_id, list(result.all_messages())
-                )
+                if first_activation:
+                    # A fresh engagement starts its own history.
+                    await memory.write_history(
+                        self.channel_id, list(result.all_messages())
+                    )
+                elif not await memory.write_history(
+                    self.channel_id,
+                    list(result.all_messages()),
+                    expected_raw=self._loaded_history_raw,
+                ):
+                    # A privacy purge rewrote the history while this turn ran
+                    # (possibly in another process during a deploy): its copy
+                    # wins, this turn's stale one is dropped.
+                    logger.info(
+                        "[%s] Chat history of channel %s changed during the "
+                        "turn; this turn's history write dropped",
+                        request_id,
+                        self.channel_id,
+                    )
             except Exception:
                 log_exception(
                     logger,
@@ -1623,7 +1657,13 @@ class ChannelEngine:
             )
             return []
         self._event_cursor = cursor
-        return [GuildEventView.from_guild_event(event) for event in events]
+        # An action on a blocked member (a timeout, a DM) would name them.
+        blocked = get_blocked_users()
+        return [
+            GuildEventView.from_guild_event(event)
+            for event in events
+            if not (event.target_user_id and blocked.is_blocked(event.target_user_id))
+        ]
 
     def _unavailable_model_key(
         self, override: Any | None, *, fallback_active: bool
@@ -2310,6 +2350,15 @@ class ChannelEngine:
             await self.bot.rest.create_message(self.channel_id, **kwargs)
         except Exception:
             log_exception(logger, "Failed to post notice message", level=logging.DEBUG)
+
+    def invalidate_guild_memory(self) -> None:
+        """A privacy purge rewrote this guild's memory: drop the held blocks
+        now and re-read them before the next turn."""
+        self._long_term_memory = None
+        self._long_term_memory_updated_at = None
+        self._behavior = None
+        self._personality = None
+        self._guild_memory_stale = True
 
     async def _privacy_purge_running(self) -> bool:
         try:

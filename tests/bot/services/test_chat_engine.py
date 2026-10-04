@@ -17,6 +17,8 @@ The agent run itself is patched out — these tests verify the *plumbing*:
 
 from __future__ import annotations
 
+import functools
+
 import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -167,6 +169,11 @@ def fake_memory():
     m.write_notes = AsyncMock()
     m.clear_notes = AsyncMock()
     m.read_history = AsyncMock(return_value=[])
+    # The engine reads history with the stored bytes for its
+    # compare-and-set write; derived from read_history's stub.
+    m.read_history_versioned = AsyncMock(
+        side_effect=functools.partial(_versioned, m)
+    )
     m.write_history = AsyncMock()
     m.clear_history = AsyncMock()
     m.topic_for_activation = AsyncMock(return_value=None)
@@ -352,6 +359,13 @@ async def test_followup_turn_loads_history_and_uses_followup_builder(
     [turn_one_request] = history_calls[0]
     assert isinstance(turn_one_request, ModelRequest)
     assert history_calls[1] == ["prior_a", "prior_b"]
+    # The follow-up's write is a compare-and-set against the bytes it loaded,
+    # so a privacy purge's rewrite in between is never overwritten.
+    first_write, *later_writes = fake_memory.write_history.await_args_list
+    assert "expected_raw" not in first_write.kwargs  # a fresh engagement
+    assert later_writes and all(
+        call.kwargs["expected_raw"] == b"loaded" for call in later_writes
+    )
 
 
 @pytest.mark.asyncio
@@ -996,3 +1010,7 @@ async def test_rate_limited_model_says_so(fake_bot, fake_memory):
     assert error_url in posted
     assert "poolside" not in posted.lower()
     assert "429" not in posted
+
+
+async def _versioned(memory, channel_id):
+    return await memory.read_history(channel_id), b"loaded"

@@ -14,6 +14,8 @@ are metered.
 
 from __future__ import annotations
 
+import functools
+
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -140,6 +142,11 @@ def fake_memory():
     m.write_notes = AsyncMock()
     m.clear_notes = AsyncMock()
     m.read_history = AsyncMock(return_value=[])
+    # The engine reads history with the stored bytes for its
+    # compare-and-set write; derived from read_history's stub.
+    m.read_history_versioned = AsyncMock(
+        side_effect=functools.partial(_versioned, m)
+    )
     m.write_history = AsyncMock()
     m.clear_history = AsyncMock()
     return m
@@ -666,3 +673,7 @@ async def test_stale_drafter_model_falls_back_to_single_stage(
     get_chat.assert_called_once_with("gpt-6.1-sol", None)
     get_worker.assert_not_called()
     get_writer.assert_not_called()
+
+
+async def _versioned(memory, channel_id):
+    return await memory.read_history(channel_id), b"loaded"

@@ -46,6 +46,14 @@ _REPLACE_IF_UNCHANGED = (
     "redis.call('set', KEYS[1], ARGV[2], 'KEEPTTL') return 1 else return 0 end"
 )
 
+# A turn's history write that loaded ``expected`` ('' = absent).
+_WRITE_IF_UNCHANGED = (
+    "local current = redis.call('get', KEYS[1]) "
+    "if (current == false and ARGV[1] == '') or current == ARGV[1] then "
+    "redis.call('set', KEYS[1], ARGV[2], 'EX', ARGV[3]) return 1 end return 0"
+)
+_UNCONDITIONAL = object()
+
 TOPIC_STALE_AFTER = timedelta(hours=6)
 TOPIC_STALE_AFTER_MESSAGES = 25
 
@@ -130,13 +138,54 @@ class ChatMemory:
             await self._redis.delete(self._history_key(channel_id))
             return []
 
+    async def read_history_versioned(
+        self, channel_id: int
+    ) -> tuple[list[ModelMessage], bytes | None]:
+        """The history plus the exact bytes it was read from (None if none),
+        for a later ``write_history(..., expected_raw=...)``."""
+        raw = await self._redis.get(self._history_key(channel_id))
+        if not raw:
+            return [], None
+        if isinstance(raw, str):
+            raw = raw.encode("utf-8")
+        try:
+            return list(ModelMessagesTypeAdapter.validate_json(raw)), raw
+        except Exception:
+            logger.exception(
+                "Discarding malformed chat history for channel %s", channel_id
+            )
+            await self._redis.delete(self._history_key(channel_id))
+            return [], None
+
     async def write_history(
-        self, channel_id: int, messages: list[ModelMessage]
-    ) -> None:
-        """Persist the full message list for the next turn to pick up."""
+        self,
+        channel_id: int,
+        messages: list[ModelMessage],
+        *,
+        expected_raw: bytes | None | object = _UNCONDITIONAL,
+    ) -> bool:
+        """Persist the full message list for the next turn to pick up.
+
+        With ``expected_raw`` the write happens only if the stored history is
+        still what the turn loaded (``None``: still absent). A privacy purge
+        that rewrote it meanwhile wins and the turn's write is dropped.
+        Returns whether it was written.
+        """
         payload = ModelMessagesTypeAdapter.dump_json(messages)
-        await self._redis.set(
-            self._history_key(channel_id), payload, ex=HISTORY_TTL_SECONDS
+        if expected_raw is _UNCONDITIONAL:
+            await self._redis.set(
+                self._history_key(channel_id), payload, ex=HISTORY_TTL_SECONDS
+            )
+            return True
+        return bool(
+            await self._redis.eval(
+                _WRITE_IF_UNCHANGED,
+                1,
+                self._history_key(channel_id),
+                expected_raw or b"",
+                payload,
+                HISTORY_TTL_SECONDS,
+            )
         )
 
     async def clear_history(self, channel_id: int) -> None:
@@ -145,13 +194,8 @@ class ChatMemory:
     # -- privacy purge rewrites: same keys, the original expiry is kept so a
     # purge never extends how long memory lives.
 
-    async def replace_history(
-        self, channel_id: int, messages: list[ModelMessage]
-    ) -> None:
-        payload = ModelMessagesTypeAdapter.dump_json(messages)
-        await self._redis.set(self._history_key(channel_id), payload, keepttl=True)
-
     async def read_history_raw(self, channel_id: int) -> bytes | None:
+        """The stored bytes, untouched (a purge never discards history)."""
         raw = await self._redis.get(self._history_key(channel_id))
         if isinstance(raw, str):
             raw = raw.encode("utf-8")
@@ -176,12 +220,24 @@ class ChatMemory:
         """Whether a privacy purge is rewriting this guild's chat memory."""
         return bool(await self._redis.exists(chat_privacy_lock_key(guild_id)))
 
-    async def replace_topic(self, channel_id: int, text: str) -> None:
-        """Rewrite the topic text, keeping its written-at stamp and expiry."""
-        await self._redis.set(self._topic_key(channel_id), text, keepttl=True)
+    async def replace_topic(self, channel_id: int, text: str) -> bool:
+        """Rewrite the topic text, keeping its written-at stamp and expiry.
 
-    async def replace_notes(self, channel_id: int, text: str) -> None:
-        await self._redis.set(self._notes_key(channel_id), text, keepttl=True)
+        Only an existing key is rewritten (XX): one that expired meanwhile is
+        not recreated without an expiry. Returns whether it was written.
+        """
+        return bool(
+            await self._redis.set(
+                self._topic_key(channel_id), text, keepttl=True, xx=True
+            )
+        )
+
+    async def replace_notes(self, channel_id: int, text: str) -> bool:
+        return bool(
+            await self._redis.set(
+                self._notes_key(channel_id), text, keepttl=True, xx=True
+            )
+        )
 
     async def increment_idle_counter(self, channel_id: int) -> int:
         count = await self._redis.incr(self._counter_key(channel_id))

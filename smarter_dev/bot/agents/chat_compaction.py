@@ -71,6 +71,8 @@ from pydantic_ai.models import Model
 
 from smarter_dev.bot.agents.model_router import build_model_for
 from smarter_dev.bot.agents.model_router import model_settings_for
+from smarter_dev.bot.privacy.attribution import ATTRIBUTION_MARK
+from smarter_dev.bot.privacy.attribution import chat_history_attributed
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
@@ -303,7 +305,9 @@ class _SummariseResult:
     cache_write_tokens: int = 0
 
 
-async def _summarise_conversation(transcript: str) -> _SummariseResult | None:
+async def _summarise_conversation(
+    transcript: str, *, attributed: bool = False
+) -> _SummariseResult | None:
     """Run the summarizer over a transcript of old turns.
 
     Returns None on failure — the caller then leaves history untouched
@@ -335,7 +339,13 @@ async def _summarise_conversation(transcript: str) -> _SummariseResult | None:
     if len(summary) > MAX_SUMMARY_CHARS:
         summary = summary[:MAX_SUMMARY_CHARS]
     return _SummariseResult(
-        text=f"{COMPACTED_PREFIX} {summary}",
+        # Marked only when every folded turn was attributed: a summary of an
+        # unmarked one stays unattributed (privacy.attribution).
+        text=(
+            f"{COMPACTED_PREFIX} {ATTRIBUTION_MARK} {summary}"
+            if attributed
+            else f"{COMPACTED_PREFIX} {summary}"
+        ),
         tokens_input=tokens_input,
         tokens_output=tokens_output,
         model_name=model_name,
@@ -565,7 +575,9 @@ async def compact_history(messages: list[ModelMessage]) -> list[ModelMessage]:
         return _strip_orphan_leading_results(messages)
 
     transcript = _render_transcript(old)
-    summary = await _summarise_conversation(transcript)
+    summary = await _summarise_conversation(
+        transcript, attributed=chat_history_attributed(old)
+    )
     if summary is None:
         return _strip_orphan_leading_results(messages)
 

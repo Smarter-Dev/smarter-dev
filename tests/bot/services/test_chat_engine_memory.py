@@ -13,6 +13,7 @@ fakeredis so the cursor semantics are the module's own, not a mock's.
 
 from __future__ import annotations
 
+import functools
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
@@ -171,6 +172,11 @@ def fake_memory():
     memory.write_notes = AsyncMock()
     memory.clear_notes = AsyncMock()
     memory.read_history = AsyncMock(return_value=[])
+    # The engine reads history with the stored bytes for its
+    # compare-and-set write; derived from read_history's stub.
+    memory.read_history_versioned = AsyncMock(
+        side_effect=functools.partial(_versioned, memory)
+    )
     memory.write_history = AsyncMock()
     memory.clear_history = AsyncMock()
     return memory
@@ -716,3 +722,7 @@ async def test_writer_stage_omits_memory_sections_when_there_is_none(
     assert "Your personality here" not in writer_prompt
     assert "How you've learned to behave here" not in writer_prompt
     assert "Also on your mind right now:" not in writer_prompt
+
+
+async def _versioned(memory, channel_id):
+    return await memory.read_history(channel_id), b"loaded"
