@@ -490,8 +490,23 @@ async def test_import_random_still_errors():
     # judge's "reject disallowed imports" guidance matches runtime reality.
     result, emitter, _ = await _run("import random\nawait send_message('x')\n")
     assert result.outcome == "error"
-    assert "random" in (result.error or "")
+    assert (result.error or "").startswith("runtime: ModuleNotFoundError: [message content]")
     assert emitter.messages == []
+
+
+async def test_a_runtime_error_keeps_its_type_and_frames_but_not_its_message():
+    script = (
+        "def check(text):\n"
+        "    raise ValueError(text)\n"
+        "check(context['message_content'] + ' what someone said')\n"
+    )
+    result, _, _ = await _run(script)
+    assert result.outcome == "error"
+    assert result.error == (
+        "runtime: ValueError: [message content]\n"
+        '  File "main.py", line 3, in <module>\n'
+        '  File "main.py", line 2, in check'
+    )
 
 
 async def test_datetime_now_returns_host_clock():
@@ -1341,7 +1356,8 @@ async def test_send_dm_absent_without_actor():
     script = 'await send_dm("U9", "hi")\n'
     result, _, _ = await _run(script)
     assert result.outcome == "error"
-    assert "send_dm" in result.error
+    # The stored error keeps the type, never the message (#80).
+    assert result.error.startswith("runtime: NameError: [message content]")
 
 
 async def test_send_dm_present_for_admin():
@@ -1449,7 +1465,7 @@ async def test_delete_webhook_spends_mod_action_and_present_only_for_admin():
         "await delete_webhook('https://discord.com/api/webhooks/1/tok')\n"
     )
     assert standard[0].outcome == "error"
-    assert "delete_webhook" in (standard[0].error or "")
+    assert (standard[0].error or "").startswith("runtime: NameError: [message content]")
 
 
 async def test_read_functions_admin_only_and_spend_lookup():
@@ -1560,7 +1576,7 @@ async def test_get_role_members_not_available_to_standard_handler():
     script = 'await get_role_members("R1")\n'
     result, _, _ = await _run(script)
     assert result.outcome == "error"
-    assert "get_role_members" in result.error
+    assert result.error.startswith("runtime: NameError: [message content]")
 
 
 async def test_get_role_members_returns_shape_and_spends_discord_read():
@@ -1757,7 +1773,7 @@ async def test_warn_user_records_the_row_before_the_dm_can_breach_a_cap():
 async def test_warn_user_not_available_to_standard_handler():
     result, _, _ = await _run("await warn_user('U9', 'r')\n")
     assert result.outcome == "error"
-    assert "warn_user" in result.error
+    assert result.error.startswith("runtime: NameError: [message content]")
 
 
 # -- list_rules (admin-tier lookup over the guild's rules document) ----------
@@ -1816,7 +1832,7 @@ async def test_list_rules_shares_the_lookups_pool():
 async def test_list_rules_not_available_to_standard_handler():
     result, _, _ = await _run("await list_rules()\n")
     assert result.outcome == "error"
-    assert "list_rules" in result.error
+    assert result.error.startswith("runtime: NameError: [message content]")
 
 
 

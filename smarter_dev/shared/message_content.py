@@ -37,7 +37,7 @@ keys a handler script chose, which is why that whole value is emptied.
 from __future__ import annotations
 
 import copy
-import re
+import traceback
 from collections.abc import Callable
 from datetime import datetime
 from datetime import timedelta
@@ -262,72 +262,55 @@ def oldest_retained_stream_id(now: datetime) -> str:
 
 
 _TRACEBACK_HEADER = "Traceback (most recent call last):"
-_TRACEBACK_FRAME_PREFIX = '  File "'
-_TRACEBACK_CHAIN_SEPARATORS = frozenset(
-    {
-        "During handling of the above exception, another exception occurred:",
-        "The above exception was the direct cause of the following exception:",
-    }
-)
+_CAUSE_SEPARATOR = "\nThe above exception was the direct cause of the following exception:\n"
+_CONTEXT_SEPARATOR = "\nDuring handling of the above exception, another exception occurred:\n"
 
 
-def redact_provider_error(
-    *, error_message: str, traceback: str, provider_body: str | None
-) -> dict[str, str | None]:
-    """The text columns of a chat error row, with any provider body removed.
+def exception_type_name(error: BaseException) -> str:
+    """``module.Qualname`` of an exception, bare for builtins."""
+    cls = type(error)
+    if cls.__module__ == "builtins":
+        return cls.__qualname__
+    return f"{cls.__module__}.{cls.__qualname__}"
 
-    A provider error body can echo the request prompt, and so a member's
-    message, back at us, and nothing can tell which bodies do. The exception
-    message and the traceback repeat the body, so when there is one all three
-    are redacted: the traceback keeps its header, its ``File`` lines, the
-    chaining separators and each exception's type, and drops source lines and
-    every exception message. An error with no provider body is kept as sent.
+
+def exception_trace(error: BaseException) -> str:
+    """A traceback of ``error`` and every exception chained to it, without text.
+
+    Any exception message can carry a member's words: a provider body that
+    echoes the prompt, a validation error quoting its input, a Discord API
+    error, a script that trips over the message it reacts to. So the stored
+    trace is built from the exception objects, never from their text: each
+    exception's type and stack frames (file, line, function), the chaining
+    between them, and the placeholder where each message was. No source lines,
+    no notes and no message is ever read.
     """
-    if provider_body is None:
-        return {
-            "error_message": error_message,
-            "traceback": traceback,
-            "provider_body": None,
-        }
-    kept: list[str] = []
-    in_message = False
-    for line in traceback.splitlines():
-        if line == _TRACEBACK_HEADER or line in _TRACEBACK_CHAIN_SEPARATORS:
-            kept.append(line)
-            in_message = False
-        elif line.startswith(_TRACEBACK_FRAME_PREFIX):
-            kept.append(line)
-        elif line and not line[0].isspace() and not in_message:
-            exception_type = line.split(":", 1)[0]
-            kept.append(f"{exception_type}: {MESSAGE_CONTENT_PLACEHOLDER}")
-            in_message = True
-    return {
-        "error_message": _redact_present_text(error_message),
-        "traceback": "\n".join(kept) + ("\n" if kept else ""),
-        "provider_body": _redact_present_text(provider_body),
-    }
-
-
-_HANDLER_ERROR_LABEL = re.compile(r"[A-Za-z_][\w.]*")
-
-
-def redact_handler_error(error: str | None) -> str | None:
-    """A handler script's error with its message replaced by the placeholder.
-
-    A script that trips over the message it is reacting to puts that text in
-    its exception message, and nothing can tell which messages do. The
-    leading labels the runtime writes (``compile``, ``runtime`` and the
-    exception type) are kept, so the run still says what kind of failure it
-    was.
-    """
-    if error is None or error == "":
-        return error
-    labels: list[str] = []
-    rest = error
-    while len(labels) < 2 and ": " in rest:
-        label, remainder = rest.split(": ", 1)
-        if not _HANDLER_ERROR_LABEL.fullmatch(label):
-            break
-        labels.append(label)
-        rest = remainder
-    return ": ".join([*labels, MESSAGE_CONTENT_PLACEHOLDER])
+    chain: list[tuple[BaseException, str]] = []
+    seen: set[int] = set()
+    current: BaseException | None = error
+    separator = ""
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        chain.append((current, separator))
+        if current.__cause__ is not None:
+            current, separator = current.__cause__, _CAUSE_SEPARATOR
+        elif current.__context__ is not None and not current.__suppress_context__:
+            current, separator = current.__context__, _CONTEXT_SEPARATOR
+        else:
+            current = None
+    # chain[i]'s separator says how chain[i] led to chain[i - 1]; printed
+    # oldest first, as Python does, it sits between them.
+    separator_before = [chain[i + 1][1] for i in range(len(chain) - 1)]
+    lines: list[str] = []
+    for index in range(len(chain) - 1, -1, -1):
+        exception, _ = chain[index]
+        if exception.__traceback__ is not None:
+            lines.append(_TRACEBACK_HEADER)
+            lines.extend(
+                f'  File "{frame.filename}", line {frame.lineno}, in {frame.name}'
+                for frame in traceback.extract_tb(exception.__traceback__)
+            )
+        lines.append(f"{exception_type_name(exception)}: {MESSAGE_CONTENT_PLACEHOLDER}")
+        if index > 0:
+            lines.append(separator_before[index - 1])
+    return "\n".join(lines) + "\n"

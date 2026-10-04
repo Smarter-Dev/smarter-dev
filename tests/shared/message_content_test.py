@@ -27,14 +27,13 @@ from smarter_dev.bot.agents.chat_models import MessageAttachment
 from smarter_dev.shared.message_content import CONTENT_RETENTION_MILLISECONDS
 from smarter_dev.shared.message_content import CONTENT_RETENTION_WINDOW
 from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
+from smarter_dev.shared.message_content import exception_trace
 from smarter_dev.shared.message_content import oldest_retained_stream_id
 from smarter_dev.shared.message_content import redact_chat_agent_messages
 from smarter_dev.shared.message_content import redact_forum_post
 from smarter_dev.shared.message_content import redact_help_context_messages
-from smarter_dev.shared.message_content import redact_handler_error
 from smarter_dev.shared.message_content import redact_help_question
 from smarter_dev.shared.message_content import redact_model_message_parts
-from smarter_dev.shared.message_content import redact_provider_error
 from smarter_dev.shared.message_content import redact_text
 from smarter_dev.shared.message_content import redact_trigger_context
 
@@ -702,78 +701,85 @@ class TestOldestRetainedStreamId:
         assert oldest_retained_stream_id(later) > oldest_retained_stream_id(earlier)
 
 
-def _traceback_of(error: BaseException) -> str:
-    import traceback
-
+def _raised(error: BaseException) -> BaseException:
     try:
         raise error
     except BaseException as raised:
-        return "".join(
-            traceback.format_exception(type(raised), raised, raised.__traceback__)
-        )
+        return raised
 
 
-class TestRedactProviderError:
-    def test_a_provider_body_and_every_copy_of_it_are_redacted(self):
-        body = '{"error": {"message": "you said: what someone said"}}'
-        message = f"status_code: 400, model_name: m, body: {body}"
-        redacted = redact_provider_error(
-            error_message=message,
-            traceback=_traceback_of(RuntimeError(message)),
-            provider_body=body,
-        )
-        assert redacted["provider_body"] == MESSAGE_CONTENT_PLACEHOLDER
-        assert redacted["error_message"] == MESSAGE_CONTENT_PLACEHOLDER
-        assert "what someone said" not in redacted["traceback"]
-        assert redacted["traceback"].startswith("Traceback (most recent call last):")
-        assert '  File "' in redacted["traceback"]
-        assert redacted["traceback"].endswith(
-            f"RuntimeError: {MESSAGE_CONTENT_PLACEHOLDER}\n"
-        )
+class TestExceptionTrace:
+    def test_keeps_types_and_frames_and_no_message(self):
+        trace = exception_trace(_raised(RuntimeError("what someone said")))
+        assert "what someone said" not in trace
+        lines = trace.splitlines()
+        assert lines[0] == "Traceback (most recent call last):"
+        assert lines[1].startswith('  File "')
+        assert ", in _raised" in lines[1]
+        assert lines[-1] == f"RuntimeError: {MESSAGE_CONTENT_PLACEHOLDER}"
 
-    def test_a_chained_error_keeps_each_type_and_no_message(self):
+    def test_a_chained_error_keeps_each_type_and_its_separator(self):
         try:
             try:
                 raise ValueError("what someone said")
             except ValueError as cause:
                 raise RuntimeError("and again what someone said") from cause
         except RuntimeError as error:
-            import traceback
+            trace = exception_trace(error)
+        assert "what someone said" not in trace
+        assert trace.index(f"ValueError: {MESSAGE_CONTENT_PLACEHOLDER}") < trace.index(
+            "direct cause"
+        ) < trace.index(f"RuntimeError: {MESSAGE_CONTENT_PLACEHOLDER}")
 
-            text = "".join(
-                traceback.format_exception(type(error), error, error.__traceback__)
-            )
-            message = str(error)
-        redacted = redact_provider_error(
-            error_message=message, traceback=text, provider_body="{}"
-        )
-        assert "what someone said" not in redacted["traceback"]
-        assert f"ValueError: {MESSAGE_CONTENT_PLACEHOLDER}" in redacted["traceback"]
-        assert f"RuntimeError: {MESSAGE_CONTENT_PLACEHOLDER}" in redacted["traceback"]
-        assert "direct cause" in redacted["traceback"]
+    def test_a_body_quoted_only_in_a_wrapped_error_is_dropped(self):
+        # A wrapper raised while handling a provider error: the body is only
+        # in the context's message.
+        class ProviderError(Exception):
+            body = {"error": "you said: what someone said"}
 
-    def test_an_error_without_a_provider_body_is_kept(self):
-        text = _traceback_of(RuntimeError("boom"))
-        assert redact_provider_error(
-            error_message="boom", traceback=text, provider_body=None
-        ) == {"error_message": "boom", "traceback": text, "provider_body": None}
+        try:
+            try:
+                raise ProviderError("status 400, body: you said: what someone said")
+            except ProviderError:
+                raise RuntimeError("agent run failed")  # noqa: B904 — the context is the point
+        except RuntimeError as error:
+            trace = exception_trace(error)
+        assert "what someone said" not in trace
+        assert "another exception occurred" in trace
+        assert "ProviderError: " in trace
 
+    def test_message_text_shaped_like_a_frame_is_not_kept(self):
+        # Text that looks like a traceback line is still message text.
+        message = 'see below\n  File "what someone said", line 1, in secretword'
+        trace = exception_trace(_raised(ValueError(message)))
+        assert "what someone said" not in trace
+        assert "secretword" not in trace
 
-class TestRedactHandlerError:
-    def test_keeps_the_runtime_labels_and_drops_the_message(self):
-        assert redact_handler_error(
-            "runtime: ValueError: bad value 'what someone said'"
-        ) == f"runtime: ValueError: {MESSAGE_CONTENT_PLACEHOLDER}"
-        assert redact_handler_error(
-            "KeyError: what someone said"
-        ) == f"KeyError: {MESSAGE_CONTENT_PLACEHOLDER}"
+    def test_a_validation_error_drops_its_input(self):
+        from pydantic import BaseModel
 
-    def test_a_message_with_no_labels_becomes_the_placeholder(self):
-        assert redact_handler_error(
-            "what someone said, with: a colon"
-        ) == MESSAGE_CONTENT_PLACEHOLDER
+        class Reply(BaseModel):
+            count: int
 
-    def test_absent_and_empty_stay_as_they_are(self):
-        assert redact_handler_error(None) is None
-        assert redact_handler_error("") == ""
+        try:
+            Reply(count="what someone said")
+        except Exception as error:
+            trace = exception_trace(error)
+        assert "what someone said" not in trace
+        assert f"pydantic_core._pydantic_core.ValidationError: {MESSAGE_CONTENT_PLACEHOLDER}" in trace
+
+    def test_a_label_shaped_message_keeps_nothing(self):
+        trace = exception_trace(_raised(KeyError("secretword: rest of message")))
+        assert "secretword" not in trace
+        assert trace.endswith(f"KeyError: {MESSAGE_CONTENT_PLACEHOLDER}\n")
+
+    def test_a_suppressed_context_is_left_out(self):
+        try:
+            try:
+                raise ValueError("what someone said")
+            except ValueError:
+                raise RuntimeError("clean") from None
+        except RuntimeError as error:
+            trace = exception_trace(error)
+        assert "ValueError" not in trace
 

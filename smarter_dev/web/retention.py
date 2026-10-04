@@ -72,7 +72,6 @@ from sqlalchemy import case, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
-from smarter_dev.shared.message_content import redact_provider_error
 from smarter_dev.shared.message_content import redact_trigger_context
 from smarter_dev.web.models import (
     CONTENT_RETENTION_WINDOW,
@@ -242,48 +241,30 @@ async def scrub_chat_agent_compaction_events(
 async def scrub_chat_agent_errors(
     session: AsyncSession, cutoff: datetime, now: datetime
 ) -> int:
-    """Drop the raw provider error body, which can echo the prompt back.
+    """Redact every failed chat run's message, traceback and provider body.
 
-    A provider error's message and traceback repeat the body, so on a row from
-    a provider (a status code or a body) they are redacted the way the write
-    path now redacts them. That pass keys on the message rather than the
-    purge stamp, so it also reaches rows an earlier sweep stamped after
-    clearing only the body.
+    Any exception message can carry a member's words (a provider body that
+    echoes the prompt, a validation error quoting its input, a Discord API
+    error), and the traceback repeats them. The write path now stores only
+    exception types and frames; a row it did not write, whatever its status
+    or body, keeps no text past the window. That pass keys on the message
+    rather than the purge stamp, so it also reaches rows an earlier sweep
+    stamped after clearing only the body.
     """
-    redacted = 0
-    while True:
-        due = (
-            await session.execute(
-                select(ChatAgentError.id, ChatAgentError.traceback)
-                .where(
-                    ChatAgentError.occurred_at <= cutoff,
-                    or_(
-                        ChatAgentError.provider_status_code.is_not(None),
-                        ChatAgentError.provider_body.is_not(None),
-                    ),
-                    ChatAgentError.error_message != MESSAGE_CONTENT_PLACEHOLDER,
-                )
-                .limit(_HANDLER_RUN_BATCH)
-            )
-        ).all()
-        for error_id, error_traceback in due:
-            text = redact_provider_error(
-                error_message="", traceback=error_traceback, provider_body=""
-            )
-            await session.execute(
-                update(ChatAgentError)
-                .where(ChatAgentError.id == error_id)
-                .values(
-                    error_message=MESSAGE_CONTENT_PLACEHOLDER,
-                    traceback=text["traceback"],
-                    provider_body=None,
-                    content_purged_at=now,
-                )
-            )
-        redacted += len(due)
-        if len(due) < _HANDLER_RUN_BATCH:
-            break
-    return redacted + await _scrub(
+    redacted = await session.execute(
+        update(ChatAgentError)
+        .where(
+            ChatAgentError.occurred_at <= cutoff,
+            ChatAgentError.error_message != MESSAGE_CONTENT_PLACEHOLDER,
+        )
+        .values(
+            error_message=MESSAGE_CONTENT_PLACEHOLDER,
+            traceback=MESSAGE_CONTENT_PLACEHOLDER,
+            provider_body=None,
+            content_purged_at=now,
+        )
+    )
+    return (redacted.rowcount or 0) + await _scrub(
         session,
         ChatAgentError,
         timestamp_column=ChatAgentError.occurred_at,

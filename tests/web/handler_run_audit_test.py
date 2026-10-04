@@ -150,13 +150,15 @@ async def test_the_completed_row_records_the_outcome_and_every_counter(test_engi
         test_engine,
         "admin",
         {"trigger_type": "schedule"},
-        _Result(ADMIN_USAGE, outcome="cap_exceeded", cap="messages", error="boom"),
+        _Result(
+            ADMIN_USAGE, outcome="cap_exceeded", cap="messages", error="CapExceeded: messages"
+        ),
     )
     assert run.handler_kind == "admin"
-    # A script's own error can quote the message it tripped on, so only its
-    # labels survive; the cap column still names the cap.
+    # The runtime builds the error from the exception's type (handler_runtime);
+    # the audit stores it as built.
     assert (run.outcome, run.cap) == ("cap_exceeded", "messages")
-    assert run.error == MESSAGE_CONTENT_PLACEHOLDER
+    assert run.error == "CapExceeded: messages"
     assert (run.messages_sent, run.web_searches, run.web_reads) == (2, 1, 1)
     assert (run.agent_calls, run.discord_reads, run.timers_scheduled) == (1, 1, 1)
     assert (run.mod_actions, run.lookups) == (3, 4)

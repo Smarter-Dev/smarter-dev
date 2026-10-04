@@ -25,7 +25,6 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from smarter_dev.shared.message_content import redact_handler_error
 from smarter_dev.shared.message_content import redact_trigger_context
 from smarter_dev.web.models import HandlerRun
 
@@ -66,7 +65,7 @@ def record_completed_run(
             trigger_context=redact_trigger_context(trigger_context),
             outcome=result.outcome,
             cap=result.cap,
-            error=redact_handler_error(result.error),
+            error=result.error,
             messages_sent=usage["messages_sent"],
             web_searches=usage["web_searches"],
             web_reads=usage["web_reads"],

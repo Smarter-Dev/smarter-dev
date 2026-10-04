@@ -348,10 +348,14 @@ class TestCreateError:
         assert error.error_type == "pydantic_ai.exceptions.ModelHTTPError"
         assert error.error_context == {"first_activation": True}
 
-    async def test_a_provider_body_and_its_copies_are_stored_as_the_placeholder(
+    async def test_a_redacted_trace_is_kept_and_every_message_is_the_placeholder(
         self, client: AsyncClient, session
     ):
-        echoed = "what someone actually said"
+        trace = (
+            "Traceback (most recent call last):\n"
+            '  File "engine.py", line 1, in run\n'
+            f"pydantic_ai.exceptions.ModelHTTPError: {MESSAGE_CONTENT_PLACEHOLDER}"
+        )
         response = await client.post(
             "/api/chat-conversations/errors",
             json={
@@ -359,15 +363,11 @@ class TestCreateError:
                 "guild_id": _GUILD,
                 "channel_id": _CHANNEL,
                 "error_type": "pydantic_ai.exceptions.ModelHTTPError",
-                "error_message": f"status_code: 400, body: {echoed}",
-                "traceback": (
-                    "Traceback (most recent call last):\n"
-                    '  File "engine.py", line 1, in run\n'
-                    "    await agent.run(prompt)\n"
-                    f"pydantic_ai.exceptions.ModelHTTPError: body: {echoed}\n"
-                ),
+                "error_message": "status_code: 400, body: what someone actually said",
+                "traceback": trace,
+                "trace_redacted": True,
                 "provider_status_code": 400,
-                "provider_body": f'{{"error":{{"message":"{echoed}"}}}}',
+                "provider_body": '{"error":{"message":"what someone actually said"}}',
             },
         )
 
@@ -375,32 +375,35 @@ class TestCreateError:
         error = (await session.execute(select(ChatAgentError))).scalars().one()
         assert error.provider_body == MESSAGE_CONTENT_PLACEHOLDER
         assert error.error_message == MESSAGE_CONTENT_PLACEHOLDER
-        assert echoed not in error.traceback
-        assert '  File "engine.py", line 1, in run' in error.traceback
-        assert error.traceback.endswith(
-            f"pydantic_ai.exceptions.ModelHTTPError: {MESSAGE_CONTENT_PLACEHOLDER}\n"
-        )
+        assert error.traceback == trace
         assert error.provider_status_code == 400
 
-    async def test_an_error_without_a_provider_body_is_kept_as_sent(
+    async def test_an_error_with_no_provider_body_keeps_no_text_either(
         self, client: AsyncClient, session
     ):
+        # A validation error quotes its input; a Discord error its body.
         response = await client.post(
             "/api/chat-conversations/errors",
             json={
                 "request_id": "err-9999",
                 "guild_id": _GUILD,
                 "channel_id": _CHANNEL,
-                "error_type": "builtins.RuntimeError",
-                "error_message": "connection reset",
-                "traceback": "Traceback (most recent call last):\nRuntimeError: connection reset\n",
+                "error_type": "pydantic_core._pydantic_core.ValidationError",
+                "error_message": "input_value='what someone said'",
+                "traceback": (
+                    "Traceback (most recent call last):\n"
+                    "ValidationError: input_value='what someone said'\n"
+                ),
             },
         )
 
         assert response.status_code == 201
         error = (await session.execute(select(ChatAgentError))).scalars().one()
-        assert error.error_message == "connection reset"
+        assert error.error_message == MESSAGE_CONTENT_PLACEHOLDER
+        # Sent by a bot that predates trace_redacted: the raw trace is not kept.
+        assert error.traceback == MESSAGE_CONTENT_PLACEHOLDER
         assert error.provider_body is None
+        assert error.error_type == "pydantic_core._pydantic_core.ValidationError"
 
 
 class TestCreateTurn:

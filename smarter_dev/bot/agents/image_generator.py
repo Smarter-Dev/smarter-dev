@@ -101,7 +101,8 @@ async def generate_image(prompt: str) -> tuple[bytes, str]:
     image data (e.g. it refused, or returned text only).
     """
     model_id = os.getenv(MODEL_ENV_VAR, DEFAULT_MODEL)
-    logger.info("generate_image: model=%s prompt=%r", model_id, prompt)
+    # The prompt is written from members' messages; log its size, not its words.
+    logger.info("generate_image: model=%s prompt_chars=%d", model_id, len(prompt))
     response = await _get_client().aio.models.generate_content(
         model=model_id,
         contents=apply_palette(prompt),
