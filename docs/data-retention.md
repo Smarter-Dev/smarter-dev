@@ -344,7 +344,5 @@ stdout). Ordinary successful API requests are not logged at all.
 Rate limiting keeps one Redis sorted set per API key: the times of its allowed
 requests, keyed by the key's id, expiring 15 minutes after the last request.
 
-The `security_logs` table is no longer written. The rows it already holds
-(one per bytes API call before this change, with the Discord ids in request
-paths) are still deleted at 90 days by the hourly retention job
-(`smarter_dev/web/security_log_retention.py`) until the table is dropped.
+The `security_logs` table that used to hold these, one row per bytes API call
+with the Discord ids in request paths, has been dropped along with its rows.

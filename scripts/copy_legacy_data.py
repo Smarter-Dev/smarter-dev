@@ -12,9 +12,10 @@ Behavior:
   {None: "skrift"}``, read via ``smarter_dev.shared.config.get_settings``.
 - Dry-run by default: prints the FK-dependency copy order and per-table
   source/target row counts, writes nothing. Pass ``--execute`` to copy.
-- Copies 23 of the 24 legacy tables, parents before children (order derived
+- Copies 22 of the 24 legacy tables, parents before children (order derived
   from ``Base.metadata.sorted_tables``). ``api_keys`` is EXCLUDED: that table
   name in the skrift schema belongs to Skrift's own key table (phase 01).
+  ``security_logs`` is EXCLUDED since #81 dropped the table.
 - Idempotency: ``INSERT ... ON CONFLICT (pk) DO NOTHING`` in batches, with a
   commit per table — an interrupted run can simply be re-run and resumes
   where it left off. Chosen over refuse-on-non-empty precisely so partial
@@ -80,7 +81,8 @@ LEGACY_SOURCE_TABLE_NAMES: frozenset[str] = frozenset({
 # NEVER copied: ``skrift.api_keys`` is Skrift core's own (different-shaped)
 # table — the authoritative bot keys after phase 01. Legacy key rows die with
 # bc_websites in phase 05.
-COPY_EXCLUDED_TABLE_NAMES: frozenset[str] = frozenset({"api_keys"})
+# ``security_logs`` was dropped in #81 (security events are logs now).
+COPY_EXCLUDED_TABLE_NAMES: frozenset[str] = frozenset({"api_keys", "security_logs"})
 
 COPY_TABLE_NAMES: frozenset[str] = LEGACY_SOURCE_TABLE_NAMES - COPY_EXCLUDED_TABLE_NAMES
 
