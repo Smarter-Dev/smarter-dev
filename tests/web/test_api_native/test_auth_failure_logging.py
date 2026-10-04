@@ -106,3 +106,26 @@ class TestReasonCodes:
         from smarter_dev.web.api_native.auth import _login_failure_reason
 
         assert _login_failure_reason(NotAuthorizedException(detail)) == code
+
+    def test_codes_cover_every_rejection_the_installed_skrift_raises(self):
+        """Pinned to Skrift's wording: a rewording must fail here, not turn
+        every permission failure into ``no_valid_key`` unnoticed."""
+        import inspect
+        import re
+
+        import skrift.auth.guards as skrift_guards
+        from litestar.exceptions import NotAuthorizedException
+
+        from smarter_dev.web.api_native.auth import _login_failure_reason
+
+        raised = re.findall(
+            r'NotAuthorizedException\(\s*"([^"]*)"', inspect.getsource(skrift_guards)
+        )
+        assert sorted(set(raised)) == ["Authentication required", "Insufficient permissions"]
+        assert {
+            detail: _login_failure_reason(NotAuthorizedException(detail))
+            for detail in raised
+        } == {
+            "Authentication required": "no_valid_key",
+            "Insufficient permissions": "insufficient_permissions",
+        }

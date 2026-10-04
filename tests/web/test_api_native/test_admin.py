@@ -136,7 +136,7 @@ def test_admin_operation_events_hold_no_member_id(client, security_events):
     assert len(security_events) == 2
     for event in security_events:
         assert "U-member-1" not in repr(event)
-    assert {event["route"] for event in security_events} == {
+    assert {event["http.route"] for event in security_events} == {
         "/api/admin/conversations",
         "/api/admin/conversations/{conversation_id}",
     }

@@ -21,7 +21,8 @@ Behavior kept byte-compatible with the legacy implementation:
 - Redis unreachable, hung (no answer within ``REDIS_TIMEOUT_SECONDS``) or
   misconfigured (a malformed ``REDIS_URL``): the request is let through
   without rate-limit headers, and a warning is logged at most once a minute
-  per process. The only key holder is the bot's own service key, so failing
+  per process; the first successful check after failures logs how many
+  requests went unlimited since the last warning. The only key holder is the bot's own service key, so failing
   open costs nothing in abuse protection while failing closed would take
   every bot feature that calls the API down with Redis.
 - Success responses carry ``x-ratelimit-limit/remaining/reset`` plus the
@@ -260,6 +261,20 @@ def _warn_rate_limiting_skipped(error: Exception) -> None:
     _redis_failures_since_warning = 0
 
 
+def _note_redis_recovered() -> None:
+    """After failures, report the requests skipped since the last warning."""
+    global _last_redis_warning_at, _redis_failures_since_warning
+    if _last_redis_warning_at is None and not _redis_failures_since_warning:
+        return
+    logger.warning(
+        "Bot API rate limiting resumed, Redis answering again; "
+        "%d more request(s) went unlimited since the last warning",
+        _redis_failures_since_warning,
+    )
+    _last_redis_warning_at = None
+    _redis_failures_since_warning = 0
+
+
 async def check_rate_limits(
     api_key: RateLimitedKey,
     request: Request,
@@ -279,6 +294,7 @@ async def check_rate_limits(
     except Exception as redis_error:
         _warn_rate_limiting_skipped(redis_error)
         return RateLimitDecision(allowed=True, headers={})
+    _note_redis_recovered()
 
     remaining_by_window: list[tuple[RateLimitWindow, int]] = []
     for window, usage_count in zip(RATE_LIMIT_WINDOWS, counts):
