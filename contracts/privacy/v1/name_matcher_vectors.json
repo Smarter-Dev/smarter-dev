@@ -148,5 +148,93 @@
     "text": "nothing here",
     "hit": false,
     "unchecked": []
+  },
+  {
+    "names": [
+      "Kai \"Crab\" Smith"
+    ],
+    "text": "ask Kai \"Crab\" Smith about lifetimes",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "Kai \"Crab\" Smith"
+    ],
+    "text": "ask Kai Crab Smith about lifetimes",
+    "hit": false,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "back\\slash"
+    ],
+    "text": "user BACK\\SLASH joined",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "back\\slash"
+    ],
+    "text": "user back/slash joined",
+    "hit": false,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "tab\tname"
+    ],
+    "text": "hello tab\tname!",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "tab\tname"
+    ],
+    "text": "hello tab name!",
+    "hit": false,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "line\nbreak"
+    ],
+    "text": "so line\nbreak said hi",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "line\nbreak"
+    ],
+    "text": "so line break said hi",
+    "hit": false,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "kai"
+    ],
+    "text": "\"kai\"\tsaid\\nothing",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "\tkai\n"
+    ],
+    "text": "ping kai\tnow",
+    "hit": true,
+    "unchecked": []
+  },
+  {
+    "names": [
+      "\"k\""
+    ],
+    "text": "the \"k\" key",
+    "hit": true,
+    "unchecked": []
   }
 ]
