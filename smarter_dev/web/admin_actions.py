@@ -238,6 +238,7 @@ class AdminActor(DiscordBotClient):
                 {
                     "action_type": action_type,
                     "target_username": target_user_id,
+                    "target_user_id": target_user_id,
                     "reason": reason,
                     "duration_seconds": duration_seconds,
                     "channel_id": channel_id,

@@ -35,6 +35,7 @@ from smarter_dev.bot.privacy.blocked_users import redact_blocked_mentions
 from smarter_dev.bot.proactive.agent import memory_note_pair
 from smarter_dev.bot.proactive.notifications import Notification
 from smarter_dev.bot.services.chat_memory import ChatMemory
+from smarter_dev.shared.privacy_purge import BOT_CONSUMER_GROUP
 from smarter_dev.shared.privacy_purge import PURGE_STREAM
 from smarter_dev.shared.privacy_purge import WORKER_CONSUMER_GROUP
 from smarter_dev.shared.privacy_purge import PurgeTarget
@@ -192,32 +193,62 @@ async def test_redis_error_mid_entry_leaves_it_pending_and_returns(world):
     assert await _pending(world.redis) == 1
 
 
-async def test_loop_survives_errors_and_heartbeats_every_iteration(monkeypatch):
+async def test_loop_survives_errors_and_heartbeats_only_after_good_polls(
+    monkeypatch,
+):
     redis = fakeredis.aioredis.FakeRedis()
     monkeypatch.setattr(purge, "ERROR_BACKOFF_SECONDS", 0.01)
     monkeypatch.setattr(purge, "IDLE_SECONDS", 0.01)
     reads = []
+    healthy = []
 
-    async def failing_read(*args, **kwargs):
+    async def read(*args, **kwargs):
         reads.append(1)
-        raise ConnectionError("redis blip")
+        if not healthy:
+            raise ConnectionError("redis blip")
+        await asyncio.sleep(0.005)
+        return []
 
-    monkeypatch.setattr(purge, "read_batch", failing_read)
+    monkeypatch.setattr(purge, "read_batch", read)
     deps = SimpleNamespace(redis=redis)
     task = asyncio.create_task(purge.purge_consumer_loop(deps))
-    await asyncio.sleep(0.1)
+    await asyncio.sleep(0.08)
 
     assert not task.done()  # survived repeated errors
     assert len(reads) >= 2
+    assert await redis.get(consumer_key()) is None  # no good poll yet
+
+    healthy.append(True)
+    await asyncio.sleep(0.05)
     assert await redis.get(consumer_key()) == b"1"
     assert 0 < await redis.ttl(consumer_key()) <= 180
 
-    # Idle (not acting) iterations heartbeat too.
-    await redis.delete(consumer_key())
+    # A standby (not acting) never heartbeats.
     monkeypatch.setattr(purge.leadership, "is_acting", lambda: False)
+    await asyncio.sleep(0.03)  # let an iteration already polling finish
+    await redis.delete(consumer_key())
     await asyncio.sleep(0.05)
-    assert await redis.get(consumer_key()) == b"1"
+    assert await redis.get(consumer_key()) is None
     task.cancel()
+
+
+async def test_missing_group_is_recreated_at_zero(monkeypatch):
+    redis = fakeredis.aioredis.FakeRedis()
+    monkeypatch.setattr(purge, "IDLE_SECONDS", 0.01)
+    await redis.xadd(PURGE_STREAM, {"payload": "not json"})
+    deps = SimpleNamespace(redis=redis)
+    task = asyncio.create_task(purge.purge_consumer_loop(deps, block_ms=5))
+    await asyncio.sleep(0.05)
+    # Someone destroys the group: the loop recreates it from id 0.
+    await redis.xgroup_destroy(PURGE_STREAM, BOT_CONSUMER_GROUP)
+    await redis.xadd(PURGE_STREAM, {"payload": "also not json"})
+    await asyncio.sleep(0.1)
+    task.cancel()
+
+    groups = {g["name"]: g for g in await redis.xinfo_groups(PURGE_STREAM)}
+    assert BOT_CONSUMER_GROUP.encode() in groups
+    # Both entries were delivered again after the recreate (id 0).
+    assert groups[BOT_CONSUMER_GROUP.encode()]["entries-read"] == 2
 
 
 async def test_supervisor_restarts_a_dead_consumer():
@@ -712,7 +743,11 @@ async def test_ack_detail_reports_name_hits_per_step(world):
 
     detail = world.acks[0][1].detail
     segments = detail.split("; ")
-    assert any(s.startswith("chat channels ") and "chat_name_hits=3" in s
-               for s in segments)
-    assert any("history_name_hits=1" in s for s in segments)
+    # Name-hit segments come first, one per step, before the counts.
+    assert segments[:4] == [
+        "chat_name_hits=3",
+        "legacy_history_name_hits=1",
+        "history_name_hits=1",
+        "watch_instructions_name_hits=1",
+    ]
     assert world.acks[0][1].outcome == "purged"

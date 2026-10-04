@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import uuid
 from collections.abc import Awaitable
 from collections.abc import Callable
@@ -85,6 +86,7 @@ from smarter_dev.bot.services.chat_conversation_persistence import end_engagemen
 from smarter_dev.bot.services.chat_conversation_persistence import persist_error
 from smarter_dev.bot.services.chat_conversation_persistence import persist_turn
 from smarter_dev.bot.services.chat_conversation_persistence import start_engagement
+from smarter_dev.bot.services.chat_memory import HISTORY_UNREADABLE
 from smarter_dev.bot.services.chat_memory import chat_privacy_locked
 from smarter_dev.bot.services.chat_memory import get_chat_memory
 from smarter_dev.bot.services.default_model_override import read_default_model_override
@@ -258,7 +260,7 @@ class ChannelEngine:
     # re-reads them from the (purged) guild memory and re-emits the fresh copy.
     _guild_memory_stale: bool = False
     # The exact stored history this turn loaded, for a compare-and-set write.
-    _loaded_history_raw: bytes | None = None
+    _loaded_history_raw: bytes | None | object = None
 
     # Set once this engine has told the channel its pinned model is gone. Backs
     # up the Redis throttle so a channel still gets the notice exactly once when
@@ -631,6 +633,12 @@ class ChannelEngine:
                         guild_events=await self._drain_guild_events(),
                     )
                     history = []
+                    # Not read into the turn, only checked: an unreadable
+                    # stored history must not be overwritten by this one.
+                    (
+                        _ignored,
+                        self._loaded_history_raw,
+                    ) = await memory.read_history_versioned(self.channel_id)
                 else:
                     if not drained:
                         # Engine fired with nothing new to react to. Skip.
@@ -1071,7 +1079,14 @@ class ChannelEngine:
 
             # Persist the post-processor history for the next turn.
             try:
-                if first_activation:
+                if self._loaded_history_raw is HISTORY_UNREADABLE:
+                    logger.info(
+                        "[%s] Chat history of channel %s is unreadable; this "
+                        "turn's history is not stored",
+                        request_id,
+                        self.channel_id,
+                    )
+                elif first_activation:
                     # A fresh engagement starts its own history.
                     await memory.write_history(
                         self.channel_id, list(result.all_messages())
@@ -1657,12 +1672,14 @@ class ChannelEngine:
             )
             return []
         self._event_cursor = cursor
-        # An action on a blocked member (a timeout, a DM) would name them.
+        # An action on or by a blocked member (a timeout, a DM) would name
+        # them; any blocked id in the event's text is a backstop. Only the
+        # copy shown to the model is filtered; the stored log is untouched.
         blocked = get_blocked_users()
         return [
             GuildEventView.from_guild_event(event)
             for event in events
-            if not (event.target_user_id and blocked.is_blocked(event.target_user_id))
+            if not _event_involves_blocked(event, blocked)
         ]
 
     def _unavailable_model_key(
@@ -2379,6 +2396,30 @@ class ChannelEngine:
             self.fire_event.set()
         else:
             self._schedule_idle_fire()
+
+
+_DIGIT_RUN = re.compile(r"[0-9]{15,22}")
+
+
+def _event_involves_blocked(event: Any, blocked: Any) -> bool:
+    """A guild event whose target or actor is blocked, or whose text holds a
+    blocked id as a digit run."""
+    for user_id in (event.target_user_id, event.actor_user_id):
+        if user_id and blocked.is_blocked(user_id):
+            return True
+    texts = (
+        event.summary,
+        event.target_username,
+        event.moderator_username,
+        event.reason,
+        event.channel_name,
+    )
+    return any(
+        blocked.is_blocked(run)
+        for text in texts
+        if text
+        for run in _DIGIT_RUN.findall(text)
+    )
 
 
 def _author_blocked(blocked: Any, message: Any) -> bool:

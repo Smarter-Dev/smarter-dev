@@ -369,6 +369,36 @@ async def test_followup_turn_loads_history_and_uses_followup_builder(
 
 
 @pytest.mark.asyncio
+async def test_unreadable_stored_history_is_never_written_over(
+    fake_bot, fake_memory
+):
+    """Privacy (#79): a stored history the engine cannot parse may be memory
+    a purge still has to see. Turns run without it and write none back,
+    neither on the activation nor on follow-ups."""
+    from smarter_dev.bot.services.chat_memory import HISTORY_UNREADABLE
+
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
+        return _result(_send("ack", topic="t", notes="n"), all_messages=["m"])
+
+    fake_memory.read_history_versioned = AsyncMock(
+        return_value=([], HISTORY_UNREADABLE)
+    )
+    patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
+    with patches[0], patches[1], patches[2], patches[3]:
+        engine, _ = await _build_engine(fake_bot)
+        engine.start()
+        engine.trigger_initial(_fake_trigger_message())
+        await asyncio.sleep(0.05)
+        for i in range(QUEUE_FIRE_THRESHOLD):
+            await engine.observe(_make_event(3000 + i, 200, f"chatter {i}"))
+        await asyncio.sleep(0.1)
+        await engine.shutdown()
+
+    assert fake_memory.read_history_versioned.await_count >= 2
+    fake_memory.write_history.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_queue_threshold_fires_agent(fake_bot, fake_memory):
     """Pushing 15 messages onto the queue should fire the agent without waiting 5s."""
     runs: list[bool] = []

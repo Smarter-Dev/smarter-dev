@@ -52,8 +52,10 @@ OTHER_CHANNEL = 12  # OTHER_GUILD: must stay untouched
 UNPLACED_CHANNEL = 13  # guild unknown to the cache: purged anyway
 
 NIA_SUMMARY = f"nia (id {NIA}) asked how to benchmark tokio; unresolved."
-NIA_TOPIC = "Benchmarking tokio."
-NIA_NOTES = "nia wants numbers for tokio."
+# Topic and notes are at least 40 chars: the fold plausibility rule
+# rejects anything shorter that has bystander content to keep.
+NIA_TOPIC = "Benchmarking tokio runtimes and comparing results."
+NIA_NOTES = "nia wants reproducible numbers for tokio benchmarks."
 NIA_NOTE = f"nia (id {NIA}) in #general asked about tokio benchmarks."
 
 
@@ -177,8 +179,9 @@ class _Summarizer:
                 info,
                 {
                     "summary": NIA_SUMMARY + attempt_suffix,
-                    "topic": NIA_TOPIC,
-                    "notes": NIA_NOTES,
+                    # A field whose input was empty comes back empty.
+                    "topic": "" if "<topic/> (none)" in text else NIA_TOPIC,
+                    "notes": "" if "<notes/> (none)" in text else NIA_NOTES,
                 },
             )
         assert "being compacted because a person asked" in text
@@ -742,7 +745,9 @@ async def test_dropped_entries_are_deleted_from_the_stream(world):
     await _publish(world.redis, _command())
     await _consume_once(world)
 
-    assert await world.redis.xlen(PURGE_STREAM) == 0
+    # The unknown run is deleted; the malformed entry stays until the
+    # worker's group (absent here) has finished with it.
+    assert await world.redis.xlen(PURGE_STREAM) == 1
 
 
 async def test_engine_created_mid_purge_does_not_write_old_history_back(

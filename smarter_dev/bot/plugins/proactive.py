@@ -370,6 +370,11 @@ def channel_message_from_hikari(message) -> ChannelMessage:
         is_bot=bool(author.is_bot),
         content=redact_blocked_mentions(message.content or "", blocked),
         reply_to_id=reply_to_id,
+        reply_to_author_id=(
+            str(referenced_author.id)
+            if reply_to_id is not None and referenced_author is not None
+            else None
+        ),
         mention_user_ids=mention_ids,
         mention_everyone=bool(getattr(message, "mentions_everyone", False)),
         attachment_count=len(attachments),
@@ -403,9 +408,24 @@ def recheck_against_blocked_list(
             user_id for user_id in message.mention_user_ids
             if not blocked.is_blocked(user_id)
         )
-        if content != message.content or mentions != message.mention_user_ids:
+        reply_to_id = message.reply_to_id
+        if message.reply_to_author_id and blocked.is_blocked(
+            message.reply_to_author_id
+        ):
+            reply_to_id = None
+        if (
+            content != message.content
+            or mentions != message.mention_user_ids
+            or reply_to_id != message.reply_to_id
+        ):
             message = dataclasses.replace(
-                message, content=content, mention_user_ids=mentions
+                message,
+                content=content,
+                mention_user_ids=mentions,
+                reply_to_id=reply_to_id,
+                reply_to_author_id=(
+                    message.reply_to_author_id if reply_to_id else None
+                ),
             )
         rechecked.append(message)
     return rechecked
@@ -1034,9 +1054,20 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
     if history_store is not None and not state.history_loaded:
         try:
             runner.history = await history_store.read_guild(int(state.guild_id))
-        except Exception:  # noqa: BLE001 — stored history is a cache
-            log_exception(logger, "failed to load proactive guild history")
-        state.history_loaded = True
+            state.history_loaded = True
+        except Exception as error:  # noqa: BLE001 — never fatal to the wake
+            # Unreadable (or Redis failed): the wake runs without history and
+            # does NOT write one back, so an unreadable key (which may hold
+            # memory a purge must still see) is never replaced by [] plus
+            # this wake. The next wake tries to load again. Type only: the
+            # error text could quote the stored content.
+            logger.warning(
+                "proactive guild history not loaded guild=%s (%s); this wake "
+                "keeps no history",
+                state.guild_id,
+                type(error).__name__,
+            )
+            runner.history = []
 
     brief_preamble = ""
     now = time.monotonic()
@@ -1199,10 +1230,11 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
             log_exception(logger, "proactive image post failed")
 
     if history_store is not None:
-        try:
-            await history_store.write_guild(int(state.guild_id), runner.history)
-        except Exception:  # noqa: BLE001 — persistence is best-effort
-            log_exception(logger, "failed to persist proactive guild history")
+        if state.history_loaded:
+            try:
+                await history_store.write_guild(int(state.guild_id), runner.history)
+            except Exception:  # noqa: BLE001 — persistence is best-effort
+                log_exception(logger, "failed to persist proactive guild history")
         for producer_state in run.channel_states.values():
             if (
                 producer_state.guild_id != state.guild_id
