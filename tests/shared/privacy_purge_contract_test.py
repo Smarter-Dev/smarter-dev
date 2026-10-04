@@ -56,3 +56,17 @@ def test_both_reject_the_same_bad_payloads(change):
         jsonschema.validate(payload, SCHEMA)
     with pytest.raises(ValidationError):
         PurgeCommand.model_validate(payload)
+
+
+def test_stored_values_are_searched_leaf_by_leaf():
+    from smarter_dev.shared.privacy_purge import PurgeTarget
+
+    target = PurgeTarget.build("111111111111111111", ["Alice", "Zoë"])
+    after_newline = json.dumps({"lines": ["hi\nAlice"]})
+    ascii_escaped = json.dumps(["Zoë said hi"], ensure_ascii=True)
+    assert target.name_hits(after_newline) == 0  # the raw search misses it
+    assert target.stored_hits(after_newline) == (0, 1)
+    assert target.stored_hits(ascii_escaped.encode()) == (0, 1)
+    assert target.stored_hits("not json, Alice") == (0, 1)
+    assert target.stored_hits(json.dumps({"uid": 111111111111111111})) == (1, 0)
+    assert target.stored_hits("111111111111111111") == (1, 0)
