@@ -7,8 +7,8 @@ construction rather than scrubbed later. Empty text stays empty and absent
 text stays absent: a placeholder is never invented where nobody said anything.
 
 Verbatim text does survive outside this module — in the agents' own working
-history and in the Redis hand-offs that feed the proactive agent, none of
-which this module touches. ``docs/data-retention.md`` is the one list of those
+history and in the Redis hand-offs that feed the proactive agent and the
+handler workers, none of which this module touches. ``docs/data-retention.md`` is the one list of those
 places and of what bounds each; this docstring states no number so it cannot
 drift from that list. Moderators auditing what was actually said use the
 activity-channel audit log.
@@ -37,6 +37,7 @@ keys a handler script chose, which is why that whole value is emptied.
 from __future__ import annotations
 
 import copy
+import re
 from collections.abc import Callable
 from datetime import datetime
 from datetime import timedelta
@@ -66,14 +67,12 @@ _MODEL_AUTHORED_PART_KINDS = frozenset(
     {
         "system-prompt",
         "text",
-        "thinking",
         "tool-call",
         "tool-search-call",
         "builtin-tool-call",
         "builtin-tool-search-call",
         "builtin-tool-return",
         "builtin-tool-search-return",
-        "compaction",
         "file",
     }
 )
@@ -172,11 +171,11 @@ def redact_model_message_parts(messages: list[dict] | None) -> list[dict] | None
     """Redact the human text inside a serialised pydantic-ai message list.
 
     Parts the model or its provider authored pass through: the system prompt,
-    reply text, reasoning, tool calls and provider-side tool results. Reasoning
-    may restate what a member said, but it is derived text in the same class
-    as ``agent_output`` and the retention sweep bounds it at 48h with the rest
-    of the delta. Everything else we send the model — prompts, tool returns,
-    retry prompts and any kind this module has never seen — is redacted down
+    reply text, tool calls and provider-side tool results. Reasoning and a
+    provider's compaction part are model-authored too, but they retell what
+    members said, so they are redacted with everything else we send the model
+    — prompts, tool returns, retry prompts and any kind this module has never
+    seen. Each is redacted down
     to its bookkeeping: kind, tool name and call id, tool kind, timestamp and
     outcome. Content, metadata and any field added later are emptied, and a
     field that was absent stays absent.
@@ -260,3 +259,75 @@ def oldest_retained_stream_id(now: datetime) -> str:
     if now.tzinfo is None:
         raise ValueError("oldest_retained_stream_id requires a timezone-aware datetime")
     return f"{int(now.timestamp() * 1000) - CONTENT_RETENTION_MILLISECONDS}-0"
+
+
+_TRACEBACK_HEADER = "Traceback (most recent call last):"
+_TRACEBACK_FRAME_PREFIX = '  File "'
+_TRACEBACK_CHAIN_SEPARATORS = frozenset(
+    {
+        "During handling of the above exception, another exception occurred:",
+        "The above exception was the direct cause of the following exception:",
+    }
+)
+
+
+def redact_provider_error(
+    *, error_message: str, traceback: str, provider_body: str | None
+) -> dict[str, str | None]:
+    """The text columns of a chat error row, with any provider body removed.
+
+    A provider error body can echo the request prompt, and so a member's
+    message, back at us, and nothing can tell which bodies do. The exception
+    message and the traceback repeat the body, so when there is one all three
+    are redacted: the traceback keeps its header, its ``File`` lines, the
+    chaining separators and each exception's type, and drops source lines and
+    every exception message. An error with no provider body is kept as sent.
+    """
+    if provider_body is None:
+        return {
+            "error_message": error_message,
+            "traceback": traceback,
+            "provider_body": None,
+        }
+    kept: list[str] = []
+    in_message = False
+    for line in traceback.splitlines():
+        if line == _TRACEBACK_HEADER or line in _TRACEBACK_CHAIN_SEPARATORS:
+            kept.append(line)
+            in_message = False
+        elif line.startswith(_TRACEBACK_FRAME_PREFIX):
+            kept.append(line)
+        elif line and not line[0].isspace() and not in_message:
+            exception_type = line.split(":", 1)[0]
+            kept.append(f"{exception_type}: {MESSAGE_CONTENT_PLACEHOLDER}")
+            in_message = True
+    return {
+        "error_message": _redact_present_text(error_message),
+        "traceback": "\n".join(kept) + ("\n" if kept else ""),
+        "provider_body": _redact_present_text(provider_body),
+    }
+
+
+_HANDLER_ERROR_LABEL = re.compile(r"[A-Za-z_][\w.]*")
+
+
+def redact_handler_error(error: str | None) -> str | None:
+    """A handler script's error with its message replaced by the placeholder.
+
+    A script that trips over the message it is reacting to puts that text in
+    its exception message, and nothing can tell which messages do. The
+    leading labels the runtime writes (``compile``, ``runtime`` and the
+    exception type) are kept, so the run still says what kind of failure it
+    was.
+    """
+    if error is None or error == "":
+        return error
+    labels: list[str] = []
+    rest = error
+    while len(labels) < 2 and ": " in rest:
+        label, remainder = rest.split(": ", 1)
+        if not _HANDLER_ERROR_LABEL.fullmatch(label):
+            break
+        labels.append(label)
+        rest = remainder
+    return ": ".join([*labels, MESSAGE_CONTENT_PLACEHOLDER])

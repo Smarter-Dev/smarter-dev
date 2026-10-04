@@ -153,7 +153,10 @@ async def test_the_completed_row_records_the_outcome_and_every_counter(test_engi
         _Result(ADMIN_USAGE, outcome="cap_exceeded", cap="messages", error="boom"),
     )
     assert run.handler_kind == "admin"
-    assert (run.outcome, run.cap, run.error) == ("cap_exceeded", "messages", "boom")
+    # A script's own error can quote the message it tripped on, so only its
+    # labels survive; the cap column still names the cap.
+    assert (run.outcome, run.cap) == ("cap_exceeded", "messages")
+    assert run.error == MESSAGE_CONTENT_PLACEHOLDER
     assert (run.messages_sent, run.web_searches, run.web_reads) == (2, 1, 1)
     assert (run.agent_calls, run.discord_reads, run.timers_scheduled) == (1, 1, 1)
     assert (run.mod_actions, run.lookups) == (3, 4)

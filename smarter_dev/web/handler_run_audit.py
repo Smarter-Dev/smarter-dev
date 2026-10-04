@@ -4,9 +4,12 @@ A fire runs its script against the verbatim trigger context — a handler is
 allowed to read the message it is reacting to — while every row that outlives
 the fire keeps the redacted copy. This module takes the context a caller has
 and redacts it itself, so no call site can store what a member actually said.
+A script's error message is redacted the same way, since a script can quote
+the message it was reacting to in it.
 
-Three rows, one owner: a completed fire with its outcome and spend, a retry
-that declined to re-run an already-started script, and a sweep that re-armed a
+Three rows, one owner: a completed fire with its outcome and spend, a fire
+that declined to run its script (a retry of an already-started script, or a
+fire whose trigger context had expired), and a sweep that re-armed a
 chain whose fire never came. Every function joins the caller's session and
 commits nothing, so the row lands in the same transaction as whatever the
 caller persists beside it.
@@ -22,6 +25,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.shared.message_content import redact_handler_error
 from smarter_dev.shared.message_content import redact_trigger_context
 from smarter_dev.web.models import HandlerRun
 
@@ -31,6 +35,11 @@ if TYPE_CHECKING:
 _SKIPPED_RETRY_ERROR = (
     "retry of a fire whose script had already started; skipped to "
     "avoid duplicate side effects"
+)
+
+EXPIRED_CONTEXT_ERROR = (
+    "the trigger context was no longer available when the fire ran; skipped "
+    "rather than run the script on redacted text"
 )
 
 _SWEEP_TRIGGER_CONTEXT = {"trigger_type": "sweep"}
@@ -57,7 +66,7 @@ def record_completed_run(
             trigger_context=redact_trigger_context(trigger_context),
             outcome=result.outcome,
             cap=result.cap,
-            error=result.error,
+            error=redact_handler_error(result.error),
             messages_sent=usage["messages_sent"],
             web_searches=usage["web_searches"],
             web_reads=usage["web_reads"],
@@ -80,15 +89,20 @@ def record_skipped_run(
     handler_id: UUID,
     handler_kind: str,
     trigger_context: dict,
+    error: str = _SKIPPED_RETRY_ERROR,
 ) -> None:
-    """Audit a retry that declined to re-run an already-started script."""
+    """Audit a fire that declined to run its script.
+
+    By default the fire is a retry of an already-started script; ``error``
+    names any other host-side reason. Never a script's own words.
+    """
     session.add(
         HandlerRun(
             handler_id=handler_id,
             handler_kind=handler_kind,
             trigger_context=redact_trigger_context(trigger_context),
             outcome="skipped",
-            error=_SKIPPED_RETRY_ERROR,
+            error=error,
             finished_at=datetime.now(UTC),
         )
     )

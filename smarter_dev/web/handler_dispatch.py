@@ -35,6 +35,7 @@ from smarter_dev.web.handler_caps import dm_trigger_author_key
 from smarter_dev.web.handler_caps import fires_per_min_for_trigger
 from smarter_dev.web.handler_caps import guild_member_events_key
 from smarter_dev.web.handler_caps import handler_fire_key
+from smarter_dev.web.handler_fire_context import hand_off_fire_context
 from smarter_dev.web.handler_fire_payloads import AdminHandlerFirePayload
 from smarter_dev.web.handler_fire_payloads import HandlerFirePayload
 from smarter_dev.web.member_activity import activity_facts
@@ -148,7 +149,8 @@ async def dispatch_handler_event(
     forgeable by a script (a runaway handler could reset its own chain to 0), and
     it would change the documented context shape the authoring prompt describes.
     """
-    limiter = WindowedLimiter(redis=get_redis_client())
+    redis = get_redis_client()
+    limiter = WindowedLimiter(redis=redis)
 
     # Recursion rail, checked BEFORE either tier's worker_submit so one check
     # covers standard and admin handlers alike. Sits behind — never instead of —
@@ -215,6 +217,16 @@ async def dispatch_handler_event(
         await record_activity(db_session, guild_id, str(author_id), now)
         await db_session.commit()
 
+    # The payloads carry the redacted context; the verbatim one is handed off
+    # in Redis once, on the first fire enqueued, and shared by every fire.
+    handed_off: tuple[dict, str | None] | None = None
+
+    async def fire_context() -> tuple[dict, str | None]:
+        nonlocal handed_off
+        if handed_off is None:
+            handed_off = await hand_off_fire_context(redis, context)
+        return handed_off
+
     # Standard tier: every enabled handler for this (channel, trigger) fires,
     # each behind its own windowed cap. The five admin-only member/thread
     # triggers are never in the standard vocabulary, so skip the query for
@@ -243,10 +255,12 @@ async def dispatch_handler_event(
                 fires_per_min_for_trigger(standard.trigger_type),
             ):
                 continue
+            payload_context, context_ref = await fire_context()
             await worker_submit(
                 HandlerFirePayload(
                     handler_id=str(standard.id),
-                    trigger_context=context,
+                    trigger_context=payload_context,
+                    context_ref=context_ref,
                     # The fire inherits the dispatch's depth; anything IT causes
                     # is enqueued at depth+1 by the fire job's closures.
                     chain_depth=chain_depth,
@@ -295,11 +309,13 @@ async def dispatch_handler_event(
             handler_fire_key(str(admin_handler.id)), ADMIN_FIRES_PER_MIN
         ):
             continue
+        payload_context, context_ref = await fire_context()
         await worker_submit(
             AdminHandlerFirePayload(
                 admin_handler_id=str(admin_handler.id),
                 channel_id=channel_id,
-                trigger_context=context,
+                trigger_context=payload_context,
+                context_ref=context_ref,
                 chain_depth=chain_depth,
             )
         )

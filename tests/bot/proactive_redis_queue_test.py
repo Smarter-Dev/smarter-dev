@@ -30,6 +30,7 @@ from smarter_dev.bot.proactive.redis_queue import RedisNotificationQueue
 from smarter_dev.bot.proactive.redis_queue import batch_dropped_key
 from smarter_dev.bot.proactive.redis_queue import batch_key
 from smarter_dev.bot.proactive.redis_queue import ownership_key
+from smarter_dev.bot.proactive.redis_queue import pending_dropped_key
 from smarter_dev.bot.proactive.redis_queue import pending_key
 from smarter_dev.bot.proactive.redis_queue import wake_stream_key
 from smarter_dev.shared.message_content import CONTENT_RETENTION_MILLISECONDS
@@ -225,6 +226,31 @@ async def test_claim_is_crash_safe_and_new_pending_waits_for_next_wake(redis_cli
 
 def _assert_ttl_is_inside_the_retention_window(ttl_milliseconds: int) -> None:
     assert 0 < ttl_milliseconds <= CONTENT_RETENTION_MILLISECONDS
+
+
+@pytest.mark.asyncio
+async def test_pending_list_expires_inside_the_retention_window(redis_client):
+    queue = RedisNotificationQueue(redis_client, pending_limit=2)
+    for index in range(3):
+        await queue.publish(_envelope(body=f"notification-{index}"))
+
+    _assert_ttl_is_inside_the_retention_window(
+        await redis_client.pttl(pending_key("111"))
+    )
+    _assert_ttl_is_inside_the_retention_window(
+        await redis_client.pttl(pending_dropped_key("111"))
+    )
+
+
+@pytest.mark.asyncio
+async def test_later_pushes_do_not_extend_the_pending_expiry(redis_client):
+    queue = RedisNotificationQueue(redis_client)
+    await queue.publish(_envelope(body="first"))
+    await redis_client.pexpire(pending_key("111"), 1_000)
+
+    await queue.publish(_envelope(body="second"))
+
+    assert 0 < await redis_client.pttl(pending_key("111")) <= 1_000
 
 
 @pytest.mark.asyncio

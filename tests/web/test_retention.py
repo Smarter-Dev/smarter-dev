@@ -41,7 +41,9 @@ from smarter_dev.web.models import (
 from smarter_dev.shared import message_content
 from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 from smarter_dev.web import retention
+from smarter_dev.web.handler_fire_context import FIRE_CONTEXT_TTL_SECONDS
 from smarter_dev.web.retention import SCRUBBERS, run_retention_sweep
+from smarter_dev.web.worker_retention import WORKER_RETENTION
 
 NOW = datetime(2026, 7, 26, 12, 0, tzinfo=UTC)
 STALE = NOW - CONTENT_RETENTION_WINDOW - timedelta(minutes=1)
@@ -198,6 +200,35 @@ class TestChatAgent:
         # Identity fields stay — an abuse report is useless without them.
         assert engagement.activation_user_id == "333"
 
+    async def test_engagement_text_is_due_from_its_last_turn(self, db_session):
+        engagement = await _engagement(db_session, STALE)
+        await _turn(db_session, engagement, FRESH)
+
+        await run_retention_sweep(db_session, now=NOW)
+
+        await db_session.refresh(engagement)
+        assert engagement.last_topic == "what the channel was talking about"
+
+    async def test_engagement_text_rewritten_after_a_sweep_is_cleared_again(
+        self, db_session
+    ):
+        engagement = await _engagement(db_session, STALE)
+        await run_retention_sweep(db_session, now=STALE + timedelta(days=3))
+        # A later turn writes the topic again, then goes stale itself.
+        later = STALE + timedelta(days=4)
+        await _turn(db_session, engagement, later)
+        engagement.last_topic = "a newer topic"
+        engagement.last_notes = "newer notes"
+        await db_session.flush()
+
+        await run_retention_sweep(
+            db_session, now=later + CONTENT_RETENTION_WINDOW + timedelta(minutes=1)
+        )
+
+        await db_session.refresh(engagement)
+        assert engagement.last_topic is None
+        assert engagement.last_notes is None
+
     async def test_compaction_events_follow_their_turn(self, db_session):
         engagement = await _engagement(db_session, STALE)
         turn = await _turn(db_session, engagement, STALE)
@@ -269,6 +300,60 @@ class TestChatAgent:
         assert error.provider_body is None
         assert error.error_type == "ModelAPIError"
         assert error.traceback.startswith("Traceback")
+        # A provider body means the message and traceback repeat it.
+        assert error.error_message == MESSAGE_CONTENT_PLACEHOLDER
+
+    async def test_redacts_the_message_and_traceback_of_an_already_purged_row(
+        self, db_session
+    ):
+        """Rows an earlier sweep stamped kept the copies the body left behind."""
+        echoed = "the prompt, with message text in it"
+        db_session.add(
+            ChatAgentError(
+                request_id="req123",
+                guild_id="111",
+                channel_id="222",
+                error_type="pydantic_ai.exceptions.ModelHTTPError",
+                error_message=f"status_code: 400, body: {echoed}",
+                traceback=(
+                    "Traceback (most recent call last):\n"
+                    '  File "engine.py", line 1, in run\n'
+                    f"ModelHTTPError: status_code: 400, body: {echoed}\n"
+                ),
+                provider_status_code=400,
+                provider_body=None,
+                occurred_at=STALE,
+                content_purged_at=STALE,
+            )
+        )
+        await db_session.flush()
+
+        await run_retention_sweep(db_session, now=NOW)
+
+        error = (await db_session.execute(select(ChatAgentError))).scalar_one()
+        assert error.error_message == MESSAGE_CONTENT_PLACEHOLDER
+        assert echoed not in error.traceback
+        assert '  File "engine.py", line 1, in run' in error.traceback
+        assert error.provider_status_code == 400
+
+    async def test_keeps_a_non_provider_error_readable(self, db_session):
+        db_session.add(
+            ChatAgentError(
+                request_id="req123",
+                guild_id="111",
+                channel_id="222",
+                error_type="builtins.RuntimeError",
+                error_message="connection reset",
+                traceback="Traceback (most recent call last): ...",
+                occurred_at=STALE,
+            )
+        )
+        await db_session.flush()
+
+        await run_retention_sweep(db_session, now=NOW)
+
+        error = (await db_session.execute(select(ChatAgentError))).scalar_one()
+        assert error.error_message == "connection reset"
 
 
 class TestForumAgentResponses:
@@ -599,7 +684,6 @@ DERIVED_TEXT_COLUMNS = (
     "agent_output",
     "summary",
     "ai_context_summary",
-    "provider_body",
     "bot_response",
     "response_content",
     "decision_reason",
@@ -720,13 +804,13 @@ class TestDocumentedBehaviour:
         assert f"{HISTORY_TOKEN_LIMIT:,}" in history_row
         assert "no key TTL" in history_row
 
-    def test_counts_the_proactive_history_among_the_places_with_no_age_bound(
+    def test_names_the_proactive_history_as_the_one_place_with_no_age_bound(
         self, retention_doc
     ):
-        """The pending list is a named gap, not the only one."""
-        gaps = paragraph_containing(retention_doc, "Two places have no age bound")
+        """The pending list is bounded now; the history is the gap left."""
+        gaps = paragraph_containing(retention_doc, "One place has no age bound")
         assert "history" in gaps
-        assert "pending" in gaps
+        assert "pending" not in gaps
 
     def test_states_each_proactive_bound_in_one_place(self, retention_doc):
         """The table owns every bound; prose that restates one can drift from it."""
@@ -745,38 +829,55 @@ class TestDocumentedBehaviour:
     def test_the_rule_leaves_the_enumeration_of_verbatim_text_to_the_table(
         self, retention_doc
     ):
-        """The streams and ``provider_body`` are not working history."""
+        """The streams and the handler hand-off are not working history."""
         rule = section(retention_doc, "## The rule")
         assert "only place" not in rule
 
-    def test_lists_the_provider_error_body_among_the_verbatim_survivors(
+    def test_no_database_column_is_listed_as_keeping_verbatim_text(
         self, retention_doc
     ):
-        """``provider_body`` is stored as sent for a whole window; the doc must say so."""
+        """Provider bodies and script errors are written as the placeholder now."""
         survivors = section(
             retention_doc, "## Where verbatim message text still exists"
         )
-        where, _, bound = table_cells(table_row(survivors, "| `chat_agent_errors"))
-        assert "provider_body" in where
-        assert states_hours(bound, RETENTION_WINDOW_HOURS)
-
-    def test_lists_the_handler_error_among_the_verbatim_survivors(
-        self, retention_doc
-    ):
-        """A script's error can quote the message it tripped on; the doc must say so."""
-        survivors = section(
-            retention_doc, "## Where verbatim message text still exists"
-        )
-        where, _, bound = table_cells(table_row(survivors, "| `handler_runs.error`"))
-        assert "handler_runs.error" in where
-        assert states_hours(bound, RETENTION_WINDOW_HOURS)
-
-    def test_the_rule_counts_both_columns_no_write_time_rule_covers(
-        self, retention_doc
-    ):
+        assert "| `chat_agent_errors" not in survivors
+        assert "| `handler_runs.error`" not in survivors
         rule = section(retention_doc, "## The rule")
-        assert "two database columns" in rule
-        assert "single database column" not in rule
+        assert "database columns" not in rule
+
+    def test_states_the_handler_fire_hand_off_ttl(self, retention_doc):
+        row = table_row(retention_doc, "| Handler fire hand-off")
+        assert states_hours(row, FIRE_CONTEXT_TTL_SECONDS // 3600)
+        assert "`skipped`" in row
+
+    def test_states_that_handler_timer_payloads_are_not_bounded_by_us(
+        self, retention_doc
+    ):
+        row = table_row(retention_doc, "| Handler timer payloads")
+        assert "Until the timer fires" in row
+
+    def test_states_the_worker_table_windows(self, retention_doc):
+        days = WORKER_RETENTION.days
+        for table in ("`worker_dead_letters`", "`worker_queue`"):
+            assert f"{days} days" in table_row(retention_doc, f"| {table} |")
+        events_row = table_row(retention_doc, "| `worker_events`")
+        assert f"{days} days" in events_row
+        assert "live work" in events_row
+        assert "expiry" in table_row(retention_doc, "| `worker_state` |")
+
+    def test_the_write_path_rows_name_what_retells_members(self, retention_doc):
+        _, placeholdered, _ = table_cells(
+            table_row(retention_doc, "| `chat_agent_compaction_events` |")
+        )
+        assert "`summary`" in placeholdered
+        _, placeholdered, _ = table_cells(
+            table_row(retention_doc, "| `chat_agent_errors` |")
+        )
+        assert "provider body" in placeholdered
+        _, placeholdered, _ = table_cells(
+            table_row(retention_doc, "| `handler_runs` |")
+        )
+        assert "error message" in placeholdered
 
     def test_the_chat_turn_write_row_names_everything_the_keep_list_keeps(
         self, retention_doc
@@ -798,13 +899,15 @@ class TestDocumentedBehaviour:
         assert "user-prompt" not in placeholdered
         assert "tool-return" not in placeholdered
 
-    def test_the_chat_turn_write_row_states_that_model_reasoning_is_kept(
+    def test_the_chat_turn_write_row_states_that_model_reasoning_is_redacted(
         self, retention_doc
     ):
-        """Reasoning can quote a member; the doc must say so and say for how long."""
-        *_, as_sent = table_cells(table_row(retention_doc, "| `chat_agent_turns` |"))
-        assert "reasoning" in as_sent
-        assert states_hours(as_sent, RETENTION_WINDOW_HOURS)
+        """Reasoning can retell a member, so it is written as the placeholder."""
+        _, placeholdered, as_sent = table_cells(
+            table_row(retention_doc, "| `chat_agent_turns` |")
+        )
+        assert "reasoning" in placeholdered
+        assert "reasoning" not in as_sent
 
     def test_the_help_conversation_write_row_describes_the_keep_list(
         self, retention_doc
@@ -829,7 +932,8 @@ class TestDocumentedBehaviour:
             table_row(retention_doc, "| Proactive pending list")
         )
         assert f"{PENDING_LIMIT} envelopes" in bound
-        assert "No age bound" in bound
+        assert states_hours(bound, RETENTION_WINDOW_HOURS)
+        assert "do not extend" in bound
         assert retention_doc.count(f"{PENDING_LIMIT} envelopes") == 1
 
     def test_states_that_a_claimed_batch_is_bounded_from_its_claim(
@@ -890,12 +994,12 @@ class TestDocumentedBehaviour:
     def test_module_docstring_states_the_retention_window(self, module_docstring):
         assert states_hours(module_docstring, RETENTION_WINDOW_HOURS)
 
-    def test_module_docstring_names_both_columns_no_write_time_rule_covers(
+    def test_module_docstring_names_the_columns_it_only_back_fills(
         self, module_docstring
     ):
         assert "``chat_agent_errors.provider_body``" in module_docstring
         assert "``handler_runs.error``" in module_docstring
-        assert "one column" not in module_docstring
+        assert "back-fill" in module_docstring
 
     def test_module_docstring_leaves_the_history_bounds_to_the_doc(
         self, module_docstring

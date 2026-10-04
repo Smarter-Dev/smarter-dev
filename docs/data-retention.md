@@ -28,8 +28,8 @@ Two things are deliberately excluded from the rule:
   proactive agent's history in `proactive_agent_histories`.
 
 The next section is the one list of every place verbatim text survives — the
-two histories, the Redis hand-offs that feed the proactive agent, and the
-two database columns no write-time rule can cover — and what bounds each of
+two histories, the Redis hand-offs that feed the proactive agent and the
+handler workers, and a handler timer's own payload — and what bounds each of
 them.
 
 We keep the surrounding *row*: timestamps, token counts, cost, model name, the
@@ -69,10 +69,9 @@ all of that without the row holding anybody's words.
 | Proactive wake stream, one per guild (Redis) | The notification envelope that woke a guild, message text included. | Trimmed to 48 hours by stream id on every publish, and again on the passive tick for guilds that stopped publishing. |
 | Proactive shadow stream (Redis) | The same envelopes, copied where canary workers can read them. | The same 48-hour trim, plus a 10,000-entry cap. |
 | A claimed proactive batch (Redis) | Envelopes handed to a wake that has not acknowledged them. | Expires 48 hours after the claim, not after the write, so a claimed envelope can outlive its own write cutoff by up to one more window. |
-| Proactive pending list, one per guild (Redis) | Non-waking envelopes queued for the next wake, message text included. | No age bound: capped at 20 envelopes by count and drained by the next wake, so a guild that never wakes again holds them until it does. |
-| `chat_agent_errors.provider_body` (Postgres) | A provider error body, which can echo the request prompt — and so a member's text — back at us. | Stored as sent, because no write-time rule can tell which bodies quote a member; cleared by the hourly sweep at 48 hours. |
-| `handler_runs.error` (Postgres) | A script's own exception message, which can quote the message the script was reacting to. | Stored as sent, because no write-time rule can tell which errors quote a member; cleared by the hourly sweep at 48 hours on `error` and `cap_exceeded` rows. |
-| Handler fire jobs in the Skrift worker queue (`worker_queue`, state store and event log, all Postgres per `app.yaml`) | The fire payload a handler job carries, which is the verbatim `trigger_context` the script runs against. | Skrift's worker retention, not ours: a finished job's state is pruned after `terminal_job_state_ttl` (7 days by default), archive snapshots after 30 days and archived events after 90. This is the one place verbatim text outlives the 48-hour window; shortening it means setting `workers.retention` in `app.yaml`, which bounds every worker job, not only handler fires. |
+| Proactive pending list, one per guild (Redis) | Non-waking envelopes queued for the next wake, message text included. | Expires 48 hours after the push that created it; later pushes do not extend it. Also capped at 20 envelopes, and drained by the next wake. |
+| Handler fire hand-off (Redis, `handler-fire:context:*`) | The verbatim trigger context of an event that fired a handler, read back by the fire job so the script sees the real message. | 1-hour key TTL, set once and never refreshed. The job payload in Skrift's worker tables carries the redacted context and a random reference to this key, never the text. A fire that finds the key gone is recorded as `skipped` and does not run. |
+| Handler timer payloads in the Skrift worker tables (`worker_queue`, `worker_state`) | What a handler script chose to carry to its own later fire. A script can copy the message it was reacting to into it. | Until the timer fires, however far ahead the script set it, then the 7 days Skrift keeps a finished job's state. Only a script that copies message text into a timer payload puts any there; the `handler_runs` audit row empties the payload whatever it holds. |
 
 The two agent histories are the "chat bot history" the policy carves out: they
 are the bot's short-term working memory, they are not queryable by an operator,
@@ -80,14 +79,17 @@ and they are not in the database except as the proactive agent's crash-recovery
 copy. The two proactive streams, the claimed batch and the pending list are
 Redis hand-offs between the bot and the proactive worker; the claimed batch is
 the one *bounded* key whose window runs from the claim rather than from the
-write.
+write. The external proactive-agent worker sets the same expiry on the batches
+it claims, and its dead-letter stream keeps ids and an error type, no text.
 
-Two places have no age bound at all, stated plainly. The proactive agent's
+One place has no age bound at all, stated plainly. The proactive agent's
 history has no clock, so a guild that never talks enough to trigger compaction
 keeps every verbatim message it has read, in Redis and in its
-`proactive_agent_histories` row, for as long as the channel stays enabled. And
-the proactive pending list is only ever drained by a wake, so a guild that
-never wakes again keeps whatever was queued for it.
+`proactive_agent_histories` row, for as long as the channel stays enabled.
+
+Skrift's worker tables hold no handler fire's message text: the payload of a
+fire is redacted at dispatch. What they keep of finished work is deleted by the
+hourly retention job (see How it runs).
 
 ## What the write path stores
 
@@ -97,11 +99,12 @@ only thing that decides what may go in them.
 
 | Table | Written as the placeholder | Written as sent |
 | --- | --- | --- |
-| `chat_agent_turns` | every field of a triggering message except its ids, reply pointers, reactions, flags and timestamp; every part of the model transcript the model did not itself author, stripped down to its kind, tool name, call id, tool kind, outcome and timestamp | `agent_output`, the model's own reply text and reasoning parts, tool names and call arguments, tokens, cost, model, timing. Reasoning can restate what a member said, so the transcript is derived text the sweep clears at 48 hours (below) rather than something write-time redaction can keep out |
-| `chat_agent_compaction_events` | the compacted original content | the compaction `summary` and all char counts |
+| `chat_agent_turns` | every field of a triggering message except its ids, reply pointers, reactions, flags and timestamp; every part of the model transcript except the system prompt, reply text, tool calls and provider-side tool results, stripped down to its kind, tool name, call id, tool kind, outcome and timestamp. That includes the model's reasoning and a provider's compaction part: both are model-authored, but they retell what members said | `agent_output`, the model's own reply text, tool names and call arguments, tokens, cost, model, timing |
+| `chat_agent_compaction_events` | the compacted original content, and the compaction `summary`, which retells it | all char counts and the summariser's tokens and cost |
+| `chat_agent_errors` | when the error carries a provider body: the body itself, the exception message and every exception message in the traceback, since a provider body can echo the prompt and the message repeats it | the error type, the status code, the traceback's `File` lines, and the whole error when there is no provider body |
 | `help_conversations` | every scraped context message, whatever the interaction type; `user_question` for every interaction type except a slash command (today: mention and streak reply) | `user_question` when the member typed it as a slash-command argument, plus `bot_response`, tokens, latency |
 | `forum_agent_responses` | the post title, the post body, and the attachment list (emptied) | tags, confidence, `decision_reason`, `response_content`, responded flag |
-| `handler_runs` | every message-bearing key of `trigger_context`, including any future key following the `*_content` convention, plus a timer re-fire's `payload`, whose keys a handler script chose rather than the host, so the whole value is emptied | trigger type, ids, flags, counters, role lists, outcome |
+| `handler_runs` | every message-bearing key of `trigger_context`, including any future key following the `*_content` convention, plus a timer re-fire's `payload`, whose keys a handler script chose rather than the host, so the whole value is emptied; and a script's error message, which can quote the message the script tripped on, keeping only the `compile`/`runtime` label and exception type | trigger type, ids, flags, counters, role lists, outcome, the bot's own explanation on `skipped` and `rearmed` rows |
 
 `help_conversations` redacts context for slash commands too: `/tldr` is a slash
 command whose context is a verbatim channel scrape. Only `user_question` is
@@ -115,27 +118,26 @@ audit row is redacted.
 ## What the sweep still clears
 
 `smarter_dev/web/retention.py` runs hourly and blanks text on rows older than
-48 hours, stamping `content_purged_at`. Its remaining job is text the AI wrote
-about what it read — a summary quotes nobody but describes everything — plus
-back-filling rows written before write-time redaction landed.
+48 hours, stamping `content_purged_at`. Its remaining job is the bot's own
+replies and decisions, plus back-filling rows written before write-time
+redaction landed. Nothing it clears holds a member's words any more: what
+retells them (summaries, reasoning, provider error bodies, script errors) is
+written as the placeholder.
 
 | Table | Cleared after 48h | Kept |
 | --- | --- | --- |
 | `help_conversations` | `bot_response`, plus the already-redacted question and context | ids, interaction type, tokens, latency |
 | `chat_agent_turns` | `agent_output` (the reply plus the agent's running topic and notes), plus the already-redacted triggering messages and transcript delta | tokens, cost, model, reasoning level, timing |
-| `chat_agent_engagements` | the denormalised running topic and notes | activation ids, aggregate tokens/cost |
-| `chat_agent_compaction_events` | the compaction `summary` | char counts, summariser cost |
-| `chat_agent_errors` | `provider_body` — a provider error can echo the prompt back, and no write-time rule can tell when it does | error type, traceback, status code |
+| `chat_agent_engagements` | the denormalised running topic and notes, 48 hours after the engagement's last turn, and again whenever a later turn wrote them | activation ids, aggregate tokens/cost |
+| `chat_agent_compaction_events` | the compaction `summary` (back-fill only; written as the placeholder) | char counts, summariser cost |
+| `chat_agent_errors` | `provider_body`, and on a provider error the exception message and the traceback's messages (back-fill only; written redacted) | error type, the traceback's `File` lines, status code |
 | `forum_agent_responses` | `decision_reason`, `response_content`, plus the already-redacted title and body | confidence, tokens, responded flag |
 | `moderation_actions` | `ai_context_summary` | action, target, moderator, reason, duration, timestamp |
-| `handler_runs` | the script's error message on `error` and `cap_exceeded` rows | trigger type, ids, flags, outcome, all counters |
+| `handler_runs` | the script's error on `error` and `cap_exceeded` rows (back-fill only; written redacted) | trigger type, ids, flags, outcome, all counters |
 
-A script that trips over the message it is reacting to puts that text into its
-exception message, and nothing at write time can tell which errors quote a
-member — so `handler_runs.error` is treated like every other derived text the
-sweep owns. The `outcome` column still says the fire failed, so an old failure
-stays visible as a failure. The explanations on `skipped` and `rearmed` rows are
-written by the bot itself, never by a script, so they stay.
+The `outcome` column still says a fire failed, so an old failure stays visible
+as a failure. The explanations on `skipped` and `rearmed` rows are written by
+the bot itself, never by a script, so they stay.
 
 Moderation keeps everything except the AI's retelling of the exchange. An
 action's `reason` — whether a moderator typed it or the triage agent wrote it —
@@ -223,6 +225,26 @@ uv run python scripts/retention_sweep.py
 
 Operators can also hard-delete emptied help-conversation rows outright from
 `/admin/help-conversations/cleanup`; the sweep only blanks the text.
+
+The same job bounds Skrift's worker tables
+(`smarter_dev/web/worker_retention.py`), because Skrift's own pruner is not
+deployed and its Postgres backends never delete an expired or dead row by
+themselves. Job payloads, agent run state (a Resources question, an agent's
+prompt) and error text live there:
+
+| Table | Deleted |
+| --- | --- |
+| `worker_state` | once the row's own expiry has passed (Skrift sets 7 days on a finished job's state and 24 hours on a finished agent run's) |
+| `worker_queue` | a dead-lettered job 7 days after it was dead-lettered; a pending job never, since a handler timer can be due weeks ahead |
+| `worker_dead_letters` | 7 days after it was written, open or resolved |
+| `worker_events`, `worker_archive_events`, `worker_archive_snapshots` | 7 days after they were written, unless they belong to live work |
+
+Live work is a job still queued, claimed, running or paused, and an agent
+session that is queued, running, awaiting approval or paused (read from its hot
+state, or from its newest snapshot once that has expired). A live session keeps
+its event stream, its newest snapshot and every stored blob its state or events
+name, however old. The blogging pipeline's admin timeline reads a run's event
+stream, so a run finished more than 7 days ago shows no timeline.
 
 The proactive Redis streams are not swept by that job. They are trimmed by the
 bot itself: on every publish, and on the passive ticker for the guilds that

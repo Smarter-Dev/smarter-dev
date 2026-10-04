@@ -345,8 +345,62 @@ class TestCreateError:
         assert error.model_name == "kimi-k2.6"
         assert error.reasoning_level == "medium"
         assert error.provider_status_code == 503
-        assert "overloaded" in (error.provider_body or "")
+        assert error.error_type == "pydantic_ai.exceptions.ModelHTTPError"
         assert error.error_context == {"first_activation": True}
+
+    async def test_a_provider_body_and_its_copies_are_stored_as_the_placeholder(
+        self, client: AsyncClient, session
+    ):
+        echoed = "what someone actually said"
+        response = await client.post(
+            "/api/chat-conversations/errors",
+            json={
+                "request_id": "err-5678",
+                "guild_id": _GUILD,
+                "channel_id": _CHANNEL,
+                "error_type": "pydantic_ai.exceptions.ModelHTTPError",
+                "error_message": f"status_code: 400, body: {echoed}",
+                "traceback": (
+                    "Traceback (most recent call last):\n"
+                    '  File "engine.py", line 1, in run\n'
+                    "    await agent.run(prompt)\n"
+                    f"pydantic_ai.exceptions.ModelHTTPError: body: {echoed}\n"
+                ),
+                "provider_status_code": 400,
+                "provider_body": f'{{"error":{{"message":"{echoed}"}}}}',
+            },
+        )
+
+        assert response.status_code == 201
+        error = (await session.execute(select(ChatAgentError))).scalars().one()
+        assert error.provider_body == MESSAGE_CONTENT_PLACEHOLDER
+        assert error.error_message == MESSAGE_CONTENT_PLACEHOLDER
+        assert echoed not in error.traceback
+        assert '  File "engine.py", line 1, in run' in error.traceback
+        assert error.traceback.endswith(
+            f"pydantic_ai.exceptions.ModelHTTPError: {MESSAGE_CONTENT_PLACEHOLDER}\n"
+        )
+        assert error.provider_status_code == 400
+
+    async def test_an_error_without_a_provider_body_is_kept_as_sent(
+        self, client: AsyncClient, session
+    ):
+        response = await client.post(
+            "/api/chat-conversations/errors",
+            json={
+                "request_id": "err-9999",
+                "guild_id": _GUILD,
+                "channel_id": _CHANNEL,
+                "error_type": "builtins.RuntimeError",
+                "error_message": "connection reset",
+                "traceback": "Traceback (most recent call last):\nRuntimeError: connection reset\n",
+            },
+        )
+
+        assert response.status_code == 201
+        error = (await session.execute(select(ChatAgentError))).scalars().one()
+        assert error.error_message == "connection reset"
+        assert error.provider_body is None
 
 
 class TestCreateTurn:
@@ -847,7 +901,8 @@ class TestCompactionEventRedaction:
         events = await _stored_compaction_events(session)
         assert len(events) == 1
         assert events[0].original_content == MESSAGE_CONTENT_PLACEHOLDER
-        assert events[0].summary == "they said hello"
+        # The summary retells members, so it is the placeholder too.
+        assert events[0].summary == MESSAGE_CONTENT_PLACEHOLDER
         assert events[0].original_chars == 27
         assert events[0].summary_chars == 15
         assert events[0].chars_saved == 12
@@ -896,7 +951,7 @@ class TestDetailTemplateRendersRedactedRows:
         assert MESSAGE_CONTENT_PLACEHOLDER in html
         assert "what someone actually said" not in html
         assert "everything the channel said" not in html
-        assert "they said hello" in html
+        assert "they said hello" not in html
         assert "search" in html
         assert "web_read" in html
         assert re.search(r"returned \d+ chars", html) is None
