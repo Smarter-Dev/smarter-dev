@@ -21,6 +21,7 @@ import os
 import httpx
 
 from smarter_dev.shared import pdf_text
+from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.media_images import ImageTooLarge
 from smarter_dev.shared.media_images import prepare_image_bounded
 from smarter_dev.shared.media_reads import MAX_DOWNLOAD_BYTES
@@ -98,7 +99,7 @@ async def _cache_set(redis, key: str, value: str) -> None:
     try:
         await redis.set(key, value, ex=CACHE_TTL_SECONDS)
     except Exception:  # noqa: BLE001 — cache is best-effort
-        logger.debug("media read cache set failed", exc_info=True)
+        log_exception(logger, "media read cache set failed", level=logging.DEBUG)
 
 
 async def _fetch_bytes(
@@ -135,7 +136,7 @@ async def _fetch_bytes(
             body.discard()
         if not isinstance(e, Exception):
             raise
-        logger.debug("media fetch failed for %s", url, exc_info=True)
+        log_exception(logger, "media fetch failed for %s", url, level=logging.DEBUG)
         return None
 
 
@@ -167,7 +168,8 @@ def _get_audio_agent():
     global _audio_agent
     if _audio_agent is None:
         from pydantic_ai import Agent
-        from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
+        from pydantic_ai.models.google import GoogleModel
+        from pydantic_ai.models.google import GoogleModelSettings
         from pydantic_ai.providers.google import GoogleProvider
 
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""

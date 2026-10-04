@@ -21,6 +21,7 @@ from smarter_dev.bot.agents.mod_tools import build_triage_report_embed
 from smarter_dev.bot.agents.moderation_agent import run_moderation_agent
 from smarter_dev.bot.utils.messages import gather_message_context
 from smarter_dev.shared.database import get_db_session_context
+from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.web.crud import ModerationConfigOperations
 from smarter_dev.web.models import ModerationConfig
 
@@ -50,7 +51,7 @@ async def _load_configs() -> None:
                 }
             logger.info(f"Loaded moderation configs for {len(_guild_configs)} guild(s)")
     except Exception:
-        logger.exception("Failed to load moderation configs")
+        log_exception(logger, "Failed to load moderation configs")
 
 
 async def refresh_config(guild_id: str) -> None:
@@ -74,7 +75,7 @@ async def refresh_config(guild_id: str) -> None:
                 _guild_configs.pop(guild_id, None)
                 logger.info(f"Removed moderation config for guild {guild_id} (inactive or deleted)")
     except Exception:
-        logger.exception(f"Failed to refresh moderation config for guild {guild_id}")
+        log_exception(logger, f"Failed to refresh moderation config for guild {guild_id}")
 
 
 @plugin.listener(hikari.GuildMessageCreateEvent)
@@ -155,7 +156,7 @@ async def _handle_moderation(
             try:
                 await bot.rest.create_message(int(channel_id), full_message)
             except Exception:
-                logger.exception(f"Failed to send channel message for guild {guild_id}")
+                log_exception(logger, f"Failed to send channel message for guild {guild_id}")
 
         # Post triage report to mod channel
         report_channel = config.get("response_channel_id") or channel_id
@@ -169,12 +170,13 @@ async def _handle_moderation(
         try:
             await bot.rest.create_message(int(report_channel), embed=report_embed)
         except Exception:
-            logger.exception(f"Failed to send triage report for guild {guild_id}")
+            log_exception(logger, f"Failed to send triage report for guild {guild_id}")
 
         logger.info(f"Moderation triage completed for guild {guild_id}: {assessment[:200]}")
 
     except Exception:
-        logger.exception(
+        log_exception(
+            logger,
             f"Moderation handling failed for message {event.message.id} "
             f"in guild {event.guild_id}"
         )

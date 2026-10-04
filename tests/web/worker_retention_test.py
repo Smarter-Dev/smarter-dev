@@ -72,7 +72,13 @@ class _Skrift:
         await self.backdate_state(f"workers:jobs:{job_id}", changed_at, ttl)
 
     async def runstate(
-        self, session_id: str, status: str, *, changed_at: datetime, ttl: float, blob: str = ""
+        self,
+        session_id: str,
+        status: str,
+        *,
+        changed_at: datetime,
+        ttl: float | None,
+        blob: str = "",
     ) -> None:
         state = RunState(
             session_id=session_id,
@@ -280,6 +286,35 @@ async def test_work_skrift_can_no_longer_resume_goes_after_the_window(skrift, db
     assert await _remaining(db_session, WorkerEventRecord.job_id) == ["recent"]
     assert await _remaining(db_session, WorkerArchiveSnapshotRecord.key) == []
     assert await _remaining(db_session, WorkerArchiveEventRecord.stream) == []
+
+
+@pytest.mark.asyncio
+async def test_a_session_with_no_expiry_is_live_only_while_it_changes(skrift, db_session):
+    # Written before Skrift slid a TTL onto the hot copy: no expiry at all.
+    # One untouched for weeks is wedged and goes with its job and history;
+    # one written inside the window may still resume, and stays.
+    await skrift.runstate("stuck", "running", changed_at=_OLD, ttl=None)
+    await skrift.snapshot("stuck", "running", _OLD, blob=_OTHER_BLOB)
+    await skrift.event("agents:run:stuck", _OLD)
+    await skrift.blob(_OTHER_BLOB, _OLD)
+    await skrift.job_state("stuck-job", JobStatus.PAUSED, changed_at=_OLD, session_id="stuck")
+    await skrift.runstate("waiting", "awaiting_approval", changed_at=_RECENT, ttl=None)
+    await skrift.snapshot("waiting", "awaiting_approval", _OLD, blob=_BLOB)
+    await skrift.event("agents:run:waiting", _OLD)
+    await skrift.blob(_BLOB, _OLD)
+    await skrift.job_state("waiting-job", JobStatus.PAUSED, changed_at=_OLD, session_id="waiting")
+
+    await delete_expired_worker_rows(db_session, now=_NOW, batch_size=2)
+
+    assert await _remaining(db_session, WorkerStateRecord.key) == [
+        "runstate:waiting",
+        "workers:jobs:waiting-job",
+    ]
+    assert await _remaining(db_session, WorkerArchiveSnapshotRecord.key) == ["runstate:waiting"]
+    assert await _remaining(db_session, WorkerEventRecord.stream) == ["agents:run:waiting"]
+    assert await _remaining(db_session, WorkerArchiveEventRecord.stream) == [
+        f"agents:blobs:{_BLOB}"
+    ]
 
 
 @pytest.mark.asyncio

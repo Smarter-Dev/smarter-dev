@@ -59,6 +59,7 @@ from smarter_dev.web.models import (
     ForumNotificationTopic,
     ForumUserSubscription,
 )
+from smarter_dev.shared.message_content import redact_text
 
 logger = logging.getLogger(__name__)
 
@@ -159,9 +160,11 @@ class ForumAgentController(Controller):
         """Record a forum agent response.
 
         The forum post is a member's Discord message, so the row keeps only
-        what the agent decided about it: the tags it was filed under, the
-        decision reason and the agent's own reply. The title and body a member
-        typed are redacted and the attachment filenames are dropped.
+        what the agent decided about it: the tags it was filed under, its
+        confidence and whether it replied. The title and body a member typed
+        are redacted and the attachment filenames are dropped. The agent's
+        reasoning and its reply are redacted too: both are the bot's own words
+        about the post, and both can quote it.
         """
         # FastAPI validated the ``agent_id`` UUID path param (422) before the
         # handler body ran its ``guild_id`` snowflake check (400) — same order.
@@ -182,9 +185,9 @@ class ForumAgentController(Controller):
                 author_display_name=data.get("author_display_name", "Unknown"),
                 post_tags=data.get("post_tags", []),
                 **redact_forum_post(data),
-                decision_reason=data.get("decision_reason", ""),
+                decision_reason=redact_text(data.get("decision_reason") or ""),
                 confidence_score=data.get("confidence_score", 0.0),
-                response_content=data.get("response_content", ""),
+                response_content=redact_text(data.get("response_content") or ""),
                 tokens_used=data.get("tokens_used", 0),
                 response_time_ms=data.get("response_time_ms", 0),
                 responded=data.get("responded", False),

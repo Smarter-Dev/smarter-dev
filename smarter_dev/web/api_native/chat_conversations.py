@@ -69,6 +69,8 @@ from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 from smarter_dev.shared.message_content import redact_chat_agent_messages
 from smarter_dev.shared.message_content import redact_model_message_parts
 from smarter_dev.shared.message_content import redact_text
+from smarter_dev.shared.message_content import redact_turn_decision
+from smarter_dev.shared.message_content import stored_error_type
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
@@ -497,8 +499,10 @@ def _engagement_totals_update(
         + compaction.cost_usd,
         "total_cost_usd": ChatAgentEngagement.total_cost_usd + total_cost_delta,
     }
-    last_topic = data.agent_output.get("topic")
-    last_notes = data.agent_output.get("notes")
+    # The engagement list shows that a turn wrote a topic, never the topic:
+    # it is the bot's own summary of the conversation.
+    last_topic = redact_text(data.agent_output.get("topic"))
+    last_notes = redact_text(data.agent_output.get("notes"))
     if last_topic is not None:
         update_values["last_topic"] = last_topic
     if last_notes is not None:
@@ -632,7 +636,7 @@ class ChatConversationController(Controller):
             turn_kind=data.turn_kind,
             output_kind=data.output_kind,
             triggering_messages=redact_chat_agent_messages(data.triggering_messages),
-            agent_output=data.agent_output,
+            agent_output=redact_turn_decision(data.agent_output),
             model_messages_delta=redact_model_message_parts(data.model_messages_delta),
             duration_ms=data.duration_ms,
             chat_tokens_input=data.chat_tokens_input,
@@ -647,7 +651,7 @@ class ChatConversationController(Controller):
             voice_model_name=data.voice_model_name,
             voice_cost_usd=voice_cost,
             voice_sent_ok=data.voice_sent_ok,
-            voice_send_error=data.voice_send_error,
+            voice_send_error=stored_error_type(data.voice_send_error),
         )
         db_session.add(turn)
         await db_session.flush()  # populate turn.id for compaction-event FKs

@@ -18,6 +18,7 @@ import hikari
 from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.crud import AuditLogConfigOperations, ModerationActionOperations
+from smarter_dev.shared.exception_logging import log_exception
 
 mod_action_ops = ModerationActionOperations()
 
@@ -124,7 +125,7 @@ async def send_audit_log(
         logger.warning(f"Audit log channel not found for guild {guild_id}")
         return False
     except Exception as e:
-        logger.error(f"Failed to send audit log for guild {guild_id}: {e}")
+        logger.error(f"Failed to send audit log for guild {guild_id}: {type(e).__name__}")
         return False
 
 
@@ -149,7 +150,7 @@ async def should_log_event(guild_id: int, event_type: str) -> bool:
             return getattr(config, event_type, False)
 
     except Exception as e:
-        logger.error(f"Failed to check audit log config for guild {guild_id}: {e}")
+        logger.error(f"Failed to check audit log config for guild {guild_id}: {type(e).__name__}")
         return False
 
 
@@ -213,11 +214,12 @@ async def _lookup_audit_moderator(
                 moderator_name = actor.username if actor else None
                 return moderator_id, moderator_name, entry.reason
     except Exception:
-        logger.debug(
+        log_exception(
+            logger,
             "Could not fetch audit log for %s in guild %s",
             event_type,
             guild_id,
-            exc_info=True,
+            level=logging.DEBUG,
         )
     return None, None, None
 
@@ -308,7 +310,7 @@ async def log_member_leave(
                 await session.commit()
                 await dispatch_mod_action(action)
     except Exception:
-        logger.exception(f"Failed to record kick action for guild {event.guild_id}")
+        log_exception(logger, f"Failed to record kick action for guild {event.guild_id}")
 
 
 async def log_member_ban(
@@ -362,7 +364,7 @@ async def log_member_ban(
                 await session.commit()
                 await dispatch_mod_action(action)
     except Exception:
-        logger.exception(f"Failed to record ban action for guild {event.guild_id}")
+        log_exception(logger, f"Failed to record ban action for guild {event.guild_id}")
 
 
 async def log_member_unban(
@@ -416,7 +418,7 @@ async def log_member_unban(
                 await session.commit()
                 await dispatch_mod_action(action)
     except Exception:
-        logger.exception(f"Failed to record unban action for guild {event.guild_id}")
+        log_exception(logger, f"Failed to record unban action for guild {event.guild_id}")
 
 
 async def log_message_edit(
@@ -574,7 +576,7 @@ async def log_member_update(
                     await session.commit()
                     await dispatch_mod_action(action)
         except Exception:
-            logger.exception(f"Failed to record timeout action for guild {event.guild_id}")
+            log_exception(logger, f"Failed to record timeout action for guild {event.guild_id}")
     elif old_timeout != new_timeout and new_timeout is None and old_timeout is not None:
         # Timeout was cleared early by a moderator — record the untimeout. Require
         # a recent communication_disabled_until change so a natural expiry (whose
@@ -606,7 +608,7 @@ async def log_member_update(
                     await session.commit()
                     await dispatch_mod_action(action)
         except Exception:
-            logger.exception(f"Failed to record untimeout action for guild {event.guild_id}")
+            log_exception(logger, f"Failed to record untimeout action for guild {event.guild_id}")
 
     # Check for username change
     if old_member.username != member.username:

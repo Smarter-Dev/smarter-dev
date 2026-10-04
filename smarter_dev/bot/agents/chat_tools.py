@@ -30,6 +30,7 @@ from smarter_dev.bot.agents.web_summarizer import summarize_web_content
 from smarter_dev.bot.utils import web_fetch
 from smarter_dev.shared import pdf_text
 from smarter_dev.shared.config import get_settings
+from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.guild_event_log import chat_memory_enabled
 from smarter_dev.shared.media_reads import MAX_DOWNLOAD_BYTES
 from smarter_dev.shared.media_reads import MAX_IMAGE_DOWNLOAD_BYTES
@@ -163,7 +164,7 @@ async def _post_status(ctx: RunContext[ChatDeps], text: str) -> None:
             flags=hikari.MessageFlag.SUPPRESS_EMBEDS,
         )
     except Exception:  # noqa: BLE001 — status messages are best-effort
-        logger.debug("failed to post tool status message", exc_info=True)
+        log_exception(logger, "failed to post tool status message", level=logging.DEBUG)
 
 
 def _search_status(query: str, preview_url: str | None) -> str:
@@ -198,7 +199,7 @@ async def web_search(ctx: RunContext[ChatDeps], query: str) -> list[dict[str, st
     try:
         preview = await reserve_search_preview(query)
     except Exception:  # noqa: BLE001 — optional user-facing artifact
-        logger.warning("failed to reserve web-search preview", exc_info=True)
+        log_exception(logger, "failed to reserve web-search preview", level=logging.WARNING)
 
     await _post_status(
         ctx,
@@ -213,7 +214,7 @@ async def web_search(ctx: RunContext[ChatDeps], query: str) -> list[dict[str, st
             try:
                 await mark_search_preview_failed(preview.id)
             except Exception:  # noqa: BLE001 — preserve the original failure
-                logger.warning("failed to mark web-search preview failed", exc_info=True)
+                log_exception(logger, "failed to mark web-search preview failed", level=logging.WARNING)
         raise
 
     if preview is not None:
@@ -223,7 +224,7 @@ async def web_search(ctx: RunContext[ChatDeps], query: str) -> list[dict[str, st
             else:
                 await populate_search_preview(preview.id, results)
         except Exception:  # noqa: BLE001 — search results still reach the agent
-            logger.warning("failed to populate web-search preview", exc_info=True)
+            log_exception(logger, "failed to populate web-search preview", level=logging.WARNING)
 
     logger.info(
         "web_search returned %d results for %r (channel=%s)",
@@ -355,7 +356,7 @@ async def _read_media(
             "web_read: could not read %s media %r: %s",
             kind,
             web_fetch.url_for_log(url),
-            e,
+            type(e).__name__,
         )
         return {"url": url, "kind": kind, "summary": "", "error": "media_read_failed"}
     return {"url": url, "kind": kind, "summary": summary}
@@ -560,7 +561,7 @@ async def _read_discord_attachment(url: str, instruction: str) -> dict[str, str]
             content = await pdf_text.pdf_text_from_file(path, MAX_READ_CHARS)
         except pdf_text.PdfUnreadable as e:
             logger.warning(
-                "web_read: could not parse pdf %r: %s", web_fetch.url_for_log(url), e
+                "web_read: could not parse pdf %r: %s", web_fetch.url_for_log(url), type(e).__name__
             )
             return {
                 "url": url,
@@ -599,7 +600,7 @@ async def list_available_reactions(ctx: RunContext[ChatDeps]) -> list[dict[str, 
         for emoji in guild_emojis:
             out.append({"name": emoji.name, "id": str(emoji.id), "type": "custom"})
     except Exception as e:
-        logger.warning("list_available_reactions: failed to fetch guild emojis: %s", e)
+        logger.warning("list_available_reactions: failed to fetch guild emojis: %s", type(e).__name__)
 
     for emoji in COMMON_UNICODE_EMOJIS:
         out.append({"name": emoji, "type": "unicode"})
@@ -643,7 +644,7 @@ async def add_reaction(
             ctx.deps.channel_id,
             message_id,
             cleaned,
-            e,
+            type(e).__name__,
         )
         return {"ok": False, "error": f"{type(e).__name__}: {e}"}
     except Exception as e:
@@ -652,7 +653,7 @@ async def add_reaction(
             ctx.deps.channel_id,
             message_id,
             cleaned,
-            e,
+            type(e).__name__,
         )
         return {"ok": False, "error": str(e)}
 
@@ -706,7 +707,8 @@ async def run_code(ctx: RunContext[ChatDeps], reason: str, code: str) -> str:
         tail = f"\n--- stdout before error ---\n{stdout}" if stdout else ""
         return f"RUNTIME ERROR — {type(e).__name__}: {e}{tail}"
     except Exception as e:  # defensive: never let the sandbox crash the turn
-        logger.exception(
+        log_exception(
+            logger,
             "run_code unexpected failure (channel=%s)", ctx.deps.channel_id
         )
         return f"ERROR — {type(e).__name__}: {e}"
@@ -781,7 +783,7 @@ async def generate_image(ctx: RunContext[ChatDeps], prompt: str) -> str:
                 )
             ).json()
         except Exception as e:  # noqa: BLE001
-            logger.warning("generate_image: quota check failed: %s", e)
+            logger.warning("generate_image: quota check failed: %s", type(e).__name__)
             return "Couldn't check the image budget just now — try again shortly."
         if int(status.get("remaining", 0)) <= 0:
             return f"No image generated. {_format_remaining(status)}"
@@ -790,7 +792,7 @@ async def generate_image(ctx: RunContext[ChatDeps], prompt: str) -> str:
         try:
             decision = await review_image_prompt(prompt)
         except Exception as e:  # noqa: BLE001
-            logger.warning("generate_image: prompt review failed: %s", e)
+            logger.warning("generate_image: prompt review failed: %s", type(e).__name__)
             return "Couldn't review the image prompt just now — try again shortly."
         if not decision.approved:
             return (
@@ -806,7 +808,7 @@ async def generate_image(ctx: RunContext[ChatDeps], prompt: str) -> str:
                 )
             ).json()
         except Exception as e:  # noqa: BLE001
-            logger.warning("generate_image: reserve failed: %s", e)
+            logger.warning("generate_image: reserve failed: %s", type(e).__name__)
             return "Couldn't reserve an image slot just now — try again shortly."
         if not reserved.get("granted"):
             return f"No image generated. {_format_remaining(reserved)}"
@@ -815,7 +817,7 @@ async def generate_image(ctx: RunContext[ChatDeps], prompt: str) -> str:
         try:
             data, mime_type = await generate_image_bytes(prompt)
         except Exception as e:  # noqa: BLE001
-            logger.warning("generate_image: generation failed: %s", e)
+            logger.warning("generate_image: generation failed: %s", type(e).__name__)
             try:
                 await api.post(
                     f"{IMAGE_QUOTA_PATH}/release", json_data={"guild_id": guild_id}
@@ -826,7 +828,7 @@ async def generate_image(ctx: RunContext[ChatDeps], prompt: str) -> str:
                     )
                 ).json()
             except Exception:  # noqa: BLE001
-                logger.debug("generate_image: quota refund failed", exc_info=True)
+                log_exception(logger, "generate_image: quota refund failed", level=logging.DEBUG)
             return (
                 f"Image generation failed ({type(e).__name__}); no image was "
                 f"attached and the slot was refunded. {_format_remaining(reserved)}"
@@ -923,7 +925,7 @@ async def remember(ctx: RunContext[ChatDeps], text: str) -> str:
             "remember: could not save note (guild=%s channel=%s): %s",
             ctx.deps.guild_id,
             ctx.deps.channel_id,
-            e,
+            type(e).__name__,
         )
         return REMEMBER_API_FAILURE
 

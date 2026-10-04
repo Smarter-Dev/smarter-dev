@@ -315,6 +315,7 @@
                 · ${{ '%.6f'|format(turn.voice_cost_usd) }}
                 {% endif %}
             </div>
+            {% if turn.agent_output.response.voice_summary != content_placeholder %}
             <button type="button"
                     class="cc-voice-play"
                     data-turn-id="{{ turn.id }}"
@@ -322,6 +323,7 @@
                 🔊 Play in browser
             </button>
             <audio id="audio-{{ turn.id }}" controls hidden style="margin-top: .35rem; display: block; width: 100%;"></audio>
+            {% endif %}
         </div>
         {% endif %}
 

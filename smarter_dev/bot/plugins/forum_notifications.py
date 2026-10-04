@@ -76,7 +76,7 @@ async def forum_autocomplete(
                 return choices
 
     except Exception as e:
-        logger.error(f"Error in forum autocomplete: {e}")
+        logger.error(f"Error in forum autocomplete: {type(e).__name__}")
         return []
 
 
@@ -215,7 +215,7 @@ async def post_notifications(ctx: lightbulb.Context) -> None:
             )
 
     except Exception as e:
-        logger.error(f"Error in post_notifications command: {e}")
+        logger.error(f"Error in post_notifications command: {type(e).__name__}")
         await ctx.respond(f"❌ An error occurred: {e}", flags=hikari.MessageFlag.EPHEMERAL)
 
 
@@ -330,7 +330,7 @@ async def handle_topic_save_interaction(event: hikari.InteractionCreateEvent) ->
                 )
 
     except Exception as e:
-        logger.error(f"Error in topic save interaction: {e}")
+        logger.error(f"Error in topic save interaction: {type(e).__name__}")
         try:
             await event.interaction.create_initial_response(
                 hikari.ResponseType.MESSAGE_CREATE,
@@ -338,7 +338,7 @@ async def handle_topic_save_interaction(event: hikari.InteractionCreateEvent) ->
                 flags=hikari.MessageFlag.EPHEMERAL
             )
         except Exception as e2:
-            logger.error(f"Failed to send error response: {e2}")
+            logger.error(f"Failed to send error response: {type(e2).__name__}")
 
 
 

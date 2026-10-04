@@ -37,6 +37,7 @@ import hikari
 
 from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
 from smarter_dev.shared.database import get_db_session_context
+from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.web.crud import ModerationActionOperations
 from smarter_dev.web.crud import ModerationFilterConfigOperations
 from smarter_dev.web.models import ModerationFilterConfig
@@ -629,11 +630,12 @@ async def _invite_is_category_exempt(
             )
             return False
         except hikari.HTTPError:
-            logger.warning(
+            log_exception(
+                logger,
                 "Could not resolve channel %s for the invite exemption; treating "
                 "the channel as not exempt",
                 event.channel_id,
-                exc_info=True,
+                level=logging.WARNING,
             )
             return False
     parent_id = getattr(channel, "parent_id", None)

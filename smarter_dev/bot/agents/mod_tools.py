@@ -319,7 +319,7 @@ def create_moderation_tools(
         except hikari.ForbiddenError:
             return {"success": False, "error": "Bot lacks permission to timeout this user."}
         except Exception as e:
-            logger.error(f"[ModTool] timeout_user failed: {e}")
+            logger.error(f"[ModTool] timeout_user failed: {type(e).__name__}")
             return {"success": False, "error": str(e)}
 
     async def purge_messages(user_id: str, count: int, reason: str) -> dict:
@@ -381,7 +381,7 @@ def create_moderation_tools(
         except hikari.ForbiddenError:
             return {"success": False, "error": "Bot lacks permission to delete messages."}
         except Exception as e:
-            logger.error(f"[ModTool] purge_messages failed: {e}")
+            logger.error(f"[ModTool] purge_messages failed: {type(e).__name__}")
             return {"success": False, "error": str(e)}
 
     async def delete_message(message_id: str, reason: str) -> dict:
@@ -437,7 +437,7 @@ def create_moderation_tools(
         except hikari.ForbiddenError:
             return {"success": False, "error": "Bot lacks permission to delete this message."}
         except Exception as e:
-            logger.error(f"[ModTool] delete_message failed: {e}")
+            logger.error(f"[ModTool] delete_message failed: {type(e).__name__}")
             return {"success": False, "error": str(e)}
 
     # ── Utility tools (always available) ─────────────────────────────
@@ -525,7 +525,7 @@ def create_moderation_tools(
         except hikari.NotFoundError:
             return {"success": False, "error": "User not found in this guild."}
         except Exception as e:
-            logger.error(f"[ModTool] get_user_info failed: {e}")
+            logger.error(f"[ModTool] get_user_info failed: {type(e).__name__}")
             return {"success": False, "error": str(e)}
 
     async def get_user_history(user_id: str) -> dict:
@@ -562,7 +562,7 @@ def create_moderation_tools(
                 "recent_actions": history,
             }
         except Exception as e:
-            logger.error(f"[ModTool] get_user_history failed: {e}")
+            logger.error(f"[ModTool] get_user_history failed: {type(e).__name__}")
             return {"success": False, "error": str(e)}
 
     # ── Build tool list ──────────────────────────────────────────────

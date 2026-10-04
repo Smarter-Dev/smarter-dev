@@ -37,6 +37,7 @@ from smarter_dev.bot.proactive.timestamps import utc_timestamp
 from smarter_dev.bot.proactive.types import ProposedReaction
 from smarter_dev.bot.proactive.types import ProposedResponse
 from smarter_dev.bot.proactive.watcher import usage_dict
+from smarter_dev.shared.exception_logging import log_exception
 
 TOOL_CALL_LIMIT = 8
 MAX_SENDS_PER_WAKE = 2
@@ -260,7 +261,7 @@ def tool_errors_returned(tool_function):
         try:
             result = await tool_function(ctx, *args, **kwargs)
         except Exception as error:  # noqa: BLE001 — surfaced to the agent
-            logger.exception("proactive tool %s failed", tool_function.__name__)
+            log_exception(logger, "proactive tool %s failed", tool_function.__name__)
             result = (
                 f"Tool {tool_function.__name__} failed: "
                 f"{type(error).__name__}: {error}. Adjust your approach or "

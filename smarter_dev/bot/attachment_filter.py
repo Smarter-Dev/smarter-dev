@@ -16,6 +16,7 @@ import hikari
 
 from smarter_dev.bot.guild_event_recorder import record_guild_event
 from smarter_dev.shared.database import get_db_session_context
+from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.guild_event_log import mod_action_event
 from smarter_dev.web.crud import AttachmentFilterConfigOperations
 
@@ -112,7 +113,7 @@ async def check_attachment_filter(
                         elif permissions & hikari.Permissions.MANAGE_MESSAGES:
                             user_has_manage_messages = True
             except Exception as e:
-                logger.error(f"Error checking user permissions: {e}")
+                logger.error(f"Error checking user permissions: {type(e).__name__}")
 
             # Determine action based on worst tier found
             # Blocked takes precedence over warn
@@ -190,9 +191,9 @@ async def check_attachment_filter(
                 )
                 return False
             except Exception as e:
-                logger.error(f"Error handling attachment filter action: {e}")
+                logger.error(f"Error handling attachment filter action: {type(e).__name__}")
                 return False
 
     except Exception as e:
-        logger.error(f"Error in attachment filter: {e}", exc_info=True)
+        log_exception(logger, f"Error in attachment filter: {type(e).__name__}", level=logging.ERROR)
         return False

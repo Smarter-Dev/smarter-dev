@@ -21,7 +21,10 @@ from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
 
+from redis.exceptions import RedisError
+
 from smarter_dev.bot.proactive.contracts import NotificationEnvelope
+from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.message_content import CONTENT_RETENTION_MILLISECONDS
 from smarter_dev.shared.message_content import oldest_retained_stream_id
 
@@ -35,14 +38,15 @@ PENDING_LIMIT = 20
 SHADOW_STREAM_MAX_ENTRIES = 10_000
 WAKE_PAYLOAD_FIELD = "payload"
 # The pending list's own expiry is only a backstop for a bot that stopped
-# ticking: two 15-minute passive ticks past its oldest envelope's window, so
-# the tick, which drops and counts that envelope at the window, always runs
-# first.
+# ticking: two 15-minute passive ticks past its newest envelope's window. Every
+# push moves it out to the envelope it adds, and every trim to the newest one
+# left, so it never deletes an envelope the tick has not had a chance to drop
+# and count.
 PENDING_EXPIRY_SLACK_MILLISECONDS = 30 * 60 * 1000
 
 _PUSH_PENDING_LUA = """
 local length = redis.call('RPUSH', KEYS[1], ARGV[1])
-if redis.call('PTTL', KEYS[1]) < 0 then
+if redis.call('PTTL', KEYS[1]) < tonumber(ARGV[3]) then
   redis.call('PEXPIRE', KEYS[1], ARGV[3])
 end
 local limit = tonumber(ARGV[2])
@@ -76,7 +80,7 @@ return values
 """
 
 # Drop the named envelopes (read and judged too old by the caller) and count
-# them, then move the list's backstop expiry to its oldest remaining envelope.
+# them, then move the list's backstop expiry to its newest remaining envelope.
 # A claim that took the list meanwhile leaves nothing to remove or expire.
 _TRIM_PENDING_LUA = """
 local removed = 0
@@ -156,8 +160,9 @@ class RedisNotificationQueue:
         The pending list a non-waking envelope enters is capped at
         ``pending_limit`` envelopes. ``trim_expired_envelopes`` drops each
         envelope once it is older than the retention window and counts it; the
-        list's own expiry, set when the push creates it and moved by each trim,
-        is a backstop for a bot that stopped ticking. Its dropped counter
+        list's own expiry, moved out by each push to the envelope it adds and
+        reset by each trim to the newest one left, is a backstop for a bot that
+        stopped ticking. Its dropped counter
         expires one window after its first count.
         """
         payload = envelope.model_dump_json()
@@ -232,22 +237,28 @@ class RedisNotificationQueue:
             pipeline.xtrim(SHADOW_STREAM_KEY, **age_bound)
             dropped = sum(await pipeline.execute())
         for guild_id in stream_guild_ids:
-            dropped += await self.trim_expired_pending(guild_id)
+            try:
+                dropped += await self.trim_expired_pending(guild_id)
+            except RedisError:
+                raise
+            except Exception:
+                # One guild's list must not stop the trim of every later one.
+                log_exception(logger, "pending trim failed guild=%s", guild_id)
         return dropped
 
     async def trim_expired_pending(self, guild_id: str, *, now: datetime | None = None) -> int:
         """Drop and count the pending envelopes older than the retention window.
 
         An envelope's age is its ``created_at``; one that does not parse is
-        dropped too. Each drop is added to ``pending-dropped``, which the next
-        claim hands the agent. The list's backstop expiry is moved to two
-        ticks past its oldest remaining envelope's window. Returns the number
-        dropped.
+        dropped too, so is one carrying a field this version does not know.
+        Each drop is added to ``pending-dropped``, which the next claim hands
+        the agent. The list's backstop expiry is reset to two ticks past its
+        newest remaining envelope's window. Returns the number dropped.
         """
         now = now or datetime.now(UTC)
         cutoff = now - timedelta(milliseconds=CONTENT_RETENTION_MILLISECONDS)
         expired: list[str] = []
-        oldest: datetime | None = None
+        newest: datetime | None = None
         for raw in await self._redis.lrange(pending_key(guild_id), 0, -1):
             value = _decode(raw)
             try:
@@ -257,16 +268,16 @@ class RedisNotificationQueue:
                 continue
             if created_at <= cutoff:
                 expired.append(value)
-            elif oldest is None or created_at < oldest:
-                oldest = created_at
+            elif newest is None or created_at > newest:
+                newest = created_at
         expire_at = (
             ""
-            if oldest is None
-            else int(oldest.timestamp() * 1000)
+            if newest is None
+            else int(newest.timestamp() * 1000)
             + CONTENT_RETENTION_MILLISECONDS
             + PENDING_EXPIRY_SLACK_MILLISECONDS
         )
-        if not expired and oldest is None:
+        if not expired and newest is None:
             return 0
         removed = await self._redis.eval(
             _TRIM_PENDING_LUA,

@@ -24,6 +24,9 @@ from pydantic_ai.messages import UserPromptPart
 
 from smarter_dev.bot.agents.chat_models import Message
 from smarter_dev.bot.agents.chat_models import MessageAttachment
+from smarter_dev.bot.agents.chat_models import MessageScore
+from smarter_dev.bot.agents.chat_models import ResponseBody
+from smarter_dev.bot.agents.chat_models import TurnDecision
 from smarter_dev.shared.message_content import CONTENT_RETENTION_MILLISECONDS
 from smarter_dev.shared.message_content import CONTENT_RETENTION_WINDOW
 from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
@@ -36,6 +39,8 @@ from smarter_dev.shared.message_content import redact_help_question
 from smarter_dev.shared.message_content import redact_model_message_parts
 from smarter_dev.shared.message_content import redact_text
 from smarter_dev.shared.message_content import redact_trigger_context
+from smarter_dev.shared.message_content import redact_turn_decision
+from smarter_dev.shared.message_content import stored_error_type
 
 
 def chat_message_dict(**overrides) -> dict:
@@ -206,11 +211,20 @@ class TestRedactModelMessageParts:
         assert tool_return["tool_name"] == "search"
         assert tool_return["tool_call_id"] == "c1"
 
-    def test_keeps_system_text_and_tool_call_parts(self):
-        original = model_messages_dump()
-        messages = redact_model_message_parts(original)
-        assert messages[0]["parts"][0] == original[0]["parts"][0]
-        assert messages[1]["parts"] == original[1]["parts"]
+    def test_the_models_own_parts_keep_only_their_bookkeeping(self):
+        # The reply, the system prompt and a tool call's arguments are the
+        # bot's own words, and each can quote a member.
+        messages = redact_model_message_parts(model_messages_dump())
+        system, text, call = (
+            messages[0]["parts"][0],
+            messages[1]["parts"][0],
+            messages[1]["parts"][1],
+        )
+        assert system["content"] == MESSAGE_CONTENT_PLACEHOLDER
+        assert text["content"] == MESSAGE_CONTENT_PLACEHOLDER
+        assert call["args"] == {}
+        assert call["tool_name"] == "search"
+        assert call["tool_call_id"] == "c1"
 
     def test_keeps_message_level_fields(self):
         original = model_messages_dump()
@@ -783,3 +797,97 @@ class TestExceptionTrace:
             trace = exception_trace(error)
         assert "ValueError" not in trace
 
+
+
+def turn_decision_dump() -> dict:
+    """A real serialised chat turn decision, every text field filled."""
+    return TurnDecision(
+        rankings=[MessageScore(message_id="1", score=9, reasoning="they asked x")],
+        response_language="english",
+        topic="what they talked about",
+        response=ResponseBody(
+            target_message_id="1",
+            reply_directly=True,
+            message="you said x, so",
+            voice_summary="you said x",
+            voice_instruction="warmly",
+        ),
+        continue_watching=True,
+        notes="they like x",
+    ).model_dump(mode="json")
+
+
+class TestRedactTurnDecision:
+    def test_keeps_the_decision_and_none_of_its_words(self):
+        redacted = redact_turn_decision(turn_decision_dump())
+        assert redacted["rankings"] == [
+            {"message_id": "1", "score": 9, "reasoning": MESSAGE_CONTENT_PLACEHOLDER}
+        ]
+        assert redacted["response_language"] == "english"
+        assert redacted["continue_watching"] is True
+        assert redacted["topic"] == MESSAGE_CONTENT_PLACEHOLDER
+        assert redacted["notes"] == MESSAGE_CONTENT_PLACEHOLDER
+        response = redacted["response"]
+        assert response["target_message_id"] == "1"
+        assert response["reply_directly"] is True
+        for key in ("message", "voice_summary", "voice_instruction"):
+            assert response[key] == MESSAGE_CONTENT_PLACEHOLDER
+
+    def test_no_text_survives_anywhere(self):
+        redacted = str(redact_turn_decision(turn_decision_dump()))
+        for text in ("they asked x", "what they talked about", "you said x", "warmly"):
+            assert text not in redacted
+
+    def test_the_serialised_shape_has_not_drifted(self):
+        # A field added to TurnDecision or ResponseBody is redacted until it is
+        # added to a keep-list; this test makes that a decision.
+        dump = turn_decision_dump()
+        assert set(dump) == {
+            "rankings",
+            "response_language",
+            "topic",
+            "response",
+            "continue_watching",
+            "notes",
+        }
+        assert set(dump["response"]) == {
+            "target_message_id",
+            "reply_directly",
+            "message",
+            "voice_summary",
+            "voice_instruction",
+            "not_cs_topic_brief_answer",
+        }
+
+    def test_redacts_a_key_it_has_never_seen(self):
+        redacted = redact_turn_decision({"blog_topic_candidates": [{"headline": "x"}]})
+        assert redacted == {"blog_topic_candidates": []}
+
+    def test_absent_and_null_stay_so(self):
+        assert redact_turn_decision({"notes": None, "response": None}) == {
+            "notes": None,
+            "response": None,
+        }
+
+    def test_is_idempotent_and_pure(self):
+        original = turn_decision_dump()
+        once = redact_turn_decision(original)
+        assert redact_turn_decision(once) == once
+        assert original == turn_decision_dump()
+
+
+class TestStoredErrorType:
+    @pytest.mark.parametrize(
+        "value", ["TimeoutError", "hikari.errors.BadRequestError", None]
+    )
+    def test_a_type_name_is_kept(self, value):
+        assert stored_error_type(value) == value
+
+    @pytest.mark.parametrize(
+        "value", ["BadRequestError: said hello", "said hello", "a.b c", "x."]
+    )
+    def test_anything_else_is_the_placeholder(self, value):
+        assert stored_error_type(value) == MESSAGE_CONTENT_PLACEHOLDER
+
+    def test_empty_stays_empty(self):
+        assert stored_error_type("") == ""

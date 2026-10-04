@@ -116,7 +116,7 @@ async def store_conversation(
                 return False
 
     except Exception as e:
-        logger.error(f"Error storing conversation: {e}")
+        logger.error(f"Error storing conversation: {type(e).__name__}")
         return False
 
 
@@ -212,13 +212,13 @@ async def generate_help_response(
                 )
             except Exception as storage_error:
                 # Don't fail the response if storage fails
-                logger.warning(f"Failed to store conversation for {user_id}: {storage_error}")
+                logger.warning(f"Failed to store conversation for {user_id}: {type(storage_error).__name__}")
 
         return response
 
     except Exception as e:
         error_message = str(e).lower()
-        logger.error(f"Failed to generate help response: {e}")
+        logger.error(f"Failed to generate help response: {type(e).__name__}")
 
         # Provide specific error messages based on the type of failure
         if "overloaded" in error_message or "503" in error_message:

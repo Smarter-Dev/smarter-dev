@@ -17,7 +17,10 @@ still run or resume:
   ``worker_state``) has not expired and is not terminal. Skrift resumes a
   session only from that hot copy (``update_runstate`` raises ``KeyError``
   without it), and slides its expiry forward on every write, so a session
-  idle past Skrift's ``active_runstate_ttl`` (7 days) can no longer resume;
+  idle past Skrift's ``active_runstate_ttl`` (7 days) can no longer resume.
+  A hot copy with no expiry at all was written before that sliding TTL, and
+  is live only while it changed within :data:`WORKER_RETENTION`, the same
+  7 days;
 - a job state that is not terminal and either belongs to a live session (an
   inline agent run paused for approval has no queue row) or changed within
   :data:`WORKER_RETENTION`.
@@ -43,7 +46,8 @@ Skrift stores a model (``JobState``, ``RunState``) as
 ``{"__skrift_pydantic__": ..., "value": {...}}``, so a status is read from
 ``value -> 'value' ->> 'status'``.
 
-Each table is read and deleted in batches by primary key, each committed on
+Live work is read in pages by primary key too. Each table is read and
+deleted in batches by primary key, each committed on
 its own like the security-log delete, and every delete repeats its age
 condition so a row rewritten since it was read stays. Re-running is always
 safe.
@@ -54,6 +58,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections.abc import AsyncIterator
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC
@@ -126,48 +131,79 @@ class LiveWork:
         return True
 
 
-async def find_live_work(session: AsyncSession, now: datetime) -> LiveWork:
+async def _pages(
+    session: AsyncSession,
+    model: Any,
+    columns: tuple[Any, ...],
+    *conditions: Any,
+    batch_size: int,
+) -> AsyncIterator[Row[Any]]:
+    """Every row matching ``conditions``, read ``batch_size`` at a time by id."""
+    after = None
+    while True:
+        query = select(model.id, *columns).where(*conditions)
+        if after is not None:
+            query = query.where(model.id > after)
+        rows = (await session.execute(query.order_by(model.id).limit(batch_size))).all()
+        for row in rows:
+            yield row
+        if len(rows) < batch_size:
+            return
+        after = rows[-1].id
+
+
+async def find_live_work(
+    session: AsyncSession, now: datetime, *, batch_size: int = _BATCH_SIZE
+) -> LiveWork:
     """The jobs and agent sessions Skrift can still run or resume, and what they reference."""
     cutoff = worker_retention_cutoff(now)
-    job_ids = set(
-        (
-            await session.scalars(
-                select(WorkerQueueRecord.job_id).where(WorkerQueueRecord.dead_lettered.is_(False))
-            )
-        ).all()
-    )
-    session_ids = {
-        key.removeprefix(_RUNSTATE_PREFIX)
-        for key, status in (
-            await session.execute(
-                select(
-                    WorkerStateRecord.key,
-                    _model_field(WorkerStateRecord.value, "status"),
-                ).where(
-                    WorkerStateRecord.key.startswith(_RUNSTATE_PREFIX),
-                    _unexpired(now),
-                )
-            )
-        ).all()
-        if status not in _TERMINAL_RUN_STATUSES
-    }
-    for key, status, job_session_id, updated_at in (
-        await session.execute(
-            select(
-                WorkerStateRecord.key,
-                _model_field(WorkerStateRecord.value, "status"),
-                _model_field(WorkerStateRecord.value, "job", "payload", "session_id"),
-                WorkerStateRecord.updated_at,
-            ).where(
-                WorkerStateRecord.key.startswith(_JOB_STATE_PREFIX),
-                _unexpired(now),
-            )
+    job_ids = {
+        row.job_id
+        async for row in _pages(
+            session,
+            WorkerQueueRecord,
+            (WorkerQueueRecord.job_id,),
+            WorkerQueueRecord.dead_lettered.is_(False),
+            batch_size=batch_size,
         )
-    ).all():
-        if status in _TERMINAL_JOB_STATUSES:
+    }
+    session_ids = {
+        row.key.removeprefix(_RUNSTATE_PREFIX)
+        async for row in _pages(
+            session,
+            WorkerStateRecord,
+            (
+                WorkerStateRecord.key,
+                _model_field(WorkerStateRecord.value, "status").label("status"),
+                WorkerStateRecord.expires_at,
+                WorkerStateRecord.updated_at,
+            ),
+            WorkerStateRecord.key.startswith(_RUNSTATE_PREFIX),
+            _unexpired(now),
+            batch_size=batch_size,
+        )
+        if row.status not in _TERMINAL_RUN_STATUSES
+        and (row.expires_at is not None or _aware(row.updated_at) >= cutoff)
+    }
+    async for row in _pages(
+        session,
+        WorkerStateRecord,
+        (
+            WorkerStateRecord.key,
+            _model_field(WorkerStateRecord.value, "status").label("status"),
+            _model_field(WorkerStateRecord.value, "job", "payload", "session_id").label(
+                "job_session_id"
+            ),
+            WorkerStateRecord.updated_at,
+        ),
+        WorkerStateRecord.key.startswith(_JOB_STATE_PREFIX),
+        _unexpired(now),
+        batch_size=batch_size,
+    ):
+        if row.status in _TERMINAL_JOB_STATUSES:
             continue
-        if _aware(updated_at) >= cutoff or job_session_id in session_ids:
-            job_ids.add(key.removeprefix(_JOB_STATE_PREFIX))
+        if _aware(row.updated_at) >= cutoff or row.job_session_id in session_ids:
+            job_ids.add(row.key.removeprefix(_JOB_STATE_PREFIX))
 
     live = LiveWork(
         job_ids=frozenset(job_ids),
@@ -177,19 +213,16 @@ async def find_live_work(session: AsyncSession, now: datetime) -> LiveWork:
     )
     # Only the newest snapshot of live work is its state; the rest is history.
     latest: dict[str, tuple[datetime, Any]] = {}
-    for snapshot_id, key, snapshot_at in (
-        await session.execute(
-            select(
-                WorkerArchiveSnapshotRecord.id,
-                WorkerArchiveSnapshotRecord.key,
-                WorkerArchiveSnapshotRecord.snapshot_at,
-            )
-        )
-    ).all():
-        if live.keeps_state_key(key) and (
-            key not in latest or _aware(snapshot_at) > latest[key][0]
+    async for row in _pages(
+        session,
+        WorkerArchiveSnapshotRecord,
+        (WorkerArchiveSnapshotRecord.key, WorkerArchiveSnapshotRecord.snapshot_at),
+        batch_size=batch_size,
+    ):
+        if live.keeps_state_key(row.key) and (
+            row.key not in latest or _aware(row.snapshot_at) > latest[row.key][0]
         ):
-            latest[key] = (_aware(snapshot_at), snapshot_id)
+            latest[row.key] = (_aware(row.snapshot_at), row.id)
     return LiveWork(
         job_ids=live.job_ids,
         session_ids=live.session_ids,
@@ -331,7 +364,7 @@ async def delete_expired_worker_rows(
     if batch_size < 1:
         raise ValueError(f"batch_size must be at least 1, got {batch_size}")
     now = now or datetime.now(UTC)
-    live = await find_live_work(session, now)
+    live = await find_live_work(session, now, batch_size=batch_size)
     counts = {
         table: await _delete_due(session, rule, batch_size)
         for table, rule in _due_rules(now, live).items()

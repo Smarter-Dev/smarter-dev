@@ -17,6 +17,7 @@ from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 
 from smarter_dev.bot.agents.chat_compaction import CompactionEvent
+from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 from smarter_dev.shared.message_content import exception_trace
 
@@ -81,7 +82,7 @@ async def start_engagement(
         body = resp.json()
         return UUID(body["id"])
     except Exception:
-        logger.exception("Failed to start chat conversation engagement")
+        log_exception(logger, "Failed to start chat conversation engagement")
         return None
 
 
@@ -106,7 +107,7 @@ async def end_engagement(
                 resp.status_code,
             )
     except Exception:
-        logger.exception("Failed to end chat conversation engagement")
+        log_exception(logger, "Failed to end chat conversation engagement")
 
 
 async def persist_error(
@@ -169,7 +170,7 @@ async def persist_error(
         admin_url = response.json().get("admin_url")
         return str(admin_url) if admin_url else None
     except Exception:
-        logger.exception("Failed to persist chat agent error")
+        log_exception(logger, "Failed to persist chat agent error")
         return None
 
 
@@ -207,7 +208,7 @@ async def persist_turn(
         delta_json = ModelMessagesTypeAdapter.dump_json(new_model_messages)
         delta = json.loads(delta_json)
     except Exception:
-        logger.exception("Failed to serialise model_messages_delta; storing None")
+        log_exception(logger, "Failed to serialise model_messages_delta; storing None")
         delta = None
 
     compaction_payload = [
@@ -260,4 +261,4 @@ async def persist_turn(
                 resp.text[:200] if hasattr(resp, "text") else "",
             )
     except Exception:
-        logger.exception("Failed to persist chat conversation turn")
+        log_exception(logger, "Failed to persist chat conversation turn")

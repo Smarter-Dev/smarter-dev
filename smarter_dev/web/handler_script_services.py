@@ -30,6 +30,7 @@ from skrift.workers import submit as worker_submit
 from sqlalchemy.exc import SQLAlchemyError
 
 from smarter_dev.shared.database import get_db_session_context
+from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.web.admin_actions import AdminActionError
 from smarter_dev.web.crud import GuildRulesConfigOperations
 from smarter_dev.web.crud import ModerationActionOperations
@@ -176,10 +177,11 @@ class AdminScriptServices:
         try:
             info = await self.actor.get_member_info(target_user_id)
         except (AdminActionError, httpx.HTTPError):
-            logger.debug(
+            log_exception(
+                logger,
                 "warn_user could not resolve username for %s",
                 target_user_id,
-                exc_info=True,
+                level=logging.DEBUG,
             )
             return target_user_id
         return info.get("username") or target_user_id
@@ -209,4 +211,4 @@ class AdminScriptServices:
                 chain_depth=self.chain_depth + 1,
             )
         except (RedisError, SQLAlchemyError):
-            logger.debug("handler warn mod_action dispatch failed", exc_info=True)
+            log_exception(logger, "handler warn mod_action dispatch failed", level=logging.DEBUG)

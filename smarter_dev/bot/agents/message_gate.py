@@ -36,6 +36,8 @@ from pydantic import create_model
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
 
+from smarter_dev.shared.exception_logging import log_exception
+
 logger = logging.getLogger(__name__)
 
 # Same model the proactive watcher runs (k8s/configmap.yaml PROACTIVE_WATCHER_MODEL).
@@ -235,10 +237,11 @@ async def filter_messages(
             response_filter, candidates, grounding, channel_name
         )
     except Exception:
-        logger.warning(
+        log_exception(
+            logger,
             "message gate model call failed; allowing all %d candidate(s) (fail-open)",
             len(candidate_ids),
-            exc_info=True,
+            level=logging.WARNING,
         )
         return candidate_ids
     logger.debug("message gate confidence: %s", judgment.confidence)
