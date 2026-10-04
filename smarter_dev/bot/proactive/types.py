@@ -76,6 +76,10 @@ class ChannelMessage:
     # memory only (never rendered) so a later re-check can drop the reply
     # marker once that author is blocked.
     reply_to_author_id: str | None = None
+    # This message replied to a blocked member's message: its text may
+    # answer them, so previews of it (reply and reaction notifications) are
+    # dropped. In memory only, never rendered.
+    replies_to_blocked: bool = False
 
     @classmethod
     def from_record(cls, record: dict) -> ChannelMessage:

@@ -741,13 +741,12 @@ async def test_ack_detail_reports_name_hits_per_step(world):
 
     await _consume_once(world)
 
-    detail = world.acks[0][1].detail
-    segments = detail.split("; ")
-    # Name-hit segments come first, one per step, before the counts.
-    assert segments[:4] == [
-        "chat_name_hits=3",
-        "legacy_history_name_hits=1",
-        "history_name_hits=1",
-        "watch_instructions_name_hits=1",
-    ]
+    ack = world.acks[0][1]
+    assert ack.name_hits == {
+        "chat": 3,
+        "history": 1,
+        "legacy_history": 1,
+        "watch_instructions": 1,
+    }
+    assert "name_hits" not in ack.detail  # display text, no flag syntax
     assert world.acks[0][1].outcome == "purged"

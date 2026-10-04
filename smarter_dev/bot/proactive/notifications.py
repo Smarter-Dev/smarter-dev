@@ -74,12 +74,20 @@ def reply_notification(
     channel_id: str = "",
     channel_name: str = "",
 ) -> Notification:
-    replied_line = (
-        f'your message id={replied_to.id} '
-        f'(sent_at={utc_timestamp(replied_to.timestamp)}, "{replied_to.content[:120]}")'
-        if replied_to is not None
-        else "one of your messages"
-    )
+    if replied_to is None:
+        replied_line = "one of your messages"
+    elif replied_to.replies_to_blocked or replied_to.blocked:
+        # The bot's message answered a blocked member: no preview of it.
+        replied_line = (
+            f"your message id={replied_to.id} "
+            f"(sent_at={utc_timestamp(replied_to.timestamp)})"
+        )
+    else:
+        replied_line = (
+            f'your message id={replied_to.id} '
+            f'(sent_at={utc_timestamp(replied_to.timestamp)}, '
+            f'"{replied_to.content[:120]}")'
+        )
     return Notification(
         kind="reply_to_bot",
         created_at=message.timestamp,
@@ -212,12 +220,13 @@ def reaction_notification(
     with whatever wakes the agent next, never waking it by itself.
     """
     preview = message_preview[:80]
+    quoted = f' ("{preview}")' if preview else ""
     return Notification(
         kind="reaction",
         created_at=created_at,
         body=(
             f"{reactor_name} (id {reactor_id}) reacted {emoji} to your "
-            f'message {message_id} ("{preview}"). A reaction is a LOW '
+            f"message {message_id}{quoted}. A reaction is a LOW "
             "signal — usually simple acknowledgment. Engage only if it "
             "clearly invites a response (a question or pointed emoji, or it "
             "continues an active exchange); otherwise let it stand."

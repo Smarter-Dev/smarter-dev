@@ -155,6 +155,7 @@ async def check_attachment_filter(
                             {
                                 "action_type": "delete",
                                 "target_username": event.author.username,
+                                "target_user_id": str(event.author.id),
                                 "reason": (
                                     f"blocked attachment: {reported['filename']}"
                                 ),

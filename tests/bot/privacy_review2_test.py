@@ -24,9 +24,6 @@ from smarter_dev.bot.privacy import purge
 from smarter_dev.bot.privacy.blocked_users import BlockedUsersCache
 from smarter_dev.bot.privacy.blocked_users import get_blocked_users
 from smarter_dev.bot.privacy.blocked_users import redact_blocked_mentions
-from smarter_dev.bot.privacy.plausibility import FoldField
-from smarter_dev.bot.privacy.plausibility import fold_plausibility_problem
-from smarter_dev.bot.privacy.plausibility import plausibility_rejection
 from smarter_dev.bot.proactive.agent import memory_note_pair
 from smarter_dev.bot.proactive.history_store import HistoryUnreadable
 from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
@@ -76,29 +73,22 @@ def _chat_model(payload: dict):
     return FunctionModel(respond)
 
 
-# -- M1 fold plausibility -------------------------------------------------------
+# -- the rewrite checks (privacy:v1) --------------------------------------------
 
 
 @pytest.mark.parametrize(
     "payload",
     [
-        {"summary": ".", "topic": NIA_TOPIC, "notes": NIA_NOTES},
-        {
-            "summary": "I'm sorry, but I cannot help with rewriting this memory.",
-            "topic": NIA_TOPIC,
-            "notes": NIA_NOTES,
-        },
+        {"summary": "", "topic": NIA_TOPIC, "notes": NIA_NOTES},
         {"summary": NIA_SUMMARY, "notes": NIA_NOTES},  # topic missing
         {"summary": NIA_SUMMARY, "topic": NIA_TOPIC},  # notes missing
         {"summary": NIA_SUMMARY, "topic": "", "notes": NIA_NOTES},
+        {"summary": NIA_SUMMARY, "topic": NIA_TOPIC, "notes": "   "},
     ],
-    ids=["lazy", "refusal", "no-topic", "no-notes", "blank-topic"],
+    ids=["empty-summary", "no-topic", "no-notes", "blank-topic", "blank-notes"],
 )
-async def test_implausible_chat_fold_fails_and_leaves_every_store(world, payload):
-    # Bystander text in the topic and notes, so they may not come back empty.
-    for channel in (LIVE_CHANNEL,):
-        await world.memory.write_topic(channel, f"kai ({KAI}) was here.\n{NIA_TOPIC}")
-        await world.memory.write_notes(channel, f"{NIA_NOTES}\nkai ({KAI}) too")
+async def test_emptied_chat_field_fails_and_leaves_every_store(world, payload):
+    """Check 1: a field whose input was non-empty must come back non-empty."""
     world.deps.chat_model = lambda: _chat_model(payload)
     before = await _snapshot(world.redis)
     await _publish(world.redis, _command(guild_ids=[GUILD]))
@@ -106,77 +96,39 @@ async def test_implausible_chat_fold_fails_and_leaves_every_store(world, payload
     await _consume_once(world)
 
     after = await _snapshot(world.redis)
-    # The channel whose topic and notes carry bystander text: untouched.
     for key in before:
-        if key.startswith(f"chat_agent:{LIVE_CHANNEL}:".encode()):
+        if key.startswith(b"chat_agent:"):
             assert after[key] == before[key], key
-    ack = world.acks[0][1]
-    assert ack.outcome == "failed"
+    assert world.acks[0][1].outcome == "failed"
 
 
-async def test_proactive_fold_that_drops_bystanders_fails_untouched(world):
-    history = [
-        ModelRequest(
-            parts=[
-                UserPromptPart(
-                    "\n".join(
-                        [
-                            _line("nia", NIA, "tokio benchmarks anyone?", 1),
-                            _line("omar", OMAR, "I have numbers for async-std", 2),
-                            _line("lin", LIN, "criterion is the way", 3),
-                            _line("kai", KAI, "mine are secret", 4),
-                        ]
-                    )
-                )
-            ]
-        ),
-        ModelResponse(parts=[TextPart("noted")]),
-    ]
-    await world.store.write_guild(int(GUILD), history)
-    world.guild_state.agent_runner.history = list(history)
+async def test_emptied_proactive_note_fails_untouched(world):
     raw_before = await world.redis.get(f"proactive:guild-history:{GUILD}")
-    calls = []
-
-    def forgetful(messages, info):
-        calls.append(1)
-        return ModelResponse(
-            parts=[TextPart("Someone asked about benchmarks; it was discussed at length.")]
-        )
-
-    world.deps.proactive_model = lambda: FunctionModel(forgetful)
+    ram_before = list(world.guild_state.agent_runner.history)
+    world.deps.proactive_model = lambda: FunctionModel(
+        lambda messages, info: ModelResponse(parts=[TextPart("   ")])
+    )
     await _publish(world.redis, _command())
 
     await _consume_once(world)
 
     assert await world.redis.get(f"proactive:guild-history:{GUILD}") == raw_before
-    assert world.guild_state.agent_runner.history == history
-    assert "proactive guild history failed=1" in world.acks[0][1].detail
-    assert len(calls) >= 3  # first try plus two retries
+    assert world.guild_state.agent_runner.history == ram_before
+    assert world.acks[0][1].outcome == "failed"
 
 
-def test_plausibility_rule_matches_the_worker_vectors():
-    inputs = [_line("nia", NIA, "x" * 2000), _line("kai", KAI, "secret")]
-    # Length floor: ceil(0.05 * len(B)) when len(B) >= 200.
-    assert "far shorter" in fold_plausibility_problem(
-        inputs, TARGET, f"nia (uid={NIA}) said a lot about many things."
+async def test_a_short_rewrite_is_accepted(world):
+    """No length, retention or refusal rules any more: a short but non-empty
+    rewrite without the id is stored."""
+    world.deps.chat_model = lambda: _chat_model(
+        {"summary": "ok", "topic": "ok", "notes": "ok"}
     )
-    long_enough = f"nia (uid={NIA}) " + "kept memory " * 10
-    assert fold_plausibility_problem(inputs, TARGET, long_enough) is None
-    # Retention by display name beside the uid.
-    assert fold_plausibility_problem(
-        inputs, TARGET, "nia " + "kept memory of the talk " * 5
-    ) is None
-    # Input wholly about the target: an empty or short output is allowed...
-    only_kai = [_line("kai", KAI, "secret")]
-    assert fold_plausibility_problem(only_kai, TARGET, "") is None
-    assert fold_plausibility_problem(only_kai, TARGET, "ok") is None
-    # ...but never a refusal, and an empty input needs an empty output.
-    assert fold_plausibility_problem(only_kai, TARGET, "I cannot.") is not None
-    assert fold_plausibility_problem([""], TARGET, "anything") is not None
-    # The bot's extra: a missing field is rejected when its input existed.
-    assert plausibility_rejection(
-        [FoldField("topic", ("a topic about tokio",), None)], TARGET
-    )
+    await _publish(world.redis, _command())
+
+    await _consume_once(world)
+
+    assert world.acks[0][1].outcome == "purged"
+    assert (await world.memory.get_topic(LIVE_CHANNEL)).text == "ok"
 
 
 # -- M2 unreadable chat history on the turn path ----------------------------------
@@ -512,95 +464,4 @@ async def test_unchecked_names_are_reported_first(world):
 
     await _consume_once(world)
 
-    assert world.acks[0][1].detail.startswith("unchecked_names=1; ")
-
-
-# -- chat retention (bot-only, input-format extension) ----------------------------
-
-
-def _chat_message(uid: str, name: str, body: str, msg: int) -> str:
-    return (
-        f'<message id="{msg}" user-id="{uid}" username="{name}">\n{body}\n</message>'
-    )
-
-
-async def _chat_world_with_bystanders(world):
-    history = [
-        ModelRequest(
-            parts=[
-                UserPromptPart(_chat_message(NIA, "nia", "tokio benchmarks?", 1)),
-            ]
-        ),
-        ModelResponse(parts=[TextPart("use criterion")]),
-        ModelRequest(
-            parts=[UserPromptPart(_chat_message(OMAR, "omar", "async-std too", 2))]
-        ),
-        ModelRequest(
-            parts=[UserPromptPart(_chat_message(LIN, "lin", "flamegraphs!", 3))]
-        ),
-        ModelRequest(
-            parts=[UserPromptPart(_chat_message(KAI, "kai", "my secret", 4))]
-        ),
-        ModelResponse(parts=[TextPart("thanks all")]),
-    ]
-    for channel in (10, 11, 12, 13):
-        await world.redis.delete(
-            f"chat_agent:{channel}:topic", f"chat_agent:{channel}:notes"
-        )
-    await world.memory.write_history(LIVE_CHANNEL, history)
-    return history
-
-
-async def test_chat_fold_that_drops_every_bystander_fails_untouched(world):
-    await _chat_world_with_bystanders(world)
-    raw_before = await world.redis.get(f"chat_agent:{LIVE_CHANNEL}:history")
-    summary = (
-        "Participants: several people. They discussed runtime benchmarking "
-        "tools at length and settled on profiling approaches."
-    )
-    world.deps.chat_model = lambda: _chat_model(
-        {"summary": summary, "topic": "", "notes": ""}
-    )
-    await _publish(world.redis, _command())
-
-    await _consume_once(world)
-
-    assert await world.redis.get(f"chat_agent:{LIVE_CHANNEL}:history") == raw_before
-    assert world.acks[0][1].outcome == "failed"
-
-
-async def test_chat_fold_that_keeps_half_the_bystanders_passes(world):
-    await _chat_world_with_bystanders(world)
-    summary = (
-        f"Participants: nia (uid={NIA}), omar (user-id={OMAR}). nia asked about "
-        "tokio benchmarks; omar added async-std."
-    )
-    world.deps.chat_model = lambda: _chat_model(
-        {"summary": summary, "topic": "", "notes": ""}
-    )
-    await _publish(world.redis, _command())
-
-    await _consume_once(world)
-
-    text = _prompt_text(await world.memory.read_history(LIVE_CHANNEL))
-    assert "omar added async-std" in text
-    _assert_clean(text)
-
-
-def test_chat_retention_counts_display_names_and_user_id_forms():
-    from smarter_dev.bot.privacy.plausibility import fold_plausibility_problem
-
-    inputs = [
-        _chat_message(NIA, "nia", "tokio?", 1),
-        _chat_message(OMAR, "omar", "async-std", 2),
-        _chat_message(LIN, "lin &amp; co", "flamegraphs", 3),
-        _chat_message(KAI, "kai", "secret", 4),
-    ]
-    filler = " talked about runtimes and profiling in some detail."
-    assert fold_plausibility_problem(inputs, TARGET, "nia and omar" + filler) is None
-    assert fold_plausibility_problem(
-        inputs, TARGET, f"user-id={NIA} and lin & co" + filler
-    ) is None
-    assert "1 of the 3 other chat participants" in fold_plausibility_problem(
-        inputs, TARGET, "omar" + filler
-    )
+    assert world.acks[0][1].unchecked_names == 1  # structured (Ack v1)

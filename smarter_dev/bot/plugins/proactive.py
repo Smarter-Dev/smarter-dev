@@ -375,6 +375,9 @@ def channel_message_from_hikari(message) -> ChannelMessage:
             if reply_to_id is not None and referenced_author is not None
             else None
         ),
+        replies_to_blocked=bool(
+            referenced_author is not None and blocked.is_blocked(referenced_author.id)
+        ),
         mention_user_ids=mention_ids,
         mention_everyone=bool(getattr(message, "mentions_everyone", False)),
         attachment_count=len(attachments),
@@ -1325,6 +1328,17 @@ def _engagement_notification(
     )
 
 
+def _reaction_preview(message) -> str:
+    """The reacted-to bot message, as the agent may see it: blocked ids
+    redacted, and nothing at all when it replied to a blocked member."""
+    blocked = get_blocked_users()
+    referenced = getattr(message, "referenced_message", None)
+    referenced_author = getattr(referenced, "author", None) if referenced else None
+    if referenced_author is not None and blocked.is_blocked(referenced_author.id):
+        return ""
+    return redact_blocked_mentions(getattr(message, "content", "") or "", blocked)
+
+
 def _schedule_producer(state: ChannelProducerState) -> None:
     if state.timer is not None and not state.timer.done():
         state.timer.cancel()
@@ -1539,7 +1553,9 @@ async def on_guild_reaction(event: hikari.GuildReactionAddEvent) -> None:
             reactor_id=str(event.user_id),
             emoji=emoji,
             message_id=str(event.message_id),
-            message_preview=getattr(message, "content", "") or "",
+            # Through the single door: blocked mentions redacted, and no
+            # preview at all of a bot reply to a blocked member.
+            message_preview=_reaction_preview(message),
             created_at=datetime.now(UTC),
             channel_id=str(event.channel_id),
             channel_name=_channel_name_for_id(run.bot, str(event.channel_id)),

@@ -13,8 +13,6 @@ from pydantic_ai.messages import UserPromptPart
 
 from smarter_dev.bot.privacy import attribution
 from smarter_dev.bot.privacy import purge
-from smarter_dev.bot.privacy.plausibility import chat_authors
-from smarter_dev.bot.privacy.plausibility import fold_input_texts
 from smarter_dev.bot.proactive.agent import memory_note_pair
 from smarter_dev.shared.privacy_purge import PurgeTarget
 
@@ -62,17 +60,6 @@ def test_tool_call_args_json_string_is_decoded(name, said):
     assert any(target.mentions(text) for text in texts)
 
 
-@pytest.mark.parametrize(("name", "said"), CASES, ids=["quote", "bslash", "tab", "nl"])
-def test_plausibility_bystander_text_excludes_decoded_name_lines(name, said):
-    target = PurgeTarget.build(KAI, [name])
-    history = [
-        ModelRequest(parts=[ToolReturnPart("channel_history", {"text": said}, "t")])
-    ]
-    texts = fold_input_texts(history)
-    lines = [line for text in texts for line in text.splitlines()]
-    assert any(target.mentions(line) for line in lines)
-
-
 def test_chat_skip_rule_reads_xml_escaped_nickname():
     target = PurgeTarget.build(KAI, ['Kai "Q" & co'])
     history = [
@@ -101,15 +88,13 @@ def test_uid_counts_only_at_its_rendered_position():
 
 
 def test_chat_tag_recognised_only_as_a_whole_rendered_line():
-    joined = (
-        f'tool said: <message id="1" user-id="{NIA}" username="nia">\n'
-        f'<message id="2" user-id="333333333333333333" username="omar">\nhi\n'
-    )
-    target = PurgeTarget.build(KAI, ["kai"])
-    assert set(chat_authors(joined, target)) == {"333333333333333333"}
     history = [
-        ModelRequest(
-            parts=[UserPromptPart(f'<message id="1" user-id="{NIA}">x')]
-        )
+        ModelRequest(parts=[UserPromptPart(f'<message id="1" user-id="{NIA}">x')])
     ]
     assert not attribution.chat_history_attributed(history)
+    ok = [
+        ModelRequest(
+            parts=[UserPromptPart(f'<message id="1" user-id="{NIA}">\nx\n</message>')]
+        )
+    ]
+    assert attribution.chat_history_attributed(ok)
