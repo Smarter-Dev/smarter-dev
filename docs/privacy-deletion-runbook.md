@@ -307,10 +307,14 @@ still being deleted, wait and run the check again; do not start a purge.
 4. Wait while the status moves through `queued`, `waiting_for_runtimes`,
    `purging`, `awaiting_acks`, `checking` and `finishing`. It ends in
    `complete` or `needs_review`. A runtime listed as "behind the block list"
-   holds the run in `waiting_for_runtimes` until it catches up; if it never
-   does, the run ends `needs_review` with the reason. If the status reads
+   holds the run in `waiting_for_runtimes` until it catches up. If it has not
+   caught up after 10 minutes, the run ends `needs_review` with an error line
+   starting "Nothing was purged": wait until the Runtimes list shows no
+   runtime behind, then press "Run the purge again". If the status reads
    `failed` ("stopped by an error: run the purge again"), press "Run the
-   purge again".
+   purge again". If it sits in `awaiting_acks` for more than an hour, a
+   runtime has not answered: check that its pods are running (the pod check
+   above) and ask a developer.
 5. Read the check report. It lists hits by store, location, id-hit count
    and name-hit count, never the text, in four sections:
    - **"Still found where the purge rewrites"** (memory, notes, revisions,
@@ -336,13 +340,21 @@ still being deleted, wait and run the check again; do not start a purge.
 
    Above the sections, the page may also show:
    - **"[unchecked] Too short to search for (ASCII, under 2 characters)"**:
-     the names listed cannot be searched. Press "Start purge for `DID`"
-     again with a longer form of each such name added; this reruns the same
-     request with the extra names. The short name stays on the request, so
+     the names listed cannot be searched. Back on the Privacy Purges list,
+     press "Look up names" for `DID` again, add a longer form of each such
+     name, and press "Start purge for `DID`"; this reruns the same request
+     with the extra names. The short name stays on the request, so
      it can never reach `complete`: step 10 says when it counts as done.
    - **"[failed] The worker's history is tombstoned (half-written)"**: press
      "Run the purge again". The request cannot be closed until the worker
      has rewritten those guilds.
+
+   A `needs_review` with a clean report has its reason elsewhere on the
+   page: an `error` line under the status, or a Steps row whose Memory, Bot
+   history, Worker history or Final notes pass column reads `failed`, shows
+   "unresolved" or is still `pending`. Follow the error line if it says what
+   to do; otherwise press "Run the purge again", and ask a developer if the
+   same step fails twice.
 
 Whatever the status, go on with steps 5 to 9. The request stays open until
 step 10 sees `complete`. Any hit in any section, an unchecked name, a
@@ -939,8 +951,10 @@ member is not told it is complete. If it is still not done as the 30 days
 run out, tell the member what is left and that the request is open.
 
 1. On the request's Privacy Purge page, press "Run the check again". It
-   runs only the search, with no model calls, and sets the status from what
-   it finds. Read the report:
+   runs only the search, with no model calls. From `complete` or
+   `needs_review` it sets the status again from what it finds; from any
+   other status it only refreshes the report, so a `failed` request needs
+   "Run the purge again" first. Read the report:
    - `complete`: go on.
    - **"Chat audit tables"**: rerun the step 3 counts (point 2) and, for
      each name, step 6's read-only name counts. If they find rows, clear
@@ -957,11 +971,13 @@ run out, tell the member what is left and that the request is open.
    - **"Still found where the purge rewrites"**, **"Possible remains
      reported by the runtimes"**, an unchecked name or a tombstoned history:
      handle it as in step 4, point 5.
-   - **Only an unchecked name is left**: if the page reads `needs_review`
-     but every hit list reads "Nothing found", "Possible remains" reads
-     "None.", no history is tombstoned, no step shows `failed` or
-     `unresolved`, and the purge already ran with a longer form of each
-     unchecked name, treat it as `complete`. Write in the receipt note that
+   - **Only an unchecked name is left**: treat a `needs_review` request as
+     `complete` only if all of these hold: there is no `error` line under
+     the status; the Steps table has a row for every guild and no cell reads
+     `pending` or `failed` or shows "unresolved"; every hit list reads
+     "Nothing found"; "Possible remains" reads "None."; no history is
+     tombstoned; and the run shown already included a longer form of each
+     unchecked name. Write in the receipt note that
      the short name went unchecked.
 
 2. Rerun the dry-run counts of steps 3, 7 and 8 (for agent sessions, rerun
