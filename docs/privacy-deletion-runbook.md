@@ -257,8 +257,8 @@ until it has loaded the list once. A purge run before both enforce it can be
 undone within hours, because the next wake reads the person's old messages
 back into history.
 
-The page refuses to start until both runtimes report enforcing, but it sees
-only processes new enough to report. A pod still on an image from before #79
+The page refuses to start until both runtimes report enforcing and a live
+purge consumer, but it sees only processes new enough to report. A pod still on an image from before #79
 reports nothing, does not enforce the list, and could write the person's
 messages back. So before the **first** purge, and again after any rollback of
 these deployments, confirm that every pod runs the #79 release and no
@@ -275,10 +275,12 @@ kubectl -n smarter-dev get pods \
 
 Every rollout must report "successfully rolled out". Every pod listed must
 show `<none>` under DELETING and, under IMAGE, the tag of a release that
-includes #79: `zzmmrmn/smarter-dev-bot:<tag>` for the bot,
+includes #79 (the tag the deploy run for the #79 merge printed, and the
+proactive-agent release tag for its PR, or any later one): `zzmmrmn/smarter-dev-bot:<tag>` for the bot,
 `zzmmrmn/smarter-dev-proactive-agent:<tag>` for the external worker, and
-`zzmmrmn/smarter-dev-website:<tag>` for the agent worker (which runs the
-purge itself) and the chat child worker. If any pod shows an older tag or is
+`zzmmrmn/smarter-dev-website:<tag>` for the agent worker, which runs the
+purge itself, and the chat child worker, which runs the chat agent's model
+jobs from the same image. If any pod shows an older tag or is
 still being deleted, wait and run the check again; do not start a purge.
 
 1. Open Admin → Bot Admin → Privacy Purges (`/admin/bot/privacy-purges`).
@@ -294,30 +296,37 @@ still being deleted, wait and run the check again; do not start a purge.
    histories, topics and notes, and the external worker's history with its
    recovery and legacy copies, are folded into new summaries without them
    and the raw messages dropped. Watch instructions are reviewed the same
-   way, and the guild's queued wake, pending, claimed and dead-letter
-   entries are discarded.
+   way. Raw copies in the Redis queues and streams are not rewritten; the
+   check reports them.
 4. Wait while the status moves through `queued`, `waiting_for_runtimes`,
-   `purging`, `awaiting_acks`, `finishing` and `checking`. It ends in
+   `purging`, `awaiting_acks`, `checking` and `finishing`. It ends in
    `complete` or `needs_review`. If it ends in `failed`, press "Run the
    purge again".
-5. Read the check report. It lists each store with a hit by name, location,
-   id-hit count and name-hit count, never the text. At this point expect
-   hits in the four database tables it searches (`chat_agent_turns`,
-   `chat_agent_engagements`, `chat_agent_compaction_events`,
-   `chat_agent_errors`): step 6 and the 48-hour sweep clear them, and step
-   10 checks again.
-   - A hit in the memory, notes, revisions, watch instructions or a history
-     (the stores the purge rewrites):
-     - an id hit is a leftover: press "Run the purge again";
-     - a name hit may be another member with the same name: judge it from
-       the guild's Chat Memory page, and run the purge again if it is them.
-   - A hit in a Redis queue or stream (wake, pending, batch, dead-letter,
-     shadow, control, the guild event log): these are short-lived copies the
-     purge does not rewrite. Do not edit them; step 10 waits for them to
-     age out.
-   - A name the page says it cannot check (a single character), or a
-     server whose history is marked unusable after a failed write: run the
-     purge again, and ask a developer if it stays.
+5. Read the check report. It lists hits by store, location, id-hit count
+   and name-hit count, never the text, in four sections:
+   - **"Still found where the purge rewrites"** (memory, notes, revisions,
+     watch instructions, histories): an id hit is a leftover, so press "Run
+     the purge again". A name hit may be another member with the same name:
+     judge it from the guild's Chat Memory page and run the purge again if
+     it is them. If you judge it to be someone else, do not close on it:
+     write the count in the receipt note and ask a developer to decide. If
+     the page says a guild's memory step was refused for losing unrelated
+     lines, the person may go by a name you did not enter: start a new purge
+     with that name added.
+   - **"Raw operational copies, not rewritten by this purge"** (the
+     proactive wake, pending, pending-dropped, batch, dead-letter, shadow,
+     control and control-processed keys, and the guild event log): short-lived
+     copies. Do not edit them; step 10 waits for them to age out.
+   - **"Chat audit tables, for the #71 deletion runbook"**
+     (`chat_agent_turns`, `chat_agent_engagements`,
+     `chat_agent_compaction_events`, `chat_agent_errors`): expected at this
+     point. Step 6 and the 48-hour sweep clear them, and step 10 checks
+     again.
+   - **"Possible remains reported by the runtimes"**: press "Run the purge
+     again"; it purges the guilds listed.
+
+   A name of one character is not searched at all, and the page does not
+   say so. Give the check a longer form of such a name too.
 
 Whatever the status, go on with steps 5 to 9. The request stays open until
 step 10 sees `complete`.
@@ -902,27 +911,33 @@ of this runbook).
 
 ## 10. Check and close
 
-Close the request only when the purge page shows `complete` after the check
-below. `needs_review` is not done, and neither is `closed` on its own: a
-closed purge is only a receipt. Until the page shows `complete`, points 3 to
-6 are not done and the member is not told it is complete. If it still does
-not show `complete` as the 30 days run out, tell the member what is left and
-that the request is open.
+Close the request only when, after the check below, the purge page shows
+`complete`, each of the report's three hit lists reads "Nothing found", and
+"Possible remains reported by the runtimes" reads "None".
+`needs_review` is not done, and neither is `closed` on its own: a closed
+purge is only a receipt. Until then, points 3 to 6 are not done and the
+member is not told it is complete. If it is still not done as the 30 days
+run out, tell the member what is left and that the request is open.
 
-1. On the request's Privacy Purge page, press "Run the check again". It runs
-   only the check, with no model calls. Read the report:
-   - `complete`: go on.
-   - A hit in one of the four database tables: rerun step 6's counts (point
-     2). If they find rows, clear them the step 6 way and run the check
-     again. If they read 0, the hit is in text the 48-hour sweep clears (the
-     bot's own replies in turns, compaction summaries): wait until the rows
-     are 48 hours old and run the check again.
-   - A hit in a Redis queue or stream (wake, pending, batch, dead-letter,
-     shadow, control, the guild event log): wait for it to age out (the
-     limits are under "Ages out") and run the check again. Do not close on
-     it. If it is still there after its limit, or the store has no limit
-     listed there, ask a developer.
-   - A hit in a store the purge rewrites: handle it as in step 4, point 5.
+1. On the request's Privacy Purge page, press "Run the check again". Once
+   the status is `complete` or `needs_review`, it runs only the check, with
+   no model calls. Read the report:
+   - `complete`, "Nothing found" in all three hit lists and "None" under
+     "Possible remains": go on.
+   - **"Chat audit tables"**: rerun the step 3 counts (point 2) and, for
+     each name, step 6's read-only name counts. If they find rows, clear
+     them the step 6 way and run the check again. If they read 0, the hit is
+     in text the 48-hour sweep clears (the bot's own replies in turns,
+     compaction summaries): wait until those rows are 48 hours old and run
+     the check again. A name hit in a column neither clears, such as another
+     member's `activation_username`, is a namesake: note the count and ask a
+     developer to decide.
+   - **"Raw operational copies"**: wait for them to age out (the limits are
+     under "Ages out") and run the check again. Do not close on them. If one
+     is still there after its limit, or its key has no limit listed there,
+     ask a developer.
+   - **"Still found where the purge rewrites"** or **"Possible remains
+     reported by the runtimes"**: handle it as in step 4, point 5.
 
 2. Rerun the dry-run counts of steps 3, 7 and 8 (for agent sessions, rerun
    the collect block first, or the count shows the old list). Every deleted store reads
