@@ -42,7 +42,6 @@ import asyncio
 import contextlib
 import logging
 import os
-import re
 from collections.abc import Awaitable
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -63,6 +62,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from smarter_dev.bot.agents.model_router import build_model_for
 from smarter_dev.bot.agents.model_router import model_settings_for
 from smarter_dev.shared.privacy_purge import PurgeTarget
+from smarter_dev.shared.privacy_segment_edit import (
+    PLACEHOLDERS,  # noqa: F401 — re-exported
+)
+from smarter_dev.shared.privacy_segment_edit import Segment
+from smarter_dev.shared.privacy_segment_edit import SegmentEdit
+from smarter_dev.shared.privacy_segment_edit import SegmentEditError
+from smarter_dev.shared.privacy_segment_edit import apply_edits
+from smarter_dev.shared.privacy_segment_edit import editable_segments
+from smarter_dev.shared.privacy_segment_edit import rebuild  # noqa: F401 — re-exported
+from smarter_dev.shared.privacy_segment_edit import segments  # noqa: F401 — re-exported
 from smarter_dev.web.chat_memory_dream import DEFAULT_DREAM_MODEL
 from smarter_dev.web.chat_memory_dream import DREAM_MODEL_ENV_VAR
 from smarter_dev.web.chat_memory_dream import DREAM_REASONING_LEVEL
@@ -105,149 +114,14 @@ _BLOCK_HEADINGS = {
     "behavior": "# My behavior",
     "memory": "# What I remember",
 }
-# Text a prompt might show for "nothing here"; never a block's or note's text.
-PLACEHOLDERS = frozenset({"(empty)", "(none)"})
 
 StillCurrent = Callable[[AsyncSession], Awaitable[bool]]
 
 
 # -- segments --------------------------------------------------------------------
 #
-# The model never returns a block. It returns one decision per segment that
-# mentions the person (keep, remove, or rewrite with new text), and code
-# rebuilds the block from the original bytes. A segment is a line, a sentence
-# within a line, and, inside a sentence that mentions the person, a part
-# between semicolons and (in a list of three or more) a part between commas.
-# Everything that does not mention the person comes back byte for byte, in
-# its order, with its duplicates; nothing can be added.
-
-_SENTENCE_SPLIT = re.compile(r"((?<=[.!?])\s+)")
-_SEMICOLON_SPLIT = re.compile(r"(;\s*)")
-_COMMA_SPLIT = re.compile(r"(,\s*)")
-# What a rewrite never touches: indentation and a list marker.
-_PREFIX = re.compile(r"\s*(?:[-*+•]\s+|\d+[.)]\s+)?")
-
-
-def _hits(target: PurgeTarget, text: str) -> int:
-    return target.id_hits(text) + target.name_hits(text)
-
-
-def _split_mentioning(sentence: str, target: PurgeTarget) -> list[str]:
-    """Pieces (segment, separator, segment, ...) of one sentence."""
-    if not target.mentions(sentence):
-        return [sentence]
-    out: list[str] = []
-    for i, part in enumerate(_SEMICOLON_SPLIT.split(sentence)):
-        if i % 2 or not target.mentions(part) or part.count(",") < 2:
-            out.append(part)
-        else:
-            out.extend(_COMMA_SPLIT.split(part))
-    segments = out[0::2]
-    # A name that itself contains a separator must not be cut in two.
-    if sum(_hits(target, seg) for seg in segments) != _hits(target, sentence):
-        return [sentence]
-    return out
-
-
-def _join_cut_names(pieces: list[str], target: PurgeTarget) -> list[str]:
-    """Re-join neighbouring pieces where the cut between them split a name
-    ("Dr. Kai" must not become "Dr." and "Kai")."""
-    out = [pieces[0]]
-    for i in range(1, len(pieces), 2):
-        sep, nxt = pieces[i], pieces[i + 1]
-        joined = out[-1] + sep + nxt
-        if _hits(target, joined) > _hits(target, out[-1]) + _hits(target, nxt):
-            out[-1] = joined
-        else:
-            out.extend((sep, nxt))
-    return out
-
-
-def _line_pieces(line: str, target: PurgeTarget) -> list[str]:
-    sentences = _join_cut_names(_SENTENCE_SPLIT.split(line), target)
-    out: list[str] = []
-    for i, piece in enumerate(sentences):
-        if i % 2:
-            out.append(piece)
-        else:
-            out.extend(_split_mentioning(piece, target))
-    return out
-
-
-@dataclass(frozen=True)
-class Segment:
-    id: str
-    index: int
-    text: str
-
-    @property
-    def prefix(self) -> str:
-        return _PREFIX.match(self.text).group(0)
-
-    @property
-    def body(self) -> str:
-        return self.text[len(self.prefix) :]
-
-
-def segments(location: str, text: str, target: PurgeTarget) -> list[Segment]:
-    """Every segment of ``text``, numbered in order; ids are ``{location}:{n}``."""
-    out: list[Segment] = []
-    for line in text.split("\n"):
-        for piece in _line_pieces(line, target)[0::2]:
-            out.append(Segment(id=f"{location}:{len(out)}", index=len(out), text=piece))
-    return out
-
-
-def editable_segments(location: str, text: str, target: PurgeTarget) -> list[Segment]:
-    """The segments that mention the person: the only ones the agent decides."""
-    return [seg for seg in segments(location, text, target) if target.mentions(seg.text)]
-
-
-def rebuild(text: str, target: PurgeTarget, decisions: dict[int, str | None]) -> str:
-    """``text`` with segment ``i`` removed (``None``) or replaced, all else byte for byte.
-
-    A line whose segments are all removed goes with its line break. Removing
-    a segment takes its own following separator, or the one before it when
-    it was the last left on its line.
-    """
-    if not decisions:
-        return text
-    out_lines: list[str] = []
-    index = 0
-    for line in text.split("\n"):
-        pieces = _line_pieces(line, target)
-        segs, seps = pieces[0::2], pieces[1::2]
-        positions = range(index, index + len(segs))
-        index += len(segs)
-        if not any(i in decisions for i in positions):
-            out_lines.append(line)
-            continue
-        survivors: list[tuple[str, int]] = []
-        for j, i in enumerate(positions):
-            if i not in decisions:
-                survivors.append((segs[j], j))
-            elif decisions[i] is not None:
-                survivors.append((decisions[i], j))
-        if not any(text_.strip() for text_, _ in survivors):
-            continue
-        parts: list[str] = []
-        for n, (text_, j) in enumerate(survivors):
-            parts.append(text_)
-            if n < len(survivors) - 1:
-                parts.append(seps[j] if j < len(seps) else " ")
-        out_lines.append("".join(parts))
-    return "\n".join(out_lines)
-
-
-# -- model output --------------------------------------------------------------
-
-
-class SegmentEdit(BaseModel):
-    """The decision for one segment that mentions the person."""
-
-    id: str
-    action: Literal["keep", "remove", "rewrite"]
-    text: str | None = None
+# The segmenter, the edit schema and the rebuild are shared with the bot and
+# the worker: :mod:`smarter_dev.shared.privacy_segment_edit`.
 
 
 class UnresolvedItem(BaseModel):
@@ -400,8 +274,6 @@ def compose_purge(
         return PurgeRefused(problem)
 
     target = context.target
-    by_location = context.editable_by_location()
-    by_id = {seg.id: (location, seg) for location, segs in by_location.items() for seg in segs}
     unresolved_locations = {item.location.strip() for item in output.unresolved}
     valid_locations = set(context.editable) | {f"note:{i}" for i, _ in context.notes}
     for location in unresolved_locations:
@@ -414,73 +286,18 @@ def compose_purge(
     if target.mentions(reasons):
         raise refuse("Unresolved reasons must not name the person or carry their ID.")
 
-    decisions: dict[str, dict[int, str | None]] = {location: {} for location in by_location}
-    seen: set[str] = set()
-    for edit in output.edits:
-        if edit.id not in by_id:
-            raise refuse(
-                f"{edit.id!r} is not a segment you were asked to decide; only listed "
-                "segments can change."
-            )
-        if edit.id in seen:
-            raise refuse(f"Segment {edit.id!r} has two entries; give it one.")
-        seen.add(edit.id)
-        location, seg = by_id[edit.id]
-        if edit.action == "remove":
-            decisions[location][seg.index] = None
-        elif edit.action == "rewrite":
-            text = (edit.text or "").strip()
-            if not text or text in PLACEHOLDERS or "\n" in text:
-                raise refuse(
-                    f"Rewritten segment {edit.id!r} must be one line of real text; "
-                    "remove it if nothing is left."
-                )
-            if target.mentions(text):
-                raise refuse(
-                    f"Rewritten segment {edit.id!r} still names this person or carries "
-                    "their ID."
-                )
-            body = _PREFIX.sub("", text, count=1) if seg.prefix.strip() else text
-            # A rewrite takes something out; it never adds a sentence or grows.
-            if len(body) > len(seg.body.strip()) or len(_SENTENCE_SPLIT.split(body)) > len(
-                _SENTENCE_SPLIT.split(seg.body.strip())
-            ):
-                raise refuse(
-                    f"Rewritten segment {edit.id!r} is longer or has more sentences than the "
-                    "original; a rewrite only takes this person out."
-                )
-            decisions[location][seg.index] = seg.prefix + body
-        else:  # keep
-            if target.id_hits(seg.text):
-                raise refuse(f"Segment {edit.id!r} carries this person's ID; it cannot stay.")
-            if location not in unresolved_locations:
-                raise refuse(
-                    f"Segment {edit.id!r} names this person. Remove or rewrite it, or if "
-                    f"it is a different person who shares the name, list `{location}` "
-                    "in unresolved and say why."
-                )
-    missing = [seg_id for seg_id in by_id if seg_id not in seen]
-    if missing:
-        raise refuse(f"Every listed segment needs one entry. Missing: {', '.join(missing)}.")
-
-    def still_names(location: str, text: str) -> None:
-        # A hit no segment holds (a name spanning a line break) cannot be
-        # decided segment by segment: refuse rather than call it clean.
-        if target.id_hits(text):
-            raise refuse(f"`{location}` still carries this person's ID.")
-        if target.name_hits(text) and location not in unresolved_locations:
-            raise refuse(
-                f"`{location}` still names this person in a place no segment covers; "
-                f"list `{location}` in unresolved if it is a different person."
-            )
+    texts = {name: getattr(context, name) for name in BLOCK_NAMES}
+    texts.update({f"note:{note_id}": content for note_id, content in context.notes})
+    try:
+        rebuilt = apply_edits(texts, output.edits, target, unresolved=unresolved_locations)
+    except SegmentEditError as error:
+        raise refuse(str(error)) from None
 
     final: dict[str, str] = {}
     changed: set[str] = set()
     for name in BLOCK_NAMES:
         previous = getattr(context, name)
-        new = rebuild(previous, target, decisions.get(name, {}))
-        if name in context.editable:
-            still_names(name, new)
+        new = rebuilt[name]
         final[name] = new
         if new != previous:
             if len(new.strip()) > _BLOCK_LIMITS[name]:
@@ -492,10 +309,7 @@ def compose_purge(
     rewritten: dict[str, str] = {}
     dropped: list[str] = []
     for note_id, content in context.notes:
-        location = f"note:{note_id}"
-        new = rebuild(content, target, decisions.get(location, {}))
-        if target.mentions(content):
-            still_names(location, new)
+        new = rebuilt[f"note:{note_id}"]
         if new == content:
             continue
         if not new.strip():
