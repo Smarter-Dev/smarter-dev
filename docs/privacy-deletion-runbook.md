@@ -15,7 +15,7 @@ help prepare or check a step, but does not run mutations.
 | | Stores |
 | --- | --- |
 | **Purge (agent)** | Everything the chat bot holds about the person: the guild memory, behavior and personality blocks, pending notes and retained revisions, both agents' working histories and their compaction summaries, the proactive recovery copy and watch instructions, and the external worker's history. The agent does the edit; see step 4. |
-| **Delete** | Bytes balances, squad memberships, quest and challenge submissions and quest progress, member activity dates, forum subscriptions, campaign signups, `/help` and `/tldr` records they started, legacy `/scan` profiles, rate-limit and DM caches, bot API security log rows whose request named them, and their site account with its chat, attachments, searches, resources questions, profile, linked logins (and their stored Discord tokens), push subscriptions, roles, API keys, second-factor enrollments, OAuth consent grants, republish links and membership rows. Also these, which can outlast the limits under "Ages out": AI error messages that name them, the running topic and notes of engagements that name them, blog topic candidates from their conversations or naming them, entries in automation memory that carry them, automation jobs about them still waiting in Skrift's job stores (and any not yet pruned), AI agent sessions that mention them, and their site jobs. |
+| **Delete** | Bytes balances, squad memberships, quest and challenge submissions and quest progress, member activity dates, forum subscriptions, campaign signups, `/help` and `/tldr` records they started, legacy `/scan` profiles, rate-limit and DM caches, bot API security log rows whose request named them (until #81's migration drops that table), and their site account with its chat, attachments, searches, resources questions, profile, linked logins (and their stored Discord tokens), push subscriptions, roles, API keys, second-factor enrollments, OAuth consent grants, republish links and membership rows. Also these, which can outlast the limits under "Ages out": AI error messages that name them, the running topic and notes of engagements that name them, blog topic candidates from their conversations or naming them, entries in automation memory that carry them, automation jobs about them still waiting in Skrift's job stores (and any not yet pruned), AI agent sessions that mention them, and their site jobs. |
 | **Anonymise** | Rows other people share. Bytes transfers the person sent or received keep their amount and date for the other member, with the person's id and username replaced and the reason cleared. Chat engagements they started lose the starter's id and username. Usage cost rows lose their Discord id and details. Legacy `/scan` usage rows lose their user id. Chat agent turns and handler runs have the person's id and names replaced where they stand as values; forum agent responses have the author's display name replaced. Site page revisions they wrote lose their author when the account is deleted. |
 | **Keep** | Moderation history: `moderation_actions` and the bot's posts in the guild's moderation and audit log channels. Anonymised billing: usage cost rows with no person linked (the membership rows are deleted with the account; Polar keeps its payment records under its own terms). A bare receipt that the request was completed. The person's Discord id alone in `chat_bot_blocked_users`, written by the purge in step 4, so the chat bot sees their messages only as `[BLOCKED BY USER]` and does not respond to them. |
 | **Ages out** | Short-lived records listed below. Nothing in them lasts past 30 days, so a request does not touch them, apart from the live work steps 6 to 8 clear. |
@@ -175,7 +175,6 @@ UNION ALL SELECT 'scan_user_profiles', count(*) FROM scan_user_profiles WHERE us
 UNION ALL SELECT 'scan_service_usage', count(*) FROM scan_service_usage WHERE user_id = :'did'
 UNION ALL SELECT 'chat_agent_engagements (anonymise)', count(*) FROM chat_agent_engagements WHERE activation_user_id = :'did'
 UNION ALL SELECT 'usage_cost_rows (anonymise)', count(*) FROM usage_cost_rows WHERE discord_user_id = :'did'
-UNION ALL SELECT 'security_logs', count(*) FROM security_logs WHERE details ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR event_metadata::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
 UNION ALL SELECT 'chat_agent_turns (anonymise)', count(*) FROM chat_agent_turns WHERE triggering_messages::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR model_messages_delta::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR agent_output::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
 UNION ALL SELECT 'handler_runs (anonymise)', count(*) FROM handler_runs WHERE trigger_context::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
 UNION ALL SELECT 'chat_agent_errors (clear text)', count(*) FROM chat_agent_errors WHERE error_message ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR traceback ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR coalesce(provider_body, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
@@ -189,6 +188,18 @@ UNION ALL SELECT 'memory revisions mentioning (agent purge)', count(*) FROM chat
 UNION ALL SELECT 'memory notes mentioning (agent purge)', count(*) FROM chat_agent_memory_notes WHERE content LIKE '%' || :'did' || '%'
 UNION ALL SELECT 'proactive histories mentioning (agent purge)', count(*) FROM proactive_agent_histories WHERE history::text LIKE '%' || :'did' || '%';
 ROLLBACK;
+```
+
+Until migration `f3a8d1c6b2e4` (#81) drops `security_logs`, old bot API
+security log rows can still name the person in their path; nothing new is
+written there. Count them only while the table exists. The `\gset` line
+also sets the flag step 6 uses, so run it again in a new `psql` session:
+
+```sql
+SELECT to_regclass('security_logs') IS NOT NULL AS has_security_logs \gset
+\if :has_security_logs
+SELECT 'security_logs' AS store, count(*) FROM security_logs WHERE details ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR event_metadata::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)');
+\endif
 ```
 
 Automation memory and the job stores have their own counts in steps 7 and
@@ -400,10 +411,13 @@ UPDATE chat_agent_turns SET
 UPDATE handler_runs SET
    trigger_context = regexp_replace(trigger_context::text, '(?<![0-9])' || :'did' || '(?![0-9])', '0', 'g')::json
  WHERE trigger_context::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)');
--- Bot API calls that named the person in their path. A safety net for rows
--- written before #81 stopped per-request logging; expect 0 after its cleanup.
+-- Bot API calls that named the person in their path, written before #81
+-- stopped per-request logging. Skipped once #81's migration has dropped the
+-- table (the flag comes from the \gset line in step 3).
+\if :has_security_logs
 DELETE FROM security_logs
  WHERE details ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR event_metadata::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)');
+\endif
 -- stop here: compare each count with the dry run, then run COMMIT; or ROLLBACK;
 ```
 

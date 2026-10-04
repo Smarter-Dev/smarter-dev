@@ -97,10 +97,20 @@ def test_ai_records_keep_no_member_words(notice):
     assert "cleared 48 hours after they were written" in records
 
 
+def test_security_events_name_no_member(notice):
+    security = notice.split("**Security.**", 1)[1].split("\n", 1)[0]
+    assert "failed authentication" in security
+    assert "over a rate limit" in security
+    assert "admin operations" in security
+    assert "never a member's Discord ID" in security
+    assert "Ordinary requests are not logged" in security
+    assert "Pydantic Logfire" in security
+
+
 @pytest.mark.xfail(
     strict=True,
-    reason="the security-log wording waits on #81's facts (#71); remove this "
-    "marker together with the placeholder",
+    reason="the Logfire retention period for security events waits on the "
+    "Logfire org settings (#71); remove this marker together with the placeholder",
 )
 def test_no_placeholder_is_left_in_the_notice(notice):
     assert "[PLACEHOLDER" not in notice
