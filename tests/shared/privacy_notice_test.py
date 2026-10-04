@@ -86,7 +86,7 @@ def test_the_notice_gives_each_message_hand_off_its_limit(notice):
     messages = notice.split("**Messages.**", 1)[1].split("**The chat bot's", 1)[0]
     assert "server automation, its text is handed to the job" in messages
     assert "kept for 1 hour" in messages
-    assert "kept for up to 48 hours" in messages
+    assert "kept for up to 48 hours, and messages it has picked up to read for up to 48 hours more" in messages
     assert "until the reminder runs, and for up to 7 days after" in messages
     assert "no time limit" not in messages.replace("That history has no time limit", "")
 

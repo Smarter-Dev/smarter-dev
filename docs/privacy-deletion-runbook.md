@@ -672,8 +672,8 @@ Skrift's job tables keep each automation run's trigger: who wrote the message
 or joined, their names and the moderation target. The hourly retention job
 deletes finished work after 7 days (a finished agent run's state after 24
 hours), but a job still waiting, such as a timer, and an AI agent session
-still live have no limit, and a request should not wait on the rest. Use the
-same `psql` session as step 7.
+still live have no limit, so this step removes the person's part of them.
+Use the same `psql` session as step 7.
 
 Deleting a waiting job cancels it. That includes an automation's timer or
 recurring fire about the person that is already due; one due later is left
