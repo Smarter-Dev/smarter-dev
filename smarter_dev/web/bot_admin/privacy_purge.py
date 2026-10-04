@@ -46,8 +46,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.privacy_purge import SNOWFLAKE_PATTERN
+from smarter_dev.shared.privacy_purge import PurgeTarget
 from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.chat_bot_purge import OUTSIDE_THE_CHECK
+from smarter_dev.web.chat_bot_purge import STATUS_AWAITING_ACKS
 from smarter_dev.web.chat_bot_purge import STATUS_CLOSED
 from smarter_dev.web.chat_bot_purge import CloseRefused
 from smarter_dev.web.chat_bot_purge import affected_guild_ids
@@ -55,8 +57,11 @@ from smarter_dev.web.chat_bot_purge import block_list_revision
 from smarter_dev.web.chat_bot_purge import clean_names
 from smarter_dev.web.chat_bot_purge import close_request
 from smarter_dev.web.chat_bot_purge import delete_commands
+from smarter_dev.web.chat_bot_purge import expire_acks
+from smarter_dev.web.chat_bot_purge import missing_acks
 from smarter_dev.web.chat_bot_purge import open_purge_request
 from smarter_dev.web.chat_bot_purge import possible_remains
+from smarter_dev.web.chat_bot_purge import remove_unchecked_name
 from smarter_dev.web.chat_bot_purge import runtime_status
 from smarter_dev.web.chat_bot_purge import start_new_run
 from smarter_dev.web.chat_bot_purge import start_refusal
@@ -136,6 +141,15 @@ async def _list_page(
     lookup_id: str = "",
     names: list[str] | None = None,
 ) -> TemplateResponse:
+    waiting = (
+        await db_session.scalars(
+            select(ChatBotPurgeRequest.id).where(
+                ChatBotPurgeRequest.status == STATUS_AWAITING_ACKS
+            )
+        )
+    ).all()
+    for request_id in waiting:
+        await expire_acks(db_session, request_id, now=datetime.now(UTC))
     requests = (
         await db_session.scalars(
             select(ChatBotPurgeRequest)
@@ -225,7 +239,8 @@ class PrivacyPurgeAdminController(Controller):
     async def view(
         self, request: Request, db_session: AsyncSession, request_id: UUID
     ) -> TemplateResponse:
-        purge = await db_session.get(ChatBotPurgeRequest, request_id)
+        await expire_acks(db_session, request_id, now=datetime.now(UTC))
+        purge = await db_session.get(ChatBotPurgeRequest, request_id, populate_existing=True)
         if purge is None:
             raise NotFoundException()
         steps = purge.steps or {}
@@ -237,6 +252,12 @@ class PrivacyPurgeAdminController(Controller):
                 "steps": steps,
                 "report": purge.check_report or {},
                 "possible_remains": possible_remains(steps),
+                "missing_acks": missing_acks(steps) if steps.get("ack_timeout") else [],
+                "unchecked_names": (
+                    PurgeTarget.build(purge.discord_user_id, purge.names or []).unchecked_names
+                    if purge.discord_user_id
+                    else ()
+                ),
                 "outside_the_check": OUTSIDE_THE_CHECK,
                 "runtimes": await runtime_status(get_redis_client()),
                 "list_revision": await block_list_revision(db_session),
@@ -273,6 +294,37 @@ class PrivacyPurgeAdminController(Controller):
         await delete_commands(get_redis_client(), request_id=request_id, except_run=run_id)
         await submit_run(request_id, run_id)
         flash_success(request, "Purge started again.")
+        return back
+
+    @post("/{request_id:uuid}/names/remove", guards=_GUARDS)
+    async def remove_name(
+        self, request: Request, db_session: AsyncSession, request_id: UUID
+    ) -> Redirect:
+        """Drop one never-searched name; the name travels in the form, not the URL."""
+        back = Redirect(path=f"{BASE_PATH}/{request_id}")
+        if not await verify_csrf(request):
+            flash_error(request, "Your session expired. Please try again.")
+            return back
+        form = await request.form()
+        try:
+            problem = await remove_unchecked_name(
+                db_session, request_id, str(form.get("name") or ""), now=datetime.now(UTC)
+            )
+            if problem:
+                await db_session.rollback()
+                flash_error(request, problem)
+                return back
+            await db_session.commit()
+        except SQLAlchemyError as error:
+            await db_session.rollback()
+            _db_failure("name removal", error)
+            flash_error(request, "The name could not be removed. Please try again.")
+            return back
+        flash_success(
+            request,
+            'Name removed. It was never searched for; use "Run the check again" to settle '
+            "the request.",
+        )
         return back
 
     @post("/{request_id:uuid}/check", guards=_GUARDS)

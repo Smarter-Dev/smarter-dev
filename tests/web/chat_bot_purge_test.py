@@ -1420,3 +1420,82 @@ def test_a_command_that_cannot_be_built_says_why():
     many = [str(10**17 + i) for i in range(501)]
     assert "501 guilds" in command_problem(many)
     assert command_problem([_GUILD]) is None
+
+
+# -- ack timeout ----------------------------------------------------------------------
+
+
+async def test_acks_missing_for_an_hour_end_in_review_and_late_acks_still_count(
+    db_session, session_factory, redis
+):
+    from smarter_dev.web.chat_bot_purge import expire_acks
+    from smarter_dev.web.chat_bot_purge import missing_acks
+
+    await _seed_memory(db_session)
+    request = await _open(db_session)
+    await _enforce(redis, 1)
+    await _run(session_factory, redis, request.id, request.run_id, _ScriptedAgent())
+    async with session_factory() as session:
+        await record_ack(
+            session,
+            request.run_id,
+            PurgeAck(component="bot", guild_id=_GUILD, outcome="purged"),
+            now=_NOW + timedelta(minutes=10),
+        )
+        await session.commit()
+    stored = await _stored(session_factory, request.id)
+    last = datetime.fromisoformat(stored.steps["last_ack_at"])
+    assert last == _NOW + timedelta(minutes=10)
+
+    async with session_factory() as session:
+        assert not await expire_acks(session, request.id, now=last + timedelta(minutes=59))
+    async with session_factory() as session:
+        assert await expire_acks(session, request.id, now=last + timedelta(minutes=61))
+
+    stored = await _stored(session_factory, request.id)
+    assert stored.status == STATUS_NEEDS_REVIEW
+    assert stored.steps["worker"][_GUILD]["outcome"] == "failed"
+    assert stored.steps["worker"][_GUILD]["detail"] == "no ack within 1 hour"
+    assert missing_acks(stored.steps) == [("worker", _GUILD)]
+    assert await redis.xlen(PURGE_STREAM) == 1  # kept for the late runtime
+
+    # The late real ack replaces the stand-in and the run goes on to its check.
+    async with session_factory() as session:
+        late = await record_ack(
+            session, request.run_id, PurgeAck(component="worker", guild_id=_GUILD, outcome="purged")
+        )
+        await session.commit()
+    assert late.status == STATUS_CHECKING
+    assert await _check(session_factory, redis, request.id, _ScriptedAgent()) == STATUS_COMPLETE
+
+
+async def test_the_page_view_applies_the_ack_timeout(db_session, session_factory, redis):
+    from unittest.mock import AsyncMock
+    from unittest.mock import patch
+
+    from smarter_dev.web.bot_admin.privacy_purge import PrivacyPurgeAdminController
+
+    await _seed_memory(db_session)
+    request = await _open(db_session)
+    await _enforce(redis, 1)
+    await _run(session_factory, redis, request.id, request.run_id, _ScriptedAgent())
+    async with session_factory() as session:
+        stored = await session.get(ChatBotPurgeRequest, request.id)
+        stored.steps["command_sent_at"] = "2020-01-01T00:00:00+00:00"
+        flag_modified(stored, "steps")
+        await session.commit()
+
+    module = "smarter_dev.web.bot_admin.privacy_purge"
+    with (
+        patch(f"{module}.get_admin_context", new=AsyncMock(return_value={})),
+        patch(f"{module}.get_flash_messages", return_value=[]),
+        patch(f"{module}.get_redis_client", return_value=redis),
+    ):
+        response = await PrivacyPurgeAdminController.view.fn(
+            None, request=object(), db_session=db_session, request_id=request.id
+        )
+    assert response.context["purge"].status == STATUS_NEEDS_REVIEW
+    assert response.context["missing_acks"] == [("bot", _GUILD), ("worker", _GUILD)]
+    # "Run the purge again" works from here.
+    rerun_id = await _rerun(session_factory, request.id)
+    assert (await _stored(session_factory, request.id)).status == "queued" and rerun_id
