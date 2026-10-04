@@ -874,8 +874,8 @@ async def test_runtime_status_takes_the_min_over_live_processes_and_ignores_the_
     await redis.set("privacy:v1:consumer:bot:a-1", "1", ex=180)
 
     status = await runtime_status(redis)
-    assert status["bot"] == {"processes": 2, "revision": 2, "consumers": 1}
-    assert status["worker"] == {"processes": 1, "revision": 3, "consumers": 0}
+    assert status["bot"] == {"processes": 2, "revision": 2, "consumers": 1, "unreadable": 0}
+    assert status["worker"] == {"processes": 1, "revision": 3, "consumers": 0, "unreadable": 0}
     assert "worker" in start_refusal(status)
 
     await redis.set("privacy:v1:consumer:worker:c-3", "1", ex=180)
@@ -1594,3 +1594,16 @@ async def test_the_check_finds_special_character_names_in_serialised_stores(
     assert [hit["location"] for hit in report["operational"]] == ["proactive:v1:dead-letter"]
     errors = [hit for hit in report["information"] if hit["store"] == "chat_agent_errors"]
     assert len(errors) == 1 and errors[0]["name_hits"] == 2
+
+
+async def test_an_unreadable_enforcing_value_means_not_enforcing(redis):
+    from smarter_dev.web.chat_bot_purge import runtime_status
+    from smarter_dev.web.chat_bot_purge import start_refusal
+
+    await _enforce(redis, 5)
+    await redis.set(f"{enforcing_key('bot')}:host-9", "garbage", ex=180)
+
+    status = await runtime_status(redis)
+    assert status["bot"]["revision"] is None and status["bot"]["unreadable"] == 1
+    assert status["worker"]["revision"] == 5
+    assert "Not enforcing the block list yet: bot" in start_refusal(status)

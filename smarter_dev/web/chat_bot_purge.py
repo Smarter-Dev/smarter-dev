@@ -213,6 +213,7 @@ async def runtime_status(redis) -> dict[str, dict]:
         enforcing_prefix = enforcing_process_pattern(component)[:-1]
         consumer_prefix = consumer_pattern(component)[:-1]
         revisions = []
+        unreadable = 0
         consumers = 0
         for key, raw in values.items():
             if raw is None:
@@ -221,13 +222,16 @@ async def runtime_status(redis) -> dict[str, dict]:
                 try:
                     revisions.append(int(_decode(raw)))
                 except ValueError:
-                    continue
+                    # A process whose report cannot be read is not known to
+                    # enforce anything: the component is not enforcing.
+                    unreadable += 1
             elif key.startswith(consumer_prefix):
                 consumers += 1
         status[component] = {
-            "processes": len(revisions),
-            "revision": min(revisions) if revisions else None,
+            "processes": len(revisions) + unreadable,
+            "revision": min(revisions) if revisions and not unreadable else None,
             "consumers": consumers,
+            "unreadable": unreadable,
         }
     return status
 
