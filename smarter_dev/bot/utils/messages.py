@@ -68,7 +68,7 @@ async def fetch_user_roles(bot: hikari.GatewayBot, guild_id: int, user_id: int, 
         return role_names
 
     except Exception as e:
-        logger.debug(f"Failed to fetch user roles for {user_id} in guild {guild_id}: {e}")
+        logger.debug(f"Failed to fetch user roles for {user_id} in guild {guild_id}: {type(e).__name__}")
         return []
 
 
@@ -169,7 +169,7 @@ async def extract_reply_context(message: hikari.Message, bot: hikari.GatewayBot)
             return replied_author, replied_content, content
 
         except Exception as e:
-            logger.debug(f"Failed to extract reply context: {e}")
+            logger.debug(f"Failed to extract reply context: {type(e).__name__}")
             # If we can't get the replied message, use fallback
             return "[unknown]", "[message]", content
 
@@ -768,7 +768,7 @@ class ConversationContextBuilder:
             }
 
         except Exception as e:
-            logger.debug(f"Failed to build user info for {user_id}: {e}")
+            logger.debug(f"Failed to build user info for {user_id}: {type(e).__name__}")
             return None
 
     async def _build_channel_info(self, channel_id: int) -> dict[str, Any]:

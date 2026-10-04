@@ -274,9 +274,9 @@ async def test_the_trim_drops_and_counts_only_envelopes_past_the_window(redis_cl
     assert dropped == 1
     assert await _pending_bodies(redis_client) == ["pushed-at-47h59m", "new"]
     assert await redis_client.get(pending_dropped_key("111")) == b"1"
-    # The backstop now follows the oldest envelope left, so it cannot delete
-    # the young ones before the next trim counts them.
-    expected = _TRIM_NOW - _WINDOW + timedelta(minutes=1) + _WINDOW + _SLACK
+    # The backstop follows the newest envelope left, so it cannot delete any
+    # envelope before a trim has dropped and counted it.
+    expected = _TRIM_NOW - timedelta(minutes=5) + _WINDOW + _SLACK
     assert await redis_client.pexpiretime(pending_key("111")) == int(
         expected.timestamp() * 1000
     )
@@ -290,6 +290,40 @@ async def test_the_trim_drops_and_counts_only_envelopes_past_the_window(redis_cl
     claimed = await queue.claim_pending("111", "wake-1")
     assert claimed.dropped == 2
     assert [envelope.body for envelope in claimed.notifications] == ["new"]
+
+
+@pytest.mark.asyncio
+async def test_a_push_moves_a_nearer_backstop_out_to_the_new_envelope(redis_client):
+    # Ticks stopped after a trim anchored the backstop to an old envelope;
+    # pushes that keep arriving must not be lost with it uncounted.
+    queue = RedisNotificationQueue(redis_client)
+    await queue.publish(_envelope(body="first"))
+    await redis_client.pexpire(pending_key("111"), 60_000)
+
+    await queue.publish(_envelope(body="second"))
+
+    ttl = await redis_client.pttl(pending_key("111"))
+    assert ttl > CONTENT_RETENTION_MILLISECONDS
+    assert await _pending_bodies(redis_client) == ["first", "second"]
+
+
+@pytest.mark.asyncio
+async def test_one_guilds_failed_pending_trim_does_not_stop_the_rest(
+    redis_client, monkeypatch
+):
+    queue = RedisNotificationQueue(redis_client)
+    trimmed: list[str] = []
+
+    async def trim(guild_id, *, now=None):
+        if guild_id == "111":
+            raise ValueError("a bad list")
+        trimmed.append(guild_id)
+        return 1
+
+    monkeypatch.setattr(queue, "trim_expired_pending", trim)
+
+    assert await queue.trim_expired_envelopes(["111", "222", "333"]) == 2
+    assert trimmed == ["222", "333"]
 
 
 @pytest.mark.asyncio
@@ -859,7 +893,9 @@ async def test_a_redis_outage_during_the_retention_trim_is_logged_not_raised(cap
         await proactive._sweep_expired_envelopes(run)
 
     assert "proactive envelope retention trim failed" in caplog.text
-    assert "redis is unreachable" in caplog.text
+    # Logged by type and frames; an exception message can quote a member.
+    assert "redis.exceptions.ConnectionError" in caplog.text
+    assert "redis is unreachable" not in caplog.text
 
 
 @pytest.mark.asyncio

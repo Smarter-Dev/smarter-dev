@@ -21,10 +21,10 @@ redacted.
 
 Each stored shape is redacted by a keep-list, never a redact-list: a chat
 message keeps :data:`_CHAT_PRESERVED_KEYS`, a help context message keeps
-:data:`_HELP_PRESERVED_KEYS`, a pydantic-ai part keeps its whole self only when
-its kind is in :data:`_MODEL_AUTHORED_PART_KINDS` and otherwise keeps
-:data:`_REDACTED_PART_PRESERVED_FIELDS`. A forum post goes further and is
-built rather than filtered: :func:`redact_forum_post` returns the three
+:data:`_HELP_PRESERVED_KEYS`, a pydantic-ai part keeps
+:data:`_REDACTED_PART_PRESERVED_FIELDS` whoever wrote it, and a chat turn's
+decision keeps :data:`_TURN_DECISION_PRESERVED_KEYS`. A forum post goes further
+and is built rather than filtered: :func:`redact_forum_post` returns the three
 member-authored columns of the row and reads nothing else, so a key the sender
 invents cannot reach it. Anything upstream adds later is therefore redacted
 until somebody decides it is safe, which is the failure mode the intent policy
@@ -63,20 +63,6 @@ _CHAT_PRESERVED_KEYS = frozenset(
 
 _HELP_PRESERVED_KEYS = frozenset({"author", "timestamp"})
 
-_MODEL_AUTHORED_PART_KINDS = frozenset(
-    {
-        "system-prompt",
-        "text",
-        "tool-call",
-        "tool-search-call",
-        "builtin-tool-call",
-        "builtin-tool-search-call",
-        "builtin-tool-return",
-        "builtin-tool-search-return",
-        "file",
-    }
-)
-
 _REDACTED_PART_PRESERVED_FIELDS = frozenset(
     {
         "part_kind",
@@ -87,6 +73,16 @@ _REDACTED_PART_PRESERVED_FIELDS = frozenset(
         "outcome",
     }
 )
+
+_TURN_DECISION_PRESERVED_KEYS = frozenset(
+    {"rankings", "response_language", "response", "continue_watching"}
+)
+
+_TURN_RESPONSE_PRESERVED_KEYS = frozenset(
+    {"target_message_id", "reply_directly", "not_cs_topic_brief_answer"}
+)
+
+_TURN_RANKING_PRESERVED_KEYS = frozenset({"message_id", "score"})
 
 _EXPLICIT_SUBMISSION_INTERACTION_TYPES = frozenset({"slash_command"})
 
@@ -143,8 +139,6 @@ def _is_redacted_part_field(key: str) -> bool:
 
 
 def _redact_part(part: dict) -> dict:
-    if part.get("part_kind") in _MODEL_AUTHORED_PART_KINDS:
-        return dict(part)
     return _redact_mapping(part, _is_redacted_part_field)
 
 
@@ -168,17 +162,16 @@ def redact_chat_agent_messages(messages: list[dict] | None) -> list[dict]:
 
 
 def redact_model_message_parts(messages: list[dict] | None) -> list[dict] | None:
-    """Redact the human text inside a serialised pydantic-ai message list.
+    """Redact all the text inside a serialised pydantic-ai message list.
 
-    Parts the model or its provider authored pass through: the system prompt,
-    reply text, tool calls and provider-side tool results. Reasoning and a
-    provider's compaction part are model-authored too, but they retell what
-    members said, so they are redacted with everything else we send the model
-    — prompts, tool returns, retry prompts and any kind this module has never
-    seen. Each is redacted down
-    to its bookkeeping: kind, tool name and call id, tool kind, timestamp and
-    outcome. Content, metadata and any field added later are emptied, and a
-    field that was absent stays absent.
+    Every part is redacted down to its bookkeeping: kind, tool name and call
+    id, tool kind, timestamp and outcome. That covers what members said — the
+    prompts, tool returns and retry prompts — and what the model wrote too:
+    its reply text, reasoning and tool-call arguments can all quote a member,
+    and a web search's query is often lifted straight from a message. Content,
+    arguments, metadata and any field added later are emptied, and a field
+    that was absent stays absent. Message-level fields (kind, usage, model
+    name, timestamps) carry no text and stay.
     """
     if messages is None:
         return None
@@ -188,6 +181,33 @@ def redact_model_message_parts(messages: list[dict] | None) -> list[dict] | None
         else dict(message)
         for message in messages
     ]
+
+
+def redact_turn_decision(output: dict) -> dict:
+    """Redact the text out of a chat turn's structured decision.
+
+    Everything the model wrote goes: the reply, its voice summary and voice
+    instruction, the running topic and notes, and each ranking's reasoning.
+    What stays is what the decision *was* — which messages it scored and how
+    high, whether it replied and to which message, in which language, and
+    whether it kept watching. A key the decision gains later is redacted.
+    """
+    redacted = _redact_mapping(
+        output, lambda key: key not in _TURN_DECISION_PRESERVED_KEYS
+    )
+    if isinstance(output.get("rankings"), list):
+        redacted["rankings"] = [
+            _redact_mapping(
+                ranking, lambda key: key not in _TURN_RANKING_PRESERVED_KEYS
+            )
+            for ranking in output["rankings"]
+            if isinstance(ranking, dict)
+        ]
+    if isinstance(output.get("response"), dict):
+        redacted["response"] = _redact_mapping(
+            output["response"], lambda key: key not in _TURN_RESPONSE_PRESERVED_KEYS
+        )
+    return redacted
 
 
 def redact_help_context_messages(messages: list[dict] | None) -> list[dict]:
@@ -272,6 +292,20 @@ def exception_type_name(error: BaseException) -> str:
     if cls.__module__ == "builtins":
         return cls.__qualname__
     return f"{cls.__module__}.{cls.__qualname__}"
+
+
+def stored_error_type(value: str | None) -> str | None:
+    """``value`` if it is an exception type name, otherwise the placeholder.
+
+    For a column that should hold :func:`exception_type_name` but is filled by
+    another process: a sender still on the old ``Type: message`` format, or
+    any other text, stores the placeholder rather than what it sent.
+    """
+    if value is None:
+        return None
+    if value and all(part.isidentifier() for part in value.split(".")):
+        return value
+    return _redact_present_text(value)
 
 
 def exception_trace(error: BaseException) -> str:

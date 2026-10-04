@@ -90,6 +90,7 @@ from smarter_dev.bot.proactive.windows import PASSIVE_SECONDS
 from smarter_dev.bot.proactive.windows import QUIET_SECONDS
 from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.proactive_settings_service import ProactiveSettingsService
+from smarter_dev.shared.exception_logging import log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +241,7 @@ async def dispatch_response(
         try:
             await bot.rest.create_message(channel_id, part, **kwargs)
         except Exception:  # noqa: BLE001 — one failed part must not kill the wake
-            logger.exception("proactive send failed")
+            log_exception(logger, "proactive send failed")
             break
         sent += 1
     return sent
@@ -303,7 +304,7 @@ async def load_memory_block(run: ProactiveRuntime, guild_id: str) -> str:
             personality = snapshot.personality
             kept_notes = snapshot.notes
         except Exception:  # noqa: BLE001 — memory is best-effort context
-            logger.warning("proactive guild memory read failed", exc_info=True)
+            log_exception(logger, "proactive guild memory read failed", level=logging.WARNING)
     return render_memory_block(
         long_term_memory=long_term,
         long_term_updated_at=long_term_at,
@@ -631,7 +632,8 @@ class ProactiveRuntime:
                     logger.info("proactive self-compaction: %s", usage)
                     return summary
                 except Exception:  # noqa: BLE001 — fall back, never hang a wake
-                    logger.exception(
+                    log_exception(
+                        logger,
                         "self-compaction failed; falling back to a watcher-model skim"
                     )
                 try:
@@ -645,7 +647,8 @@ class ProactiveRuntime:
                     )
                     return summary
                 except Exception:  # noqa: BLE001 — truncation beats a hung agent
-                    logger.exception(
+                    log_exception(
+                        logger,
                         "compaction summarize failed on both models; "
                         "compacting by truncation"
                     )
@@ -735,7 +738,7 @@ async def _record_usage(
             entries=entries,
         )
     except Exception:  # noqa: BLE001 — the ledger must not stop either loop
-        logger.exception("failed to persist proactive usage")
+        log_exception(logger, "failed to persist proactive usage")
 
 
 async def _run_producer(state: ChannelProducerState, *, passive: bool = False) -> None:
@@ -897,10 +900,11 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
     try:
         enabled_rows = await service.list_enabled_channels(state.guild_id)
     except APIError:
-        logger.warning(
+        log_exception(
+            logger,
             "proactive enabled-channel lookup failed guild=%s",
             state.guild_id,
-            exc_info=True,
+            level=logging.WARNING,
         )
         await asyncio.sleep(SETTINGS_RETRY_BACKOFF_SECONDS)
         return
@@ -940,7 +944,7 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
         try:
             runner.history = await history_store.read_guild(int(state.guild_id))
         except Exception:  # noqa: BLE001 — stored history is a cache
-            logger.exception("failed to load proactive guild history")
+            log_exception(logger, "failed to load proactive guild history")
         state.history_loaded = True
 
     brief_preamble = ""
@@ -954,10 +958,11 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
             history = await _fetch_history(run.bot, int(channel_id), exclude_ids=set())
         except hikari.HikariError:
             # An unreachable channel must not discard every channel's wake.
-            logger.warning(
+            log_exception(
+                logger,
                 "proactive channel history unavailable channel=%s",
                 channel_id,
-                exc_info=True,
+                level=logging.WARNING,
             )
             history = []
         return ChannelEnvironment(visible=history, bot_user_id=bot_user_id)
@@ -1069,7 +1074,7 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
                 reaction.emoji,
             )
         except Exception:  # noqa: BLE001
-            logger.exception("proactive reaction failed")
+            log_exception(logger, "proactive reaction failed")
 
     images_by_channel: dict[str, list] = {}
     for deps in wake_deps:
@@ -1100,13 +1105,13 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
         try:
             await run.bot.rest.create_message(int(channel_id), **image_kwargs)
         except Exception:  # noqa: BLE001 — images are best-effort extras
-            logger.exception("proactive image post failed")
+            log_exception(logger, "proactive image post failed")
 
     if history_store is not None:
         try:
             await history_store.write_guild(int(state.guild_id), runner.history)
         except Exception:  # noqa: BLE001 — persistence is best-effort
-            logger.exception("failed to persist proactive guild history")
+            log_exception(logger, "failed to persist proactive guild history")
         for producer_state in run.channel_states.values():
             if (
                 producer_state.guild_id != state.guild_id
@@ -1121,7 +1126,7 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
                     last_message_id=producer_state.last_reviewed_message_id,
                 )
             except Exception:  # noqa: BLE001 — persistence is best-effort
-                logger.exception("failed to persist proactive cursor")
+                log_exception(logger, "failed to persist proactive cursor")
     for channel_id, instruction_store in instruction_stores.items():
         if instruction_store.updates == persisted_updates[channel_id]:
             continue
@@ -1130,7 +1135,7 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
                 state.guild_id, channel_id, instruction_store.to_stored()
             )
         except Exception:  # noqa: BLE001 — persistence is best-effort
-            logger.exception("failed to persist watch instructions")
+            log_exception(logger, "failed to persist watch instructions")
     await _record_usage(
         service,
         guild_id=state.guild_id,
@@ -1165,7 +1170,7 @@ async def _consumer_loop(state: GuildAgentState) -> None:
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 — a failed wake must not kill the loop
-            logger.exception("proactive agent wake failed guild=%s", state.guild_id)
+            log_exception(logger, "proactive agent wake failed guild=%s", state.guild_id)
 
 
 def _engagement_notification(
@@ -1217,7 +1222,7 @@ async def _run_producer_guarded(state: ChannelProducerState) -> None:
     try:
         await _run_producer(state)
     except Exception:  # noqa: BLE001 — a failed run must not kill scheduling
-        logger.exception("proactive producer failed channel=%s", state.channel_id)
+        log_exception(logger, "proactive producer failed channel=%s", state.channel_id)
 
 
 async def _persist_active_window(
@@ -1235,7 +1240,7 @@ async def _persist_active_window(
             ttl_seconds=ACTIVE_WINDOW_SECONDS,
         )
     except Exception:  # noqa: BLE001 — persistence is best-effort
-        logger.exception("failed to persist active window channel=%s", state.channel_id)
+        log_exception(logger, "failed to persist active window channel=%s", state.channel_id)
 
 
 async def _restore_active_window(
@@ -1251,7 +1256,7 @@ async def _restore_active_window(
     try:
         stored_until = await store.read_active_until(int(state.channel_id))
     except Exception:  # noqa: BLE001 — restoration is best-effort
-        logger.exception("failed to read active window channel=%s", state.channel_id)
+        log_exception(logger, "failed to read active window channel=%s", state.channel_id)
         return
     remaining = (stored_until or 0) - time.time()
     if remaining > 0:
@@ -1273,7 +1278,7 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
             str(event.guild_id), str(event.channel_id)
         )
     except Exception:  # noqa: BLE001 — settings failure means "off", not a crash
-        logger.warning("proactive settings lookup failed", exc_info=True)
+        log_exception(logger, "proactive settings lookup failed", level=logging.WARNING)
         return
     if not settings.enabled:
         return
@@ -1374,7 +1379,7 @@ async def on_guild_reaction(event: hikari.GuildReactionAddEvent) -> None:
             str(event.guild_id), str(event.channel_id)
         )
     except Exception:  # noqa: BLE001 — settings failure means "off", not a crash
-        logger.warning("proactive settings lookup failed", exc_info=True)
+        log_exception(logger, "proactive settings lookup failed", level=logging.WARNING)
         return
     if not settings.enabled:
         return
@@ -1385,7 +1390,7 @@ async def on_guild_reaction(event: hikari.GuildReactionAddEvent) -> None:
                 event.channel_id, event.message_id
             )
         except Exception:  # noqa: BLE001 — a lost lookup only drops one signal
-            logger.warning("proactive reaction message fetch failed", exc_info=True)
+            log_exception(logger, "proactive reaction message fetch failed", level=logging.WARNING)
             return
     author = getattr(message, "author", None)
     if author is None or str(author.id) != str(me.id):
@@ -1446,7 +1451,7 @@ async def _passive_sweep(run: ProactiveRuntime) -> None:
             if idle_for >= PASSIVE_SECONDS:
                 await _run_producer(state, passive=True)
         except Exception:  # noqa: BLE001 — one channel must not kill the ticker
-            logger.exception("passive sweep failed channel=%s", state.channel_id)
+            log_exception(logger, "passive sweep failed channel=%s", state.channel_id)
 
 
 async def _sweep_expired_envelopes(run: ProactiveRuntime) -> None:
@@ -1460,7 +1465,7 @@ async def _sweep_expired_envelopes(run: ProactiveRuntime) -> None:
     try:
         dropped = await queue.trim_expired_envelopes(connected_guild_ids)
     except RedisError:
-        logger.exception("proactive envelope retention trim failed")
+        log_exception(logger, "proactive envelope retention trim failed")
         return
     logger.info("proactive envelope retention trim dropped=%d", dropped)
 
@@ -1489,7 +1494,7 @@ async def _fetch_missed(
         ).limit(CATCHUP_MAX_MESSAGES):
             fetched.append(message)
     except Exception:  # noqa: BLE001 — catch-up is best-effort
-        logger.exception("proactive catch-up fetch failed channel=%s", channel_id)
+        log_exception(logger, "proactive catch-up fetch failed channel=%s", channel_id)
         return []
     fetched.sort(key=lambda message: int(message.id))
     cutoff = datetime.now(UTC) - timedelta(seconds=CATCHUP_MAX_AGE_SECONDS)
@@ -1507,10 +1512,11 @@ async def _recovery_channel_settings(
             try:
                 return await service.get_settings(guild_id, str(channel_id))
             except APIError:
-                logger.warning(
+                log_exception(
+                    logger,
                     "proactive recovery settings unavailable channel=%s",
                     channel_id,
-                    exc_info=True,
+                    level=logging.WARNING,
                 )
         await asyncio.sleep(SETTINGS_RETRY_BACKOFF_SECONDS)
 
@@ -1583,7 +1589,7 @@ async def _recover_channels(run: ProactiveRuntime) -> None:
                 if len(state.buffer) >= remaining:
                     break
         except Exception:  # noqa: BLE001 — one channel must not kill recovery
-            logger.exception("proactive recovery failed channel=%s", channel_id)
+            log_exception(logger, "proactive recovery failed channel=%s", channel_id)
 
 
 def _redis_text(value) -> str:
@@ -1703,7 +1709,8 @@ async def _process_control_entry(
         await redis_client.xack(CONTROL_STREAM_KEY, CONTROL_GROUP, stream_id)
         await redis_client.xdel(CONTROL_STREAM_KEY, stream_id)
     except Exception:
-        logger.exception(
+        log_exception(
+            logger,
             "failed proactive control command stream_id=%s",
             _redis_text(stream_id),
         )

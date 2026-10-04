@@ -20,6 +20,7 @@ from smarter_dev.bot.agents.tldr_agent import TLDRAgent
 from smarter_dev.bot.services.rate_limiter import rate_limiter
 from smarter_dev.bot.utils.messages import gather_message_context
 from smarter_dev.bot.views.tldr_views import TLDRShareView
+from smarter_dev.shared.exception_logging import log_exception
 
 if TYPE_CHECKING:
     pass
@@ -122,7 +123,7 @@ async def store_tldr_conversation(
                 return False
 
     except Exception as e:
-        logger.error(f"Error storing TLDR conversation: {e}")
+        logger.error(f"Error storing TLDR conversation: {type(e).__name__}")
         return False
 
 
@@ -206,13 +207,13 @@ async def generate_tldr_summary(
                 )
             except Exception as storage_error:
                 # Don't fail the response if storage fails
-                logger.warning(f"Failed to store TLDR conversation for {user_id}: {storage_error}")
+                logger.warning(f"Failed to store TLDR conversation for {user_id}: {type(storage_error).__name__}")
 
         return summary
 
     except Exception as e:
         error_message = str(e).lower()
-        logger.error(f"Failed to generate TLDR summary: {e}")
+        logger.error(f"Failed to generate TLDR summary: {type(e).__name__}")
 
         # Provide specific error messages based on the type of failure
         if "overloaded" in error_message or "503" in error_message:
@@ -257,7 +258,7 @@ async def tldr_command(ctx: lightbulb.Context) -> None:
             guild_id=ctx.guild_id
         )
     except RuntimeError:
-        logger.exception(f"tldr context fetch failed for channel {ctx.channel_id}")
+        log_exception(logger, f"tldr context fetch failed for channel {ctx.channel_id}")
         await ctx.edit_last_response(
             "❌ **Couldn't Read This Channel**\n\n"
             "I couldn't fetch the recent messages here. Check that I have "

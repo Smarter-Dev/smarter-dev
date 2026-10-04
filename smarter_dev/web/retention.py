@@ -15,14 +15,20 @@ trimmed to the same
 :data:`~smarter_dev.shared.message_content.CONTENT_RETENTION_WINDOW` (48 hours)
 by the bot, not by this sweep.
 
-What this sweep owns is the bot's own words: ``agent_output``,
-``ai_context_summary``, ``bot_response``, ``response_content`` and
-``decision_reason`` get a 48-hour window. Text that retells what members said
-— the compaction ``summary``, ``chat_agent_errors.provider_body`` and
-``handler_runs.error`` — is written as the placeholder now, and the sweep
-still clears those columns only as the back-fill path for rows written before
-write-time redaction landed, which is why it still nulls the columns the write
-path now placeholders. Each scrubbed row is stamped ``content_purged_at``; the row
+The bot's own words are not kept either, because any of them can quote a
+member. A chat turn's ``agent_output`` keeps the decision but not its reply,
+voice text, topic, notes or ranking reasons; its transcript keeps no reply
+text or tool-call arguments; the engagement's ``last_topic`` and
+``last_notes``, a help ``bot_response`` and a forum agent's
+``decision_reason`` and ``response_content`` are the placeholder. All are
+written that way, and :func:`redact_bot_words` applies the same redaction on
+every sweep to rows written before that landed, whatever their age.
+``ai_context_summary`` keeps its 48-hour window. Text that retells what
+members said — the compaction ``summary``, ``chat_agent_errors.provider_body``
+and ``handler_runs.error`` — is written as the placeholder too, and the
+48-hour pass still clears those columns as the back-fill path for rows
+written before write-time redaction landed, which is why it still nulls the
+columns the write path now placeholders. Each scrubbed row is stamped ``content_purged_at``; the row
 itself stays — timestamps, token counts, cost, model name, the decision the
 agent took — so cost dashboards and abuse monitoring keep their long history
 without keeping anyone's words.
@@ -84,6 +90,8 @@ from smarter_dev.web.models import (
     HelpConversation,
     ModerationAction,
 )
+from smarter_dev.shared.message_content import redact_model_message_parts
+from smarter_dev.shared.message_content import redact_turn_decision
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +100,9 @@ logger = logging.getLogger(__name__)
 # inside a JSON blob), so it streams in batches instead of loading a busy
 # guild's full 48 hours into memory at once.
 _HANDLER_RUN_BATCH = 500
+
+# How many chat turns the bot's-words back-fill rewrites per round trip.
+_TURN_BATCH = 500
 
 
 def cutoff_for(now: datetime) -> datetime:
@@ -375,6 +386,130 @@ async def scrub_handler_runs(
             return scrubbed
 
 
+def _placeholder_unless_blank(column: Any) -> Any:
+    """SQL for ``column`` with any text in it replaced by the placeholder."""
+    return case(
+        (or_(column.is_(None), column == ""), column),
+        else_=MESSAGE_CONTENT_PLACEHOLDER,
+    )
+
+
+def _holds_text(column: Any) -> Any:
+    """SQL true where ``column`` holds text other than the placeholder."""
+    return (column != "") & (column != MESSAGE_CONTENT_PLACEHOLDER)
+
+
+async def _redact_turn_text(session: AsyncSession) -> int:
+    """Rewrite each unpurged turn's decision and transcript as written today.
+
+    The 48-hour pass already emptied older turns. A turn written before the
+    write path redacted the bot's words is rewritten in place; one written
+    since comes out unchanged and is left alone.
+    """
+    rewritten = 0
+    after = None
+    while True:
+        query = (
+            select(
+                ChatAgentTurn.id,
+                ChatAgentTurn.agent_output,
+                ChatAgentTurn.model_messages_delta,
+            )
+            .where(ChatAgentTurn.content_purged_at.is_(None))
+            .order_by(ChatAgentTurn.id)
+            .limit(_TURN_BATCH)
+        )
+        if after is not None:
+            query = query.where(ChatAgentTurn.id > after)
+        rows = (await session.execute(query)).all()
+        if not rows:
+            return rewritten
+        for turn_id, output, delta in rows:
+            redacted_output = redact_turn_decision(output or {})
+            redacted_delta = redact_model_message_parts(delta)
+            if redacted_output == (output or {}) and redacted_delta == delta:
+                continue
+            await session.execute(
+                update(ChatAgentTurn)
+                .where(ChatAgentTurn.id == turn_id)
+                .values(
+                    agent_output=redacted_output,
+                    model_messages_delta=redacted_delta,
+                )
+            )
+            rewritten += 1
+        after = rows[-1][0]
+        if len(rows) < _TURN_BATCH:
+            return rewritten
+
+
+async def redact_bot_words(
+    session: AsyncSession, cutoff: datetime, now: datetime
+) -> int:
+    """Replace the bot's own words in rows already written, whatever their age.
+
+    The write path stores these as the placeholder; this is the back-fill for
+    rows written before it did. It leaves ``content_purged_at`` alone, so the
+    48-hour pass still runs on each row; a row that pass already emptied holds
+    no text, so only unpurged rows are read. ``cutoff`` and ``now`` are
+    unused: the redaction does not wait for a window.
+    """
+    del cutoff, now
+    help_answers = await session.execute(
+        update(HelpConversation)
+        .where(
+            HelpConversation.content_purged_at.is_(None),
+            _holds_text(HelpConversation.bot_response),
+        )
+        .values(bot_response=MESSAGE_CONTENT_PLACEHOLDER)
+    )
+    forum_replies = await session.execute(
+        update(ForumAgentResponse)
+        .where(
+            ForumAgentResponse.content_purged_at.is_(None),
+            or_(
+                _holds_text(ForumAgentResponse.decision_reason),
+                _holds_text(ForumAgentResponse.response_content),
+            )
+        )
+        .values(
+            decision_reason=_placeholder_unless_blank(
+                ForumAgentResponse.decision_reason
+            ),
+            response_content=_placeholder_unless_blank(
+                ForumAgentResponse.response_content
+            ),
+        )
+    )
+    engagement_topics = await session.execute(
+        update(ChatAgentEngagement)
+        .where(
+            or_(
+                _holds_text(ChatAgentEngagement.last_topic),
+                _holds_text(ChatAgentEngagement.last_notes),
+            )
+        )
+        .values(
+            last_topic=_placeholder_unless_blank(ChatAgentEngagement.last_topic),
+            last_notes=_placeholder_unless_blank(ChatAgentEngagement.last_notes),
+        )
+        .execution_options(synchronize_session=False)
+    )
+    # The old format was always "Type: message"; a type name has no ": ".
+    voice_errors = await session.execute(
+        update(ChatAgentTurn)
+        .where(ChatAgentTurn.voice_send_error.like("%: %"))
+        .values(voice_send_error=MESSAGE_CONTENT_PLACEHOLDER)
+    )
+    return (
+        (help_answers.rowcount or 0)
+        + (forum_replies.rowcount or 0)
+        + (engagement_topics.rowcount or 0)
+        + (voice_errors.rowcount or 0)
+        + await _redact_turn_text(session)
+    )
+
+
 # Table name -> scrubber. Ordered as they run; the name is what shows up in the
 # sweep log and in the operator-facing summary.
 SCRUBBERS: dict[str, Any] = {
@@ -405,6 +540,10 @@ async def run_retention_sweep(
     cutoff = cutoff_for(now)
     result = SweepResult(cutoff=cutoff)
 
+    result.counts["bot's own words, any age"] = await redact_bot_words(
+        session, cutoff, now
+    )
+    await session.commit()
     for table, scrubber in SCRUBBERS.items():
         result.counts[table] = await scrubber(session, cutoff, now)
         await session.commit()

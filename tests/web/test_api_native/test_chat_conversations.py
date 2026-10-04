@@ -431,8 +431,8 @@ class TestCreateTurn:
         await session.refresh(engagement)
         assert engagement.total_chat_tokens_input == 100
         assert engagement.total_chat_tokens_output == 50
-        assert engagement.last_topic == "greetings"
-        assert engagement.last_notes == "friendly"
+        assert engagement.last_topic == MESSAGE_CONTENT_PLACEHOLDER
+        assert engagement.last_notes == MESSAGE_CONTENT_PLACEHOLDER
 
     async def test_unknown_engagement_is_404(self, client: AsyncClient, session):
         response = await client.post(
@@ -832,17 +832,71 @@ class TestTurnStoresPlaceholdersForMessageText:
 
         assert (await _stored_turn(session)).triggering_messages == []
 
-    async def test_agent_output_survives_verbatim(self, client: AsyncClient, session):
+    async def test_agent_output_keeps_the_decision_without_its_words(
+        self, client: AsyncClient, session
+    ):
         engagement = await _seed_engagement(session)
         agent_output = {
+            "rankings": [{"message_id": "444", "score": 8, "reasoning": "they asked"}],
+            "response_language": "en",
             "topic": "greetings",
             "notes": "friendly",
-            "response": {"message": "hello there", "target_message_id": "444"},
+            "continue_watching": True,
+            "response": {
+                "target_message_id": "444",
+                "reply_directly": True,
+                "message": "hello there",
+                "voice_summary": "hi",
+                "voice_instruction": "warmly",
+                "not_cs_topic_brief_answer": False,
+            },
         }
 
         await _post_turn(client, engagement, agent_output=agent_output)
 
-        assert (await _stored_turn(session)).agent_output == agent_output
+        assert (await _stored_turn(session)).agent_output == {
+            "rankings": [{"message_id": "444", "score": 8, "reasoning": MESSAGE_CONTENT_PLACEHOLDER}],
+            "response_language": "en",
+            "topic": MESSAGE_CONTENT_PLACEHOLDER,
+            "notes": MESSAGE_CONTENT_PLACEHOLDER,
+            "continue_watching": True,
+            "response": {
+                "target_message_id": "444",
+                "reply_directly": True,
+                "message": MESSAGE_CONTENT_PLACEHOLDER,
+                "voice_summary": MESSAGE_CONTENT_PLACEHOLDER,
+                "voice_instruction": MESSAGE_CONTENT_PLACEHOLDER,
+                "not_cs_topic_brief_answer": False,
+            },
+        }
+
+    async def test_a_voice_error_keeps_its_type_only(
+        self, client: AsyncClient, session
+    ):
+        engagement = await _seed_engagement(session)
+
+        await _post_turn(
+            client,
+            engagement,
+            voice_sent_ok=False,
+            voice_send_error="HTTPException: 400 said hello there",
+        )
+
+        assert (await _stored_turn(session)).voice_send_error == MESSAGE_CONTENT_PLACEHOLDER
+
+    async def test_a_voice_error_type_is_stored(self, client: AsyncClient, session):
+        engagement = await _seed_engagement(session)
+
+        await _post_turn(
+            client,
+            engagement,
+            voice_sent_ok=False,
+            voice_send_error="hikari.errors.BadRequestError",
+        )
+
+        assert (
+            await _stored_turn(session)
+        ).voice_send_error == "hikari.errors.BadRequestError"
 
 
 class TestTurnDeltaRedaction:
@@ -862,7 +916,7 @@ class TestTurnDeltaRedaction:
         assert by_kind["user-prompt"]["content"] == MESSAGE_CONTENT_PLACEHOLDER
         assert by_kind["tool-return"]["content"] == {}
 
-    async def test_text_tool_call_and_system_parts_survive(
+    async def test_the_models_own_parts_keep_only_their_bookkeeping(
         self, client: AsyncClient, session
     ):
         engagement = await _seed_engagement(session)
@@ -875,10 +929,10 @@ class TestTurnDeltaRedaction:
             for part in message["parts"]
         ]
         by_kind = {part["part_kind"]: part for part in parts}
-        assert by_kind["text"]["content"] == "the agent reply"
+        assert by_kind["text"]["content"] == MESSAGE_CONTENT_PLACEHOLDER
         assert by_kind["tool-call"]["tool_name"] == "web_read"
-        assert by_kind["tool-call"]["args"] == {"query": "a phrase"}
-        assert by_kind["system-prompt"]["content"] == "you are a bot"
+        assert by_kind["tool-call"]["args"] == {}
+        assert by_kind["system-prompt"]["content"] == MESSAGE_CONTENT_PLACEHOLDER
         assert by_kind["tool-return"]["tool_name"] == "web_read"
 
     async def test_absent_delta_stays_null(self, client: AsyncClient, session):

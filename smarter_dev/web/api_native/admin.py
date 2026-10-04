@@ -82,6 +82,7 @@ from smarter_dev.web.api_native.errors import (
 )
 from smarter_dev.web.models import HelpConversation
 from smarter_dev.web.security_logger import get_security_logger
+from smarter_dev.shared.message_content import redact_text
 
 # Permissions granted to the bot's Skrift service key (see roles.py
 # `bot-service` role and the phase-01 key-mint runbook). ``bot-api-admin``
@@ -119,7 +120,8 @@ class AdminController(Controller):
         The member's own Discord text is redacted before the row exists: the
         channel scrape in ``context_messages`` always, and ``user_question``
         unless the member typed it at the bot as a slash-command argument.
-        The bot's own answer is kept.
+        The bot's own answer is redacted too: it can quote the question or
+        the channel it was answered from.
         """
         caller = await resolve_request_api_key(request)
         try:
@@ -134,7 +136,7 @@ class AdminController(Controller):
                 user_question=redact_help_question(
                     data.user_question, data.interaction_type
                 ),
-                bot_response=data.bot_response,
+                bot_response=redact_text(data.bot_response),
                 tokens_used=data.tokens_used,
                 response_time_ms=data.response_time_ms,
                 retention_policy=data.retention_policy,

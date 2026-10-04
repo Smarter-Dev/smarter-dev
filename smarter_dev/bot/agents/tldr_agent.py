@@ -255,7 +255,7 @@ class TLDRAgent(BaseAgent):
             return summary_with_count, tokens_used, messages_used
 
         except Exception as e:
-            logger.error(f"Error generating TLDR summary: {e}")
+            logger.error(f"Error generating TLDR summary: {type(e).__name__}")
             return ("**Channel Summary**\nSorry, there was too much content to summarize. Try using a smaller message count or wait a moment before trying again.\n\n*(Unable to process messages)*", 0, 0)
 
     async def generate_summary_async(
@@ -302,7 +302,7 @@ class TLDRAgent(BaseAgent):
             return summary_with_count, tokens_used, messages_used
 
         except Exception as e:
-            logger.error(f"Error generating async TLDR summary: {e}")
+            logger.error(f"Error generating async TLDR summary: {type(e).__name__}")
             return ("**Channel Summary**\nSorry, there was too much content to summarize. Try using a smaller message count or wait a moment before trying again.\n\n*(Unable to process messages)*", 0, 0)
 
 

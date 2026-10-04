@@ -207,7 +207,8 @@ class TestChatAgent:
         await run_retention_sweep(db_session, now=NOW)
 
         await db_session.refresh(engagement)
-        assert engagement.last_topic == "what the channel was talking about"
+        # Not yet due, so not cleared; the any-age pass still redacts it.
+        assert engagement.last_topic == MESSAGE_CONTENT_PLACEHOLDER
 
     async def test_engagement_text_rewritten_after_a_sweep_is_cleared_again(
         self, db_session
@@ -422,6 +423,145 @@ class TestForumAgentResponses:
         assert response.confidence_score == 0.9
         assert response.tokens_used == 500
         assert response.responded is True
+
+
+class TestBotWordsAnyAge:
+    """The bot's own words in rows written before write-time redaction."""
+
+    async def test_a_fresh_help_answer_is_redacted_now(self, db_session):
+        db_session.add(_help_conversation(FRESH))
+        await db_session.flush()
+
+        result = await run_retention_sweep(db_session, now=NOW)
+
+        conversation = (
+            await db_session.execute(select(HelpConversation))
+        ).scalar_one()
+        assert conversation.bot_response == MESSAGE_CONTENT_PLACEHOLDER
+        assert conversation.content_purged_at is None
+        assert conversation.tokens_used == 120
+        assert result.counts["bot's own words, any age"] == 1
+
+    async def test_a_fresh_forum_reply_and_reason_are_redacted_now(self, db_session):
+        agent = await TestForumAgentResponses()._agent(db_session)
+        db_session.add(
+            ForumAgentResponse(
+                agent_id=agent.id,
+                guild_id="111",
+                channel_id="222",
+                thread_id="333",
+                post_title=MESSAGE_CONTENT_PLACEHOLDER,
+                post_content=MESSAGE_CONTENT_PLACEHOLDER,
+                author_display_name="someone",
+                decision_reason="they asked how to deploy",
+                response_content="",
+                confidence_score=0.4,
+                responded=False,
+                created_at=FRESH,
+            )
+        )
+        await db_session.flush()
+
+        await run_retention_sweep(db_session, now=NOW)
+
+        response = (
+            await db_session.execute(select(ForumAgentResponse))
+        ).scalar_one()
+        assert response.decision_reason == MESSAGE_CONTENT_PLACEHOLDER
+        assert response.response_content == ""
+        assert response.confidence_score == 0.4
+
+    async def test_a_fresh_turn_keeps_its_decision_without_its_words(
+        self, db_session
+    ):
+        engagement = await _engagement(db_session, FRESH)
+        turn = await _turn(db_session, engagement, FRESH)
+        turn.agent_output = {
+            "topic": "greetings",
+            "notes": None,
+            "continue_watching": True,
+            "response": {"target_message_id": "444", "message": "hey yourself"},
+        }
+        turn.model_messages_delta = [
+            {
+                "kind": "response",
+                "parts": [
+                    {"part_kind": "text", "content": "hey yourself"},
+                    {
+                        "part_kind": "tool-call",
+                        "tool_name": "web_search",
+                        "tool_call_id": "c1",
+                        "args": {"query": "what they asked"},
+                    },
+                ],
+            }
+        ]
+        await db_session.flush()
+
+        await run_retention_sweep(db_session, now=NOW)
+
+        await db_session.refresh(turn)
+        await db_session.refresh(engagement)
+        assert turn.agent_output == {
+            "topic": MESSAGE_CONTENT_PLACEHOLDER,
+            "notes": None,
+            "continue_watching": True,
+            "response": {
+                "target_message_id": "444",
+                "message": MESSAGE_CONTENT_PLACEHOLDER,
+            },
+        }
+        assert turn.model_messages_delta == [
+            {
+                "kind": "response",
+                "parts": [
+                    {"part_kind": "text", "content": MESSAGE_CONTENT_PLACEHOLDER},
+                    {
+                        "part_kind": "tool-call",
+                        "tool_name": "web_search",
+                        "tool_call_id": "c1",
+                        "args": {},
+                    },
+                ],
+            }
+        ]
+        assert turn.content_purged_at is None
+        assert turn.chat_tokens_input == 900
+        assert engagement.last_topic == MESSAGE_CONTENT_PLACEHOLDER
+        assert engagement.last_notes == MESSAGE_CONTENT_PLACEHOLDER
+
+    async def test_an_old_voice_error_keeps_no_text(self, db_session):
+        engagement = await _engagement(db_session, STALE - timedelta(days=90))
+        old = await _turn(db_session, engagement, STALE - timedelta(days=90))
+        old.voice_sent_ok = False
+        old.voice_send_error = "BadRequestError: could not say hey yourself"
+        typed = await _turn(db_session, engagement, STALE)
+        typed.voice_sent_ok = False
+        typed.voice_send_error = "hikari.errors.BadRequestError"
+        await db_session.flush()
+
+        await run_retention_sweep(db_session, now=NOW)
+
+        await db_session.refresh(old)
+        await db_session.refresh(typed)
+        assert old.voice_send_error == MESSAGE_CONTENT_PLACEHOLDER
+        assert typed.voice_send_error == "hikari.errors.BadRequestError"
+
+    async def test_a_redacted_row_is_left_alone(self, db_session):
+        db_session.add(
+            _help_conversation(FRESH, bot_response=MESSAGE_CONTENT_PLACEHOLDER)
+        )
+        engagement = await _engagement(db_session, FRESH)
+        engagement.last_topic = MESSAGE_CONTENT_PLACEHOLDER
+        engagement.last_notes = None
+        turn = await _turn(db_session, engagement, FRESH)
+        turn.agent_output = {"topic": MESSAGE_CONTENT_PLACEHOLDER}
+        turn.model_messages_delta = None
+        await db_session.flush()
+
+        result = await run_retention_sweep(db_session, now=NOW)
+
+        assert result.counts["bot's own words, any age"] == 0
 
 
 class TestModerationActions:

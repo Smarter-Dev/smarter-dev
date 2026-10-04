@@ -27,6 +27,7 @@ import lightbulb
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.web.handler_caps import GUILD_MEMBER_EVENTS_PER_MIN, WINDOW_SECONDS
+from smarter_dev.shared.exception_logging import log_exception
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class ActivityBatcher:
         try:
             await api.post("/activity/batch", json_data={"events": events})
         except Exception:  # noqa: BLE001 — activity is best-effort; keep for retry
-            logger.debug("activity flush failed; re-queueing", exc_info=True)
+            log_exception(logger, "activity flush failed; re-queueing", level=logging.DEBUG)
             for (g, u), at in taken.items():
                 self.record(g, u, at)
 
@@ -131,7 +132,7 @@ class ActiveChannelsCache:
             try:
                 await self._refresh(api)
             except Exception:  # noqa: BLE001 — never let dispatch crash on a cache miss
-                logger.debug("active-channels refresh failed", exc_info=True)
+                log_exception(logger, "active-channels refresh failed", level=logging.DEBUG)
                 return False
         return True
 
@@ -230,7 +231,7 @@ async def _dispatch(
             },
         )
     except Exception:  # noqa: BLE001 — dispatch is best-effort for a toy
-        logger.debug("handler dispatch failed", exc_info=True)
+        log_exception(logger, "handler dispatch failed", level=logging.DEBUG)
         return True  # a transient error is not a raid-gate decline
     return bool(response.json().get("dispatched", True))
 
@@ -536,10 +537,11 @@ async def replay_startup_rules_acceptances(bot: Any) -> None:
         try:
             members = await _paged_guild_members(bot, guild_id)
         except Exception:  # noqa: BLE001 — one guild's fetch must not drop the rest
-            logger.warning(
+            log_exception(
+                logger,
                 "startup replay: member fetch failed for guild %s",
                 guild_id,
-                exc_info=True,
+                level=logging.WARNING,
             )
             continue
         await replay_missed_rules_acceptances(str(guild_id), members, _dispatch)

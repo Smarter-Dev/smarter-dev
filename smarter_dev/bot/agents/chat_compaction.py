@@ -71,6 +71,7 @@ from pydantic_ai.models import Model
 
 from smarter_dev.bot.agents.model_router import build_model_for
 from smarter_dev.bot.agents.model_router import model_settings_for
+from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ReasoningLevel
@@ -316,7 +317,7 @@ async def _summarise_conversation(transcript: str) -> _SummariseResult | None:
     try:
         result = await get_summarizer_agent().run(user_prompt=transcript)
     except Exception:
-        logger.exception("Conversation summariser failed; skipping compaction")
+        log_exception(logger, "Conversation summariser failed; skipping compaction")
         return None
     summary = (result.output or "").strip()
     if not summary:
