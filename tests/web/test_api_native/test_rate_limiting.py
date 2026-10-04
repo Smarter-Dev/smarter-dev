@@ -286,7 +286,6 @@ class TestRateLimitExceeded:
                 "event": "rate_limit_exceeded",
                 "success": False,
                 "key_id": str(skrift_key_row.id),
-                "key_prefix": skrift_key_row.key_prefix,
                 "current_usage": RATE_LIMIT_PER_SECOND,
                 "rate_limit": RATE_LIMIT_PER_SECOND,
                 "window": "second",
