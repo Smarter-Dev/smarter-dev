@@ -30,7 +30,7 @@ def _request() -> MagicMock:
 def _key() -> SimpleNamespace:
     return SimpleNamespace(
         id=UUID("00000000-0000-0000-0000-0000000000ab"),
-        key_prefix="sk_abcd",
+        key_prefix="sk_auth1",  # a prefix the scrubber would redact
         display_name="Auth Service",  # a name the scrubber would redact
     )
 
@@ -103,7 +103,6 @@ async def test_real_logfire_receives_every_event_unscrubbed(monkeypatch, capfire
             "security.event": "rate_limit_exceeded",
             "success": False,
             "key_id": "00000000-0000-0000-0000-0000000000ab",
-            "key_prefix": "sk_abcd",
             "current_usage": 10,
             "rate_limit": 10,
             "window": "second",
@@ -115,7 +114,6 @@ async def test_real_logfire_receives_every_event_unscrubbed(monkeypatch, capfire
             "success": True,
             "operation": "view_help_conversation",
             "key_id": "00000000-0000-0000-0000-0000000000ab",
-            "key_prefix": "sk_abcd",
             "details": "Viewed conversation 00000000-0000-0000-0000-0000000000cd",
             "http.route": "/api/guilds/{guild_id}/bytes/config",
             "http.method": "GET",
@@ -196,6 +194,7 @@ async def test_no_api_native_route_is_scrubbed_from_any_event(monkeypatch, capfi
     ]
     assert "Scrubbed" not in repr(spans)
     assert "Auth Service" not in repr(spans)
+    assert "sk_auth1" not in repr(spans)
 
 
 @pytest.mark.asyncio

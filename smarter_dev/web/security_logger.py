@@ -16,8 +16,9 @@ the like), so events arrive readable: ``login_failed`` rather than
 method's values are fixed codes for the same reason. Values we do not
 choose go under keys Logfire never scrubs: the route template and method as
 ``http.route`` and ``http.method`` (``/api/auth/validate`` would otherwise be
-redacted for containing "auth"). The calling key is identified by id and
-prefix, not by its free-text name.
+redacted for containing "auth"). The calling key is identified by its id
+alone: not by its free-text name, nor by its random prefix, either of which
+can contain a scrubbed word.
 
 No event records a member's Discord id. Paths are recorded as route
 templates (``/api/guilds/{guild_id}/bytes/balance/{user_id}``), never the
@@ -49,7 +50,6 @@ class AuthenticatedKeyLike(Protocol):
     """
 
     id: UUID
-    key_prefix: str
 
 
 def _http(request: Request) -> dict[str, Any]:
@@ -131,7 +131,6 @@ class SecurityLogger:
             "rate_limit_exceeded",
             False,
             key_id=str(api_key.id),
-            key_prefix=api_key.key_prefix,
             current_usage=current_usage,
             rate_limit=limit,
             window=window,
@@ -148,8 +147,8 @@ class SecurityLogger:
     ) -> None:
         """Log an administrative operation by the calling API key.
 
-        The key is identified by id and prefix; its display name is free text
-        that Logfire's scrubber may redact. ``details`` must not name a
+        The key is identified by id alone; its display name and prefix can
+        contain words Logfire's scrubber redacts. ``details`` must not name a
         member; callers describe the operation's scope (a guild, a page, a
         conversation id) and nothing more.
         """
@@ -158,7 +157,6 @@ class SecurityLogger:
             success,
             operation=operation,
             key_id=str(api_key.id),
-            key_prefix=api_key.key_prefix,
             details=details or f"Admin operation: {operation}",
             **_http(request),
         )
