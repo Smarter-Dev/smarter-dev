@@ -25,7 +25,6 @@ from datetime import UTC, datetime, timedelta
 
 import redis.asyncio as redis
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
-from smarter_dev.shared.exception_logging import log_exception
 
 logger = logging.getLogger(__name__)
 

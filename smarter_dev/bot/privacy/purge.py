@@ -73,6 +73,7 @@ from smarter_dev.bot.privacy.compaction import purge_watch_instructions
 from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
 from smarter_dev.bot.services.chat_memory import ChatMemory
 from smarter_dev.bot.services.chat_memory import chat_privacy_lock_key
+from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.privacy_purge import BOT_CONSUMER_GROUP
 from smarter_dev.shared.privacy_purge import PURGE_STREAM
 from smarter_dev.shared.privacy_purge import WORKER_CONSUMER_GROUP
@@ -396,7 +397,7 @@ class _GuildPrivacyLock:
                     _RENEW_LOCK, 1, self._key, self._token, PRIVACY_LOCK_TTL_SECONDS
                 )
             except Exception:  # noqa: BLE001 — the TTL still bounds the lock
-                logger.warning("privacy lock renewal failed", exc_info=True)
+                log_exception(logger, "privacy lock renewal failed", level=logging.WARNING)
 
     async def __aexit__(self, *exc_info) -> None:
         if self._renewer is not None:
