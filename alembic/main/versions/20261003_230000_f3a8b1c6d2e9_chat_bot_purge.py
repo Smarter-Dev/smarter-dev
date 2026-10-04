@@ -5,7 +5,7 @@ block list keeps both runtimes from reading that user's old messages again.
 All three tables are new, so the build before this one never reads them.
 
 Revision ID: f3a8b1c6d2e9
-Revises: e7b2c4d9a1f3
+Revises: c5e1a9d3b7f2
 Create Date: 2026-10-03 23:00:00.000000
 
 """
@@ -18,7 +18,7 @@ from sqlalchemy.dialects import postgresql
 from alembic import op
 
 revision: str = "f3a8b1c6d2e9"
-down_revision: str | None = "e7b2c4d9a1f3"
+down_revision: str | None = "c5e1a9d3b7f2"
 branch_labels = None
 depends_on = None
 
