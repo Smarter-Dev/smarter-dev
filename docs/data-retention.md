@@ -344,9 +344,9 @@ token is stored. Preview pages are read-only, unlisted, and marked `noindex`.
 
 ## Retention is not deletion
 
-Everything above bounds message *text*. None of it removes a person: the
-48-hour sweep blanks text but keeps each row with its Discord ids and
-usernames, the agent histories keep usernames and ids inside their prose, and
+Everything above is about where message *text* is kept and for how long.
+None of it removes a person: a row whose text is redacted or blanked keeps
+its Discord ids and usernames, the agent histories keep usernames and ids inside their prose, and
 bytes, squads, quests, challenge submissions, activity dates and moderation
 actions are game and moderation records keyed by Discord id with no clock at
 all. Deleting a site account removes the account and its site chat, but
@@ -354,9 +354,10 @@ nothing keyed by Discord id (#45 tracks that gap). Member leave removes only
 that guild's bytes balance and squad memberships.
 
 Deleting one person's data is a manual request handled by the admin until it
-is automated, with the chat bot's part done by the agent purge (#79). The public notice is `/privacy`
-(`smarter_dev/shared/privacy_notice.md`); the admin's steps, including what is
-kept and what cannot be removed yet, are in `docs/privacy-deletion-runbook.md`.
+is automated, with the chat bot's part done by the agent purge (#79). The
+public notice is `/privacy` (`smarter_dev/shared/privacy_notice.md`); the
+admin's steps, including what is kept and what cannot be removed yet, are in
+`docs/privacy-deletion-runbook.md`.
 
 ## Security logs
 
