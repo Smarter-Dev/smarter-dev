@@ -1008,6 +1008,15 @@ OUTSIDE_THE_CHECK = (
     "Redis keys outside the listed patterns and tables not listed here, "
     "such as bytes transactions and squad records.",
     "A runtime's in-process memory before it reloads from the stores.",
+    # What the name search does not catch (the matcher is exact by design).
+    "Other forms of a name: plurals and suffixes (alices), unaccented "
+    "variants (Jose for José), fullwidth or look-alike characters, hidden "
+    "zero-width characters, or different spacing between the words of a name.",
+    # What the store search does not reach.
+    "JSON nested more than five levels deep, JSON quoted inside ordinary "
+    "text, and encoded values (base64, compressed or pickled data).",
+    "Redis key names: an ID that appears only in a key's name, not its value, "
+    "is not found.",
 )
 
 

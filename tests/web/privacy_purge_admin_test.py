@@ -536,3 +536,12 @@ def test_the_page_offers_removal_beside_each_unchecked_name():
     assert "Remove (never searched)" in html
     assert 'action="/admin/bot/privacy-purges/rid/names/remove"' in html
     assert '<input type="hidden" name="name" value="k">' in html and "<csrf>" in html
+
+
+def test_the_page_lists_the_known_misses_of_the_check():
+    from smarter_dev.web.chat_bot_purge import OUTSIDE_THE_CHECK
+
+    text = " ".join(OUTSIDE_THE_CHECK)
+    for needle in ("plurals", "unaccented", "fullwidth", "zero-width", "spacing",
+                   "five levels", "inside ordinary", "encoded", "key names"):
+        assert needle in text
