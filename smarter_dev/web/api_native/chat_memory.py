@@ -93,8 +93,10 @@ class ChatMemoryController(Controller):
         notes_since = utc_day_start(datetime.now(UTC))
         blob = await get_guild_memory_blob(db_session, guild_id)
         if blob is not None and not blob.memory_enabled:
-            # The per-guild forget button: withhold everything, and say so, so
+            # The per-guild pause switch: withhold everything, and say so, so
             # the bot can tell "switched off" from "nothing to remember yet".
+            # Storage is untouched. Note writes (the POST below) do not check
+            # the flag, so a paused guild still accumulates notes.
             return ChatMemoryBundleRead(
                 guild_id=guild_id,
                 content=None,
