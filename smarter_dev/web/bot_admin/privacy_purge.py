@@ -49,6 +49,7 @@ from smarter_dev.shared.privacy_purge import SNOWFLAKE_PATTERN
 from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.chat_bot_purge import OUTSIDE_THE_CHECK
 from smarter_dev.web.chat_bot_purge import STATUS_CLOSED
+from smarter_dev.web.chat_bot_purge import CloseRefused
 from smarter_dev.web.chat_bot_purge import affected_guild_ids
 from smarter_dev.web.chat_bot_purge import block_list_revision
 from smarter_dev.web.chat_bot_purge import clean_names
@@ -59,6 +60,7 @@ from smarter_dev.web.chat_bot_purge import possible_remains
 from smarter_dev.web.chat_bot_purge import runtime_status
 from smarter_dev.web.chat_bot_purge import start_new_run
 from smarter_dev.web.chat_bot_purge import start_refusal
+from smarter_dev.web.chat_bot_purge import trim_commands
 from smarter_dev.web.chat_bot_purge_jobs import submit_check
 from smarter_dev.web.chat_bot_purge_jobs import submit_run
 from smarter_dev.web.discord_admin_client import get_admin_discord_client
@@ -82,21 +84,28 @@ async def known_names(db_session: AsyncSession, user_id: str) -> list[str]:
         )
     except Exception as error:  # noqa: BLE001 — the text can carry the ID
         logger.warning("Purge name lookup: Discord unavailable (%s)", type(error).__name__)
-    rows = await db_session.execute(
-        select(
-            BytesTransaction.giver_id,
-            BytesTransaction.giver_username,
-            BytesTransaction.receiver_username,
-        )
-        .where(
-            or_(
-                BytesTransaction.giver_id == user_id,
-                BytesTransaction.receiver_id == user_id,
+    try:
+        rows = (
+            await db_session.execute(
+                select(
+                    BytesTransaction.giver_id,
+                    BytesTransaction.giver_username,
+                    BytesTransaction.receiver_username,
+                )
+                .where(
+                    or_(
+                        BytesTransaction.giver_id == user_id,
+                        BytesTransaction.receiver_id == user_id,
+                    )
+                )
+                .limit(500)
             )
-        )
-        .limit(500)
-    )
-    for giver_id, giver_name, receiver_name in rows.all():
+        ).all()
+    except Exception as error:  # noqa: BLE001 — the statement's parameters are the ID
+        await db_session.rollback()
+        logger.warning("Purge name lookup: stored names unavailable (%s)", type(error).__name__)
+        rows = []
+    for giver_id, giver_name, receiver_name in rows:
         names.append(giver_name if giver_id == user_id else receiver_name)
     return clean_names(names)
 
@@ -134,6 +143,7 @@ async def _list_page(
             .limit(100)
         )
     ).all()
+    await trim_commands(get_redis_client(), now=datetime.now(UTC))
     return TemplateResponse(
         "admin/bot/privacy_purges/list.html",
         context={
@@ -219,6 +229,7 @@ class PrivacyPurgeAdminController(Controller):
         if purge is None:
             raise NotFoundException()
         steps = purge.steps or {}
+        await trim_commands(get_redis_client(), now=datetime.now(UTC))
         return TemplateResponse(
             "admin/bot/privacy_purges/view.html",
             context={
@@ -228,6 +239,7 @@ class PrivacyPurgeAdminController(Controller):
                 "possible_remains": possible_remains(steps),
                 "outside_the_check": OUTSIDE_THE_CHECK,
                 "runtimes": await runtime_status(get_redis_client()),
+                "list_revision": await block_list_revision(db_session),
                 "active_page": _ACTIVE_PAGE,
                 "flash_messages": get_flash_messages(request),
                 **await get_admin_context(request, db_session),
@@ -271,7 +283,8 @@ class PrivacyPurgeAdminController(Controller):
         if not await verify_csrf(request):
             flash_error(request, "Your session expired. Please try again.")
             return back
-        await submit_check(request_id)
+        # The deterministic search only; it never runs the agent.
+        await submit_check(request_id, scan_only=True)
         flash_success(request, "Check started.")
         return back
 
@@ -288,6 +301,15 @@ class PrivacyPurgeAdminController(Controller):
                 db_session, request_id, now=datetime.now(UTC), redis=get_redis_client()
             )
             await db_session.commit()
+        except CloseRefused as refused:
+            await db_session.rollback()
+            flash_error(
+                request,
+                f"Not closed: {len(refused.guild_ids)} guild(s) still have a tombstoned history "
+                f"({', '.join(refused.guild_ids[:10])}). Run the purge again; close once the "
+                "worker has rewritten them.",
+            )
+            return back
         except SQLAlchemyError as error:
             await db_session.rollback()
             _db_failure("close", error)
