@@ -21,7 +21,7 @@ The rules from the privacy plan shape everything here:
    rewrite); code rebuilds the block from the original bytes, so everything
    else comes back byte for byte and in order, and nothing can be added. A
    note that does not name them is never changed. An empty block stays
-   empty; a placeholder such as ``(empty)`` is never written.
+   empty, and a block that had text never comes back empty.
 3. **A failure changes nothing.** Any refusal or exception leaves the blocks,
    notes and revisions exactly as they were. There is no fallback that blanks
    a block to make a purge "succeed".
@@ -62,9 +62,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from smarter_dev.bot.agents.model_router import build_model_for
 from smarter_dev.bot.agents.model_router import model_settings_for
 from smarter_dev.shared.privacy_purge import PurgeTarget
-from smarter_dev.shared.privacy_segment_edit import (
-    PLACEHOLDERS,  # noqa: F401 — re-exported
-)
 from smarter_dev.shared.privacy_segment_edit import Segment
 from smarter_dev.shared.privacy_segment_edit import SegmentEdit
 from smarter_dev.shared.privacy_segment_edit import SegmentEditError
