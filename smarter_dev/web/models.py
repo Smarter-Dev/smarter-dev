@@ -6374,7 +6374,7 @@ class ChatBotPurgeRequest(Base):
     )
     discord_user_id: Mapped[str | None] = mapped_column(String(22), nullable=True)
     names: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
     run_id: Mapped[UUID | None] = mapped_column(
         PostgresUUID(as_uuid=True), nullable=True
     )

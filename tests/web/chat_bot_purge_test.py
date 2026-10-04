@@ -34,9 +34,9 @@ from smarter_dev.web.chat_bot_purge import read_blocked_users
 from smarter_dev.web.chat_bot_purge import record_ack
 from smarter_dev.web.chat_bot_purge import run_check
 from smarter_dev.web.chat_bot_purge import run_purge
-from smarter_dev.web.chat_memory_purge import NoteEdit
 from smarter_dev.web.chat_memory_purge import PurgeContext
 from smarter_dev.web.chat_memory_purge import PurgeOutput
+from smarter_dev.web.chat_memory_purge import SegmentEdit
 from smarter_dev.web.crud import get_guild_memory_blob
 from smarter_dev.web.crud import upsert_guild_memory_blob
 from smarter_dev.web.models import ChatBotBlockedUser
@@ -58,13 +58,16 @@ class _Result:
 
 
 class _ScriptedAgent:
+    """Removes every segment that names kai."""
+
     async def run(self, user_prompt: str, *, deps: PurgeContext):
         return _Result(
             PurgeOutput(
-                memory=deps.memory.replace(f"\n{KAI_LINE}", ""),
-                behavior=deps.behavior,
-                personality=deps.personality,
-                notes=[NoteEdit(id=note_id, action="keep") for note_id, _ in deps.notes],
+                edits=[
+                    SegmentEdit(id=seg.id, action="remove")
+                    for segs in deps.editable_by_location().values()
+                    for seg in segs
+                ]
             )
         )
 
@@ -148,7 +151,7 @@ async def test_a_run_waits_for_both_runtimes_to_enforce_the_new_list(
         sleep=_no_sleep,
     )
 
-    assert status == STATUS_WAITING
+    assert status == STATUS_NEEDS_REVIEW
     assert await redis.xlen(PURGE_STREAM) == 0
 
 
@@ -572,7 +575,9 @@ def test_ack_name_hits_reads_every_step_and_the_bare_form():
         "bot": {_GUILD: {"outcome": "purged", "detail": "history folded attempts=1 history_name_hits=2"}},
         "worker": {_GUILD: {"outcome": "purged", "detail": ""}},
     }
-    assert possible_remains(steps) == [{"guild_id": _GUILD, "component": "bot", "name_hits": 2}]
+    assert possible_remains(steps) == [
+        {"guild_id": _GUILD, "component": "bot", "name_hits": 2, "tombstoned": False}
+    ]
     assert run_outcome(steps, {"remains": []}) == STATUS_NEEDS_REVIEW
 
 
@@ -602,16 +607,8 @@ async def test_a_note_written_from_unpurged_history_is_caught_by_the_final_pass(
         )
         await session.commit()
 
-    class _DropKai(_ScriptedAgent):
-        async def run(self, user_prompt, *, deps):
-            out = (await super().run(user_prompt, deps=deps)).output
-            out.notes = [
-                NoteEdit(id=i, action="drop" if "kai" in c else "keep") for i, c in deps.notes
-            ]
-            return _Result(out)
-
     await _ack_all(session_factory, request.run_id, [_GUILD])
-    status = await _check(session_factory, redis, request.id, _DropKai())
+    status = await _check(session_factory, redis, request.id, _ScriptedAgent())
 
     assert status == STATUS_COMPLETE
     stored = await _stored(session_factory, request.id)
@@ -851,6 +848,7 @@ async def test_an_invalid_command_fails_the_run_before_any_memory_changes(
 
     assert status == STATUS_NEEDS_REVIEW
     assert agent.calls == 0
+    assert "not Discord snowflakes" in (await _stored(session_factory, request.id)).steps["error"]
     async with session_factory() as session:
         assert (await get_guild_memory_blob(session, _GUILD)).content == MEMORY
     assert await redis.xlen(PURGE_STREAM) == 0
@@ -1009,3 +1007,416 @@ async def test_a_second_execution_after_the_run_finished_does_nothing(
     assert agent.calls == 0
     assert await redis.xlen(PURGE_STREAM) == 1
     assert (await _stored(session_factory, request.id)).status == STATUS_AWAITING_ACKS
+
+
+# == second review round ===========================================================
+
+
+# -- a stale runtime: the run waits, then ends in review with the reason ------------
+
+
+async def test_a_process_holding_an_old_list_revision_holds_the_purge_back(
+    db_session, session_factory, redis
+):
+    from smarter_dev.web.chat_bot_purge import runtime_status
+    from smarter_dev.web.chat_bot_purge import start_refusal
+
+    await _seed_memory(db_session)
+    request = await _open(db_session)  # the list is now at revision 1
+    for component in ("bot", "worker"):
+        await redis.set(f"privacy:v1:consumer:{component}:host-1", "1", ex=180)
+    await redis.set(f"{enforcing_key('worker')}:host-1", 1, ex=180)
+    # One bot process kept running through a list outage on revision 0.
+    await redis.set(f"{enforcing_key('bot')}:host-1", 0, ex=180)
+    await redis.set(f"{enforcing_key('bot')}:host-2", 1, ex=180)
+
+    # The admin start is not refused (it only needs every component reporting
+    # some revision and a consumer); the run is what waits.
+    assert start_refusal(await runtime_status(redis)) is None
+
+    polls: list[int] = []
+
+    async def poll(_seconds):
+        polls.append(1)
+        if len(polls) == 2:
+            stored = await _stored(session_factory, request.id)
+            assert stored.status == STATUS_WAITING
+            assert await redis.xlen(PURGE_STREAM) == 0
+            await redis.set(f"{enforcing_key('bot')}:host-1", 1, ex=180)
+
+    agent = _CountingAgent()
+    status = await run_purge(
+        request.id, request.run_id, session_factory=session_factory, redis=redis,
+        now=lambda: _NOW, agent=agent, sleep=poll, wait_seconds=60, poll_seconds=5,
+    )
+    assert status == STATUS_AWAITING_ACKS
+    assert len(polls) == 2 and agent.calls == 1
+
+
+async def test_a_wait_that_times_out_ends_in_review_with_the_reason(
+    db_session, session_factory, redis
+):
+    await _seed_memory(db_session)
+    request = await _open(db_session)
+    await _enforce(redis, 1)
+    await redis.set(f"{enforcing_key('bot')}:host-2", 0, ex=180)  # stuck on its last list
+    agent = _CountingAgent()
+
+    status = await run_purge(
+        request.id, request.run_id, session_factory=session_factory, redis=redis,
+        now=lambda: _NOW, agent=agent, sleep=_no_sleep, wait_seconds=10, poll_seconds=5,
+    )
+
+    assert status == STATUS_NEEDS_REVIEW and agent.calls == 0
+    stored = await _stored(session_factory, request.id)
+    assert "bot holds revision 0" in stored.steps["error"]
+    assert "revision 1" in stored.steps["error"]
+    assert await redis.xlen(PURGE_STREAM) == 0
+    async with session_factory() as session:
+        assert (await get_guild_memory_blob(session, _GUILD)).content == MEMORY
+
+
+# -- M2: an unchecked name keeps the run in review ----------------------------------
+
+
+async def test_an_unchecked_name_ends_in_review(db_session, session_factory, redis):
+    await _seed_memory(db_session)
+    request = await _open(db_session, names=("kai", "k"))
+    await _enforce(redis, 1)
+    await _run(session_factory, redis, request.id, request.run_id, _ScriptedAgent())
+    await _ack_all(session_factory, request.run_id, [_GUILD])
+
+    assert await _check(session_factory, redis, request.id, _ScriptedAgent()) == STATUS_NEEDS_REVIEW
+    stored = await _stored(session_factory, request.id)
+    assert stored.check_report["unchecked_names"] == ["k"]
+
+
+# -- M3: pydantic-ai histories, JSON inside JSON ---------------------------------------
+
+
+async def test_the_check_reads_tool_args_and_returns_in_a_real_history(db_session, redis):
+    from pydantic_ai.messages import ModelMessagesTypeAdapter
+    from pydantic_ai.messages import ModelRequest
+    from pydantic_ai.messages import ModelResponse
+    from pydantic_ai.messages import ToolCallPart
+    from pydantic_ai.messages import ToolReturnPart
+
+    from smarter_dev.shared.privacy_purge import PurgeTarget
+    from smarter_dev.web.chat_bot_purge import scan_stores
+    from smarter_dev.web.models import ChatAgentTurn  # noqa: F401 — table exists
+    from smarter_dev.web.models import ProactiveAgentHistory
+
+    target = PurgeTarget.build(_KAI_ID, ["Zoë"])
+    messages = [
+        ModelResponse(
+            parts=[ToolCallPart(tool_name="note", args=json.dumps({"text": "line\nZoë"}), tool_call_id="c1")]
+        ),
+        ModelRequest(
+            parts=[ToolReturnPart(tool_name="note", content=json.dumps({"saved": "ok\nZoë"}), tool_call_id="c1")]
+        ),
+    ]
+    dumped = ModelMessagesTypeAdapter.dump_python(messages, mode="json")
+    raw = json.dumps(dumped)
+    assert "Zo\\\\u00eb" in raw  # escaped twice: once in args, once in the dump
+    db_session.add(
+        ProactiveAgentHistory(guild_id=_GUILD, schema_version=1, revision=1, checksum="x", history=dumped)
+    )
+    await db_session.commit()
+    await redis.set("proactive:v1:{guild:1}:history", raw)
+
+    report = await scan_stores(db_session, redis, target)
+
+    found = {hit["location"]: hit["name_hits"] for hit in report["remains"]}
+    assert found == {f"guild:{_GUILD}": 2, "proactive:v1:{guild:1}:history": 2}
+
+
+# -- M4: notes written between runs ---------------------------------------------------
+
+
+async def test_a_note_written_after_an_earlier_runs_memory_step_is_still_reviewed(
+    db_session, session_factory, redis
+):
+    from smarter_dev.web.crud import create_memory_note
+
+    await _seed_memory(db_session)
+    request = await _open(db_session)
+    await _enforce(redis, 1)
+    clock = {"now": _NOW}
+
+    def now():
+        return clock["now"]
+
+    # Run 1 purges the guild, then stalls (no acks ever arrive).
+    await run_purge(
+        request.id, request.run_id, session_factory=session_factory, redis=redis,
+        now=now, agent=_ScriptedAgent(), sleep=_no_sleep,
+    )
+    clock["now"] = _NOW + timedelta(hours=1)
+    async with session_factory() as session:
+        await create_memory_note(
+            session, guild_id=_GUILD, channel_id="555000111222333444",
+            content="the rust person is moving to embedded work.",
+            created_at=_NOW + timedelta(minutes=30), day_start=_NOW,
+        )
+        await session.commit()
+    clock["now"] = _NOW + timedelta(hours=2)
+    rerun_id = await _rerun(session_factory, request.id)
+    await run_purge(
+        request.id, rerun_id, session_factory=session_factory, redis=redis,
+        now=now, agent=_ScriptedAgent(), sleep=_no_sleep,
+    )
+    stored = await _stored(session_factory, request.id)
+    assert stored.steps["memory"][_GUILD]["earlier_run"] is True
+    await _ack_all(session_factory, rerun_id, [_GUILD])
+
+    seen: list[str] = []
+
+    class _Watch(_ScriptedAgent):
+        async def run(self, user_prompt, *, deps):
+            seen.extend(content for _, content in deps.notes)
+            return await super().run(user_prompt, deps=deps)
+
+    await run_check(request.id, session_factory=session_factory, redis=redis, now=now, agent=_Watch())
+    assert "the rust person is moving to embedded work." in seen
+
+
+# -- M5: any searched-store hit ends in review; the scan-only check ------------------
+
+
+async def test_an_operational_or_audit_hit_keeps_the_request_out_of_complete(
+    db_session, session_factory, redis
+):
+    await _seed_memory(db_session)
+    request = await _open(db_session)
+    await _enforce(redis, 1)
+    await _run(session_factory, redis, request.id, request.run_id, _ScriptedAgent())
+    await _ack_all(session_factory, request.run_id, [_GUILD])
+    await redis.xadd("proactive:v1:dead-letter", {"payload": f"from {_KAI_ID}"})
+
+    assert await _check(session_factory, redis, request.id, _ScriptedAgent()) == STATUS_NEEDS_REVIEW
+    stored = await _stored(session_factory, request.id)
+    assert stored.check_report["hit_counts"] == {"redis": 1}
+
+    await redis.delete("proactive:v1:dead-letter")
+    agent = _CountingAgent()
+    status = await run_check(
+        request.id, session_factory=session_factory, redis=redis, now=lambda: _NOW,
+        agent=agent, scan_only=True,
+    )
+    assert status == STATUS_COMPLETE and agent.calls == 0
+
+
+async def test_the_scan_only_check_never_runs_the_notes_pass(db_session, session_factory, redis):
+    await _seed_memory(db_session)
+    request = await _open(db_session)
+    await _enforce(redis, 1)
+    await _run(session_factory, redis, request.id, request.run_id, _ScriptedAgent())
+    await _ack_all(session_factory, request.run_id, [_GUILD])  # status: checking
+    agent = _CountingAgent()
+
+    status = await run_check(
+        request.id, session_factory=session_factory, redis=redis, now=lambda: _NOW,
+        agent=agent, scan_only=True,
+    )
+
+    assert status == STATUS_CHECKING and agent.calls == 0
+    assert (await _stored(session_factory, request.id)).steps["final_notes"] == {}
+
+
+@pytest.mark.parametrize(
+    "ack",
+    [
+        {"outcome": "failed", "detail": ""},
+        {"outcome": "purged", "detail": "history folded attempts=1 history_name_hits=3"},
+        {"outcome": "purged", "detail": "tombstoned=1"},
+    ],
+    ids=["failed", "name-hits", "tombstoned"],
+)
+async def test_a_late_flagged_ack_reopens_a_complete_request(
+    db_session, session_factory, redis, ack
+):
+    await _seed_memory(db_session)
+    request = await _open(db_session)
+    await _enforce(redis, 1)
+    await _run(session_factory, redis, request.id, request.run_id, _ScriptedAgent())
+    await _ack_all(session_factory, request.run_id, [_GUILD])
+    assert await _check(session_factory, redis, request.id, _ScriptedAgent()) == STATUS_COMPLETE
+
+    async with session_factory() as session:
+        await record_ack(
+            session, request.run_id, PurgeAck(component="worker", guild_id=_GUILD, **ack)
+        )
+        await session.commit()
+
+    assert (await _stored(session_factory, request.id)).status == STATUS_NEEDS_REVIEW
+
+
+# -- tombstones ---------------------------------------------------------------------
+
+
+async def test_a_tombstoned_guild_blocks_close_keeps_the_command_and_ends_in_review(
+    db_session, session_factory, redis
+):
+    from smarter_dev.shared.privacy_purge import history_tombstone_key
+    from smarter_dev.web.chat_bot_purge import CloseRefused
+
+    await _seed_memory(db_session)
+    request = await _open(db_session)
+    await _enforce(redis, 1)
+    await _run(session_factory, redis, request.id, request.run_id, _ScriptedAgent())
+    await redis.set(
+        history_tombstone_key(_GUILD),
+        json.dumps({"run_id": str(request.run_id), "request_id": str(request.id)}),
+    )
+    await _ack_all(session_factory, request.run_id, [_GUILD])
+
+    assert await _check(session_factory, redis, request.id, _ScriptedAgent()) == STATUS_NEEDS_REVIEW
+    stored = await _stored(session_factory, request.id)
+    assert stored.check_report["tombstoned"] == [_GUILD]
+    assert await redis.xlen(PURGE_STREAM) == 1  # the worker may still retry it
+    async with session_factory() as session:
+        with pytest.raises(CloseRefused):
+            await close_request(session, request.id, now=_NOW, redis=redis)
+        await session.rollback()
+    assert await redis.xlen(PURGE_STREAM) == 1
+    assert (await _stored(session_factory, request.id)).discord_user_id == _KAI_ID
+
+    # Another request's tombstone does not hold this one; an old plain one does.
+    await redis.set(history_tombstone_key(_GUILD), json.dumps({"request_id": "other"}))
+    async with session_factory() as session:
+        await close_request(session, request.id, now=_NOW, redis=redis)
+        await session.commit()
+    assert await redis.xlen(PURGE_STREAM) == 0
+
+
+async def test_a_plain_tombstone_counts_as_unknown_run(redis):
+    import uuid
+
+    from smarter_dev.shared.privacy_purge import history_tombstone_key
+    from smarter_dev.web.chat_bot_purge import tombstoned_guilds
+
+    await redis.set(history_tombstone_key(_GUILD), "1")
+    assert await tombstoned_guilds(redis, uuid.uuid4(), [_GUILD, _GUILDS[0]]) == [_GUILD]
+
+
+def test_tombstoned_acks_are_flagged():
+    from smarter_dev.web.chat_bot_purge import ack_tombstoned
+    from smarter_dev.web.chat_bot_purge import flagged_guilds
+
+    assert ack_tombstoned("purge: postgres:purged v1:unpurged v1:tombstoned")
+    assert ack_tombstoned("tombstoned=1")
+    assert not ack_tombstoned("purge: postgres:purged v1:unpurged v1:not-tombstoned")
+    assert not ack_tombstoned("tombstoned=0")
+    steps = {"worker": {_GUILD: {"outcome": "failed", "detail": "tombstoned=1"}}}
+    assert flagged_guilds(steps, {"tombstoned": [_GUILDS[0]]}) == {_GUILD, _GUILDS[0]}
+
+
+# -- L1: a re-executed run reuses its command ----------------------------------------
+
+
+async def test_a_reexecution_after_xadd_reuses_the_entry(db_session, session_factory, redis):
+    await _seed_memory(db_session)
+    request = await _open(db_session)
+    await _enforce(redis, 1)
+    await _run(session_factory, redis, request.id, request.run_id, _ScriptedAgent())
+    # The first execution died right after XADD: status and lease as it left them.
+    async with session_factory() as session:
+        stored = await session.get(ChatBotPurgeRequest, request.id)
+        stored.status = "purging"
+        stored.steps["command_entry_id"] = None
+        flag_modified(stored, "steps")
+        await session.commit()
+
+    status = await _run(session_factory, redis, request.id, request.run_id, _ScriptedAgent())
+
+    assert status == STATUS_AWAITING_ACKS
+    entries = await redis.xrange(PURGE_STREAM)
+    assert len(entries) == 1
+    assert (await _stored(session_factory, request.id)).steps["command_entry_id"] == entries[0][0].decode()
+
+
+# -- L3: trimming without an XADD; retrying the post-settle delete -------------------
+
+
+async def test_the_stream_is_trimmed_while_a_run_waits(db_session, session_factory, redis):
+    old_ms = int((_NOW - timedelta(days=8)).timestamp() * 1000)
+    await redis.xadd(PURGE_STREAM, {"payload": "{}"}, id=f"{old_ms}-0")
+    request = await _open(db_session)
+    await run_purge(
+        request.id, request.run_id, session_factory=session_factory, redis=redis,
+        now=lambda: _NOW, agent=_ScriptedAgent(), sleep=_no_sleep, wait_seconds=5,
+    )
+    assert await redis.xlen(PURGE_STREAM) == 0
+
+
+async def test_the_post_settle_delete_is_retried(redis, monkeypatch):
+    import uuid
+
+    from smarter_dev.web import chat_bot_purge
+
+    calls = []
+    real = chat_bot_purge.delete_commands
+
+    async def flaky(redis_client, **match):
+        calls.append(1)
+        if len(calls) < 3:
+            raise ConnectionError("redis blinked")
+        return await real(redis_client, **match)
+
+    monkeypatch.setattr(chat_bot_purge, "delete_commands", flaky)
+    request_id = uuid.uuid4()
+    await redis.xadd(PURGE_STREAM, {"payload": json.dumps({"request_id": str(request_id)})})
+
+    assert await chat_bot_purge.delete_commands_retrying(
+        redis, request_id=request_id, sleep=_no_sleep
+    )
+    assert len(calls) == 3 and await redis.xlen(PURGE_STREAM) == 0
+
+
+# -- L5: a job exception leaves the request failed ------------------------------------
+
+
+async def test_a_job_exception_leaves_the_request_failed_and_rerunnable(
+    db_session, session_factory, redis
+):
+    from smarter_dev.web.chat_bot_purge import STATUS_FAILED
+    from smarter_dev.web.chat_bot_purge import mark_failed
+
+    request = await _open(db_session)
+    assert await mark_failed(session_factory, request.id, None, "OperationalError")
+    stored = await _stored(session_factory, request.id)
+    assert stored.status == STATUS_FAILED
+    assert "OperationalError" in stored.steps["error"]
+    rerun_id = await _rerun(session_factory, request.id)
+    assert (await _stored(session_factory, request.id)).run_id == rerun_id
+
+
+# -- L7: one SCAN per status read ------------------------------------------------------
+
+
+async def test_runtime_status_scans_once(redis, monkeypatch):
+    from smarter_dev.web.chat_bot_purge import runtime_status
+
+    await _enforce(redis, 1)
+    patterns = []
+    real = redis.scan_iter
+
+    def counting(*args, **kwargs):
+        patterns.append(kwargs.get("match"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(redis, "scan_iter", counting)
+    await runtime_status(redis)
+    assert patterns == ["privacy:v1:*"]
+
+
+# -- item 11: the real reason -------------------------------------------------------
+
+
+def test_a_command_that_cannot_be_built_says_why():
+    from smarter_dev.web.chat_bot_purge import command_problem
+
+    assert "not Discord snowflakes" in command_problem(["123", _GUILD])
+    many = [str(10**17 + i) for i in range(501)]
+    assert "501 guilds" in command_problem(many)
+    assert command_problem([_GUILD]) is None

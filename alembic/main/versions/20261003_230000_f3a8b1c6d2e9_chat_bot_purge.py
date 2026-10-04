@@ -62,7 +62,7 @@ def upgrade() -> None:
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("discord_user_id", sa.String(22), nullable=True),
         sa.Column("names", sa.JSON(), nullable=True),
-        sa.Column("status", sa.String(20), nullable=False),
+        sa.Column("status", sa.String(32), nullable=False),
         sa.Column("run_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("steps", sa.JSON(), nullable=False),
         sa.Column("check_report", sa.JSON(), nullable=True),
@@ -83,6 +83,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Dropping the block list would let both runtimes read everyone who was
+    # purged straight back into history. Refuse while anyone is on it.
+    blocked = op.get_bind().execute(
+        sa.text("SELECT count(*) FROM chat_bot_blocked_users")
+    ).scalar()
+    if blocked:
+        raise RuntimeError(
+            f"Refusing to downgrade: chat_bot_blocked_users has {blocked} row(s). "
+            "Dropping it un-blocks every purged user. Move the list elsewhere first."
+        )
     op.drop_index(
         "uq_chat_bot_purge_requests_open_user",
         table_name="chat_bot_purge_requests",
