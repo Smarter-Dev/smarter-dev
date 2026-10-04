@@ -190,7 +190,7 @@ UNION ALL SELECT 'proactive histories mentioning (agent purge)', count(*) FROM p
 ROLLBACK;
 ```
 
-Until migration `f3a8d1c6b2e4` (#81) drops `security_logs`, old bot API
+Until migration `9c41e07d5b28` (#81) drops `security_logs`, old bot API
 security log rows can still name the person in their path; nothing new is
 written there. Count them only while the table exists:
 
