@@ -1,10 +1,11 @@
 """Scheduled deletion of security-log rows past their 90-day window.
 
-``security_logs`` holds one row per bytes API call and per auth or admin event:
-IP address, user agent, request path and query, and whatever Discord ids those
-carry. The 90-day window is the one :meth:`SecurityLogger.cleanup_old_logs`
-has always declared; nothing called it, so the table only grew. The hourly
-retention job (``scripts/retention_sweep.py``) now enforces it.
+Nothing writes ``security_logs`` since #81 (security events are logs, see
+:mod:`smarter_dev.web.security_logger`); this sweep ages out the rows written
+before then, one per bytes API call with the Discord ids in request paths,
+until the table is dropped. The 90-day window is the one the old
+``SecurityLogger.cleanup_old_logs`` declared and nothing called; the hourly
+retention job (``scripts/retention_sweep.py``) enforces it.
 
 Rows are deleted, not scrubbed: a security log with the identifying columns
 blanked has no audit value left. The delete runs in bounded batches, each

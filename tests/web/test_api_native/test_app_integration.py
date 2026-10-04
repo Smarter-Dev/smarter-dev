@@ -20,6 +20,7 @@ from collections.abc import AsyncIterator
 from collections.abc import Iterator
 from unittest.mock import patch
 
+import fakeredis.aioredis as fakeredis_aioredis
 import pytest
 from litestar.di import Provide
 from litestar.testing import TestClient
@@ -187,8 +188,9 @@ def app_client(integration_session_maker) -> Iterator[TestClient]:
 
     invalidate_user_permissions_cache()
     with (
-        # Guard/introspection key lookups and the rate limiter's sessions all
-        # target the test database instead of the process-global engine.
+        # Guard/introspection key lookups and the rate limiter's session target
+        # the test database instead of the process-global engine; its counters
+        # go to an in-memory Redis.
         patch(
             "smarter_dev.web.api_native.auth.get_db_session_context",
             side_effect=lambda: integration_session_maker(),
@@ -198,8 +200,8 @@ def app_client(integration_session_maker) -> Iterator[TestClient]:
             side_effect=lambda: integration_session_maker(),
         ),
         patch(
-            "smarter_dev.web.api_native.rate_limiting.get_db_session_context",
-            side_effect=lambda: integration_session_maker(),
+            "smarter_dev.web.api_native.rate_limiting.get_redis_client",
+            return_value=fakeredis_aioredis.FakeRedis(decode_responses=True),
         ),
     ):
         with create_test_client(

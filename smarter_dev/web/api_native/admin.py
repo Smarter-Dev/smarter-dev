@@ -146,15 +146,11 @@ class AdminController(Controller):
             await db_session.refresh(conversation)
 
             await get_security_logger().log_admin_operation(
-                session=db_session,
                 operation="create_help_conversation",
-                user_identifier=f"bot:{caller.display_name}",
+                api_key=caller,
                 request=request,
                 success=True,
-                details=(
-                    f"Conversation created for user {data.user_id} "
-                    f"in guild {data.guild_id}"
-                ),
+                details=f"Conversation created in guild {data.guild_id}",
             )
 
             return HelpConversationCreateResponse(
@@ -229,9 +225,8 @@ class AdminController(Controller):
             pages = math.ceil(total / size) if total > 0 else 1
 
             await get_security_logger().log_admin_operation(
-                session=db_session,
                 operation="list_help_conversations",
-                user_identifier=caller.display_name,
+                api_key=caller,
                 request=request,
                 success=True,
                 details=(
@@ -357,9 +352,8 @@ class AdminController(Controller):
             )
 
             await get_security_logger().log_admin_operation(
-                session=db_session,
                 operation="view_help_conversation_stats",
-                user_identifier=caller.display_name,
+                api_key=caller,
                 request=request,
                 success=True,
                 details=(
@@ -409,9 +403,8 @@ class AdminController(Controller):
                 raise plain_error(404, "Conversation not found")
 
             await get_security_logger().log_admin_operation(
-                session=db_session,
                 operation="view_help_conversation",
-                user_identifier=caller.display_name,
+                api_key=caller,
                 request=request,
                 success=True,
                 details=f"Viewed conversation {parsed_conversation_id}",

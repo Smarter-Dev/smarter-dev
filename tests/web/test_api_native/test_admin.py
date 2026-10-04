@@ -126,6 +126,22 @@ def test_create_and_get_conversation(client):
     assert data["is_resolved"] is False
 
 
+def test_admin_operation_events_hold_no_member_id(client, security_events):
+    created = client.post(
+        "/api/admin/conversations", json=_conversation_body(user_id="U-member-1")
+    )
+    client.get(f"/api/admin/conversations/{created.json()['id']}")
+
+    assert {event["event"] for event in security_events} == {"admin_operation"}
+    assert len(security_events) == 2
+    for event in security_events:
+        assert "U-member-1" not in repr(event)
+    assert {event["http.route"] for event in security_events} == {
+        "/api/admin/conversations",
+        "/api/admin/conversations/{conversation_id}",
+    }
+
+
 def test_get_conversation_404_and_malformed_id(client):
     missing = client.get(
         "/api/admin/conversations/00000000-0000-0000-0000-000000000000"

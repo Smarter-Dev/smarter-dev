@@ -1,7 +1,8 @@
 """Tests for the failed-auth security-log hookup in ``bot_api_auth_guard``.
 
 Parity with the legacy ``verify_api_key``: every rejected bot-API request
-recorded an ``authentication_failed`` row in ``security_logs``
+recorded a failed-authentication security event (a ``login_failed`` log
+since #81)
 (docs/v2/legacy-sunset/04-api-rewrite.md, "Cross-cutting deletions").
 """
 
@@ -60,7 +61,7 @@ class TestAuthenticationFailureLogging:
         security_logger_mock.log_authentication_failed.assert_awaited_once()
         call_kwargs = security_logger_mock.log_authentication_failed.await_args.kwargs
         assert call_kwargs["bearer_presented"] is False
-        assert call_kwargs["session"] is None
+        assert call_kwargs["reason"] == "no_valid_key"
 
     async def test_rejected_key_401_and_logged_without_any_of_it(
         self, guarded_client: TestClient, security_logger_mock: Mock
@@ -87,3 +88,44 @@ class TestAuthenticationFailureLogging:
         response = guarded_client.get(CONFIG_PATH)
 
         assert response.status_code == 401
+
+
+class TestReasonCodes:
+    """Skrift's wording contains "auth", which Logfire's scrubber redacts."""
+
+    @pytest.mark.parametrize(
+        ("detail", "code"),
+        [
+            ("Authentication required", "no_valid_key"),
+            ("Insufficient permissions", "insufficient_permissions"),
+        ],
+    )
+    def test_skrift_detail_maps_to_a_code(self, detail, code):
+        from litestar.exceptions import NotAuthorizedException
+
+        from smarter_dev.web.api_native.auth import _login_failure_reason
+
+        assert _login_failure_reason(NotAuthorizedException(detail)) == code
+
+    def test_codes_cover_every_rejection_the_installed_skrift_raises(self):
+        """Pinned to Skrift's wording: a rewording must fail here, not turn
+        every permission failure into ``no_valid_key`` unnoticed."""
+        import inspect
+        import re
+
+        import skrift.auth.guards as skrift_guards
+        from litestar.exceptions import NotAuthorizedException
+
+        from smarter_dev.web.api_native.auth import _login_failure_reason
+
+        raised = re.findall(
+            r'NotAuthorizedException\(\s*"([^"]*)"', inspect.getsource(skrift_guards)
+        )
+        assert sorted(set(raised)) == ["Authentication required", "Insufficient permissions"]
+        assert {
+            detail: _login_failure_reason(NotAuthorizedException(detail))
+            for detail in raised
+        } == {
+            "Authentication required": "no_valid_key",
+            "Insufficient permissions": "insufficient_permissions",
+        }

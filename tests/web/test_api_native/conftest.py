@@ -838,3 +838,17 @@ def image_quota_client(fake_redis: _FakeRedis) -> Iterator[TestClient]:
                 yield client
     finally:
         image_quota_module.BOT_API_GUARDS[:] = original_guards
+
+
+@pytest.fixture
+def security_events(monkeypatch) -> list[dict[str, Any]]:
+    """Every security event the global logger emits, as one dict each."""
+    from smarter_dev.web import security_logger
+
+    events: list[dict[str, Any]] = []
+
+    def record(event: str, success: bool, **attributes: Any) -> None:
+        events.append({"event": event, "success": success, **attributes})
+
+    monkeypatch.setattr(security_logger.security_logger, "emit", record)
+    return events
