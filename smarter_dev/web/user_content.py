@@ -324,7 +324,7 @@ async def delete_account_leftovers(session: AsyncSession, user_id: UUID) -> None
     Run in the account deletion's own transaction, before the user row goes:
     dashboard searches, the search link and push subscriptions have no foreign
     key to the user, ``work_dispatches`` rows name only the work they
-    dispatched (a Resources one holds the question in full), and queued
+    dispatched (an older Resources one may still hold the question), and queued
     notifications are keyed by a string. The dispatch rows are found through
     the work they name, so this has to run while that work still exists.
     """
