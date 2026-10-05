@@ -92,6 +92,7 @@ def test_shared_records_are_anonymised_not_deleted(notice):
 
 def test_self_deletion_names_what_it_leaves(notice):
     assert "A copy of each question you asked about our resources is kept until you ask us to delete it, as are searches you made from your dashboard" in notice
+    assert "The AI's own copies of your questions about our resources and its answers are deleted 8 days after it finishes." in notice
     assert "straight away" not in notice
 
 
@@ -131,9 +132,9 @@ def test_the_notice_states_figures_not_mechanisms(notice):
     lowered = notice.lower()
     for mechanism in ("up to", "placeholder", "folded", "every 15 minutes", "16 kb", "last five", "api key", "proactive", "chat agent"):
         assert mechanism not in lowered
-    assert "Searches other people make through a link you share are kept for 30 minutes" in notice
+    assert "Searches made with your search link while signed out are kept for 30 minutes" in notice
     assert "You stay signed in for 30 days after your last visit" in notice
-    assert "Working copies made while the AI answers are kept for 8 days after it finishes" in notice
+    assert "it keeps its own copy of the question, its research and its answer, deleted 8 days after it finishes" in notice
     monitoring = notice.split("**Monitoring.**", 1)[1].split(" - **", 1)[0]
     assert "Everything sent to Logfire is kept for 30 days" in monitoring
     assert "Our servers also keep their own logs, with no fixed time limit" in monitoring
