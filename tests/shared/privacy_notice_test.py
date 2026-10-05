@@ -86,7 +86,7 @@ def test_the_notice_says_the_blocked_list_covers_the_chat_bot_only(notice):
 def test_shared_records_are_anonymised_not_deleted(notice):
     deleted = notice.split("**What we delete.**", 1)[1].split("**What we keep", 1)[0]
     assert "is deleted or kept with your ID and name removed" in deleted
-    assert "such as bytes transfers, stay that way for them" in deleted
+    assert "such as bytes transfers, stay in the other person's history with your ID and name removed" in deleted
 
 
 def _store(notice: str, kind: str) -> str:
