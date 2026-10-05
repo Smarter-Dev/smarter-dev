@@ -19,7 +19,7 @@ help prepare or check a step, but does not run mutations.
 | **Purge (agent)** | Everything the chat bot holds about the person: the guild memory, behavior and personality blocks, pending notes and retained revisions, both agents' working histories and their compaction summaries, the proactive recovery copy and watch instructions, and the external worker's history. The agent does the edit; see step 4. |
 | **Delete** | Bytes balances, squad memberships, quest and challenge submissions and quest progress, member activity dates, forum subscriptions, campaign signups, `/help` and `/tldr` records they started, legacy `/scan` profiles, rate-limit and DM caches, bot API security log rows whose request named them (until #81's migration drops that table), and their site account with its chat, attachments, searches, resources questions, profile, linked logins (and their stored Discord tokens), push subscriptions, roles, API keys, second-factor enrollments, OAuth consent grants, republish links and membership rows. Also these, which can outlast the limits under "Ages out": AI error messages that name them, the running topic and notes of engagements that name them, blog topic candidates from their conversations or naming them, entries in automation memory that carry them, automation jobs about them still waiting in Skrift's job stores (and any not yet pruned), AI agent sessions that mention them, and their site jobs. |
 | **Anonymise** | Rows other people share. Bytes transfers the person sent or received keep their amount and date for the other member, with the person's id and username replaced and the reason cleared. Chat engagements they started lose the starter's id and username. Usage cost rows lose their Discord id and details. Legacy `/scan` usage rows lose their user id. Chat agent turns and handler runs have the person's id and names replaced where they stand as values; forum agent responses have the author's display name replaced. Site page revisions they wrote lose their author when the account is deleted. |
-| **Keep** | Moderation history: `moderation_actions` and the bot's posts in the guild's moderation and audit log channels. Anonymised billing: usage cost rows with no person linked (the membership rows are deleted with the account; Polar keeps its payment records under its own terms). A bare receipt that the request was completed. The person's Discord id alone in `chat_bot_blocked_users`, written by the purge in step 4, so the chat bot sees their messages only as `[BLOCKED BY USER]` and does not respond to them. |
+| **Keep** | Moderation history: `moderation_actions`, the bot's posts in the guild's moderation and audit log channels, and the moderator's `reason` copied into `handler_runs` rows of moderation triggers. Anonymised billing: usage cost rows with no person linked (the membership rows are deleted with the account; Polar keeps its payment records under its own terms). A bare receipt that the request was completed. The person's Discord id alone in `chat_bot_blocked_users`, written by the purge in step 4, so the chat bot sees their messages only as `[BLOCKED BY USER]` and does not respond to them. |
 | **Ages out** | Short-lived records listed below. Nothing in them lasts past 30 days, so a request does not touch them, apart from the live work steps 6 to 8 clear. |
 
 The Delete and Anonymise rows also cover records that can outlast those
@@ -216,7 +216,7 @@ UNION ALL SELECT 'scan_service_usage', count(*) FROM scan_service_usage WHERE us
 UNION ALL SELECT 'chat_agent_engagements (anonymise)', count(*) FROM chat_agent_engagements WHERE activation_user_id = :'did'
 UNION ALL SELECT 'usage_cost_rows (anonymise)', count(*) FROM usage_cost_rows WHERE discord_user_id = :'did'
 UNION ALL SELECT 'chat_agent_turns (anonymise)', count(*) FROM chat_agent_turns WHERE triggering_messages::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR model_messages_delta::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR agent_output::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
-UNION ALL SELECT 'handler_runs (anonymise)', count(*) FROM handler_runs WHERE trigger_context::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
+UNION ALL SELECT 'handler_runs (anonymise, outside mentions)', count(*) FROM handler_runs WHERE (trigger_context::jsonb - 'mentioned_user_ids')::text ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
 UNION ALL SELECT 'handler_runs own (clear account details)', count(*) FROM handler_runs WHERE :'did' IN (trigger_context::jsonb ->> 'member_id', trigger_context::jsonb ->> 'user_id', trigger_context::jsonb ->> 'author_id') AND trigger_context::jsonb ?| array['account_created_at', 'author_account_created_at', 'joined_at', 'author_joined_at', 'has_custom_avatar']
 UNION ALL SELECT 'handler_runs mentioning (drop from mentions)', count(*) FROM handler_runs WHERE jsonb_typeof(trigger_context::jsonb -> 'mentioned_user_ids') = 'array' AND trigger_context::jsonb -> 'mentioned_user_ids' ? :'did'
 UNION ALL SELECT 'chat_agent_errors (clear text)', count(*) FROM chat_agent_errors WHERE error_message ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR traceback ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR coalesce(provider_body, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
@@ -240,9 +240,11 @@ BEGIN READ ONLY;
 SELECT DISTINCT name FROM (
   SELECT trigger_context::jsonb ->> k AS name
     FROM handler_runs,
-         unnest(array['username', 'display_name', 'nickname', 'target_username',
+         unnest(array['username', 'display_name', 'nickname', 'member_display_name',
+                      'target_username', 'creator_username', 'creator_display_name',
                       'author_name', 'author_username', 'author_display_name']) AS k
    WHERE CASE WHEN k LIKE 'author%' THEN trigger_context::jsonb ->> 'author_id'
+              WHEN k LIKE 'creator%' THEN trigger_context::jsonb ->> 'creator_id'
               WHEN k = 'target_username' THEN trigger_context::jsonb ->> 'target_user_id'
               ELSE coalesce(trigger_context::jsonb ->> 'member_id', trigger_context::jsonb ->> 'user_id') END = :'did'
   UNION SELECT target_username FROM moderation_actions WHERE target_user_id = :'did'
@@ -619,10 +621,12 @@ nickname, and every former one), set it and replace it where shared audit rows
 record it. The first query turns the name into the form the app's JSON holds
 (non-ASCII characters as `\u` escapes) and into a pattern for it, and the
 counts show how many rows each update will touch. Every match ignores case.
-In automation runs the name is also replaced where it stands as a whole word
-inside a longer string (a thread title, say), except in a moderation
-trigger's `reason`: that is the moderator's reason for an action, and
-moderation history is kept, as the notice says. Run the names longest
+In turns and automation runs, `pg_temp.renamed` replaces a JSON string that
+is the name, never a key, number or `true`/`false`/`null`; in a thread's
+name it also replaces the name where it stands as a whole word (a thread
+called "Help for alice"). It leaves a moderation trigger's `reason` as it
+is: that is the moderator's reason for an action, and moderation history is
+kept, as the notice says. Run the names longest
 first, so a name that contains another (a display name `Alice Smith` and a
 username `Alice`) is replaced whole. Stop and ask a developer when:
 
@@ -635,9 +639,11 @@ username `Alice`) is replaced whole. Stop and ask a developer when:
   JSON key or an ordinary value;
 - the name contains an emoji or another character outside the Basic
   Multilingual Plane, which the escape below does not produce;
-- a custom role is named after the person: role names are not replaced,
-  because a whole-word match would also rename roles that merely contain the
-  name;
+- a custom role, a forum tag or another string you can see in the person's
+  rows contains the name inside longer text other than a thread's name: only
+  whole strings and thread names are replaced, because a whole-word match
+  elsewhere would also rename other members' names and roles that merely
+  contain it;
 - the errors, engagement topics or blog topics count is higher than you
   expect. Those are matched by the name anywhere in their text, ignoring
   case, so a short name can match ordinary words. The same goes for the
@@ -646,6 +652,39 @@ username `Alice`) is replaced whole. Stop and ask a developer when:
 What the developer cannot match by query, they edit by hand or delete, row by
 row, within the request's 30 days, so nothing naming the person is left.
 
+Once, before the names, in the same session:
+
+```sql
+DROP FUNCTION IF EXISTS pg_temp.renamed(jsonb, text, text);
+-- The JSON with every string that is the name (ignoring case) replaced, and
+-- the name replaced as a whole word inside a thread's name. Keys, numbers
+-- and literals are never touched, nor a moderation trigger's reason.
+CREATE FUNCTION pg_temp.renamed(j jsonb, n text, k text DEFAULT NULL) RETURNS jsonb
+LANGUAGE plpgsql IMMUTABLE AS $$
+BEGIN
+  IF jsonb_typeof(j) = 'object' THEN
+    RETURN (SELECT coalesce(jsonb_object_agg(e.k,
+              CASE WHEN e.k = 'reason' AND j ->> 'trigger_type' = 'mod_action' THEN e.v
+                   ELSE pg_temp.renamed(e.v, n, e.k) END), '{}'::jsonb)
+              FROM jsonb_each(j) AS e(k, v));
+  ELSIF jsonb_typeof(j) = 'array' THEN
+    RETURN (SELECT coalesce(jsonb_agg(pg_temp.renamed(a.x, n, k) ORDER BY a.o), '[]'::jsonb)
+              FROM jsonb_array_elements(j) WITH ORDINALITY AS a(x, o));
+  ELSIF jsonb_typeof(j) = 'string' THEN
+    IF lower(j #>> '{}') = lower(n) THEN
+      RETURN to_jsonb('[deleted user]'::text);
+    ELSIF k = 'thread_name' THEN
+      RETURN to_jsonb(regexp_replace(j #>> '{}',
+        '(?<![[:alnum:]_])' || regexp_replace(n, '([^[:alnum:][:space:]])', '\\\1', 'g') || '(?![[:alnum:]_])',
+        '[deleted user]', 'gi'));
+    END IF;
+  END IF;
+  RETURN j;
+END $$;
+```
+
+Then for each name, longest first:
+
 ```sql
 \set name 'their_username'
 SELECT string_agg(CASE WHEN ascii(c) < 128 THEN c
@@ -653,14 +692,13 @@ SELECT string_agg(CASE WHEN ascii(c) < 128 THEN c
   FROM regexp_split_to_table(to_json(:'name'::text)::text, '') WITH ORDINALITY AS t(c, n) \gset
 SELECT substr(:'jq', 2, length(:'jq') - 2) AS jin \gset
 SELECT regexp_replace(:'jin', '([^[:alnum:][:space:]])', '\\\1', 'g') AS jre \gset
-SELECT '(?<![[:alnum:]_])' || :'jre' || '(?![[:alnum:]_])' AS jword \gset
 BEGIN READ ONLY;
-SELECT 'turns: name as a value' AS what, count(*) FROM chat_agent_turns WHERE triggering_messages::text ~* ('"' || :'jre' || '"')
+SELECT 'turns: name as a value' AS what, count(*) FROM chat_agent_turns
+ WHERE pg_temp.renamed(triggering_messages::jsonb, :'name') <> triggering_messages::jsonb
 UNION ALL SELECT 'turns: name in prompt text', count(*) FROM chat_agent_turns
  WHERE coalesce(model_messages_delta::text, '') ~* ('(username|nickname)=\\"' || :'jre' || '\\"')
 UNION ALL SELECT 'handler runs', count(*) FROM handler_runs
- WHERE (trigger_context::jsonb - 'reason')::text ~* :'jword'
-    OR (trigger_context::jsonb ->> 'trigger_type' IS DISTINCT FROM 'mod_action' AND trigger_context::text ~* :'jword')
+ WHERE pg_temp.renamed(trigger_context::jsonb, :'name') <> trigger_context::jsonb
 UNION ALL SELECT 'forum responses', count(*) FROM forum_agent_responses WHERE lower(author_display_name) = lower(:'name')
 UNION ALL SELECT 'errors: name in text', count(*) FROM chat_agent_errors WHERE (strpos(lower(error_message), lower(:'name')) > 0 OR strpos(error_message, :'jin') > 0) OR (strpos(lower(traceback), lower(:'name')) > 0 OR strpos(traceback, :'jin') > 0) OR (strpos(lower(coalesce(provider_body, '')), lower(:'name')) > 0 OR strpos(coalesce(provider_body, ''), :'jin') > 0)
 UNION ALL SELECT 'engagement topics: name', count(*) FROM chat_agent_engagements WHERE (strpos(lower(coalesce(last_topic, '')), lower(:'name')) > 0 OR strpos(coalesce(last_topic, ''), :'jin') > 0) OR (strpos(lower(coalesce(last_notes, '')), lower(:'name')) > 0 OR strpos(coalesce(last_notes, ''), :'jin') > 0)
@@ -668,23 +706,15 @@ UNION ALL SELECT 'blog topics: name', count(*) FROM candidate_blog_topics WHERE 
 ROLLBACK;
 BEGIN;
 UPDATE chat_agent_turns
-   SET triggering_messages = regexp_replace(triggering_messages::text, '"' || :'jre' || '"', '"[deleted user]"', 'gi')::json
- WHERE triggering_messages::text ~* ('"' || :'jre' || '"');
+   SET triggering_messages = pg_temp.renamed(triggering_messages::jsonb, :'name')::json
+ WHERE pg_temp.renamed(triggering_messages::jsonb, :'name') <> triggering_messages::jsonb;
 UPDATE chat_agent_turns
    SET model_messages_delta = regexp_replace(model_messages_delta::text,
          '(username|nickname)=\\"' || :'jre' || '\\"', '\1=\\"[deleted user]\\"', 'gi')::json
  WHERE coalesce(model_messages_delta::text, '') ~* ('(username|nickname)=\\"' || :'jre' || '\\"');
--- Automation runs: every other trigger whole; a moderation trigger without
--- its reason, which is put back as it was.
 UPDATE handler_runs
-   SET trigger_context = regexp_replace(trigger_context::text, :'jword', '[deleted user]', 'gi')::json
- WHERE trigger_context::jsonb ->> 'trigger_type' IS DISTINCT FROM 'mod_action'
-   AND trigger_context::text ~* :'jword';
-UPDATE handler_runs
-   SET trigger_context = (regexp_replace((trigger_context::jsonb - 'reason')::text, :'jword', '[deleted user]', 'gi')::jsonb
-                          || jsonb_build_object('reason', trigger_context::jsonb -> 'reason'))::json
- WHERE trigger_context::jsonb ->> 'trigger_type' = 'mod_action'
-   AND (trigger_context::jsonb - 'reason')::text ~* :'jword';
+   SET trigger_context = pg_temp.renamed(trigger_context::jsonb, :'name')::json
+ WHERE pg_temp.renamed(trigger_context::jsonb, :'name') <> trigger_context::jsonb;
 UPDATE forum_agent_responses SET author_display_name = '[deleted user]'
  WHERE lower(author_display_name) = lower(:'name');
 UPDATE chat_agent_errors
