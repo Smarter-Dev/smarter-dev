@@ -397,7 +397,7 @@ and a session keeps its jobs live.
 
 | Table | Deleted |
 | --- | --- |
-| `worker_state` | once the row's own expiry has passed (Skrift sets 7 days on a finished job's state, already emptied, and 24 hours on a finished agent run's, which its caller has already deleted); a job's state that is not live and has not changed in 7 days; a session's state that is not live and has not changed in 6 hours |
+| `worker_state` | once the row's own expiry has passed (Skrift sets 7 days on a finished job's state, already emptied, and 24 hours on a finished agent run's, which its caller has already deleted); a job's state that is not live and has not changed in 7 days; a session's state that is not live and has not changed in 5 hours |
 | `worker_queue` | a dead-lettered job (it holds the job's payload) 7 days after it was dead-lettered; a pending job never |
 | `worker_dead_letters` | 7 days after it was written, open or resolved |
 | `worker_events`, `worker_archive_events`, `worker_archive_snapshots` | a session's events and snapshots 5 hours after they were written, except a blogging session's events (the run timeline reads them); everything else 7 days after it was written; never while they belong to live work |
