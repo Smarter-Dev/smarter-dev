@@ -90,6 +90,15 @@ def test_shared_records_are_anonymised_not_deleted(notice):
     assert "Records of what the AI and automations did, such as which messages and channels were involved and what was done, are kept with your ID and name removed." in deleted
 
 
+def test_the_account_names_each_sign_in_provider_and_what_it_gives(notice):
+    account = _store(notice, "Your account.")
+    assert "You sign in with Discord, GitHub or Google." in account
+    assert "email address and whether it is verified, and the sign-in tokens it issues" in account
+    assert "Google gives your first and last name and, for a work or school account, its domain" in account
+    assert "GitHub gives the rest of your public profile" in account
+    assert "can no longer sign in" not in notice
+
+
 def test_self_deletion_names_what_it_leaves(notice):
     assert "A copy of each question you asked about our resources is kept until you ask us to delete it, as are searches you made from your dashboard" in notice
     assert "The AI's own copies of your questions about our resources and its answers are deleted 8 days after it finishes." in notice

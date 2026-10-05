@@ -186,11 +186,11 @@ they have no site account linked to this Discord account; skip every step
 marked *site*. Two or more rows cannot happen (the pair is unique); stop and
 ask a developer if it does.
 
-A site account made with GitHub or Google sign-in before the site went
-Discord-only has no Discord link, and its owner cannot sign in any more. Do
-not try to match it to a Discord account. If its owner asks, they must prove
-they own it (for example, by email from the account's address), and the
-account is deleted through the developer path in step 5.
+A site account made with GitHub or Google sign-in may have no Discord link.
+Do not try to match it to a Discord account by email or name. Its owner
+deletes it by signing in with that provider and using Account → Security →
+Delete account (step 5), which also proves they own it; point them there if
+they ask.
 
 ## 3. Dry run
 

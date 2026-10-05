@@ -29,7 +29,7 @@ The bot reads messages in the servers it is in, so the chat bot can answer peopl
 
 ## What the website stores
 
-- **Your account.** Your Discord ID, username, avatar, email address, profile, notification settings and the sign-in details Discord gives us, to run your account. Kept until you delete your account. You stay signed in for 30 days after your last visit. Older accounts made with GitHub or Google, which can no longer sign in, are kept until you ask us to delete them.
+- **Your account.** You sign in with Discord, GitHub or Google. From each one you use, we receive your account ID, name or username, avatar, email address and whether it is verified, and the sign-in tokens it issues. Discord and Google also give us your language; Google gives your first and last name and, for a work or school account, its domain; GitHub gives the rest of your public profile, such as bio, company and location. We keep these with your profile and notification settings to run your account. Kept until you delete your account. You stay signed in for 30 days after your last visit.
 - **Chat.** Your conversations and attachments, kept until you delete them or your account, and questions you ask about our resources, kept until you ask us to delete them. While the AI answers a question about our resources, it keeps its own copy of the question, its research and its answer, deleted 8 days after it finishes.
 - **Searches** from your dashboard, kept until you ask us to delete them. Searches made with your search link while signed out are kept for 30 minutes.
 - **Education products.** We are building Gym and Labs. They are not open yet. Before they collect anything new, we will update this notice to say what they store.
