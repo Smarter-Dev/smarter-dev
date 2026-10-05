@@ -186,11 +186,26 @@ they have no site account linked to this Discord account; skip every step
 marked *site*. Two or more rows cannot happen (the pair is unique); stop and
 ask a developer if it does.
 
-A site account made with GitHub or Google sign-in before the site went
-Discord-only has no Discord link, and its owner cannot sign in any more. Do
-not try to match it to a Discord account. If its owner asks, they must prove
-they own it (for example, by email from the account's address), and the
-account is deleted through the developer path in step 5.
+A site account made with GitHub or Google sign-in may have no Discord link,
+so the query above does not find it. Do not match it to a Discord account by
+email or name. If its owner asks, by DM or by email, ask which of the two
+they sign in with and the email address that account uses, then:
+
+```sql
+BEGIN READ ONLY;
+SELECT user_id FROM oauth_accounts
+ WHERE provider = 'github' AND provider_email = 'their@email.example';
+ROLLBACK;
+```
+
+(`'google'` for Google.) One row: set `uid` from it. No row or several: stop
+and ask a developer. Run the *site* part of the dry run (step 3), then ask
+them to delete the account themselves from Account → Security → Delete
+account. That proves they own it, so an emailed request need not be sent
+again by DM. Once their `users` row is gone, run step 5.1 and the *site*
+part of step 8 with that `uid`: they remove what self-deletion leaves. Skip
+every step that needs `did`, unless they also name a Discord account and send
+the request from it by DM.
 
 ## 3. Dry run
 

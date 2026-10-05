@@ -24,26 +24,23 @@ auth:
       scopes:
         - identify
         - email
-  # Discord-only login (task #56). GitHub, Google and passkey sign-in are
-  # switched off by leaving them out of this block: Skrift answers 404 on the
-  # login, callback and passkey routes of any method not configured here, and
-  # the login page lists only configured methods. Accounts, linked providers,
-  # passkey enrollments and live sessions are untouched, and the
-  # GITHUB_/GOOGLE_ env vars and secrets stay in k8s/deploy.yaml.
-  # To re-enable, uncomment the blocks below (delete the leading "# ") and
-  # deploy; see docs/auth-providers.md.
-    # github:
-    #   client_id: $GITHUB_CLIENT_ID
-    #   client_secret: $GITHUB_CLIENT_SECRET
-    #   scopes:
-    #     - user:email
-    # google:
-    #   client_id: $GOOGLE_CLIENT_ID
-    #   client_secret: $GOOGLE_CLIENT_SECRET
-    #   scopes:
-    #     - openid
-    #     - email
-    #     - profile
+    # GitHub and Google were off from task #56 until task #71: accounts made
+    # with them before the site went Discord-only could not sign in.
+    github:
+      client_id: $GITHUB_CLIENT_ID
+      client_secret: $GITHUB_CLIENT_SECRET
+      scopes:
+        - user:email
+    google:
+      client_id: $GOOGLE_CLIENT_ID
+      client_secret: $GOOGLE_CLIENT_SECRET
+      scopes:
+        - openid
+        - email
+        - profile
+  # Skrift answers 404 on the login, callback and passkey routes of any method
+  # not configured here, and the login page lists only configured methods.
+  # Passkey sign-in stays off (task #56); see docs/auth-providers.md.
   #
   # Discoverable passkey sign-in. `factor_key: passkey` ties primary login to
   # the `second_factors.passkey` enrollment store, so a passkey added from the
