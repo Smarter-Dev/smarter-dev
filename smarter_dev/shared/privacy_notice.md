@@ -51,7 +51,7 @@ The bot reads messages in the servers it is in, so the chat bot can answer peopl
 
 DM an @admin on the Smarter Dev Discord server, or email admin@smarter.dev. Either way, we check that you own the Discord account, then an admin deletes your data within 30 days of your request.
 
-**What we delete.** Everything the chat bot holds about you: it removes you from its memories and its conversations. Everything else above that is kept until you ask us to delete it, including your website account, is deleted or kept with your ID and name removed. Bytes transfers you sent or received stay in the other member's history with your ID and name removed. Records of what the AI and automations did are kept with your ID and name removed; they still hold message IDs, times and role details.
+**What we delete.** Everything the chat bot holds about you: it removes you from its memories and its conversations. Everything else above that is kept until you ask us to delete it, including your website account, is deleted or kept with your ID and name removed. Bytes transfers you sent or received stay in the other member's history with your ID and name removed. Records of what the AI and automations did are kept with your ID and name removed; they still hold the IDs of messages, channels and tags, times, role and permission details, and what was done, such as a reaction added or a moderation action taken.
 
 **What we keep.**
 
