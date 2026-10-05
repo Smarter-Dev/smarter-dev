@@ -948,7 +948,8 @@ CREATE TEMP TABLE later_timers ON COMMIT DROP AS
    WHERE job::jsonb ->> 'type' IN ('handlers.fire', 'admin_handlers.fire')
      AND claim_token IS NULL AND NOT dead_lettered AND visible_at > now()
      AND job::jsonb #>> '{payload,trigger_context,trigger_type}' = 'timer'
-     AND pg_temp.hit((job::jsonb -> 'payload')::text);
+     AND pg_temp.hit((job::jsonb -> 'payload')::text)
+     FOR UPDATE;
 UPDATE worker_queue
    SET job = jsonb_set(job::jsonb, '{payload,trigger_context,payload}',
          coalesce(pg_temp.scrub((job::jsonb #> '{payload,trigger_context,payload}')::json)::jsonb, 'null'))::json
@@ -974,7 +975,9 @@ UNION ALL SELECT 'timer state left carrying them (expect 0)', count(*) FROM work
 -- its will_be_cancelled rows; both checks must be 0. Then COMMIT; or ROLLBACK;
 ```
 
-A timer is cancelled whole, queue row and state together, if either copy
+`FOR UPDATE` holds the timers' queue rows until `COMMIT;`, and Skrift's claim
+skips locked rows, so no timer starts running while this block rewrites its
+two copies. A timer is cancelled whole, queue row and state together, if either copy
 still carries the person after the rewrite (in the state's attempt history,
 say). If a timer was claimed between the
 dry run and this block, it ran with the person; the step 10 recheck finds

@@ -202,8 +202,9 @@ allowed — that is a keyword watch, not a command.
   the result is a user-facing artifact with its own lifecycle.
 - `agent_conversations` / `agent_messages` — the website's own agent chat, not
   Discord.
-- `work_dispatches` — one row per Resources question handed to its agent,
-  holding the question in full. No age bound and no sweep, and deleting the
+- `work_dispatches` — one row per job the site hands to a worker (chat
+  turns, sub-agents, account deletion, web search, Resources questions); a
+  Resources row holds the question in full. No age bound and no sweep, and deleting the
   account does not remove it (no foreign key to the user); runbook step 8
   deletes a person's rows for a request.
 - `proactive_agent_histories` — the proactive agent's own working history,
