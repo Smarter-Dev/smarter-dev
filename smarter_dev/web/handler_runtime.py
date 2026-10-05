@@ -83,11 +83,16 @@ limit=10)`` -> list[dict] (this guild's recent actions for a member, newest
 first, via an injected DB reader), ``get_member_info(user_id)`` -> dict (member
 profile; a departed user comes back with ``in_guild=False``), and
 ``search_guild_members(query, limit=10)`` -> dict (prefix name/nick search with a
-per-row top role and an overflow count), and ``list_rules()`` -> list[dict] of
+per-row top role and an overflow count), ``list_rules()`` -> list[dict] of
 the guild's configured rules (``{"number", "title", "text"}``, parsed by
 ``guild_rules.parse_guild_rules`` — the same parse ``/rule`` uses — via an
-injected DB reader; ``[]`` when the guild has none) — each of the four spends the
-lookups budget, plus ``warn_user(user_id, reason, channel_id=None, dm=True)`` ->
+injected DB reader; ``[]`` when the guild has none), and
+``list_recent_messages(user_id)`` -> list[dict] (where a member posted in this
+guild in the last two minutes, newest first: ``{"channel_id", "message_id",
+"age_seconds", "attachment_count", "has_link"}`` — ids and shape only, never the
+text — via an injected Redis reader; what lets a script see a cross-channel
+burst and find every message of it once a review confirms it) — each of the
+five spends the lookups budget, plus ``warn_user(user_id, reason, channel_id=None, dm=True)`` ->
 dict (``{"message_id", "dm_sent", "warn_count"}``: the handler-tier ``/warn`` —
 spends a mod_action FIRST so a mod_action-triggered fire, which runs with zero
 mod actions, structurally cannot warn in response to a warn; then posts the
@@ -204,6 +209,12 @@ ModActionRecorder = Callable[[str, str, str], Awaitable[int]]
 # can never read another guild's rules — same discipline as ModActionReader.
 RulesReader = Callable[[], Awaitable[list[dict[str, Any]]]]
 
+# An async function (author_id) -> where that member posted in this guild in the
+# last two minutes, newest first. Injected by the admin fire job with the Redis
+# client and the guild id bound host-side, so a script can never read another
+# guild's members — same discipline as ModActionReader.
+RecentMessagesReader = Callable[[str], Awaitable[list[dict[str, Any]]]]
+
 
 # An async function (key, ttl_seconds) -> bool implementing SET NX EX for THIS
 # handler: True for the first caller inside the TTL, False for every later one.
@@ -231,6 +242,12 @@ async def _no_mod_action_recorder(user_id: str, reason: str, channel_id: str) ->
 
 async def _no_rules_reader() -> list[dict[str, Any]]:
     raise RuntimeError("no rules reader configured for this handler execution")
+
+
+async def _no_recent_messages_reader(user_id: str) -> list[dict[str, Any]]:
+    raise RuntimeError(
+        "no recent-messages reader configured for this handler execution"
+    )
 
 
 async def _no_claimer(key: str, ttl_seconds: int) -> bool:
@@ -322,6 +339,10 @@ class HandlerExecution:
     # DB-backed reader for list_rules (the guild's parsed rules), injected by the
     # admin fire job with the guild bound host-side. Admin handlers only.
     rules_reader: RulesReader = _no_rules_reader
+    # Redis-backed reader for list_recent_messages (a member's last two minutes
+    # of posts, ids only), injected by the admin fire job with the guild bound
+    # host-side. Admin handlers only.
+    recent_messages_reader: RecentMessagesReader = _no_recent_messages_reader
     # This handler's id — needed only for the per-handler timer-arming window key.
     # Optional (default "") so existing callers that never arm a timer are unaffected.
     handler_id: str = ""
@@ -420,6 +441,7 @@ class HandlerExecution:
                     # lookup/history/whois commands and the rejoin alert.
                     "list_mod_actions": self._guard(self._list_mod_actions),
                     "list_rules": self._guard(self._list_rules),
+                    "list_recent_messages": self._guard(self._list_recent_messages),
                     "get_member_info": self._guard(self._get_member_info),
                     "search_guild_members": self._guard(self._search_guild_members),
                     "get_role_members": self._guard(self._get_role_members),
@@ -637,6 +659,17 @@ class HandlerExecution:
         """Profile a member (or a departed user, in_guild=False); spends a lookup."""
         self.budget.spend_lookup()
         return await self.actor.get_member_info(str(user_id))
+
+    async def _list_recent_messages(self, user_id: str) -> list[dict]:
+        """Where a member posted in THIS guild in the last two minutes, newest
+        first; spends a lookup.
+
+        Dispatch notes every human message as it arrives, so a second call later
+        in the same fire sees messages posted since the first — which is the
+        point: a review takes longer than a scam burst, and the script re-reads
+        the list when the verdict lands to find every copy."""
+        self.budget.spend_lookup()
+        return await self.recent_messages_reader(str(user_id))
 
     async def _search_guild_members(self, query: str, limit: int = 10) -> dict:
         """Prefix-search guild members with per-row top role; spends ONE lookup
@@ -1165,6 +1198,7 @@ async def run_handler_script(
     mod_action_reader: ModActionReader = _no_mod_action_reader,
     mod_action_recorder: ModActionRecorder = _no_mod_action_recorder,
     rules_reader: RulesReader = _no_rules_reader,
+    recent_messages_reader: RecentMessagesReader = _no_recent_messages_reader,
     handler_id: str = "",
     timer_scheduler: TimerScheduler = _no_timer,
     claimer: Claimer = _no_claimer,
@@ -1205,6 +1239,7 @@ async def run_handler_script(
         mod_action_reader=mod_action_reader,
         mod_action_recorder=mod_action_recorder,
         rules_reader=rules_reader,
+        recent_messages_reader=recent_messages_reader,
         handler_id=handler_id,
         timer_scheduler=timer_scheduler,
         claimer=claimer,

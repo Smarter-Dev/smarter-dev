@@ -38,6 +38,8 @@ from smarter_dev.web.handler_caps import handler_fire_key
 from smarter_dev.web.handler_fire_context import hand_off_fire_context
 from smarter_dev.web.handler_fire_payloads import AdminHandlerFirePayload
 from smarter_dev.web.handler_fire_payloads import HandlerFirePayload
+from smarter_dev.web.handler_recent_messages import recent_message_entry
+from smarter_dev.web.handler_recent_messages import record_recent_message
 from smarter_dev.web.member_activity import activity_facts
 from smarter_dev.web.member_activity import get_activity
 from smarter_dev.web.member_activity import record_activity
@@ -216,6 +218,16 @@ async def dispatch_handler_event(
         context.update(activity_facts(row, now))
         await record_activity(db_session, guild_id, str(author_id), now)
         await db_session.commit()
+        # Noted before any fire is enqueued, so the fire for THIS message already
+        # sees it beside the author's other posts of the last two minutes — an
+        # admin script reads them with list_recent_messages to spot a
+        # cross-channel burst. Ids and shape only, never the text.
+        await record_recent_message(
+            redis,
+            guild_id,
+            str(author_id),
+            recent_message_entry(context, channel_id, now),
+        )
 
     # The payloads carry the redacted context; the verbatim one is handed off
     # in Redis once, on the first fire enqueued, and shared by every fire.

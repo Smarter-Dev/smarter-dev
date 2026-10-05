@@ -43,6 +43,7 @@ from smarter_dev.web.handler_guild_memory import (
 )
 from smarter_dev.web.handler_memory import persist_handler_memory
 from smarter_dev.web.handler_notify import notify_handler_error
+from smarter_dev.web.handler_recent_messages import read_recent_messages
 from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
 from smarter_dev.web.handler_run_audit import EXPIRED_CONTEXT_ERROR
 from smarter_dev.web.handler_run_audit import record_completed_run, record_skipped_run
@@ -225,6 +226,8 @@ async def _run_admin_handler_fire(payload: AdminHandlerFirePayload, context: Wor
         mod_action_reader=services.read_mod_actions,
         mod_action_recorder=services.record_warn,
         rules_reader=services.read_rules,
+        # Guild bound host-side: a script names only the member.
+        recent_messages_reader=partial(read_recent_messages, redis, guild_id),
         handler_id=str(handler_id),
         timer_scheduler=timer_scheduler.schedule_timer,
         claimer=claimer,

@@ -73,6 +73,11 @@ notice (plus one more for its DM unless `dm=False`) — count it that way agains
 and remember a `mod_action`-triggered handler runs with 0 moderation actions, so it cannot warn.
 `remove_timeout(user_id)` lifts an active timeout and spends a moderation action exactly like the
 `timeout_user` it reverses — count it against the per-fire cap the same way.
+`list_recent_messages(user_id)` (a lookup) returns where a member posted in the last two minutes —
+ids only. Using it to spot one member posting a file or link in several channels within seconds,
+timing them out while ONE anchored review runs, and deleting every post of that burst once the
+review confirms a violation is targeted moderation, not blanket destruction. It must sit behind a
+cheap guard (the message carries an attachment or a link), like every other lookup.
 
 ## Reject unsafe edit_message / rename_channel use
 - Editing a foreign message: `edit_message` only works on the bot's OWN messages, so its target

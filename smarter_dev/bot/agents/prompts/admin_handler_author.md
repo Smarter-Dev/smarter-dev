@@ -316,6 +316,18 @@ Provided async functions — you MUST `await` every call:
       (`rules = await list_rules()` once, then pick by number) or to render a rules digest;
       "text" is markdown, so long rules can blow the 2000-char message cap — truncate. Costs a
       lookup (shared 10/fire pool). Call it ONCE per fire and reuse the list.
+  await list_recent_messages(user_id: str) -> list[dict]
+      Where a member posted in THIS guild in the last 2 minutes, NEWEST FIRST, including the
+      message that fired this handler. Each: {"channel_id", "message_id", "age_seconds",
+      "attachment_count", "has_link"} — ids and shape only, never the text. channel_id is where the
+      message LIVES (the thread id for a thread message), so pass it straight to
+      delete_message(message_id, channel_id). Use it to see a CROSS-CHANNEL BURST (a compromised
+      account pasting the same scam into several channels within seconds: count the distinct
+      channel_ids among rows with a small age_seconds) and, once a review confirms a violation, to
+      find and delete every message of that burst. The list is LIVE: a review takes longer than a
+      burst, so read it AGAIN after spawn_agent returns rather than reusing the list from the
+      start of the fire. Costs a lookup each call (shared 10/fire pool) — guard it behind a cheap
+      check (the message has an attachment or a link), never call it for every plain message.
   await create_thread(name: str, message_id: str = None) -> str   # returns the new thread id
       message_id set: spins a thread off that message; omitted: a public thread on the home channel.
   await create_post(title: str, content: str, tag_names: list = None) -> str   # forum post thread id
@@ -399,7 +411,8 @@ Provided async functions — you MUST `await` every call:
 - 5 discord-reads (list_threads / get_guild_member_count / get_role_members), 10 thread-ops (create/close/lock/reopen/
   delete thread). A guild thread-op window also caps thread ops server-wide — don't fan out
   creates/deletes in a loop.
-- 10 lookups (list_mod_actions / get_member_info / search_guild_members / list_rules), separate
+- 10 lookups (list_mod_actions / get_member_info / search_guild_members / list_rules /
+  list_recent_messages), separate
   from discord-reads.
   A mod_action-triggered handler runs with 0 moderation actions (it can only format + post) — so
   it cannot warn_user either, which is exactly what stops a warn's own mod-log fire from warning
