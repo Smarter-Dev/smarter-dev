@@ -31,13 +31,14 @@ delivered via a single ``agent_reframe_ready`` notification that the
 browser renders as a transient preface above the tool chips; it
 collapses alongside the chip stream when ``agent_run_complete`` fires.
 
-Worker preset
--------------
-The app YAML uses ``workers.preset: local`` → ``execution: inline`` and
-in-memory backends, so each ``Agent.run`` blocks in the request context
-and no queue/Redis state survives the request. Persistence is owned by
-the ``agent_conversations`` / ``agent_messages`` tables, not Skrift's
-RunState.
+Skrift sessions
+---------------
+Each stage runs inline (``agents.default_subagent_dispatch: inline``) inside
+the ``resources.agent.run`` worker job, and Skrift stores each stage's session
+in its worker tables while it runs. The product reads only the
+``agent_conversations`` / ``agent_messages`` tables, so once the pipeline ends,
+however it ends, it deletes every stage's session
+(:func:`~smarter_dev.web.agent_session_cleanup.forget_agent_sessions`).
 """
 
 from __future__ import annotations
@@ -52,6 +53,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
+from uuid import uuid4
 
 import httpx
 import skrift
@@ -68,6 +70,7 @@ from skrift.agents.models import ResumeContext
 # worker when the string model ids below materialize, never on the web tier.
 from skrift.notifications import notify_user
 
+from smarter_dev.web.agent_session_cleanup import forget_agent_sessions
 from smarter_dev.web.research_tools import brave_search
 from smarter_dev.web.research_tools import jina_read
 
@@ -1610,6 +1613,42 @@ async def run_resources_pipeline(
       excerpts.
     - Author failure: re-raised so the caller fires `agent_run_error`.
     """
+    session_ids: list[str] = []
+    try:
+        return await _run_stages(
+            question,
+            message_history=message_history,
+            actor=actor,
+            conversation_id=conversation_id,
+            owner_user_id=owner_user_id,
+            usage_records=usage_records,
+            usage_callback=usage_callback,
+            session_ids=session_ids,
+        )
+    finally:
+        # The stages' sessions hold the question, the earlier messages, the
+        # research and the answer. Everything the caller needs from them is
+        # in hand, and a retry starts new ones.
+        await forget_agent_sessions(session_ids)
+
+
+def _new_session_id(session_ids: list[str]) -> str:
+    """A session id for the next stage, recorded so the pipeline can delete it."""
+    session_ids.append(uuid4().hex)
+    return session_ids[-1]
+
+
+async def _run_stages(
+    question: str,
+    *,
+    message_history: list | None,
+    actor: str,
+    conversation_id: str,
+    owner_user_id: str,
+    usage_records: list[dict] | None,
+    usage_callback,
+    session_ids: list[str],
+) -> str:
     deps_ref = {
         "conversation_id": conversation_id,
         "owner_user_id": owner_user_id,
@@ -1627,6 +1666,7 @@ async def run_resources_pipeline(
             _build_reframer_user_turn(question),
             message_history=message_history,
             actor=actor,
+            session_id=_new_session_id(session_ids),
             deps_ref=deps_ref,
         ),
         timeout=_REFRAMER_TIMEOUT_S,
@@ -1665,6 +1705,7 @@ async def run_resources_pipeline(
             researcher_input,
             message_history=message_history,
             actor=actor,
+            session_id=_new_session_id(session_ids),
             deps_ref=deps_ref,
         ),
         timeout=_RESEARCHER_TIMEOUT_S,
@@ -1686,6 +1727,7 @@ async def run_resources_pipeline(
                         question, research.gaps, reframe.web_search_topics
                     ),
                     actor=actor,
+                    session_id=_new_session_id(session_ids),
                     deps_ref=deps_ref,
                 ),
                 timeout=_GAP_FILLER_TIMEOUT_S,
@@ -1716,6 +1758,7 @@ async def run_resources_pipeline(
             _build_author_user_turn(question, author_payload),
             message_history=message_history,
             actor=actor,
+            session_id=_new_session_id(session_ids),
             deps_ref=deps_ref,
         ),
         timeout=_AUTHOR_TIMEOUT_S,

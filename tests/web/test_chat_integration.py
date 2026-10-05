@@ -853,6 +853,16 @@ async def test_resources_ask_is_idempotent_and_rejects_inactive_user(
     assert second["idempotent"] is True
     assert await db_session.scalar(select(func.count(ResourceAgentRun.id))) == 1
     assert await db_session.scalar(select(func.count(AgentConversation.id))) == 1
+    # The worker job and its dispatch carry ids, never the question.
+    run = await db_session.scalar(select(ResourceAgentRun))
+    dispatch = await db_session.scalar(
+        select(WorkDispatch).where(WorkDispatch.aggregate_id == run.id)
+    )
+    assert dispatch.payload == {
+        "run_id": str(run.id),
+        "conversation_id": str(run.conversation_id),
+        "owner_user_id": str(user.id),
+    }
 
     user.is_active = False
     await db_session.commit()

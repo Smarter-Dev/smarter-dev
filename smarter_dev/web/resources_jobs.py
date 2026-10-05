@@ -32,8 +32,9 @@ logger = logging.getLogger(__name__)
 
 
 class ResourcesRunPayload(BaseModel):
-    # Legacy fields remain during rolling deploys: old workers ignore run_id,
-    # while new workers materialize a durable run for old queued payloads.
+    # New jobs carry run_id and the ids only; the question is read from the run
+    # row. The legacy fields let this worker still run a job queued before
+    # run_id existed, which carried the question.
     run_id: str | None = None
     conversation_id: str | None = None
     owner_user_id: str | None = None
