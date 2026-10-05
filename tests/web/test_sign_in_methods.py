@@ -1,10 +1,11 @@
-"""Production ``app.yaml`` allows Discord sign-in and nothing else (task #56).
+"""Production ``app.yaml`` allows Discord, GitHub and Google sign-in, and no
+passkeys (task #56, GitHub and Google back in task #71).
 
 Loads the real ``app.yaml`` into Skrift and mounts Skrift's own
 ``AuthController``, so these tests exercise the same route guards production
 runs: a method left out of ``auth`` must 404 on every entry point a browser
 could hit directly, not just vanish from the login page. The account security
-page must keep showing passkeys and providers that are switched off.
+page must keep showing passkeys while passkey sign-in is off.
 """
 
 from __future__ import annotations
@@ -44,7 +45,18 @@ from smarter_dev.web.account_controller import AccountController
 
 REPO = Path(__file__).resolve().parents[2]
 APP_YAML = REPO / "app.yaml"
-DISABLED = ["github", "google", "passkey", "dummy"]
+PROVIDERS = ["discord", "github", "google"]
+DISABLED = ["passkey", "dummy"]
+AUTHORIZE_HOSTS = {
+    "discord": "discord.com",
+    "github": "github.com",
+    "google": "accounts.google.com",
+}
+SCOPES = {
+    "discord": {"identify", "email"},
+    "github": {"user:email"},
+    "google": {"openid", "email", "profile"},
+}
 
 
 @pytest.fixture
@@ -89,32 +101,35 @@ def client(prod_settings, tmp_path) -> TestClient:
         yield c
 
 
-def test_only_discord_is_configured(prod_settings):
-    assert prod_settings.auth.get_method_keys() == ["discord"]
-    assert list(prod_settings.auth.providers) == ["discord"]
+def test_discord_github_and_google_are_configured(prod_settings):
+    assert prod_settings.auth.get_method_keys() == PROVIDERS
+    assert list(prod_settings.auth.providers) == PROVIDERS
     assert prod_settings.auth.second_factors.get_method_keys() == []
 
 
-def test_login_page_lists_only_discord(client):
+def test_login_page_lists_the_three_providers(client):
     resp = client.get("/auth/login", follow_redirects=False)
     assert resp.status_code == 200
-    assert resp.text.strip() == "discord"
+    assert resp.text.strip() == ",".join(PROVIDERS)
 
 
-def test_discord_login_redirects_to_discord(client, prod_settings):
-    resp = client.get("/auth/discord/login", follow_redirects=False)
+@pytest.mark.parametrize("provider", PROVIDERS)
+def test_login_redirects_to_the_provider(client, prod_settings, provider):
+    resp = client.get(f"/auth/{provider}/login", follow_redirects=False)
     assert resp.status_code in (302, 303, 307)
     target = urlparse(resp.headers["location"])
-    assert target.hostname == "discord.com"
+    assert target.hostname == AUTHORIZE_HOSTS[provider]
     query = parse_qs(target.query)
-    assert query["client_id"] == [prod_settings.auth.providers["discord"].client_id]
-    assert query["redirect_uri"] == ["https://smarter.dev/auth/discord/callback"]
+    assert query["client_id"] == [prod_settings.auth.providers[provider].client_id]
+    assert query["redirect_uri"] == [f"https://smarter.dev/auth/{provider}/callback"]
+    assert set(query["scope"][0].split()) == SCOPES[provider]
 
 
-def test_discord_callback_is_live(client):
+@pytest.mark.parametrize("provider", PROVIDERS)
+def test_callback_is_live(client, provider):
     # No state in the session, so the flow is rejected by the OAuth state
     # check — past the "is this method configured" gate the others fail at.
-    resp = client.get("/auth/discord/callback?code=x&state=y", follow_redirects=False)
+    resp = client.get(f"/auth/{provider}/callback?code=x&state=y", follow_redirects=False)
     assert resp.status_code == 400
 
 
@@ -154,8 +169,6 @@ def test_disabled_callback_404s(client, method):
         "/auth/passkey/complete",
         "/auth/passkey/register/options",
         "/auth/passkey/register/complete",
-        "/auth/github/complete",
-        "/auth/google/complete",
         "/auth/dummy-login",
     ],
 )
@@ -208,7 +221,7 @@ async def test_security_page_keeps_passkeys_while_sign_in_is_off(prod_settings):
     assert "factor_type" in queries[2]
     assert context["passkey_sign_in"] is False
     assert context["passkey_available"] is False
-    assert context["sign_in_methods"] == ["discord"]
+    assert context["sign_in_methods"] == PROVIDERS
 
 
 def _render_security_page(**context) -> str:
@@ -230,14 +243,15 @@ def _render_security_page(**context) -> str:
     return " ".join(env.get_template("account/security.html").render(**context).split())
 
 
-def test_security_page_copy_while_discord_only():
+def test_security_page_copy_with_three_providers():
     html = _render_security_page(
-        sign_in_methods=["discord"],
+        sign_in_methods=PROVIDERS,
         passkey_sign_in=False,
         passkey_available=False,
         linked_accounts=[
             SimpleNamespace(provider="discord", provider_email=None, created_at=None),
             SimpleNamespace(provider="github", provider_email=None, created_at=None),
+            SimpleNamespace(provider="google", provider_email=None, created_at=None),
         ],
         passkeys=[
             SimpleNamespace(
@@ -245,12 +259,10 @@ def test_security_page_copy_while_discord_only():
             )
         ],
     )
-    assert "Sign-in is Discord only for now." in html
-    assert "Sign in with any of these" not in html
-    assert html.count("sign-in off for now") == 1
-    assert 'Github</div> <div class="sec-item-meta"> • sign-in off for now' in html
+    assert "Sign in with any of these" in html
+    assert "only for now" not in html
+    assert "sign-in off for now" not in html
     assert "Passkey sign-in is off for now." in html
     assert "Laptop" in html
     assert "/account/security/passkeys/" in html
     assert "Add passkey" not in html
-    assert "your only way to sign in" not in html
