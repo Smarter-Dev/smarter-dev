@@ -1,13 +1,14 @@
 """Redis producer primitives for guild-scoped proactive notifications.
 
 Envelopes carry verbatim Discord message text, so the keys that hold them are
-bounded by the content retention window where a bound is possible. The wake
-and shadow streams hold no entry written more than the window ago: each is
-trimmed exactly at the cutoff (approximate trimming skips a quiet stream whose
-entries all sit in the open macro node) on every publish and again by
-``trim_expired_envelopes`` on the bot's passive tick. A claimed batch expires
-one window after the claim, not after the write, so its envelopes can outlive
-their own write cutoff by up to one more window. The pending list is trimmed by
+bounded by the retention window (``CONTENT_RETENTION_WINDOW``) where a bound is
+possible. The wake and shadow streams hold no entry written more than the
+window ago: each is trimmed exactly at the cutoff (approximate trimming skips a
+quiet stream whose entries all sit in the open macro node) on every publish and
+again by ``trim_expired_envelopes`` on the bot's passive tick. A claimed batch
+is deleted when its wake is acknowledged; its expiry is only the backstop, set
+at the claim to ``IN_FLIGHT_MAX`` after its oldest envelope was written, so no
+envelope in it outlives the in-flight bound. The pending list is trimmed by
 entry age on the same tick, and each envelope it drops is counted in
 ``pending-dropped`` so the agent is told; see ``trim_expired_envelopes``.
 """
@@ -27,6 +28,7 @@ from smarter_dev.bot.proactive.contracts import NotificationEnvelope
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.message_content import CONTENT_RETENTION_MILLISECONDS
 from smarter_dev.shared.message_content import oldest_retained_stream_id
+from smarter_dev.shared.retention_policy import IN_FLIGHT_MAX_MILLISECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -292,7 +294,8 @@ class RedisNotificationQueue:
 
     async def claim_pending(self, guild_id: str, wake_id: str) -> ClaimedPending:
         """Move the pending list into a batch that a retry of ``wake_id`` reads
-        again and that expires with the retention window if never acknowledged."""
+        again, expiring ``IN_FLIGHT_MAX`` after its oldest envelope was
+        written if never acknowledged."""
         raw = await self._redis.eval(
             _CLAIM_PENDING_LUA,
             4,
@@ -307,6 +310,14 @@ class RedisNotificationQueue:
             NotificationEnvelope.model_validate_json(_decode(value))
             for value in raw[1:]
         )
+        if notifications:
+            # Only ever moves the expiry earlier, so a retry cannot extend it.
+            oldest = min(envelope.created_at for envelope in notifications)
+            await self._redis.pexpireat(
+                batch_key(guild_id, wake_id),
+                int(oldest.timestamp() * 1000) + IN_FLIGHT_MAX_MILLISECONDS,
+                lt=True,
+            )
         return ClaimedPending(notifications=notifications, dropped=dropped)
 
     async def acknowledge_pending(self, guild_id: str, wake_id: str) -> None:

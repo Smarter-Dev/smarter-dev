@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 MAX_READ_CHARS = 100_000
 MAX_FETCH_BYTES = MAX_DOWNLOAD_BYTES  # don't download enormous files to read them
-CACHE_TTL_SECONDS = 24 * 60 * 60
+CACHE_TTL_SECONDS = 60 * 60
 
 # Extension -> media type, trusting the extension over the server's Content-Type
 # (CDNs are unreliable for media, e.g. serving .ogg as video/ogg).

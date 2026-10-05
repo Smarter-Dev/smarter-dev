@@ -1,4 +1,4 @@
-"""Tests for the 48-hour Discord content retention sweep."""
+"""Tests for the Discord content retention sweep."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from smarter_dev.bot.proactive.redis_queue import (
     SHADOW_STREAM_MAX_ENTRIES,
 )
 from smarter_dev.bot.services.chat_memory import HISTORY_TTL_SECONDS
+from smarter_dev.shared.retention_policy import IN_FLIGHT_MAX
 
 from smarter_dev.web.models import (
     CONTENT_RETENTION_WINDOW,
@@ -846,6 +847,7 @@ DERIVED_TEXT_COLUMNS = (
     "decision_reason",
 )
 RETENTION_WINDOW_HOURS = int(CONTENT_RETENTION_WINDOW.total_seconds() // 3600)
+IN_FLIGHT_HOURS = int(IN_FLIGHT_MAX.total_seconds() // 3600)
 
 
 HANDLER_LINT_MODULE = REPO_ROOT / "smarter_dev" / "web" / "handler_lint.py"
@@ -945,7 +947,7 @@ class TestDocumentedBehaviour:
 
     def test_states_that_the_chat_verbatim_tail_is_a_floor(self, retention_doc):
         """``KEEP_RECENT_CHARS`` is what is never folded, not a ceiling on the tail."""
-        _, _, bound = table_cells(
+        _, _, _, bound = table_cells(
             table_row(retention_doc, "| Chat agent working history")
         )
         assert "at most" not in bound
@@ -973,7 +975,7 @@ class TestDocumentedBehaviour:
     def test_states_each_proactive_bound_in_one_place(self, retention_doc):
         """The table owns every bound; prose that restates one can drift from it."""
         assert retention_doc.count("no key TTL") == 1
-        assert retention_doc.count("after the claim") == 1
+        assert retention_doc.count("after its oldest envelope was written") == 1
         out_of_scope = section(retention_doc, "## What is out of scope, and why")
         assert "compaction" not in out_of_scope
 
@@ -1086,7 +1088,7 @@ class TestDocumentedBehaviour:
 
     def test_states_the_pending_list_cap(self, retention_doc):
         """The survivors table owns the cap; nothing else in the doc restates it."""
-        _, _, bound = table_cells(
+        _, _, _, bound = table_cells(
             table_row(retention_doc, "| Proactive pending list")
         )
         assert f"{PENDING_LIMIT} envelopes" in bound
@@ -1095,12 +1097,12 @@ class TestDocumentedBehaviour:
         assert "15 minutes" in bound
         assert retention_doc.count(f"{PENDING_LIMIT} envelopes") == 1
 
-    def test_states_that_a_claimed_batch_is_bounded_from_its_claim(
+    def test_states_that_a_claimed_batch_is_bounded_from_its_oldest_envelope(
         self, retention_doc
     ):
         claimed_batch_row = table_row(retention_doc, "| A claimed proactive")
-        assert "after the claim" in claimed_batch_row
-        assert states_hours(claimed_batch_row, RETENTION_WINDOW_HOURS)
+        assert "after its oldest envelope was written" in claimed_batch_row
+        assert states_hours(claimed_batch_row, IN_FLIGHT_HOURS)
 
     def test_states_that_a_handler_run_stores_no_timer_payload(self, retention_doc):
         handler_run_row = table_row(retention_doc, "| `handler_runs` |")

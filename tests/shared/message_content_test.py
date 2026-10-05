@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import fields
 from datetime import UTC
 from datetime import datetime
+from datetime import timedelta
 from typing import get_args
 
 import pytest
@@ -41,6 +42,7 @@ from smarter_dev.shared.message_content import redact_text
 from smarter_dev.shared.message_content import redact_trigger_context
 from smarter_dev.shared.message_content import redact_turn_decision
 from smarter_dev.shared.message_content import stored_error_type
+from smarter_dev.shared.retention_policy import IN_FLIGHT_MAX
 
 
 def chat_message_dict(**overrides) -> dict:
@@ -698,11 +700,11 @@ class TestOldestRetainedStreamId:
         cutoff = now - CONTENT_RETENTION_WINDOW
         assert oldest_retained_stream_id(now) == f"{int(cutoff.timestamp() * 1000)}-0"
 
-    def test_the_window_is_forty_eight_hours(self):
-        assert CONTENT_RETENTION_WINDOW.total_seconds() == 48 * 60 * 60
+    def test_the_window_leaves_the_hourly_sweep_inside_the_in_flight_bound(self):
+        assert IN_FLIGHT_MAX.total_seconds() == 6 * 60 * 60
+        assert CONTENT_RETENTION_WINDOW + timedelta(hours=1) == IN_FLIGHT_MAX
 
-    def test_the_millisecond_window_is_the_same_forty_eight_hours(self):
-        assert CONTENT_RETENTION_MILLISECONDS == 48 * 60 * 60 * 1000
+    def test_the_millisecond_window_is_the_same_window(self):
         assert CONTENT_RETENTION_MILLISECONDS == int(
             CONTENT_RETENTION_WINDOW.total_seconds() * 1000
         )

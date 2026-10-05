@@ -34,6 +34,7 @@ from smarter_dev.web.handler_caps import (
     claim_handler_key,
 )
 from smarter_dev.web.handler_emitter import DiscordEmitter
+from smarter_dev.web.handler_fire_context import discard_fire_context
 from smarter_dev.web.handler_fire_context import load_fire_context
 from smarter_dev.web.handler_fire_payloads import AdminHandlerFirePayload
 from smarter_dev.web.handler_guild_memory import (
@@ -77,8 +78,17 @@ async def run_admin_handler_fire(payload: AdminHandlerFirePayload, context: Work
     An error leaves without its message text (``redacted_job_errors``): Skrift
     keeps it for 7 days, and the fire holds a member's message.
     """
-    with redacted_job_errors():
-        return await _run_admin_handler_fire(payload, context)
+    redis = get_redis_client()
+    try:
+        with redacted_job_errors():
+            outcome = await _run_admin_handler_fire(payload, context)
+    except Exception:
+        # A retry reads the hand-off again; only the last attempt deletes it.
+        if context.job.attempt >= context.job.max_attempts:
+            await discard_fire_context(redis, payload.context_ref)
+        raise
+    await discard_fire_context(redis, payload.context_ref)
+    return outcome
 
 
 async def _run_admin_handler_fire(payload: AdminHandlerFirePayload, context: WorkerContext) -> dict:

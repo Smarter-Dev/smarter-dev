@@ -43,9 +43,13 @@ from datetime import datetime
 from datetime import timedelta
 from typing import Any
 
+from smarter_dev.shared.retention_policy import IN_FLIGHT_SWEEP_WINDOW
+
 MESSAGE_CONTENT_PLACEHOLDER: str = "[message content]"
 
-CONTENT_RETENTION_WINDOW: timedelta = timedelta(hours=48)
+# How old message text may get before the bot's trims and the hourly retention
+# sweep (smarter_dev/web/retention.py) remove it.
+CONTENT_RETENTION_WINDOW: timedelta = IN_FLIGHT_SWEEP_WINDOW
 CONTENT_RETENTION_MILLISECONDS: int = int(CONTENT_RETENTION_WINDOW.total_seconds() * 1000)
 
 _CHAT_PRESERVED_KEYS = frozenset(

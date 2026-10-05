@@ -35,6 +35,7 @@ from smarter_dev.bot.proactive.redis_queue import pending_key
 from smarter_dev.bot.proactive.redis_queue import wake_stream_key
 from smarter_dev.shared.message_content import CONTENT_RETENTION_MILLISECONDS
 from smarter_dev.shared.message_content import oldest_retained_stream_id
+from smarter_dev.shared.retention_policy import IN_FLIGHT_MAX_MILLISECONDS
 
 try:
     import fakeredis.aioredis as fakeredis_aioredis
@@ -68,7 +69,8 @@ def _envelope(
         channel_id=channel_id,
         channel_name="general",
         kind=kind,
-        created_at=datetime(2026, 9, 1, 16, 0, tzinfo=UTC),
+        # Now: a claimed batch expires a fixed time after its oldest envelope.
+        created_at=datetime.now(UTC),
         body=body,
         message_ids=("333",),
         wakes=wakes,
@@ -232,7 +234,9 @@ def _aged(body: str, age: timedelta) -> NotificationEnvelope:
     return _envelope(body=body).model_copy(update={"created_at": _TRIM_NOW - age})
 
 
-_TRIM_NOW = datetime(2026, 10, 4, 12, 0, tzinfo=UTC)
+# Near the real clock: the trim sets an absolute expiry, and one already past
+# would delete the list before the test reads it.
+_TRIM_NOW = datetime.now(UTC).replace(microsecond=0)
 _WINDOW = timedelta(milliseconds=CONTENT_RETENTION_MILLISECONDS)
 _SLACK = timedelta(milliseconds=redis_queue.PENDING_EXPIRY_SLACK_MILLISECONDS)
 
@@ -264,7 +268,7 @@ async def test_the_trim_drops_and_counts_only_envelopes_past_the_window(redis_cl
     queue = RedisNotificationQueue(redis_client)
     for envelope in (
         _aged("old", _WINDOW + timedelta(minutes=1)),
-        _aged("pushed-at-47h59m", _WINDOW - timedelta(minutes=1)),
+        _aged("pushed-a-minute-inside", _WINDOW - timedelta(minutes=1)),
         _aged("new", timedelta(minutes=5)),
     ):
         await queue.publish(envelope)
@@ -272,7 +276,7 @@ async def test_the_trim_drops_and_counts_only_envelopes_past_the_window(redis_cl
     dropped = await queue.trim_expired_pending("111", now=_TRIM_NOW)
 
     assert dropped == 1
-    assert await _pending_bodies(redis_client) == ["pushed-at-47h59m", "new"]
+    assert await _pending_bodies(redis_client) == ["pushed-a-minute-inside", "new"]
     assert await redis_client.get(pending_dropped_key("111")) == b"1"
     # The backstop follows the newest envelope left, so it cannot delete any
     # envelope before a trim has dropped and counted it.
@@ -281,7 +285,7 @@ async def test_the_trim_drops_and_counts_only_envelopes_past_the_window(redis_cl
         expected.timestamp() * 1000
     )
 
-    # A minute later the 47h59m envelope is past the window: dropped and
+    # A minute later that envelope is past the window: dropped and
     # counted, never silently expired with the list.
     later = _TRIM_NOW + timedelta(minutes=2)
     assert await queue.trim_expired_pending("111", now=later) == 1
@@ -370,6 +374,22 @@ async def test_retrying_a_claim_does_not_extend_the_batch_expiry(redis_client):
     await queue.claim_pending("111", "wake-1")
 
     assert await redis_client.pttl(batch_key("111", "wake-1")) <= 1_000
+
+
+@pytest.mark.asyncio
+async def test_a_claimed_batch_expires_six_hours_after_its_oldest_envelope(
+    redis_client,
+):
+    queue = RedisNotificationQueue(redis_client)
+    oldest = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=4)
+    await queue.publish(_envelope(body="old").model_copy(update={"created_at": oldest}))
+    await queue.publish(_envelope(body="new"))
+
+    await queue.claim_pending("111", "wake-1")
+
+    assert await redis_client.pexpiretime(batch_key("111", "wake-1")) == int(
+        oldest.timestamp() * 1000
+    ) + IN_FLIGHT_MAX_MILLISECONDS
 
 
 @pytest.mark.asyncio
@@ -569,8 +589,8 @@ def _assert_minid_is_the_retention_cutoff(minid: str, *, before, after) -> None:
 async def test_publish_trims_wake_entries_past_the_retention_window(redis_client):
     queue = RedisNotificationQueue(redis_client)
     stream = wake_stream_key("111")
-    await redis_client.xadd(stream, {"payload": b"expired"}, id=_stream_id_for_age(49))
-    await redis_client.xadd(stream, {"payload": b"retained"}, id=_stream_id_for_age(47))
+    await redis_client.xadd(stream, {"payload": b"expired"}, id=_stream_id_for_age(7))
+    await redis_client.xadd(stream, {"payload": b"retained"}, id=_stream_id_for_age(4))
 
     await queue.publish(_envelope(guild_id="111", wakes=True, kind="mention"))
 
@@ -584,10 +604,10 @@ async def test_publish_trims_wake_entries_past_the_retention_window(redis_client
 async def test_publish_shadow_trims_entries_past_the_retention_window(redis_client):
     queue = RedisNotificationQueue(redis_client)
     await redis_client.xadd(
-        SHADOW_STREAM_KEY, {"payload": b"expired"}, id=_stream_id_for_age(49)
+        SHADOW_STREAM_KEY, {"payload": b"expired"}, id=_stream_id_for_age(7)
     )
     await redis_client.xadd(
-        SHADOW_STREAM_KEY, {"payload": b"retained"}, id=_stream_id_for_age(47)
+        SHADOW_STREAM_KEY, {"payload": b"retained"}, id=_stream_id_for_age(4)
     )
 
     await queue.publish_shadow(_envelope(guild_id="111", wakes=True, kind="mention"))
@@ -683,12 +703,12 @@ async def test_publish_without_a_wake_issues_no_stream_trim(redis_client):
 @pytest.mark.asyncio
 async def test_trim_expired_envelopes_clears_streams_no_publish_reaches(redis_client):
     queue = RedisNotificationQueue(redis_client)
-    await _seed_abandoned_wake_stream(redis_client, "111", 49, 47)
-    await _seed_abandoned_wake_stream(redis_client, "222", 72)
+    await _seed_abandoned_wake_stream(redis_client, "111", 7, 4)
+    await _seed_abandoned_wake_stream(redis_client, "222", 12)
 
     dropped = await queue.trim_expired_envelopes(["111", "222"])
 
-    assert await _payloads_in(redis_client, wake_stream_key("111")) == [b"aged-47"]
+    assert await _payloads_in(redis_client, wake_stream_key("111")) == [b"aged-4"]
     assert await _payloads_in(redis_client, wake_stream_key("222")) == []
     assert dropped == 2
 
@@ -698,7 +718,7 @@ async def test_trim_expired_envelopes_visits_guilds_the_index_no_longer_names(
     redis_client,
 ):
     queue = RedisNotificationQueue(redis_client)
-    await _seed_abandoned_wake_stream(redis_client, "111", 49, indexed=False)
+    await _seed_abandoned_wake_stream(redis_client, "111", 7, indexed=False)
 
     dropped = await queue.trim_expired_envelopes(["111"])
 
@@ -711,7 +731,7 @@ async def test_trim_expired_envelopes_visits_guilds_only_the_index_still_names(
     redis_client,
 ):
     queue = RedisNotificationQueue(redis_client)
-    await _seed_abandoned_wake_stream(redis_client, "111", 49, indexed=True)
+    await _seed_abandoned_wake_stream(redis_client, "111", 7, indexed=True)
 
     dropped = await queue.trim_expired_envelopes([])
 
@@ -725,10 +745,10 @@ async def test_trim_expired_envelopes_bounds_the_shadow_stream_after_shadow_mode
 ):
     queue = RedisNotificationQueue(redis_client)
     await redis_client.xadd(
-        SHADOW_STREAM_KEY, {"payload": b"expired"}, id=_stream_id_for_age(49)
+        SHADOW_STREAM_KEY, {"payload": b"expired"}, id=_stream_id_for_age(7)
     )
     await redis_client.xadd(
-        SHADOW_STREAM_KEY, {"payload": b"retained"}, id=_stream_id_for_age(47)
+        SHADOW_STREAM_KEY, {"payload": b"retained"}, id=_stream_id_for_age(4)
     )
 
     await queue.trim_expired_envelopes([])
@@ -741,7 +761,7 @@ async def test_trim_expired_envelopes_leaves_ready_signals_and_the_guild_index(
     redis_client,
 ):
     queue = RedisNotificationQueue(redis_client)
-    await _seed_abandoned_wake_stream(redis_client, "111", 49)
+    await _seed_abandoned_wake_stream(redis_client, "111", 7)
     await redis_client.xadd(
         READY_STREAM_KEY, {"guild_id": b"111"}, id=_stream_id_for_age(200)
     )
@@ -756,8 +776,8 @@ async def test_trim_expired_envelopes_leaves_ready_signals_and_the_guild_index(
 async def test_trim_expired_envelopes_bounds_every_stream_once_at_the_exact_cutoff(
     redis_client,
 ):
-    await _seed_abandoned_wake_stream(redis_client, "111", 49, indexed=True)
-    await _seed_abandoned_wake_stream(redis_client, "222", 49, indexed=False)
+    await _seed_abandoned_wake_stream(redis_client, "111", 7, indexed=True)
+    await _seed_abandoned_wake_stream(redis_client, "222", 7, indexed=False)
     recording = _RecordingRedis(redis_client)
     queue = RedisNotificationQueue(recording)
 
@@ -792,7 +812,7 @@ async def test_trim_expired_envelopes_tolerates_a_guild_whose_stream_is_gone(
 async def test_trim_expired_envelopes_skips_a_corrupt_index_member_and_trims_the_rest(
     redis_client, caplog
 ):
-    await _seed_abandoned_wake_stream(redis_client, "111", 49, indexed=True)
+    await _seed_abandoned_wake_stream(redis_client, "111", 7, indexed=True)
     await redis_client.sadd(READY_GUILDS_KEY, "not-a-snowflake")
     queue = RedisNotificationQueue(redis_client)
 
@@ -839,7 +859,7 @@ def _embedded_runtime(bot: SimpleNamespace) -> proactive.ProactiveRuntime:
 async def test_passive_tick_trims_streams_that_stopped_receiving_publishes(
     redis_client, monkeypatch
 ):
-    await _seed_abandoned_wake_stream(redis_client, "111", 49, 47)
+    await _seed_abandoned_wake_stream(redis_client, "111", 7, 4)
     monkeypatch.setattr(proactive, "PASSIVE_SECONDS", 0)
     monkeypatch.setattr(proactive, "FIRST_PASSIVE_SWEEP_SECONDS", 0)
     monkeypatch.setattr(
@@ -852,15 +872,15 @@ async def test_passive_tick_trims_streams_that_stopped_receiving_publishes(
     with pytest.raises(asyncio.CancelledError):
         await ticker
 
-    assert await _payloads_in(redis_client, wake_stream_key("111")) == [b"aged-47"]
+    assert await _payloads_in(redis_client, wake_stream_key("111")) == [b"aged-4"]
 
 
 @pytest.mark.asyncio
 async def test_sweep_visits_every_guild_the_bot_sees_and_reports_the_drop_count(
     redis_client, caplog
 ):
-    await _seed_abandoned_wake_stream(redis_client, "111", 49, indexed=False)
-    await _seed_abandoned_wake_stream(redis_client, "222", 49, indexed=True)
+    await _seed_abandoned_wake_stream(redis_client, "111", 7, indexed=False)
+    await _seed_abandoned_wake_stream(redis_client, "222", 7, indexed=True)
     run = _embedded_runtime(_bot_seeing_guilds(redis_client, 111))
 
     with caplog.at_level(logging.INFO, logger=proactive.logger.name):
@@ -902,7 +922,7 @@ async def test_a_redis_outage_during_the_retention_trim_is_logged_not_raised(cap
 async def test_a_corrupt_guild_index_member_is_skipped_by_the_sweep(
     redis_client, caplog
 ):
-    await _seed_abandoned_wake_stream(redis_client, "111", 49, indexed=False)
+    await _seed_abandoned_wake_stream(redis_client, "111", 7, indexed=False)
     await redis_client.sadd(READY_GUILDS_KEY, "not-a-snowflake")
     run = _embedded_runtime(_bot_seeing_guilds(redis_client, 111))
 
@@ -935,7 +955,7 @@ class _RedisFailingOnce:
 async def test_passive_ticker_keeps_ticking_after_a_retention_sweep_failure(
     redis_client, monkeypatch, caplog
 ):
-    await _seed_abandoned_wake_stream(redis_client, "111", 49, 47)
+    await _seed_abandoned_wake_stream(redis_client, "111", 7, 4)
     failing_once = _RedisFailingOnce(redis_client)
     monkeypatch.setattr(proactive, "PASSIVE_SECONDS", 0)
     monkeypatch.setattr(proactive, "FIRST_PASSIVE_SWEEP_SECONDS", 0)
@@ -953,4 +973,4 @@ async def test_passive_ticker_keeps_ticking_after_a_retention_sweep_failure(
 
     assert failing_once.failures_left == 0
     assert "proactive envelope retention trim failed" in caplog.text
-    assert await _payloads_in(redis_client, wake_stream_key("111")) == [b"aged-47"]
+    assert await _payloads_in(redis_client, wake_stream_key("111")) == [b"aged-4"]

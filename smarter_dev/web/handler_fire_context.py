@@ -6,7 +6,9 @@ context carries what a member wrote, so dispatch puts only the redacted
 context in the payload and hands the verbatim one over in Redis for
 :data:`FIRE_CONTEXT_TTL_SECONDS`, under a random reference the payload
 carries. The fire job reads it back before running the script, so the script
-still sees the real message.
+still sees the real message, and deletes it when the job finishes: on any
+return, or on the failure that spends the last attempt. A failure with retries
+left keeps it for the retry; the expiry is only the backstop.
 
 A fire that finds the hand-off gone does not run: a script given the
 placeholder in place of the message could post or moderate on it. Contexts
@@ -16,12 +18,16 @@ with nothing to redact are not handed off at all.
 from __future__ import annotations
 
 import json
+import logging
 from copy import deepcopy
 from uuid import uuid4
 
 from pydantic_core import to_json
 
+from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.message_content import redact_trigger_context
+
+logger = logging.getLogger(__name__)
 
 FIRE_CONTEXT_TTL_SECONDS = 60 * 60
 
@@ -64,3 +70,16 @@ async def load_fire_context(
     if raw is None:
         return None
     return json.loads(raw)
+
+
+async def discard_fire_context(redis, context_ref: str | None) -> None:
+    """Delete a finished fire's hand-off. A failed delete is logged, not
+    raised: it must not fail a job that has run, and the expiry still holds."""
+    if context_ref is None:
+        return
+    try:
+        await redis.delete(fire_context_key(context_ref))
+    except Exception:  # noqa: BLE001 — the expiry is the backstop
+        log_exception(
+            logger, "handler fire context delete failed", level=logging.WARNING
+        )

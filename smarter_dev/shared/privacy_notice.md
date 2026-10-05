@@ -18,10 +18,9 @@ The bot reads messages in the servers it is in, so the chat bot can answer peopl
 
 - **The chat bot's memories.** A memory for each server, in the bot's own words, about the people there and how it should behave there. It names people by username and Discord ID, and it is told not to keep anything private, sensitive or shared in confidence. Kept permanently: the bot never resets them, and only the bot edits them.
 - **The chat bot's conversations.** Messages in conversations the chat bot takes part in or watches, with its notes and summaries of them, so it can follow along. Kept until you ask us to delete them.
-- **Messages being handled.** Copies of messages, and of what the AI read in files people post, while the bot works on them. Kept for 5 days.
+- **Messages being handled.** Copies of messages, of what the AI read in files people post, of `/help` questions, and of the chat bot's web searches with the results it saw, while the bot works on them. Kept for at most 6 hours.
 - **Server automations.** Text from a message that an automation set up by a server admin chose to keep. Kept until you ask us to delete it.
 - **Records of what the AI did.** Who and which channel it concerned, when, what it cost and what it decided, without the words, so we can check its behaviour and cost. Kept until you ask us to delete them.
-- **`/help` questions and the chat bot's web searches**, with the results it saw, so it can answer and show what it found. Kept for 3 days.
 - **Moderation.** Every moderation action taken on a member, and the bot's posts of those actions, and of edited and deleted messages with their text, to the server's log channels. Kept permanently. Moderation history, including those posts, is kept so the server can stay safe, and is not part of a deletion request.
 - **Games and community features.** Your bytes balance and transfers, squad, quest and challenge submissions, forum subscriptions, command records and message dates, so these features work. Kept until you ask us to delete them. Leaving a server removes your bytes balance and squad membership there.
 - **Rate limits and caches.** Message counts and other working data tied to your Discord ID. Kept for 30 days.
@@ -30,7 +29,7 @@ The bot reads messages in the servers it is in, so the chat bot can answer peopl
 ## What the website stores
 
 - **Your account.** You sign in with Discord, GitHub or Google. From each one you use, we receive your profile as that service shares it with us, including your account ID, name or username, avatar, email address and whether it is verified, and the sign-in tokens it issues. Discord's also includes details such as your language and banner and whether you use two-factor sign-in or Nitro; Google's gives your first and last name, language and, for a work or school account, its domain; GitHub's is your public profile, such as bio, company and location. We keep these with your profile and notification settings to run your account. Kept until you delete your account. You stay signed in for 30 days after your last visit.
-- **Chat.** Your conversations and attachments, kept until you delete them or your account, and questions you ask about our resources, kept until you delete them or your account. While the AI answers a question about our resources, it keeps its own copy of the question, its research and its answer, deleted as soon as it finishes, or within 7 hours if it is cut off partway. The progress it shows you while it works is kept for 2 days.
+- **Chat.** Your conversations and attachments, kept until you delete them or your account, and questions you ask about our resources, kept until you delete them or your account. While the AI answers a question about our resources, it keeps its own copy of the question, its research and its answer, deleted as soon as it finishes, or within 6 hours if it is cut off partway. The progress it shows you while it works is kept for 2 days.
 - **Searches** from your dashboard, kept until you delete them or your account. Searches made with your search link while signed out are kept for 30 minutes.
 - **Education products.** We are building Gym and Labs. They are not open yet. Before they collect anything new, we will update this notice to say what they store.
 - **Billing.** Payments are handled by Polar, which keeps its payment records under its own terms. We keep your membership record while you have an account.
@@ -64,7 +63,7 @@ DM an @admin on the Smarter Dev Discord server, or email admin@smarter.dev. Eith
 
 Everything else that can still mention you is gone within 30 days of your request.
 
-You can delete a chat, a question about our resources or a search yourself, one at a time where it is listed or all of each kind at once from your account's security settings. Each goes with its answers, files and every copy we keep. Deleting your website account from your account settings removes the account with all of those and your search link. The AI's own copies of your questions about our resources and its answers are deleted as soon as it finishes each answer, or within 7 hours if it was cut off partway. Anything the Discord bot stores and the chat bot's memories are kept until you ask us to delete them. For those, DM an @admin or email admin@smarter.dev.
+You can delete a chat, a question about our resources or a search yourself, one at a time where it is listed or all of each kind at once from your account's security settings. Each goes with its answers, files and every copy we keep. Deleting your website account from your account settings removes the account with all of those and your search link. The AI's own copies of your questions about our resources and its answers are deleted as soon as it finishes each answer, or within 6 hours if it was cut off partway. Anything the Discord bot stores and the chat bot's memories are kept until you ask us to delete them. For those, DM an @admin or email admin@smarter.dev.
 
 ## Changes
 

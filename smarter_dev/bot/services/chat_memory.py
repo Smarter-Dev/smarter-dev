@@ -29,7 +29,7 @@ from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 logger = logging.getLogger(__name__)
 
 KEY_PREFIX = "chat_agent"
-TOPIC_TTL_SECONDS = int(timedelta(hours=24).total_seconds())
+TOPIC_TTL_SECONDS = int(timedelta(hours=6).total_seconds())
 NOTES_TTL_SECONDS = int(timedelta(hours=2).total_seconds())
 HISTORY_TTL_SECONDS = int(timedelta(hours=2).total_seconds())
 COUNTER_TTL_SECONDS = int(timedelta(hours=24).total_seconds())
