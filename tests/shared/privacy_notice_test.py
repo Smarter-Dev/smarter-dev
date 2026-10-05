@@ -66,8 +66,8 @@ def test_the_notice_does_not_describe_an_opt_out_as_available(notice):
 
 def test_a_deletion_request_removes_the_person_from_the_chat_bot(notice):
     deleted = notice.split("**What we delete.**", 1)[1].split("**", 1)[0]
-    assert "removes you from its memories" in deleted
-    assert "conversation summaries" in deleted
+    assert "removes you from its memories and its conversations" in deleted
+    assert "Everything else above that is kept until you ask us to delete it" in deleted
     assert "cannot remove" not in notice.lower()
 
 
@@ -83,39 +83,56 @@ def test_the_notice_says_the_blocked_list_covers_the_chat_bot_only(notice):
     assert "The blocked list covers the chat bot only" in notice
 
 
-def test_bytes_transfers_are_anonymised_not_deleted(notice):
+def test_shared_records_are_anonymised_not_deleted(notice):
     deleted = notice.split("**What we delete.**", 1)[1].split("**What we keep", 1)[0]
-    assert "bytes transfers you sent or received stay" in deleted
-    assert "username and the reason removed" in deleted
+    assert "such as bytes transfers, stay with your ID and name removed" in deleted
 
 
-def test_the_notice_gives_each_message_hand_off_its_limit(notice):
-    messages = notice.split("**Messages.**", 1)[1].split("**The chat bot's", 1)[0]
-    assert "server automation, its text is handed to the job" in messages
-    assert "kept for 1 hour" in messages
-    assert "dropped once they are 48 hours old (checked every 15 minutes)" in messages
-    assert "up to 48 hours after it picks them up" in messages
-    assert "until the reminder runs, and for up to 7 days after" in messages
-    assert "up to 16 KB" in messages
-    assert "That memory has no time limit: it lasts as long as the automation exists" in messages
-    assert "stays until an automation deletes it, even after the automations that wrote it are removed" in messages
-    assert "can paraphrase or quote members" in messages
-    assert "Ideas already filed have no time limit" in messages
-    unbounded = ("That history has no time limit", "That memory has no time limit", "Ideas already filed have no time limit")
-    for phrase in unbounded:
-        messages = messages.replace(phrase, "")
-    assert "no time limit" not in messages
+def _store(notice: str, kind: str) -> str:
+    return notice.split(f"**{kind}**", 1)[1].split(" - **", 1)[0].split(" ## ", 1)[0]
+
+
+# Each kind of data the notice lists, and the retention it states for it. A
+# stated period must never be shorter than the code can keep the data; the
+# stores behind each figure are in docs/data-retention.md and the runbook.
+RETENTION = {
+    "The chat bot's memories.": "Kept permanently",
+    "The chat bot's conversations.": "Kept until you ask us to delete them",
+    "Messages being handled.": "Kept for 5 days",
+    "Server automations.": "Kept until you ask us to delete it",
+    "Blog post ideas.": "Kept until you ask us to delete them",
+    "Records of what the AI did.": "Kept until you ask us to delete them",
+    "`/help` questions and the chat bot's web searches": "Kept for 3 days",
+    "Moderation.": "Kept permanently",
+    "Games and community features.": "Kept until you ask us to delete them",
+    "Rate limits and caches.": "Kept for 30 days",
+    "Test copies.": "Kept permanently",
+    "Your account.": "Kept until you delete your account",
+    "Chat.": "kept until you delete them or your account",
+    "Searches": "kept until you ask us to delete them",
+    "Email.": "Kept until you ask us to delete it",
+    "Security.": "Kept for 30 days in Pydantic Logfire",
+}
+
+
+@pytest.mark.parametrize("kind", RETENTION)
+def test_each_kind_of_data_states_how_long_it_is_kept(notice, kind):
+    assert RETENTION[kind] in _store(notice, kind)
+
+
+def test_the_notice_states_figures_not_mechanisms(notice):
+    lowered = notice.lower()
+    for mechanism in ("up to", "placeholder", "folded", "every 15 minutes", "16 kb", "last five", "api key", "proactive", "chat agent"):
+        assert mechanism not in lowered
+    assert "Searches other people make through a link you share are kept for 30 minutes" in notice
+    assert "You stay signed in for 30 days after your last visit" in notice
 
 
 def test_ai_records_keep_no_words(notice):
-    records = notice.split("**Records of what the AI did.**", 1)[1].split("**Moderation", 1)[0]
-    assert "The words do not" in records
-    assert "the AI's own replies, running notes, reasoning and what it passed to its tools" in records
-    assert "the search and the results it saw are kept for 48 hours" in records
-    assert "are saved as a placeholder instead" in records
-    assert "can quote" not in records
-    commands = notice.split("**Commands and automations.**", 1)[1].split("\n", 1)[0]
-    assert "the bot's answers are not kept" in commands
+    records = _store(notice, "Records of what the AI did.")
+    assert "without the words" in records
+    assert "only the bot edits them" in _store(notice, "The chat bot's memories.")
+    assert "It names people by username and Discord ID" in notice
 
 
 def test_the_notice_does_not_call_logs_text_free(notice):
@@ -123,14 +140,11 @@ def test_the_notice_does_not_call_logs_text_free(notice):
 
 
 def test_security_events_name_no_member(notice):
-    security = notice.split("**Security.**", 1)[1].split("\n", 1)[0]
-    assert "failed authentication" in security
-    assert "over a rate limit" in security
+    security = _store(notice, "Security.")
+    assert "Failed attempts to authenticate to our API with the IP address they came from" in security
+    assert "requests refused for going over a rate limit" in security
     assert "admin operations" in security
     assert "None records a member's Discord ID" in security
-    assert "Ordinary requests are not logged" in security
-    assert "Pydantic Logfire" in security
-    assert "kept for 30 days." in security
 
 
 def test_no_placeholder_is_left_in_the_notice(notice):
@@ -148,7 +162,7 @@ def test_the_notice_names_what_a_deletion_keeps(notice):
     "product",
     [
         "Gym and Labs",
-        "Chat, search and the AI features",
+        "**Chat.**",
         "Your account",
         "TypeSafe",
         "Resend",
