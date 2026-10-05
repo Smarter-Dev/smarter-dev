@@ -26,7 +26,6 @@ The bot reads messages in the servers it is in, so the chat bot can answer peopl
 - **Moderation.** Every moderation action taken on a member, and the bot's posts of those actions, and of edited and deleted messages with their text, to the server's log channels. Kept permanently. Moderation history, including those posts, is kept so the server can stay safe, and is not part of a deletion request.
 - **Games and community features.** Your bytes balance and transfers, squad, quest and challenge submissions, forum subscriptions, command records and message dates, so these features work. Kept until you ask us to delete them. Leaving a server removes your bytes balance and squad membership there.
 - **Rate limits and caches.** Message counts and other working data tied to your Discord ID. Kept for 30 days.
-- **Test copies.** Some channel conversations, exported to test the bot's AI. Kept permanently.
 
 ## What the website stores
 
@@ -60,7 +59,7 @@ DM an @admin on the Smarter Dev Discord server, or email admin@smarter.dev. Eith
 - A bare record that your request was completed, with nothing that identifies you.
 - Your Discord ID alone on the chat bot's blocked list. Your messages then reach the chat bot only as `[BLOCKED BY USER]`, and it does not respond to you. The blocked list covers the chat bot only: other AI features, such as `/help`, forum replies, server automations and moderation, still process your new messages, and features like bytes start new records the next time you post.
 - Your name as the creator of automations, campaigns or scheduled messages you set up as a server admin.
-- Logs, the bot's posts on Discord and the test copies above, none of which are edited to remove you.
+- Logs and the bot's posts on Discord, neither of which is edited to remove you.
 - Copies held by Discord and the services named above, under their own terms.
 
 Everything else that can still mention you is gone within 30 days of your request.

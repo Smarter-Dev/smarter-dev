@@ -33,11 +33,9 @@ requester who is an admin (`created_by` on `channel_handlers`,
 `admin_handlers`, `forum_agents`, `campaigns`, `scheduled_messages`,
 `squad_sale_events` and `repeating_messages`;
 `extension_installs.installed_by`); Pydantic Logfire and server logs; copies
-held by AI model providers and the other processors the notice names; the
-bot's Discord posts and DMs outside the moderation and audit log channels;
-and copies of channel conversations exported to test the bot's AI
-(`scripts/proactive_eval/fetch_history.py`, and the historical copies from
-#42). Site pages and assets an admin authored are reassigned, not kept (step
+held by AI model providers and the other processors the notice names; and the
+bot's Discord posts and DMs outside the moderation and audit log channels.
+Site pages and assets an admin authored are reassigned, not kept (step
 5).
 
 ### Ages out
