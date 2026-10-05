@@ -15,10 +15,10 @@ still run or resume:
   claimed, paused with a wake time, or a handler timer due weeks ahead);
 - an agent session whose hot run state (``runstate:<id>`` in
   ``worker_state``) has not expired, is not terminal and changed within
-  :data:`SESSION_BACKSTOP` (6 hours). Skrift resumes a session only from that
+  :data:`SESSION_BACKSTOP` (5 hours, so the hourly job has it gone by 6). Skrift resumes a session only from that
   hot copy (``update_runstate`` raises ``KeyError`` without it). Every agent
   run here finishes within minutes, writing as it goes, and none waits for an
-  approval, so a session idle for 6 hours was cut off: its caller is gone and
+  approval, so a session idle for 5 hours was cut off: its caller is gone and
   nothing will read it;
 - a job state that is not terminal and either belongs to a live session (an
   inline agent run paused for approval has no queue row) or changed within
@@ -85,10 +85,12 @@ from sqlalchemy import update
 from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.shared.retention_policy import IN_FLIGHT_SWEEP_WINDOW
+
 logger = logging.getLogger(__name__)
 
 WORKER_RETENTION = timedelta(days=7)
-SESSION_BACKSTOP = timedelta(hours=6)
+SESSION_BACKSTOP = IN_FLIGHT_SWEEP_WINDOW
 
 _BATCH_SIZE = 500
 

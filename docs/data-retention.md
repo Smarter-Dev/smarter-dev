@@ -6,6 +6,40 @@ it actually behaves — if the code changes, change this file in the same commit
 `tests/web/test_retention.py` pins the numbers below against the constants they
 come from.
 
+## Retention policy
+
+Every store belongs to one of five classes. A store may keep its data for
+less than its class allows when its function needs it; nothing keeps data
+longer to match its class. The two numbers are constants in
+`smarter_dev/shared/retention_policy.py`, and the table under "What the public
+notice states" tags each kind of data with its class.
+
+1. **In-flight work.** Message text held while the bot works on it. Deleted
+   when the work finishes, with a 6-hour backstop (`IN_FLIGHT_MAX`).
+2. **Operational.** Rate limits, caches, dedupe claims, sign-in sessions,
+   failed-job records, logs and monitoring. At most 30 days
+   (`OPERATIONAL_MAX`); a counter expires with its own window.
+3. **User content.** Kept until the user deletes it, or an admin does on
+   their request. A request is done within 30 days.
+4. **Permanent.** Only the chat bot's memories and moderation history.
+5. **Usage, cost and audit records.** No message text. Kept indefinitely;
+   the person's ID and name are removed on a deletion request.
+
+Known exceptions:
+
+- **Container stdout logs** have no time limit. Kubernetes rotates each
+  container's log by size and deletes a pod's logs when the pod is removed,
+  so a line lasts until its pod is replaced (every deploy replaces the app
+  pods) or until enough newer output rotates it out (the kubelet defaults
+  are five files of 10 MiB per container).
+- **Skrift's queued notifications** are kept for 24 hours. The progress
+  stream for a Resources answer is sent through them and holds the
+  restated question and the search queries. The limit is
+  `QUEUED_TTL_HOURS` in Skrift's `skrift/lib/notification_backends.py`, a
+  module constant, so bringing it to 6 hours needs a Skrift change.
+- **Test copies** (channel exports for evaluating the bot) are kept
+  permanently, which only memories and moderation history are meant to be.
+
 ## The rule
 
 **Verbatim Discord message text is written to durable storage only as the
@@ -69,27 +103,28 @@ was posted to the channel, where the guild's own audit log keeps it.
 
 ## Where verbatim message text still exists, and for how long
 
-| Where | What it holds | Bound |
-| --- | --- | --- |
-| Chat agent working history (`smarter_dev/bot/services/chat_memory.py`, Redis) | The conversation the chat agent is currently in. | 2-hour key TTL, refreshed on write — that TTL is the bound. Compaction (`chat_compaction.py`) folds everything older than roughly the last 20,000 characters into a summary, keeping more when a single turn is larger than that, and the history grows again until the next fold. |
-| Proactive agent history (`smarter_dev/bot/proactive/history_store.py`, Redis, with a recovery copy in `proactive_agent_histories`) | The running history the proactive agent reasons over. | Size, not age: no key TTL and no sweep. Compaction fires only once the history passes 100,000 estimated tokens, and then keeps at most the trailing 8 messages verbatim, summarising the rest. |
-| Proactive wake stream, one per guild (Redis) | The notification envelope that woke a guild, message text included. | Trimmed to 48 hours by stream id on every publish, and again on the passive tick for guilds that stopped publishing. |
-| Proactive shadow stream (Redis) | The same envelopes, copied where canary workers can read them. | The same 48-hour trim, plus a 10,000-entry cap. |
-| A claimed proactive batch (Redis) | Envelopes handed to a wake that has not acknowledged them. | Expires 48 hours after the claim, not after the write, so a claimed envelope can outlive its own write cutoff by up to one more window. |
-| Proactive pending list, one per guild (Redis) | Non-waking envelopes queued for the next wake, message text included. | Each envelope is dropped once it is 48 hours old, on the bot's 15-minute passive tick, and counted in `pending-dropped` so the agent is told; so an envelope lasts at most 48 hours and 15 minutes while the tick runs. An envelope this version cannot read (no `created_at`, or a field it does not know) is dropped and counted on the same tick, however new. The list's own expiry is a backstop for a bot that stopped ticking: every push moves it out to 30 minutes past the new envelope's 48 hours, and every tick resets it to 30 minutes past the newest envelope left, so it never deletes an envelope uncounted. If the tick stops while pushes go on, older envelopes stay until the tick runs again or the list expires 48 hours 30 minutes after its last push. Also capped at 20 envelopes, and drained by the next wake. |
-| Handler fire hand-off (Redis, `handler-fire:context:*`) | The verbatim trigger context of an event that fired a handler, read back by the fire job so the script sees the real message. | 1-hour key TTL, set once and never refreshed. The job payload in Skrift's worker tables carries the redacted context and a random reference to this key, never the text. A fire that finds the key gone is recorded as `skipped` and does not run. |
-| Handler timer payloads in the Skrift worker tables (`worker_queue`, `worker_state`) | What a handler script chose to carry to its own later fire. A script can copy the message it was reacting to into it. | Until the timer fires, however far ahead the script set it. The fire's job state is emptied as the fire finishes; a fire that fails for good keeps the payload in its dead letter, which the hourly retention job deletes 7 days later. Only a script that copies message text into a timer payload puts any there; the `handler_runs` audit row empties the payload whatever it holds. |
-| Handler script memory (`channel_handlers.memory` and `admin_handlers.memory`, one JSON blob per handler; `guild_handler_memory`, one row per key shared by a guild's admin handlers) | Whatever a handler script chose to keep between fires. A script can copy text from the message it reacted to into it. | No age bound. A handler's own memory lasts as long as the handler. Guild memory is tied to no handler: uninstalling an extension or deleting a handler leaves it, and a key stays until a script deletes it. Each store is capped at 16 KB (`smarter_dev/web/handler_memory.py`, `handler_guild_memory.py`). Only a script that copies message text puts any there; the bot's own handlers keep counters, ids and timestamps. |
-| Moderation's `ai_context_summary` (`moderation_actions`) | A free-text field the AI moderation tools may fill. Today only the purge tool writes it, with a count (`Purged 3 message(s)`); no code reads it. | 48 hours, cleared by the hourly sweep. |
+| Where | Class | What it holds | Bound |
+| --- | --- | --- | --- |
+| Chat agent working history (`smarter_dev/bot/services/chat_memory.py`, Redis) | User content | The conversation the chat agent is currently in. | 2-hour key TTL, refreshed on write — that TTL is the bound. Compaction (`chat_compaction.py`) folds everything older than roughly the last 20,000 characters into a summary, keeping more when a single turn is larger than that, and the history grows again until the next fold. |
+| Proactive agent history (`smarter_dev/bot/proactive/history_store.py`, Redis, with a recovery copy in `proactive_agent_histories`) | User content | The running history the proactive agent reasons over. | Size, not age: no key TTL and no sweep. Compaction fires only once the history passes 100,000 estimated tokens, and then keeps at most the trailing 8 messages verbatim, summarising the rest. |
+| Proactive wake stream, one per guild (Redis) | In-flight | The notification envelope that woke a guild, message text included. | Trimmed to 5 hours by stream id on every publish, and again on the passive tick for guilds that stopped publishing, so an entry nobody consumed lasts at most 5 hours and 15 minutes. The external worker acknowledges and deletes (`XACK` + `XDEL`) each entry when its wake finishes, or when the wake is dead-lettered after its last attempt; a failed attempt with attempts left keeps the entry for the retry. |
+| Proactive shadow stream (Redis) | In-flight | The same envelopes, copied for a canary comparison, for guilds listed in `PROACTIVE_AGENT_SHADOW_GUILD_IDS` (empty in `k8s/configmap.yaml`). No code reads it, so nothing consumes and deletes an entry. | The same 5-hour trim, plus a 10,000-entry cap. |
+| A claimed proactive batch (Redis) | In-flight | The pending-list envelopes a wake claimed, kept until the wake is acknowledged so a retry reads them again. | Deleted when the wake finishes, or when it is dead-lettered after its last attempt (5 by default, retried about every 4 minutes). As a backstop for a wake that never finishes, the key expires 6 hours after its oldest envelope was written: the claim, and each mid-run drain that adds envelopes, can only bring that expiry in, so no claimed envelope outlives 6 hours. Only the external worker claims batches; the bot's own consumer keeps its queue in process memory. |
+| Proactive pending list, one per guild (Redis) | In-flight | Non-waking envelopes queued for the next wake, message text included. | Each envelope is dropped once it is 5 hours old, on the bot's 15-minute passive tick, and counted in `pending-dropped` so the agent is told; so an envelope lasts at most 5 hours and 15 minutes while the tick runs. An envelope this version cannot read (no `created_at`, or a field it does not know) is dropped and counted on the same tick, however new. The list's own expiry is a backstop for a bot that stopped ticking: every push moves it out to 30 minutes past the new envelope's 5 hours, and every tick resets it to 30 minutes past the newest envelope left, so it never deletes an envelope uncounted. If the tick stops while pushes go on, older envelopes stay until the tick runs again or the list expires 5 hours 30 minutes after its last push. Also capped at 20 envelopes, and drained by the next wake. |
+| Handler fire hand-off (Redis, `handler-fire:context:*`) | In-flight | The verbatim trigger context of an event that fired a handler, read back by the fire job so the script sees the real message. | Deleted when the fire job finishes (it ran, was skipped, or failed its last attempt); a failed attempt with retries left keeps it for the retry. A 1-hour key TTL, set once and never refreshed, is the backstop. The job payload in Skrift's worker tables carries the redacted context and a random reference to this key, never the text. A fire that finds the key gone is recorded as `skipped` and does not run. |
+| Handler timer payloads in the Skrift worker tables (`worker_queue`, `worker_state`) | User content | What a handler script chose to carry to its own later fire. A script can copy the message it was reacting to into it. | Until the timer fires, however far ahead the script set it. The fire's job state is emptied as the fire finishes; a fire that fails for good keeps the payload in its dead letter, which the hourly retention job deletes 7 days later. Only a script that copies message text into a timer payload puts any there; the `handler_runs` audit row empties the payload whatever it holds. |
+| Handler script memory (`channel_handlers.memory` and `admin_handlers.memory`, one JSON blob per handler; `guild_handler_memory`, one row per key shared by a guild's admin handlers) | User content | Whatever a handler script chose to keep between fires. A script can copy text from the message it reacted to into it. | No age bound. A handler's own memory lasts as long as the handler. Guild memory is tied to no handler: uninstalling an extension or deleting a handler leaves it, and a key stays until a script deletes it. Each store is capped at 16 KB (`smarter_dev/web/handler_memory.py`, `handler_guild_memory.py`). Only a script that copies message text puts any there; the bot's own handlers keep counters, ids and timestamps. |
+| Moderation's `ai_context_summary` (`moderation_actions`) | In-flight | A free-text field the AI moderation tools may fill. Today only the purge tool writes it, with a count (`Purged 3 message(s)`); no code reads it. | 5 hours, cleared by the hourly sweep: at most 6 hours. |
 
 The two agent histories are the "chat bot history" the policy carves out: they
 are the bot's short-term working memory, they are not queryable by an operator,
 and they are not in the database except as the proactive agent's crash-recovery
 copy. The two proactive streams, the claimed batch and the pending list are
-Redis hand-offs between the bot and the proactive worker; the claimed batch is
-the one *bounded* key whose window runs from the claim rather than from the
-write. The external proactive-agent worker sets the same expiry on the batches
-it claims, and its dead-letter stream keeps ids and an error type, no text.
+Redis hand-offs between the bot and the proactive worker. The external
+proactive-agent worker is what claims batches: it renames the pending list to
+the batch key, sets the backstop expiry the table gives, and deletes the
+batch when the wake finishes. Its
+dead-letter stream keeps ids and an error type, no text.
 
 Two places have no age bound at all, stated plainly. The proactive agent's
 history has no clock, so a guild that never talks enough to trigger compaction
@@ -144,15 +179,15 @@ topic and notes, a help `bot_response`, a forum agent's `decision_reason` and
 `response_content`, and a voice-send error that still carries its message. A
 row already written that way is left alone.
 
-Its second pass blanks text on rows older than 48 hours, stamping
+Its second pass blanks text on rows older than 5 hours, stamping
 `content_purged_at`. That is the back-fill for rows written before each
-write-time redaction landed, and the 48-hour bound on `ai_context_summary`.
+write-time redaction landed, and the 5-hour bound on `ai_context_summary`.
 
-| Table | Cleared after 48h | Kept |
+| Table | Cleared after 5h | Kept |
 | --- | --- | --- |
 | `help_conversations` | the already-redacted answer, question and context | ids, interaction type, tokens, latency |
 | `chat_agent_turns` | the already-redacted `agent_output`, triggering messages and transcript delta | tokens, cost, model, reasoning level, timing |
-| `chat_agent_engagements` | the already-redacted topic and notes, 48 hours after the engagement's last turn, and again whenever a later turn wrote them | activation ids, aggregate tokens/cost |
+| `chat_agent_engagements` | the already-redacted topic and notes, 5 hours after the engagement's last turn, and again whenever a later turn wrote them | activation ids, aggregate tokens/cost |
 | `chat_agent_compaction_events` | the compaction `summary` (back-fill only; written as the placeholder) | char counts, summariser cost |
 | `chat_agent_errors` | the exception message and the whole traceback of every row not written redacted, whatever its status or body, and `provider_body` (back-fill only; written redacted) | error type, status code, and the types and frames of a row written redacted |
 | `forum_agent_responses` | the already-redacted reasoning, reply, title and body | confidence, tokens, responded flag |
@@ -264,7 +299,7 @@ allowed — that is a keyword watch, not a command.
   query-string values of bot API requests, or httpx's outbound request URLs
   (capped at WARNING in `main.py`).
 - Model-written working notes beside the chat history: the running topic
-  (24-hour key) and notes (2-hour key) per channel, and the guild's recent
+  (6-hour key) and notes (2-hour key) per channel, and the guild's recent
   bot-event log (one-hour window, newest 200 events, holding usernames and
   moderation reasons). These are the agent's prose and the bot's own events,
   not message text, and they expire on their own clocks.
@@ -274,8 +309,9 @@ allowed — that is a keyword watch, not a command.
 
 ## How it runs
 
-`k8s/cron-retention-sweep.yaml` runs `scripts/retention_sweep.py` hourly, so the
-true worst case is 48–49 hours rather than the 48–72 a daily job would give. The
+`k8s/cron-retention-sweep.yaml` runs `scripts/retention_sweep.py` at the top of
+every hour, so text due at 5 hours is gone by 6, the in-flight bound
+(`CONTENT_RETENTION_WINDOW` is `IN_FLIGHT_MAX` less that hour). The
 sweep is idempotent (a stamped row is skipped) and commits per table, so a run
 that dies partway through keeps the tables it finished and the next hourly run
 picks up the rest. The first run after this change scrubs everything that
@@ -320,9 +356,9 @@ dead-lettered queue row, which keep its payload and error text because they are
 what an operator replays the job from on Skrift's dead-letter page; lifecycle
 events, which hold ids, statuses and error text; and a session whose caller was
 cut off before it finished (a web pod restarting while a title is generated, a
-worker stopped partway through a pipeline), which goes 6 hours after its last
+worker stopped partway through a pipeline), which goes 5 hours after its last
 write. The first three are operational records, kept 7 days; the last is
-in-flight work, so it has the 6-hour backstop.
+in-flight work, so the hourly job has it gone by the 6-hour backstop.
 
 A session's run state was also the only record of its token usage. A title's
 model turns are written to `usage_cost_rows` (product `resources`, operation
@@ -349,10 +385,10 @@ Live work is never deleted, however old. Live work is what Skrift can still
 run or resume: a job with a queue row that was not dead-lettered (queued,
 claimed, paused with a wake time, or a handler timer due weeks ahead); an
 agent session whose hot run state has not expired, is not finished and changed
-in the last 6 hours; and a job that is not finished and either belongs to such
+in the last 5 hours; and a job that is not finished and either belongs to such
 a session or changed in the last 7 days. Every agent run here finishes within
 minutes, writing as it goes, and none waits for an approval, so a session
-untouched for 6 hours was cut off and nothing will read it.
+untouched for 5 hours was cut off and nothing will read it.
 
 A job that waits with neither a queue row nor a session — an inline job paused
 on its own — is live for 7 days after it last changed, then deleted. Nothing
@@ -361,10 +397,10 @@ and a session keeps its jobs live.
 
 | Table | Deleted |
 | --- | --- |
-| `worker_state` | once the row's own expiry has passed (Skrift sets 7 days on a finished job's state, already emptied, and 24 hours on a finished agent run's, which its caller has already deleted); a job's state that is not live and has not changed in 7 days; a session's state that is not live and has not changed in 6 hours |
+| `worker_state` | once the row's own expiry has passed (Skrift sets 7 days on a finished job's state, already emptied, and 24 hours on a finished agent run's, which its caller has already deleted); a job's state that is not live and has not changed in 7 days; a session's state that is not live and has not changed in 5 hours |
 | `worker_queue` | a dead-lettered job (it holds the job's payload) 7 days after it was dead-lettered; a pending job never |
 | `worker_dead_letters` | 7 days after it was written, open or resolved |
-| `worker_events`, `worker_archive_events`, `worker_archive_snapshots` | a session's events and snapshots 6 hours after they were written, except a blogging session's events (the run timeline reads them); everything else 7 days after it was written; never while they belong to live work |
+| `worker_events`, `worker_archive_events`, `worker_archive_snapshots` | a session's events and snapshots 5 hours after they were written, except a blogging session's events (the run timeline reads them); everything else 7 days after it was written; never while they belong to live work |
 
 A live session keeps its event stream, its newest snapshot and every stored
 blob its state or events name; its older snapshots are history and go. Skrift
@@ -393,7 +429,8 @@ before the provider call (so the initial Discord tool-use message can link to a
 pending page), populated when the search returns, and never performs a search
 when loaded or refreshed.
 
-These snapshots have a separate fixed 48-hour lifecycle. The public controller
+These snapshots have a fixed 5-hour lifecycle (`SEARCH_PREVIEW_RETENTION`, the
+retention window). The public controller
 rejects them as soon as `expires_at` is reached, and the same hourly retention
 job then hard-deletes the expired rows. Only a SHA-256 hash of the random URL
 token is stored. Preview pages are read-only, unlisted, and marked `noindex`.
@@ -408,24 +445,23 @@ behind it keep less. A figure must never be shorter than a store behind it;
 change the notice in the same commit as anything here that raises a bound.
 `tests/shared/privacy_notice_test.py` pins each figure.
 
-| Notice says | Stores behind it | Bound, and where it is enforced |
-| --- | --- | --- |
-| The chat bot's memories: permanent | `chat_agent_guild_memory`, `chat_agent_memory_revisions` (last five nights), `chat_agent_memory_notes` | No bound (above); only the agent purge edits it for a request |
-| The chat bot's conversations: until a deletion request | chat agent working history, running topic (24-hour key) and notes (2-hour key), the guild's bot-event log (one hour); proactive history in Redis and `proactive_agent_histories`, and the external worker's copy | Proactive history has no age bound; the chat history's 2-hour TTL is refreshed on every write, so an active conversation has no fixed end either. The agent purge (step 4 of the runbook) removes the person |
-| Messages being handled: 5 days | proactive wake and shadow streams, claimed batches, pending lists; `handler-fire:context:*` (1 hour); `mediaread:*`, the AI's reading of a posted file (24 hours, `CACHE_TTL_SECONDS` in `smarter_dev/web/media_read.py`) | Longest is a claimed batch: an envelope can sit 48 hours in a stream, then a claim keeps it 48 hours more, about 4 days. Pending lists can outlast 48 hours only while the bot's passive tick is stopped |
-| Server automations: until a deletion request | handler script memory and guild memory (16 KB each), handler timer payloads | No age bound (above); runbook steps 7 and 8 clear the person's entries |
-| Records of what the AI did: until a deletion request | `chat_agent_turns`, `chat_agent_engagements`, `chat_agent_compaction_events`, `chat_agent_errors`, `forum_agent_responses`, `handler_runs`, `help_conversations` rows, usage cost rows | No age bound on the rows; text is written as the placeholder or cleared by the sweep. The runbook anonymises or deletes the person's rows; an anonymised row still holds message IDs, channel and tag IDs (including the DM channel ID), times, role details and a permission flag, reaction emoji, and moderation action details. The notice sums these up as "which messages and channels were involved and what was done" |
-| `/help` questions and web searches: 3 days | `help_conversations.user_question` typed as a slash-command argument; `search_result_previews` | Both 48 hours, then the hourly sweep: at most 49 hours |
-| Moderation: permanent | `moderation_actions`; the bot's posts to the moderation and audit log channels | No bound; not part of a deletion request |
-| Games and community features: until a deletion request | bytes balances and transactions, squad memberships, quest and challenge submissions and progress, member activity, forum subscriptions, `/help` and `/tldr` records, legacy `/scan` rows | No bound; member leave removes that guild's bytes balance and squad membership |
-| Rate limits and caches: 30 days | `chatlimit:*` (4-hour window, `user_message_limit.py`), `hcap:dmuser:*` (1 hour), `hdm:chan:*` (7 days, `handler_emitter.py`), `hclaim:*` (a script's claim, at most 30 days, `CLAIM_TTL_MAX_SECONDS` in `handler_caps.py`) | Longest is `hclaim:*` |
-| Test copies: permanent | channel exports from `scripts/proactive_eval/fetch_history.py` and the historical copies from #42 | Not edited for a request |
-| Your account: until the account is deleted; signed in 30 days after the last visit | the site account, profile, linked Discord, GitHub and Google logins with the profile and tokens each provider gave (`oauth_accounts`), push subscriptions | Session `max_age` 30 days, rolling (`app.yaml`) |
-| Chat: until deleted; Resources questions until deleted; the AI's own copy of a Resources question, its research and its answer as soon as it finishes, or within 7 hours if it is cut off partway; the progress it shows for 2 days | site chat conversations and attachments; Resources questions (`agent_messages`, `resource_agent_runs`), and an older `work_dispatches` row's copy while its run is unfinished (above); the Resources and chat-title agents' Skrift sessions and jobs; Skrift's queued notifications (24 hours) | The member deletes a chat or a question, or all of either, themselves (chat rail or Resources rail; Account → Security → Your data); each delete removes the rows, the uploaded files, a question's queued notifications and the `work_dispatches` rows. A chat's usage rows (`usage_cost_rows.details`) hold a copy of each model reply only while its turn runs, for crash recovery; the turn worker clears them when the turn ends, the hourly retention job clears any it missed, and a chat delete clears them too. Conversations, attachments and Resources conversations also go with the account (a queued job), which deletes the `work_dispatches` rows too. The agents' sessions are deleted when the pipeline or the title finishes, and their jobs' state is emptied (above). A session cut off partway stays until the hourly retention job deletes it, 6 hours after its last write (rounded up to 7 hours for the hourly run); runbook step 8 removes it for a request |
-| Searches: until deleted; searches made with a search link while signed out 30 minutes | dashboard searches; anonymous search keys (`TTL_SECONDS` in `smarter_dev/web/web_search/anonymous.py`), each holding the search text, queries, results, answer, the link owner's ID and the browser session that ran it | The member deletes a search, or all of them, themselves (the search page; Account → Security → Your data), with its `work_dispatches` row. Account deletion removes the searches and the search link (no foreign key, so the job deletes them explicitly); runbook step 5.1 only catches accounts deleted before that |
-| Email: until a deletion request | campaign and waitlist signups | No bound |
-| Security: 30 days in Pydantic Logfire | security events (below) | Logfire organisation retention |
-| Monitoring: 30 days in Pydantic Logfire; servers' own logs with no fixed time limit | errors and traces from the bot and the website; container stdout | Logfire organisation retention (the Personal plan default, never configured otherwise); container logs are bounded by size and pod lifetime, not time |
+| Notice says | Class | Stores behind it | Bound, and where it is enforced |
+| --- | --- | --- | --- |
+| The chat bot's memories: permanent | Permanent | `chat_agent_guild_memory`, `chat_agent_memory_revisions` (last five nights), `chat_agent_memory_notes` | No bound (above); only the agent purge edits it for a request |
+| The chat bot's conversations: until a deletion request | User content | chat agent working history, running topic (6-hour key) and notes (2-hour key), the guild's bot-event log (one hour); proactive history in Redis and `proactive_agent_histories`, and the external worker's copy | Proactive history has no age bound; the chat history's 2-hour TTL is refreshed on every write, so an active conversation has no fixed end either. The agent purge (step 4 of the runbook) removes the person |
+| Messages being handled: at most 6 hours | In-flight | proactive wake and shadow streams, claimed batches, pending lists; `handler-fire:context:*`; `mediaread:*`, the AI's reading of a posted file; `help_conversations.user_question` typed as a slash-command argument; `search_result_previews` | Deleted when the work finishes where there is a finish: a proactive wake's stream entries and claimed batch, a handler fire's hand-off. The rest age out. The streams, pending lists, `/help` questions, previews and `ai_context_summary` use the 5-hour `CONTENT_RETENTION_WINDOW` (`smarter_dev/shared/message_content.py`): the bot trims every 15 minutes, the sweep runs hourly, so at most 6 hours. A claimed batch's backstop is 6 hours from its oldest envelope (`IN_FLIGHT_MAX`). `handler-fire:context:*` and `mediaread:*` (`CACHE_TTL_SECONDS` in `smarter_dev/web/media_read.py`) are 1-hour keys. Pending lists can outlast this only while the bot's passive tick is stopped |
+| Server automations: until a deletion request | User content | handler script memory and guild memory (16 KB each), handler timer payloads | No age bound (above); runbook steps 7 and 8 clear the person's entries |
+| Records of what the AI did: until a deletion request | Usage, cost and audit | `chat_agent_turns`, `chat_agent_engagements`, `chat_agent_compaction_events`, `chat_agent_errors`, `forum_agent_responses`, `handler_runs`, `help_conversations` rows, usage cost rows | No age bound on the rows; text is written as the placeholder or cleared by the sweep. The runbook anonymises or deletes the person's rows; an anonymised row still holds message IDs, channel and tag IDs (including the DM channel ID), times, role details and a permission flag, reaction emoji, and moderation action details. The notice sums these up as "which messages and channels were involved and what was done" |
+| Moderation: permanent | Permanent | `moderation_actions`; the bot's posts to the moderation and audit log channels | No bound; not part of a deletion request |
+| Games and community features: until a deletion request | User content | bytes balances and transactions, squad memberships, quest and challenge submissions and progress, member activity, forum subscriptions, `/help` and `/tldr` records, legacy `/scan` rows | No bound; member leave removes that guild's bytes balance and squad membership |
+| Rate limits and caches: 30 days | Operational | `chatlimit:*` (4-hour window, `user_message_limit.py`), `hcap:dmuser:*` (1 hour), `hdm:chan:*` (7 days, `handler_emitter.py`), `hclaim:*` (a script's claim, at most 30 days, `CLAIM_TTL_MAX_SECONDS` in `handler_caps.py`) | Longest is `hclaim:*` |
+| Test copies: permanent | None: permanent, outside the policy (see Retention policy) | channel exports from `scripts/proactive_eval/fetch_history.py` and the historical copies from #42 | Not edited for a request |
+| Your account: until the account is deleted; signed in 30 days after the last visit | User content; sign-in sessions operational | the site account, profile, linked Discord, GitHub and Google logins with the profile and tokens each provider gave (`oauth_accounts`), push subscriptions | Session `max_age` 30 days, rolling (`app.yaml`) |
+| Chat: until deleted; Resources questions until deleted; the AI's own copy of a Resources question, its research and its answer as soon as it finishes, or within 6 hours if it is cut off partway; the progress it shows for 2 days | User content; the AI's own copies are in-flight work | site chat conversations and attachments; Resources questions (`agent_messages`, `resource_agent_runs`), and an older `work_dispatches` row's copy while its run is unfinished (above); the Resources and chat-title agents' Skrift sessions and jobs; Skrift's queued notifications (24 hours) | The member deletes a chat or a question, or all of either, themselves (chat rail or Resources rail; Account → Security → Your data); each delete removes the rows, the uploaded files, a question's queued notifications and the `work_dispatches` rows. A chat's usage rows (`usage_cost_rows.details`) hold a copy of each model reply only while its turn runs, for crash recovery; the turn worker clears them when the turn ends, the hourly retention job clears any it missed, and a chat delete clears them too. Conversations, attachments and Resources conversations also go with the account (a queued job), which deletes the `work_dispatches` rows too. The agents' sessions are deleted when the pipeline or the title finishes, and their jobs' state is emptied (above). A session cut off partway stays until the hourly retention job deletes it, 5 hours after its last write (`SESSION_BACKSTOP`, the in-flight sweep window), so it is gone by 6 hours; runbook step 8 removes it for a request |
+| Searches: until deleted; searches made with a search link while signed out 30 minutes | User content; signed-out searches in-flight | dashboard searches; anonymous search keys (`TTL_SECONDS` in `smarter_dev/web/web_search/anonymous.py`), each holding the search text, queries, results, answer, the link owner's ID and the browser session that ran it | The member deletes a search, or all of them, themselves (the search page; Account → Security → Your data), with its `work_dispatches` row. Account deletion removes the searches and the search link (no foreign key, so the job deletes them explicitly); runbook step 5.1 only catches accounts deleted before that |
+| Email: until a deletion request | User content | campaign and waitlist signups | No bound |
+| Security: 30 days in Pydantic Logfire | Operational | security events (below) | Logfire organisation retention |
+| Monitoring: 30 days in Pydantic Logfire; servers' own logs with no fixed time limit | Operational; container stdout is the known exception | errors and traces from the bot and the website; container stdout | Logfire organisation retention (the Personal plan default, never configured otherwise); container logs are bounded by size and pod lifetime, not time |
 
 The notice no longer carries these details, recorded here instead: the
 external proactive-agent worker reads channel messages from Discord directly,
@@ -437,7 +473,7 @@ and the answer; the audit log channel posts carry a message's old and new text
 and its author.
 
 Short-lived copies not named in the notice (in Skrift's worker tables, a
-failed job's dead letter, 7 days, and a session cut off partway, 7 hours) fall under the notice's "gone within 30 days of your
+failed job's dead letter, 7 days, and a session cut off partway, 6 hours) fall under the notice's "gone within 30 days of your
 request".
 
 ## Retention is not deletion

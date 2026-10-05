@@ -24,9 +24,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import get_db_session_context
+from smarter_dev.shared.message_content import CONTENT_RETENTION_WINDOW
 from smarter_dev.web.models import SearchResultPreview
 
-SEARCH_PREVIEW_RETENTION = timedelta(hours=48)
+# Previews hold search results that can quote what someone asked; they are
+# swept with the rest of the retention window's message text.
+SEARCH_PREVIEW_RETENTION = CONTENT_RETENTION_WINDOW
 _TOKEN_BYTES = 32
 
 

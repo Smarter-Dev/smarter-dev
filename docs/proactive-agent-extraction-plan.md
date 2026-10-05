@@ -189,13 +189,13 @@ schema version are required.
 
 ### Retention
 
-Envelopes carry verbatim Discord message text. The 48-hour content retention
-window (`CONTENT_RETENTION_WINDOW` and `CONTENT_RETENTION_MILLISECONDS` in
+Envelopes carry verbatim Discord message text. The 5-hour retention window
+(`CONTENT_RETENTION_WINDOW` and `CONTENT_RETENTION_MILLISECONDS` in
 `smarter_dev/shared/message_content.py`) bounds the keys that hold them as
-follows; the bound is per key, and two keys hold envelopes for longer than 48
-hours from the write:
+follows; the bound is per key, and `docs/data-retention.md` has the current
+worst case for each:
 
-- `wake` and `proactive:v1:shadow` hold no entry written more than 48 hours
+- `wake` and `proactive:v1:shadow` hold no entry written more than 5 hours
   ago. Each is trimmed exactly at the cutoff (`XTRIM MINID`, not approximate:
   approximate trimming only drops whole macro nodes and would never touch a
   quiet stream) on every publish, and again on the bot's 15-minute passive
@@ -203,13 +203,12 @@ hours from the write:
   still names. The worker may remove guilds from that index, and a member of
   it that is not a guild snowflake is skipped with a warning; retention does
   not depend on the index being intact.
-- `batch:<wake_id>` and its `:dropped` counter expire 48 hours after the
-  claim, not after the write. A wake that is never acknowledged cannot keep
-  its batch forever, but an envelope claimed late can outlive its own write
-  cutoff by up to one more window.
-- `pending` is bounded by count only (`PENDING_LIMIT`) and is drained by the
-  next wake. This is the known exception: a guild that never wakes again keeps
-  up to that many verbatim envelopes with no age bound.
+- `batch:<wake_id>` and its `:dropped` counter are deleted when the wake is
+  acknowledged. As a backstop the batch expires 6 hours after its oldest
+  envelope was written (`IN_FLIGHT_MAX`), so no claimed envelope outlives
+  the in-flight bound.
+- `pending` is capped at `PENDING_LIMIT`, drained by the next wake, and trimmed
+  by envelope age on the bot's passive tick.
 - `ready` and `guilds-with-wakes` carry guild ids only and are never trimmed
   by age.
 

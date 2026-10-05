@@ -1,0 +1,35 @@
+# One-off Job: run scripts/cap_inflight_ttls.py once, after the deploy that
+# brought in-flight message text to 6 hours (and again after proactive-agent
+# picks up the same change, if it deploys later). It only moves Redis expiries
+# earlier and prints counts. Not applied by the deploy workflow; apply by hand
+# with the deployed website tag:
+#   sed 's|<IMAGE_VERSION>|<tag>|' k8s/oneoff-cap-inflight-ttls.yaml | kubectl apply -f -
+#   kubectl logs -n smarter-dev job/smarter-dev-cap-inflight-ttls
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smarter-dev-cap-inflight-ttls
+  namespace: smarter-dev
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: smarter-dev-cap-inflight-ttls
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: cap-inflight-ttls
+          image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
+          workingDir: /app
+          command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/cap_inflight_ttls.py"]
+          envFrom:
+            - configMapRef:
+                name: smarter-dev-config
+          env:
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: redis-url
