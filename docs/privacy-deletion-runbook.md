@@ -148,7 +148,7 @@ history change for a request.
    (`/help`, forum replies, server automations, moderation) still process
    their new messages. Ask them to confirm they want to go ahead, because
    deletion cannot be undone. Wait for a yes. The 30 days run from the
-   request.
+   request (for an emailed request, from the email).
 4. Note the names the person goes by on Discord: their username, display
    name and server nickname, as shown on their profile in the server. Steps 4
    and 6 to 8 use them. Keep them only until the request is
