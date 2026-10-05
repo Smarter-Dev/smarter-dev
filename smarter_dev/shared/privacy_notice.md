@@ -10,7 +10,7 @@ Smarter Dev runs a Discord server, a Discord bot and the smarter.dev website. Th
 
 ## Who we are
 
-Smarter Dev is run by Smarter Dev LLC. For anything about your data, DM an @admin on the [Smarter Dev Discord server](https://discord.gg/de8kajxbYS).
+Smarter Dev is run by Smarter Dev LLC. For anything about your data, DM an @admin on the [Smarter Dev Discord server](https://discord.gg/de8kajxbYS) or email [admin@smarter.dev](mailto:admin@smarter.dev).
 
 ## What the Discord bot stores
 
@@ -60,7 +60,7 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, DM an @admi
 
 ## Deleting your data
 
-DM an @admin on the Smarter Dev Discord server. We check that you own the Discord account, then an admin deletes your data within 30 days of your request.
+DM an @admin on the Smarter Dev Discord server, or email admin@smarter.dev. Either way, we check that you own the Discord account, then an admin deletes your data within 30 days of your request.
 
 **What we delete.** Everything the chat bot holds about you: it removes you from its memories, rewrites its conversation summaries without you and drops the conversation history that holds your messages. Your bytes balance, your squad memberships, quest and challenge submissions, activity dates, forum subscriptions and `/help` records, and your website account with its chat conversations, attachments, searches and profile. Entries about you in server automations' memory, automation jobs about you that are waiting or failed, AI agent sessions that mention you, AI error records and topic notes that name you, and blog post ideas from your conversations or that name you. Records that you share with other people are kept with you removed: bytes transfers you sent or received stay in the other member's history with your ID, username and the reason removed, and records of the bot's conversations and automations that involve other people have your ID and names replaced.
 
@@ -77,7 +77,7 @@ We also keep a few things we cannot or do not edit for one person:
 
 If you stay in the server, the bot's other features, such as bytes and activity dates, start new records the next time you post. The blocked list covers the chat bot only: other AI features, such as `/help`, forum replies, server automations and moderation, still process your new messages.
 
-Deleting your website account from your account settings removes the account and its chat conversations and attachments straight away. It does not remove anything the Discord bot stores, the chat bot's memories, or searches you made from your dashboard. For those, message an admin.
+Deleting your website account from your account settings removes the account and its chat conversations and attachments straight away. It does not remove anything the Discord bot stores, the chat bot's memories, or searches you made from your dashboard. For those, DM an @admin or email admin@smarter.dev.
 
 ## Changes
 

@@ -85,6 +85,7 @@ def test_the_page_shows_the_whole_notice(client):
     assert "Moderation history is kept so the server can stay safe" in text
     assert "anonymous usage and cost records" in text
     assert "DM an @admin on the Smarter Dev Discord server" in text
+    assert 'href="mailto:admin@smarter.dev"' in client.get(PRIVACY_PATH).text
 
 
 def test_the_short_version_on_the_page_is_the_one_the_command_quotes(client):

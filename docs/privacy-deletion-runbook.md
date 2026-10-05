@@ -1,8 +1,10 @@
 # Handling a data deletion request by hand
 
 Until deletion is automated (#75), a member asks for their data to be deleted
-by sending a direct message on Discord to anyone with the @admin role, and the
-admin who receives it follows this runbook. The notice promises the deletion
+by sending a direct message on Discord to anyone with the @admin role, or by
+emailing admin@smarter.dev, and the admin who receives it follows this
+runbook. Either way, ownership of the Discord account is confirmed over
+Discord before anything is deleted (step 1). The notice promises the deletion
 within 30 days of the request. The public promise is the notice at `/privacy`
 (`smarter_dev/shared/privacy_notice.md`); this runbook is how it is kept. If
 the two disagree, fix whichever is wrong in the same change.
@@ -132,7 +134,9 @@ history change for a request.
 1. The request must come from the Discord account whose data is to be
    deleted, in a direct message. Discord has authenticated the sender, so the
    account sending the DM is the account you delete. Do not act on a request
-   sent on someone else's behalf, by email, or from another account.
+   sent on someone else's behalf or from another account. A request emailed
+   to admin@smarter.dev is not acted on until the person sends it again by
+   DM from the Discord account to be deleted; reply asking them to.
 2. Copy the sender's user id (Developer Mode → right-click the user → Copy
    User ID). Call it `DID` below. Never look a person up by username, display
    name or email.

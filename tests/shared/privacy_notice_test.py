@@ -45,9 +45,13 @@ def test_the_short_version_carries_the_required_statements():
 
 def test_every_deletion_request_goes_to_the_admin_role(notice):
     assert notice.count("DM an @admin on the") == 3
+    assert "or email [admin@smarter.dev](mailto:admin@smarter.dev)." in notice
+    assert "For those, DM an @admin or email admin@smarter.dev." in notice
     assert "Moderation history, including those posts, is kept so the server can stay safe, and is not part of a deletion request." in notice
     deleting = notice.split("## Deleting your data", 1)[1]
     assert "within 30 days of your request" in deleting
+    assert "DM an @admin on the Smarter Dev Discord server, or email admin@smarter.dev." in deleting
+    assert "Either way, we check that you own the Discord account" in deleting
     assert "backup" not in notice.lower()
 
 
@@ -195,3 +199,9 @@ def test_discord_drops_only_the_server_from_the_deletion_line():
     )
     assert discord_points[:-1] == notice_points[:-1]
     assert "Smarter Dev Discord server" not in channel_post(PUBLIC_URL)
+
+
+def test_the_email_address_is_in_the_full_notice_only():
+    assert "admin@smarter.dev" not in " ".join(short_version())
+    assert "admin@smarter.dev" not in channel_post(PUBLIC_URL)
+    assert "admin@smarter.dev" not in command_response(PUBLIC_URL)
