@@ -947,7 +947,7 @@ class TestDocumentedBehaviour:
 
     def test_states_that_the_chat_verbatim_tail_is_a_floor(self, retention_doc):
         """``KEEP_RECENT_CHARS`` is what is never folded, not a ceiling on the tail."""
-        _, _, bound = table_cells(
+        _, _, _, bound = table_cells(
             table_row(retention_doc, "| Chat agent working history")
         )
         assert "at most" not in bound
@@ -1088,7 +1088,7 @@ class TestDocumentedBehaviour:
 
     def test_states_the_pending_list_cap(self, retention_doc):
         """The survivors table owns the cap; nothing else in the doc restates it."""
-        _, _, bound = table_cells(
+        _, _, _, bound = table_cells(
             table_row(retention_doc, "| Proactive pending list")
         )
         assert f"{PENDING_LIMIT} envelopes" in bound
