@@ -108,6 +108,8 @@ Check that the clean-up was done before taking the first request.
   handler fire jobs holds exception types and frames only. Job payloads hold
   ids and names, not message text, except a timer whose automation script
   copied text into it: that stays until the timer fires, then up to 7 days.
+  A timer whose payload carries the person is not left to age out: step 8
+  rewrites it without them, or cancels it.
   Live work is never pruned: a queued or pending job, an AI agent session
   Skrift can still resume, and an unfinished job that belongs to such a
   session or changed in the last 7 days. A session from before Skrift gave
@@ -842,9 +844,10 @@ person's part of it, and does not wait 7 days for the rest.
 Use the same `psql` session as step 7.
 
 Deleting a waiting job cancels it. That includes an automation's timer or
-recurring fire about the person that is already due; one due later is left
-for a developer, because deleting it stops a recurring schedule for good. The
-developer still removes the person from it within the request's 30 days.
+recurring fire about the person that is already due. A timer due later is
+rewritten without the person instead, so the automation's follow-up still
+runs, and cancelled only if the rewrite cannot remove them (see "Timers due
+later" below).
 
 Dry run:
 
@@ -871,12 +874,10 @@ UNION ALL SELECT 'webhook deliveries, all (expect 0)', count(*) FROM webhook_del
 ROLLBACK;
 ```
 
-Running jobs finish within minutes; rerun the dry run until that row is 0. A
-timer due later is an automation's scheduled follow-up; deleting it cancels
-it, and if it belongs to a recurring schedule the schedule stops, so a
-developer removes the person from it within the 30 days: by rewriting its
-payload without them, or by deleting it if that cannot be done. The archive and webhook tables are not used by this site:
-if either count is not 0, stop and ask a developer.
+Running jobs finish within minutes; rerun the dry run until that row is 0.
+Timers due later are handled after this block. The archive and webhook
+tables are not used by this site: if either count is not 0, stop and ask a
+developer.
 
 ```sql
 BEGIN;
@@ -897,6 +898,87 @@ UPDATE worker_events SET event = jsonb_set(event::jsonb, '{error}', '"[removed]"
 -- state of a job still in the queue, such as a timer due later, stays with its
 -- job), then run COMMIT; or ROLLBACK;
 ```
+
+**Timers due later.** A timer a script armed with `schedule_timer` waits in
+`worker_queue` with `trigger_context` `{"trigger_type": "timer", "payload":
+{...}, "scheduled_at": ...}`, where `payload` is whatever the script chose to
+carry. Skrift keeps a second copy of the whole job in its state,
+`worker_state` key `workers:jobs:<job_id>`, under `value -> value -> job`.
+Both copies are rewritten together. A recurring schedule's own fire carries
+only `{"trigger_type": "schedule"}`, never a person, so this never touches a
+schedule; cancelling a timer cancels only that one follow-up.
+
+The rewrite drops each entry of the script's `payload` that carries the
+person (`pg_temp.scrub`, from step 7: a key or value with their id or one of
+their names, at any depth inside that entry). The timer then fires without
+them; a script that needed the dropped entry may record one failed run in
+`handler_runs`. A timer that still carries the person after the rewrite, in either copy (the
+person is the whole payload, or sits outside it), is cancelled.
+
+Dry run, in the same session:
+
+```sql
+BEGIN READ ONLY;
+SELECT q.job_id, q.visible_at,
+       q.job::jsonb #>> '{payload,trigger_context,trigger_type}' AS trigger_type,
+       pg_temp.hit((jsonb_set(q.job::jsonb, '{payload,trigger_context,payload}',
+         coalesce(pg_temp.scrub((q.job::jsonb #> '{payload,trigger_context,payload}')::json)::jsonb, 'null'))
+         -> 'payload')::text)
+       OR coalesce(pg_temp.hit((jsonb_set(s.value::jsonb, '{value,job,payload,trigger_context,payload}',
+         coalesce(pg_temp.scrub((s.value::jsonb #> '{value,job,payload,trigger_context,payload}')::json)::jsonb, 'null'))
+         )::text), false) AS will_be_cancelled
+  FROM worker_queue q
+  LEFT JOIN worker_state s ON s.key = 'workers:jobs:' || q.job_id
+ WHERE q.job::jsonb ->> 'type' IN ('handlers.fire', 'admin_handlers.fire')
+   AND q.claim_token IS NULL AND NOT q.dead_lettered AND q.visible_at > now()
+   AND pg_temp.hit((q.job::jsonb -> 'payload')::text);
+ROLLBACK;
+```
+
+Every row should have `trigger_type` `timer`; if one does not, stop and ask
+a developer. `will_be_cancelled` true means the rewrite cannot clear one of its two
+copies, so the timer will be cancelled.
+
+Rewrite, then cancel what the rewrite could not clear:
+
+```sql
+BEGIN;
+CREATE TEMP TABLE later_timers ON COMMIT DROP AS
+  SELECT job_id FROM worker_queue
+   WHERE job::jsonb ->> 'type' IN ('handlers.fire', 'admin_handlers.fire')
+     AND claim_token IS NULL AND NOT dead_lettered AND visible_at > now()
+     AND job::jsonb #>> '{payload,trigger_context,trigger_type}' = 'timer'
+     AND pg_temp.hit((job::jsonb -> 'payload')::text);
+UPDATE worker_queue
+   SET job = jsonb_set(job::jsonb, '{payload,trigger_context,payload}',
+         coalesce(pg_temp.scrub((job::jsonb #> '{payload,trigger_context,payload}')::json)::jsonb, 'null'))::json
+ WHERE job_id IN (SELECT job_id FROM later_timers) AND claim_token IS NULL;
+UPDATE worker_state
+   SET value = jsonb_set(value::jsonb, '{value,job,payload,trigger_context,payload}',
+         coalesce(pg_temp.scrub((value::jsonb #> '{value,job,payload,trigger_context,payload}')::json)::jsonb, 'null'))::json
+ WHERE key IN (SELECT 'workers:jobs:' || job_id FROM later_timers)
+   AND value::jsonb #> '{value,job,payload,trigger_context,payload}' IS NOT NULL;
+CREATE TEMP TABLE cancelled_timers ON COMMIT DROP AS
+  SELECT job_id FROM later_timers
+   WHERE job_id IN (SELECT job_id FROM worker_queue
+                     WHERE pg_temp.hit((job::jsonb -> 'payload')::text))
+      OR 'workers:jobs:' || job_id IN (SELECT key FROM worker_state
+                                        WHERE pg_temp.hit(value::jsonb::text));
+DELETE FROM worker_queue WHERE job_id IN (SELECT job_id FROM cancelled_timers) AND claim_token IS NULL;
+DELETE FROM worker_state WHERE key IN (SELECT 'workers:jobs:' || job_id FROM cancelled_timers);
+SELECT 'timers left carrying them (expect 0)' AS check, count(*) FROM worker_queue
+ WHERE job_id IN (SELECT job_id FROM later_timers) AND pg_temp.hit((job::jsonb -> 'payload')::text)
+UNION ALL SELECT 'timer state left carrying them (expect 0)', count(*) FROM worker_state
+ WHERE key IN (SELECT 'workers:jobs:' || job_id FROM later_timers) AND pg_temp.hit(value::jsonb::text);
+-- stop here: the rewritten count is the dry run's rows, the cancelled count
+-- its will_be_cancelled rows; both checks must be 0. Then COMMIT; or ROLLBACK;
+```
+
+A timer is cancelled whole, queue row and state together, if either copy
+still carries the person after the rewrite (in the state's attempt history,
+say). If a timer was claimed between the
+dry run and this block, it ran with the person; the step 10 recheck finds
+what that run left.
 
 *Site*, with `uid` set and after step 5 has finished: the site's own jobs
 name the account by `uid`.
