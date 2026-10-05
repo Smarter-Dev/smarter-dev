@@ -11,7 +11,8 @@ than once, and while the bot and the worker are running:
 - ``mediaread:*`` keys expire within ``CACHE_TTL_SECONDS``;
 - the chat agent's topic keys expire within ``TOPIC_TTL_SECONDS``.
 
-Prints counts only, never a key. Run it once, right after the deploy:
+Prints counts only, never a key. Run it once, right after the deploy, as the
+Job in ``k8s/oneoff-cap-inflight-ttls.yaml``. Locally:
     .venv/bin/python scripts/cap_inflight_ttls.py
 """
 
