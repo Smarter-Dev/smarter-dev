@@ -1155,8 +1155,11 @@ DELETE FROM worker_archive_snapshots WHERE key IN (SELECT 'runstate:' || session
 A name is matched as a whole word, so a name that is also a common word
 (`user`, `content`, `agents`) matches sessions that have nothing to do with
 the person. Before deleting, compare the session count with how many
-sessions you would expect (the person's Resources questions); if it is much higher, stop and ask a
-developer.
+sessions you would expect: normally few, since a Resources or title session is
+deleted when it finishes and a blogging run keeps only its event streams, so
+what is left is work in progress or cut off partway in the last 7 hours, and
+blogging runs' event streams from the last 7 days. If it
+is much higher, stop and ask a developer.
 
 ## 9. Clear Redis caches
 

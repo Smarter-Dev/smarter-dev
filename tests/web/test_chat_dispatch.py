@@ -19,6 +19,8 @@ from skrift.db.models.user import User
 from sqlalchemy import select
 
 from smarter_dev.web.chat import dispatch as chat_dispatch
+from smarter_dev.web.chat.dispatch import cancel_dispatch
+from smarter_dev.web.chat.dispatch import clear_finished_dispatch_payloads
 from smarter_dev.web.chat.dispatch import create_dispatch
 from smarter_dev.web.chat.dispatch import dispatch_one
 from smarter_dev.web.chat.dispatch import dispatch_pending
@@ -430,3 +432,93 @@ async def test_create_dispatch_is_idempotent_and_revives_a_cancelled_row(
     assert revived.id == first.id
     assert revived.status == "pending"
     assert await dispatch_pending() == 1
+
+
+_QUESTION = "how do I size a connection pool for a burst of webhooks"
+
+
+def _resources_row(**kwargs):
+    run_id = uuid4()
+    return _row(
+        id=uuid4(),
+        job_type="resources.agent.run",
+        aggregate_id=run_id,
+        payload={
+            "run_id": str(run_id),
+            "conversation_id": str(uuid4()),
+            "owner_user_id": str(uuid4()),
+            "question": _QUESTION,
+        },
+        **kwargs,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_finished_dispatch_keeps_its_ids_but_not_the_question(
+    db_session, outbox
+):
+    # The run row is gone (a missing aggregate is finished too).
+    row = _resources_row(
+        status="dispatched", dispatched_at=_now() - timedelta(minutes=30)
+    )
+    ids = {key: value for key, value in row.payload.items() if key != "question"}
+    row_id, run_id = row.id, row.aggregate_id
+    db_session.add(row)
+    await db_session.commit()
+
+    await requeue_stale_dispatches()
+
+    db_session.expire_all()
+    stored = await db_session.get(WorkDispatch, row_id)
+    assert stored.status == "complete"
+    assert stored.payload == ids
+    # The row stays, so asking create_dispatch again finds it and dispatches nothing.
+    again = await create_dispatch(
+        db_session,
+        job_type="resources.agent.run",
+        aggregate_id=run_id,
+        payload={**ids, "question": _QUESTION},
+    )
+    assert again.id == row_id and again.status == "complete"
+    assert await dispatch_pending() == 0 and outbox == []
+
+
+@pytest.mark.asyncio
+async def test_the_hourly_job_clears_questions_from_dispatches_finished_earlier(
+    db_session, outbox
+):
+    finished = _resources_row(status="complete")
+    cancelled = _resources_row(status="cancelled")
+    waiting = _resources_row(status="pending")
+    finished_id, cancelled_id, waiting_id = finished.id, cancelled.id, waiting.id
+    db_session.add_all([finished, cancelled, waiting])
+    await db_session.commit()
+
+    assert await clear_finished_dispatch_payloads(db_session, batch_size=1) == 2
+    assert await clear_finished_dispatch_payloads(db_session) == 0
+
+    db_session.expire_all()
+    assert "question" not in (await db_session.get(WorkDispatch, finished_id)).payload
+    assert "question" not in (await db_session.get(WorkDispatch, cancelled_id)).payload
+    # A dispatch still to be handed over keeps what its job is submitted with.
+    assert (await db_session.get(WorkDispatch, waiting_id)).payload[
+        "question"
+    ] == _QUESTION
+
+
+@pytest.mark.asyncio
+async def test_cancelling_a_pending_dispatch_keeps_only_its_ids(db_session, outbox):
+    row = _resources_row(status="pending")
+    row_id, run_id = row.id, row.aggregate_id
+    db_session.add(row)
+    await db_session.commit()
+
+    _job_id, cancelled = await cancel_dispatch(
+        db_session, job_type="resources.agent.run", aggregate_id=run_id
+    )
+    await db_session.commit()
+
+    db_session.expire_all()
+    stored = await db_session.get(WorkDispatch, row_id)
+    assert cancelled and stored.status == "cancelled"
+    assert set(stored.payload) == {"run_id", "conversation_id", "owner_user_id"}

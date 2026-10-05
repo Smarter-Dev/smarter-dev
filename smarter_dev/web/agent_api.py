@@ -288,7 +288,9 @@ def _kick_title_generation(
 
     async def _run() -> None:
         try:
-            title = await generate_title(question, actor=str(owner_user_id))
+            title = await generate_title(
+                question, actor=str(owner_user_id), conversation_id=conversation_id
+            )
             if not title:
                 return
             # NB: must be the *Skrift* session context — agent_conversations
@@ -586,11 +588,12 @@ class ResourcesAgentApiController(Controller):
             db_session,
             job_type="resources.agent.run",
             aggregate_id=run.id,
+            # The worker reads the question from the run row; the job carries
+            # only ids, so neither this dispatch nor Skrift keeps a copy.
             payload={
                 "run_id": str(run.id),
                 "conversation_id": str(conversation.id),
                 "owner_user_id": str(user_id),
-                "question": question,
             },
         )
         await db_session.commit()
@@ -757,11 +760,12 @@ class AgentConversationApiController(Controller):
             db_session,
             job_type="resources.agent.run",
             aggregate_id=run.id,
+            # The worker reads the question from the run row; the job carries
+            # only ids, so neither this dispatch nor Skrift keeps a copy.
             payload={
                 "run_id": str(run.id),
                 "conversation_id": str(conversation.id),
                 "owner_user_id": str(user_id),
-                "question": question,
             },
         )
         await db_session.commit()

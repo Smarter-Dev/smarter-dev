@@ -78,7 +78,7 @@ was posted to the channel, where the guild's own audit log keeps it.
 | A claimed proactive batch (Redis) | Envelopes handed to a wake that has not acknowledged them. | Expires 48 hours after the claim, not after the write, so a claimed envelope can outlive its own write cutoff by up to one more window. |
 | Proactive pending list, one per guild (Redis) | Non-waking envelopes queued for the next wake, message text included. | Each envelope is dropped once it is 48 hours old, on the bot's 15-minute passive tick, and counted in `pending-dropped` so the agent is told; so an envelope lasts at most 48 hours and 15 minutes while the tick runs. An envelope this version cannot read (no `created_at`, or a field it does not know) is dropped and counted on the same tick, however new. The list's own expiry is a backstop for a bot that stopped ticking: every push moves it out to 30 minutes past the new envelope's 48 hours, and every tick resets it to 30 minutes past the newest envelope left, so it never deletes an envelope uncounted. If the tick stops while pushes go on, older envelopes stay until the tick runs again or the list expires 48 hours 30 minutes after its last push. Also capped at 20 envelopes, and drained by the next wake. |
 | Handler fire hand-off (Redis, `handler-fire:context:*`) | The verbatim trigger context of an event that fired a handler, read back by the fire job so the script sees the real message. | 1-hour key TTL, set once and never refreshed. The job payload in Skrift's worker tables carries the redacted context and a random reference to this key, never the text. A fire that finds the key gone is recorded as `skipped` and does not run. |
-| Handler timer payloads in the Skrift worker tables (`worker_queue`, `worker_state`) | What a handler script chose to carry to its own later fire. A script can copy the message it was reacting to into it. | Until the timer fires, however far ahead the script set it, then the 7 days Skrift keeps a finished job's state. Only a script that copies message text into a timer payload puts any there; the `handler_runs` audit row empties the payload whatever it holds. |
+| Handler timer payloads in the Skrift worker tables (`worker_queue`, `worker_state`) | What a handler script chose to carry to its own later fire. A script can copy the message it was reacting to into it. | Until the timer fires, however far ahead the script set it. The fire's job state is emptied as the fire finishes; a fire that fails for good keeps the payload in its dead letter, which the hourly retention job deletes 7 days later. Only a script that copies message text into a timer payload puts any there; the `handler_runs` audit row empties the payload whatever it holds. |
 | Handler script memory (`channel_handlers.memory` and `admin_handlers.memory`, one JSON blob per handler; `guild_handler_memory`, one row per key shared by a guild's admin handlers) | Whatever a handler script chose to keep between fires. A script can copy text from the message it reacted to into it. | No age bound. A handler's own memory lasts as long as the handler. Guild memory is tied to no handler: uninstalling an extension or deleting a handler leaves it, and a key stays until a script deletes it. Each store is capped at 16 KB (`smarter_dev/web/handler_memory.py`, `handler_guild_memory.py`). Only a script that copies message text puts any there; the bot's own handlers keep counters, ids and timestamps. |
 | Moderation's `ai_context_summary` (`moderation_actions`) | A free-text field the AI moderation tools may fill. Today only the purge tool writes it, with a count (`Purged 3 message(s)`); no code reads it. | 48 hours, cleared by the hourly sweep. |
 
@@ -202,9 +202,14 @@ allowed — that is a keyword watch, not a command.
 - `agent_conversations` / `agent_messages` — the website's own agent chat, not
   Discord.
 - `work_dispatches` — one row per job the site hands to a worker (chat
-  turns, sub-agents, account deletion, web search, Resources questions); a
-  Resources row holds the question in full. No age bound and no sweep, and deleting the
-  account does not remove it (no foreign key to the user); runbook step 8
+  turns, sub-agents, account deletion, web search, Resources questions). A
+  row keeps only ids once its work finishes or is cancelled; the row itself
+  stays, because `create_dispatch` finds it by its work and does not dispatch
+  the same work twice. A Resources row written before Resources jobs stopped
+  carrying the question held it in full until then: the dispatcher empties a
+  row as it completes, and the hourly retention job empties any finished or
+  cancelled row still holding one. No age bound on the rows, and deleting the
+  account does not remove them (no foreign key to the user); runbook step 8
   deletes a person's rows for a request.
 - `proactive_agent_histories` — the proactive agent's own working history,
   with the bounds (and the missing ones) described above; it is not an
@@ -285,22 +290,64 @@ uv run python scripts/retention_sweep.py
 Operators can also hard-delete emptied help-conversation rows outright from
 `/admin/help-conversations/cleanup`; the sweep only blanks the text.
 
+Most of what Skrift's worker tables hold about finished work is gone before
+that job runs:
+
+- A job's state (`workers:jobs:<id>` in `worker_state`) is written without its
+  payload, its result and its paused state as the job completes, is
+  dead-lettered or is cancelled (`smarter_dev/web/worker_state_store.py`). That
+  covers every job: a Chat turn's reply in its result, a handler timer's
+  payload. The row keeps the job's id, type, queue, status, attempts, errors and
+  timings. A job Skrift will still retry keeps everything until it finishes.
+- An agent session is deleted by the code that ran it as soon as that code has
+  the result: its run state, its snapshots and its event stream
+  (`smarter_dev/web/agent_session_cleanup.py`). The four Resources stages go
+  when the pipeline ends, whether it answered or failed, since a retry starts
+  new sessions; a chat title's session goes when the title comes back. The
+  blogging pipeline deletes the run state of its stages and their sub-agents
+  when the run ends, and keeps their event streams, which the run's admin
+  timeline reads, for the hourly job's 7 days.
+- A Resources job, and the `work_dispatches` row it is submitted from, carry
+  only ids; the worker reads the question from `resource_agent_runs`.
+
+What the hourly job is still there for: a dead-lettered job's dead letter and
+dead-lettered queue row, which keep its payload and error text because they are
+what an operator replays the job from on Skrift's dead-letter page; lifecycle
+events, which hold ids, statuses and error text; and a session whose caller was
+cut off before it finished (a web pod restarting while a title is generated, a
+worker stopped partway through a pipeline), which goes 6 hours after its last
+write. The first three are operational records, kept 7 days; the last is
+in-flight work, so it has the 6-hour backstop.
+
+A session's run state was also the only record of its token usage. A title's
+model turns are written to `usage_cost_rows` (product `resources`, operation
+`resource_title`) as its session is deleted; Resources stages already record
+theirs. Blogging runs' costs are recorded nowhere: `usage_cost_rows` allows
+only the `resources`, `chat`, `discord` and `search` products, so recording
+them needs a schema change. Skrift's own agent usage page
+(`/admin/agent-usage`) read finished sessions' run state for the 24 hours
+Skrift kept it, so Resources, title and blogging runs no longer appear there.
+
+Outside the worker tables, the Resources pipeline also
+sends the browser the restated question and its research steps, and the chat
+title, as queued Skrift notifications, which Skrift keeps in
+`stored_notifications` for 24 hours and deletes on a 10-minute cleanup loop:
+the notice rounds that up to 2 days.
+
 The same job bounds Skrift's worker tables
 (`smarter_dev/web/worker_retention.py`), because Skrift's own pruner is not
 deployed and its Postgres backends never delete an expired or dead row by
-themselves. Job payloads, agent run state (a Resources question, an agent's
-prompt) and error text live there.
+themselves. Job payloads, agent run state (an agent's prompt) and error text
+live there until then.
 
 Live work is never deleted, however old. Live work is what Skrift can still
 run or resume: a job with a queue row that was not dead-lettered (queued,
 claimed, paused with a wake time, or a handler timer due weeks ahead); an
-agent session whose hot run state has not expired and is not finished; and a
-job that is not finished and either belongs to such a session or changed in
-the last 7 days. Skrift resumes a session only from its hot run state, which
-it keeps for 7 days after the session's last write, so a session idle longer
-than that, or left running by a worker that died, can no longer resume and is
-no longer live. Hot run state written before Skrift gave it that sliding
-expiry has none at all; it is live only while it changed in the last 7 days.
+agent session whose hot run state has not expired, is not finished and changed
+in the last 6 hours; and a job that is not finished and either belongs to such
+a session or changed in the last 7 days. Every agent run here finishes within
+minutes, writing as it goes, and none waits for an approval, so a session
+untouched for 6 hours was cut off and nothing will read it.
 
 A job that waits with neither a queue row nor a session — an inline job paused
 on its own — is live for 7 days after it last changed, then deleted. Nothing
@@ -309,10 +356,10 @@ and a session keeps its jobs live.
 
 | Table | Deleted |
 | --- | --- |
-| `worker_state` | once the row's own expiry has passed (Skrift sets 7 days on a finished job's state and 24 hours on a finished agent run's), and a job's or session's state that is not live and has not changed in 7 days |
+| `worker_state` | once the row's own expiry has passed (Skrift sets 7 days on a finished job's state, already emptied, and 24 hours on a finished agent run's, which its caller has already deleted); a job's state that is not live and has not changed in 7 days; a session's state that is not live and has not changed in 6 hours |
 | `worker_queue` | a dead-lettered job (it holds the job's payload) 7 days after it was dead-lettered; a pending job never |
 | `worker_dead_letters` | 7 days after it was written, open or resolved |
-| `worker_events`, `worker_archive_events`, `worker_archive_snapshots` | 7 days after they were written, unless they belong to live work |
+| `worker_events`, `worker_archive_events`, `worker_archive_snapshots` | a session's events and snapshots 6 hours after they were written, except a blogging session's events (the run timeline reads them); everything else 7 days after it was written; never while they belong to live work |
 
 A live session keeps its event stream, its newest snapshot and every stored
 blob its state or events name; its older snapshots are history and go. Skrift
@@ -369,7 +416,7 @@ change the notice in the same commit as anything here that raises a bound.
 | Rate limits and caches: 30 days | `chatlimit:*` (4-hour window, `user_message_limit.py`), `hcap:dmuser:*` (1 hour), `hdm:chan:*` (7 days, `handler_emitter.py`), `hclaim:*` (a script's claim, at most 30 days, `CLAIM_TTL_MAX_SECONDS` in `handler_caps.py`) | Longest is `hclaim:*` |
 | Test copies: permanent | channel exports from `scripts/proactive_eval/fetch_history.py` and the historical copies from #42 | Not edited for a request |
 | Your account: until the account is deleted; signed in 30 days after the last visit | the site account, profile, linked Discord, GitHub and Google logins with the profile and tokens each provider gave (`oauth_accounts`), push subscriptions | Session `max_age` 30 days, rolling (`app.yaml`) |
-| Chat: until deleted; Resources questions until a deletion request; the AI's own copy of a Resources question, its research and its answer 8 days after it finishes | site chat conversations and attachments; Resources questions, including `work_dispatches` (each holds the full question; nothing sweeps it and account deletion does not reach it, since it has no foreign key to the user); the Resources and chat-title agents' Skrift sessions and jobs, and Skrift's queued notifications (24 hours) | Conversations, attachments and Resources conversations go with the account (a queued job); `work_dispatches` rows go only with a deletion request (runbook step 8). Account deletion leaves the agents' copies in Skrift's worker tables, which the hourly retention job deletes 7 days after their last write once the work is finished (rounded up to 8 days for the hourly run; a session that can still resume is live and has no limit); runbook step 8 removes them for a request |
+| Chat: until deleted; Resources questions until the account is deleted or a deletion request; the AI's own copy of a Resources question, its research and its answer as soon as it finishes, or within 7 hours if it is cut off partway; the progress it shows for 2 days | site chat conversations and attachments; Resources questions (`agent_messages`, `resource_agent_runs`), and an older `work_dispatches` row's copy while its run is unfinished (above); the Resources and chat-title agents' Skrift sessions and jobs; Skrift's queued notifications (24 hours) | Conversations, attachments and Resources conversations go with the account (a queued job); a `work_dispatches` row keeps only ids once its run ends, which deleting the account also does, and the row itself goes only with a deletion request (runbook step 8). The agents' sessions are deleted when the pipeline or the title finishes, and their jobs' state is emptied (above). A session cut off partway stays until the hourly retention job deletes it, 6 hours after its last write (rounded up to 7 hours for the hourly run); runbook step 8 removes it for a request |
 | Searches: until a deletion request; searches made with a search link while signed out 30 minutes | dashboard searches; anonymous search keys (`TTL_SECONDS` in `smarter_dev/web/web_search/anonymous.py`), each holding the search text, queries, results, answer, the link owner's ID and the browser session that ran it | Not removed by account deletion; runbook step 5 |
 | Email: until a deletion request | campaign and waitlist signups | No bound |
 | Security: 30 days in Pydantic Logfire | security events (below) | Logfire organisation retention |
@@ -384,8 +431,8 @@ enrollments, runbook step 5); a dashboard search stores the query, the results
 and the answer; the audit log channel posts carry a message's old and new text
 and its author.
 
-Short-lived copies not named in the notice (Skrift's worker tables, 7 days
-after work finishes) fall under the notice's "gone within 30 days of your
+Short-lived copies not named in the notice (in Skrift's worker tables, a
+failed job's dead letter, 7 days, and a session cut off partway, 7 hours) fall under the notice's "gone within 30 days of your
 request".
 
 ## Retention is not deletion
