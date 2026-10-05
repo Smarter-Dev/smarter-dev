@@ -163,6 +163,10 @@ workers:
   # `local` preset used in-memory queue/state, which wiped pending jobs on
   # every restart).
   preset: single_node
+  backends:
+    # As in app.yaml: a finished job's state is written without its payload
+    # or result.
+    state_store: smarter_dev.web.worker_state_store:FinishedJobStateStore
   queues:
     - agents
     - chat-subagents

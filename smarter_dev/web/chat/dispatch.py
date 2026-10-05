@@ -180,6 +180,58 @@ async def dispatch_one(dispatch_id: UUID) -> bool:
         return True
 
 
+def payload_ids(payload: dict) -> dict:
+    """What a finished dispatch keeps of its payload: the ids, never content.
+
+    A Resources dispatch written before its job stopped carrying the question
+    holds the question in full; nothing reads a finished dispatch's payload.
+    """
+    return {
+        key: value
+        for key, value in payload.items()
+        if key == "id" or key.endswith("_id")
+    }
+
+
+def _complete(row: WorkDispatch) -> None:
+    """Mark the dispatch finished. The row stays: ``create_dispatch`` finds it
+    by its aggregate and does not dispatch the same work twice."""
+    row.status = "complete"
+    row.payload = payload_ids(row.payload)
+
+
+async def clear_finished_dispatch_payloads(
+    session: AsyncSession, *, batch_size: int = 500
+) -> int:
+    """Empty the question from finished or cancelled dispatches that still hold one.
+
+    Rows completed before :func:`_complete` emptied payloads, and a cancelled
+    one, which a new ask can revive, needs only its ids. The hourly retention
+    job runs this, and a re-run finds nothing.
+    """
+    cleared = 0
+    after = None
+    while True:
+        query = select(WorkDispatch).where(
+            WorkDispatch.status.in_(("complete", "cancelled")),
+            WorkDispatch.payload["question"].as_string().is_not(None),
+        )
+        if after is not None:
+            query = query.where(WorkDispatch.id > after)
+        rows = list(
+            (
+                await session.execute(query.order_by(WorkDispatch.id).limit(batch_size))
+            ).scalars()
+        )
+        for row in rows:
+            row.payload = payload_ids(row.payload)
+        await session.commit()
+        cleared += len(rows)
+        if len(rows) < batch_size:
+            return cleared
+        after = rows[-1].id
+
+
 async def requeue_stale_dispatches() -> int:
     """Repair active aggregates whose dispatched worker lease disappeared."""
     now = datetime.now(UTC)
@@ -209,7 +261,7 @@ async def requeue_stale_dispatches() -> int:
                     "usage_limited",
                     "selection_required",
                 }:
-                    row.status = "complete"
+                    _complete(row)
                     continue
                 stale = bool(
                     aggregate
@@ -236,7 +288,7 @@ async def requeue_stale_dispatches() -> int:
                     "usage_limited",
                     "lease_lost",
                 }:
-                    row.status = "complete"
+                    _complete(row)
                     continue
                 stale = bool(
                     aggregate
@@ -260,7 +312,7 @@ async def requeue_stale_dispatches() -> int:
                     "error",
                     "cancelled",
                 }:
-                    row.status = "complete"
+                    _complete(row)
                     continue
                 stale = bool(
                     aggregate
@@ -280,7 +332,7 @@ async def requeue_stale_dispatches() -> int:
             elif row.job_type == "web_search.run":
                 aggregate = await session.get(WebSearchRun, row.aggregate_id)
                 if aggregate is None or aggregate.status in {"complete", "error"}:
-                    row.status = "complete"
+                    _complete(row)
                     continue
                 stale = bool(
                     (
@@ -297,7 +349,7 @@ async def requeue_stale_dispatches() -> int:
             elif row.job_type == "chat.account.delete":
                 aggregate = await session.get(AccountDeletionRequest, row.aggregate_id)
                 if aggregate is None or aggregate.status == "complete":
-                    row.status = "complete"
+                    _complete(row)
                     continue
                 stale = bool(
                     aggregate
@@ -352,6 +404,7 @@ async def cancel_dispatch(
     pending_cancelled = row.status == "pending"
     if pending_cancelled:
         row.status = "cancelled"
+        row.payload = payload_ids(row.payload)
     return row.worker_job_id, pending_cancelled
 
 

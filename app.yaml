@@ -246,8 +246,10 @@ workers:
     # Redis. Affects ALL worker jobs (resources/blogging/handlers), which
     # are low-volume and human-triggered, so Postgres is plenty. The web
     # pods still only submit (out_of_process); the agent-worker drains the
-    # shared Postgres queue.
-    state_store: skrift.workers.sqlalchemy:SQLAlchemyStateStore
+    # shared Postgres queue. The state store is Skrift's SQLAlchemy one,
+    # writing a finished job's state without its payload or result
+    # (smarter_dev/web/worker_state_store.py).
+    state_store: smarter_dev.web.worker_state_store:FinishedJobStateStore
     queue: skrift.workers.sqlalchemy:SQLAlchemyQueue
     event_log: skrift.workers.sqlalchemy:SQLAlchemyEventLog
   # Modules `skrift workers run` imports to register the @handlers it

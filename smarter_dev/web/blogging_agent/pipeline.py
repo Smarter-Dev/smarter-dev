@@ -4,7 +4,9 @@ Submits four Skrift Agent runs in sequence inside one worker job:
 Scout → Brainstorm → Research → Synthesis. Each stage's
 session_id is recorded onto the ``authoring_pipeline_runs`` row so the
 admin UI can replay/subscribe to Skrift's native event log for the audit
-view.
+view. When the run ends, the run state of every stage and of the sub-agents
+they dispatched goes; their event streams, which that view reads, stay until
+the hourly retention job deletes them, 7 days on.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from sqlalchemy.pool import NullPool
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import convert_postgres_url_for_asyncpg
+from smarter_dev.web.agent_session_cleanup import forget_agent_sessions
 from smarter_dev.web.blogging_agent.brainstorm_agent import (
     BrainstormCandidate,
     BrainstormInput,
@@ -107,6 +110,7 @@ async def _run_stage(
     root_session_id: str | None,
     session_maker,
     stage_name: str,
+    started: list[str],
 ) -> tuple[str, Any]:
     """Run one Skrift Agent. Returns (session_id, typed result).
 
@@ -116,6 +120,7 @@ async def _run_stage(
     the stage completes.
     """
     sid = uuid4().hex
+    started.append(sid)
     # Record session id up-front for live SSE tailing.
     async with session_maker() as db:
         run = await db.get(AuthoringPipelineRun, run_id)
@@ -168,6 +173,8 @@ async def run_authoring_pipeline(payload: PipelineRunPayload) -> dict:
     engine = _build_engine()
     Session = async_sessionmaker(engine, expire_on_commit=False)
     cache = register_cache(str(run_id))
+    # This attempt's sessions only: an overlapping attempt's are its own.
+    started_sessions: list[str] = []
 
     try:
         async with Session() as db:
@@ -194,6 +201,7 @@ async def run_authoring_pipeline(payload: PipelineRunPayload) -> dict:
             root_session_id=root_session_id,
             session_maker=Session,
             stage_name="scout",
+            started=started_sessions,
         )
         scout_out = _typed(scout_raw, ScoutOutput)
 
@@ -222,6 +230,7 @@ async def run_authoring_pipeline(payload: PipelineRunPayload) -> dict:
             root_session_id=root_session_id,
             session_maker=Session,
             stage_name="brainstorm",
+            started=started_sessions,
         )
         brainstorm_out = _typed(brainstorm_raw, BrainstormOutput)
 
@@ -246,6 +255,7 @@ async def run_authoring_pipeline(payload: PipelineRunPayload) -> dict:
             root_session_id=root_session_id,
             session_maker=Session,
             stage_name="research",
+            started=started_sessions,
         )
         research_out = _typed(research_raw, ResearchOutput)
 
@@ -264,6 +274,7 @@ async def run_authoring_pipeline(payload: PipelineRunPayload) -> dict:
             root_session_id=root_session_id,
             session_maker=Session,
             stage_name="synthesis",
+            started=started_sessions,
         )
         synthesis_out = _typed(synthesis_raw, SynthesisOutput)
 
@@ -277,6 +288,9 @@ async def run_authoring_pipeline(payload: PipelineRunPayload) -> dict:
         return {"status": "failed", "reason": "exception"}
     finally:
         await drop_cache(str(run_id))
+        await forget_agent_sessions(
+            started_sessions, with_sub_agents=True, keep_events=True
+        )
         await engine.dispose()
 
 

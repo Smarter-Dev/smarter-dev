@@ -102,8 +102,10 @@ def test_the_account_names_each_sign_in_provider_and_what_it_gives(notice):
 
 
 def test_self_deletion_names_what_it_leaves(notice):
-    assert "A copy of each question you asked about our resources is kept until you ask us to delete it, as are searches you made from your dashboard" in notice
-    assert "The AI's own copies of your questions about our resources and its answers are deleted 8 days after it finishes." in notice
+    assert "removes the account, its chat conversations and attachments, and your questions about our resources." in notice
+    assert "Searches you made from your dashboard are kept until you ask us to delete them, as are anything the Discord bot stores and the chat bot's memories." in notice
+    assert "A copy of each question you asked about our resources" not in notice
+    assert "The AI's own copies of your questions about our resources and its answers are deleted as soon as it finishes each answer, or 8 days later if it was cut off partway." in notice
     assert "straight away" not in notice
 
 
@@ -144,7 +146,8 @@ def test_the_notice_states_figures_not_mechanisms(notice):
         assert mechanism not in lowered
     assert "Searches made with your search link while signed out are kept for 30 minutes" in notice
     assert "You stay signed in for 30 days after your last visit" in notice
-    assert "it keeps its own copy of the question, its research and its answer, deleted 8 days after it finishes" in notice
+    assert "it keeps its own copy of the question, its research and its answer, deleted as soon as it finishes, or 8 days later if it is cut off partway" in notice
+    assert "The progress it shows you while it works is kept for 2 days." in notice
     monitoring = notice.split("**Monitoring.**", 1)[1].split(" - **", 1)[0]
     assert "Everything sent to Logfire is kept for 30 days" in monitoring
     assert "Our servers also keep their own logs, with no fixed time limit" in monitoring
