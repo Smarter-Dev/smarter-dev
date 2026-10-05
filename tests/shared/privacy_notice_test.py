@@ -87,7 +87,7 @@ def test_shared_records_are_anonymised_not_deleted(notice):
     deleted = notice.split("**What we delete.**", 1)[1].split("**What we keep", 1)[0]
     assert "is deleted or kept with your ID and name removed" in deleted
     assert "Bytes transfers you sent or received stay in the other member's history with your ID and name removed" in deleted
-    assert "they still hold the IDs of messages, channels and tags, times, role and permission details, and what was done" in deleted
+    assert "Records of what the AI and automations did, such as which messages and channels were involved and what was done, are kept with your ID and name removed." in deleted
 
 
 def test_self_deletion_names_what_it_leaves(notice):
