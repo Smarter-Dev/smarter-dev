@@ -1,28 +1,25 @@
 """An agent run's copy in Skrift's worker tables is deleted once its caller has the result.
 
-Sessions are written by Skrift's own session-state code (run state, snapshots,
-the event stream) through its SQLAlchemy backends over the test database, with
-the state store ``app.yaml`` names. Only the model loop is skipped: each stage
-records its prompt and an output of its type and completes, as Skrift's runner
-does. Skrift 0.2.1a1's runner cannot run against the locked pydantic-ai 2.x
-(it needs <2.0), so the loop itself is not exercised here.
+Every agent here really runs: Skrift's runner executes it inline through its
+SQLAlchemy backends over the test database, with the state store ``app.yaml``
+names, and pydantic-ai drives the model loop. Only the model is swapped, for
+pydantic-ai's ``TestModel`` answering with an output of the stage's type and
+calling no tools, so nothing reaches a provider. The agent keeps its
+configured model id, which is what its cost row is priced from.
 """
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from contextlib import asynccontextmanager
+from contextlib import contextmanager
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 import skrift.workers.runtime as worker_runtime
-from skrift.agents.models import AgentUsageRecord
-from skrift.agents.models import RunState
+from pydantic_ai.models.test import TestModel
 from skrift.agents.session import Session
-from skrift.agents.state import append_event
-from skrift.agents.state import create_or_update_runstate
-from skrift.agents.state import drain_outbox
-from skrift.agents.state import update_runstate
 from skrift.config import AgentsConfig
 from skrift.config import WorkersConfig
 from skrift.db.models.worker import WorkerArchiveEventRecord
@@ -32,7 +29,6 @@ from skrift.db.models.worker import WorkerEventRecord
 from skrift.db.models.worker import WorkerQueueRecord
 from skrift.db.models.worker import WorkerStateRecord
 from skrift.workers import configure_workers
-from skrift.workers.models import utcnow
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -40,6 +36,8 @@ from smarter_dev.web import agent_session_cleanup
 from smarter_dev.web import resources_agent
 from smarter_dev.web import title_agent
 from smarter_dev.web.agent_session_cleanup import forget_agent_sessions
+from smarter_dev.web.blogging_agent import pipeline as blogging
+from smarter_dev.web.blogging_agent.scout_agent import scout_agent
 from smarter_dev.web.models import UsageCostRow
 from smarter_dev.web.worker_state_store import FinishedJobStateStore
 
@@ -78,6 +76,9 @@ async def skrift_runtime(test_engine, db_session, monkeypatch):
         agents=AgentsConfig(default_subagent_dispatch="inline"), workers=WorkersConfig()
     )
     monkeypatch.setattr("skrift.config.get_settings", lambda: settings)
+    # Building an agent's configured OpenAI model needs a key; TestModel
+    # replaces that model for every run, so the key is never used.
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-never-sent")
 
     @asynccontextmanager
     async def session_context():
@@ -90,77 +91,44 @@ async def skrift_runtime(test_engine, db_session, monkeypatch):
     return runtime
 
 
-async def _record_session(
-    agent,
-    prompt,
-    output,
-    *,
-    session_id=None,
-    parent_session_id=None,
-    root_session_id=None,
-) -> Session:
-    """Store a finished session the way Skrift's runner leaves one."""
-    sid = session_id or uuid4().hex
-    state = RunState(
-        session_id=sid,
-        agent_name=agent.skrift_name,
-        messages=[{"role": "user", "content": prompt}],
-        parent_session_id=parent_session_id,
-        root_session_id=root_session_id or parent_session_id or sid,
-    )
-    append_event(state, "UserMessageReceived", {"message": prompt})
-    await create_or_update_runstate(state)
-    await drain_outbox(sid)
-    stored = output.model_dump(mode="json") if hasattr(output, "model_dump") else output
-
-    def complete(runstate: RunState) -> RunState:
-        # The model turn's usage, as Skrift's runner records it.
-        runstate.turn_usage["turn-1"] = AgentUsageRecord(
-            session_id=sid,
-            turn_id="turn-1",
-            agent_name=agent.skrift_name,
-            configured_model="openai-responses:gpt-6-luna",
-            input_tokens=120,
-            output_tokens=8,
-        )
-        runstate.status = "completed"
-        runstate.terminal_at = utcnow()
-        runstate.output = stored
-        runstate.messages.append({"role": "model", "content": {"text": str(stored)}})
-        append_event(runstate, "AgentCompleted", {"output": stored})
-        return runstate
-
-    await update_runstate(sid, complete)
-    await drain_outbox(sid)
-    return Session(sid)
+@contextmanager
+def _answering(*answers):
+    """Each ``(agent, output)`` runs on ``TestModel`` and answers with ``output``."""
+    with ExitStack() as stack:
+        for agent, output in answers:
+            model = (
+                TestModel(call_tools=[], custom_output_args=output.model_dump(mode="json"))
+                if hasattr(output, "model_dump")
+                else TestModel(call_tools=[], custom_output_text=output)
+            )
+            stack.enter_context(agent.materialized.override(model=model))
+        yield
 
 
-def _recording(monkeypatch, agent, output) -> None:
-    """``agent.run`` stores a finished session holding the prompt and ``output``."""
+async def _run(agent, prompt, output, *, parent_session_id=None) -> Session:
+    """A finished session of ``agent``, run for real on ``prompt``."""
+    with _answering((agent, output)):
+        session = await agent.run(prompt, parent_session_id=parent_session_id)
+        await session.result()
+    return session
 
-    async def run(prompt, *, session_id=None, **kwargs):
-        return await _record_session(agent, prompt, output, session_id=session_id)
 
-    monkeypatch.setattr(agent, "run", run)
-
-
-def _stages_answer(monkeypatch) -> None:
+def _stages_answer():
     """Each Resources stage answers with an output of its own type."""
     ra = resources_agent
-    _recording(
-        monkeypatch,
-        ra.reframer_agent,
-        ra.ReframerOutput(
-            restated_question="You want to size a pool for bursts.",
-            reframing_instructions="Lead with queueing.",
-            corpus_topics=["connection pools"],
-            web_search_topics=["webhook bursts"],
+    return _answering(
+        (
+            ra.reframer_agent,
+            ra.ReframerOutput(
+                restated_question="You want to size a pool for bursts.",
+                reframing_instructions="Lead with queueing.",
+                corpus_topics=["connection pools"],
+                web_search_topics=["webhook bursts"],
+            ),
         ),
-    )
-    _recording(monkeypatch, ra.researcher_agent, ra.ResearchOutput())
-    _recording(monkeypatch, ra.gap_filler_agent, ra.GapFillerOutput())
-    _recording(
-        monkeypatch, ra.author_agent, "Size the pool for the queue, not the burst."
+        (ra.researcher_agent, ra.ResearchOutput()),
+        (ra.gap_filler_agent, ra.GapFillerOutput()),
+        (ra.author_agent, "Size the pool for the queue, not the burst."),
     )
 
 
@@ -183,8 +151,6 @@ async def _rows(db_session, model) -> int:
 async def test_a_resources_answer_leaves_nothing_of_the_question_in_the_worker_tables(
     skrift_runtime, db_session, monkeypatch
 ):
-    _stages_answer(monkeypatch)
-
     async def no_notification(*args, **kwargs):
         return None
 
@@ -195,15 +161,16 @@ async def test_a_resources_answer_leaves_nothing_of_the_question_in_the_worker_t
     async def record_usage(record: dict, index: int) -> None:
         seen_while_running.append(await _rows_holding(db_session, _QUESTION))
 
-    answer = await resources_agent.run_resources_pipeline(
-        _QUESTION,
-        message_history=None,
-        actor="user-1",
-        conversation_id="conversation-1",
-        owner_user_id="user-1",
-        usage_records=usage,
-        usage_callback=record_usage,
-    )
+    with _stages_answer():
+        answer = await resources_agent.run_resources_pipeline(
+            _QUESTION,
+            message_history=None,
+            actor="user-1",
+            conversation_id="conversation-1",
+            owner_user_id="user-1",
+            usage_records=usage,
+            usage_callback=record_usage,
+        )
 
     assert answer
     assert [record["stage"] for record in usage][:2] == ["reframer", "researcher"]
@@ -222,8 +189,6 @@ async def test_a_resources_answer_leaves_nothing_of_the_question_in_the_worker_t
 async def test_a_failed_resources_stage_still_leaves_nothing_behind(
     skrift_runtime, db_session, monkeypatch
 ):
-    _stages_answer(monkeypatch)
-
     async def no_notification(*args, **kwargs):
         return None
 
@@ -233,7 +198,7 @@ async def test_a_failed_resources_stage_still_leaves_nothing_behind(
 
     monkeypatch.setattr(resources_agent, "notify_user", no_notification)
 
-    with pytest.raises(RuntimeError, match="lost its lease"):
+    with _stages_answer(), pytest.raises(RuntimeError, match="lost its lease"):
         await resources_agent.run_resources_pipeline(
             _QUESTION,
             message_history=None,
@@ -251,13 +216,12 @@ async def test_a_failed_resources_stage_still_leaves_nothing_behind(
 async def test_a_title_leaves_nothing_of_the_question_in_the_worker_tables(
     skrift_runtime, db_session, monkeypatch
 ):
-    _recording(monkeypatch, title_agent.title_agent, "Webhook Burst Pool Sizing")
-
     asker, conversation = uuid4(), uuid4()
 
-    title = await title_agent.generate_title(
-        _QUESTION, actor=str(asker), conversation_id=conversation
-    )
+    with _answering((title_agent.title_agent, "Webhook Burst Pool Sizing")):
+        title = await title_agent.generate_title(
+            _QUESTION, actor=str(asker), conversation_id=conversation
+        )
 
     assert title
     assert sum((await _rows_holding(db_session, _QUESTION)).values()) == 0
@@ -267,34 +231,35 @@ async def test_a_title_leaves_nothing_of_the_question_in_the_worker_tables(
     cost = await db_session.scalar(select(UsageCostRow))
     assert (cost.product_mode, cost.operation_type) == ("resources", "resource_title")
     assert (cost.user_id, cost.conversation_id) == (asker, conversation)
-    assert (cost.model_id, cost.input_tokens, cost.output_tokens) == (
-        "gpt-6-luna",
-        120,
-        8,
-    )
+    assert cost.model_id == "gpt-6-luna"
+    assert cost.input_tokens > 0 and cost.output_tokens > 0
     assert _QUESTION not in str(cost.details)
 
 
 async def _streams(db_session) -> set[str]:
+    """Session event streams; ``workers:lifecycle`` is an operational record."""
     db_session.expire_all()
-    return set((await db_session.scalars(select(WorkerEventRecord.stream))).all())
+    streams = set((await db_session.scalars(select(WorkerEventRecord.stream))).all())
+    return {stream for stream in streams if stream.startswith("agents:run:")}
 
 
 async def _state_keys(db_session, model) -> set[str]:
+    """Session state keys. A run's job state stays, emptied, for the hourly job."""
     db_session.expire_all()
-    return set((await db_session.scalars(select(model.key))).all())
+    keys = set((await db_session.scalars(select(model.key))).all())
+    return {key for key in keys if not key.startswith("workers:jobs:")}
 
 
 @pytest.mark.asyncio
 async def test_sub_agents_go_with_their_root(skrift_runtime, db_session):
     agent = resources_agent.author_agent
-    parent = await _record_session(agent, _QUESTION, "an answer")
-    await _record_session(
-        agent, f"look into {_QUESTION}", "notes", parent_session_id=parent.id
-    )
-    unrelated = await _record_session(agent, "another member's question", "theirs")
+    parent = await _run(agent, _QUESTION, "an answer")
+    await _run(agent, f"look into {_QUESTION}", "notes", parent_session_id=parent.id)
+    unrelated = await _run(agent, "another member's question", "theirs")
 
     await forget_agent_sessions([parent.id], with_sub_agents=True)
+
+    assert (await _rows_holding(db_session, _QUESTION))["worker_state"] == 0
 
     assert await _state_keys(db_session, WorkerStateRecord) == {
         f"runstate:{unrelated.id}"
@@ -310,8 +275,8 @@ async def test_kept_event_streams_stay_for_the_page_that_reads_them(
     skrift_runtime, db_session
 ):
     agent = resources_agent.author_agent
-    parent = await _record_session(agent, _QUESTION, "an answer")
-    child = await _record_session(
+    parent = await _run(agent, _QUESTION, "an answer")
+    child = await _run(
         agent, f"look into {_QUESTION}", "notes", parent_session_id=parent.id
     )
     streams = await _streams(db_session)
@@ -329,6 +294,45 @@ async def test_kept_event_streams_stay_for_the_page_that_reads_them(
         }
     )
 
+
+@pytest.mark.asyncio
+async def test_a_blogging_stage_leaves_its_timeline_and_nothing_else(
+    skrift_runtime, test_engine, db_session
+):
+    """One real blogging stage, run as the pipeline runs it, then forgotten as
+    the pipeline forgets an attempt's stages."""
+    started: list[str] = []
+    found = scout_agent._init_kwargs["output_type"](
+        topics=[
+            {
+                "headline": "Webhook bursts",
+                "observation": _QUESTION,
+                "scope": "pool sizing",
+            }
+        ]
+    )
+
+    with _answering((scout_agent, found)):
+        session_id, result = await blogging._run_stage(
+            scout_agent,
+            f"Scout this week: {_QUESTION}",
+            run_id=uuid4(),
+            root_session_id=None,
+            session_maker=async_sessionmaker(test_engine, expire_on_commit=False),
+            stage_name="scout",
+            started=started,
+        )
+
+    assert started == [session_id]
+    assert blogging._typed(result, type(found)).topics[0].observation == _QUESTION
+    assert (await _rows_holding(db_session, _QUESTION))["worker_state"] > 0
+
+    await forget_agent_sessions(started, with_sub_agents=True, keep_events=True)
+
+    assert await _state_keys(db_session, WorkerStateRecord) == set()
+    assert await _state_keys(db_session, WorkerArchiveSnapshotRecord) == set()
+    # The run's admin timeline reads its event stream after the run ends.
+    assert await _streams(db_session) == {f"agents:run:{session_id}"}
 
 @pytest.mark.asyncio
 async def test_a_failed_delete_is_left_to_the_hourly_job(monkeypatch, caplog):
