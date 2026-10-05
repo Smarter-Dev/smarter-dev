@@ -27,6 +27,7 @@ from skrift.flash import flash_error
 from skrift.flash import flash_success
 from skrift.flash import get_flash_messages
 from skrift.forms.core import verify_csrf
+from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -35,10 +36,40 @@ from smarter_dev.web.billing.portal import create_portal_session
 from smarter_dev.web.chat.dispatch import create_dispatch
 from smarter_dev.web.chat.dispatch import dispatch_one
 from smarter_dev.web.models import AccountDeletionRequest
+from smarter_dev.web.models import AgentConversation
 from smarter_dev.web.models import SudoMembership
 from smarter_dev.web.models import UserProfile
+from smarter_dev.web.models import WebChatConversation
+from smarter_dev.web.models import WebSearchRun
+from smarter_dev.web.user_content import delete_all_chats
+from smarter_dev.web.user_content import delete_all_resources_conversations
+from smarter_dev.web.user_content import delete_all_searches
 
 logger = logging.getLogger(__name__)
+
+
+async def _your_data(db_session: AsyncSession, user_id: UUID) -> dict[str, int]:
+    """How many of each kind of thing the member has made on the site."""
+    return {
+        "chats": await db_session.scalar(
+            select(func.count())
+            .select_from(WebChatConversation)
+            .where(WebChatConversation.owner_user_id == user_id)
+        )
+        or 0,
+        "questions": await db_session.scalar(
+            select(func.count())
+            .select_from(AgentConversation)
+            .where(AgentConversation.owner_user_id == user_id)
+        )
+        or 0,
+        "searches": await db_session.scalar(
+            select(func.count())
+            .select_from(WebSearchRun)
+            .where(WebSearchRun.owner_user_id == user_id)
+        )
+        or 0,
+    }
 
 
 def _passkey_factor_key(skrift_settings) -> str | None:
@@ -212,6 +243,7 @@ class AccountController(Controller):
             context={
                 "user": user,
                 "active_tab": "security",
+                "your_data": await _your_data(db_session, user.id),
                 "linked_accounts": linked_accounts,
                 "passkeys": passkeys,
                 "passkey_available": bool(factor_key) and is_webauthn_available(),
@@ -262,6 +294,47 @@ class AccountController(Controller):
             pass
         request.session.clear()
         return Redirect(path="/", status_code=303)
+
+    @post("/data/{kind:str}/delete")
+    async def delete_your_data(
+        self, request: Request, db_session: AsyncSession, kind: str
+    ) -> Redirect:
+        """Delete every item of one kind the member made on the site."""
+        user = await _current_user(request, db_session)
+        if not await verify_csrf(request):
+            flash_error(request, "Your session expired. Please try again.")
+            return Redirect(path="/account/security")
+        if kind == "chats":
+            storage = await request.app.state.storage_manager.get("chat_attachments")
+            result = await delete_all_chats(db_session, storage, user.id)
+            noun = "chat"
+        elif kind == "questions":
+            result = await delete_all_resources_conversations(db_session, user.id)
+            noun = "question"
+        elif kind == "searches":
+            result = await delete_all_searches(db_session, user.id)
+            noun = "search"
+        else:
+            flash_error(request, "There is nothing of that kind to delete.")
+            return Redirect(path="/account/security")
+        plural = "es" if noun == "search" else "s"
+        message = (
+            f"Deleted {result.deleted} {noun}{'' if result.deleted == 1 else plural}."
+        )
+        if result.running:
+            message += (
+                f" {result.running} still being answered "
+                f"{'was' if result.running == 1 else 'were'} kept; delete "
+                f"{'it' if result.running == 1 else 'them'} once "
+                f"{'it finishes' if result.running == 1 else 'they finish'}."
+            )
+        if result.stranded:
+            message += (
+                f" {result.stranded} could not be deleted yet because their uploaded"
+                " files could not be removed; try again shortly."
+            )
+        flash_success(request, message)
+        return Redirect(path="/account/security")
 
     @post("/security/passkeys/{enrollment_id:uuid}/delete")
     async def delete_passkey(

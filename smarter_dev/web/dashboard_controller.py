@@ -40,6 +40,7 @@ from skrift.auth.services import get_user_permissions
 from skrift.auth.session_keys import SESSION_USER_ID
 from skrift.db.models.user import User
 from sqlalchemy import func
+from sqlalchemy import or_
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,8 +53,12 @@ from smarter_dev.web.chat.dispatch import dispatch_one
 from smarter_dev.web.chat.entitlements import has_chat
 from smarter_dev.web.dashboard_nav import nav_context
 from smarter_dev.web.dashboard_nav import recent_searches
+from smarter_dev.web.models import UsageCostRow
 from smarter_dev.web.models import WebSearchLink
 from smarter_dev.web.models import WebSearchRun
+from smarter_dev.web.user_content import StillRunning
+from smarter_dev.web.user_content import delete_all_searches
+from smarter_dev.web.user_content import delete_search
 from smarter_dev.web.web_search.snapshot import EVENT_TYPE
 from smarter_dev.web.web_search.snapshot import MAX_REQUEST_CHARS
 from smarter_dev.web.web_search.snapshot import snapshot
@@ -163,20 +168,64 @@ async def _enforce_limits(db_session: AsyncSession, user_id: UUID) -> None:
         raise HTTPException(
             status_code=429, detail="That's a lot of searches. Try again in a minute."
         )
-    today = await db_session.scalar(
-        select(func.count())
-        .select_from(WebSearchRun)
-        .where(
-            WebSearchRun.owner_user_id == user_id,
-            WebSearchRun.created_at >= datetime.now(UTC) - timedelta(days=1),
-        )
-    )
-    if (today or 0) >= PER_DAY_LIMIT:
+    today = await searches_in_last_day(db_session, user_id)
+    if today >= PER_DAY_LIMIT:
         raise HTTPException(
             status_code=429,
             detail=f"You've run {PER_DAY_LIMIT} searches in the last day. Try again later.",
         )
     _recent_starts[str(user_id)] = [*starts, now]
+
+
+async def searches_in_last_day(db_session: AsyncSession, user_id: UUID) -> int:
+    """Searches started in the last day, deleted ones included.
+
+    A deleted search's cost rows stay, naming it, so deleting searches does not
+    reset the daily limit. Searches run through the member's search link while
+    signed out are charged to them too, but are not theirs to count.
+    """
+    since = datetime.now(UTC) - timedelta(days=1)
+    started = set(
+        (
+            await db_session.execute(
+                select(WebSearchRun.id).where(
+                    WebSearchRun.owner_user_id == user_id, WebSearchRun.created_at >= since
+                )
+            )
+        ).scalars()
+    )
+    # A search was started when it was first charged; a retry billed later is
+    # not a new search.
+    charged = (
+        set(
+            (
+                await db_session.execute(
+                    select(UsageCostRow.root_turn_id)
+                    .where(
+                        UsageCostRow.user_id == user_id,
+                        UsageCostRow.product_mode == "search",
+                        UsageCostRow.root_turn_id.is_not(None),
+                        or_(
+                            UsageCostRow.details["anonymous"].as_boolean().is_(None),
+                            UsageCostRow.details["anonymous"].as_boolean().is_(False),
+                        ),
+                    )
+                    .group_by(UsageCostRow.root_turn_id)
+                    .having(func.min(UsageCostRow.metered_at) >= since)
+                )
+            ).scalars()
+        )
+        - started
+    )
+    if charged:
+        charged -= set(
+            (
+                await db_session.execute(
+                    select(WebSearchRun.id).where(WebSearchRun.id.in_(charged))
+                )
+            ).scalars()
+        )
+    return len(started) + len(charged)
 
 
 def link_state(link: WebSearchLink | None) -> dict | None:
@@ -356,6 +405,32 @@ class DashboardController(Controller):
         user = await _active_user(request, db_session)
         return {
             "search": snapshot(await _owned(db_session, user.id, search_id)),
+            "build": CLIENT_BUILD,
+        }
+
+    @delete("/api/searches/{search_id:uuid}", status_code=200)
+    async def delete_one_search(
+        self, request: Request, db_session: AsyncSession, search_id: UUID
+    ) -> dict:
+        require_api_csrf(request)
+        user = await _active_user(request, db_session)
+        try:
+            await delete_search(db_session, await _owned(db_session, user.id, search_id))
+        except StillRunning:
+            raise HTTPException(
+                status_code=409, detail="Wait for this search to finish, then delete it."
+            ) from None
+        return {"searches": await _recent(db_session, user.id), "build": CLIENT_BUILD}
+
+    @delete("/api/searches", status_code=200)
+    async def delete_every_search(self, request: Request, db_session: AsyncSession) -> dict:
+        require_api_csrf(request)
+        user = await _active_user(request, db_session)
+        result = await delete_all_searches(db_session, user.id)
+        return {
+            "deleted": result.deleted,
+            "running": result.running,
+            "searches": await _recent(db_session, user.id),
             "build": CLIENT_BUILD,
         }
 

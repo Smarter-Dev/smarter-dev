@@ -77,6 +77,10 @@ from smarter_dev.web.models import WebChatRuntimeEvent
 from smarter_dev.web.models import WebChatSubagent
 from smarter_dev.web.models import WebChatTurn
 from smarter_dev.web.models import WorkDispatch
+from smarter_dev.web.user_content import StillRunning
+from smarter_dev.web.user_content import UploadsStranded
+from smarter_dev.web.user_content import delete_all_chats
+from smarter_dev.web.user_content import delete_chat_conversation
 
 MAX_INPUT_CHARS = 5_000
 ACTIVE_TURN_STATUSES = ("submitted", "queued", "running", "stopping")
@@ -731,71 +735,55 @@ class ChatApiController(Controller):
         request: Request,
         db_session: AsyncSession,
     ) -> dict:
-        """Destroy a conversation and everything hanging off it.
+        """Destroy a conversation and everything hanging off it, copies included
+        (:func:`~smarter_dev.web.user_content.delete_chat_conversation`).
 
-        Turns, messages, documents and attachment rows go with the conversation
-        by cascade, but the uploaded objects are outside the database and have to
-        be removed by hand. They are marked ``deleting`` first, so a failure part
-        way through leaves them to the periodic orphan reconciler instead of
-        stranding private files with no row pointing at them — and the
-        conversation itself survives, so the owner can simply try again.
+        No Chat entitlement is needed: a member whose plan lapsed can still
+        delete what they wrote.
         """
         require_api_csrf(request)
         user_id = require_user_id(request)
-        await require_entitled(db_session, user_id)
         conversation = await owned_conversation(
             db_session, conversation_id, user_id, lock=True
         )
         # Same reasoning as archiving: the Quick chat is reached at a fixed URL
-        # and has no rail menu, so destroying it from the API would leave the
-        # person looking at a surface that quietly rebuilt itself empty.
+        # and has no rail menu, so destroying it from the rail would leave the
+        # person looking at a surface that quietly rebuilt itself empty. It goes
+        # with "Delete all chats" on the account page.
         if conversation.chat_mode == QUICK_CHAT_MODE:
             raise HTTPException(
                 status_code=409, detail="A Quick chat cannot be deleted."
             )
-        active = await db_session.scalar(
-            select(WebChatTurn.id).where(
-                WebChatTurn.conversation_id == conversation.id,
-                WebChatTurn.status.in_(ACTIVE_TURN_STATUSES),
-            )
-        )
-        if active is not None:
+        storage = await request.app.state.storage_manager.get("chat_attachments")
+        try:
+            await delete_chat_conversation(db_session, storage, conversation)
+        except StillRunning:
             # A worker still holds this turn's rows. Stop it first, then delete.
             raise HTTPException(
                 status_code=409,
                 detail="Stop the current response before deleting this chat.",
-            )
-        attachments = list(
-            (
-                await db_session.execute(
-                    select(WebChatAttachment).where(
-                        WebChatAttachment.conversation_id == conversation_id
-                    )
-                )
-            ).scalars()
-        )
-        if attachments:
-            for attachment in attachments:
-                attachment.status = "deleting"
-            await db_session.commit()
-            backend = await request.app.state.storage_manager.get("chat_attachments")
-            stranded = 0
-            for attachment in attachments:
-                try:
-                    await backend.delete(attachment.storage_key)
-                except Exception:
-                    stranded += 1
-                    continue
-                await db_session.delete(attachment)
-            await db_session.commit()
-            if stranded:
-                raise HTTPException(
-                    status_code=502,
-                    detail="Some uploads could not be removed. Try again shortly.",
-                )
-        await db_session.delete(conversation)
-        await db_session.commit()
+            ) from None
+        except UploadsStranded:
+            raise HTTPException(
+                status_code=502,
+                detail="Some uploads could not be removed. Try again shortly.",
+            ) from None
         return {"status": "deleted"}
+
+    @delete("/conversations", status_code=HTTP_200_OK)
+    async def delete_all_conversations(
+        self, request: Request, db_session: AsyncSession
+    ) -> dict:
+        """Every chat the member owns, the Quick chat and archived ones included."""
+        require_api_csrf(request)
+        user_id = require_user_id(request)
+        storage = await request.app.state.storage_manager.get("chat_attachments")
+        result = await delete_all_chats(db_session, storage, user_id)
+        return {
+            "deleted": result.deleted,
+            "running": result.running,
+            "stranded": result.stranded,
+        }
 
     @patch("/conversations/{conversation_id:uuid}/reasoning")
     async def reasoning(
