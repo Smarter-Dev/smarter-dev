@@ -7,6 +7,10 @@ run record (activations, responses, token usage, USD cost) that stage 4
 scores. Ends with the cost summary the repo owner asked for: cost per day,
 30-day projection, and cadence sensitivity.
 
+Real days came from fetch_history.py, removed in task #71, so only days
+pulled before then can be replayed, plus the fixtures run_mode1 writes under
+data/mode1/. run_mode1 also still uses this module's adapter and cost helpers.
+
 Usage:
     uv run python -m scripts.proactive_eval.simulate scripts/proactive_eval/data/<fixture>.jsonl \
         [--every 300] [--model gemini-3.5-flash-lite] [--adapter baseline|silent] \

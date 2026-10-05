@@ -3,7 +3,8 @@
 
 The manifest contains paths, hashes, split assignments, counts, run controls,
 and price assumptions, but never copies message content out of the gitignored
-``data/`` workflow.
+``data/`` workflow. The days were pulled by fetch_history.py, removed in task
+#71, so this only runs on days pulled before then.
 
 Examples:
     uv run python -m scripts.proactive_eval.benchmark_manifest freeze \
