@@ -81,6 +81,7 @@ from sqlalchemy import and_
 from sqlalchemy import delete
 from sqlalchemy import or_
 from sqlalchemy import select
+from sqlalchemy import update
 from sqlalchemy.engine import Row
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -444,3 +445,72 @@ async def delete_expired_worker_rows(
         worker_retention_cutoff(now).isoformat(),
     )
     return counts
+
+
+# Statuses whose state ``FinishedJobStateStore`` writes without content.
+_FINISHED_JOB_STATUSES = ("completed", "dead_lettered", "cancelled")
+_EMPTY_PER_RUN = 2_000
+
+
+def _holds_content(job_state: Any) -> bool:
+    if not isinstance(job_state, dict):
+        return False
+    job = job_state.get("job") or {}
+    return bool(
+        job.get("payload")
+        or job_state.get("result") is not None
+        or job_state.get("paused_state")
+    )
+
+
+async def empty_finished_job_states(
+    session: AsyncSession,
+    *,
+    batch_size: int = _BATCH_SIZE,
+    limit: int = _EMPTY_PER_RUN,
+) -> int:
+    """Empty the payload, result and paused state of finished jobs that still hold them.
+
+    ``FinishedJobStateStore`` empties a job's state as the job finishes. A job
+    that finished before it was deployed, or on a worker still running the
+    previous release during a rollout, kept its content; this empties those,
+    at most ``limit`` a run, without touching the row's timestamps, so the
+    7-day deletion above still counts from the job's own last write. Rows
+    already empty are skipped, so re-running is always safe.
+    """
+    status = _model_field(WorkerStateRecord.value, "status")
+    finished = (
+        WorkerStateRecord.key.startswith(_JOB_STATE_PREFIX),
+        status.in_(_FINISHED_JOB_STATUSES),
+    )
+    emptied = 0
+    async for row in _pages(
+        session,
+        WorkerStateRecord,
+        (WorkerStateRecord.value,),
+        *finished,
+        batch_size=batch_size,
+    ):
+        if emptied >= limit:
+            break
+        wrapped = row.value
+        if not isinstance(wrapped, dict) or not _holds_content(wrapped.get("value")):
+            continue
+        job_state = dict(wrapped["value"])
+        job_state["job"] = {**(job_state.get("job") or {}), "payload": {}}
+        job_state["result"] = None
+        job_state["paused_state"] = {}
+        await session.execute(
+            update(WorkerStateRecord)
+            # Repeating the status check leaves a row Skrift rewrote since.
+            .where(WorkerStateRecord.id == row.id, *finished)
+            .values(
+                value={**wrapped, "value": job_state},
+                updated_at=WorkerStateRecord.updated_at,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        await session.commit()
+        emptied += 1
+    logger.info("worker_state: %d finished jobs emptied of their content", emptied)
+    return emptied

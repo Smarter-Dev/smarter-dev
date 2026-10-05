@@ -300,6 +300,10 @@ that job runs:
   covers every job: a Chat turn's reply in its result, a handler timer's
   payload. The row keeps the job's id, type, queue, status, attempts, errors and
   timings. A job Skrift will still retry keeps everything until it finishes.
+  A job that finished before this was deployed, or on a worker still running
+  the previous release during a rollout, kept its content; the hourly job
+  empties those the same way, up to 2,000 a run, leaving the row's timestamps
+  alone (`empty_finished_job_states` in `smarter_dev/web/worker_retention.py`).
 - An agent session is deleted by the code that ran it as soon as that code has
   the result: its run state, its snapshots and its event stream
   (`smarter_dev/web/agent_session_cleanup.py`). The four Resources stages go
