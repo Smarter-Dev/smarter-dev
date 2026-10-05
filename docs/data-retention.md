@@ -366,10 +366,19 @@ change the notice in the same commit as anything here that raises a bound.
 | Rate limits and caches: 30 days | `chatlimit:*` (4-hour window, `user_message_limit.py`), `hcap:dmuser:*` (1 hour), `hdm:chan:*` (7 days, `handler_emitter.py`), `hclaim:*` (a script's claim, at most 30 days, `CLAIM_TTL_MAX_SECONDS` in `handler_caps.py`) | Longest is `hclaim:*` |
 | Test copies: permanent | channel exports from `scripts/proactive_eval/fetch_history.py` and the historical copies from #42 | Not edited for a request |
 | Your account: until the account is deleted; signed in 30 days after the last visit | the site account, profile, linked logins and stored Discord tokens, push subscriptions; legacy GitHub/Google accounts | Session `max_age` 30 days, rolling (`app.yaml`) |
-| Chat: until deleted | site chat conversations and attachments; Resources questions | Deleted with the account |
+| Chat: until deleted; Resources questions until a deletion request; working copies 8 days | site chat conversations and attachments; Resources questions; the Resources and chat-title agents' Skrift sessions and jobs, and Skrift's queued notifications (24 hours) | Conversations and attachments go with the account. Account deletion leaves the agents' copies in Skrift's worker tables, which the hourly retention job deletes 7 days after their last write (rounded up to 8 days for the hourly run); runbook step 8 removes them for a request |
 | Searches: until a deletion request; shared-link searches 30 minutes | dashboard searches; anonymous search keys (`TTL_SECONDS` in `smarter_dev/web/web_search/anonymous.py`) | Not removed by account deletion; runbook step 5 |
 | Email: until a deletion request | campaign and waitlist signups | No bound |
 | Security: 30 days in Pydantic Logfire | security events (below) | Logfire organisation retention |
+| Monitoring: 30 days in Pydantic Logfire; servers' own logs with no fixed time limit | errors and traces from the bot and the website; container stdout | Logfire organisation retention (the Personal plan default, never configured otherwise); container logs are bounded by size and pod lifetime, not time |
+
+The notice no longer carries these details, recorded here instead: the
+external proactive-agent worker reads channel messages from Discord directly,
+as well as receiving them from the bot, and keeps its own copy of the
+proactive history; legacy GitHub/Google accounts can also hold passkeys
+(deleted with the account's second-factor enrollments, runbook step 5); a
+dashboard search stores the query, the results and the answer; the audit log
+channel posts carry a message's old and new text and its author.
 
 Short-lived copies not named in the notice (Skrift's worker tables, 7 days
 after work finishes) fall under the notice's "gone within 30 days of your

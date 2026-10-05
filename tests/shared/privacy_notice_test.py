@@ -85,7 +85,8 @@ def test_the_notice_says_the_blocked_list_covers_the_chat_bot_only(notice):
 
 def test_shared_records_are_anonymised_not_deleted(notice):
     deleted = notice.split("**What we delete.**", 1)[1].split("**What we keep", 1)[0]
-    assert "such as bytes transfers, stay with your ID and name removed" in deleted
+    assert "is deleted or kept with your ID and name removed" in deleted
+    assert "such as bytes transfers, stay that way for them" in deleted
 
 
 def _store(notice: str, kind: str) -> str:
@@ -126,6 +127,10 @@ def test_the_notice_states_figures_not_mechanisms(notice):
         assert mechanism not in lowered
     assert "Searches other people make through a link you share are kept for 30 minutes" in notice
     assert "You stay signed in for 30 days after your last visit" in notice
+    assert "Working copies made while the AI answers are kept for 8 days" in notice
+    monitoring = notice.split("**Monitoring.**", 1)[1].split(" - **", 1)[0]
+    assert "They are kept for 30 days" in monitoring
+    assert "Our servers also keep their own logs, with no fixed time limit" in monitoring
 
 
 def test_ai_records_keep_no_words(notice):
