@@ -4,7 +4,8 @@
 Scrubs expired Discord message content, deletes expired, short-lived agent
 web-search previews, deletes Skrift worker rows past their window (7 days,
 or the row's own expiry), empties the question from finished
-``work_dispatches`` rows that still hold one and clears any model replies
+``work_dispatches`` rows that still hold one, empties the payload and result
+of finished Skrift jobs that still hold them and clears any model replies
 still held in the usage rows of Chat turns that are no longer running. Exits
 0 on success, 1 on an unhandled exception; counts go to the log.
 
@@ -25,6 +26,7 @@ from smarter_dev.web.chat.usage import forget_stale_reply_copies
 from smarter_dev.web.retention import run_retention_sweep
 from smarter_dev.web.search_previews import delete_expired_search_previews
 from smarter_dev.web.worker_retention import delete_expired_worker_rows
+from smarter_dev.web.worker_retention import empty_finished_job_states
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
@@ -38,15 +40,18 @@ async def main() -> int:
         deleted_previews = await delete_expired_search_previews(session)
         await session.commit()
         deleted_worker_rows = await delete_expired_worker_rows(session)
+        emptied_jobs = await empty_finished_job_states(session)
         cleared_dispatches = await clear_finished_dispatch_payloads(session)
         cleared_replies = await forget_stale_reply_copies(session)
     logger.info(
         "retention sweep complete: %s; search_result_previews=%d deleted; "
-        "worker rows deleted: %s; work_dispatches questions cleared=%d; "
+        "worker rows deleted: %s; finished jobs emptied=%d; "
+        "work_dispatches questions cleared=%d; "
         "chat usage rows cleared of replies=%d",
         result,
         deleted_previews,
         deleted_worker_rows,
+        emptied_jobs,
         cleared_dispatches,
         cleared_replies,
     )

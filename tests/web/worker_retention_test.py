@@ -8,6 +8,7 @@ only their timestamps are moved back afterwards.
 from __future__ import annotations
 
 import importlib.util
+import json
 from contextlib import asynccontextmanager
 from datetime import UTC
 from datetime import datetime
@@ -39,7 +40,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from smarter_dev.web.worker_retention import SESSION_BACKSTOP
 from smarter_dev.web.worker_retention import WORKER_RETENTION
+from smarter_dev.web.worker_retention import _aware
 from smarter_dev.web.worker_retention import delete_expired_worker_rows
+from smarter_dev.web.worker_retention import empty_finished_job_states
 
 _NOW = datetime.now(UTC)
 _OLD = _NOW - WORKER_RETENTION - timedelta(days=30)
@@ -390,9 +393,84 @@ async def test_bookkeeping_snapshots_keep_their_newest_copy(skrift, db_session):
     assert await _remaining(db_session, WorkerArchiveSnapshotRecord.value) == [[2]]
 
 
+async def _old_release_job(
+    skrift, job_id: str, status: JobStatus, changed_at: datetime
+) -> None:
+    """A job's state as the release before FinishedJobStateStore wrote it."""
+    job = JobEnvelope(
+        id=job_id,
+        type="resources.agent.run",
+        queue="agents",
+        payload={"question": "member words"},
+    )
+    await skrift.state.set(
+        f"workers:jobs:{job_id}",
+        JobState(
+            job=job,
+            status=status,
+            result={"answer": "member words"},
+            paused_state={"at": "words"},
+        ),
+    )
+    await skrift.backdate_state(f"workers:jobs:{job_id}", changed_at, None)
+
+
+async def _job_value(session, job_id: str) -> tuple[dict, datetime]:
+    session.expire_all()
+    row = await session.scalar(
+        select(WorkerStateRecord).where(
+            WorkerStateRecord.key == f"workers:jobs:{job_id}"
+        )
+    )
+    return row.value["value"], row.updated_at
+
+
+@pytest.mark.asyncio
+async def test_jobs_finished_before_the_emptying_store_are_emptied_in_place(
+    skrift, db_session
+):
+    for job_id, status in (
+        ("completed", JobStatus.COMPLETED),
+        ("dead", JobStatus.DEAD_LETTERED),
+        ("cancelled", JobStatus.CANCELLED),
+        ("retrying", JobStatus.SUBMITTED),
+        ("running", JobStatus.RUNNING),
+    ):
+        await _old_release_job(skrift, job_id, status, _WEEKS_AGO)
+
+    assert await empty_finished_job_states(db_session, batch_size=2) == 3
+
+    for job_id in ("completed", "dead", "cancelled"):
+        value, updated_at = await _job_value(db_session, job_id)
+        assert "member words" not in json.dumps(value), job_id
+        assert (
+            value["job"]["id"] == job_id
+            and value["job"]["type"] == "resources.agent.run"
+        )
+        # Untouched, so the 7-day deletion still counts from the job's own end.
+        assert _aware(updated_at) == _WEEKS_AGO
+    # Skrift can still run these, from their payload.
+    for job_id in ("retrying", "running"):
+        value, _ = await _job_value(db_session, job_id)
+        assert value["job"]["payload"] == {"question": "member words"}
+    assert await empty_finished_job_states(db_session) == 0
+
+
+@pytest.mark.asyncio
+async def test_emptying_finished_jobs_stops_at_its_limit_and_resumes_next_run(
+    skrift, db_session
+):
+    for index in range(5):
+        await _old_release_job(skrift, f"done-{index}", JobStatus.COMPLETED, _RECENT)
+
+    assert await empty_finished_job_states(db_session, batch_size=2, limit=3) == 3
+    assert await empty_finished_job_states(db_session, batch_size=2, limit=3) == 2
+    assert await empty_finished_job_states(db_session, batch_size=2, limit=3) == 0
+
+
 @pytest.mark.asyncio
 async def test_hourly_sweep_entrypoint_deletes_old_worker_dead_letters(
-    db_session, monkeypatch
+    skrift, db_session, monkeypatch
 ):
     """The CronJob runs scripts/retention_sweep.py; running it clears old
     worker dead letters."""
@@ -422,9 +500,12 @@ async def test_hourly_sweep_entrypoint_deletes_old_worker_dead_letters(
         )
     )
     await db_session.commit()
+    await _old_release_job(skrift, "pre-deploy", JobStatus.COMPLETED, _RECENT)
 
     assert await script.main() == 0
     assert (
         await db_session.scalar(select(func.count()).select_from(WorkerDeadLetterRecord))
         == 0
     )
+    value, _ = await _job_value(db_session, "pre-deploy")
+    assert "member words" not in json.dumps(value)
