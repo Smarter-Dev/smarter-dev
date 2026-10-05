@@ -114,6 +114,7 @@ RETENTION = {
     "Moderation.": "Kept permanently",
     "Games and community features.": "Kept until you ask us to delete them",
     "Rate limits and caches.": "Kept for 30 days",
+    "Test copies.": "Kept permanently",
     "Your account.": "Kept until you delete your account",
     "Chat.": "kept until you delete them or your account",
     "Searches": "kept until you ask us to delete them",
