@@ -31,7 +31,7 @@ The bot reads messages in the servers it is in, so the chat bot can answer peopl
 ## What the website stores
 
 - **Your account.** Your Discord ID, username, avatar, email address, profile, notification settings and the sign-in details Discord gives us, to run your account. Kept until you delete your account. You stay signed in for 30 days after your last visit. Older accounts made with GitHub or Google, which can no longer sign in, are kept until you ask us to delete them.
-- **Chat.** Your conversations and attachments, kept until you delete them or your account, and questions you ask about our resources, kept until you delete your account.
+- **Chat.** Your conversations and attachments, kept until you delete them or your account, and questions you ask about our resources, kept until you ask us to delete them. Working copies made while the AI answers are kept for 8 days.
 - **Searches** from your dashboard, kept until you ask us to delete them. Searches other people make through a link you share are kept for 30 minutes.
 - **Education products.** We are building Gym and Labs. They are not open yet. Before they collect anything new, we will update this notice to say what they store.
 - **Billing.** Payments are handled by Polar, which keeps its payment records under its own terms. We keep your membership record while you have an account.
@@ -44,14 +44,14 @@ The bot reads messages in the servers it is in, so the chat bot can answer peopl
 - **Hosting.** Our servers, database and file storage run on DigitalOcean.
 - **Payments.** Polar.
 - **Email.** Confirmation emails are sent through Resend.
-- **Monitoring.** Errors and performance traces from the bot and the website, and security events from the website's API, go to Pydantic Logfire. Errors and traces can include IDs, and some can include the text of a message.
+- **Monitoring.** Errors and performance traces from the bot and the website, and security events from the website's API, go to Pydantic Logfire. Errors and traces can include IDs, and some can include the text of a message. They are kept for 30 days. Our servers also keep their own logs, with no fixed time limit.
 - **Discord.** Everything you post on Discord is also held by Discord under its own privacy policy.
 
 ## Deleting your data
 
 DM an @admin on the Smarter Dev Discord server, or email admin@smarter.dev. Either way, we check that you own the Discord account, then an admin deletes your data within 30 days of your request.
 
-**What we delete.** Everything the chat bot holds about you: it removes you from its memories and its conversations. Everything else above that is kept until you ask us to delete it, including your website account. Records you share with other people, such as bytes transfers, stay with your ID and name removed.
+**What we delete.** Everything the chat bot holds about you: it removes you from its memories and its conversations. Everything else above that is kept until you ask us to delete it, including your website account, is deleted or kept with your ID and name removed. Records you share with other people, such as bytes transfers, stay that way for them.
 
 **What we keep.**
 
@@ -65,7 +65,7 @@ DM an @admin on the Smarter Dev Discord server, or email admin@smarter.dev. Eith
 
 Everything else that can still mention you is gone within 30 days of your request.
 
-Deleting your website account from your account settings removes the account and its chat conversations and attachments straight away. It does not remove anything the Discord bot stores, the chat bot's memories, or searches you made from your dashboard. For those, DM an @admin or email admin@smarter.dev.
+Deleting your website account from your account settings removes the account and its chat conversations and attachments straight away, and their working copies within 8 days. It does not remove anything the Discord bot stores, the chat bot's memories, or searches you made from your dashboard. For those, DM an @admin or email admin@smarter.dev.
 
 ## Changes
 
