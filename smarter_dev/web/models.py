@@ -5520,7 +5520,7 @@ class BlogPostTag(Base):
 
 
 class AuthoringPipelineRun(Base):
-    """One admin-triggered execution of the 5-stage blogging pipeline."""
+    """One admin-triggered execution of the 4-stage blogging pipeline."""
 
     __tablename__ = "authoring_pipeline_runs"
 
