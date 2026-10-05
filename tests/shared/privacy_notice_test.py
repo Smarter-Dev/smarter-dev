@@ -120,10 +120,9 @@ def _store(notice: str, kind: str) -> str:
 RETENTION = {
     "The chat bot's memories.": "Kept permanently",
     "The chat bot's conversations.": "Kept until you ask us to delete them",
-    "Messages being handled.": "Kept for 5 days",
+    "Messages being handled.": "Kept for at most 6 hours",
     "Server automations.": "Kept until you ask us to delete it",
     "Records of what the AI did.": "Kept until you ask us to delete them",
-    "`/help` questions and the chat bot's web searches": "Kept for 3 days",
     "Moderation.": "Kept permanently",
     "Games and community features.": "Kept until you ask us to delete them",
     "Rate limits and caches.": "Kept for 30 days",

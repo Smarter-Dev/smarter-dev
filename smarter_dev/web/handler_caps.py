@@ -18,6 +18,8 @@ from dataclasses import dataclass
 
 from redis.asyncio import Redis
 
+from smarter_dev.shared.retention_policy import OPERATIONAL_MAX
+
 WINDOW_SECONDS = 60
 
 # Frequency ceilings (generous preset). Reaction triggers are tighter: reactions
@@ -158,7 +160,7 @@ async def claim_fire_attempt(redis, job_id: str) -> bool:
 # silently suppress each other's actions.
 CLAIM_KEY_MAX_LEN = 128
 CLAIM_TTL_MIN_SECONDS = 1
-CLAIM_TTL_MAX_SECONDS = 30 * 86400
+CLAIM_TTL_MAX_SECONDS = int(OPERATIONAL_MAX.total_seconds())
 # Per-fire ceiling on ``claim`` calls, in the shape of the ``max_timers`` per-fire
 # counter: a claim is cheap (one Redis round trip, no Discord spend), but an
 # unbounded loop of them is still a script writing unbounded keys into Redis.

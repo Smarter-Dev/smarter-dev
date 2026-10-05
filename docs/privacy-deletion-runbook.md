@@ -68,14 +68,16 @@ deployed and the one-off clean-up in their descriptions has been run:
 Check that the clean-up was done before taking the first request.
 
 - **Message text in hand-offs:** `handler-fire:context:*` in Redis, the
-  verbatim message that set off an automation (1 hour; a fire that finds it
-  gone is skipped); the proactive pending lists (each message is dropped once
-  it is 48 hours old, on the bot's 15-minute tick, so at most 48 hours 15
-  minutes while the bot runs; if the tick stops while messages keep
-  arriving, older ones stay until it resumes or 48 hours 30 minutes after
-  the last one arrived); claimed proactive batches,
-  by the bot or the external worker (48 hours after the claim); the
-  proactive wake and shadow streams (trimmed to 48 hours). The external
+  verbatim message that set off an automation (deleted when the fire job
+  finishes, 1 hour at most; a fire that finds it gone is skipped); the
+  proactive pending lists (each message is dropped once it is 5 hours old, on
+  the bot's 15-minute tick, so at most 5 hours 15 minutes while the bot runs;
+  if the tick stops while messages keep arriving, older ones stay until it
+  resumes or 5 hours 30 minutes after the last one arrived); batches the
+  external worker claimed (deleted when the wake finishes, else 6 hours after
+  the oldest message in them was written); the proactive wake and shadow
+  streams (trimmed to 5 hours; the worker deletes a wake's entries when it
+  finishes). The external
   worker's dead-letter stream holds ids and an error type only (trimmed to
   48 hours on every write and every 15 minutes).
   `proactive:v1:control-processed*` markers last 7 days and hold only a
@@ -91,7 +93,7 @@ Check that the clean-up was done before taking the first request.
   query, for example) in turn transcripts; `/help` answers; and the forum
   agent's reasons and replies. Rows written before #80 are redacted the same
   way by the hourly retention sweep's first run after the deploy, at any
-  age. The sweep also clears, 48 hours after they are written:
+  age. The sweep also clears, 5 hours after they are written:
   `help_conversations` questions (a question typed as a `/help` argument is
   stored as typed) and `moderation_actions.ai_context_summary` (a message
   count). Member text is written as `[message content]` everywhere else: every `chat_agent_errors` message and
@@ -100,7 +102,7 @@ Check that the clean-up was done before taking the first request.
   the cap name; a compile error keeps its message, since the script is
   compiled before it sees any message). Rows written before #80 that still
   hold member text (compaction summaries, error messages and tracebacks,
-  `handler_runs.error`) are cleared by the same sweep at 48 hours; model
+  `handler_runs.error`) are cleared by the same sweep at 5 hours; model
   reasoning in their turn transcripts goes with the first run's redaction.
 - **Skrift worker tables, pruned by the hourly retention job:** finished,
   dead-lettered and unresumable work 7 days after it was written: job state,
@@ -116,8 +118,8 @@ Check that the clean-up was done before taking the first request.
   sessions an expiry counts as live only while it changed in the last 7
   days. Step 8 removes the person's part of
   it.
-- **Caches:** `search_result_previews` (48 hours),
-  `chat_agent:guild:{guild}:events` (about an hour), `mediaread:*` (24 hours),
+- **Caches:** `search_result_previews` (5 hours),
+  `chat_agent:guild:{guild}:events` (about an hour), `mediaread:*` (1 hour),
   `hclaim:*` (up to 30 days; deleting one can make a handler act twice), the
   anonymous web search keys (30 minutes) and in-process caches in the bot and
   workers.
@@ -578,7 +580,7 @@ DELETE FROM help_conversations WHERE user_id = :'did';
 DELETE FROM research_sessions WHERE user_id = :'did';
 DELETE FROM scan_user_profiles WHERE user_id = :'did';
 UPDATE scan_service_usage SET user_id = NULL WHERE user_id = :'did';
--- Records that can name them past the 48-hour sweep.
+-- Records that can name them past the 5-hour sweep.
 UPDATE chat_agent_errors
    SET error_message = '[removed]', traceback = '[removed]', provider_body = NULL
  WHERE error_message ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR traceback ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR coalesce(provider_body, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)');
@@ -1197,9 +1199,9 @@ run out, tell the member what is left and that the request is open.
    - **"Chat audit tables"**: rerun the step 3 counts (point 2) and, for
      each name, step 6's read-only name counts. If they find rows, clear
      them the step 6 way and run the check again. If they read 0, the hit is
-     in older text the sweep clears at 48 hours (rows written before #80,
+     in older text the sweep clears at 5 hours (rows written before #80,
      such as compaction summaries): run the check again once those rows are
-     48 hours old. A name hit in a column neither clears, such as another
+     6 hours old. A name hit in a column neither clears, such as another
      member's `activation_username`, is a namesake: note the count and ask a
      developer to decide.
    - **"Raw operational copies"**: wait for them to age out (the limits are

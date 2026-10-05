@@ -975,7 +975,7 @@ class HelpConversation(Base):
         kwargs.setdefault('last_activity_at', now)
         kwargs.setdefault('created_at', now)
         
-        # Every conversation expires on the same 48-hour window, whatever its
+        # Every conversation expires on the same retention window, whatever its
         # policy label: the text here is Discord message content the user never
         # explicitly submitted to us, so it is scrubbed by the retention sweep
         # (smarter_dev.web.retention) as soon as the window elapses.
