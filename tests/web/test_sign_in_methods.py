@@ -52,6 +52,11 @@ AUTHORIZE_HOSTS = {
     "github": "github.com",
     "google": "accounts.google.com",
 }
+SCOPES = {
+    "discord": {"identify", "email"},
+    "github": {"user:email"},
+    "google": {"openid", "email", "profile"},
+}
 
 
 @pytest.fixture
@@ -117,6 +122,7 @@ def test_login_redirects_to_the_provider(client, prod_settings, provider):
     query = parse_qs(target.query)
     assert query["client_id"] == [prod_settings.auth.providers[provider].client_id]
     assert query["redirect_uri"] == [f"https://smarter.dev/auth/{provider}/callback"]
+    assert set(query["scope"][0].split()) == SCOPES[provider]
 
 
 @pytest.mark.parametrize("provider", PROVIDERS)

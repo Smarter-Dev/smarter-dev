@@ -93,9 +93,11 @@ def test_shared_records_are_anonymised_not_deleted(notice):
 def test_the_account_names_each_sign_in_provider_and_what_it_gives(notice):
     account = _store(notice, "Your account.")
     assert "You sign in with Discord, GitHub or Google." in account
+    assert "we receive your profile as that service shares it with us" in account
     assert "email address and whether it is verified, and the sign-in tokens it issues" in account
-    assert "Google gives your first and last name and, for a work or school account, its domain" in account
-    assert "GitHub gives the rest of your public profile" in account
+    assert "whether you use two-factor sign-in or Nitro" in account
+    assert "Google's gives your first and last name, language and, for a work or school account, its domain" in account
+    assert "GitHub's is your public profile" in account
     assert "can no longer sign in" not in notice
 
 

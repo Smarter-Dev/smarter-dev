@@ -37,18 +37,21 @@ change.
 
 Skrift stores the provider's whole profile response
 (`oauth_accounts.provider_metadata`), the email and whether the provider
-verified it, and the access token, plus a refresh token where the provider
-issues one.
+verified it, and the tokens the provider issued on the latest sign-in. Each
+sign-in overwrites both tokens, so a sign-in that issues no refresh token
+clears the stored one.
 
-- Discord (`identify`, `email`): id, username, global name, avatar, email,
-  verified flag, locale.
+- Discord (`identify`, `email`): id, username, global name, avatar, banner,
+  accent colour, email, verified flag, locale, MFA flag, Nitro type and
+  account flags.
 - GitHub (`user:email`): the public profile from `/user` (id, login, name,
   avatar, bio, company, location, blog, follower counts and similar) and the
   primary email from `/user/emails` with its verified flag.
 - Google (`openid`, `email`, `profile`, offline access): id, email, verified
   flag, name, given and family name, picture, locale, and the Workspace
-  domain (`hd`) for a Workspace account; a refresh token, because Skrift asks
-  for offline access.
+  domain (`hd`) for a Workspace account. Skrift asks for offline access, but
+  with `prompt=select_account` Google issues a refresh token only on the
+  first consent, so the next sign-in clears it.
 
 ### While a provider is off
 
