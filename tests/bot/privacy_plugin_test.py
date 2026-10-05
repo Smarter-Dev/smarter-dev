@@ -11,7 +11,7 @@ import hikari
 from smarter_dev.bot import client
 from smarter_dev.bot.plugins import privacy_notice as privacy_plugin
 from smarter_dev.shared import privacy_notice
-from smarter_dev.shared.privacy_notice import short_version
+from smarter_dev.shared.privacy_notice import discord_short_version
 
 run_privacy = privacy_plugin.privacy.callback
 
@@ -27,7 +27,7 @@ async def test_privacy_replies_with_the_link_only_to_the_caller(monkeypatch):
     ctx.respond.assert_awaited_once()
     body = ctx.respond.await_args.args[0]
     assert "https://smarter.dev/privacy" in body
-    for point in short_version():
+    for point in discord_short_version():
         assert point in body
     assert ctx.respond.await_args.kwargs["flags"] == hikari.MessageFlag.EPHEMERAL
 

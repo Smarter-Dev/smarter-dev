@@ -15,6 +15,7 @@ import pytest
 from smarter_dev.shared import privacy_notice
 from smarter_dev.shared.privacy_notice import channel_post
 from smarter_dev.shared.privacy_notice import command_response
+from smarter_dev.shared.privacy_notice import discord_short_version
 from smarter_dev.shared.privacy_notice import notice_markdown
 from smarter_dev.shared.privacy_notice import short_version
 
@@ -34,15 +35,17 @@ def test_the_short_version_carries_the_required_statements():
     assert len(short_version()) == 5
     assert "permanent memories" in points
     assert "never resets" in points
-    assert "Moderation history is kept" in points
+    assert "Moderation history is kept so the server can stay safe" in points
+    assert "is not part of a deletion request" in points
     assert "only anonymous usage and cost records stay" in points
     assert "including from the chat bot's memories" in points
-    assert "send a direct message to anyone with the @admin role" in points
+    assert "DM an @admin on the Smarter Dev Discord server. We delete it within 30 days." in points
     assert "within 30 days" in points
 
 
 def test_every_deletion_request_goes_to_the_admin_role(notice):
-    assert notice.count("anyone with the @admin role") == 3
+    assert notice.count("DM an @admin on the") == 3
+    assert "Moderation history, including those posts, is kept so the server can stay safe, and is not part of a deletion request." in notice
     deleting = notice.split("## Deleting your data", 1)[1]
     assert "within 30 days of your request" in deleting
     assert "backup" not in notice.lower()
@@ -155,7 +158,7 @@ def test_the_notice_covers_the_site(notice, product):
 
 def test_the_command_response_is_the_short_version_and_the_link():
     response = command_response(PUBLIC_URL)
-    for point in short_version():
+    for point in discord_short_version():
         assert point in response
     assert response.endswith(PUBLIC_URL)
     assert len(response) <= DISCORD_MESSAGE_LIMIT
@@ -163,7 +166,7 @@ def test_the_command_response_is_the_short_version_and_the_link():
 
 def test_the_channel_post_is_the_short_version_and_the_link():
     post = channel_post(PUBLIC_URL)
-    for point in short_version():
+    for point in discord_short_version():
         assert point in post
     assert PUBLIC_URL in post
     assert "/privacy" in post
@@ -181,3 +184,14 @@ def test_the_url_follows_the_deployment(monkeypatch):
     settings = privacy_notice.get_settings()
     monkeypatch.setattr(settings, "site_base_url", "https://example.test/")
     assert privacy_notice.privacy_url() == "https://example.test/privacy"
+
+
+def test_discord_drops_only_the_server_from_the_deletion_line():
+    notice_points = short_version()
+    discord_points = discord_short_version()
+    assert discord_points[-1] == (
+        "To have your data deleted, including from the chat bot's memories, "
+        "DM an @admin. We delete it within 30 days."
+    )
+    assert discord_points[:-1] == notice_points[:-1]
+    assert "Smarter Dev Discord server" not in channel_post(PUBLIC_URL)

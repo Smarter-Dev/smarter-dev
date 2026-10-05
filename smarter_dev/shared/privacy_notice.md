@@ -1,16 +1,16 @@
-Smarter Dev runs a Discord server, a Discord bot and the smarter.dev website. This notice says what we store about you in each of them, why, for how long, who else handles it, and how to ask us to delete it.
+Smarter Dev runs a Discord server, a Discord bot and the smarter.dev website. This notice covers what we store about you, why we store it, how long we keep it, who else handles it, and how to have it deleted.
 
 ## The short version
 
 - The bot reads messages in the Discord servers it is in, so its features can work: the chat bot, moderation, bytes, squads, quests and challenges.
 - The chat bot keeps permanent memories about the people it talks with, written in its own words and naming people by username and Discord ID. It never resets them.
-- Moderation history is kept, even after you ask us to delete your data.
+- Moderation history is kept so the server can stay safe, and is not part of a deletion request.
 - When your data is deleted, your membership record goes with it; only anonymous usage and cost records stay.
-- To have your data deleted, including from the chat bot's memories, send a direct message to anyone with the @admin role on the Smarter Dev Discord server. We delete it within 30 days.
+- To have your data deleted, including from the chat bot's memories, DM an @admin on the Smarter Dev Discord server. We delete it within 30 days.
 
 ## Who we are
 
-Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a direct message to anyone with the @admin role on the [Smarter Dev Discord server](https://discord.gg/de8kajxbYS).
+Smarter Dev is run by Smarter Dev LLC. For anything about your data, DM an @admin on the [Smarter Dev Discord server](https://discord.gg/de8kajxbYS).
 
 ## What the Discord bot stores
 
@@ -29,7 +29,7 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a dire
 
 **Records of what the AI did.** When an AI feature answers or acts, we keep a record of it: who and which channel it concerned (IDs and usernames), when, which model, how much it cost and what it decided, such as which messages it looked at and whether it replied. The IDs, usernames and numbers stay. The words do not: your messages, and the AI's own replies, running notes, reasoning and what it passed to its tools, are saved as a placeholder instead. Moderation, below, and the old blog post ideas above are the exceptions. When the chat bot searches the web, the search and the results it saw are kept for 48 hours at an unlisted link it can post in Discord. This does not cover the chat bot's memories, described above, which are kept until the bot rewrites them.
 
-**Moderation.** We keep a permanent record of every moderation action taken on a member: who it concerned, who took it, the reason, how long it lasted and when. The bot also posts these actions to the server's moderation log channel, and posts edited and deleted messages, with the old and new text and who wrote them, to the server's audit log channel. Moderation history, including those posts, is kept even after you ask us to delete your data.
+**Moderation.** We keep a permanent record of every moderation action taken on a member: who it concerned, who took it, the reason, how long it lasted and when. The bot also posts these actions to the server's moderation log channel, and posts edited and deleted messages, with the old and new text and who wrote them, to the server's audit log channel. Moderation history, including those posts, is kept so the server can stay safe, and is not part of a deletion request.
 
 **Games and community features.** Your bytes balance and the bytes you have sent and received (with the usernames and reasons), your squad membership, your quest and challenge submissions, and the dates of your first and latest message in each server. Leaving a server removes your bytes balance and squad membership there. The rest is kept until you ask us to delete it.
 
@@ -60,7 +60,7 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, send a dire
 
 ## Deleting your data
 
-Send a direct message to anyone with the @admin role on the Smarter Dev Discord server. We check that you own the Discord account, then an admin deletes your data within 30 days of your request.
+DM an @admin on the Smarter Dev Discord server. We check that you own the Discord account, then an admin deletes your data within 30 days of your request.
 
 **What we delete.** Everything the chat bot holds about you: it removes you from its memories, rewrites its conversation summaries without you and drops the conversation history that holds your messages. Your bytes balance, your squad memberships, quest and challenge submissions, activity dates, forum subscriptions and `/help` records, and your website account with its chat conversations, attachments, searches and profile. Entries about you in server automations' memory, automation jobs about you that are waiting or failed, AI agent sessions that mention you, AI error records and topic notes that name you, and blog post ideas from your conversations or that name you. Records that you share with other people are kept with you removed: bytes transfers you sent or received stay in the other member's history with your ID, username and the reason removed, and records of the bot's conversations and automations that involve other people have your ID and names replaced.
 
