@@ -105,10 +105,8 @@ def test_image_prompt_reviewer_uses_gpt_6_luna():
 
 def test_title_and_blogging_agents_default_to_gpt_6_luna():
     from smarter_dev.web import title_agent
-    from smarter_dev.web.blogging_agent import review_agent
     from smarter_dev.web.blogging_agent import summariser
 
     assert title_agent.TITLE_MODEL == "gpt-6-luna"
-    assert review_agent.REVIEW_MODEL == "gpt-6-luna"
     assert summariser._LUNA_MODEL == "gpt-6-luna"
     assert summariser._MODEL_SETTINGS == {"openai_reasoning_effort": "low"}

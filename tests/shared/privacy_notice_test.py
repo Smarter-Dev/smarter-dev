@@ -108,7 +108,6 @@ RETENTION = {
     "The chat bot's conversations.": "Kept until you ask us to delete them",
     "Messages being handled.": "Kept for 5 days",
     "Server automations.": "Kept until you ask us to delete it",
-    "Blog post ideas.": "Kept until you ask us to delete them",
     "Records of what the AI did.": "Kept until you ask us to delete them",
     "`/help` questions and the chat bot's web searches": "Kept for 3 days",
     "Moderation.": "Kept permanently",

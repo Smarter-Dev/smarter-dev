@@ -395,7 +395,6 @@ SKRIFT_ADMIN_PAGES: tuple[AdminPageCheck, ...] = (
         f"/admin/help-conversations/{config.HELP_CONVERSATION_ID}"),
     AdminPageCheck("admin-help-conversation-cleanup",
                    "/admin/help-conversations/cleanup"),
-    AdminPageCheck("admin-blogging-topics", "/admin/blogging-agent/topics"),
     AdminPageCheck("admin-blogging-runs", "/admin/blogging-agent/runs"),
 )
 

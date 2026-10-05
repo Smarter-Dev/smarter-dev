@@ -1,1 +1,1 @@
-"""Authoring agent pipeline — admin-triggered five-stage blog post writer."""
+"""Authoring agent pipeline — admin-triggered four-stage blog post writer."""
