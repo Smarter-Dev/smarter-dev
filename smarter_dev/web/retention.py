@@ -12,7 +12,7 @@ proactive agent and the handler workers. What bounds each of those, and what
 does not, is ``docs/data-retention.md``'s to state; this docstring does not
 repeat it. The proactive Redis streams that carry notification envelopes are
 trimmed to the same
-:data:`~smarter_dev.shared.message_content.CONTENT_RETENTION_WINDOW` (48 hours)
+:data:`~smarter_dev.shared.message_content.CONTENT_RETENTION_WINDOW` (5 hours)
 by the bot, not by this sweep.
 
 The bot's own words are not kept either, because any of them can quote a
@@ -23,10 +23,10 @@ text or tool-call arguments; the engagement's ``last_topic`` and
 ``decision_reason`` and ``response_content`` are the placeholder. All are
 written that way, and :func:`redact_bot_words` applies the same redaction on
 every sweep to rows written before that landed, whatever their age.
-``ai_context_summary`` keeps its 48-hour window. Text that retells what
+``ai_context_summary`` keeps the same window. Text that retells what
 members said — the compaction ``summary``, ``chat_agent_errors.provider_body``
 and ``handler_runs.error`` — is written as the placeholder too, and the
-48-hour pass still clears those columns as the back-fill path for rows
+window pass still clears those columns as the back-fill path for rows
 written before write-time redaction landed, which is why it still nulls the
 columns the write path now placeholders. Each scrubbed row is stamped ``content_purged_at``; the row
 itself stays — timestamps, token counts, cost, model name, the decision the
@@ -55,9 +55,9 @@ The chat agent's three-layer memory — ``chat_agent_guild_memory``,
 design, and the exemption is pinned by a test in ``tests/web/test_retention.py``.
 The blob and its revision history are prose the agent wrote *about itself*
 rather than message text it read: no verbatim quotes, no private or sensitive
-detail, only who these people are to it. Scrubbing that on a 48-hour window
-would not protect anyone's words, it would just give the bot amnesia every
-other day. The mid-term notes are exempt for a different reason — they are
+detail, only who these people are to it. Scrubbing that on the retention
+window would not protect anyone's words, it would just give the bot amnesia
+several times a day. The mid-term notes are exempt for a different reason — they are
 deleted outright by the nightly dream session that consumes them, so they live
 well under a day by construction and never reach a retention cutoff. Adding a
 scrubber for any of the three needs the same explicit sign-off the exemption
@@ -98,7 +98,7 @@ logger = logging.getLogger(__name__)
 # How many handler_runs rows to rewrite per round trip. The trigger_context
 # scrub is the one that cannot be expressed as a single UPDATE (it edits keys
 # inside a JSON blob), so it streams in batches instead of loading a busy
-# guild's full 48 hours into memory at once.
+# guild's full window into memory at once.
 _HANDLER_RUN_BATCH = 500
 
 # How many chat turns the bot's-words back-fill rewrites per round trip.
@@ -204,7 +204,7 @@ async def scrub_chat_agent_engagements(
 ) -> int:
     """Drop the denormalised topic/notes an engagement carries for the list view.
 
-    Every turn rewrites them, so they are due 48 hours after the engagement's
+    Every turn rewrites them, so they are due one window after the engagement's
     last turn, not its start, and cleared again whenever a later turn wrote
     them after an earlier sweep.
     """
@@ -402,7 +402,7 @@ def _holds_text(column: Any) -> Any:
 async def _redact_turn_text(session: AsyncSession) -> int:
     """Rewrite each unpurged turn's decision and transcript as written today.
 
-    The 48-hour pass already emptied older turns. A turn written before the
+    The window pass already emptied older turns. A turn written before the
     write path redacted the bot's words is rewritten in place; one written
     since comes out unchanged and is left alone.
     """
@@ -450,7 +450,7 @@ async def redact_bot_words(
 
     The write path stores these as the placeholder; this is the back-fill for
     rows written before it did. It leaves ``content_purged_at`` alone, so the
-    48-hour pass still runs on each row; a row that pass already emptied holds
+    window pass still runs on each row; a row that pass already emptied holds
     no text, so only unpurged rows are read. ``cutoff`` and ``now`` are
     unused: the redaction does not wait for a window.
     """

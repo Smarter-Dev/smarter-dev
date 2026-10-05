@@ -18,10 +18,9 @@ The bot reads messages in the servers it is in, so the chat bot can answer peopl
 
 - **The chat bot's memories.** A memory for each server, in the bot's own words, about the people there and how it should behave there. It names people by username and Discord ID, and it is told not to keep anything private, sensitive or shared in confidence. Kept permanently: the bot never resets them, and only the bot edits them.
 - **The chat bot's conversations.** Messages in conversations the chat bot takes part in or watches, with its notes and summaries of them, so it can follow along. Kept until you ask us to delete them.
-- **Messages being handled.** Copies of messages, and of what the AI read in files people post, while the bot works on them. Kept for 5 days.
+- **Messages being handled.** Copies of messages, of what the AI read in files people post, of `/help` questions, and of the chat bot's web searches with the results it saw, while the bot works on them. Kept for at most 6 hours.
 - **Server automations.** Text from a message that an automation set up by a server admin chose to keep. Kept until you ask us to delete it.
 - **Records of what the AI did.** Who and which channel it concerned, when, what it cost and what it decided, without the words, so we can check its behaviour and cost. Kept until you ask us to delete them.
-- **`/help` questions and the chat bot's web searches**, with the results it saw, so it can answer and show what it found. Kept for 3 days.
 - **Moderation.** Every moderation action taken on a member, and the bot's posts of those actions, and of edited and deleted messages with their text, to the server's log channels. Kept permanently. Moderation history, including those posts, is kept so the server can stay safe, and is not part of a deletion request.
 - **Games and community features.** Your bytes balance and transfers, squad, quest and challenge submissions, forum subscriptions, command records and message dates, so these features work. Kept until you ask us to delete them. Leaving a server removes your bytes balance and squad membership there.
 - **Rate limits and caches.** Message counts and other working data tied to your Discord ID. Kept for 30 days.

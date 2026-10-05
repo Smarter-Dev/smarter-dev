@@ -92,7 +92,9 @@ class _SessionCtx:
 
 
 def _worker_context() -> SimpleNamespace:
-    return SimpleNamespace(job=SimpleNamespace(id=uuid4().hex))
+    return SimpleNamespace(
+        job=SimpleNamespace(id=uuid4().hex, attempt=1, max_attempts=3)
+    )
 
 
 def _patch_job(

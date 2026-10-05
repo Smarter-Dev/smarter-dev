@@ -39,10 +39,13 @@ def _patch_seam(monkeypatch, name, value, *modules):
 def _ctx(job_id: str | None = None) -> SimpleNamespace:
     """Minimal stand-in for the WorkerContext skrift injects into a fire job.
 
-    Only ``context.job.id`` is read (to key the at-most-once fire claim), so a
-    namespace is enough and keeps these tests free of the worker runtime.
+    ``context.job.id`` keys the at-most-once fire claim and the attempt count
+    decides whether a failure deletes the context hand-off, so a namespace is
+    enough and keeps these tests free of the worker runtime.
     """
-    return SimpleNamespace(job=SimpleNamespace(id=job_id or uuid4().hex))
+    return SimpleNamespace(
+        job=SimpleNamespace(id=job_id or uuid4().hex, attempt=1, max_attempts=3)
+    )
 
 
 async def _fire(payload, *, context=None):
@@ -519,6 +522,7 @@ async def test_standard_fire_records_zero_role_changes(monkeypatch, test_engine)
 import fakeredis.aioredis as fakeredis_aioredis
 
 from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
+from smarter_dev.web.handler_fire_context import fire_context_key
 from smarter_dev.web.handler_fire_context import hand_off_fire_context
 from smarter_dev.web.handler_run_audit import EXPIRED_CONTEXT_ERROR
 
@@ -596,6 +600,82 @@ async def test_fire_runs_the_handed_off_context_and_stores_none_of_it(
     [run] = await _load_runs(test_engine, handler_id)
     assert run.trigger_context["content"] == MESSAGE_CONTENT_PLACEHOLDER
     assert run.error == f"runtime: ValueError: {MESSAGE_CONTENT_PLACEHOLDER}"
+
+
+async def test_a_finished_fire_deletes_its_hand_off(monkeypatch, test_engine):
+    handler_id = await _seed_std_handler(test_engine)
+    redis = fakeredis_aioredis.FakeRedis(decode_responses=True)
+
+    async def fake_run(script, context, **kwargs):
+        return HandlerResult(outcome="ok", usage=dict(_USAGE), duration_ms=1)
+
+    _patch_std_fire(monkeypatch, test_engine, fake_run, redis)
+    redacted, context_ref = await hand_off_fire_context(
+        redis, {"trigger_type": "message", "content": "what someone said"}
+    )
+
+    await _fire(
+        HandlerFirePayload(
+            handler_id=handler_id, trigger_context=redacted, context_ref=context_ref
+        )
+    )
+
+    assert await redis.exists(fire_context_key(context_ref)) == 0
+
+
+@pytest.mark.parametrize(("attempt", "kept"), [(1, 1), (2, 1), (3, 0)])
+async def test_a_failed_fire_keeps_its_hand_off_until_the_last_attempt(
+    monkeypatch, test_engine, attempt, kept
+):
+    handler_id = await _seed_std_handler(test_engine)
+    redis = fakeredis_aioredis.FakeRedis(decode_responses=True)
+
+    async def fake_run(script, context, **kwargs):
+        return HandlerResult(outcome="ok", usage=dict(_USAGE), duration_ms=1)
+
+    _patch_std_fire(monkeypatch, test_engine, fake_run, redis)
+    monkeypatch.setattr(handlers_jobs, "claim_fire_attempt", _raise_before_the_script)
+    redacted, context_ref = await hand_off_fire_context(
+        redis, {"trigger_type": "message", "content": "what someone said"}
+    )
+    context = SimpleNamespace(
+        job=SimpleNamespace(id=uuid4().hex, attempt=attempt, max_attempts=3)
+    )
+
+    with pytest.raises(Exception):
+        await _fire(
+            HandlerFirePayload(
+                handler_id=handler_id, trigger_context=redacted, context_ref=context_ref
+            ),
+            context=context,
+        )
+
+    assert await redis.exists(fire_context_key(context_ref)) == kept
+
+
+async def _raise_before_the_script(_redis, _job_id):
+    raise RuntimeError("redis blip before the script ran")
+
+
+async def test_a_finished_admin_fire_deletes_its_hand_off(monkeypatch, test_engine):
+    handler_id = await _seed_admin_handler(test_engine, "G1")
+    _patch_admin_job(monkeypatch, test_engine, _ok_result())
+    redis = fakeredis_aioredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(admin_handlers_jobs, "get_redis_client", lambda: redis)
+    redacted, context_ref = await hand_off_fire_context(
+        redis, {"trigger_type": "message", "content": "what someone said"}
+    )
+
+    await _admin_fire(
+        AdminHandlerFirePayload(
+            admin_handler_id=handler_id,
+            channel_id="C1",
+            trigger_context=redacted,
+            context_ref=context_ref,
+        )
+    )
+
+    assert await redis.exists(fire_context_key(context_ref)) == 0
 
 
 async def test_fire_whose_hand_off_expired_is_skipped_not_run(

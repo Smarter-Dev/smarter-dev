@@ -45,7 +45,7 @@
         {% if expired_count > 0 %}
         <div class="sk-flash sk-flash-warning">
             <strong>{{ expired_count }} expired conversation{{ 's' if expired_count != 1 else '' }} found.</strong>
-            These are past the 48-hour window. The hourly sweep has already
+            These are past the 5-hour window. The hourly sweep has already
             scrubbed their text; deleting removes the rows entirely.
         </div>
 
@@ -60,7 +60,7 @@
         {% else %}
         <div class="sk-flash sk-flash-success">
             <strong>No expired conversations.</strong>
-            Every stored conversation is inside the 48-hour window.
+            Every stored conversation is inside the 5-hour window.
         </div>
 
         {% include "admin/bot/help_conversations/_retention_policy.html" %}

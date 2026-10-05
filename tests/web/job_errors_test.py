@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import traceback
+from types import SimpleNamespace
 
 import pytest
 from skrift.workers.runtime import PermanentFailure
@@ -61,5 +62,8 @@ async def test_both_fire_jobs_redact_at_their_boundary(monkeypatch, module, job)
 
     monkeypatch.setattr(module, f"_{job}", fails)
     with pytest.raises(RedactedJobError) as raised:
-        await getattr(module, job)(None, None)
+        await getattr(module, job)(
+            SimpleNamespace(context_ref=None),
+            SimpleNamespace(job=SimpleNamespace(attempt=1, max_attempts=3)),
+        )
     assert "what someone said" not in _what_skrift_stores(raised.value)
