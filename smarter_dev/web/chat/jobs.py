@@ -107,6 +107,7 @@ from smarter_dev.web.chat.toolsets import run_code as execute_code
 from smarter_dev.web.chat.toolsets import web_read_optional
 from smarter_dev.web.chat.toolsets import web_read_required
 from smarter_dev.web.chat.toolsets import web_search
+from smarter_dev.web.chat.usage import forget_finished_turn_reply_copies
 from smarter_dev.web.llm_pricing import price_rates_for_model
 from smarter_dev.web.models import AccountDeletionRequest
 from smarter_dev.web.models import ChatCatalogModel
@@ -123,6 +124,7 @@ from smarter_dev.web.models import WebChatSubagent
 from smarter_dev.web.models import WebChatThread
 from smarter_dev.web.models import WebChatTurn
 from smarter_dev.web.models import WorkDispatch
+from smarter_dev.web.user_content import delete_account_leftovers
 
 logger = logging.getLogger(__name__)
 ACTIVE = ("submitted", "queued", "running", "stopping")
@@ -3117,6 +3119,12 @@ async def run_chat_turn(payload: ChatTurnPayload) -> dict:
         heartbeat.cancel()
         with suppress(asyncio.CancelledError):
             await heartbeat
+        try:
+            async with get_db_session_context() as session:
+                await forget_finished_turn_reply_copies(session, turn_id)
+        except Exception:
+            # The hourly retention sweep clears what this misses.
+            logger.exception("could not clear reply copies of Chat turn %s", turn_id)
 
 
 async def _lease_watch(lease, child_id: UUID) -> None:
@@ -3754,6 +3762,7 @@ async def delete_chat_account(payload: ChatAccountDeletionPayload) -> dict:
                     details={},
                 )
             )
+            await delete_account_leftovers(session, user_id)
             user = await session.get(User, user_id)
             if user is not None:
                 await session.delete(user)

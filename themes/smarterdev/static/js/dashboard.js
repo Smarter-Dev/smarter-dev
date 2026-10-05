@@ -185,6 +185,20 @@
       node.querySelector('[data-back]').hidden = true;
       node.querySelector('[data-unsaved]').hidden = false;
       node.querySelector('[data-login]').href = initial.login_url;
+    } else {
+      node.querySelector('[data-search-delete]').addEventListener('click', function (event) {
+        if (!window.confirm('Delete this search? Its results and answer are deleted with it.')) return;
+        const button = event.currentTarget;
+        button.disabled = true;
+        api(searchApi + id, { method: 'DELETE' }).then(function (body) {
+          cache.searches.delete(id);
+          cache.recent = body.searches;
+          go('/dashboard/search');
+        }).catch(function (error) {
+          button.disabled = false;
+          showError(node, error.message);
+        });
+      });
     }
     const search = cache.searches.get(id);
     if (search) renderSearch(search);
@@ -501,6 +515,8 @@
     document.title = search.request + ' · Smarter Dev';
     node.querySelector('[data-request-text]').textContent = search.request;
     node.querySelector('[data-status-text]').textContent = statusText(search);
+    // A search still running is deleted once it finishes.
+    node.querySelector('[data-search-delete]').hidden = anonymous || !!search.active;
 
     STEPS.forEach(function (step) {
       const item = node.querySelector('[data-step="' + step + '"]');

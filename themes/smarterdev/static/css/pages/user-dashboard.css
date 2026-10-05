@@ -224,6 +224,20 @@
 .ud-shell [hidden] { display: none !important }
 .ud-back:hover svg { transform: translateX(-2px) }
 
+/* Quiet, like the back link: deleting is offered, not advertised. */
+.ud-delete {
+  margin-top: 10px;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: .78rem;
+  color: var(--p-muted);
+  cursor: pointer;
+  transition: color .18s;
+}
+.ud-delete:hover, .ud-delete:focus-visible { color: var(--p-danger, #ff8a8a) }
+
 .ud-request {
   margin: 0;
   font-family: var(--body);

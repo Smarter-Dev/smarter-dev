@@ -144,7 +144,8 @@
     menuRow = row;
     menuButton = button;
     var archived = row.dataset.archived === 'true';
-    rowMenu.querySelector('[data-row-action="archive"]').textContent = archived ? 'Unarchive' : 'Archive';
+    var archive = rowMenu.querySelector('[data-row-action="archive"]');
+    if (archive) archive.textContent = archived ? 'Unarchive' : 'Archive';
     rowMenu.hidden = false;
     button.setAttribute('aria-expanded', 'true');
     // Measured only once it is displayed; a hidden element has no size.
@@ -270,7 +271,7 @@
   function askDelete(row) {
     if (!deleteDialog) return;
     pendingDelete = row;
-    deleteDialog.querySelector('[data-delete-title]').textContent = rowTitle(row) || 'Untitled chat';
+    deleteDialog.querySelector('[data-delete-title]').textContent = rowTitle(row) || (mode === 'resources' ? 'Untitled' : 'Untitled chat');
     deleteDialog.hidden = false;
     deleteDialog.querySelector('[data-delete-confirm]').focus();
   }
@@ -318,18 +319,21 @@
       var id = row.dataset.conversationId;
       var button = deleteDialog.querySelector('[data-delete-confirm]');
       button.disabled = true;
-      api('/v2/api/chat/conversations/' + id, {method: 'DELETE'}).then(function () {
+      // A Resources question lives under its own API and lands back on /resources.
+      var resources = mode === 'resources';
+      var url = (resources ? '/v2/api/agent/conversations/' : '/v2/api/chat/conversations/') + id;
+      api(url, {method: 'DELETE'}).then(function () {
         deleteDialog.hidden = true;
         pendingDelete = null;
         row.remove();
         pruneGroups();
         syncArchiveDrawer();
         // The conversation on screen no longer exists; anywhere else is fine.
-        if (id === conversationId) window.location.href = '/chat';
+        if (id === conversationId) window.location.href = resources ? '/resources' : '/chat';
       }).catch(function (error) {
         deleteDialog.hidden = true;
         pendingDelete = null;
-        showError(error.message || 'That chat could not be deleted.');
+        showError(error.message || (resources ? 'That question could not be deleted.' : 'That chat could not be deleted.'));
       }).then(function () { button.disabled = false; });
     });
   }

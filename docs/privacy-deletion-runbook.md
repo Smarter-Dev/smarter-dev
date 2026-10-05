@@ -462,10 +462,13 @@ check".
 
 The site's own account deletion does this part, and it is the one path that
 also removes private chat attachments from storage and cancels Polar
-subscriptions. It does not touch searches, so remove those first.
+subscriptions. It also deletes what has no foreign key to the account: the
+dashboard searches, the search link, push subscriptions, the account's
+`work_dispatches` rows and its queued notifications.
 
-1. Delete the search history, which has no link to the account and would be
-   left behind:
+1. Delete any search history left by an account deleted before
+   self-deletion covered it. For an account deleted since, this deletes
+   nothing:
 
    ```sql
    BEGIN;

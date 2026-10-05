@@ -13,14 +13,15 @@
 {# The owner's one perpetual Quick chat. Absent in Resources mode and until the
    first visit to /chat creates it. #}
 {% set quick_pin = quick_conversation|default(none) %}
-{# A history row is a link plus the menu that acts on it. Only Chat rows carry
-   the menu: a Resources answer has no title of its own to change and no private
-   uploads to destroy, so the rail there stays a plain list of links. #}
+{# A history row is a link plus the menu that acts on it. In Resources mode the
+   rail lists the asker's own questions, and their menu only deletes: an answer
+   has no title of its own to change and nothing to archive. #}
+{% set row_actions = mode == 'chat' or is_owner|default(false) %}
 {% macro history_row(item, archived=false) -%}
 {%- set current = conversation and item.id == conversation.id -%}
 <div class="chat-history-row" data-history-row data-conversation-id="{{ item.id }}" data-archived="{{ 'true' if archived else 'false' }}">
   <a href="/chat/{{ item.id }}" {% if current %}aria-current="page"{% endif %} data-history-title>{{ item.title or 'Untitled chat' }}</a>
-  {%- if mode == 'chat' %}
+  {%- if row_actions %}
   <button type="button" class="chat-history-more" data-history-menu aria-haspopup="true" aria-expanded="false">
     <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><circle cx="8" cy="3" r="1.35"/><circle cx="8" cy="8" r="1.35"/><circle cx="8" cy="13" r="1.35"/></svg>
     <span class="p-sr">Actions for {{ item.title or 'Untitled chat' }}</span>
@@ -341,16 +342,22 @@
 
 <div class="p-backdrop" data-model-dialog hidden><div role="dialog" aria-modal="true" class="p-dialog chat-dialog"><h2>Confirm model change</h2><p data-model-warning></p><div class="chat-dialog-actions"><button type="button" class="p-btn" data-model-cancel>Cancel</button><button type="button" class="p-btn is-primary" data-model-confirm>Confirm change</button></div></div></div>
 
-{% if mode == 'chat' %}
+{% if row_actions %}
 {# One menu, moved to whichever row asked for it. The rail scrolls and clips, so
    this lives outside it and is positioned against the button that opened it. #}
 <div class="chat-row-menu" data-row-menu role="menu" hidden>
+  {% if mode == 'chat' %}
   <button type="button" role="menuitem" data-row-action="rename">Rename</button>
   <button type="button" role="menuitem" data-row-action="archive">Archive</button>
+  {% endif %}
   <button type="button" role="menuitem" class="is-danger" data-row-action="delete">Delete</button>
 </div>
 
+{% if mode == 'chat' %}
 <div class="p-backdrop" data-delete-dialog hidden><div role="dialog" aria-modal="true" aria-labelledby="chat-delete-title" class="p-dialog chat-dialog"><h2 id="chat-delete-title">Delete this chat?</h2><p>“<span data-delete-title></span>” and everything in it — every message, document, and uploaded file — will be destroyed. This cannot be undone.</p><div class="chat-dialog-actions"><button type="button" class="p-btn" data-delete-cancel>Cancel</button><button type="button" class="p-btn is-danger" data-delete-confirm>Delete chat</button></div></div></div>
+{% else %}
+<div class="p-backdrop" data-delete-dialog hidden><div role="dialog" aria-modal="true" aria-labelledby="chat-delete-title" class="p-dialog chat-dialog"><h2 id="chat-delete-title">Delete this question?</h2><p>“<span data-delete-title></span>”, every answer to it and every follow-up will be destroyed. This cannot be undone.</p><div class="chat-dialog-actions"><button type="button" class="p-btn" data-delete-cancel>Cancel</button><button type="button" class="p-btn is-danger" data-delete-confirm>Delete question</button></div></div></div>
+{% endif %}
 {% endif %}
 {% endblock %}
 {% block page_scripts %}{% if mode == 'chat' %}<script src="{{ theme_url('js/dashboard-nav.js') }}" defer></script>{% endif %}<script src="{{ theme_url('js/sdanswer.js') }}" defer></script><script src="{{ theme_url('js/chat.js') }}" defer></script>{% endblock %}

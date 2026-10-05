@@ -208,9 +208,10 @@ allowed — that is a keyword watch, not a command.
   the same work twice. A Resources row written before Resources jobs stopped
   carrying the question held it in full until then: the dispatcher empties a
   row as it completes, and the hourly retention job empties any finished or
-  cancelled row still holding one. No age bound on the rows, and deleting the
-  account does not remove them (no foreign key to the user); runbook step 8
-  deletes a person's rows for a request.
+  cancelled row still holding one. No age bound on the rows. They have no
+  foreign key to the user, so the deletes in `smarter_dev/web/user_content.py`
+  remove them with the chat, question or search they dispatched, and so does
+  account deletion; runbook step 8 deletes a person's rows for a request.
 - `proactive_agent_histories` — the proactive agent's own working history,
   with the bounds (and the missing ones) described above; it is not an
   operator-facing audit trail.
@@ -299,6 +300,10 @@ that job runs:
   covers every job: a Chat turn's reply in its result, a handler timer's
   payload. The row keeps the job's id, type, queue, status, attempts, errors and
   timings. A job Skrift will still retry keeps everything until it finishes.
+  A job that finished before this was deployed, or on a worker still running
+  the previous release during a rollout, kept its content; the hourly job
+  empties those the same way, up to 2,000 a run, leaving the row's timestamps
+  alone (`empty_finished_job_states` in `smarter_dev/web/worker_retention.py`).
 - An agent session is deleted by the code that ran it as soon as that code has
   the result: its run state, its snapshots and its event stream
   (`smarter_dev/web/agent_session_cleanup.py`). The four Resources stages go
@@ -416,8 +421,8 @@ change the notice in the same commit as anything here that raises a bound.
 | Rate limits and caches: 30 days | `chatlimit:*` (4-hour window, `user_message_limit.py`), `hcap:dmuser:*` (1 hour), `hdm:chan:*` (7 days, `handler_emitter.py`), `hclaim:*` (a script's claim, at most 30 days, `CLAIM_TTL_MAX_SECONDS` in `handler_caps.py`) | Longest is `hclaim:*` |
 | Test copies: permanent | channel exports from `scripts/proactive_eval/fetch_history.py` and the historical copies from #42 | Not edited for a request |
 | Your account: until the account is deleted; signed in 30 days after the last visit | the site account, profile, linked Discord, GitHub and Google logins with the profile and tokens each provider gave (`oauth_accounts`), push subscriptions | Session `max_age` 30 days, rolling (`app.yaml`) |
-| Chat: until deleted; Resources questions until the account is deleted or a deletion request; the AI's own copy of a Resources question, its research and its answer as soon as it finishes, or within 7 hours if it is cut off partway; the progress it shows for 2 days | site chat conversations and attachments; Resources questions (`agent_messages`, `resource_agent_runs`), and an older `work_dispatches` row's copy while its run is unfinished (above); the Resources and chat-title agents' Skrift sessions and jobs; Skrift's queued notifications (24 hours) | Conversations, attachments and Resources conversations go with the account (a queued job); a `work_dispatches` row keeps only ids once its run ends, which deleting the account also does, and the row itself goes only with a deletion request (runbook step 8). The agents' sessions are deleted when the pipeline or the title finishes, and their jobs' state is emptied (above). A session cut off partway stays until the hourly retention job deletes it, 6 hours after its last write (rounded up to 7 hours for the hourly run); runbook step 8 removes it for a request |
-| Searches: until a deletion request; searches made with a search link while signed out 30 minutes | dashboard searches; anonymous search keys (`TTL_SECONDS` in `smarter_dev/web/web_search/anonymous.py`), each holding the search text, queries, results, answer, the link owner's ID and the browser session that ran it | Not removed by account deletion; runbook step 5 |
+| Chat: until deleted; Resources questions until deleted; the AI's own copy of a Resources question, its research and its answer as soon as it finishes, or within 7 hours if it is cut off partway; the progress it shows for 2 days | site chat conversations and attachments; Resources questions (`agent_messages`, `resource_agent_runs`), and an older `work_dispatches` row's copy while its run is unfinished (above); the Resources and chat-title agents' Skrift sessions and jobs; Skrift's queued notifications (24 hours) | The member deletes a chat or a question, or all of either, themselves (chat rail or Resources rail; Account → Security → Your data); each delete removes the rows, the uploaded files, a question's queued notifications and the `work_dispatches` rows. A chat's usage rows (`usage_cost_rows.details`) hold a copy of each model reply only while its turn runs, for crash recovery; the turn worker clears them when the turn ends, the hourly retention job clears any it missed, and a chat delete clears them too. Conversations, attachments and Resources conversations also go with the account (a queued job), which deletes the `work_dispatches` rows too. The agents' sessions are deleted when the pipeline or the title finishes, and their jobs' state is emptied (above). A session cut off partway stays until the hourly retention job deletes it, 6 hours after its last write (rounded up to 7 hours for the hourly run); runbook step 8 removes it for a request |
+| Searches: until deleted; searches made with a search link while signed out 30 minutes | dashboard searches; anonymous search keys (`TTL_SECONDS` in `smarter_dev/web/web_search/anonymous.py`), each holding the search text, queries, results, answer, the link owner's ID and the browser session that ran it | The member deletes a search, or all of them, themselves (the search page; Account → Security → Your data), with its `work_dispatches` row. Account deletion removes the searches and the search link (no foreign key, so the job deletes them explicitly); runbook step 5.1 only catches accounts deleted before that |
 | Email: until a deletion request | campaign and waitlist signups | No bound |
 | Security: 30 days in Pydantic Logfire | security events (below) | Logfire organisation retention |
 | Monitoring: 30 days in Pydantic Logfire; servers' own logs with no fixed time limit | errors and traces from the bot and the website; container stdout | Logfire organisation retention (the Personal plan default, never configured otherwise); container logs are bounded by size and pod lifetime, not time |

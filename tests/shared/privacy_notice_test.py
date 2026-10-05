@@ -102,8 +102,9 @@ def test_the_account_names_each_sign_in_provider_and_what_it_gives(notice):
 
 
 def test_self_deletion_names_what_it_leaves(notice):
-    assert "removes the account, its chat conversations and attachments, and your questions about our resources." in notice
-    assert "Searches you made from your dashboard are kept until you ask us to delete them, as are anything the Discord bot stores and the chat bot's memories." in notice
+    assert "You can delete a chat, a question about our resources or a search yourself, one at a time where it is listed or all of each kind at once" in notice
+    assert "Deleting your website account from your account settings removes the account with all of those and your search link." in notice
+    assert "Anything the Discord bot stores and the chat bot's memories are kept until you ask us to delete them." in notice
     assert "A copy of each question you asked about our resources" not in notice
     assert "The AI's own copies of your questions about our resources and its answers are deleted as soon as it finishes each answer, or within 7 hours if it was cut off partway." in notice
     assert "straight away" not in notice
@@ -129,7 +130,7 @@ RETENTION = {
     "Test copies.": "Kept permanently",
     "Your account.": "Kept until you delete your account",
     "Chat.": "kept until you delete them or your account",
-    "Searches": "kept until you ask us to delete them",
+    "Searches": "kept until you delete them or your account",
     "Email.": "Kept until you ask us to delete it",
     "Security.": "Kept for 30 days in Pydantic Logfire",
 }
