@@ -46,7 +46,6 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "bytes_transactions",
     "campaign_signups",
     "campaigns",
-    "candidate_blog_topics",
     "challenge_inputs",
     "challenge_submissions",
     "challenges",

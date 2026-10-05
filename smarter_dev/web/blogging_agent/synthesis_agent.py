@@ -1,4 +1,4 @@
-"""Stage 5 of the blogging pipeline — Synthesis.
+"""Stage 4 of the blogging pipeline — Synthesis.
 
 Takes the topic, goal, and citations and writes the post. Returns a
 structured ``SynthesisOutput`` that the orchestrator turns into a

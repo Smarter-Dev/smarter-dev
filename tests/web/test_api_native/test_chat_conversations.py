@@ -3,7 +3,7 @@
 Assert the wire contract of the ported ``routers/chat_conversations.py``
 directly: the engagement create (201), engagement end (200 / 404 / 422 on a
 malformed id), turn create (201 with the cost breakdown, engagement aggregate
-bumps, compaction-event + blog-candidate capture), and the usage-leaderboard
+bumps, compaction-event capture, blog ideas ignored), and the usage-leaderboard
 read (200 with per-channel token totals plus the ge/le query validation). Paths
 carry the final ``/api`` prefix and mirror exactly what the bot sends from
 ``smarter_dev/bot/services/chat_conversation_persistence.py`` and
@@ -52,7 +52,6 @@ from smarter_dev.shared.database import Base
 from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 from smarter_dev.web.api_native import chat_conversations as chat_module
 from smarter_dev.web.api_native.chat_conversations import ChatConversationController
-from smarter_dev.web.models import CandidateBlogTopic
 from smarter_dev.web.models import ChatAgentCompactionEvent
 from smarter_dev.web.models import ChatAgentEngagement
 from smarter_dev.web.models import ChatAgentError
@@ -573,7 +572,10 @@ class TestCreateTurn:
         assert events[0].chars_saved == 12
         assert events[0].summarizer_reasoning_level == "low"
 
-    async def test_captures_blog_topic_candidates(self, client: AsyncClient, session):
+    async def test_ignores_blog_topic_candidates_and_still_stores_the_turn(
+        self, client: AsyncClient, session
+    ):
+        """A bot image from before blog ideas were removed still sends them."""
         engagement = await _seed_engagement(session)
 
         await _post_turn(
@@ -584,21 +586,15 @@ class TestCreateTurn:
                     {
                         "headline": "A neat pattern",
                         "observation": "People keep asking the same thing",
-                        "scope": "community",
-                        "evidence": ["msg1", "msg2"],
-                        "category": "trend",
-                    },
-                    {"headline": "", "observation": "dropped — no headline"},
+                        "evidence": ["msg1"],
+                    }
                 ]
             },
         )
 
-        candidates = (await session.execute(select(CandidateBlogTopic))).scalars().all()
-        assert len(candidates) == 1
-        assert candidates[0].engagement_id == engagement.id
-        assert candidates[0].turn_id == (await _stored_turn(session)).id
-        assert candidates[0].headline == "A neat pattern"
-        assert candidates[0].evidence == ["msg1", "msg2"]
+        turn = await _stored_turn(session)
+        assert turn.engagement_id == engagement.id
+        assert "A neat pattern" not in str(turn.agent_output)
 
 
 class TestTurnUsageCostRows:
