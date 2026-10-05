@@ -37,9 +37,7 @@ _PROMPT = (Path(__file__).parent / "prompts" / "scout.md").read_text(
 class ScoutTopic(BaseModel):
     """A current-events claim, surfaced for a downstream hypothesis pass.
 
-    Same neutral shape the chat agent's ``BlogTopicCandidate`` uses, so
-    Brainstorm sees both inputs uniformly. NOT a pitch — no "the take",
-    no editorial.
+    Brainstorm's only input. NOT a pitch — no "the take", no editorial.
     """
 
     headline: str = Field(

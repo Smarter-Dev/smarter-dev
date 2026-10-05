@@ -224,7 +224,7 @@ workers:
     - agents
     - chat-subagents
   # Global claim-timeout for the worker pool. The blogging orchestrator
-  # job runs the whole 5-stage pipeline inside one claim and can take
+  # job runs the whole 4-stage pipeline inside one claim and can take
   # well over 10 minutes when Research dispatches a chatty sub-agent.
   # If the claim expires mid-pipeline, another worker re-claims the
   # same job → two orchestrator coroutines run in parallel for the same

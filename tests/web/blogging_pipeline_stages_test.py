@@ -5,12 +5,15 @@ from __future__ import annotations
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from smarter_dev.web.blogging_agent import pipeline
-from smarter_dev.web.blogging_agent.brainstorm_agent import BrainstormInput, BrainstormOutput
+from smarter_dev.web.blogging_agent.brainstorm_agent import BrainstormInput
+from smarter_dev.web.blogging_agent.brainstorm_agent import BrainstormOutput
 from smarter_dev.web.blogging_agent.research_agent import ResearchOutput
-from smarter_dev.web.blogging_agent.scout_agent import ScoutOutput, ScoutTopic
+from smarter_dev.web.blogging_agent.scout_agent import ScoutOutput
+from smarter_dev.web.blogging_agent.scout_agent import ScoutTopic
 from smarter_dev.web.blogging_agent.synthesis_agent import SynthesisOutput
 from smarter_dev.web.models import AuthoringPipelineRun
 

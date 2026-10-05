@@ -1098,8 +1098,7 @@ titles, the blogging pipeline) keep each session's messages in `worker_state`
 `agents:run:<session>`. A session goes whole if it mentions the person (the
 id, or a name anywhere, ignoring case) or, for the site account, holds `uid`.
 Do not run this while
-a Resources question or a blogging run that involves them is still in
-progress.
+a Resources question that involves them is still in progress.
 
 Collect the sessions. Run the last three `INSERT`s only with `uid` set:
 

@@ -351,6 +351,7 @@ class BloggingAgentAdminController(Controller):
         return Redirect(path=f"/admin/blogging-agent/runs/{run_id}")
 
 
+# "review" stays so runs from before the Review stage was removed still show it.
 _STAGE_ORDER = ("review", "scout", "brainstorm", "research", "synthesis")
 
 
