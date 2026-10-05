@@ -17,14 +17,14 @@ help prepare or check a step, but does not run mutations.
 | | Stores |
 | --- | --- |
 | **Purge (agent)** | Everything the chat bot holds about the person: the guild memory, behavior and personality blocks, pending notes and retained revisions, both agents' working histories and their compaction summaries, the proactive recovery copy and watch instructions, and the external worker's history. The agent does the edit; see step 4. |
-| **Delete** | Bytes balances, squad memberships, quest and challenge submissions and quest progress, member activity dates, forum subscriptions, campaign signups, `/help` and `/tldr` records they started, legacy `/scan` profiles, rate-limit and DM caches, bot API security log rows whose request named them (until #81's migration drops that table), and their site account with its chat, attachments, searches, resources questions, profile, linked logins (and their stored Discord tokens), push subscriptions, roles, API keys, second-factor enrollments, OAuth consent grants, republish links and membership rows. Also these, which can outlast the limits under "Ages out": AI error messages that name them, the running topic and notes of engagements that name them, blog topic candidates from their conversations or naming them, entries in automation memory that carry them, automation jobs about them still waiting in Skrift's job stores (and any not yet pruned), AI agent sessions that mention them, and their site jobs. |
+| **Delete** | Bytes balances, squad memberships, quest and challenge submissions and quest progress, member activity dates, forum subscriptions, campaign signups, `/help` and `/tldr` records they started, legacy `/scan` profiles, rate-limit and DM caches, bot API security log rows whose request named them (until #81's migration drops that table), and their site account with its chat, attachments, searches, resources questions, profile, linked logins (and their stored Discord tokens), push subscriptions, roles, API keys, second-factor enrollments, OAuth consent grants, republish links and membership rows. Also these, which can outlast the limits under "Ages out": AI error messages that name them, the running topic and notes of engagements that name them, entries in automation memory that carry them, automation jobs about them still waiting in Skrift's job stores (and any not yet pruned), AI agent sessions that mention them, and their site jobs. |
 | **Anonymise** | Rows other people share. Bytes transfers the person sent or received keep their amount and date for the other member, with the person's id and username replaced and the reason cleared. Chat engagements they started lose the starter's id and username. Usage cost rows lose their Discord id and details. Legacy `/scan` usage rows lose their user id. Chat agent turns and handler runs have the person's id and names replaced where they stand as values; forum agent responses have the author's display name replaced. Site page revisions they wrote lose their author when the account is deleted. |
 | **Keep** | Moderation history: `moderation_actions`, the bot's posts in the guild's moderation and audit log channels, and the moderator's `reason` copied into `handler_runs` rows of moderation triggers. Anonymised billing: usage cost rows with no person linked (the membership rows are deleted with the account; Polar keeps its payment records under its own terms). A bare receipt that the request was completed. The person's Discord id alone in `chat_bot_blocked_users`, written by the purge in step 4, so the chat bot sees their messages only as `[BLOCKED BY USER]` and does not respond to them. |
 | **Ages out** | Short-lived records listed below. Nothing in them lasts past 30 days, so a request does not touch them, apart from the live work steps 6 to 8 clear. |
 
 The Delete and Anonymise rows also cover records that can outlast those
-limits, which the steps below edit: AI error messages and engagement topics (step 6), blog
-topic candidates (step 6), automation memory (step 7) and job stores
+limits, which the steps below edit: AI error messages and engagement topics (step 6),
+automation memory (step 7) and job stores
 (step 8).
 
 The Keep row has a second part, disclosed in the notice's "What we keep":
@@ -221,7 +221,6 @@ UNION ALL SELECT 'handler_runs own (clear account details)', count(*) FROM handl
 UNION ALL SELECT 'handler_runs mentioning (drop from mentions)', count(*) FROM handler_runs WHERE jsonb_typeof(trigger_context::jsonb -> 'mentioned_user_ids') = 'array' AND trigger_context::jsonb -> 'mentioned_user_ids' ? :'did'
 UNION ALL SELECT 'chat_agent_errors (clear text)', count(*) FROM chat_agent_errors WHERE error_message ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR traceback ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR coalesce(provider_body, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
 UNION ALL SELECT 'chat_agent_engagements topic (clear)', count(*) FROM chat_agent_engagements WHERE coalesce(last_topic, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR coalesce(last_notes, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
-UNION ALL SELECT 'candidate_blog_topics', count(*) FROM candidate_blog_topics WHERE engagement_id IN (SELECT id FROM chat_agent_engagements WHERE activation_user_id = :'did') OR (headline || ' ' || observation || ' ' || scope || ' ' || evidence::text) ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
 -- kept:
 UNION ALL SELECT 'moderation_actions (kept)', count(*) FROM moderation_actions WHERE target_user_id = :'did' OR moderator_user_id = :'did'
 -- chat bot stores, purged by the agent in step 4; counted to compare after:
@@ -561,11 +560,7 @@ DELETE FROM help_conversations WHERE user_id = :'did';
 DELETE FROM research_sessions WHERE user_id = :'did';
 DELETE FROM scan_user_profiles WHERE user_id = :'did';
 UPDATE scan_service_usage SET user_id = NULL WHERE user_id = :'did';
--- Records that can name them past the 48-hour sweep. Blog topic candidates go
--- first: they are found through the engagement the person started, which
--- the statements after them anonymise.
-DELETE FROM candidate_blog_topics
- WHERE engagement_id IN (SELECT id FROM chat_agent_engagements WHERE activation_user_id = :'did') OR (headline || ' ' || observation || ' ' || scope || ' ' || evidence::text) ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)');
+-- Records that can name them past the 48-hour sweep.
 UPDATE chat_agent_errors
    SET error_message = '[removed]', traceback = '[removed]', provider_body = NULL
  WHERE error_message ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR traceback ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR coalesce(provider_body, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)');
@@ -644,7 +639,7 @@ username `Alice`) is replaced whole. Stop and ask a developer when:
   whole strings and thread names are replaced, because a whole-word match
   elsewhere would also rename other members' names and roles that merely
   contain it;
-- the errors, engagement topics or blog topics count is higher than you
+- the errors or engagement topics count is higher than you
   expect. Those are matched by the name anywhere in their text, ignoring
   case, so a short name can match ordinary words. The same goes for the
   handler runs count.
@@ -702,7 +697,6 @@ UNION ALL SELECT 'handler runs', count(*) FROM handler_runs
 UNION ALL SELECT 'forum responses', count(*) FROM forum_agent_responses WHERE lower(author_display_name) = lower(:'name')
 UNION ALL SELECT 'errors: name in text', count(*) FROM chat_agent_errors WHERE (strpos(lower(error_message), lower(:'name')) > 0 OR strpos(error_message, :'jin') > 0) OR (strpos(lower(traceback), lower(:'name')) > 0 OR strpos(traceback, :'jin') > 0) OR (strpos(lower(coalesce(provider_body, '')), lower(:'name')) > 0 OR strpos(coalesce(provider_body, ''), :'jin') > 0)
 UNION ALL SELECT 'engagement topics: name', count(*) FROM chat_agent_engagements WHERE (strpos(lower(coalesce(last_topic, '')), lower(:'name')) > 0 OR strpos(coalesce(last_topic, ''), :'jin') > 0) OR (strpos(lower(coalesce(last_notes, '')), lower(:'name')) > 0 OR strpos(coalesce(last_notes, ''), :'jin') > 0)
-UNION ALL SELECT 'blog topics: name', count(*) FROM candidate_blog_topics WHERE (strpos(lower(headline || ' ' || observation || ' ' || scope || ' ' || evidence::text), lower(:'name')) > 0 OR strpos(headline || ' ' || observation || ' ' || scope || ' ' || evidence::text, :'jin') > 0);
 ROLLBACK;
 BEGIN;
 UPDATE chat_agent_turns
@@ -722,8 +716,6 @@ UPDATE chat_agent_errors
  WHERE (strpos(lower(error_message), lower(:'name')) > 0 OR strpos(error_message, :'jin') > 0) OR (strpos(lower(traceback), lower(:'name')) > 0 OR strpos(traceback, :'jin') > 0) OR (strpos(lower(coalesce(provider_body, '')), lower(:'name')) > 0 OR strpos(coalesce(provider_body, ''), :'jin') > 0);
 UPDATE chat_agent_engagements SET last_topic = NULL, last_notes = NULL
  WHERE (strpos(lower(coalesce(last_topic, '')), lower(:'name')) > 0 OR strpos(coalesce(last_topic, ''), :'jin') > 0) OR (strpos(lower(coalesce(last_notes, '')), lower(:'name')) > 0 OR strpos(coalesce(last_notes, ''), :'jin') > 0);
-DELETE FROM candidate_blog_topics
- WHERE (strpos(lower(headline || ' ' || observation || ' ' || scope || ' ' || evidence::text), lower(:'name')) > 0 OR strpos(headline || ' ' || observation || ' ' || scope || ' ' || evidence::text, :'jin') > 0);
 -- stop here: compare each UPDATE and DELETE count with its line above, then run COMMIT; or ROLLBACK;
 ```
 
@@ -1105,8 +1097,7 @@ titles, the blogging pipeline) keep each session's messages in `worker_state`
 (`runstate:<session>`), `worker_archive_snapshots` and the event stream
 `agents:run:<session>`. A session goes whole if it mentions the person (the
 id, or a name anywhere, ignoring case) or, for the site account, holds `uid`.
-The blogging pipeline copies blog topic candidates into its sessions, so this
-is where copies of the candidates deleted in step 6 go. Do not run this while
+Do not run this while
 a Resources question or a blogging run that involves them is still in
 progress.
 
@@ -1150,8 +1141,7 @@ DELETE FROM worker_archive_snapshots WHERE key IN (SELECT 'runstate:' || session
 A name is matched as a whole word, so a name that is also a common word
 (`user`, `content`, `agents`) matches sessions that have nothing to do with
 the person. Before deleting, compare the session count with how many
-sessions you would expect (the person's Resources questions and blog runs
-that drew on their conversations); if it is much higher, stop and ask a
+sessions you would expect (the person's Resources questions); if it is much higher, stop and ask a
 developer.
 
 ## 9. Clear Redis caches

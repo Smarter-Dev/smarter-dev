@@ -80,7 +80,6 @@ was posted to the channel, where the guild's own audit log keeps it.
 | Handler fire hand-off (Redis, `handler-fire:context:*`) | The verbatim trigger context of an event that fired a handler, read back by the fire job so the script sees the real message. | 1-hour key TTL, set once and never refreshed. The job payload in Skrift's worker tables carries the redacted context and a random reference to this key, never the text. A fire that finds the key gone is recorded as `skipped` and does not run. |
 | Handler timer payloads in the Skrift worker tables (`worker_queue`, `worker_state`) | What a handler script chose to carry to its own later fire. A script can copy the message it was reacting to into it. | Until the timer fires, however far ahead the script set it, then the 7 days Skrift keeps a finished job's state. Only a script that copies message text into a timer payload puts any there; the `handler_runs` audit row empties the payload whatever it holds. |
 | Handler script memory (`channel_handlers.memory` and `admin_handlers.memory`, one JSON blob per handler; `guild_handler_memory`, one row per key shared by a guild's admin handlers) | Whatever a handler script chose to keep between fires. A script can copy text from the message it reacted to into it. | No age bound. A handler's own memory lasts as long as the handler. Guild memory is tied to no handler: uninstalling an extension or deleting a handler leaves it, and a key stays until a script deletes it. Each store is capped at 16 KB (`smarter_dev/web/handler_memory.py`, `handler_guild_memory.py`). Only a script that copies message text puts any there; the bot's own handlers keep counters, ids and timestamps. |
-| Candidate blog topics (`candidate_blog_topics`) | Blog-post ideas the chat agent once filed from a conversation: a headline, an observation, a scope, a list of evidence strings and a category. These are the agent's words, but the evidence can paraphrase or quote what members said. | No age bound and not swept. The chat agent's output has had no blog-topic field since July 2026, so the current bot writes no new rows. The web endpoint still stores any `blog_topic_candidates` a turn sends, evidence included, so a bot image from before that change (in a rollback or canary) would add rows. The blogging pipeline's Review and Brainstorm stages and the blogging admin page read them, so clearing them is an operator decision, not a sweep. |
 | Moderation's `ai_context_summary` (`moderation_actions`) | A free-text field the AI moderation tools may fill. Today only the purge tool writes it, with a count (`Purged 3 message(s)`); no code reads it. | 48 hours, cleared by the hourly sweep. |
 
 The two agent histories are the "chat bot history" the policy carves out: they
@@ -92,14 +91,14 @@ the one *bounded* key whose window runs from the claim rather than from the
 write. The external proactive-agent worker sets the same expiry on the batches
 it claims, and its dead-letter stream keeps ids and an error type, no text.
 
-Three places have no age bound at all, stated plainly. The proactive agent's
+Two places have no age bound at all, stated plainly. The proactive agent's
 history has no clock, so a guild that never talks enough to trigger compaction
 keeps every verbatim message it has read, in Redis and in its
 `proactive_agent_histories` row, for as long as the channel stays enabled.
 Handler script memory keeps whatever a script stored, up to 16 KB per store:
 a handler's own memory for as long as the handler exists, guild memory until a
-script deletes the key. `candidate_blog_topics` rows stay until an operator
-discards them.
+script deletes the key. Blog post ideas (`candidate_blog_topics`) were the
+third until migration `2b028ca5a19f` dropped the table.
 
 Skrift's worker tables hold no handler fire's message text: the payload of a
 fire is redacted at dispatch, and a fire that fails leaves Skrift only its
@@ -363,7 +362,6 @@ change the notice in the same commit as anything here that raises a bound.
 | The chat bot's conversations: until a deletion request | chat agent working history, running topic (24-hour key) and notes (2-hour key), the guild's bot-event log (one hour); proactive history in Redis and `proactive_agent_histories`, and the external worker's copy | Proactive history has no age bound; the chat history's 2-hour TTL is refreshed on every write, so an active conversation has no fixed end either. The agent purge (step 4 of the runbook) removes the person |
 | Messages being handled: 5 days | proactive wake and shadow streams, claimed batches, pending lists; `handler-fire:context:*` (1 hour); `mediaread:*`, the AI's reading of a posted file (24 hours, `CACHE_TTL_SECONDS` in `smarter_dev/web/media_read.py`) | Longest is a claimed batch: an envelope can sit 48 hours in a stream, then a claim keeps it 48 hours more, about 4 days. Pending lists can outlast 48 hours only while the bot's passive tick is stopped |
 | Server automations: until a deletion request | handler script memory and guild memory (16 KB each), handler timer payloads | No age bound (above); runbook steps 7 and 8 clear the person's entries |
-| Blog post ideas: until a deletion request | `candidate_blog_topics`, and blogging pipeline sessions that copied them | No age bound, not swept; runbook step 6 |
 | Records of what the AI did: until a deletion request | `chat_agent_turns`, `chat_agent_engagements`, `chat_agent_compaction_events`, `chat_agent_errors`, `forum_agent_responses`, `handler_runs`, `help_conversations` rows, usage cost rows | No age bound on the rows; text is written as the placeholder or cleared by the sweep. The runbook anonymises or deletes the person's rows; an anonymised row still holds message IDs, channel and tag IDs (including the DM channel ID), times, role details and a permission flag, reaction emoji, and moderation action details. The notice sums these up as "which messages and channels were involved and what was done" |
 | `/help` questions and web searches: 3 days | `help_conversations.user_question` typed as a slash-command argument; `search_result_previews` | Both 48 hours, then the hourly sweep: at most 49 hours |
 | Moderation: permanent | `moderation_actions`; the bot's posts to the moderation and audit log channels | No bound; not part of a deletion request |

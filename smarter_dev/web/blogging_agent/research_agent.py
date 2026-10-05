@@ -1,4 +1,4 @@
-"""Stage 4 of the blogging pipeline — Research.
+"""Stage 3 of the blogging pipeline — Research.
 
 The outer Research stage is a GPT-6 Luna agent whose only tool is
 ``dig_into``. Each call dispatches a GPT-6 Luna sub-agent that runs its

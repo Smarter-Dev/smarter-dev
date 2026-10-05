@@ -1,4 +1,4 @@
-"""Stage 2 of the blogging pipeline — Scout.
+"""Stage 1 of the blogging pipeline — Scout.
 
 Searches the web for current tech news, reads candidate pages via Jina,
 returns 2-3 ScoutTopic suggestions. Scout never sees raw page text — only
