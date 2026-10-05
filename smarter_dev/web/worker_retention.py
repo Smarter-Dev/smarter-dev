@@ -14,19 +14,24 @@ still run or resume:
 - a job with a ``worker_queue`` row that was not dead-lettered (queued,
   claimed, paused with a wake time, or a handler timer due weeks ahead);
 - an agent session whose hot run state (``runstate:<id>`` in
-  ``worker_state``) has not expired and is not terminal. Skrift resumes a
-  session only from that hot copy (``update_runstate`` raises ``KeyError``
-  without it), and slides its expiry forward on every write, so a session
-  idle past Skrift's ``active_runstate_ttl`` (7 days) can no longer resume.
-  A hot copy with no expiry at all was written before that sliding TTL, and
-  is live only while it changed within :data:`WORKER_RETENTION`, the same
-  7 days;
+  ``worker_state``) has not expired, is not terminal and changed within
+  :data:`SESSION_BACKSTOP` (6 hours). Skrift resumes a session only from that
+  hot copy (``update_runstate`` raises ``KeyError`` without it). Every agent
+  run here finishes within minutes, writing as it goes, and none waits for an
+  approval, so a session idle for 6 hours was cut off: its caller is gone and
+  nothing will read it;
 - a job state that is not terminal and either belongs to a live session (an
   inline agent run paused for approval has no queue row) or changed within
   :data:`WORKER_RETENTION`.
 
-Everything else is finished, dead-lettered or wedged beyond resuming, and its
-rows go once they are older than :data:`WORKER_RETENTION`:
+Everything else is finished, dead-lettered or wedged beyond resuming. An
+agent session's own rows (its run state, snapshots and event stream) go once
+they are older than :data:`SESSION_BACKSTOP`: the code that ran a session
+deletes it as soon as it has the result (``agent_session_cleanup.py``), so
+these are sessions whose caller was cut off. The exception is a blogging
+session's event stream, which the blogging pipeline's admin run timeline
+reads; it is kept for :data:`WORKER_RETENTION` like the operational records.
+Everything else goes once it is older than :data:`WORKER_RETENTION`:
 
 - ``worker_state``: a row whose own ``expires_at`` has passed, which Skrift
   already treats as gone, and a job state or run state that is not live and
@@ -82,6 +87,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 WORKER_RETENTION = timedelta(days=7)
+SESSION_BACKSTOP = timedelta(hours=6)
 
 _BATCH_SIZE = 500
 
@@ -91,6 +97,11 @@ def worker_retention_cutoff(now: datetime) -> datetime:
     return now - WORKER_RETENTION
 
 
+def session_cutoff(now: datetime) -> datetime:
+    """An agent session's rows written strictly before this are due."""
+    return now - SESSION_BACKSTOP
+
+
 _TERMINAL_JOB_STATUSES = frozenset({"completed", "failed", "dead_lettered", "cancelled"})
 _TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "cancelled"})
 _JOB_STATE_PREFIX = "workers:jobs:"
@@ -98,6 +109,9 @@ _RUNSTATE_PREFIX = "runstate:"
 _RUN_STREAM_PREFIX = "agents:run:"
 _BLOB_STREAM_PREFIX = "agents:blobs:"
 _BLOB_ID = re.compile(r"sha256:[0-9a-f]{64}")
+# Agents whose event streams a page reads after they finish: the blogging
+# pipeline's admin run timeline (blogging_agent_admin.py).
+_TIMELINE_AGENT_PREFIX = "blogging."
 
 
 def _model_field(column: Any, *path: str) -> Any:
@@ -117,11 +131,21 @@ class LiveWork:
     session_ids: frozenset[str]
     blob_streams: frozenset[str]
     kept_snapshot_ids: frozenset[Any]
+    timeline_streams: frozenset[str] = frozenset()
 
     def keeps_stream(self, stream: str) -> bool:
         if stream.startswith(_RUN_STREAM_PREFIX):
             return stream.removeprefix(_RUN_STREAM_PREFIX) in self.session_ids
         return stream in self.blob_streams
+
+    def keeps_event(self, stream: str, created_at: datetime, now: datetime) -> bool:
+        """A session's event stream goes at the session backstop, unless a page
+        reads it; then it, like any other stream, goes after the full window."""
+        if self.keeps_stream(stream):
+            return True
+        if stream.startswith(_RUN_STREAM_PREFIX) and stream not in self.timeline_streams:
+            return False
+        return _aware(created_at) >= worker_retention_cutoff(now)
 
     def keeps_state_key(self, key: str) -> bool:
         if key.startswith(_JOB_STATE_PREFIX):
@@ -183,7 +207,7 @@ async def find_live_work(
             batch_size=batch_size,
         )
         if row.status not in _TERMINAL_RUN_STATUSES
-        and (row.expires_at is not None or _aware(row.updated_at) >= cutoff)
+        and _aware(row.updated_at) >= session_cutoff(now)
     }
     async for row in _pages(
         session,
@@ -228,7 +252,32 @@ async def find_live_work(
         session_ids=live.session_ids,
         blob_streams=frozenset(await _blobs_named_by(session, session_ids)),
         kept_snapshot_ids=frozenset(snapshot_id for _, snapshot_id in latest.values()),
+        timeline_streams=frozenset(await _timeline_streams(session)),
     )
+
+
+async def _timeline_streams(session: AsyncSession) -> set[str]:
+    """Event streams of sessions a page reads after they finish.
+
+    Skrift records the agent's name on the event that starts a run.
+    """
+    streams: set[str] = set()
+    for model, column in (
+        (WorkerEventRecord, WorkerEventRecord.event),
+        (WorkerArchiveEventRecord, WorkerArchiveEventRecord.event),
+    ):
+        rows = await session.scalars(
+            select(model.stream)
+            .where(
+                model.stream.startswith(_RUN_STREAM_PREFIX),
+                column[("payload", "agent_name")]
+                .as_string()
+                .startswith(_TIMELINE_AGENT_PREFIX),
+            )
+            .distinct()
+        )
+        streams.update(rows.all())
+    return streams
 
 
 def _aware(value: datetime) -> datetime:
@@ -271,6 +320,7 @@ class _Due:
 
 def _due_rules(now: datetime, live: LiveWork) -> dict[str, _Due]:
     cutoff = worker_retention_cutoff(now)
+    sessions_cutoff = session_cutoff(now)
     return {
         "worker_state": _Due(
             WorkerStateRecord,
@@ -280,11 +330,12 @@ def _due_rules(now: datetime, live: LiveWork) -> dict[str, _Due]:
                     WorkerStateRecord.expires_at <= now,
                 ),
                 and_(
-                    or_(
-                        WorkerStateRecord.key.startswith(_JOB_STATE_PREFIX),
-                        WorkerStateRecord.key.startswith(_RUNSTATE_PREFIX),
-                    ),
+                    WorkerStateRecord.key.startswith(_JOB_STATE_PREFIX),
                     WorkerStateRecord.updated_at < cutoff,
+                ),
+                and_(
+                    WorkerStateRecord.key.startswith(_RUNSTATE_PREFIX),
+                    WorkerStateRecord.updated_at < sessions_cutoff,
                 ),
             ),
             (WorkerStateRecord.key, WorkerStateRecord.expires_at),
@@ -306,22 +357,40 @@ def _due_rules(now: datetime, live: LiveWork) -> dict[str, _Due]:
         ),
         "worker_events": _Due(
             WorkerEventRecord,
-            WorkerEventRecord.created_at < cutoff,
-            (WorkerEventRecord.stream, WorkerEventRecord.job_id),
+            or_(
+                and_(
+                    WorkerEventRecord.stream.startswith(_RUN_STREAM_PREFIX),
+                    WorkerEventRecord.created_at < sessions_cutoff,
+                ),
+                WorkerEventRecord.created_at < cutoff,
+            ),
+            (WorkerEventRecord.stream, WorkerEventRecord.job_id, WorkerEventRecord.created_at),
             lambda row: (
                 (row.job_id is None or row.job_id not in live.job_ids)
-                and not live.keeps_stream(row.stream)
+                and not live.keeps_event(row.stream, row.created_at, now)
             ),
         ),
         "worker_archive_events": _Due(
             WorkerArchiveEventRecord,
-            WorkerArchiveEventRecord.created_at < cutoff,
-            (WorkerArchiveEventRecord.stream,),
-            lambda row: not live.keeps_stream(row.stream),
+            or_(
+                and_(
+                    WorkerArchiveEventRecord.stream.startswith(_RUN_STREAM_PREFIX),
+                    WorkerArchiveEventRecord.created_at < sessions_cutoff,
+                ),
+                WorkerArchiveEventRecord.created_at < cutoff,
+            ),
+            (WorkerArchiveEventRecord.stream, WorkerArchiveEventRecord.created_at),
+            lambda row: not live.keeps_event(row.stream, row.created_at, now),
         ),
         "worker_archive_snapshots": _Due(
             WorkerArchiveSnapshotRecord,
-            WorkerArchiveSnapshotRecord.snapshot_at < cutoff,
+            or_(
+                and_(
+                    WorkerArchiveSnapshotRecord.key.startswith(_RUNSTATE_PREFIX),
+                    WorkerArchiveSnapshotRecord.snapshot_at < sessions_cutoff,
+                ),
+                WorkerArchiveSnapshotRecord.snapshot_at < cutoff,
+            ),
             (),
             lambda row: row.id not in live.kept_snapshot_ids,
         ),

@@ -288,7 +288,9 @@ def _kick_title_generation(
 
     async def _run() -> None:
         try:
-            title = await generate_title(question, actor=str(owner_user_id))
+            title = await generate_title(
+                question, actor=str(owner_user_id), conversation_id=conversation_id
+            )
             if not title:
                 return
             # NB: must be the *Skrift* session context — agent_conversations

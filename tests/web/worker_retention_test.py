@@ -37,6 +37,7 @@ from sqlalchemy import select
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from smarter_dev.web.worker_retention import SESSION_BACKSTOP
 from smarter_dev.web.worker_retention import WORKER_RETENTION
 from smarter_dev.web.worker_retention import delete_expired_worker_rows
 
@@ -237,14 +238,14 @@ async def test_old_dead_lettered_jobs_go_and_a_long_pending_timer_stays(skrift, 
 
 
 @pytest.mark.asyncio
-async def test_a_session_paused_for_weeks_keeps_what_it_needs_to_resume(skrift, db_session):
-    # Started weeks ago, waiting on an approval; its last write was two days
-    # ago, so its hot copy is unexpired and Skrift can resume it. The inline
-    # job that runs it has no queue row and has not changed since it paused.
+async def test_a_session_still_being_worked_keeps_what_it_needs_to_resume(skrift, db_session):
+    # Started weeks ago, waiting on an approval; its last write was two hours
+    # ago, inside the session backstop, so Skrift can still resume it. The
+    # inline job that runs it has no queue row and has not changed since it paused.
     await skrift.snapshot("paused", "running", _OLD - timedelta(days=1))
     await skrift.snapshot("paused", "awaiting_approval", _OLD, blob=_BLOB)
     await skrift.runstate(
-        "paused", "awaiting_approval", changed_at=_NOW - timedelta(days=2), ttl=_WEEK
+        "paused", "awaiting_approval", changed_at=_NOW - timedelta(hours=2), ttl=_WEEK
     )
     await skrift.event("agents:run:paused", _OLD)
     await skrift.blob(_BLOB, _OLD)
@@ -266,6 +267,47 @@ async def test_a_session_paused_for_weeks_keeps_what_it_needs_to_resume(skrift, 
     ).all()
     # The newest snapshot is its state; the older one is history.
     assert statuses == [("runstate:paused", "awaiting_approval")]
+
+
+@pytest.mark.asyncio
+async def test_a_session_cut_off_goes_six_hours_after_its_last_write(skrift, db_session):
+    # Its caller stopped partway: unfinished, unexpired, but untouched for
+    # longer than the backstop. One written just inside it stays.
+    assert timedelta(hours=6) == SESSION_BACKSTOP
+    cut_off = _NOW - timedelta(hours=6, minutes=5)
+    inside = _NOW - timedelta(hours=5, minutes=55)
+    await skrift.runstate("cut-off", "running", changed_at=cut_off, ttl=_WEEK)
+    await skrift.snapshot("cut-off", "running", cut_off)
+    await skrift.event("agents:run:cut-off", cut_off)
+    await skrift.runstate("working", "running", changed_at=inside, ttl=_WEEK)
+    await skrift.snapshot("working", "running", inside)
+    await skrift.event("agents:run:working", inside)
+
+    await delete_expired_worker_rows(db_session, now=_NOW)
+
+    assert await _remaining(db_session, WorkerStateRecord.key) == ["runstate:working"]
+    assert await _remaining(db_session, WorkerArchiveSnapshotRecord.key) == ["runstate:working"]
+    assert await _remaining(db_session, WorkerEventRecord.stream) == ["agents:run:working"]
+
+
+@pytest.mark.asyncio
+async def test_a_blogging_timeline_stream_stays_for_the_full_window(skrift, db_session):
+    # The admin run timeline reads a blogging session's events after it ends;
+    # a Resources session's events go at the backstop.
+    for session_id, agent, at in (
+        ("blog", "blogging.scout", _NOW - timedelta(days=1)),
+        ("answer", "smarter.dev.resources.author", _NOW - timedelta(days=1)),
+        ("old-blog", "blogging.scout", _OLD),
+    ):
+        stream = f"agents:run:{session_id}"
+        await skrift.events.append(
+            stream, {"type": "AgentStarted", "payload": {"agent_name": agent}}
+        )
+        await skrift._backdate(WorkerEventRecord, WorkerEventRecord.stream == stream, created_at=at)
+
+    await delete_expired_worker_rows(db_session, now=_NOW)
+
+    assert await _remaining(db_session, WorkerEventRecord.stream) == ["agents:run:blog"]
 
 
 @pytest.mark.asyncio

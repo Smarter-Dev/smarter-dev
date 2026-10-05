@@ -16,10 +16,12 @@ from __future__ import annotations
 import logging
 import os
 import re
+from uuid import UUID
 from uuid import uuid4
 
 import skrift
 
+from smarter_dev.web.agent_session_cleanup import UsageOwner
 from smarter_dev.web.agent_session_cleanup import forget_agent_sessions
 
 logger = logging.getLogger(__name__)
@@ -59,6 +61,13 @@ title_agent = skrift.Agent(
 )
 
 
+def _uuid(value: str | None) -> UUID | None:
+    try:
+        return UUID(str(value)) if value else None
+    except ValueError:
+        return None
+
+
 def _sanitize(raw: str) -> str:
     """Strip the things models like to add despite being told not to."""
     text = (raw or "").strip()
@@ -80,13 +89,14 @@ def _sanitize(raw: str) -> str:
 
 
 async def generate_title(
-    question: str, *, actor: str | None = None
+    question: str, *, actor: str | None = None, conversation_id: UUID | None = None
 ) -> str | None:
     """Generate a title for ``question`` via GPT-6 Luna. ``None`` on failure.
 
-    ``actor`` is the user id this run should be attributed to in Skrift's
-    audit trail. Pass the asker's UUID as a string so cost/usage rolls up
-    to the right account.
+    ``actor`` is the user id this run should be attributed to. Pass the
+    asker's UUID as a string: the run's tokens are recorded in
+    ``usage_cost_rows`` against that user and ``conversation_id`` as the
+    session is deleted.
     """
     if not (question or "").strip():
         return None
@@ -113,8 +123,17 @@ async def generate_title(
         return None
     finally:
         # The session holds the question and the title; the caller stores the
-        # title and never reads the session again.
-        await forget_agent_sessions([session_id])
+        # title and never reads the session again. Its usage is recorded first:
+        # the session was the only record of it.
+        await forget_agent_sessions(
+            [session_id],
+            usage=UsageOwner(
+                product_mode="resources",
+                operation_type="resource_title",
+                user_id=_uuid(actor),
+                conversation_id=conversation_id,
+            ),
+        )
     if not isinstance(raw, str):
         raw = getattr(raw, "output", None) or getattr(raw, "data", None) or str(raw)
     title = _sanitize(str(raw))

@@ -17,6 +17,12 @@ its dead-lettered queue row, which is what an operator replays it from; the
 hourly retention job deletes both after 7 days
 (:mod:`smarter_dev.web.worker_retention`).
 
+One consequence: Skrift treats a submission that reuses a job id as the same
+job only if its payload matches the stored one, so resubmitting a finished
+job's id now raises ``JobIdConflict`` instead of returning its handle. Nothing
+here does that; every submit uses a fresh id, and an agent's outbox submits
+only an id with no state at all.
+
 ``app.yaml`` names this class as ``workers.backends.state_store``.
 """
 

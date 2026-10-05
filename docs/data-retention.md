@@ -315,11 +315,18 @@ dead-lettered queue row, which keep its payload and error text because they are
 what an operator replays the job from on Skrift's dead-letter page; lifecycle
 events, which hold ids, statuses and error text; and a session whose caller was
 cut off before it finished (a web pod restarting while a title is generated, a
-worker stopped partway through a pipeline). Skrift's own agent usage page
+worker stopped partway through a pipeline), which goes 6 hours after its last
+write. The first three are operational records, kept 7 days; the last is
+in-flight work, so it has the 6-hour backstop.
+
+A session's run state was also the only record of its token usage. A title's
+model turns are written to `usage_cost_rows` (product `resources`, operation
+`resource_title`) as its session is deleted; Resources stages already record
+theirs. Blogging runs' costs are recorded nowhere: `usage_cost_rows` allows
+only the `resources`, `chat`, `discord` and `search` products, so recording
+them needs a schema change. Skrift's own agent usage page
 (`/admin/agent-usage`) read finished sessions' run state for the 24 hours
-Skrift kept it, so Resources, title and blogging runs no longer appear there;
-Resources stage costs are in `usage_cost_rows`, title and blogging costs are
-recorded nowhere else.
+Skrift kept it, so Resources, title and blogging runs no longer appear there.
 
 Outside the worker tables, the Resources pipeline also
 sends the browser the restated question and its research steps, and the chat
@@ -336,13 +343,11 @@ live there until then.
 Live work is never deleted, however old. Live work is what Skrift can still
 run or resume: a job with a queue row that was not dead-lettered (queued,
 claimed, paused with a wake time, or a handler timer due weeks ahead); an
-agent session whose hot run state has not expired and is not finished; and a
-job that is not finished and either belongs to such a session or changed in
-the last 7 days. Skrift resumes a session only from its hot run state, which
-it keeps for 7 days after the session's last write, so a session idle longer
-than that, or left running by a worker that died, can no longer resume and is
-no longer live. Hot run state written before Skrift gave it that sliding
-expiry has none at all; it is live only while it changed in the last 7 days.
+agent session whose hot run state has not expired, is not finished and changed
+in the last 6 hours; and a job that is not finished and either belongs to such
+a session or changed in the last 7 days. Every agent run here finishes within
+minutes, writing as it goes, and none waits for an approval, so a session
+untouched for 6 hours was cut off and nothing will read it.
 
 A job that waits with neither a queue row nor a session — an inline job paused
 on its own — is live for 7 days after it last changed, then deleted. Nothing
@@ -351,10 +356,10 @@ and a session keeps its jobs live.
 
 | Table | Deleted |
 | --- | --- |
-| `worker_state` | once the row's own expiry has passed (Skrift sets 7 days on a finished job's state, already emptied, and 24 hours on a finished agent run's, which its caller has already deleted), and a job's or session's state that is not live and has not changed in 7 days |
+| `worker_state` | once the row's own expiry has passed (Skrift sets 7 days on a finished job's state, already emptied, and 24 hours on a finished agent run's, which its caller has already deleted); a job's state that is not live and has not changed in 7 days; a session's state that is not live and has not changed in 6 hours |
 | `worker_queue` | a dead-lettered job (it holds the job's payload) 7 days after it was dead-lettered; a pending job never |
 | `worker_dead_letters` | 7 days after it was written, open or resolved |
-| `worker_events`, `worker_archive_events`, `worker_archive_snapshots` | 7 days after they were written, unless they belong to live work |
+| `worker_events`, `worker_archive_events`, `worker_archive_snapshots` | a session's events and snapshots 6 hours after they were written, except a blogging session's events (the run timeline reads them); everything else 7 days after it was written; never while they belong to live work |
 
 A live session keeps its event stream, its newest snapshot and every stored
 blob its state or events name; its older snapshots are history and go. Skrift
@@ -411,7 +416,7 @@ change the notice in the same commit as anything here that raises a bound.
 | Rate limits and caches: 30 days | `chatlimit:*` (4-hour window, `user_message_limit.py`), `hcap:dmuser:*` (1 hour), `hdm:chan:*` (7 days, `handler_emitter.py`), `hclaim:*` (a script's claim, at most 30 days, `CLAIM_TTL_MAX_SECONDS` in `handler_caps.py`) | Longest is `hclaim:*` |
 | Test copies: permanent | channel exports from `scripts/proactive_eval/fetch_history.py` and the historical copies from #42 | Not edited for a request |
 | Your account: until the account is deleted; signed in 30 days after the last visit | the site account, profile, linked Discord, GitHub and Google logins with the profile and tokens each provider gave (`oauth_accounts`), push subscriptions | Session `max_age` 30 days, rolling (`app.yaml`) |
-| Chat: until deleted; Resources questions until the account is deleted or a deletion request; the AI's own copy of a Resources question, its research and its answer as soon as it finishes, or 8 days later if it is cut off partway; the progress it shows for 2 days | site chat conversations and attachments; Resources questions (`agent_messages`, `resource_agent_runs`), and an older `work_dispatches` row's copy while its run is unfinished (above); the Resources and chat-title agents' Skrift sessions and jobs; Skrift's queued notifications (24 hours) | Conversations, attachments and Resources conversations go with the account (a queued job); a `work_dispatches` row keeps only ids once its run ends, which deleting the account also does, and the row itself goes only with a deletion request (runbook step 8). The agents' sessions are deleted when the pipeline or the title finishes, and their jobs' state is emptied (above). A session cut off partway stays until the hourly retention job deletes it, 7 days after its last write (rounded up to 8 days for the hourly run); runbook step 8 removes it for a request |
+| Chat: until deleted; Resources questions until the account is deleted or a deletion request; the AI's own copy of a Resources question, its research and its answer as soon as it finishes, or within 7 hours if it is cut off partway; the progress it shows for 2 days | site chat conversations and attachments; Resources questions (`agent_messages`, `resource_agent_runs`), and an older `work_dispatches` row's copy while its run is unfinished (above); the Resources and chat-title agents' Skrift sessions and jobs; Skrift's queued notifications (24 hours) | Conversations, attachments and Resources conversations go with the account (a queued job); a `work_dispatches` row keeps only ids once its run ends, which deleting the account also does, and the row itself goes only with a deletion request (runbook step 8). The agents' sessions are deleted when the pipeline or the title finishes, and their jobs' state is emptied (above). A session cut off partway stays until the hourly retention job deletes it, 6 hours after its last write (rounded up to 7 hours for the hourly run); runbook step 8 removes it for a request |
 | Searches: until a deletion request; searches made with a search link while signed out 30 minutes | dashboard searches; anonymous search keys (`TTL_SECONDS` in `smarter_dev/web/web_search/anonymous.py`), each holding the search text, queries, results, answer, the link owner's ID and the browser session that ran it | Not removed by account deletion; runbook step 5 |
 | Email: until a deletion request | campaign and waitlist signups | No bound |
 | Security: 30 days in Pydantic Logfire | security events (below) | Logfire organisation retention |
@@ -427,7 +432,7 @@ and the answer; the audit log channel posts carry a message's old and new text
 and its author.
 
 Short-lived copies not named in the notice (in Skrift's worker tables, a
-failed job's dead letter and a session cut off partway, 7 days) fall under the notice's "gone within 30 days of your
+failed job's dead letter, 7 days, and a session cut off partway, 7 hours) fall under the notice's "gone within 30 days of your
 request".
 
 ## Retention is not deletion
