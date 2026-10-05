@@ -16,6 +16,7 @@ from uuid import uuid4
 
 import pytest
 import skrift.workers.runtime as worker_runtime
+from skrift.agents.models import AgentUsageRecord
 from skrift.agents.models import RunState
 from skrift.agents.session import Session
 from skrift.agents.state import append_event
@@ -39,6 +40,7 @@ from smarter_dev.web import agent_session_cleanup
 from smarter_dev.web import resources_agent
 from smarter_dev.web import title_agent
 from smarter_dev.web.agent_session_cleanup import forget_agent_sessions
+from smarter_dev.web.models import UsageCostRow
 from smarter_dev.web.worker_state_store import FinishedJobStateStore
 
 _QUESTION = "how do I size a connection pool for a burst of webhooks"
@@ -112,6 +114,15 @@ async def _record_session(
     stored = output.model_dump(mode="json") if hasattr(output, "model_dump") else output
 
     def complete(runstate: RunState) -> RunState:
+        # The model turn's usage, as Skrift's runner records it.
+        runstate.turn_usage["turn-1"] = AgentUsageRecord(
+            session_id=sid,
+            turn_id="turn-1",
+            agent_name=agent.skrift_name,
+            configured_model="openai-responses:gpt-6-luna",
+            input_tokens=120,
+            output_tokens=8,
+        )
         runstate.status = "completed"
         runstate.terminal_at = utcnow()
         runstate.output = stored
@@ -242,11 +253,26 @@ async def test_a_title_leaves_nothing_of_the_question_in_the_worker_tables(
 ):
     _recording(monkeypatch, title_agent.title_agent, "Webhook Burst Pool Sizing")
 
-    title = await title_agent.generate_title(_QUESTION, actor="user-1")
+    asker, conversation = uuid4(), uuid4()
+
+    title = await title_agent.generate_title(
+        _QUESTION, actor=str(asker), conversation_id=conversation
+    )
 
     assert title
     assert sum((await _rows_holding(db_session, _QUESTION)).values()) == 0
     assert await _rows(db_session, WorkerArchiveSnapshotRecord) == 0
+    # The session was the only record of what the title cost; it is kept.
+    db_session.expire_all()
+    cost = await db_session.scalar(select(UsageCostRow))
+    assert (cost.product_mode, cost.operation_type) == ("resources", "resource_title")
+    assert (cost.user_id, cost.conversation_id) == (asker, conversation)
+    assert (cost.model_id, cost.input_tokens, cost.output_tokens) == (
+        "gpt-6-luna",
+        120,
+        8,
+    )
+    assert _QUESTION not in str(cost.details)
 
 
 async def _streams(db_session) -> set[str]:
