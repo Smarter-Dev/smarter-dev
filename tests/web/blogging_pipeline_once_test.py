@@ -121,3 +121,36 @@ async def test_a_finished_run_is_not_run_again(sessions, monkeypatch, status):
 
     assert result == {"status": status, "reason": "already finished"}
     assert (await get_run(sessions, run_id)).status == status
+
+
+async def test_an_ended_attempt_deletes_only_its_own_stage_sessions(sessions, monkeypatch):
+    """The run state of this attempt's stages goes; the timeline's streams stay."""
+    run_id = await a_run(sessions)
+    engine = create_async_engine("sqlite+aiosqlite://")
+    monkeypatch.setattr(pipeline, "_build_engine", lambda: engine)
+    monkeypatch.setattr(pipeline, "async_sessionmaker", lambda *a, **k: sessions)
+
+    async def scout_then_crash(agent, prompt, *, started, stage_name, **kwargs):
+        started.append(f"{stage_name}-session")
+        if stage_name == "brainstorm":
+            raise RuntimeError("provider unavailable")
+        return started[-1], None
+
+    forgotten = []
+
+    async def forget(session_ids, **options):
+        forgotten.append((list(session_ids), options))
+
+    monkeypatch.setattr(pipeline, "_run_stage", scout_then_crash)
+    monkeypatch.setattr(pipeline, "_typed", lambda raw, model: model.model_construct())
+    monkeypatch.setattr(pipeline, "forget_agent_sessions", forget)
+
+    result = await pipeline.run_authoring_pipeline(pipeline.PipelineRunPayload(run_id=run_id))
+
+    assert result == {"status": "failed", "reason": "exception"}
+    assert forgotten == [
+        (
+            ["scout-session", "brainstorm-session"],
+            {"with_sub_agents": True, "keep_events": True},
+        )
+    ]

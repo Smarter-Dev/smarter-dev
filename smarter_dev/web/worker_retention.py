@@ -4,8 +4,8 @@ Skrift's own pruner (``WorkerPruner``) runs only under ``skrift workers
 persister`` or ``skrift workers prune``, which no manifest runs, and its
 SQLAlchemy backends implement few of its hooks: a ``worker_state`` row past its
 expiry is deleted only when that key is read again, and an open dead letter
-never. Those tables keep job payloads, agent run state (a Resources question,
-an agent's prompt) and error text, so the hourly retention job
+never. Those tables keep job payloads, agent run state (an agent's prompt)
+and error text, so the hourly retention job
 (``scripts/retention_sweep.py``) bounds them itself.
 
 Live work is never deleted, whatever its age. Live work is what Skrift can
