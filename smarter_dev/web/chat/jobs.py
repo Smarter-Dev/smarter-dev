@@ -123,6 +123,7 @@ from smarter_dev.web.models import WebChatSubagent
 from smarter_dev.web.models import WebChatThread
 from smarter_dev.web.models import WebChatTurn
 from smarter_dev.web.models import WorkDispatch
+from smarter_dev.web.user_content import delete_account_leftovers
 
 logger = logging.getLogger(__name__)
 ACTIVE = ("submitted", "queued", "running", "stopping")
@@ -3754,6 +3755,7 @@ async def delete_chat_account(payload: ChatAccountDeletionPayload) -> dict:
                     details={},
                 )
             )
+            await delete_account_leftovers(session, user_id)
             user = await session.get(User, user_id)
             if user is not None:
                 await session.delete(user)
