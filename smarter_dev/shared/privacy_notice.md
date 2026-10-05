@@ -31,8 +31,8 @@ The bot reads messages in the servers it is in, so the chat bot can answer peopl
 ## What the website stores
 
 - **Your account.** Your Discord ID, username, avatar, email address, profile, notification settings and the sign-in details Discord gives us, to run your account. Kept until you delete your account. You stay signed in for 30 days after your last visit. Older accounts made with GitHub or Google, which can no longer sign in, are kept until you ask us to delete them.
-- **Chat.** Your conversations and attachments, kept until you delete them or your account, and questions you ask about our resources, kept until you ask us to delete them. Working copies made while the AI answers are kept for 8 days after it finishes.
-- **Searches** from your dashboard, kept until you ask us to delete them. Searches other people make through a link you share are kept for 30 minutes.
+- **Chat.** Your conversations and attachments, kept until you delete them or your account, and questions you ask about our resources, kept until you ask us to delete them. While the AI answers a question about our resources, it keeps its own copy of the question, its research and its answer, deleted 8 days after it finishes.
+- **Searches** from your dashboard, kept until you ask us to delete them. Searches made with your search link while signed out are kept for 30 minutes.
 - **Education products.** We are building Gym and Labs. They are not open yet. Before they collect anything new, we will update this notice to say what they store.
 - **Billing.** Payments are handled by Polar, which keeps its payment records under its own terms. We keep your membership record while you have an account.
 - **Email.** Your email address or Discord ID if you sign up for a campaign or waitlist, to send you a confirmation. Kept until you ask us to delete it.
@@ -65,7 +65,7 @@ DM an @admin on the Smarter Dev Discord server, or email admin@smarter.dev. Eith
 
 Everything else that can still mention you is gone within 30 days of your request.
 
-Deleting your website account from your account settings removes the account and its chat conversations and attachments, and the AI's working copies of them within 8 days after it finishes. A copy of each question you asked about our resources is kept until you ask us to delete it, as are searches you made from your dashboard, anything the Discord bot stores, and the chat bot's memories. For those, DM an @admin or email admin@smarter.dev.
+Deleting your website account from your account settings removes the account and its chat conversations and attachments. The AI's own copies of your questions about our resources and its answers are deleted 8 days after it finishes. A copy of each question you asked about our resources is kept until you ask us to delete it, as are searches you made from your dashboard, anything the Discord bot stores, and the chat bot's memories. For those, DM an @admin or email admin@smarter.dev.
 
 ## Changes
 
