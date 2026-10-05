@@ -843,7 +843,8 @@ Use the same `psql` session as step 7.
 
 Deleting a waiting job cancels it. That includes an automation's timer or
 recurring fire about the person that is already due; one due later is left
-for a developer, because deleting it stops a recurring schedule for good.
+for a developer, because deleting it stops a recurring schedule for good. The
+developer still removes the person from it within the request's 30 days.
 
 Dry run:
 
@@ -873,7 +874,8 @@ ROLLBACK;
 Running jobs finish within minutes; rerun the dry run until that row is 0. A
 timer due later is an automation's scheduled follow-up; deleting it cancels
 it, and if it belongs to a recurring schedule the schedule stops, so a
-developer decides. The archive and webhook tables are not used by this site:
+developer removes the person from it within the 30 days: by rewriting its
+payload without them, or by deleting it if that cannot be done. The archive and webhook tables are not used by this site:
 if either count is not 0, stop and ask a developer.
 
 ```sql

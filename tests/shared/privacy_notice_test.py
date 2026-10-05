@@ -127,9 +127,9 @@ def test_the_notice_states_figures_not_mechanisms(notice):
         assert mechanism not in lowered
     assert "Searches other people make through a link you share are kept for 30 minutes" in notice
     assert "You stay signed in for 30 days after your last visit" in notice
-    assert "Working copies made while the AI answers are kept for 8 days" in notice
+    assert "Working copies made while the AI answers are kept for 8 days after it finishes" in notice
     monitoring = notice.split("**Monitoring.**", 1)[1].split(" - **", 1)[0]
-    assert "They are kept for 30 days" in monitoring
+    assert "Everything sent to Logfire is kept for 30 days" in monitoring
     assert "Our servers also keep their own logs, with no fixed time limit" in monitoring
 
 
