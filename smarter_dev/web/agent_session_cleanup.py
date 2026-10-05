@@ -7,7 +7,8 @@ prompt, any earlier messages passed in, every tool call and its result and the
 output; ``worker_archive_snapshots`` holds copies of that state; and the
 session's event stream (``agents:run:<id>`` in ``worker_events``) records the
 same as events. Skrift would keep them until the hourly retention job deleted
-them, 6 hours after the session last changed.
+them, 5 hours after the session last changed (gone by 6 hours, as the job
+runs hourly).
 
 The caller is the only reader: it awaits the session's result and its usage,
 writes what the product needs to its own tables, and never reads the session
@@ -17,7 +18,7 @@ sessions.
 
 The job that ran a session keeps no content either: its state is emptied as it
 finishes (:mod:`smarter_dev.web.worker_state_store`). A failure here is logged
-and left to the hourly retention job, which deletes a session 6 hours after its
+and left to the hourly retention job, which deletes a session 5 hours after its
 last write.
 
 A session's run state is also the only record of its token usage. A caller

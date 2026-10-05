@@ -38,6 +38,7 @@ from sqlalchemy import select
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from smarter_dev.shared.retention_policy import IN_FLIGHT_MAX
 from smarter_dev.web.worker_retention import SESSION_BACKSTOP
 from smarter_dev.web.worker_retention import WORKER_RETENTION
 from smarter_dev.web.worker_retention import _aware
@@ -273,12 +274,14 @@ async def test_a_session_still_being_worked_keeps_what_it_needs_to_resume(skrift
 
 
 @pytest.mark.asyncio
-async def test_a_session_cut_off_goes_six_hours_after_its_last_write(skrift, db_session):
+async def test_a_session_cut_off_goes_five_hours_after_its_last_write(skrift, db_session):
     # Its caller stopped partway: unfinished, unexpired, but untouched for
     # longer than the backstop. One written just inside it stays.
-    assert timedelta(hours=6) == SESSION_BACKSTOP
-    cut_off = _NOW - timedelta(hours=6, minutes=5)
-    inside = _NOW - timedelta(hours=5, minutes=55)
+    # The hourly job then has it gone within IN_FLIGHT_MAX.
+    assert timedelta(hours=5) == SESSION_BACKSTOP
+    assert SESSION_BACKSTOP + timedelta(hours=1) == IN_FLIGHT_MAX
+    cut_off = _NOW - timedelta(hours=5, minutes=5)
+    inside = _NOW - timedelta(hours=4, minutes=55)
     await skrift.runstate("cut-off", "running", changed_at=cut_off, ttl=_WEEK)
     await skrift.snapshot("cut-off", "running", cut_off)
     await skrift.event("agents:run:cut-off", cut_off)
