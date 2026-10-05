@@ -86,7 +86,6 @@ from smarter_dev.web.api_native.schemas import ChatAgentTurnCreateResponse
 from smarter_dev.web.api_native.schemas import ChatUsageLeaderboardEntry
 from smarter_dev.web.api_native.schemas import ChatUsageLeaderboardResponse
 from smarter_dev.web.llm_pricing import calc_cost
-from smarter_dev.web.models import CandidateBlogTopic
 from smarter_dev.web.models import ChatAgentCompactionEvent
 from smarter_dev.web.models import ChatAgentEngagement
 from smarter_dev.web.models import ChatAgentError
@@ -403,39 +402,6 @@ async def _persist_compaction_events(
     )
 
 
-def _candidate_blog_topics(
-    *, engagement_id: UUID, turn_id: UUID, agent_output: dict
-) -> list[CandidateBlogTopic]:
-    """The blogging-agent topics this turn surfaced, minus the unusable ones.
-
-    Same neutral {headline, observation, scope, evidence, category} shape Scout
-    produces — Brainstorm forms hypotheses from these claims downstream. A
-    candidate without both a headline and an observation claims nothing, and
-    evidence that did not arrive as a list is dropped rather than guessed at.
-    """
-    topics = []
-    for candidate in agent_output.get("blog_topic_candidates") or []:
-        headline = (candidate.get("headline") or "").strip()
-        observation = (candidate.get("observation") or "").strip()
-        if not headline or not observation:
-            continue
-        evidence = candidate.get("evidence")
-        topics.append(
-            CandidateBlogTopic(
-                engagement_id=engagement_id,
-                turn_id=turn_id,
-                headline=headline[:255],
-                observation=observation,
-                scope=(candidate.get("scope") or "").strip(),
-                evidence=[str(item) for item in evidence if item]
-                if isinstance(evidence, list)
-                else [],
-                category=candidate.get("category"),
-            )
-        )
-    return topics
-
-
 async def _replayed_turn_response(
     db_session: AsyncSession, *, engagement_id: UUID, request_id: str
 ) -> ChatAgentTurnCreateResponse | None:
@@ -669,13 +635,6 @@ class ChatConversationController(Controller):
             turn_id=turn.id,
             engagement=engagement,
             events=data.compaction_events,
-        )
-        db_session.add_all(
-            _candidate_blog_topics(
-                engagement_id=data.engagement_id,
-                turn_id=turn.id,
-                agent_output=data.agent_output,
-            )
         )
         await db_session.execute(
             update(ChatAgentEngagement)

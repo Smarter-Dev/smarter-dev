@@ -20,7 +20,6 @@ The bot reads messages in the servers it is in, so the chat bot can answer peopl
 - **The chat bot's conversations.** Messages in conversations the chat bot takes part in or watches, with its notes and summaries of them, so it can follow along. Kept until you ask us to delete them.
 - **Messages being handled.** Copies of messages, and of what the AI read in files people post, while the bot works on them. Kept for 5 days.
 - **Server automations.** Text from a message that an automation set up by a server admin chose to keep. Kept until you ask us to delete it.
-- **Blog post ideas.** Filed from conversations by older versions of the chat bot; they can quote members. Kept until you ask us to delete them.
 - **Records of what the AI did.** Who and which channel it concerned, when, what it cost and what it decided, without the words, so we can check its behaviour and cost. Kept until you ask us to delete them.
 - **`/help` questions and the chat bot's web searches**, with the results it saw, so it can answer and show what it found. Kept for 3 days.
 - **Moderation.** Every moderation action taken on a member, and the bot's posts of those actions, and of edited and deleted messages with their text, to the server's log channels. Kept permanently. Moderation history, including those posts, is kept so the server can stay safe, and is not part of a deletion request.

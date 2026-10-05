@@ -1,7 +1,7 @@
 """Authoring pipeline orchestrator — Skrift worker handler.
 
-Submits five Skrift Agent runs in sequence inside one worker job:
-Review → Scout → Brainstorm → Research → Synthesis. Each stage's
+Submits four Skrift Agent runs in sequence inside one worker job:
+Scout → Brainstorm → Research → Synthesis. Each stage's
 session_id is recorded onto the ``authoring_pipeline_runs`` row so the
 admin UI can replay/subscribe to Skrift's native event log for the audit
 view.
@@ -17,7 +17,7 @@ from uuid import UUID, uuid4
 
 from pydantic import BaseModel
 from skrift.workers import handler
-from sqlalchemy import select, text, update
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -37,13 +37,6 @@ from smarter_dev.web.blogging_agent.research_agent import (
     build_research_user_turn,
     research_agent,
 )
-from smarter_dev.web.blogging_agent.review_agent import (
-    CandidateTopicView,
-    ReviewInput,
-    ReviewOutput,
-    build_review_user_turn,
-    review_agent,
-)
 from smarter_dev.web.blogging_agent.scout_agent import (
     ScoutOutput,
     scout_agent,
@@ -57,7 +50,6 @@ from smarter_dev.web.blogging_agent.synthesis_agent import (
 from smarter_dev.web.models import (
     AuthoringPipelineRun,
     BlogPostMeta,
-    CandidateBlogTopic,
 )
 
 logger = logging.getLogger(__name__)
@@ -164,14 +156,14 @@ def _typed(result: Any, model_cls):
     "blogging.pipeline.run",
     queue="agents",
     max_attempts=1,
-    # The whole 5-stage pipeline can run for several minutes; the default
+    # The whole 4-stage pipeline can run for several minutes; the default
     # 30s visibility timeout would let another worker re-claim the job
     # while it's still mid-Research and we'd end up running synthesis
     # twice. 1800s (30 min) is a comfortable ceiling.
     visibility_timeout=1800.0,
 )
 async def run_authoring_pipeline(payload: PipelineRunPayload) -> dict:
-    """Run all five blogging-pipeline stages for one run row."""
+    """Run all four blogging-pipeline stages for one run row."""
     run_id = payload.run_id
     engine = _build_engine()
     Session = async_sessionmaker(engine, expire_on_commit=False)
@@ -192,71 +184,9 @@ async def run_authoring_pipeline(payload: PipelineRunPayload) -> dict:
             run.started_at = datetime.now(timezone.utc)
             await db.commit()
 
-        # ── Stage 1: Review ──────────────────────────────────────────
-        # Review trims + dedupes the candidate queue. Only worth running
-        # when something *new* has shown up since the last run; with only
-        # previously-`kept` rows in the inbox there's nothing fresh to
-        # judge, so we skip the API call and leave the existing kept set
-        # alone. Brainstorm + Scout still proceed regardless.
-        async with Session() as db:
-            result = await db.execute(
-                select(CandidateBlogTopic)
-                .where(CandidateBlogTopic.status.in_(("new", "kept")))
-                .order_by(CandidateBlogTopic.surfaced_at.desc())
-            )
-            inbox = list(result.scalars())
-
-        has_new = any(t.status == "new" for t in inbox)
         root_session_id: str | None = None
-        if has_new:
-            review_input = ReviewInput(
-                candidates=[
-                    CandidateTopicView(
-                        id=t.id,
-                        headline=t.headline,
-                        observation=t.observation,
-                        scope=t.scope,
-                        evidence=list(t.evidence or []),
-                        category=t.category,
-                        status=t.status,
-                        surfaced_at_iso=t.surfaced_at.isoformat(),
-                        surfaced_by=t.surfaced_by,
-                    )
-                    for t in inbox
-                ]
-            )
-            review_sid, review_raw = await _run_stage(
-                review_agent,
-                build_review_user_turn(review_input),
-                run_id=run_id,
-                root_session_id=None,
-                session_maker=Session,
-                stage_name="review",
-            )
-            review_out = _typed(review_raw, ReviewOutput)
-            root_session_id = review_sid
 
-            # Apply Review's decisions to the DB.
-            kept_set = {tid for tid in review_out.kept_topic_ids}
-            async with Session() as db:
-                for topic in inbox:
-                    new_status = "kept" if topic.id in kept_set else "discarded"
-                    if new_status != topic.status:
-                        await db.execute(
-                            update(CandidateBlogTopic)
-                            .where(CandidateBlogTopic.id == topic.id)
-                            .values(
-                                status=new_status,
-                                reviewed_at=datetime.now(timezone.utc),
-                            )
-                        )
-                await db.commit()
-        else:
-            logger.info(
-                "pipeline run %s: no new candidates — skipping Review", run_id
-            )
-
-        # ── Stage 2: Scout ───────────────────────────────────────────
+        # ── Stage 1: Scout ───────────────────────────────────────────
         scout_sid, scout_raw = await _run_stage(
             scout_agent,
             "Find 2-3 current tech-news topics worth a blog post.",
@@ -267,27 +197,8 @@ async def run_authoring_pipeline(payload: PipelineRunPayload) -> dict:
         )
         scout_out = _typed(scout_raw, ScoutOutput)
 
-        # ── Stage 3: Brainstorm ──────────────────────────────────────
-        async with Session() as db:
-            result = await db.execute(
-                select(CandidateBlogTopic)
-                .where(CandidateBlogTopic.status == "kept")
-                .order_by(CandidateBlogTopic.surfaced_at.desc())
-                .limit(17)
-            )
-            kept_topics = list(result.scalars())
-
-        brainstorm_candidates: list[BrainstormCandidate] = [
-            BrainstormCandidate(
-                source="kept",
-                headline=t.headline,
-                observation=t.observation,
-                scope=t.scope or "",
-                evidence=list(t.evidence or []),
-                category=t.category,
-            )
-            for t in kept_topics
-        ]
+        # ── Stage 2: Brainstorm ──────────────────────────────────────
+        brainstorm_candidates: list[BrainstormCandidate] = []
         for scout_topic in scout_out.topics:
             brainstorm_candidates.append(
                 BrainstormCandidate(
@@ -301,7 +212,7 @@ async def run_authoring_pipeline(payload: PipelineRunPayload) -> dict:
             )
 
         # Empty candidate list is allowed — Brainstorm gets to decide
-        # whether the queue + scout's news yielded anything worth a
+        # whether scout's news yielded anything worth a
         # hypothesis (it can return an abort via the schema's sentinel).
         brainstorm_input = BrainstormInput(candidates=brainstorm_candidates)
         brainstorm_sid, brainstorm_raw = await _run_stage(
@@ -322,7 +233,7 @@ async def run_authoring_pipeline(payload: PipelineRunPayload) -> dict:
             )
             return {"status": "failed", "reason": "brainstorm_abort"}
 
-        # ── Stage 4: Research ────────────────────────────────────────
+        # ── Stage 3: Research ────────────────────────────────────────
         research_input = ResearchInput(
             hypothesis=brainstorm_out.hypothesis,
             counter_hypothesis=brainstorm_out.counter_hypothesis,
@@ -338,7 +249,7 @@ async def run_authoring_pipeline(payload: PipelineRunPayload) -> dict:
         )
         research_out = _typed(research_raw, ResearchOutput)
 
-        # ── Stage 5: Synthesis ───────────────────────────────────────
+        # ── Stage 4: Synthesis ───────────────────────────────────────
         synthesis_input = SynthesisInput(
             revised_hypothesis=research_out.revised_hypothesis,
             hypothesis_status=research_out.hypothesis_status,

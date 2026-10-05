@@ -1,7 +1,7 @@
-"""Stage 3 of the blogging pipeline — Brainstorm.
+"""Stage 2 of the blogging pipeline — Brainstorm.
 
-Takes up to ~20 candidate topics (kept survivors of Review + Scout's
-news topics) and synthesises one post topic, a research plan, and a goal.
+Takes Scout's news topics and synthesises one post topic, a research plan,
+and a goal.
 No tools; pure reasoning.
 """
 
@@ -27,9 +27,9 @@ _PROMPT = (Path(__file__).parent / "prompts" / "brainstorm.md").read_text(
 
 
 class BrainstormCandidate(BaseModel):
-    """Slim candidate view (works for both kept chat-captures and scout topics)."""
+    """Slim view of one Scout topic."""
 
-    source: str  # "kept" or "scout"
+    source: str  # "scout"
     headline: str
     observation: str
     scope: str = ""
@@ -109,7 +109,7 @@ def build_brainstorm_user_turn(payload: BrainstormInput) -> str:
     """Render the candidate set as the user prompt."""
     if not payload.candidates:
         return (
-            "You received zero candidate claims this run (Review skipped, "
+            "You received zero candidate claims this run ("
             "Scout returned nothing). Return the abort sentinel: "
             "`hypothesis='(no post worth writing this run)'`, "
             "`counter_hypothesis='skip'`, `open_questions=['skip']`."

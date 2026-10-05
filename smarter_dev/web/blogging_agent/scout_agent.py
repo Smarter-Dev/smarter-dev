@@ -1,4 +1,4 @@
-"""Stage 2 of the blogging pipeline — Scout.
+"""Stage 1 of the blogging pipeline — Scout.
 
 Searches the web for current tech news, reads candidate pages via Jina,
 returns 2-3 ScoutTopic suggestions. Scout never sees raw page text — only
@@ -37,9 +37,7 @@ _PROMPT = (Path(__file__).parent / "prompts" / "scout.md").read_text(
 class ScoutTopic(BaseModel):
     """A current-events claim, surfaced for a downstream hypothesis pass.
 
-    Same neutral shape the chat agent's ``BlogTopicCandidate`` uses, so
-    Brainstorm sees both inputs uniformly. NOT a pitch — no "the take",
-    no editorial.
+    Brainstorm's only input. NOT a pitch — no "the take", no editorial.
     """
 
     headline: str = Field(
