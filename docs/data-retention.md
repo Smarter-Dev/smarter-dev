@@ -202,6 +202,11 @@ allowed — that is a keyword watch, not a command.
   the result is a user-facing artifact with its own lifecycle.
 - `agent_conversations` / `agent_messages` — the website's own agent chat, not
   Discord.
+- `work_dispatches` — one row per job the site hands to a worker (chat
+  turns, sub-agents, account deletion, web search, Resources questions); a
+  Resources row holds the question in full. No age bound and no sweep, and deleting the
+  account does not remove it (no foreign key to the user); runbook step 8
+  deletes a person's rows for a request.
 - `proactive_agent_histories` — the proactive agent's own working history,
   with the bounds (and the missing ones) described above; it is not an
   operator-facing audit trail.
@@ -341,6 +346,48 @@ These snapshots have a separate fixed 48-hour lifecycle. The public controller
 rejects them as soon as `expires_at` is reached, and the same hourly retention
 job then hard-deletes the expired rows. Only a SHA-256 hash of the random URL
 token is stored. Preview pages are read-only, unlisted, and marked `noindex`.
+
+## What the public notice states
+
+The notice at `/privacy` (`smarter_dev/shared/privacy_notice.md`) lists each
+kind of data a member would recognise, with one retention figure: the longest
+any store of that kind can keep it, stated as a fact. Where a kind spans
+several stores the figure is the longest of them, so most of the stores
+behind it keep less. A figure must never be shorter than a store behind it;
+change the notice in the same commit as anything here that raises a bound.
+`tests/shared/privacy_notice_test.py` pins each figure.
+
+| Notice says | Stores behind it | Bound, and where it is enforced |
+| --- | --- | --- |
+| The chat bot's memories: permanent | `chat_agent_guild_memory`, `chat_agent_memory_revisions` (last five nights), `chat_agent_memory_notes` | No bound (above); only the agent purge edits it for a request |
+| The chat bot's conversations: until a deletion request | chat agent working history, running topic (24-hour key) and notes (2-hour key), the guild's bot-event log (one hour); proactive history in Redis and `proactive_agent_histories`, and the external worker's copy | Proactive history has no age bound; the chat history's 2-hour TTL is refreshed on every write, so an active conversation has no fixed end either. The agent purge (step 4 of the runbook) removes the person |
+| Messages being handled: 5 days | proactive wake and shadow streams, claimed batches, pending lists; `handler-fire:context:*` (1 hour); `mediaread:*`, the AI's reading of a posted file (24 hours, `CACHE_TTL_SECONDS` in `smarter_dev/web/media_read.py`) | Longest is a claimed batch: an envelope can sit 48 hours in a stream, then a claim keeps it 48 hours more, about 4 days. Pending lists can outlast 48 hours only while the bot's passive tick is stopped |
+| Server automations: until a deletion request | handler script memory and guild memory (16 KB each), handler timer payloads | No age bound (above); runbook steps 7 and 8 clear the person's entries |
+| Blog post ideas: until a deletion request | `candidate_blog_topics`, and blogging pipeline sessions that copied them | No age bound, not swept; runbook step 6 |
+| Records of what the AI did: until a deletion request | `chat_agent_turns`, `chat_agent_engagements`, `chat_agent_compaction_events`, `chat_agent_errors`, `forum_agent_responses`, `handler_runs`, `help_conversations` rows, usage cost rows | No age bound on the rows; text is written as the placeholder or cleared by the sweep. The runbook anonymises or deletes the person's rows; an anonymised row still holds message IDs, channel and tag IDs (including the DM channel ID), times, role details and a permission flag, reaction emoji, and moderation action details. The notice sums these up as "which messages and channels were involved and what was done" |
+| `/help` questions and web searches: 3 days | `help_conversations.user_question` typed as a slash-command argument; `search_result_previews` | Both 48 hours, then the hourly sweep: at most 49 hours |
+| Moderation: permanent | `moderation_actions`; the bot's posts to the moderation and audit log channels | No bound; not part of a deletion request |
+| Games and community features: until a deletion request | bytes balances and transactions, squad memberships, quest and challenge submissions and progress, member activity, forum subscriptions, `/help` and `/tldr` records, legacy `/scan` rows | No bound; member leave removes that guild's bytes balance and squad membership |
+| Rate limits and caches: 30 days | `chatlimit:*` (4-hour window, `user_message_limit.py`), `hcap:dmuser:*` (1 hour), `hdm:chan:*` (7 days, `handler_emitter.py`), `hclaim:*` (a script's claim, at most 30 days, `CLAIM_TTL_MAX_SECONDS` in `handler_caps.py`) | Longest is `hclaim:*` |
+| Test copies: permanent | channel exports from `scripts/proactive_eval/fetch_history.py` and the historical copies from #42 | Not edited for a request |
+| Your account: until the account is deleted; signed in 30 days after the last visit | the site account, profile, linked logins and stored Discord tokens, push subscriptions; legacy GitHub/Google accounts | Session `max_age` 30 days, rolling (`app.yaml`) |
+| Chat: until deleted; Resources questions until a deletion request; the AI's own copy of a Resources question, its research and its answer 8 days after it finishes | site chat conversations and attachments; Resources questions, including `work_dispatches` (each holds the full question; nothing sweeps it and account deletion does not reach it, since it has no foreign key to the user); the Resources and chat-title agents' Skrift sessions and jobs, and Skrift's queued notifications (24 hours) | Conversations, attachments and Resources conversations go with the account (a queued job); `work_dispatches` rows go only with a deletion request (runbook step 8). Account deletion leaves the agents' copies in Skrift's worker tables, which the hourly retention job deletes 7 days after their last write once the work is finished (rounded up to 8 days for the hourly run; a session that can still resume is live and has no limit); runbook step 8 removes them for a request |
+| Searches: until a deletion request; searches made with a search link while signed out 30 minutes | dashboard searches; anonymous search keys (`TTL_SECONDS` in `smarter_dev/web/web_search/anonymous.py`), each holding the search text, queries, results, answer, the link owner's ID and the browser session that ran it | Not removed by account deletion; runbook step 5 |
+| Email: until a deletion request | campaign and waitlist signups | No bound |
+| Security: 30 days in Pydantic Logfire | security events (below) | Logfire organisation retention |
+| Monitoring: 30 days in Pydantic Logfire; servers' own logs with no fixed time limit | errors and traces from the bot and the website; container stdout | Logfire organisation retention (the Personal plan default, never configured otherwise); container logs are bounded by size and pod lifetime, not time |
+
+The notice no longer carries these details, recorded here instead: the
+external proactive-agent worker reads channel messages from Discord directly,
+as well as receiving them from the bot, and keeps its own copy of the
+proactive history; legacy GitHub/Google accounts can also hold passkeys
+(deleted with the account's second-factor enrollments, runbook step 5); a
+dashboard search stores the query, the results and the answer; the audit log
+channel posts carry a message's old and new text and its author.
+
+Short-lived copies not named in the notice (Skrift's worker tables, 7 days
+after work finishes) fall under the notice's "gone within 30 days of your
+request".
 
 ## Retention is not deletion
 
