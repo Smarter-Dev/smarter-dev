@@ -7,8 +7,11 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
+from sqlalchemy import String
 from sqlalchemy import case
+from sqlalchemy import cast
 from sqlalchemy import func
+from sqlalchemy import or_
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +21,7 @@ from smarter_dev.web.chat.limits import settle_reservation_actual
 from smarter_dev.web.llm_pricing import calc_cost
 from smarter_dev.web.models import UsageCostRow
 from smarter_dev.web.models import WebChatConversation
+from smarter_dev.web.models import WebChatTurn
 
 _PROVIDER_PREFIX = {
     "google": "google-gla",
@@ -125,6 +129,88 @@ async def record_usage(
             raise
         return existing
     return row
+
+
+# What a Chat usage row keeps of a model reply while its turn runs, so a crashed
+# worker can replay the reply instead of paying for it twice. Nothing reads them
+# once the turn has finished, and the ledger is a cost record, not a transcript.
+REPLY_COPIES = ("model_response", "durable_delta")
+UNFINISHED_TURN_STATUSES = ("submitted", "queued", "running", "stopping")
+
+
+def _without_reply_copies(row: UsageCostRow) -> bool:
+    details = row.details or {}
+    if not any(key in details for key in REPLY_COPIES):
+        return False
+    row.details = {
+        key: value for key, value in details.items() if key not in REPLY_COPIES
+    }
+    return True
+
+
+async def forget_reply_copies(session: AsyncSession, *conditions) -> int:
+    """Drop the reply copies from the Chat usage rows matching ``conditions``."""
+    rows = (
+        await session.execute(
+            select(UsageCostRow).where(UsageCostRow.product_mode == "chat", *conditions)
+        )
+    ).scalars()
+    return sum(_without_reply_copies(row) for row in rows)
+
+
+async def forget_finished_turn_reply_copies(
+    session: AsyncSession, turn_id: UUID
+) -> int:
+    """Once a turn has finished, its usage rows lose the replies they held.
+
+    A turn going back to the queue for another attempt keeps them: the next
+    attempt recovers its last settled reply from them.
+    """
+    status = await session.scalar(
+        select(WebChatTurn.status).where(WebChatTurn.id == turn_id)
+    )
+    if status in UNFINISHED_TURN_STATUSES:
+        return 0
+    forgotten = await forget_reply_copies(session, UsageCostRow.root_turn_id == turn_id)
+    await session.commit()
+    return forgotten
+
+
+async def forget_stale_reply_copies(session: AsyncSession, batch: int = 200) -> int:
+    """Hourly backstop for the rows a turn's own clean-up missed.
+
+    A sub-agent that settles after its turn has ended, a worker that died
+    while finishing, rows written before this clean-up existed: any Chat row
+    still holding a reply whose turn is not running loses it here.
+    """
+    unfinished = select(WebChatTurn.id).where(
+        WebChatTurn.status.in_(UNFINISHED_TURN_STATUSES)
+    )
+    text = cast(UsageCostRow.details, String)
+    candidates = (
+        select(UsageCostRow.id)
+        .where(
+            UsageCostRow.product_mode == "chat",
+            or_(*(text.contains(f'"{key}"') for key in REPLY_COPIES)),
+            or_(
+                UsageCostRow.root_turn_id.is_(None),
+                UsageCostRow.root_turn_id.not_in(unfinished),
+            ),
+        )
+        .order_by(UsageCostRow.id)
+    )
+    forgotten = 0
+    after = None
+    while True:
+        page = (
+            candidates if after is None else candidates.where(UsageCostRow.id > after)
+        )
+        ids = list((await session.execute(page.limit(batch))).scalars())
+        if not ids:
+            return forgotten
+        after = ids[-1]
+        forgotten += await forget_reply_copies(session, UsageCostRow.id.in_(ids))
+        await session.commit()
 
 
 async def record_settled_chat_usage(

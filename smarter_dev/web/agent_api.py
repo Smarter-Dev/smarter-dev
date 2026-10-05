@@ -22,10 +22,12 @@ from uuid import UUID
 
 from litestar import Controller
 from litestar import Request
+from litestar import delete
 from litestar import get
 from litestar import post
 from litestar.exceptions import HTTPException
 from litestar.response import Response
+from litestar.status_codes import HTTP_200_OK
 from litestar.status_codes import HTTP_201_CREATED
 from litestar.status_codes import HTTP_401_UNAUTHORIZED
 from litestar.status_codes import HTTP_403_FORBIDDEN
@@ -49,8 +51,12 @@ from smarter_dev.web.models import AgentConversation
 from smarter_dev.web.models import AgentMessage
 from smarter_dev.web.models import ResourceAgentRun
 from smarter_dev.web.models import ResourceSource
+from smarter_dev.web.models import UsageCostRow
 from smarter_dev.web.sdanswer import enrich_answer
 from smarter_dev.web.title_agent import generate_title
+from smarter_dev.web.user_content import StillRunning
+from smarter_dev.web.user_content import delete_all_resources_conversations
+from smarter_dev.web.user_content import delete_resources_conversation
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +179,35 @@ async def _count_questions_last_week(
         .where(AgentConversation.agent_type == agent_type)
         .where(AgentConversation.created_at >= cutoff)
     )
-    return int((await db_session.execute(stmt)).scalar() or 0)
+    asked = int((await db_session.execute(stmt)).scalar() or 0)
+    if agent_type != "resources":
+        return asked
+    # A question the asker deleted still counts: its cost rows stay, with
+    # the conversation's id, after the conversation is gone. It was asked when
+    # it was first charged; a follow-up charged later is not a new question.
+    charged = set(
+        (
+            await db_session.execute(
+                select(UsageCostRow.conversation_id)
+                .where(UsageCostRow.user_id == user_id)
+                .where(UsageCostRow.product_mode == "resources")
+                .where(UsageCostRow.conversation_id.is_not(None))
+                .group_by(UsageCostRow.conversation_id)
+                .having(func.min(UsageCostRow.metered_at) >= cutoff)
+            )
+        ).scalars()
+    )
+    if charged:
+        charged -= set(
+            (
+                await db_session.execute(
+                    select(AgentConversation.id).where(
+                        AgentConversation.id.in_(charged)
+                    )
+                )
+            ).scalars()
+        )
+    return asked + len(charged)
 
 
 async def _count_user_turns(db_session: AsyncSession, conversation_id: UUID) -> int:
@@ -624,6 +658,37 @@ class AgentConversationApiController(Controller):
     """Owner-only status and follow-ups for persisted Resources conversations."""
 
     path = "/v2/api/agent/conversations"
+
+    @delete("/{conversation_id:uuid}", status_code=HTTP_200_OK)
+    async def delete_conversation(
+        self, conversation_id: UUID, request: Request, db_session: AsyncSession
+    ) -> dict:
+        """Delete one of the asker's questions, its answers and every copy."""
+        require_api_csrf(request)
+        user_id = _require_user_id(request)
+        conversation = await db_session.get(AgentConversation, conversation_id)
+        if conversation is None or conversation.owner_user_id != user_id:
+            raise HTTPException(
+                status_code=HTTP_404_NOT_FOUND, detail="Conversation not found."
+            )
+        try:
+            await delete_resources_conversation(db_session, conversation)
+        except StillRunning:
+            raise HTTPException(
+                status_code=409,
+                detail="Wait for the answer to finish before deleting this question.",
+            ) from None
+        return {"status": "deleted"}
+
+    @delete("/", status_code=HTTP_200_OK)
+    async def delete_all_conversations(
+        self, request: Request, db_session: AsyncSession
+    ) -> dict:
+        """Every question the asker has asked about our resources."""
+        require_api_csrf(request)
+        user_id = _require_user_id(request)
+        result = await delete_all_resources_conversations(db_session, user_id)
+        return {"deleted": result.deleted, "running": result.running}
 
     @get("/{conversation_id:uuid}/status")
     async def status(
