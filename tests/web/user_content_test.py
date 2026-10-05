@@ -33,6 +33,7 @@ from smarter_dev.web.chat.api import ChatApiController
 from smarter_dev.web.chat.csrf import CSRF_SESSION_KEY
 from smarter_dev.web.chat.settings import ensure_settings
 from smarter_dev.web.chat.threads import QUICK_CHAT_MODE
+from smarter_dev.web.chat.usage import forget_stale_reply_copies
 from smarter_dev.web.dashboard_controller import DashboardController
 from smarter_dev.web.models import AccountDeletionRequest
 from smarter_dev.web.models import AgentConversation
@@ -663,6 +664,97 @@ async def test_deleting_the_account_leaves_none_of_it_behind(db_session, monkeyp
     db_session.expire_all()
     for details in (await db_session.scalars(select(UsageCostRow.details))).all():
         assert _WORDS not in json.dumps(details)
+
+
+# ── Replies kept in the usage ledger ─────────────────────────────────
+
+
+def _holds_reply(row) -> bool:
+    return _WORDS in json.dumps(row.details)
+
+
+async def _run_turn_that(db_session, monkeypatch, turn, preflight_error):
+    """Run the turn worker until its preflight fails with ``preflight_error``."""
+
+    @asynccontextmanager
+    async def session_context():
+        yield db_session
+
+    async def preflight(*_args, **_kwargs):
+        raise preflight_error
+
+    async def quiet(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(chat_jobs, "get_db_session_context", session_context)
+    monkeypatch.setattr(chat_jobs, "_preflight", preflight)
+    monkeypatch.setattr(chat_jobs, "_event", quiet)
+    monkeypatch.setattr(chat_jobs, "_notify_safe", quiet)
+    return await chat_jobs.run_chat_turn(
+        chat_jobs.ChatTurnPayload(turn_id=str(turn.id))
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_finished_turn_leaves_no_reply_in_its_usage_rows(
+    db_session, monkeypatch
+):
+    user = await _user(db_session)
+    _conversation, turn, _upload, reply = await _chat(
+        db_session, user, turn_status="queued"
+    )
+    reply_id = reply.id
+
+    result = await _run_turn_that(
+        db_session, monkeypatch, turn, PermissionError("No Chat plan")
+    )
+
+    assert result == {"status": "error"}
+    db_session.expire_all()
+    cost = await db_session.get(UsageCostRow, reply_id)
+    assert not _holds_reply(cost)
+    assert cost.details["response_complete"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_turn_going_back_for_another_attempt_keeps_its_replies(
+    db_session, monkeypatch
+):
+    user = await _user(db_session)
+    _conversation, turn, _upload, reply = await _chat(
+        db_session, user, turn_status="queued"
+    )
+    reply_id, turn_id = reply.id, turn.id
+
+    with pytest.raises(RuntimeError):
+        await _run_turn_that(db_session, monkeypatch, turn, RuntimeError("blip"))
+
+    db_session.expire_all()
+    assert (await db_session.get(WebChatTurn, turn_id)).status == "queued"
+    # The next attempt recovers its last settled reply from here.
+    assert _holds_reply(await db_session.get(UsageCostRow, reply_id))
+
+
+@pytest.mark.asyncio
+async def test_the_sweep_clears_replies_of_turns_not_running(db_session):
+    user = await _user(db_session)
+    *_, finished = await _chat(db_session, user)
+    *_, running = await _chat(db_session, user, turn_status="running")
+    # A chat deleted before replies were cleared at delete time left its rows
+    # pointing at a turn that is gone.
+    orphan = _cost(user.id, mode="chat", operation="primary", root_turn_id=uuid4())
+    orphan.details = dict(finished.details)
+    db_session.add(orphan)
+    await db_session.commit()
+    finished_id, running_id, orphan_id = finished.id, running.id, orphan.id
+
+    assert await forget_stale_reply_copies(db_session, batch=1) == 2
+
+    db_session.expire_all()
+    assert not _holds_reply(await db_session.get(UsageCostRow, finished_id))
+    assert not _holds_reply(await db_session.get(UsageCostRow, orphan_id))
+    assert _holds_reply(await db_session.get(UsageCostRow, running_id))
+    assert await forget_stale_reply_copies(db_session) == 0
 
 
 # ── Where the member finds the deletes ───────────────────────────────

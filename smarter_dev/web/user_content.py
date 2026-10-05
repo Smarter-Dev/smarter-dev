@@ -41,6 +41,7 @@ from sqlalchemy import delete
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.web.chat.usage import forget_reply_copies
 from smarter_dev.web.models import AgentConversation
 from smarter_dev.web.models import ResourceAgentRun
 from smarter_dev.web.models import UsageCostRow
@@ -56,10 +57,6 @@ ACTIVE_TURN_STATUSES = ("submitted", "queued", "running", "stopping")
 STALLED_AFTER = timedelta(minutes=15)
 ACTIVE_RESOURCE_RUN_STATUSES = ("submitted", "running")
 FINISHED_SEARCH_STATUSES = ("complete", "error")
-
-# What a chat usage row keeps of a model reply so a crashed turn can be
-# replayed without paying for it twice. Useless once the conversation is gone.
-_REPLY_COPIES = ("model_response", "durable_delta")
 
 
 class StillRunning(Exception):
@@ -190,17 +187,7 @@ async def delete_chat_conversation(
         if turn_ids
         else []
     )
-    for row in (
-        await session.execute(
-            select(UsageCostRow).where(UsageCostRow.conversation_id == conversation_id)
-        )
-    ).scalars():
-        if any(key in (row.details or {}) for key in _REPLY_COPIES):
-            row.details = {
-                key: value
-                for key, value in row.details.items()
-                if key not in _REPLY_COPIES
-            }
+    await forget_reply_copies(session, UsageCostRow.conversation_id == conversation_id)
     await forget_dispatches(session, "chat.turn.run", turn_ids)
     await forget_dispatches(session, "chat.subagent.run", subagent_ids)
     await session.delete(conversation)
