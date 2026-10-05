@@ -51,7 +51,7 @@ The bot reads messages in the servers it is in, so the chat bot can answer peopl
 
 DM an @admin on the Smarter Dev Discord server, or email admin@smarter.dev. Either way, we check that you own the Discord account, then an admin deletes your data within 30 days of your request.
 
-**What we delete.** Everything the chat bot holds about you: it removes you from its memories and its conversations. Everything else above that is kept until you ask us to delete it, including your website account, is deleted or kept with your ID and name removed. Records you share with other people, such as bytes transfers, stay in the other person's history with your ID and name removed.
+**What we delete.** Everything the chat bot holds about you: it removes you from its memories and its conversations. Everything else above that is kept until you ask us to delete it, including your website account, is deleted or kept with your ID and name removed. Bytes transfers you sent or received stay in the other member's history with your ID and name removed. Records of what the AI and automations did are kept with your ID and name removed; they still hold message IDs, times, and role and account details.
 
 **What we keep.**
 
@@ -65,7 +65,7 @@ DM an @admin on the Smarter Dev Discord server, or email admin@smarter.dev. Eith
 
 Everything else that can still mention you is gone within 30 days of your request.
 
-Deleting your website account from your account settings removes the account, its chat conversations, attachments and resources questions straight away, and the AI's working copies of them within 8 days of it finishing. It does not remove anything the Discord bot stores, the chat bot's memories, or searches you made from your dashboard. For those, DM an @admin or email admin@smarter.dev.
+Deleting your website account from your account settings removes the account and its chat conversations and attachments, and the AI's working copies of them within 8 days. It does not remove questions you asked about our resources, searches you made from your dashboard, anything the Discord bot stores, or the chat bot's memories. For those, DM an @admin or email admin@smarter.dev.
 
 ## Changes
 
