@@ -982,6 +982,33 @@ class TestDocumentedBehaviour:
         assert "no verbatim message" in history_row
         assert "proactive_agent_histories" in history_row
 
+    def test_conversation_row_states_the_quiet_server_bound(self, retention_doc):
+        """#89: the row quoting the notice carries its new bound, and says a
+        purge does not restart the clock."""
+        row = table_row(
+            retention_doc,
+            "| Messages the AI assistant has read: at most 3 hours after the "
+            "server goes quiet |",
+        )
+        assert "A privacy purge's rewrite restarts neither clock" in row
+        assert "The chat bot's conversations" not in retention_doc
+
+    def test_states_unreadable_histories_are_deleted(self, retention_doc):
+        history_row = table_row(retention_doc, "| Proactive agent history")
+        assert "no longer parse is deleted when it reaches the idle point" in (
+            history_row
+        )
+        assert "A privacy purge's rewrite keeps the clock where it was" in (
+            history_row
+        )
+
+    def test_states_the_legacy_channel_histories_are_swept(self, retention_doc):
+        """#89: every proactive history key is in the doc, the per-channel
+        ones from before the guild key as deleted by the sweep."""
+        history_row = table_row(retention_doc, "| Proactive agent history")
+        assert "`proactive:{channel}:history`" in history_row
+        assert "first sweep after it starts deletes every one" in history_row
+
     def test_names_each_place_with_no_age_bound(self, retention_doc):
         """The pending list is bounded now, blog ideas are dropped and the
         proactive history has its idle bound (#89); handler script memory is

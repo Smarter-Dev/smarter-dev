@@ -88,6 +88,12 @@ class ProactiveHistoryStore:
         payload = ModelMessagesTypeAdapter.dump_json(messages)
         await self._redis.set(self._history_key(channel_id), payload)
 
+    async def rewrite(self, channel_id: int, messages: list[ModelMessage]) -> None:
+        """Replace a legacy channel history only while it still exists, so a
+        purge that read it before the sweep deleted it cannot bring it back."""
+        payload = ModelMessagesTypeAdapter.dump_json(messages)
+        await self._redis.set(self._history_key(channel_id), payload, xx=True)
+
     async def read_guild(self, guild_id: int) -> list[ModelMessage]:
         """Like ``read``: [] when absent, ``HistoryUnreadable`` when the
         stored bytes do not parse."""
@@ -99,14 +105,22 @@ class ProactiveHistoryStore:
         messages: list[ModelMessage],
         *,
         freshly_compacted: bool = False,
+        keep_clock: bool = False,
     ) -> None:
         """Store the guild history and restart its idle clock.
 
         ``freshly_compacted`` marks a history that is exactly a compaction's
         output (note + kept tail); any write without it clears the mark.
+        ``keep_clock`` (a privacy purge's rewrite) leaves the idle clock and
+        the mark as they were: a purge is not activity, and must not extend
+        how long the rest of the history stays verbatim.
         """
         payload = ModelMessagesTypeAdapter.dump_json(messages)
         member = str(guild_id)
+        if keep_clock:
+            await self._redis.zadd(IDLE_INDEX_KEY, {member: time.time()}, nx=True)
+            await self._redis.set(self._guild_history_key(guild_id), payload)
+            return
         await self._redis.zadd(IDLE_INDEX_KEY, {member: time.time()})
         if freshly_compacted:
             await self._redis.sadd(FRESH_SET_KEY, member)
@@ -121,6 +135,11 @@ class ProactiveHistoryStore:
         verbatim, so the guild leaves the idle index until its next write."""
         payload = ModelMessagesTypeAdapter.dump_json(messages)
         await self._redis.set(self._guild_history_key(guild_id), payload)
+        await self.forget_idle(guild_id)
+
+    async def delete_guild(self, guild_id: int) -> None:
+        """Drop the guild history and its idle state."""
+        await self._redis.delete(self._guild_history_key(guild_id))
         await self.forget_idle(guild_id)
 
     async def forget_idle(self, guild_id: int) -> None:
@@ -155,6 +174,20 @@ class ProactiveHistoryStore:
                     IDLE_INDEX_KEY, {guild_id: now}, nx=True
                 )
         return added
+
+    async def delete_legacy_channel_histories(self) -> int:
+        """Delete every per-channel ``proactive:{channel}:history`` key.
+
+        Nothing has written them since the history moved to one key per
+        guild, and they carry verbatim text with no age bound. The pattern
+        also matches the worker's ``proactive:v1:{guild:g}:history``; only a
+        numeric middle part (a channel id) is deleted."""
+        deleted = 0
+        async for key in self._redis.scan_iter(match=f"{KEY_PREFIX}:*:history"):
+            parts = _decode(key).split(":")
+            if len(parts) == 3 and parts[1].isdigit():
+                deleted += await self._redis.delete(key)
+        return deleted
 
     async def clear(self, channel_id: int) -> None:
         await self._redis.delete(self._history_key(channel_id))

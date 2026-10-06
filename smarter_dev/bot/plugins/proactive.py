@@ -1672,10 +1672,13 @@ async def _compact_idle_guild(
         try:
             history = await store.read_guild(guild_id)
         except HistoryUnreadable:
-            # Never replaced: a purge must still see these bytes. Out of the
-            # index so the sweep does not retry it every tick.
-            await store.forget_idle(guild_id)
-            return "unreadable"
+            # Verbatim bytes nobody can use, and no purge can rewrite what it
+            # cannot parse: past the window they are deleted. A loaded runner
+            # starts empty rather than write its old copy back.
+            await store.delete_guild(guild_id)
+            if state is not None and state.agent_runner is not None:
+                state.agent_runner.history = []
+            return "unreadable deleted"
         if is_summary_only(history):
             await store.forget_idle(guild_id)
             return "already summary only"
@@ -1723,7 +1726,8 @@ async def compact_idle_histories(run: ProactiveRuntime) -> dict[int, str]:
 async def _idle_compaction_ticker() -> None:
     """Runs whether or not any wake happens. The idle clock lives in Redis
     (``history_store.IDLE_INDEX_KEY``), so a restart resumes it; histories
-    written before the index existed start their clock at the first tick."""
+    written before the index existed start their clock at the first tick,
+    and the same first pass deletes the legacy per-channel history keys."""
     indexed = False
     while True:
         await asyncio.sleep(PROACTIVE_IDLE_SWEEP_TICK.total_seconds())
@@ -1736,6 +1740,7 @@ async def _idle_compaction_ticker() -> None:
         try:
             if store is not None and not indexed:
                 await store.index_unindexed_guild_histories(now=time.time())
+                await store.delete_legacy_channel_histories()
                 indexed = True
             await compact_idle_histories(run)
         except Exception:  # noqa: BLE001 — the ticker must keep running

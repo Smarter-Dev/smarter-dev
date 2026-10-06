@@ -681,7 +681,7 @@ async def _purge_proactive_guild_history(
             state.history_loaded = False
 
     async def write(new_history: list[ModelMessage]) -> None:
-        await store.write_guild(int(guild_id), new_history)
+        await store.write_guild(int(guild_id), new_history, keep_clock=True)
         if runner is not None:
             runner.history = new_history
 
@@ -733,7 +733,7 @@ async def _purge_legacy_channel_histories(
             continue
 
         async def write(new_history, channel_id=channel_id) -> None:
-            await store.write(channel_id, new_history)
+            await store.rewrite(channel_id, new_history)
 
         await _fold_proactive_history(
             area=area,

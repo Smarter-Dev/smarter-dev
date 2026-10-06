@@ -298,3 +298,134 @@ def test_chat_memory_keys_share_the_proactive_idle_window():
     assert chat_memory.NOTES_TTL_SECONDS == seconds
     assert chat_memory.HISTORY_TTL_SECONDS == seconds
     assert chat_memory.TOPIC_STALE_AFTER == AGENT_VERBATIM_IDLE_WINDOW
+
+
+async def _legacy_world(redis):
+    store = ProactiveHistoryStore(redis)
+    await store.write(7, verbatim_wake())  # legacy per-channel key
+    await store.write(8, verbatim_wake())
+    await store.write_guild(GUILD, verbatim_wake())
+    # Keys the legacy pattern also matches, or sits beside: never deleted.
+    keep = {
+        b"proactive:v1:{guild:2}:history": b"worker",
+        b"chat_agent:7:history": b"chat",
+        b"proactive:7:cursor": b"cursor",
+    }
+    for key, value in keep.items():
+        await redis.set(key, value)
+    return store, keep
+
+
+async def test_the_first_tick_deletes_the_legacy_channel_histories(setup, monkeypatch):
+    _store, keep = await _legacy_world(setup.redis)
+    monkeypatch.setattr(proactive, "runtime", setup.runtime)
+    monkeypatch.setattr(
+        proactive,
+        "PROACTIVE_IDLE_SWEEP_TICK",
+        SimpleNamespace(total_seconds=lambda: 0.01),
+    )
+    task = asyncio.create_task(proactive._idle_compaction_ticker())
+    for _ in range(100):
+        await asyncio.sleep(0.01)
+        if not await setup.redis.exists("proactive:7:history", "proactive:8:history"):
+            break
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+
+    assert await setup.redis.exists("proactive:7:history", "proactive:8:history") == 0
+    for key, value in keep.items():
+        assert await setup.redis.get(key) == value
+    assert VERBATIM in dumped(await setup.stored())  # not idle: untouched
+
+
+async def test_a_purge_racing_the_sweep_cannot_restore_a_legacy_key(monkeypatch):
+    # The purge read a legacy key, then the sweep deleted it before the
+    # purge wrote its rewrite back: the rewrite must not recreate it.
+    from tests.bot.privacy_purge_test import LIVE_CHANNEL
+    from tests.bot.privacy_purge_test import _command
+    from tests.bot.privacy_purge_test import _consume_once
+    from tests.bot.privacy_purge_test import _publish
+    from tests.bot.privacy_purge_test import build_world
+
+    world = await build_world()
+    read_raw = ProactiveHistoryStore.read_raw
+
+    async def read_then_swept(self, channel_id):
+        raw = await read_raw(self, channel_id)
+        await self.delete_legacy_channel_histories()
+        return raw
+
+    monkeypatch.setattr(ProactiveHistoryStore, "read_raw", read_then_swept)
+    await _publish(world.redis, _command())
+    await _consume_once(world)
+
+    assert world.acks[0][1].outcome == "purged"
+    assert await world.redis.exists(f"proactive:{LIVE_CHANNEL}:history") == 0
+
+
+async def test_a_purge_with_no_legacy_keys_left_completes():
+    from tests.bot.privacy_purge_test import _command
+    from tests.bot.privacy_purge_test import _consume_once
+    from tests.bot.privacy_purge_test import _publish
+    from tests.bot.privacy_purge_test import build_world
+
+    world = await build_world()
+    assert await world.store.delete_legacy_channel_histories() == 2
+    await _publish(world.redis, _command())
+    await _consume_once(world)
+
+    assert world.acks[0][1].outcome == "purged"
+    assert await world.redis.keys("proactive:1*:history") == []
+
+
+async def test_a_purge_rewrite_keeps_the_idle_clock():
+    # Idle for a minute short of the window, then purged: the rest of the
+    # history must still fold on time, not 2 hours after the purge.
+    from tests.bot.privacy_purge_test import GUILD as PURGE_GUILD
+    from tests.bot.privacy_purge_test import _command
+    from tests.bot.privacy_purge_test import _consume_once
+    from tests.bot.privacy_purge_test import _publish
+    from tests.bot.privacy_purge_test import build_world
+
+    world = await build_world()
+    written_at = time.time() - IDLE + 60
+    await world.redis.zadd(IDLE_INDEX_KEY, {PURGE_GUILD: written_at})
+    before = await world.store.read_guild_raw(int(PURGE_GUILD))
+
+    await _publish(world.redis, _command())
+    await _consume_once(world)
+
+    assert world.acks[0][1].outcome == "purged"
+    assert await world.store.read_guild_raw(int(PURGE_GUILD)) != before
+    assert await world.redis.zscore(IDLE_INDEX_KEY, PURGE_GUILD) == written_at
+
+
+async def test_an_unreadable_history_is_deleted_at_the_idle_point(setup, caplog):
+    secret = b"not json: " + VERBATIM.encode()
+    await setup.store.write_guild(GUILD, verbatim_wake())
+    await setup.redis.set(ProactiveHistoryStore._guild_history_key(GUILD), secret)
+    await setup.backdate(IDLE + 1)
+    state = setup.runtime.guild_state_for(GUILD)
+    state.agent_runner = SimpleNamespace(history=verbatim_wake())
+    state.history_loaded = True
+
+    with caplog.at_level("INFO"):
+        outcomes = await proactive.compact_idle_histories(setup.runtime)
+
+    assert outcomes == {GUILD: "unreadable deleted"}
+    assert setup.summaries == []
+    assert await setup.store.read_guild_raw(GUILD) is None
+    assert await setup.redis.zscore(IDLE_INDEX_KEY, str(GUILD)) is None
+    assert state.agent_runner.history == []
+    assert "unreadable deleted" in caplog.text
+    assert VERBATIM not in caplog.text
+
+
+async def test_an_unreadable_history_inside_the_window_is_kept(setup):
+    # Negative control for the delete: only the idle point removes it.
+    await setup.store.write_guild(GUILD, verbatim_wake())
+    await setup.redis.set(ProactiveHistoryStore._guild_history_key(GUILD), b"{bad")
+    await setup.backdate(IDLE - 60)
+
+    assert await proactive.compact_idle_histories(setup.runtime) == {}
+    assert await setup.store.read_guild_raw(GUILD) == b"{bad"
