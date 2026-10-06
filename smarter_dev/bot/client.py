@@ -52,6 +52,10 @@ configure_observability("smarter-dev-bot")
 SHUTDOWN_DRAIN_SECONDS = 40.0
 
 
+class GatewayLostError(RuntimeError):
+    """The gateway stopped for good while the bot was running."""
+
+
 def install_shutdown_signals() -> None:
     """Cancel the running bot task on SIGTERM or SIGINT so it closes cleanly.
 
@@ -120,8 +124,17 @@ async def start_health_server(bot: lightbulb.BotApp, port: int = 8080) -> web.Ap
         }
         return web.json_response(body, status=200 if body["ready"] else 503)
 
+    async def live_handler(request: web.Request) -> web.Response:
+        # Only the gateway: a bot that cannot reach Redis or the API is still
+        # worth keeping, a bot without a gateway is not. The liveness probe's
+        # failureThreshold gives hikari time to resume before Kubernetes
+        # restarts the pod.
+        connected = gateway_connected(bot)
+        return web.json_response({"live": connected}, status=200 if connected else 503)
+
     app = web.Application()
     app.router.add_get("/health", health_handler)
+    app.router.add_get("/live", live_handler)
     app.router.add_get("/ready", ready_handler)
     runner = web.AppRunner(app)
     await runner.setup()
@@ -2109,11 +2122,18 @@ async def run_bot() -> None:
         # Keep the bot running until interrupted
         logger.info("Bot is now running. Press Ctrl+C to stop.")
 
-        # Wait forever or until interrupted
+        # Run until interrupted or until the gateway is gone for good. hikari
+        # stops a shard on a close code it will not reconnect after (4003 Not
+        # authenticated, for one) and has no way to start it again, so
+        # bot.join() returning or raising means this process can no longer
+        # hear Discord: exit non-zero and let Kubernetes restart the pod with
+        # a fresh session.
         try:
-            await asyncio.Event().wait()
+            await bot.join()
         except asyncio.CancelledError:
             logger.info("Bot shutdown requested")
+        else:
+            raise GatewayLostError("the Discord gateway closed and will not reconnect")
 
     except KeyboardInterrupt:
         logger.info("Bot shutdown requested via keyboard interrupt")

@@ -191,23 +191,32 @@ spec:
                         # use above it ranks the pod higher for eviction under
                         # node memory pressure.
                         memory: 612Mi
+                # /live answers once the gateway is connected (the health
+                # server starts after bot.start() returns) and fails while
+                # shard 0 is disconnected. Startup allows 10 minutes: a
+                # throttled start once took ~7 (see the CPU limit above).
                 startupProbe:
-                    exec:
-                        command: ["pgrep", "-f", "smarter_dev.bot.client"]
-                    failureThreshold: 30
+                    httpGet:
+                        path: /live
+                        port: 8080
+                    failureThreshold: 60
                     periodSeconds: 10
+                    timeoutSeconds: 3
+                # Restart once the gateway has been down for 90 s (9 x 10 s):
+                # a normal resume takes seconds, and a gateway hikari will not
+                # reconnect left the bot deaf for two hours on 2026-10-06
+                # (#94) while a pgrep probe passed. A longer Discord outage
+                # restarts the pod, which only reconnects again.
                 livenessProbe:
-                    exec:
-                        command: ["pgrep", "-f", "smarter_dev.bot.client"]
-                    initialDelaySeconds: 10
-                    periodSeconds: 30
-                    timeoutSeconds: 5
-                    failureThreshold: 3
+                    httpGet:
+                        path: /live
+                        port: 8080
+                    periodSeconds: 10
+                    timeoutSeconds: 3
+                    failureThreshold: 9
                 # Ready means connected with services and commands set up,
                 # and able to reach Redis and the Kubernetes API, so a roll
                 # keeps the old bot until the new one could act.
-                # Liveness stays process-level: a Discord outage must not
-                # restart the bot.
                 readinessProbe:
                     httpGet:
                         path: /ready
