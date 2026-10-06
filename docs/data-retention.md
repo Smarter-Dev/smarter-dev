@@ -368,11 +368,14 @@ Outside the worker tables, the Resources pipeline also
 sends the browser the restated question and its research steps, and the chat
 title, as queued Skrift notifications, stored in `stored_notifications`. They
 are in-flight work. When a run completes or fails for good, the job deletes
-the owner's queued notifications (`clear_user_notifications` in
-`smarter_dev/web/resources_jobs.py`). The queue is per user, so a second run
-of the same owner still in flight loses its stored steps too: a reconnect no
-longer replays them, and a step sent at that moment may not reach its page;
-its answer is not affected. A run cancelled because its owner's account is
+that conversation's queued notifications from the owner's queue
+(`forget_queued_progress` in `smarter_dev/web/user_content.py`, which deleting
+a question also uses), so another run of the same owner still in flight keeps
+its steps. The rows are deleted from the shared store directly, not through
+Skrift's clear, which can only take a whole queue or one group: no replica
+replays them, but no `dismissed` event is pushed and no tombstone is left, so
+a step sent while the delete runs is stored and stays until the lifetime. A
+run cancelled because its owner's account is
 inactive, or completed by an older worker, does not clear; its steps go with
 the lifetime. A failed delete is logged and leaves them to the lifetime:
 `notifications.queued_ttl_seconds` in `app.yaml` is the 5-hour

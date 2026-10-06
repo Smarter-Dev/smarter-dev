@@ -56,21 +56,23 @@ async def service(test_engine, monkeypatch):
     return service
 
 
-async def _run(db_session, *, attempt_count: int = 0):
+async def _run(db_session, *, attempt_count: int = 0, owner=None):
     """A submitted run, and the progress it sent; returns the owner and run ids."""
     connection = await db_session.connection()
     await connection.run_sync(lambda sync: User.metadata.create_all(sync))
-    user = User(email=f"{uuid4().hex}@example.test", name="Member", is_active=True)
-    db_session.add(user)
-    await db_session.flush()
+    if owner is None:
+        user = User(email=f"{uuid4().hex}@example.test", name="Member", is_active=True)
+        db_session.add(user)
+        await db_session.flush()
+        owner = user.id
     conversation = AgentConversation(
-        owner_user_id=user.id, agent_type="resources", title="Pool sizing"
+        owner_user_id=owner, agent_type="resources", title="Pool sizing"
     )
     db_session.add(conversation)
     await db_session.flush()
     run = ResourceAgentRun(
         conversation_id=conversation.id,
-        owner_user_id=user.id,
+        owner_user_id=owner,
         user_sequence=1,
         submission_key=uuid4().hex[:16],
         question=_WORDS,
@@ -86,7 +88,7 @@ async def _run(db_session, *, attempt_count: int = 0):
         ]
     )
     await db_session.flush()
-    user_id, conversation_id, run_id = user.id, conversation.id, run.id
+    user_id, conversation_id, run_id = owner, conversation.id, run.id
     await db_session.commit()
     # The progress the pipeline sent while it worked.
     await notify_user(
@@ -132,6 +134,23 @@ async def test_a_finished_run_deletes_its_stored_progress(service, db_session):
     assert await _stored(db_session, f"user:{user_id}") == []
     # Another member's queue is not touched.
     assert len(await _stored(db_session, other_user)) == 1
+
+
+@pytest.mark.asyncio
+async def test_another_run_of_the_same_owner_keeps_its_progress(service, db_session):
+    user_id, first_run = await _run(db_session)
+    _, second_run = await _run(db_session, owner=user_id)
+    second = await db_session.get(ResourceAgentRun, second_run)
+    second_conversation = str(second.conversation_id)
+    assert len(await _stored(db_session, f"user:{user_id}")) == 4
+
+    result = await run_resources_job(ResourcesRunPayload(run_id=str(first_run)))
+
+    assert result["status"] == "ok"
+    # A reconnect while the second run works still replays its steps.
+    replayed = await service.get_queued(uuid4().hex, str(user_id))
+    assert [n.type for n in replayed] == ["agent_reframe_ready", "agent_tool_event"]
+    assert {n.payload["conversation_id"] for n in replayed} == {second_conversation}
 
 
 @pytest.mark.asyncio
@@ -202,7 +221,7 @@ async def test_a_clear_failure_is_logged_and_the_run_still_completes(
     async def broken(*args, **kwargs):
         raise RuntimeError("redis is down")
 
-    monkeypatch.setattr(resources_jobs, "clear_user_notifications", broken)
+    monkeypatch.setattr(resources_jobs, "forget_queued_progress", broken)
 
     with caplog.at_level(logging.ERROR, logger=resources_jobs.logger.name):
         result = await run_resources_job(ResourcesRunPayload(run_id=str(run_id)))
