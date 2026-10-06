@@ -76,4 +76,4 @@ Smarter Dev LLC is responsible for this data; reach us at admin@smarter.dev. You
 We update this page when this policy changes and announce it in the server's privacy channel.
 
 https://smarter.dev/privacy
--# Last updated October 6, 2026
+-# Last updated October 7, 2026

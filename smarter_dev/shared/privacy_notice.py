@@ -24,7 +24,7 @@ from smarter_dev.shared.config import get_settings
 
 PRIVACY_PATH = "/privacy"
 NOTICE_TITLE = "Privacy policy"
-LAST_UPDATED = date(2026, 10, 6)
+LAST_UPDATED = date(2026, 10, 7)
 DISCORD_MESSAGE_LIMIT = 2000
 
 _NOTICE_FILE = Path(__file__).with_name("privacy_notice.md")

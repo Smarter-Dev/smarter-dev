@@ -328,7 +328,7 @@ def test_the_channel_carries_the_whole_policy_in_messages_under_the_cap():
         assert len(part) <= DISCORD_MESSAGE_LIMIT
     joined = "\n\n".join(parts)
     title = f"# {privacy_notice.NOTICE_TITLE}\n"
-    footer = f"\n\n{PUBLIC_URL}\n-# Last updated October 6, 2026"
+    footer = f"\n\n{PUBLIC_URL}\n-# Last updated October 7, 2026"
     assert joined.startswith(title) and joined.endswith(footer)
     assert joined.removeprefix(title).removesuffix(footer) == discord_markdown().strip()
     assert discord_markdown() == notice_markdown().replace(

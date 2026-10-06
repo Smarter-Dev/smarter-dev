@@ -98,7 +98,7 @@ def test_the_page_uses_the_site_layout_and_says_when_it_was_updated(client):
     assert 'name="viewport"' in html
     assert "/theme/css/pages/blog.css" in html
     assert 'class="post-body' in html
-    assert "Last updated Oct 06, 2026" in html
+    assert "Last updated Oct 07, 2026" in html
     assert '<link rel="canonical" href="https://smarter.dev/privacy">' in html
 
 
