@@ -23,7 +23,6 @@ from skrift.markdown import render_markdown
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.privacy_notice import PRIVACY_PATH
-from smarter_dev.shared.privacy_notice import short_version
 from smarter_dev.web.privacy_controller import privacy_notice
 
 REPO = Path(__file__).resolve().parents[2]
@@ -67,31 +66,30 @@ def test_the_notice_renders_without_signing_in(client):
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    assert "<h1" in response.text and "Privacy notice" in response.text
+    assert "<h1" in response.text and "Privacy policy" in response.text
 
 
 def test_the_page_shows_the_whole_notice(client):
     text = _text(client.get(PRIVACY_PATH).text)
 
     for heading in (
-        "The short version",
-        "What the Discord bot stores",
-        "What the website stores",
-        "Who else handles your data",
+        "Data we collect",
+        "Why we collect it",
+        "How long we keep it",
+        "Who else processes your data",
         "Deleting your data",
+        "Data we retain",
+        "Your rights",
+        "Changes",
     ):
         assert heading in text
-    assert "permanent" in text
-    assert "Moderation history is kept forever to keep the server safe" in text
-    assert "anonymous usage and cost records" in text
-    assert "DM an @admin on the Smarter Dev Discord server" in text
-    assert 'href="mailto:admin@smarter.dev"' in client.get(PRIVACY_PATH).text
-
-
-def test_the_short_version_on_the_page_is_the_one_the_command_quotes(client):
-    text = _text(client.get(PRIVACY_PATH).text)
-    for point in short_version():
-        assert _text(render_markdown(point)) in text
+    assert "The short version" not in text
+    assert "Moderation history" in text
+    assert "message an @admin on the Smarter Dev Discord server or email admin@smarter.dev" in text
+    html = client.get(PRIVACY_PATH).text
+    assert 'href="mailto:admin@smarter.dev"' in html
+    assert 'href="https://discord.gg/de8kajxbYS"' in html
+    assert 'href="https://smarter.dev/account/security#your-data"' in html
 
 
 def test_the_page_uses_the_site_layout_and_says_when_it_was_updated(client):
@@ -100,7 +98,7 @@ def test_the_page_uses_the_site_layout_and_says_when_it_was_updated(client):
     assert 'name="viewport"' in html
     assert "/theme/css/pages/blog.css" in html
     assert 'class="post-body' in html
-    assert "Last updated Oct 06, 2026" in html
+    assert "Last updated Oct 07, 2026" in html
     assert '<link rel="canonical" href="https://smarter.dev/privacy">' in html
 
 

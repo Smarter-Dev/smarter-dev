@@ -1,4 +1,4 @@
-"""``/privacy`` — the short version of the privacy notice and a link to it.
+"""``/privacy`` — a short summary of the privacy notice and a link to it.
 
 Open to everyone. Under the summary is one button that opens the AI
 assistant opt-out (:mod:`smarter_dev.bot.privacy.opt_out`, #92); opting
