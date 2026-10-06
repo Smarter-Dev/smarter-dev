@@ -63,7 +63,7 @@ def test_the_policy_has_one_section_per_question_and_no_short_version(notice):
     assert notice.count("## ") == len(HEADINGS)
     assert "short version" not in notice.lower()
     assert notice.startswith(
-        'Smarter Dev LLC ("we") operates the Smarter Dev Discord server, its bot and smarter.dev. '
+        'Smarter Dev LLC ("we") operates the Smarter Dev Discord server, its bot and our website, smarter.dev. '
         "This policy explains what personal data we collect through them, why, how long we keep it "
         "and how to have it deleted."
     )
@@ -125,6 +125,15 @@ def test_what_we_collect_and_why_state_no_retention(notice):
         assert word not in collected.replace("messages you edit or delete", "")
 
 
+def test_the_website_is_never_named_by_its_bare_domain(notice):
+    """Zech (#86): a Discord reader may not tell "Smarter Dev" from
+    "smarter.dev", so prose says "our website"; only the intro gives the domain."""
+    prose = re.sub(r"\]\([^)]*\)", "]", notice).replace("admin@smarter.dev", "")
+    prose = prose.replace("our website, smarter.dev.", "", 1)
+    assert "smarter.dev" not in prose
+    assert "**On our website**" in notice
+
+
 def test_the_bot_is_in_one_server(notice):
     lowered = notice.lower()
     for plural in ("discord servers", "servers it is in", "each server", "every server"):
@@ -135,7 +144,7 @@ def test_the_bot_is_in_one_server(notice):
 def test_the_bot_does_not_claim_to_store_avatars(notice):
     """The bot reads avatar URLs live and stores none; only a linked login's
     provider profile on the website holds an avatar."""
-    discord = _section(notice, "Data we collect").split("**On smarter.dev**")[0]
+    discord = _section(notice, "Data we collect").split("**On our website**")[0]
     assert "- Your Discord ID and username." in discord
     assert "avatar" not in discord
 
@@ -343,7 +352,7 @@ def test_the_committed_channel_post_is_current():
 def test_the_command_is_a_summary_built_from_the_policy(notice):
     response = command_response(PUBLIC_URL)
     assert response == (
-        "Smarter Dev collects data about you to run the server, bot and website, "
+        "Smarter Dev collects data about you to run the Discord server, bot and our website, "
         "to let the AI assistant take part in conversations and remember the server, "
         "to moderate the server and keep it safe, to sign you in, bill you and send you "
         "email you asked for, and to monitor cost, abuse and errors. To have most of it "

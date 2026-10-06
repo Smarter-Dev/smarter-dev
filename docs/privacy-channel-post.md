@@ -1,6 +1,6 @@
 === Message 1 of 3 ===
 # Privacy policy
-Smarter Dev LLC ("we") operates the Smarter Dev Discord server, its bot and smarter.dev. This policy explains what personal data we collect through them, why, how long we keep it and how to have it deleted.
+Smarter Dev LLC ("we") operates the Smarter Dev Discord server, its bot and our website, smarter.dev. This policy explains what personal data we collect through them, why, how long we keep it and how to have it deleted.
 
 ## Data we collect
 
@@ -10,7 +10,7 @@ Smarter Dev LLC ("we") operates the Smarter Dev Discord server, its bot and smar
 - Messages, reactions and commands you post in the server. We keep records derived from them, such as activity and participation, and the conversations our AI assistant takes part in. We do not archive your messages.
 - Moderation records: actions taken on your account, and the earlier text of messages you edit or delete.
 
-**On smarter.dev**
+**On our website**
 
 - Account details from the sign-in provider you choose (Discord, GitHub or Google): ID, username, avatar, email address and public profile details.
 - Content you create: chats, uploaded files, questions and searches.
@@ -24,7 +24,7 @@ Smarter Dev LLC ("we") operates the Smarter Dev Discord server, its bot and smar
 
 ## Why we collect it
 
-- To run the server, bot and website.
+- To run the Discord server, bot and our website.
 - To let the AI assistant take part in conversations and remember the server.
 - To moderate the server and keep it safe.
 - To sign you in, bill you and send you email you asked for.
