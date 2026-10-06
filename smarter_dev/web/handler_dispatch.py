@@ -221,12 +221,13 @@ async def dispatch_handler_event(
         # Noted before any fire is enqueued, so the fire for THIS message already
         # sees it beside the author's other posts of the last two minutes — an
         # admin script reads them with list_recent_messages to spot a
-        # cross-channel burst. Ids and shape only, never the text.
+        # cross-channel burst. Ids, shape and a content hash, never the text.
         await record_recent_message(
             redis,
             guild_id,
             str(author_id),
             recent_message_entry(context, channel_id, now),
+            now,
         )
 
     # The payloads carry the redacted context; the verbatim one is handed off

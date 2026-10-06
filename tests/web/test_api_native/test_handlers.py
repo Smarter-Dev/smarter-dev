@@ -595,9 +595,11 @@ async def test_dispatch_notes_a_human_message_for_burst_detection(client, submit
         ("C2", "M2"),
     ]
     assert all(row["attachment_count"] == 1 and row["has_link"] for row in rows)
+    # The same text and file in two channels: the notes are copies of one post.
+    assert len({row["content_hash"] for row in rows}) == 1
     # Ids and shape only: neither the text nor a file url reaches the note.
     [key] = await submitted.redis.keys("hrecent:*")
-    stored = "".join(await submitted.redis.lrange(key, 0, -1))
+    stored = "".join(await submitted.redis.zrange(key, 0, -1))
     assert "scam.example" not in stored
     assert "cdn.example" not in stored
 

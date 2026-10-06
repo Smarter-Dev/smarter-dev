@@ -8,14 +8,17 @@ notes every human guild message here, and an admin handler script reads the
 author's notes back with ``list_recent_messages`` — once when a message arrives
 (is this a burst?) and again when the verdict lands (which messages to remove).
 
-Only ids and shape are kept: the channel, the message id, when it was posted,
-how many files it carried and whether it carried a link. Never the text. Each
-author's list holds at most :data:`MAX_RECENT_MESSAGES` entries and expires
-:data:`RECENT_MESSAGES_TTL_SECONDS` after their last message.
+What is kept: the channel, the message id, when it was posted, how many files
+it carried, whether it carried a link, and a short hash of what it carried so
+copies of one post can be told from two different posts. Never the text. Each author's set holds at most :data:`MAX_RECENT_MESSAGES` notes. A
+note is never read back after :data:`RECENT_MESSAGES_TTL_SECONDS`; it is erased
+by the author's next message after that, or with the whole key that long after
+their last message — so no later than twice that after it was written.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import UTC
@@ -47,6 +50,27 @@ def message_posted_at(message_id: str, fallback: datetime) -> datetime:
     return datetime.fromtimestamp(posted_ms / 1000, tz=UTC)
 
 
+def content_hash(trigger_context: dict) -> str:
+    """A short hash of what a message carried: its text and its files.
+
+    Two messages share it only when the text matches (ignoring case and
+    spacing) and the files have the same names and sizes. That is what one scam
+    pasted into several channels looks like, and what two different screenshots
+    do not. The author id is mixed in, so a hash is only comparable within one
+    member's notes.
+    """
+    files = sorted(
+        [str(item.get("filename") or ""), item.get("size")]
+        for item in trigger_context.get("attachments") or []
+    )
+    text = " ".join((trigger_context.get("message_content") or "").split())
+    carried = json.dumps(
+        [str(trigger_context.get("author_id") or ""), text.casefold(), files],
+        default=str,
+    )
+    return hashlib.sha256(carried.encode("utf-8")).hexdigest()[:16]
+
+
 def recent_message_entry(trigger_context: dict, channel_id: str, now: datetime) -> dict:
     """The note kept for one message trigger.
 
@@ -68,17 +92,27 @@ def recent_message_entry(trigger_context: dict, channel_id: str, now: datetime) 
         "has_link": bool(
             _LINK_PATTERN.search(trigger_context.get("message_content") or "")
         ),
+        "content_hash": content_hash(trigger_context),
     }
 
 
 async def record_recent_message(
-    redis, guild_id: str, author_id: str, entry: dict
+    redis, guild_id: str, author_id: str, entry: dict, now: datetime | None = None
 ) -> None:
-    """Note one message at the head of its author's list, newest first."""
+    """Note one message, and erase this author's notes that are past the window.
+
+    The key's TTL is refreshed by every message, so without the erase an author
+    who keeps posting would keep every old note alive until the cap pushed it
+    out.
+    """
     key = recent_messages_key(guild_id, author_id)
+    written_at = (now or datetime.now(UTC)).timestamp()
     async with redis.pipeline(transaction=True) as pipe:
-        pipe.lpush(key, json.dumps(entry))
-        pipe.ltrim(key, 0, MAX_RECENT_MESSAGES - 1)
+        pipe.zadd(key, {json.dumps(entry, sort_keys=True): float(entry["posted_at"])})
+        pipe.zremrangebyscore(
+            key, "-inf", f"({written_at - RECENT_MESSAGES_TTL_SECONDS}"
+        )
+        pipe.zremrangebyrank(key, 0, -(MAX_RECENT_MESSAGES + 1))
         pipe.expire(key, RECENT_MESSAGES_TTL_SECONDS)
         await pipe.execute()
 
@@ -89,24 +123,25 @@ async def read_recent_messages(
     """This author's messages from the last two minutes, newest first.
 
     Each row is ``{"channel_id", "message_id", "age_seconds",
-    "attachment_count", "has_link"}``. The key's TTL is refreshed by every new
-    message, so an author who keeps posting would otherwise keep old entries
-    alive; rows past the window are dropped here as well.
+    "attachment_count", "has_link", "content_hash"}``. A note past the window
+    that no later message has erased yet is not returned.
     """
     read_at = (now or datetime.now(UTC)).timestamp()
     rows = []
-    for raw in await redis.lrange(recent_messages_key(guild_id, author_id), 0, -1):
+    for raw in await redis.zrangebyscore(
+        recent_messages_key(guild_id, author_id),
+        read_at - RECENT_MESSAGES_TTL_SECONDS,
+        "+inf",
+    ):
         entry = json.loads(raw)
-        age_seconds = max(0.0, read_at - float(entry["posted_at"]))
-        if age_seconds > RECENT_MESSAGES_TTL_SECONDS:
-            continue
         rows.append(
             {
                 "channel_id": entry["channel_id"],
                 "message_id": entry["message_id"],
-                "age_seconds": round(age_seconds, 1),
+                "age_seconds": round(max(0.0, read_at - float(entry["posted_at"])), 1),
                 "attachment_count": entry["attachment_count"],
                 "has_link": entry["has_link"],
+                "content_hash": entry["content_hash"],
             }
         )
     rows.sort(key=lambda row: row["age_seconds"])

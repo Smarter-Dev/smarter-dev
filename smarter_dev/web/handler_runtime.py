@@ -89,9 +89,10 @@ the guild's configured rules (``{"number", "title", "text"}``, parsed by
 injected DB reader; ``[]`` when the guild has none), and
 ``list_recent_messages(user_id)`` -> list[dict] (where a member posted in this
 guild in the last two minutes, newest first: ``{"channel_id", "message_id",
-"age_seconds", "attachment_count", "has_link"}`` — ids and shape only, never the
-text — via an injected Redis reader; what lets a script see a cross-channel
-burst and find every message of it once a review confirms it) — each of the
+"age_seconds", "attachment_count", "has_link", "content_hash"}`` — ids, shape
+and a hash that copies of one post share, never the text — via an injected Redis
+reader; what lets a script see a cross-channel burst and find every copy of it
+once a review confirms it) — each of the
 five spends the lookups budget, plus ``warn_user(user_id, reason, channel_id=None, dm=True)`` ->
 dict (``{"message_id", "dm_sent", "warn_count"}``: the handler-tier ``/warn`` —
 spends a mod_action FIRST so a mod_action-triggered fire, which runs with zero
@@ -340,7 +341,7 @@ class HandlerExecution:
     # admin fire job with the guild bound host-side. Admin handlers only.
     rules_reader: RulesReader = _no_rules_reader
     # Redis-backed reader for list_recent_messages (a member's last two minutes
-    # of posts, ids only), injected by the admin fire job with the guild bound
+    # of posts, ids and shape only), injected by the admin fire job with the guild bound
     # host-side. Admin handlers only.
     recent_messages_reader: RecentMessagesReader = _no_recent_messages_reader
     # This handler's id — needed only for the per-handler timer-arming window key.

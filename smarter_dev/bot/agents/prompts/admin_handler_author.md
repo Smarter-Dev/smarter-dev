@@ -53,7 +53,7 @@ One input variable `context: dict` describes the trigger:
               message; false for humans; only ever true when the handler opted into bot messages,
               see include_bot_messages below — the bot's OWN messages are never delivered),
               context["attachments"] — a list of files posted with the message, each
-              {"url", "content_type", "filename"} (empty list if none).
+              {"url", "content_type", "filename", "size"} (size in bytes; empty list if none).
               context["embeds"] — the message's embeds, JSON-safe, each {"title", "description",
               "fields": [{"name", "value"}]} with every string truncated to 1024 chars and absent
               parts null (empty list if none) — how a bot-message handler reads a Disboard-style
@@ -319,15 +319,20 @@ Provided async functions — you MUST `await` every call:
   await list_recent_messages(user_id: str) -> list[dict]
       Where a member posted in THIS guild in the last 2 minutes, NEWEST FIRST, including the
       message that fired this handler. Each: {"channel_id", "message_id", "age_seconds",
-      "attachment_count", "has_link"} — ids and shape only, never the text. channel_id is where the
-      message LIVES (the thread id for a thread message), so pass it straight to
-      delete_message(message_id, channel_id). Use it to see a CROSS-CHANNEL BURST (a compromised
-      account pasting the same scam into several channels within seconds: count the distinct
-      channel_ids among rows with a small age_seconds) and, once a review confirms a violation, to
-      find and delete every message of that burst. The list is LIVE: a review takes longer than a
-      burst, so read it AGAIN after spawn_agent returns rather than reusing the list from the
-      start of the fire. Costs a lookup each call (shared 10/fire pool) — guard it behind a cheap
-      check (the message has an attachment or a link), never call it for every plain message.
+      "attachment_count", "has_link", "content_hash"} — ids and shape only, never the text.
+      channel_id is where the message LIVES (the thread id for a thread message), so pass it
+      straight to delete_message(message_id, channel_id). content_hash is equal for two rows only
+      when they carried the same text and the same files (names and sizes): rows that share the
+      fired message's content_hash are COPIES of it. Use it to see a CROSS-CHANNEL BURST (a
+      compromised account pasting the same scam into several channels within seconds: a copy in
+      another channel_id with a close age_seconds) and, once a review confirms a violation, to
+      find and delete every copy. Never treat rows with a different content_hash as part of the
+      same post — one review says nothing about them. The list is LIVE: a review takes longer
+      than a burst, so read it AGAIN after spawn_agent returns rather than reusing the list from
+      the start of the fire. Several fires run for one burst: use claim() keyed on the member and
+      content_hash so only one of them holds the member and only one reviews. Costs a lookup each
+      call (shared 10/fire pool) — guard it behind a cheap check (the message has an attachment
+      or a link), never call it for every plain message.
   await create_thread(name: str, message_id: str = None) -> str   # returns the new thread id
       message_id set: spins a thread off that message; omitted: a public thread on the home channel.
   await create_post(title: str, content: str, tag_names: list = None) -> str   # forum post thread id
