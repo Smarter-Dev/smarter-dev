@@ -306,6 +306,30 @@ def test_an_error_response_never_puts_the_key_on_the_terminal(
     assert KEY not in captured.err and KEY not in captured.out
 
 
+def test_a_reason_phrase_never_puts_the_key_on_the_terminal(
+    script_file, monkeypatch, capsys
+):
+    # A proxy that writes the credential into the status line's reason
+    # phrase rather than the body.
+    def handle(request: httpx.Request) -> httpx.Response:
+        phrase = f"Rejected credential {request.headers['Authorization']}"
+        return httpx.Response(
+            401, text="", extensions={"reason_phrase": phrase.encode()}
+        )
+
+    monkeypatch.setenv("BOT_API_KEY", KEY)
+    monkeypatch.setattr(
+        httpx.AsyncClient, "__init__", _with_transport(httpx.MockTransport(handle))
+    )
+
+    code = main(_argv(script_file, "--apply"))
+
+    captured = capsys.readouterr()
+    assert code == 1
+    assert "GET /api/admin/handlers -> 401 Unauthorized" in captured.err
+    assert KEY not in captured.err and KEY not in captured.out
+
+
 def test_a_missing_key_stops_before_any_request(script_file, monkeypatch, capsys):
     monkeypatch.delenv("BOT_API_KEY", raising=False)
 

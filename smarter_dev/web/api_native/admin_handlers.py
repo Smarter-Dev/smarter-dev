@@ -45,7 +45,9 @@ from skrift.auth.guards import Permission
 from skrift.workers import get_handle
 from sqlalchemy import func
 from sqlalchemy import select
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm.attributes import set_committed_value
 
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
@@ -306,11 +308,25 @@ class AdminHandlerController(Controller):
         record = await db_session.get(AdminHandler, parsed_handler_id)
         if record is None:
             raise plain_error(404, "admin handler not found")
-        if record.script != data.expected_script:
+        # The check and the write are one statement, so two callers who both
+        # read the old script cannot both get past it: the row matches only
+        # while the script is still what the caller read, and the one that
+        # matched holds the row until commit. Comparing the loaded record
+        # would let both through, each against its own stale copy.
+        written = await db_session.execute(
+            update(AdminHandler)
+            .where(
+                AdminHandler.id == parsed_handler_id,
+                AdminHandler.script == data.expected_script,
+            )
+            .values(script=data.script)
+            .execution_options(synchronize_session=False)
+        )
+        if written.rowcount != 1:
             raise plain_error(
                 409, "the admin handler's script has changed since it was read"
             )
-        record.script = data.script
+        set_committed_value(record, "script", data.script)
         # A scheduled handler's settings are validated against its script.
         if record.trigger_type in _TIME_TRIGGERS:
             try:

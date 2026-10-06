@@ -21,6 +21,7 @@ from litestar.testing import AsyncTestClient
 from litestar.testing import TestClient
 from litestar.testing import create_async_test_client
 from litestar.testing import create_test_client
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -311,6 +312,54 @@ def test_replace_script_refuses_when_the_script_moved(client):
     assert resp.status_code == 409
     assert "changed since it was read" in resp.text
     assert _script_of(client, handler_id)["script"] == "first = 1\n"
+
+
+async def test_replace_script_lets_only_one_of_two_stale_readers_through(
+    db_session, submitted, no_guards
+):
+    # Two editors read the same script. Each session holds its own copy of
+    # the row, so a check against the loaded record would pass for both and
+    # the second write would quietly replace the first. The check has to be
+    # the database's: the write lands only where the script is still what
+    # was read.
+    record = AdminHandler(
+        guild_id="G1",
+        name="scam-banner",
+        trigger_type="message",
+        settings={},
+        channel_ids=[],
+        description="ban scammers",
+        script="old = 1\n",
+        created_by_admin="A1",
+    )
+    db_session.add(record)
+    await db_session.commit()
+    handler_id = str(record.id)
+    other_session = async_sessionmaker(db_session.bind, expire_on_commit=False)()
+    # Both sessions now hold the old script.
+    assert (await other_session.get(AdminHandler, record.id)).script == "old = 1\n"
+    assert (await db_session.get(AdminHandler, record.id)).script == "old = 1\n"
+
+    async with _async_client(other_session) as first:
+        first_write = await first.put(
+            f"/api/admin/handlers/{handler_id}/script",
+            json={"script": "first = 1\n", "expected_script": "old = 1\n"},
+        )
+    async with _async_client(db_session) as second:
+        second_write = await second.put(
+            f"/api/admin/handlers/{handler_id}/script",
+            json={"script": "second = 2\n", "expected_script": "old = 1\n"},
+        )
+    await other_session.close()
+    # The column itself: a loaded record would only show its session's copy.
+    async with async_sessionmaker(db_session.bind)() as fresh:
+        stored = await fresh.scalar(
+            select(AdminHandler.script).where(AdminHandler.id == record.id)
+        )
+
+    assert first_write.status_code == 200
+    assert second_write.status_code == 409
+    assert stored == "first = 1\n"
 
 
 def test_replace_script_on_unknown_handler_is_404(client):

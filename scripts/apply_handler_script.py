@@ -37,6 +37,7 @@ import difflib
 import os
 import sys
 from dataclasses import dataclass
+from http import HTTPStatus
 from pathlib import Path
 
 import httpx
@@ -165,6 +166,13 @@ async def run(args: argparse.Namespace) -> int:
     return 0
 
 
+def _status_line(status_code: int) -> str:
+    try:
+        return f"{status_code} {HTTPStatus(status_code).phrase}"
+    except ValueError:
+        return str(status_code)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--guild-id", required=True)
@@ -184,11 +192,12 @@ def main(argv: list[str] | None = None) -> int:
         print(str(error), file=sys.stderr)
         return 1
     except httpx.HTTPStatusError as error:
-        # The status and the request, never the response body: a reflected
-        # header would put the key on the terminal.
+        # The status and the request, nothing the server wrote: a reflected
+        # header in the body or the reason phrase would put the key on the
+        # terminal. The phrase printed is this machine's for the code.
         print(
             f"{error.request.method} {error.request.url.path} -> "
-            f"{error.response.status_code} {error.response.reason_phrase}",
+            f"{_status_line(error.response.status_code)}",
             file=sys.stderr,
         )
         return 1
