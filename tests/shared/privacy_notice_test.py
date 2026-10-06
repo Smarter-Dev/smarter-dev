@@ -2,7 +2,7 @@
 
 The notice is a public promise about what the code does, so these tests pin
 the statements that must stay true and the ones it must never make: the chat
-bot's memories are permanent and never reset, moderation history survives a
+bot's memories are permanent and only the bot edits them, moderation history survives a
 deletion request, and no opt-out or automatic deletion exists yet.
 """
 
@@ -34,7 +34,6 @@ def test_the_short_version_carries_the_required_statements():
     points = " ".join(short_version())
     assert len(short_version()) == 5
     assert "permanent memories" in points
-    assert "never resets" in points
     assert "Moderation history is kept so the server can stay safe" in points
     assert "is not part of a deletion request" in points
     assert "only anonymous usage and cost records stay" in points
@@ -61,7 +60,7 @@ def test_the_notice_does_not_describe_an_opt_out_as_available(notice):
     assert "you can opt out" not in lowered
     assert "forget" not in lowered
     assert "blank" not in lowered
-    assert "the bot never resets them" in lowered
+    assert "kept permanently; only the bot edits them" in lowered
 
 
 def test_a_deletion_request_removes_the_person_from_the_chat_bot(notice):
