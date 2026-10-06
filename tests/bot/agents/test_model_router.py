@@ -338,6 +338,87 @@ async def test_openrouter_claude_request_on_the_wire(monkeypatch):
     assert body["provider"] == {"max_price": {"prompt": 2.0, "completion": 10.0}}
 
 
+async def test_openrouter_mistral_large_4_request_on_the_wire(monkeypatch):
+    """One structured-output request to Mistral Large 4, as OpenRouter gets it.
+
+    Mistral's endpoint accepts tool_choice "required" and has no reasoning
+    parameter, so the output tool is forced and no effort is sent.
+    """
+    import json
+
+    import httpx
+    from pydantic import BaseModel
+    from pydantic_ai import Agent
+
+    class Reply(BaseModel):
+        text: str
+
+    sent: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "id": "gen-1",
+                "object": "chat.completion",
+                "created": 1791294122,
+                "model": "mistralai/mistral-large-4-0",
+                "choices": [
+                    {
+                        "index": 0,
+                        "finish_reason": "tool_calls",
+                        "message": {
+                            "role": "assistant",
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "final_result",
+                                        "arguments": '{"text": "hi"}',
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
+            },
+        )
+
+    real_provider = model_router.OpenRouterProvider
+
+    def provider_with_transport(**kwargs):
+        return real_provider(
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+            **kwargs,
+        )
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-secret")
+    monkeypatch.setattr(model_router, "OpenRouterProvider", provider_with_transport)
+    model = get_model("mistral-large-4")
+    agent = Agent(
+        build_model_for(model),
+        output_type=Reply,
+        model_settings=model_settings_for(model),
+    )
+    result = await agent.run("hello")
+
+    assert result.output == Reply(text="hi")
+    (body,) = sent
+    assert body["model"] == "mistralai/mistral-large-4-0"
+    assert body["tool_choice"] == "required"
+    assert "reasoning_effort" not in body
+    assert "reasoning" not in body
+    assert body["provider"] == {"max_price": {"prompt": 0.68, "completion": 2.09}}
+
+
 def test_openrouter_routing_constraints_ride_on_every_request():
     """Endpoint constraints go out as the OpenRouter ``provider`` block.
 

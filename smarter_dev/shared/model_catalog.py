@@ -243,6 +243,7 @@ MODEL_FAMILIES: tuple[str, ...] = (
     "GPT",
     "Claude",
     "Grok",
+    "Mistral",
 )
 
 
@@ -262,6 +263,7 @@ MODEL_VENDORS: dict[str, str] = {
     "GPT": "OpenAI",
     "Claude": "Anthropic",
     "Grok": "xAI",
+    "Mistral": "Mistral AI",
 }
 
 
@@ -306,7 +308,7 @@ _CLAUDE_EFFORT = _OPEN_EFFORT + (ReasoningLevel.XHIGH, ReasoningLevel.MAX)
 
 # Curated catalog. Kept <= 24 entries so the whole set fits in one Discord
 # string-select (25-option limit, leaving room for a "server default" sentinel).
-# Gemini -> Google, GPT -> OpenAI, Claude and Grok -> OpenRouter, and the open weights ->
+# Gemini -> Google, GPT -> OpenAI, Claude, Grok and Mistral -> OpenRouter, and the open weights ->
 # Digital Ocean / OpenCode Zen / OpenRouter, all OpenAI-compatible. Model ids reflect the latest releases as of mid-2026
 # (verified against provider model listings); they are wire ids and can be
 # re-verified without a migration.
@@ -662,6 +664,35 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         context_window=500_000,
         reasoning_levels=_OPEN_EFFORT,
         default_reasoning=ReasoningLevel.MEDIUM,
+    ),
+    # --- Mistral via OpenRouter ---
+    # Mistral Large 4 joined on 2026-10-06, the day Mistral opened its preview
+    # API, at the user's request. Capabilities from GET /api/v1/models and
+    # /api/v1/models/mistralai/mistral-large-4-0/endpoints (2026-10-06): 512K
+    # context, 256K output, text+image input, tools with tool_choice
+    # "required", structured outputs, and no reasoning parameter, so no
+    # reasoning knob. Mistral's own endpoint is the only one. It lists at
+    # $0.68/$2.09 with a 50% launch discount against Mistral's $1.36/$4.18. The
+    # ceiling sits at the discounted rate llm_pricing records, because usage is
+    # metered from that table: a higher ceiling would let the end of the
+    # discount bill at twice the metered rate. When the discount ends, routing
+    # refuses the model until this ceiling and the price row move together.
+    # Mistral publishes the weights on 2026-10-27. Until then it is not an open
+    # weight family; when third-party endpoints appear, revisit the routing and
+    # OPEN_WEIGHT_FAMILIES.
+    CatalogModel(
+        key="mistral-large-4",
+        label="Mistral Large 4",
+        family="Mistral",
+        provider=ModelProvider.OPENROUTER,
+        model_id="mistralai/mistral-large-4-0",
+        supports_vision=True,
+        context_window=524_288,
+        max_output_tokens=262_144,
+        openrouter_routing=OpenRouterRouting(
+            max_price_input_mtok=0.68,
+            max_price_output_mtok=2.09,
+        ),
     ),
 )
 

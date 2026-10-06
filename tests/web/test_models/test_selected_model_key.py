@@ -796,3 +796,118 @@ async def test_gpt_6_sol_move_downgrade_restores_the_row_and_keeps_choices(db_se
     }
     pin = (await db_session.execute(select(ChannelModelOverride))).scalar_one()
     assert pin.model_key == "gpt-6-1-sol"
+
+
+# c1a9cd91cadd admits Mistral Large 4 as a new key and changes nothing else.
+
+
+def _mistral_large_4_statements(direction: str = "upgrade"):
+    module = _load_migration("c1a9cd91cadd")
+    executed: list = []
+
+    class _Op:
+        @staticmethod
+        def execute(statement):
+            executed.append(statement)
+
+    module.op = _Op
+    getattr(module, direction)()
+    return executed
+
+
+def test_mistral_large_4_admission_follows_the_inflight_expiry_cap():
+    from smarter_dev.shared.model_catalog import RETIRED_SUCCESSORS
+    from smarter_dev.shared.model_catalog import get_model
+
+    module = _load_migration("c1a9cd91cadd")
+    assert module.down_revision == "7e4b2d9a1c38"
+    assert get_model(module._KEY).model_id == "mistralai/mistral-large-4-0"
+    assert get_model(module._PRICE_PEER) is not None
+    assert module._KEY not in RETIRED_SUCCESSORS.values()
+
+
+async def test_mistral_large_4_admission_is_enabled_at_grok_tier_and_sorts_last(
+    db_session,
+):
+    from smarter_dev.web.chat.settings import ensure_settings
+    from smarter_dev.web.models import ChatCatalogModel
+
+    await ensure_settings(db_session)
+    seeded = await db_session.get(ChatCatalogModel, "mistral-large-4")
+    await db_session.delete(seeded)
+    grok = await db_session.get(ChatCatalogModel, "grok-4-7")
+    grok.cost_tier = "high"
+    grok.enabled = False
+    await db_session.commit()
+    before = await _catalog_rows(db_session)
+    settings_before = (
+        await db_session.execute(text("SELECT * FROM chat_settings"))
+    ).all()
+
+    [statement] = _mistral_large_4_statements()
+    for _ in range(2):  # idempotent
+        await db_session.execute(statement)
+    await db_session.commit()
+
+    after = await _catalog_rows(db_session)
+    max_order = max(order for _, _, order in before.values())
+    # Enabled regardless of Grok, at Grok's tier, after every existing row.
+    assert after.pop("mistral-large-4") == (True, "high", max_order + 1)
+    assert after == before
+    assert (
+        await db_session.execute(text("SELECT * FROM chat_settings"))
+    ).all() == settings_before
+
+
+async def test_mistral_large_4_admission_defaults_to_medium_without_grok(db_session):
+    [statement] = _mistral_large_4_statements()
+    await db_session.execute(statement)
+    await db_session.commit()
+    assert await _catalog_rows(db_session) == {
+        "mistral-large-4": (True, "medium", 0)
+    }
+
+
+async def test_mistral_large_4_admission_leaves_an_existing_row_alone(db_session):
+    from smarter_dev.web.models import ChatCatalogModel
+
+    db_session.add(
+        ChatCatalogModel(
+            model_key="mistral-large-4", enabled=False, cost_tier="ultra", sort_order=3
+        )
+    )
+    await db_session.commit()
+    [statement] = _mistral_large_4_statements()
+    await db_session.execute(statement)
+    await db_session.commit()
+    assert await _catalog_rows(db_session) == {
+        "mistral-large-4": (False, "ultra", 3)
+    }
+
+
+async def test_mistral_large_4_is_selectable_once_admitted(db_session):
+    from smarter_dev.web.chat.api import resolved_conversation_settings
+    from smarter_dev.web.chat.settings import ensure_settings
+    from smarter_dev.web.models import ChatCatalogModel
+
+    await ensure_settings(db_session)
+    seeded = await db_session.get(ChatCatalogModel, "mistral-large-4")
+    await db_session.delete(seeded)
+    await db_session.commit()
+    [statement] = _mistral_large_4_statements()
+    await db_session.execute(statement)
+    await db_session.commit()
+
+    _, key, reasoning = await resolved_conversation_settings(
+        db_session, permissions=frozenset(), model_key="mistral-large-4"
+    )
+    assert key == "mistral-large-4"
+    assert reasoning is None
+
+
+def test_mistral_large_4_downgrade_deletes_only_its_row():
+    [statement] = _mistral_large_4_statements("downgrade")
+    assert " ".join(str(statement).split()) == (
+        "DELETE FROM chat_catalog_models WHERE model_key = :key"
+    )
+    assert statement.compile().params == {"key": "mistral-large-4"}

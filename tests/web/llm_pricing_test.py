@@ -243,6 +243,35 @@ class TestOpenRouterPricing:
         assert cost == Decimal("1.80")
         assert "priced at the base rate" not in caplog.text
 
+    def test_mistral_large_4_rates(self):
+        # OpenRouter bills $0.68/$2.09 per M at its 50% launch discount
+        # (2026-10-06).
+        assert calc_cost(
+            1_000_000, 1_000_000, "openrouter:mistralai/mistral-large-4-0"
+        ) == Decimal("2.77")
+
+    def test_mistral_large_4_cache_rate(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=500_000,
+            cache_write_tokens=0,
+            model_name="openrouter:mistralai/mistral-large-4-0",
+        )
+        # 500K uncached at $0.68/M + 500K cached reads at $0.07/M.
+        assert cost == Decimal("0.375")
+
+    def test_mistral_large_4_has_no_long_context_tier(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="smarter_dev.web.llm_pricing"):
+            cost = calc_cost(
+                500_000,
+                0,
+                "openrouter:mistralai/mistral-large-4-0",
+                per_request=True,
+            )
+        assert cost == Decimal("0.34")
+        assert "priced at the base rate" not in caplog.text
+
     def test_author_precision_routes_priced_at_their_measured_endpoint(self):
         # Moved off Zen/DO on 2026-08-13. Rates are measured from what actually
         # served a sample, not quoted from the endpoint we would prefer —

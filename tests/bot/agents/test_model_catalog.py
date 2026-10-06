@@ -297,6 +297,39 @@ def test_grok_routes_through_openrouter_with_verified_capabilities():
     assert [m.key for m in MODEL_CATALOG if m.family == "Grok"] == ["grok-4-7"]
 
 
+def test_mistral_large_4_routes_through_openrouter_with_verified_capabilities():
+    # Verified against OpenRouter's models and endpoints APIs (2026-10-06):
+    # 512K context, 256K output, image input, tools, no reasoning parameter,
+    # and Mistral's own endpoint as the only one.
+    model = get_model("mistral-large-4")
+    assert model is not None
+    assert model.label == "Mistral Large 4"
+    assert model.model_id == "mistralai/mistral-large-4-0"
+    assert model.family == "Mistral"
+    assert model_vendor(model) == "Mistral AI"
+    assert model.provider is ModelProvider.OPENROUTER
+    assert model.supports_vision is True
+    assert model.supports_tools is True
+    assert model.supports_forced_tool_choice is True
+    assert model.context_window == 524_288
+    assert model.max_output_tokens == 262_144
+    assert model.reasoning_levels == ()
+    assert model.default_reasoning is None
+    # Weights unpublished until 2026-10-27: structured output stays on tool
+    # calls, not prompted JSON.
+    assert model.needs_prompted_output is False
+    # Ceiling at the discounted rate llm_pricing meters, so the end of
+    # OpenRouter's launch discount refuses requests instead of under-billing.
+    assert model.openrouter_routing.as_provider_block() == {
+        "max_price": {"prompt": 0.68, "completion": 2.09}
+    }
+    assert [m.key for m in MODEL_CATALOG if m.family == "Mistral"] == [
+        "mistral-large-4"
+    ]
+    # Additive: no retired key is read as Mistral Large 4.
+    assert "mistral-large-4" not in RETIRED_SUCCESSORS.values()
+
+
 def test_qwen3_8_routes_through_openrouter_not_digital_ocean():
     # DO's live account carries qwen3.8-max but not the 2.4T A95B weights, so
     # OpenRouter is the only route that can serve it (its cheapest OpenRouter
@@ -400,7 +433,7 @@ def test_provider_routing_by_family():
                 ModelProvider.OPENAI,
                 ModelProvider.OPENROUTER,
             )
-        elif model.family in ("Grok", "Claude"):
+        elif model.family in ("Grok", "Claude", "Mistral"):
             assert model.provider is ModelProvider.OPENROUTER
         elif model.family in _OPEN_WEIGHTS_FAMILIES:
             # Open weights normally ride DO or Zen, but Qwen3.8 2.4T A95B is on
