@@ -116,6 +116,11 @@ Check that the clean-up was done before taking the first request.
   sessions an expiry counts as live only while it changed in the last 7
   days. Step 8 removes the person's part of
   it.
+- **Resources progress:** what the site showed while it answered a
+  resources question (the restated question, the research steps and the
+  title), in Skrift's `stored_notifications`. Deleted when the run finishes,
+  else 5 hours 10 minutes at most; also deleted with the question or the
+  account (step 5).
 - **Caches:** `search_result_previews` (5 hours),
   `chat_agent:guild:{guild}:events` (about an hour), `mediaread:*` (1 hour),
   `hclaim:*` (up to 30 days; deleting one can make a handler act twice),
