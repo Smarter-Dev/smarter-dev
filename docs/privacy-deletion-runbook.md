@@ -536,14 +536,18 @@ dashboard searches, the search link, push subscriptions, the account's
 
    ```sql
    BEGIN READ ONLY;
-   SELECT id, status, finished_at FROM account_deletion_requests WHERE user_id = :'uid';
+   SELECT id, status, finished_at FROM account_deletion_requests WHERE user_id = :'uid';  -- expect no row
    SELECT count(*) FROM users WHERE id = :'uid';           -- expect 0
    SELECT count(*) FROM usage_cost_rows WHERE user_id = :'uid';  -- expect 0
    ROLLBACK;
    ```
 
-   `status` must be `complete`. `error` means billing revocation is being
-   retried; wait for it rather than finishing the request around it.
+   When the job finishes it strips its own row down to the receipt: the
+   account's id is replaced with a random one and the Polar subscription ids
+   are removed, so no row is found by `uid`. A row still found is unfinished:
+   `pending` or `running` means wait, and `error` means billing revocation is
+   being retried (the row keeps the ids until it succeeds); wait for it rather
+   than finishing the request around it.
 
 If the person authored site pages or uploaded assets (admins only), those
 rows reference the account with no delete rule and the job fails on them; ask
@@ -1194,7 +1198,7 @@ of this runbook).
 Close the request only when, after the check below, the purge page shows
 `complete`: every hit list then reads "Nothing found" and "Flagged by the
 runtimes' acks" reads "None.". `needs_review` is not done, and
-neither is `closed` on its own: a closed purge is only a receipt. Until then, points 3 to 6 are not done and the
+neither is `closed` on its own: a closed purge is only a receipt. Until then, points 3 to 5 are not done and the
 member is not told it is complete. If it is still not done as the 30 days
 run out, tell the member what is left and that the request is open.
 
@@ -1236,27 +1240,17 @@ run out, tell the member what is left and that the request is open.
      UNION ALL SELECT value::jsonb::text FROM guild_handler_memory) m
     WHERE strpos(lower(t), lower(:'name')) > 0;
    ```
-3. *Site:* strip the deletion job's row down to the receipt:
-
-   ```sql
-   BEGIN;
-   UPDATE account_deletion_requests
-      SET user_id = gen_random_uuid(), subscription_ids = '[]', error = NULL
-    WHERE user_id = :'uid' AND status = 'complete';
-   -- expect UPDATE 1, then run COMMIT; (anything else: ROLLBACK;)
-   ```
-
-4. Press "Close to a receipt" and confirm. This strips the request to a
+3. Press "Close to a receipt" and confirm. This strips the request to a
    bare receipt (times, outcome, counts); the blocked-list entry stays. The
    page lets you close from any status, so check first that it reads
    `complete`.
    If it refuses with "Not closed: N guild(s) still have a tombstoned
    history", press "Run the purge again" and close once the worker has
    rewritten them.
-5. Finish the receipt note: receipt id, dates, "completed", and the classes
+4. Finish the receipt note: receipt id, dates, "completed", and the classes
    handled (purged, deleted, anonymised, kept). No id, username,
    counts per person or message text. Discard the names noted in step 1.
-6. Reply to the member with the receipt id, and repeat what was kept. Once
+5. Reply to the member with the receipt id, and repeat what was kept. Once
    they have it, you may delete the DM thread on your side.
 
 ## Retention windows

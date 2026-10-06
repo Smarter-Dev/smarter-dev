@@ -666,6 +666,94 @@ async def test_deleting_the_account_leaves_none_of_it_behind(db_session, monkeyp
         assert _WORDS not in json.dumps(details)
 
 
+async def _delete_account_with_billing(db_session, monkeypatch, revoke):
+    """Run account deletion for a member with a Polar subscription."""
+    user = await _user(db_session)
+    user_id = user.id
+    deletion = AccountDeletionRequest(
+        user_id=user_id, status="pending", subscription_ids=["sub_member"]
+    )
+    db_session.add(deletion)
+    await db_session.commit()
+    request_id = deletion.id
+
+    @asynccontextmanager
+    async def session_context():
+        yield db_session
+
+    class _Manager:
+        def __init__(self, _settings):
+            pass
+
+        async def get(self, _name):
+            return _Storage()
+
+        async def close(self):
+            pass
+
+    @asynccontextmanager
+    async def polar():
+        yield SimpleNamespace(subscriptions=SimpleNamespace(revoke_async=revoke))
+
+    monkeypatch.setattr(chat_jobs, "get_db_session_context", session_context)
+    monkeypatch.setattr("skrift.storage.StorageManager", _Manager)
+    monkeypatch.setattr(
+        "skrift.config.get_settings", lambda: SimpleNamespace(storage=None)
+    )
+    monkeypatch.setattr("smarter_dev.web.billing.client.get_polar", polar)
+    try:
+        await chat_jobs.delete_chat_account(
+            chat_jobs.ChatAccountDeletionPayload(request_id=str(request_id))
+        )
+    finally:
+        db_session.expire_all()
+    return user_id, await db_session.get(AccountDeletionRequest, request_id)
+
+
+@pytest.mark.asyncio
+async def test_a_finished_account_deletion_keeps_only_a_receipt(
+    db_session, monkeypatch
+):
+    revoked = []
+
+    async def revoke(*, id):
+        revoked.append(id)
+
+    user_id, receipt = await _delete_account_with_billing(
+        db_session, monkeypatch, revoke
+    )
+
+    assert revoked == ["sub_member"]
+    assert (receipt.status, receipt.error) == ("complete", None)
+    assert receipt.finished_at is not None
+    assert receipt.user_id != user_id
+    assert receipt.subscription_ids == []
+    assert (
+        await _count(
+            db_session,
+            AccountDeletionRequest,
+            AccountDeletionRequest.user_id == user_id,
+        )
+        == 0
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_account_deletion_retrying_billing_keeps_what_the_retry_needs(
+    db_session, monkeypatch
+):
+    async def revoke(*, id):
+        raise ConnectionError("Polar is down")
+
+    with pytest.raises(RuntimeError, match="billing revocation will be retried"):
+        await _delete_account_with_billing(db_session, monkeypatch, revoke)
+
+    request = await db_session.scalar(select(AccountDeletionRequest))
+    assert request.status == "error"
+    assert await db_session.get(User, request.user_id) is None
+    assert request.subscription_ids == ["sub_member"]
+
+
 # ── Replies kept in the usage ledger ─────────────────────────────────
 
 
