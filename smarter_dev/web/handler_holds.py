@@ -259,10 +259,11 @@ class MemberHolds:
     async def _save(self, user_id: str, states: dict[str, str], now: float) -> None:
         """Write the member's record with only what is still live in it.
 
-        Holds that ran out and releases that settled are dropped. The hash
-        expires :data:`SETTLED_SECONDS` after the latest hold runs out or
-        release settles, and goes entirely once nothing is live — the
-        bookkeeping of which timeout is a hold's own goes with it.
+        Holds that ran out and releases that settled are dropped, and so is
+        a recorded expiry that has passed: a timeout that ended cannot be the
+        one in place, nor be handed back. The hash expires
+        :data:`SETTLED_SECONDS` after the latest hold runs out or release
+        settles, and goes entirely once nothing is live.
         """
         name = member_holds_key(self.guild_id, user_id)
         live = {
@@ -275,7 +276,13 @@ class MemberHolds:
             await self.redis.delete(name)
             return
         ends = [float(state[2:]) + SETTLED_SECONDS for state in live.values()]
-        live.update({field: states[field] for field in _BOOKKEEPING if field in states})
+        live.update(
+            {
+                field: states[field]
+                for field in _BOOKKEEPING
+                if field in states and float(states[field]) > now
+            }
+        )
         async with self.redis.pipeline(transaction=True) as pipe:
             pipe.delete(name)
             pipe.hset(name, mapping=live)

@@ -541,6 +541,24 @@ async def test_the_record_keeps_only_live_holds_and_fresh_releases(
     assert await redis.ttl(member_holds_key("G1", "U1")) <= 300 + SETTLED_SECONDS + 1
 
 
+async def test_an_expiry_that_has_passed_is_dropped_from_the_record(
+    holds, redis, discord, monkeypatch
+):
+    # A moderator's two minutes, extended by a hold that keeps being renewed
+    # by overlapping holds for weeks. The two minutes passed long ago and can
+    # never be handed back; they must not ride along in every rewrite.
+    clock = _Clock(monkeypatch)
+    discord.moderator_times_out(120)
+    await holds.hold("U1", "repeat:post-a", 28 * DAY)
+    clock.advance(20 * DAY)
+    await holds.hold("U1", "repeat:post-b", 28 * DAY)
+    clock.advance(20 * DAY)
+    await holds.hold("U1", "repeat:post-c", 28 * DAY)
+
+    fields = {key.decode() for key in await redis.hkeys(member_holds_key("G1", "U1"))}
+    assert fields == {"H1:repeat:post-b", "H1:repeat:post-c", "placed"}
+
+
 async def test_a_record_with_nothing_live_in_it_is_dropped(holds, redis):
     # A record whose expiry outlived its contents (the hash is written as a
     # whole; fakeredis shares the test clock, so it is planted here). The
