@@ -628,3 +628,14 @@ def test_claude_sonnet_5_5_bills_under_openrouter():
     )
     # The retired direct-Anthropic Sonnet 5 keeps its own line.
     assert provider_key_from_model_name("claude-sonnet-5") == "anthropic"
+
+
+def test_mistral_large_4_bills_under_openrouter():
+    from smarter_dev.web.api_native.chat_conversations import _normalized_model_identity
+
+    assert provider_key_from_model_name("mistralai/mistral-large-4-0") == "openrouter"
+    assert _normalized_model_identity("openrouter:mistralai/mistral-large-4-0") == (
+        "openrouter",
+        "mistral-large-4",
+        "mistralai/mistral-large-4-0",
+    )

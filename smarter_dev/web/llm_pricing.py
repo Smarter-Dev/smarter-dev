@@ -465,6 +465,18 @@ _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
         cache_read_mtok=Decimal("0.20"),
         cache_write_mtok=Decimal("2.50"),
     ),
+    # Mistral Large 4, added 2026-10-06. Read from GET
+    # https://openrouter.ai/api/v1/models and its /endpoints on 2026-10-06:
+    # Mistral's only endpoint quotes $0.68/$2.09 and $0.07 cache reads, which
+    # is Mistral's $1.36/$4.18 at OpenRouter's 50% launch discount. This
+    # records what OpenRouter bills today; when the discount ends, update
+    # this row with the new rate. No cache-write rate and no long-context tier
+    # across the 512K window.
+    "mistralai/mistral-large-4-0": types.ModelPrice(
+        input_mtok=Decimal("0.68"),
+        output_mtok=Decimal("2.09"),
+        cache_read_mtok=Decimal("0.07"),
+    ),
     # Qwen3.8 2.4T A95B. Every OpenRouter endpoint quotes the same rate, so
     # there is no route-dependent price to model here.
     "qwen/qwen3.8-2.4t-a95b": types.ModelPrice(
