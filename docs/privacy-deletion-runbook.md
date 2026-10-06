@@ -474,7 +474,8 @@ The site's own account deletion does this part, and it is the one path that
 also removes private chat attachments from storage and cancels Polar
 subscriptions. It also deletes what has no foreign key to the account: the
 dashboard searches, the search link, push subscriptions, the account's
-`work_dispatches` rows and its queued notifications.
+`work_dispatches` rows, its queued notifications, and the campaign and
+waitlist sign-ups under its confirmed email addresses or linked Discord login.
 
 1. Delete any search history left by an account deleted before
    self-deletion covered it. For an account deleted since, this deletes
@@ -559,6 +560,15 @@ subagents, attachments rows), resources questions and spending windows. Its
 membership rows go with it; the anonymised usage cost rows stay.
 
 ## 6. Delete what is keyed by Discord id
+
+Campaign and waitlist sign-ups are self-service for members with a site
+account: they delete them from Account → Security → Your data, and the account
+deletion in step 5 deletes every sign-up under an email address one of their
+linked logins confirmed or under their linked Discord login. The
+`campaign_signups` delete below stays for everyone else: people without an
+account, and sign-ups under a Discord id the account never linked. If step 5
+deleted an account with that Discord login, its `campaign_signups` count here
+can be lower than the dry run's, down to 0; that is expected.
 
 One transaction. The blocks below end without `COMMIT;` on purpose: paste a
 block, compare each `DELETE n` / `UPDATE n` psql prints with the dry run, and

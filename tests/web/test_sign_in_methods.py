@@ -196,6 +196,10 @@ async def _security_page_context(
         result.scalar_one_or_none.return_value = rows[0] if rows else None
         result.scalars.return_value.all.return_value = rows
         results.append(result)
+    # The campaign sign-ups lookup: no linked login holds a contact.
+    no_contacts = MagicMock()
+    no_contacts.all.return_value = []
+    results.append(no_contacts)
     db = AsyncMock(spec=AsyncSession)
     db.execute.side_effect = results
     request = MagicMock()

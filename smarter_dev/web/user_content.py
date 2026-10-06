@@ -41,6 +41,8 @@ from sqlalchemy import delete
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.web.account_identifiers import forget_admin_identifiers
+from smarter_dev.web.account_signups import delete_account_signups
 from smarter_dev.web.chat.usage import forget_reply_copies
 from smarter_dev.web.models import AgentConversation
 from smarter_dev.web.models import ResourceAgentRun
@@ -341,7 +343,12 @@ async def delete_account_leftovers(session: AsyncSession, user_id: UUID) -> None
     dispatched (an older Resources one may still hold the question), and queued
     notifications are keyed by a string. The dispatch rows are found through
     the work they name, so this has to run while that work still exists.
+    Campaign sign-ups and the creator values naming the account are found
+    through its name and linked logins, so they go before the logins cascade
+    away with the user row.
     """
+    await delete_account_signups(session, user_id)
+    await forget_admin_identifiers(session, user_id)
     turn_ids = list(
         (
             await session.execute(

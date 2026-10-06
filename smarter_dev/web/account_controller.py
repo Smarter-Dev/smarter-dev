@@ -32,6 +32,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.config import get_settings
+from smarter_dev.web.account_signups import delete_account_signups
+from smarter_dev.web.account_signups import list_account_signups
 from smarter_dev.web.billing.portal import create_portal_session
 from smarter_dev.web.chat.dispatch import create_dispatch
 from smarter_dev.web.chat.dispatch import dispatch_one
@@ -244,6 +246,7 @@ class AccountController(Controller):
                 "user": user,
                 "active_tab": "security",
                 "your_data": await _your_data(db_session, user.id),
+                "signups": await list_account_signups(db_session, user.id),
                 "linked_accounts": linked_accounts,
                 "passkeys": passkeys,
                 "passkey_available": bool(factor_key) and is_webauthn_available(),
@@ -304,6 +307,13 @@ class AccountController(Controller):
         if not await verify_csrf(request):
             flash_error(request, "Your session expired. Please try again.")
             return Redirect(path="/account/security")
+        if kind == "signups":
+            deleted = await delete_account_signups(db_session, user.id)
+            await db_session.commit()
+            flash_success(
+                request, f"Deleted {deleted} sign-up{'' if deleted == 1 else 's'}."
+            )
+            return Redirect(path="/account/security")
         if kind == "chats":
             storage = await request.app.state.storage_manager.get("chat_attachments")
             result = await delete_all_chats(db_session, storage, user.id)
@@ -334,6 +344,23 @@ class AccountController(Controller):
                 " files could not be removed; try again shortly."
             )
         flash_success(request, message)
+        return Redirect(path="/account/security")
+
+    @post("/data/signups/{signup_id:uuid}/delete")
+    async def delete_signup(
+        self, request: Request, db_session: AsyncSession, signup_id: UUID
+    ) -> Redirect:
+        """Delete one campaign or waitlist sign-up that is the member's own."""
+        user = await _current_user(request, db_session)
+        if not await verify_csrf(request):
+            flash_error(request, "Your session expired. Please try again.")
+            return Redirect(path="/account/security")
+        deleted = await delete_account_signups(db_session, user.id, signup_id)
+        await db_session.commit()
+        if deleted:
+            flash_success(request, "Sign-up deleted.")
+        else:
+            flash_error(request, "That sign-up is not one of yours.")
         return Redirect(path="/account/security")
 
     @post("/security/passkeys/{enrollment_id:uuid}/delete")

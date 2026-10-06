@@ -136,7 +136,7 @@
     ('questions', 'Questions about our resources', 'question', 'questions', 'Every question and the answers to it.'),
     ('searches', 'Searches', 'search', 'searches', 'Every search from your dashboard, with its results and answer.'),
 ] %}
-<div class="account-card">
+<div class="account-card" id="your-data">
     <h2 style="font-family:var(--heading);color:var(--white);font-size:.95rem;letter-spacing:.06em;margin:0 0 .5rem;">Your data</h2>
     <p class="account-meta">What you have made on the site. Deleting removes it and every copy we keep of it. This cannot be undone.</p>
     <div class="sec-list">
@@ -159,12 +159,53 @@
             {% endif %}
         </div>
         {% endfor %}
+        {# Campaign and waitlist sign-ups held under an email address or Discord
+           login this account has confirmed; the account page shows nobody
+           else's (smarter_dev/web/account_signups.py). #}
+        {% set signups = signups|default([]) %}
+        {% set count = signups | length %}
+        <div class="sec-item">
+            <div>
+                <div class="sec-item-name">Campaign and waitlist sign-ups</div>
+                <div class="sec-item-meta">{{ count }} sign-up{{ '' if count == 1 else 's' }} under your confirmed email addresses or your Discord login</div>
+            </div>
+            {% if count %}
+            <details class="data-delete">
+                <summary class="sec-remove-btn">Delete all</summary>
+                <form class="data-delete-confirm" method="post" action="/account/data/signups/delete" data-sk-no-spa>
+                    {{ csrf_field() }}
+                    <p>Delete all {{ count }} sign-up{{ '' if count == 1 else 's' }}? We will stop contacting you about {{ 'that campaign' if count == 1 else 'those campaigns' }}.</p>
+                    <button type="submit" class="sec-remove-btn">Delete {{ 'it' if count == 1 else 'all ' ~ count }}</button>
+                </form>
+            </details>
+            {% endif %}
+        </div>
+        {% for signup in signups %}
+        <div class="sec-item" data-signup>
+            <div>
+                <div class="sec-item-name">{{ signup.campaign | capitalize }}</div>
+                <div class="sec-item-meta">
+                    {% if signup.email %}Email <code>{{ signup.email }}</code>{% if not signup.email_confirmed %} • not confirmed{% endif %}{% endif %}
+                    {% if signup.email and signup.discord %} • {% endif %}
+                    {% if signup.discord %}Your Discord account{% endif %}
+                </div>
+            </div>
+            <details class="data-delete">
+                <summary class="sec-remove-btn">Delete</summary>
+                <form class="data-delete-confirm" method="post" action="/account/data/signups/{{ signup.id }}/delete" data-sk-no-spa>
+                    {{ csrf_field() }}
+                    <p>Delete this sign-up? We will stop contacting you about it.</p>
+                    <button type="submit" class="sec-remove-btn">Delete it</button>
+                </form>
+            </details>
+        </div>
+        {% endfor %}
     </div>
 </div>
 
 <div class="account-card" style="border-color:rgba(239,68,68,.35)">
     <h2 style="font-family:var(--heading);color:#ff8a8a;font-size:.95rem;letter-spacing:.06em;margin:0 0 .5rem;">Delete account</h2>
-    <p class="account-meta">Permanently deletes your account and everything above: your chats and their uploaded files, your questions about our resources, your searches and your search link. This cannot be undone. Discord content keeps its existing retention policy.</p>
+    <p class="account-meta">Permanently deletes your account and everything above: your chats and their uploaded files, your questions about our resources, your searches, your search link and your campaign and waitlist sign-ups. This cannot be undone. Discord content keeps its existing retention policy.</p>
     <form method="post" action="/account/delete" data-sk-no-spa>
         {{ csrf_field() }}
         <div class="form-row"><label for="delete-confirmation">Type DELETE to confirm</label><input id="delete-confirmation" name="confirmation" autocomplete="off" required pattern="DELETE"></div>
