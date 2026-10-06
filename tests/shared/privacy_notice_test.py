@@ -100,7 +100,7 @@ def test_no_fact_is_said_twice(notice):
 def test_what_we_collect_and_why_state_no_retention(notice):
     collected = _section(notice, "Data we collect") + _section(notice, "Why we collect it")
     for word in ("until", "at most", "indefinitely", "days", "hours", "delet"):
-        assert word not in collected
+        assert word not in collected.replace("messages you edit or delete", "")
 
 
 def test_the_bot_is_in_one_server(notice):
@@ -111,13 +111,16 @@ def test_the_bot_is_in_one_server(notice):
 
 
 def test_messages_are_not_archived(notice):
+    """Zech's terms (#86): the assistant's working history and text passing
+    through for processing are not an archive. The moderators' log of edited
+    and deleted messages is a record, so the moderation bullet discloses it."""
     collected = _section(notice, "Data we collect")
     assert (
         "Messages, reactions and commands you post in the server. We keep records derived from them, "
         "such as activity and participation, and the conversations our AI assistant takes part in. "
         "We do not archive your messages."
     ) in collected
-    assert "Moderation actions taken on your account, with the messages involved." in collected
+    assert "Moderation records: actions taken on your account, and the earlier text of messages you edit or delete." in collected
 
 
 def test_the_stated_limits_are_the_code_limits(notice):
