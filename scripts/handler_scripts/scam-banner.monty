@@ -8,40 +8,30 @@ DAY = 86400
 REPEAT_TIMEOUT_SECONDS = DAY
 # How long a moderation action keeps a member under closer scrutiny.
 RECENT_ACTION_SECONDS = 30 * DAY
-# Burst: the same post in another channel within this long.
+# Burst: a same-looking post in another channel within this long.
 BURST_SECONDS = 10
 # A fire's longest run, and how far back the recent-message list reaches.
 FIRE_SECONDS = 120
-# Copies one fire may remove within its 25-action budget.
+# Copies one fire removes; a timer fire takes the rest.
 SWEEP_LIMIT = 20
-author_id = context["author_id"]
-message_id = context["message_id"]
+author_id = context.get("author_id")
+message_id = context.get("message_id")
 # Set only for a message inside a thread.
 thread_id = context.get("thread_id")
 
 
-def now():
-    return datetime.datetime.now(datetime.timezone.utc)
-
-
-STARTED = now()
-
-
 def age(value):
-    return (now() - datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))).total_seconds()
+    then = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return (datetime.datetime.now(datetime.timezone.utc) - then).total_seconds()
 
 
 def actions_within(history, seconds):
     return [a for a in history if a["action_type"] in ("warn", "timeout", "kick", "ban") and age(a["created_at"]) < seconds]
 
 
-def acted_since(history, age_at_start):
-    # Actions newer than a post that was this old when the fire began.
-    return actions_within(history, age_at_start + (now() - STARTED).total_seconds())
-
-
 async def read_copies():
-    # This message's row, and every recent post with its text and files.
+    # This message's row, and every recent post that looks the same:
+    # same text, same file names and sizes.
     rows = await list_recent_messages(author_id)
     mine = [r for r in rows if r["message_id"] == message_id]
     if not mine:
@@ -98,17 +88,21 @@ async def report(action, history):
     )
 
 
-async def act_on_violation(history, suspect):
+async def act_on_violation(history, suspect, key):
+    # Marked before the copies are read: a copy posted after that read finds
+    # the mark and removes itself.
+    await claim("bad:" + key, FIRE_SECONDS)
     await delete_message(message_id, thread_id)
-    # Read again: the review outlasts a burst. Copies need no review each.
+    # Read again: the review outlasts a burst.
     mine, copies = await read_copies()
-    others = [r for r in copies if r["message_id"] != message_id]
+    others = [[r["channel_id"], r["message_id"]] for r in copies if r["message_id"] != message_id]
     left = others[SWEEP_LIMIT:]
-    for row in others[:SWEEP_LIMIT]:
-        await delete_message(row["message_id"], row["channel_id"])
+    for channel, copy in others[:SWEEP_LIMIT]:
+        await delete_message(copy, channel)
     done = "Confirmed scam/abuse removed from " + str(1 + len(others) - len(left)) + " post(s)"
     if left:
-        done += ", " + str(len(left)) + " more copies still up"
+        await schedule_timer(60, {"sweep": left})
+        done += ", " + str(len(left)) + " more within a minute"
     if age(context["author_account_created_at"]) < 7 * DAY:
         await ban_user(author_id, reason="Automated review: confirmed scam or abuse, account under a week old")
         await report(done + "; user banned (account under a week old).", history)
@@ -116,10 +110,10 @@ async def act_on_violation(history, suspect):
     reason = "Your message was removed after a clear scam or abusive-content review. Please review the server rules before posting again."
     if suspect or (mine and is_burst(mine, copies)):
         reason = "Your scam-like post suggests your account may be compromised. Please secure your account before posting again."
-    # Warn first: the warn is what stops another fire lifting the long hold.
     await warn_user(author_id, reason, channel_id=thread_id)
     if actions_within(history, RECENT_ACTION_SECONDS):
-        await timeout_user(author_id, REPEAT_TIMEOUT_SECONDS)
+        # A hold never shortens a longer timeout already in place.
+        await hold_member(author_id, "repeat:" + key, REPEAT_TIMEOUT_SECONDS)
         done += "; user warned and timed out for 24 hours (repeat in 30 days)."
     else:
         done += "; user warned."
@@ -127,6 +121,11 @@ async def act_on_violation(history, suspect):
 
 
 async def run():
+    if context.get("trigger_type") == "timer":
+        # The rest of a burst too large for the fire that confirmed it.
+        for channel, copy in context["payload"]["sweep"]:
+            await delete_message(copy, channel)
+        return
     if context["author_has_manage_messages"]:
         return
     text = context.get("message_content", "")
@@ -153,29 +152,26 @@ async def run():
     risky_author = risky_author or actions_within(history, RECENT_ACTION_SECONDS)
     if not (suspect or risky_author):
         return
-    # One hold and one review per post and its copies.
-    key = author_id + ":" + (mine["content_hash"] if mine else message_id)
-    first = copies[-1]["age_seconds"] if copies else 0
-    # Contain first: the review outlasts a burst. Never after an action taken
-    # since the first copy, which may be a longer hold.
-    if suspect and not acted_since(history, first) and await claim("hold:" + key, FIRE_SECONDS):
-        await timeout_user(author_id, TIMEOUT_SECONDS)
+    # One hold and one review per post and the posts that look the same.
+    key = mine["content_hash"] if mine else message_id
+    # Contain first: the review outlasts a burst. The member's holds are
+    # shared by every fire, and one released as clean is not placed again.
+    if suspect and await hold_member(author_id, key, TIMEOUT_SECONDS):
         notice = "-# Investigating potential scam"
         if not thread_id or await send_message(notice, thread_id) is False:
             await send_message(notice)
     if not await claim("review:" + key, FIRE_SECONDS):
-        # A copy of a post confirmed since its first copy needs no second review.
-        if acted_since(history, first):
+        # Under review elsewhere: that fire's sweep removes this copy if it
+        # confirms. Already confirmed: this copy goes now, unreviewed.
+        if await claimed("bad:" + key):
             await delete_message(message_id, thread_id)
         return
     verdict = await review(text, attachments)
     if verdict.startswith("VIOLATION"):
-        await act_on_violation(history, suspect)
-    # Clean: lift the hold if one was placed (claiming it here stops a late
-    # fire placing one), unless the member was acted on meanwhile.
-    elif verdict == "CLEAN" and not await claim("hold:" + key, FIRE_SECONDS):
-        if not acted_since(await list_mod_actions(author_id, 5), first):
-            await remove_timeout(author_id)
+        await act_on_violation(history, suspect, key)
+    elif verdict == "CLEAN":
+        # Lifts the timeout only if no other post still needs it.
+        await release_hold(author_id, key)
 
 
 await run()
