@@ -73,10 +73,18 @@ notice (plus one more for its DM unless `dm=False`) — count it that way agains
 and remember a `mod_action`-triggered handler runs with 0 moderation actions, so it cannot warn.
 `remove_timeout(user_id)` lifts an active timeout and spends a moderation action exactly like the
 `timeout_user` it reverses — count it against the per-fire cap the same way.
+`hold_member(user_id, key, seconds)` and `release_hold(user_id, key)` are the safe pair for a
+timeout that a verdict may later lift (each spends a moderation action): a hold never shortens a
+longer timeout, and a release lifts the member's timeout only when no other key is still held and
+the timeout in place is a hold's own. A script that times a member out pending a review and lifts
+it on a clean verdict with bare `timeout_user` + `remove_timeout` can undo a moderator's timeout or
+another fire's hold when it fires concurrently — reject it (`actions_appropriate`) and say to use
+the hold pair. `claimed(key)` reads a claim without taking it and counts as a claim.
 `list_recent_messages(user_id)` (a lookup) returns where a member posted in the last two minutes —
-ids, shape and a `content_hash` that two rows share only when they carried the same text and files.
-Using it to spot one member posting the SAME file or link post in several channels within seconds,
-timing them out while ONE anchored review runs, and deleting every copy of that post once the
+ids, shape and a `content_hash` that two rows share when they carried the same text and files with
+the same names and sizes. The hash describes how a post looks; the files are never read.
+Using it to spot one member posting a same-looking file or link post in several channels within
+seconds, holding them while ONE anchored review runs, and deleting the same-hash rows once the
 review confirms a violation is targeted moderation, not blanket destruction. Deleting rows with a
 DIFFERENT `content_hash` on the strength of that one review is not: reject it
 (`actions_appropriate`). It must sit behind a cheap guard (the message carries an attachment or a

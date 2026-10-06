@@ -8,6 +8,9 @@ TypeError reach production.
 from __future__ import annotations
 
 import json
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
 
 import httpx
 import pytest
@@ -81,6 +84,80 @@ async def test_timeout_user():
     assert request.method == "PATCH"
     assert request.url.path.endswith("/guilds/G1/members/U1")
     assert "communication_disabled_until" in json.loads(request.content)
+
+
+def _member_actor(member: dict | None, status_code: int = 200) -> AdminActor:
+    """An actor whose member endpoint answers with ``member``."""
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(status_code, json=member)
+
+    return AdminActor(
+        bot_token="t", guild_id="G1", transport=httpx.MockTransport(handle)
+    )
+
+
+async def test_set_timeout_until_returns_the_expiry_discord_stored():
+    # Discord may keep less precision than it was sent; what it kept is what a
+    # later read returns, so that is the value handed back.
+    asked = datetime(2026, 10, 5, 16, 15, 0, 123456, tzinfo=UTC)
+    stored = "2026-10-05T16:15:00.123000+00:00"
+    actor = _member_actor({"communication_disabled_until": stored})
+
+    assert await actor.set_timeout_until("U1", asked, 300) == datetime.fromisoformat(
+        stored
+    )
+
+
+async def test_set_timeout_until_falls_back_to_what_it_sent():
+    requests: list[httpx.Request] = []
+    asked = datetime(2026, 10, 5, 16, 15, tzinfo=UTC)
+
+    assert await _actor(requests).set_timeout_until("U1", asked, 300) == asked
+
+    assert json.loads(requests[0].content) == {
+        "communication_disabled_until": "2026-10-05T16:15:00+00:00"
+    }
+
+
+async def test_set_timeout_until_is_none_for_a_member_who_left():
+    asked = datetime(2026, 10, 5, 16, 15, tzinfo=UTC)
+
+    assert await _member_actor({}, status_code=404).set_timeout_until(
+        "U1", asked, 300
+    ) is None
+
+
+async def test_timeout_until_reads_a_running_timeout():
+    until = datetime.now(UTC) + timedelta(hours=1)
+    actor = _member_actor(
+        {"communication_disabled_until": until.isoformat().replace("+00:00", "Z")}
+    )
+
+    assert await actor.timeout_until("U1") == until
+
+
+@pytest.mark.parametrize(
+    "member",
+    [
+        {},
+        {"communication_disabled_until": None},
+        # Discord leaves a lapsed timeout on the member until the next change.
+        {"communication_disabled_until": "2020-01-01T00:00:00+00:00"},
+        {"communication_disabled_until": "not a time"},
+    ],
+)
+async def test_timeout_until_is_none_when_the_member_is_free(member):
+    assert await _member_actor(member).timeout_until("U1") is None
+
+
+async def test_timeout_until_is_none_for_a_member_who_left():
+    assert await _member_actor({}, status_code=404).timeout_until("U1") is None
+
+
+async def test_timeout_until_raises_on_any_other_failure():
+    with pytest.raises(AdminActionError):
+        await _member_actor({}, status_code=500).timeout_until("U1")
 
 
 async def test_remove_timeout():

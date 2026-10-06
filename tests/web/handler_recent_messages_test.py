@@ -122,13 +122,13 @@ def test_entry_without_link_or_files():
 
 def test_copies_of_one_post_share_a_hash_whatever_the_channel_or_upload():
     # The same text and the same files pasted into two channels: every upload
-    # gets its own CDN url, and the text may differ in case and spacing.
+    # gets its own CDN url.
     first = _context(
-        NOW, message_content="Free  crypto, claim now", attachments=[_file()]
+        NOW, message_content="Free crypto, claim now", attachments=[_file()]
     )
     second = _context(
         NOW + timedelta(seconds=2),
-        message_content="free crypto, CLAIM now ",
+        message_content="Free crypto, claim now",
         attachments=[_file() | {"url": "https://cdn.example/other-upload/1.png"}],
     )
     assert content_hash(first) == content_hash(second)
@@ -139,6 +139,9 @@ def test_copies_of_one_post_share_a_hash_whatever_the_channel_or_upload():
     "change",
     [
         {"message_content": "free crypto, claim today"},
+        # Text is compared as written: a link's path is case-sensitive.
+        {"message_content": "free crypto, claim now https://x.example/AbC"},
+        {"message_content": "free crypto,  claim now https://x.example/abc"},
         {"attachments": [_file(size=51_000)]},
         {"attachments": [_file("2.png")]},
         {"attachments": [_file(), _file("2.png")]},
@@ -149,10 +152,22 @@ def test_copies_of_one_post_share_a_hash_whatever_the_channel_or_upload():
 def test_a_different_post_has_a_different_hash(change):
     # Two screenshots both named image.png differ in size; another member's
     # identical post is not comparable either.
-    post = {"message_content": "free crypto, claim now", "attachments": [_file()]}
+    post = {
+        "message_content": "free crypto, claim now https://x.example/abc",
+        "attachments": [_file()],
+    }
     assert content_hash(_context(NOW, **post)) != content_hash(
         _context(NOW, **(post | change))
     )
+
+
+def test_the_hash_describes_a_post_and_does_not_prove_its_files_are_the_same():
+    # The files are never read. Two different files with one name and one
+    # size, under the same text, look the same to the hash: that is its limit,
+    # and why the docs call it "looks the same" rather than "is the same".
+    one = _context(NOW, attachments=[_file() | {"url": "https://cdn.example/a"}])
+    other = _context(NOW, attachments=[_file() | {"url": "https://cdn.example/b"}])
+    assert content_hash(one) == content_hash(other)
 
 
 def test_hash_does_not_depend_on_the_order_files_were_attached():

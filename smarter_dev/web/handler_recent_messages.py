@@ -9,8 +9,10 @@ author's notes back with ``list_recent_messages`` — once when a message arrive
 (is this a burst?) and again when the verdict lands (which messages to remove).
 
 What is kept: the channel, the message id, when it was posted, how many files
-it carried, whether it carried a link, and a short hash of what it carried so
-copies of one post can be told from two different posts. Never the text. Each author's set holds at most :data:`MAX_RECENT_MESSAGES` notes. A
+it carried, whether it carried a link, and a short hash of its text and its
+file names and sizes, so posts that look the same can be told from posts that
+do not. Never the text, and never a file. Each author's set holds at most
+:data:`MAX_RECENT_MESSAGES` notes. A
 note is never read back after :data:`RECENT_MESSAGES_TTL_SECONDS`; it is erased
 by the author's next message after that, or with the whole key that long after
 their last message — so no later than twice that after it was written.
@@ -51,21 +53,25 @@ def message_posted_at(message_id: str, fallback: datetime) -> datetime:
 
 
 def content_hash(trigger_context: dict) -> str:
-    """A short hash of what a message carried: its text and its files.
+    """A short hash of how a message looks: its exact text and its files.
 
-    Two messages share it only when the text matches (ignoring case and
-    spacing) and the files have the same names and sizes. That is what one scam
-    pasted into several channels looks like, and what two different screenshots
-    do not. The author id is mixed in, so a hash is only comparable within one
-    member's notes.
+    Two messages share it when the text is the same character for character
+    and the files have the same names and sizes. That is what one scam pasted
+    into several channels looks like. It is a description, not proof: the
+    files themselves are never read, so two different files with one name and
+    one size hash alike. The author id is mixed in, so a hash is only
+    comparable within one member's notes.
     """
     files = sorted(
         [str(item.get("filename") or ""), item.get("size")]
         for item in trigger_context.get("attachments") or []
     )
-    text = " ".join((trigger_context.get("message_content") or "").split())
     carried = json.dumps(
-        [str(trigger_context.get("author_id") or ""), text.casefold(), files],
+        [
+            str(trigger_context.get("author_id") or ""),
+            trigger_context.get("message_content") or "",
+            files,
+        ],
         default=str,
     )
     return hashlib.sha256(carried.encode("utf-8")).hexdigest()[:16]
