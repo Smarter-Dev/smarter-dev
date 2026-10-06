@@ -27,7 +27,9 @@ uv run python -m scripts.proactive_eval.smoke_models --confirm-paid
 
 ## Dataset and split
 
-Use the existing `fetch_history.py`, `label_day.py`, replay, and scoring paths.
+Use the existing `label_day.py`, replay, and scoring paths. The history export
+(`fetch_history.py`) was removed in task #71, so no new channel-days can be
+pulled; this plan can only run on days pulled before then.
 Select at least 12 whole UTC channel-days from real guild history: six tuning
 and six held out. Split by channel-day (and keep adjacent days from one active
 conversation on the same side) so a conversation never leaks across splits.

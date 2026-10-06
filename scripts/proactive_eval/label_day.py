@@ -7,6 +7,9 @@ For every human default/reply message in a stage-1 fixture, asks a headless
 <fixture-stem>.labels.json next to the fixture. `ok_to_respond` is derived in
 code (anyone or bot), never by the judge.
 
+Stage-1 fixtures came from fetch_history.py, removed in task #71, so this only
+runs on days pulled before then.
+
 Chunks are cached under data/.label_cache/<fixture-stem>/ so an interrupted
 run resumes where it left off; --force relabels from scratch.
 

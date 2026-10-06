@@ -12,6 +12,9 @@ Outputs one combined run record (with channel-targeting metrics) plus one
 score_run-compatible per-channel record per fixture, so the existing judge
 pipeline scores each channel's responses against its own transcript.
 
+Days were pulled by fetch_history.py, removed in task #71, so this only runs
+on days pulled before then.
+
 Usage:
     uv run python -m scripts.proactive_eval.run_guildwide \
         scripts/proactive_eval/data/<fixture-a>.jsonl \
