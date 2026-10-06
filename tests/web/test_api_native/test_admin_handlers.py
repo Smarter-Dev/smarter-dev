@@ -13,12 +13,16 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import UTC
 from datetime import datetime
+from datetime import timedelta
 
 import pytest
 from litestar.di import Provide
 from litestar.plugins.pydantic import PydanticPlugin
+from litestar.testing import AsyncTestClient
 from litestar.testing import TestClient
+from litestar.testing import create_async_test_client
 from litestar.testing import create_test_client
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -27,6 +31,7 @@ from smarter_dev.shared.database import Base
 from smarter_dev.web import handler_recurrence
 from smarter_dev.web.api_native import admin_handlers as admin_handlers_module
 from smarter_dev.web.api_native.admin_handlers import AdminHandlerController
+from smarter_dev.web.models import AdminHandler
 
 
 class _StubJobHandle:
@@ -90,6 +95,24 @@ def client(db_session, submitted) -> Iterator[TestClient]:
             yield test_client
     finally:
         admin_handlers_module.BOT_API_GUARDS[:] = original_guards
+
+
+@pytest.fixture
+def no_guards():
+    """Guards bypassed, as for ``client``, for a test that builds its own app."""
+    original_guards = list(admin_handlers_module.BOT_API_GUARDS)
+    admin_handlers_module.BOT_API_GUARDS.clear()
+    yield
+    admin_handlers_module.BOT_API_GUARDS[:] = original_guards
+
+
+def _async_client(db_session) -> AsyncTestClient:
+    """The same app as ``client``, for a test that also drives the session."""
+    return create_async_test_client(
+        route_handlers=[AdminHandlerController],
+        plugins=[PydanticPlugin()],
+        dependencies={"db_session": Provide(lambda: db_session, sync_to_thread=False)},
+    )
 
 
 def _body(**over):
@@ -222,6 +245,198 @@ def test_edit_admin_handler(client):
     assert resp.status_code == 200
     assert resp.json()["channel_ids"] == ["MODCHAT"]
     assert resp.json()["description"] == "ban scammers politely"
+
+
+def _script_of(client, handler_id: str) -> dict:
+    rows = client.get(
+        "/api/admin/handlers", params={"guild_id": "G1", "include_scripts": "true"}
+    ).json()
+    return next(r for r in rows if r["handler_id"] == handler_id)
+
+
+async def test_replace_script_changes_the_script_and_nothing_else(
+    db_session, submitted, no_guards
+):
+    # A handler somebody disabled, with settings and a scope. The script-only
+    # write must change the script and leave every one of those as it was —
+    # the full update would switch the handler back on.
+    record = AdminHandler(
+        guild_id="G1",
+        name="scam-banner",
+        trigger_type="message",
+        settings={"include_bot_messages": True},
+        channel_ids=["C1"],
+        description="ban scammers",
+        script="old = 1\n",
+        created_by_admin="A1",
+        enabled=False,
+    )
+    db_session.add(record)
+    await db_session.commit()
+    handler_id = str(record.id)
+
+    async with _async_client(db_session) as client:
+        resp = await client.put(
+            f"/api/admin/handlers/{handler_id}/script",
+            json={"script": "new = 2\n", "expected_script": "old = 1\n"},
+        )
+        assert resp.status_code == 200
+        rows = (
+            await client.get(
+                "/api/admin/handlers",
+                params={"guild_id": "G1", "include_scripts": "true"},
+            )
+        ).json()
+
+    after = next(r for r in rows if r["handler_id"] == handler_id)
+    assert after["script"] == "new = 2\n"
+    assert after["enabled"] is False
+    assert after["description"] == "ban scammers"
+    assert after["settings"] == {"include_bot_messages": True}
+    assert after["channel_ids"] == ["C1"]
+    assert after["name"] == "scam-banner"
+
+
+def test_replace_script_refuses_when_the_script_moved(client):
+    created = client.post("/api/admin/handlers", json=_body()).json()
+    handler_id = created["handler_id"]
+    client.put(
+        f"/api/admin/handlers/{handler_id}/script",
+        json={"script": "first = 1\n", "expected_script": _body()["script"]},
+    )
+
+    resp = client.put(
+        f"/api/admin/handlers/{handler_id}/script",
+        json={"script": "second = 2\n", "expected_script": _body()["script"]},
+    )
+
+    assert resp.status_code == 409
+    assert "changed since it was read" in resp.text
+    assert _script_of(client, handler_id)["script"] == "first = 1\n"
+
+
+async def test_replace_script_lets_only_one_of_two_stale_readers_through(
+    db_session, submitted, no_guards
+):
+    # Two editors read the same script. Each session holds its own copy of
+    # the row, so a check against the loaded record would pass for both and
+    # the second write would quietly replace the first. The check has to be
+    # the database's: the write lands only where the script is still what
+    # was read.
+    record = AdminHandler(
+        guild_id="G1",
+        name="scam-banner",
+        trigger_type="message",
+        settings={},
+        channel_ids=[],
+        description="ban scammers",
+        script="old = 1\n",
+        created_by_admin="A1",
+    )
+    db_session.add(record)
+    await db_session.commit()
+    handler_id = str(record.id)
+    other_session = async_sessionmaker(db_session.bind, expire_on_commit=False)()
+    # Both sessions now hold the old script.
+    assert (await other_session.get(AdminHandler, record.id)).script == "old = 1\n"
+    assert (await db_session.get(AdminHandler, record.id)).script == "old = 1\n"
+
+    async with _async_client(other_session) as first:
+        first_write = await first.put(
+            f"/api/admin/handlers/{handler_id}/script",
+            json={"script": "first = 1\n", "expected_script": "old = 1\n"},
+        )
+    async with _async_client(db_session) as second:
+        second_write = await second.put(
+            f"/api/admin/handlers/{handler_id}/script",
+            json={"script": "second = 2\n", "expected_script": "old = 1\n"},
+        )
+    await other_session.close()
+    # The column itself: a loaded record would only show its session's copy.
+    async with async_sessionmaker(db_session.bind)() as fresh:
+        stored = await fresh.scalar(
+            select(AdminHandler.script).where(AdminHandler.id == record.id)
+        )
+
+    assert first_write.status_code == 200
+    assert second_write.status_code == 409
+    assert stored == "first = 1\n"
+
+
+async def test_replace_script_reschedules_from_the_settings_in_the_row(
+    db_session, submitted, no_guards
+):
+    # A reader loaded the row, then somebody else's full update changed the
+    # interval and armed a new fire. The script write that follows must
+    # validate against, and re-arm from, the interval in the row now, and
+    # cancel the fire that is pending now, not the one it loaded.
+    record = AdminHandler(
+        guild_id="G1",
+        name="ticker",
+        trigger_type="schedule",
+        settings={"interval_seconds": 3600},
+        channel_ids=["MODCHAT"],
+        description="tick",
+        script='await send_message("tick", "MODCHAT")\n',
+        created_by_admin="A1",
+        scheduled_job_id="J0",
+    )
+    db_session.add(record)
+    await db_session.commit()
+    handler_id = str(record.id)
+    stale_session = async_sessionmaker(db_session.bind, expire_on_commit=False)()
+    # Kept referenced: the identity map holds its rows weakly, and a copy
+    # nobody holds is read again fresh, which is not the case under test.
+    stale_copy = await stale_session.get(AdminHandler, record.id)
+    assert stale_copy.settings == {"interval_seconds": 3600}
+
+    async with _async_client(db_session) as other:
+        edited = await other.put(
+            f"/api/admin/handlers/{handler_id}",
+            json={
+                "description": "tick",
+                "script": 'await send_message("tick", "MODCHAT")\n',
+                "settings": {"interval_seconds": 600},
+                "channel_ids": ["MODCHAT"],
+            },
+        )
+    assert edited.status_code == 200
+    assert _StubJobHandle.cancelled == ["J0"]
+    ((_, armed_by_edit),) = submitted
+    async with _async_client(stale_session) as stale:
+        before = datetime.now(UTC)
+        replaced = await stale.put(
+            f"/api/admin/handlers/{handler_id}/script",
+            json={
+                "script": 'await send_message("tock", "MODCHAT")\n',
+                "expected_script": 'await send_message("tick", "MODCHAT")\n',
+            },
+        )
+    assert stale_copy.settings == {"interval_seconds": 600}
+    await stale_session.close()
+
+    assert replaced.status_code == 200
+    assert _StubJobHandle.cancelled == ["J0", armed_by_edit["job_id"]]
+    (_, armed_by_replace) = submitted[-1]
+    assert armed_by_replace["scheduled_for"] - before < timedelta(seconds=600 + 5)
+    async with async_sessionmaker(db_session.bind)() as fresh:
+        stored = (
+            await fresh.execute(
+                select(AdminHandler.settings, AdminHandler.scheduled_job_id).where(
+                    AdminHandler.id == record.id
+                )
+            )
+        ).one()
+    assert stored.settings == {"interval_seconds": 600}
+    assert stored.scheduled_job_id == armed_by_replace["job_id"]
+
+
+def test_replace_script_on_unknown_handler_is_404(client):
+    resp = client.put(
+        "/api/admin/handlers/00000000-0000-0000-0000-000000000000/script",
+        json={"script": "x = 1\n", "expected_script": ""},
+    )
+    assert resp.status_code == 404
 
 
 def test_edit_admin_rename_collision_is_conflict(client):

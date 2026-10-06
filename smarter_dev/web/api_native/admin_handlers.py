@@ -45,6 +45,7 @@ from skrift.auth.guards import Permission
 from skrift.workers import get_handle
 from sqlalchemy import func
 from sqlalchemy import select
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
@@ -94,6 +95,20 @@ class UpdateAdminHandlerRequest(BaseModel):
     channel_ids: list[str] = Field(default_factory=list)
     # Optional rename; omitted = keep the current name.
     name: str | None = None
+
+
+class ReplaceScriptRequest(BaseModel):
+    """Change a handler's script and nothing else.
+
+    ``expected_script`` is the script the caller read; the change is refused
+    when the handler's script is no longer that, so two editors cannot
+    overwrite each other unknowingly. What the full update touches —
+    description, settings, scope, name, whether the handler is enabled — is
+    left as it is.
+    """
+
+    script: str
+    expected_script: str
 
 
 class AdminHandlerResponse(BaseModel):
@@ -272,6 +287,54 @@ class AdminHandlerController(Controller):
             except ScheduleError as exc:
                 raise plain_error(422, str(exc)) from exc
 
+        await db_session.commit()
+        await db_session.refresh(record)
+        return _to_response(record)
+
+    @put("/{handler_id:str}/script", status_code=HTTP_200_OK, guards=BOT_API_GUARDS)
+    async def replace_admin_handler_script(
+        self,
+        db_session: AsyncSession,
+        handler_id: str,
+        data: ReplaceScriptRequest,
+    ) -> AdminHandlerResponse:
+        """Put a reviewed script on a handler (``scripts/apply_handler_script.py``).
+
+        A disabled handler stays disabled, unlike the full update, which
+        enables on every write.
+        """
+        parsed_handler_id = parse_uuid_path(handler_id, "handler_id")
+        record = await db_session.get(AdminHandler, parsed_handler_id)
+        if record is None:
+            raise plain_error(404, "admin handler not found")
+        # The check and the write are one statement, so two callers who both
+        # read the old script cannot both get past it: the row matches only
+        # while the script is still what the caller read, and the one that
+        # matched holds the row until commit. Comparing the loaded record
+        # would let both through, each against its own stale copy.
+        written = await db_session.execute(
+            update(AdminHandler)
+            .where(
+                AdminHandler.id == parsed_handler_id,
+                AdminHandler.script == data.expected_script,
+            )
+            .values(script=data.script)
+            .execution_options(synchronize_session=False)
+        )
+        if written.rowcount != 1:
+            raise plain_error(
+                409, "the admin handler's script has changed since it was read"
+            )
+        # The row is ours until commit; read it again so the settings and
+        # job id below are the ones in it now, not the ones loaded before
+        # another writer's edit went through.
+        await db_session.refresh(record)
+        # A scheduled handler's settings are validated against its script.
+        if record.trigger_type in _TIME_TRIGGERS:
+            try:
+                await _reschedule(record)
+            except ScheduleError as exc:
+                raise plain_error(422, str(exc)) from exc
         await db_session.commit()
         await db_session.refresh(record)
         return _to_response(record)
