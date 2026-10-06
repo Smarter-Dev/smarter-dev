@@ -171,6 +171,9 @@ class BlockedUsers(BaseModel):
 
     revision: int = Field(ge=0)
     user_ids: list[Snowflake]
+    # People who opted back in (#92): their messages written before the time
+    # stay hidden. Never holds someone in ``user_ids``.
+    read_from: dict[Snowflake, AwareDatetime] = Field(default_factory=dict)
 
 
 _ASCII_NAME = re.compile(r"[a-z0-9_ ]+")

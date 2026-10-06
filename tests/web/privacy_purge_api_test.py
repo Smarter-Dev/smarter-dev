@@ -1,6 +1,6 @@
 """HTTP-level tests for the privacy bot API (``/api/privacy``), real guards on.
 
-Both routes sit behind the bot-API key. A missing key, an unknown ``sk_`` key
+Every route sits behind the bot-API key. A missing key, an unknown ``sk_`` key
 and a valid key without the ``bot-api`` permission are all refused before the
 handler runs. Skrift's guard answers 401 for each, including "insufficient
 permissions" (it raises ``NotAuthorizedException``, never 403).
@@ -75,16 +75,22 @@ def guarded_client() -> Iterator[TestClient]:
 _ROUTES = [
     ("get", "/api/privacy/blocked-users", None),
     ("post", f"/api/privacy/purges/{uuid.uuid4()}/acks", _ACK),
+    ("post", "/api/privacy/opt-out/state", {"discord_user_id": "1" * 18}),
+    ("put", "/api/privacy/opt-out", {"discord_user_id": "1" * 18, "opted_out": True}),
 ]
 
 
-@pytest.mark.parametrize(("method", "path", "body"), _ROUTES, ids=["blocked-users", "acks"])
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    _ROUTES,
+    ids=["blocked-users", "acks", "opt-out-state", "opt-out-change"],
+)
 @pytest.mark.parametrize(
     "headers",
     [{}, {"Authorization": f"Bearer {_WRONG_KEY}"}, {"Authorization": f"Bearer {_GOOD_KEY}"}],
     ids=["no-key", "wrong-key", "key-without-bot-api"],
 )
-def test_both_routes_refuse_without_a_bot_api_key(guarded_client, method, path, body, headers):
+def test_every_route_refuses_without_a_bot_api_key(guarded_client, method, path, body, headers):
     kwargs = {"headers": headers}
     if body is not None:
         kwargs["json"] = body

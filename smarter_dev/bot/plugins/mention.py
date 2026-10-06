@@ -13,6 +13,7 @@ Responsibilities:
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -280,6 +281,48 @@ def _bot_was_engaged(event: hikari.MessageCreateEvent, bot_user_id: int) -> bool
     return False
 
 
+OPTED_OUT_NOTICE = (
+    "You are opted out of the AI assistant, so it does not read or answer your "
+    "messages. Run /privacy to change that."
+)
+# One notice per person per 10 minutes, per process: enough to explain the
+# silence without answering every mention. Kept in memory, so no store holds
+# who is opted out beyond the list itself.
+OPTED_OUT_NOTICE_INTERVAL_SECONDS = 600
+_opted_out_notice_at: dict[int, float] = {}
+
+
+async def _maybe_send_opted_out_notice(bot: Any, event: hikari.MessageCreateEvent) -> None:
+    """Tell an opted-out person who engaged the bot why it stays silent.
+
+    No model call and nothing about their message is read beyond whether it
+    mentions or replies to the bot. The reply pings no one.
+    """
+    bot_user = bot.get_me()
+    if not bot_user or not _bot_was_engaged(event, bot_user.id):
+        return
+    now = time.monotonic()
+    for user_id, sent_at in list(_opted_out_notice_at.items()):
+        if now - sent_at >= OPTED_OUT_NOTICE_INTERVAL_SECONDS:
+            del _opted_out_notice_at[user_id]
+    author_id = event.message.author.id
+    if author_id in _opted_out_notice_at:
+        return
+    _opted_out_notice_at[author_id] = now
+    try:
+        await bot.rest.create_message(
+            event.channel_id,
+            OPTED_OUT_NOTICE,
+            reply=event.message,
+            mentions_reply=False,
+            user_mentions=False,
+            role_mentions=False,
+            mentions_everyone=False,
+        )
+    except Exception:
+        log_exception(logger, "Failed to send the opted-out notice", level=logging.WARNING)
+
+
 async def _activate_engine(registry: Any, event: hikari.MessageCreateEvent) -> None:
     """Run the shared activation pipeline for a triggering message.
 
@@ -347,10 +390,14 @@ async def on_message_create(event: hikari.GuildMessageCreateEvent) -> None:
         return
     if not event.guild_id:
         return
-    # A blocked author engaging the bot gets no response and no model call
-    # (no notice either; that is #74). Before the blocked-users list has
-    # loaded everyone counts as blocked, so a cold start answers no one.
-    if get_blocked_users().is_blocked(event.message.author.id):
+    # A blocked author engaging the bot gets no response and no model call,
+    # only a short notice that they are opted out (#92). Before the
+    # blocked-users list has loaded everyone counts as blocked, so a cold
+    # start answers no one, notice included.
+    blocked = get_blocked_users()
+    if blocked.is_blocked(event.message.author.id):
+        if blocked.loaded:
+            await _maybe_send_opted_out_notice(plugin.bot, event)
         return
 
     bot_user = plugin.bot.get_me()

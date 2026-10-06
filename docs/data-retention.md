@@ -511,6 +511,27 @@ public notice is `/privacy` (`smarter_dev/shared/privacy_notice.md`); the
 admin's steps, including what is kept and what cannot be removed yet, are in
 `docs/privacy-deletion-runbook.md`.
 
+## The AI assistant opt-out and the block list
+
+`chat_bot_blocked_users` lists the Discord users whose messages neither
+runtime (the bot and the external proactive-agent worker) passes to a model;
+each refreshes it every 60 seconds and reads a listed person's messages as
+`[BLOCKED BY USER]`. A row holds the Discord user id, a `source` and its
+timestamps, never a reason. There are two sources:
+
+- `purge`: an admin's deletion request (#79). Permanent, so the deletion
+  stays true; a purge turns an existing `opt_out` row into a `purge` row.
+- `opt_out`: the person opted out of the AI assistant with the button under
+  `/privacy` (#92). Opting out deletes nothing the assistant already holds.
+  The row stays until the person opts back in, which removes it.
+
+Opting back in applies to new messages only, so it leaves one row in
+`chat_bot_opt_ins`: the Discord user id and the moment (`read_from`). Both
+runtimes keep hiding that person's messages written before it, which Discord
+history would otherwise hand back. The row is kept for as long as the person
+stays opted in; opting out again or a purge deletes it. Every change to
+either table bumps `chat_bot_blocked_users_revision`.
+
 ## Security logs
 
 Security events are structured logs, not database rows. Three kinds are

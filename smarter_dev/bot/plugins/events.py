@@ -25,6 +25,7 @@ from smarter_dev.bot.plugins.model_override import handle_model_override_reset
 from smarter_dev.bot.plugins.model_override import handle_model_override_save
 from smarter_dev.bot.plugins.model_override import handle_model_override_select
 from smarter_dev.bot.plugins.model_override import handle_model_override_drafter_select
+from smarter_dev.bot.privacy import opt_out
 from smarter_dev.bot.utils.error_responses import respond_with_error_card
 from smarter_dev.bot.views.beacon_views import handle_beacon_modal_submit
 from smarter_dev.shared.exception_logging import log_exception
@@ -279,6 +280,10 @@ async def handle_component_interaction(event: hikari.InteractionCreateEvent) -> 
             await handle_model_override_reset(event)
         elif custom_id.startswith("model_budget_fallback:"):
             await handle_model_budget_fallback(event)
+        elif custom_id.startswith(opt_out.CUSTOM_ID_PREFIX):
+            await opt_out.handle_interaction(
+                event, getattr(event.app, "d", {}).get("privacy_service")
+            )
         else:
             logger.warning(f"Unhandled component interaction: {custom_id}")
 

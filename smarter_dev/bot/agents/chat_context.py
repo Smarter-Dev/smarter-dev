@@ -212,7 +212,7 @@ async def _convert(
     window_ids = {msg.id for msg in raw_messages}
     messages: list[Message] = []
     for msg in raw_messages:
-        if blocked.is_blocked(msg.author.id):
+        if blocked.is_blocked(msg.author.id, msg.id):
             # Position only: no id, author, time, reply, mentions or files.
             messages.append(
                 Message(message_id="", author_id="", body="", blocked=True)
@@ -227,7 +227,7 @@ async def _convert(
         )
         ref = getattr(msg, "referenced_message", None)
         ref_author = getattr(ref, "author", None) if ref is not None else None
-        if ref_author is not None and blocked.is_blocked(ref_author.id):
+        if ref_author is not None and blocked.is_blocked(ref_author.id, ref.id):
             # A reply to a blocked author's message names nothing about it.
             ref = None
             ref_author = None
@@ -323,7 +323,7 @@ async def _build_authors(
     blocked = get_blocked_users()
     seen: dict[int, hikari.User] = {}
     for msg in messages:
-        if blocked.is_blocked(msg.author.id):
+        if blocked.is_blocked(msg.author.id, msg.id):
             continue
         if msg.author.id not in seen:
             seen[msg.author.id] = msg.author

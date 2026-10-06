@@ -57,6 +57,7 @@ from uuid import UUID
 from uuid import uuid4
 
 from pydantic import ValidationError
+from sqlalchemy import delete
 from sqlalchemy import select
 from sqlalchemy import update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -85,6 +86,7 @@ from smarter_dev.web.models import ChatAgentMemoryRevision
 from smarter_dev.web.models import ChatAgentTurn
 from smarter_dev.web.models import ChatBotBlockedUser
 from smarter_dev.web.models import ChatBotBlockedUsersRevision
+from smarter_dev.web.models import ChatBotOptIn
 from smarter_dev.web.models import ChatBotPurgeRequest
 from smarter_dev.web.models import ProactiveAgentHistory
 from smarter_dev.web.models import ProactiveChannelSettings
@@ -146,16 +148,35 @@ async def add_blocked_user(
     Adding someone already listed changes nothing and returns the current
     revision, which is what makes a repeated request safe. Both inserts are
     ``ON CONFLICT DO NOTHING`` and the revision is bumped by the database, so
-    two admins blocking at once never collide.
+    two admins blocking at once never collide. The one exception: a purge of
+    someone who opted out turns their row into a ``purge`` row, so opting
+    back in cannot undo the deletion. Membership is unchanged, so the
+    revision is too.
     """
     insert = _insert(session)
+    # Blocked outright, an opt-in time is moot; keep no second row with the id.
+    await session.execute(
+        delete(ChatBotOptIn).where(ChatBotOptIn.discord_user_id == discord_user_id)
+    )
     added = await session.execute(
         insert(ChatBotBlockedUser)
         .values(discord_user_id=discord_user_id, source=source)
         .on_conflict_do_nothing(index_elements=["discord_user_id"])
     )
     if not added.rowcount:
+        if source == BLOCK_SOURCE_PURGE:
+            await session.execute(
+                update(ChatBotBlockedUser)
+                .where(ChatBotBlockedUser.discord_user_id == discord_user_id)
+                .values(source=BLOCK_SOURCE_PURGE)
+            )
         return await block_list_revision(session)
+    return await bump_block_list_revision(session)
+
+
+async def bump_block_list_revision(session: AsyncSession) -> int:
+    """Bump the block list's revision after a change to it; return the new one."""
+    insert = _insert(session)
     await session.execute(
         insert(ChatBotBlockedUsersRevision)
         .values(id=1, revision=0)
@@ -176,7 +197,26 @@ async def read_blocked_users(session: AsyncSession) -> BlockedUsers:
     # enforcing a revision whose user it is still reading).
     revision = await block_list_revision(session)
     user_ids = (await session.scalars(select(ChatBotBlockedUser.discord_user_id))).all()
-    return BlockedUsers(revision=revision, user_ids=sorted(user_ids))
+    opted_in = (
+        await session.execute(
+            select(ChatBotOptIn.discord_user_id, ChatBotOptIn.read_from)
+        )
+    ).all()
+    blocked = set(user_ids)
+    return BlockedUsers(
+        revision=revision,
+        user_ids=sorted(user_ids),
+        read_from={
+            user_id: _utc(read_from)
+            for user_id, read_from in opted_in
+            if user_id not in blocked
+        },
+    )
+
+
+def _utc(moment: datetime) -> datetime:
+    # SQLite (the tests) hands back naive datetimes; they were written as UTC.
+    return moment if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
 
 
 # -- the runtimes ------------------------------------------------------------------
