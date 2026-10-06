@@ -2,7 +2,7 @@ Smarter Dev runs a Discord server, a Discord bot and the smarter.dev website. Th
 
 ## The short version
 
-- The bot reads messages in the Discord servers it is in, so its features can work: the chat bot, moderation, bytes, squads, quests and challenges.
+- The bot reads messages in the Smarter Dev Discord server, so its features can work: the chat bot, moderation, bytes, squads, quests and challenges.
 - The chat bot keeps permanent memories about the people it talks with, written in its own words and naming people by username and Discord ID.
 - Moderation history is kept forever to keep the server safe.
 - A deletion keeps moderation history, usage and cost records with your ID and name removed, and a few other records the full notice lists with the reason for each.
@@ -14,8 +14,8 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, DM an @admi
 
 ## What we store and why
 
-- **The Discord features.** The bot reads messages in the servers it is in so its features can work. It does not keep a copy of every message. It keeps your bytes balance and transfers, your squad, your quest and challenge submissions, your forum subscriptions, the commands you use and when you post, so those features work. While the bot or the AI works on a message, a posted file, a `/help` question or a web search, it holds a copy of what it is working on.
-- **The chat bot.** The chat bot keeps the messages of conversations it takes part in or watches, with its notes and summaries of them, so it can follow along. It also keeps a memory for each server, in its own words, about the people there and how it should behave there, so it knows the server from one day to the next. It names people by username and Discord ID, and it is told not to keep anything private, sensitive or shared in confidence.
+- **The Discord features.** The bot reads messages in the Smarter Dev Discord server so its features can work. It does not keep a copy of every message. It keeps your bytes balance and transfers, your squad, your quest and challenge submissions, your forum subscriptions, the commands you use and when you post, so those features work. While the bot or the AI works on a message, a posted file, a `/help` question or a web search, it holds a copy of what it is working on.
+- **The chat bot.** The chat bot keeps the messages of conversations it takes part in or watches, with its notes and summaries of them, so it can follow along. It also keeps one memory of the server, in its own words, about the people there and how it should behave there, so it knows the server from one day to the next. It names people by username and Discord ID, and it is told not to keep anything private, sensitive or shared in confidence.
 - **Moderation.** Every moderation action taken on a member. The bot also posts those actions, and edited and deleted messages with their text, to the server's log channels. Moderators use these to keep the server safe.
 - **Server automations.** Text from a message that an automation set up by a server admin chose to keep, so the automation can do its job.
 - **Records of what the AI did.** Who and which channel it concerned, when, what it cost and what it decided, but not the text of any message or reply, so we can check its behaviour and cost.
@@ -54,7 +54,7 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, DM an @admi
 These stay after a deletion request:
 
 - **Moderation history**, including the bot's posts to the server's log channels. It is kept forever to keep the server safe.
-- **The chat bot's memories.** They are how the chat bot knows each server, so they are never reset. A request removes you from them.
+- **The chat bot's memories.** They are how the chat bot knows the server, so they are never reset. A request removes you from them.
 - **Records of usage, cost and what the AI and automations did**, such as which messages and channels were involved and what was done, with your ID and name removed. We need them to track our costs and check how the AI behaves.
 - **Bytes transfers** you sent or received, in the other member's history with your ID and name removed, so their history stays correct.
 - **Your Discord ID alone on the chat bot's blocked list**, so the chat bot keeps leaving you out (see below).

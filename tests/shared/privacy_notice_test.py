@@ -41,6 +41,7 @@ def test_the_short_version_carries_the_required_statements():
     points = " ".join(short_version())
     assert len(short_version()) == 5
     assert "permanent memories" in points
+    assert "The bot reads messages in the Smarter Dev Discord server, so its features can work" in points
     assert "Moderation history is kept forever to keep the server safe." in points
     assert "deletion request" not in points
     assert "A deletion keeps moderation history, usage and cost records with your ID and name removed, and a few other records the full notice lists" in points
@@ -73,6 +74,14 @@ def test_the_notice_is_laid_out_as_a_policy(notice):
     stored = _section(notice, "What we store and why")
     for word in ("Kept until", "Kept for", "kept permanently", "at most", "until you", "deleted when"):
         assert word not in stored
+
+
+def test_the_bot_is_in_one_server(notice):
+    lowered = notice.lower()
+    for plural in ("discord servers", "servers it is in", "each server", "every server", "for each guild"):
+        assert plural not in lowered
+    assert "one memory of the server" in _item(notice, "The chat bot.")
+    assert "The bot reads messages in the Smarter Dev Discord server, so its features can work" in channel_post(PUBLIC_URL)
 
 
 def test_every_deletion_request_goes_to_the_admin_role(notice):
@@ -277,7 +286,7 @@ def test_discord_drops_only_the_server_from_the_deletion_line():
         "DM an @admin or email admin@smarter.dev. We delete it within 30 days."
     )
     assert discord_points[:-1] == notice_points[:-1]
-    assert "Smarter Dev Discord server" not in channel_post(PUBLIC_URL)
+    assert channel_post(PUBLIC_URL).count("Smarter Dev Discord server") == 1
 
 
 def test_the_short_versions_give_the_email_address():
