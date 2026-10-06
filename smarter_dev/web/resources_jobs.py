@@ -15,6 +15,7 @@ from uuid import uuid4
 from pydantic import BaseModel
 from skrift.db.models.user import User
 from skrift.notifications import NotificationMode
+from skrift.notifications import clear_user_notifications
 from skrift.notifications import notify_user
 from skrift.workers import handler
 from sqlalchemy import select
@@ -125,6 +126,24 @@ async def _notify_safe(user_id: UUID, event: str, **payload) -> None:
         )
     except Exception:
         logger.exception("Resources notification failed after durable state commit")
+
+
+async def _clear_progress_safe(user_id: UUID) -> None:
+    """Delete the owner's queued progress notifications once a run is done.
+
+    The pipeline's progress (the restated question, the research steps and the
+    title) is sent as queued notifications to the owner's user queue, where
+    Skrift keeps them for ``notifications.queued_ttl_seconds``. A finished run
+    no longer needs them, so they go now; the lifetime is only the backstop.
+    The queue is per user, so this also clears progress from another run of
+    the same owner still in flight: that run's open page keeps what it shows,
+    only a reconnect's replay of its earlier steps is lost. A failure is
+    logged and never fails the run.
+    """
+    try:
+        await clear_user_notifications(str(user_id))
+    except Exception:
+        logger.exception("Clearing Resources progress notifications failed")
 
 
 @handler(
@@ -333,6 +352,7 @@ async def run_resources_job(payload: ResourcesRunPayload) -> dict:
             content_html=content_html,
             sdanswer_blocks=blocks,
         )
+        await _clear_progress_safe(owner_user_id)
         return {"status": "ok", "assistant_message_id": str(assistant.id)}
     except asyncio.CancelledError:
         raise
@@ -391,6 +411,7 @@ async def run_resources_job(payload: ResourcesRunPayload) -> dict:
             conversation_id=str(conversation_id),
             detail=detail,
         )
+        await _clear_progress_safe(owner_user_id)
         return {"status": "error"}
     finally:
         heartbeat.cancel()

@@ -32,11 +32,6 @@ Known exceptions:
   so a line lasts until its pod is replaced (every deploy replaces the app
   pods) or until enough newer output rotates it out (the kubelet defaults
   are five files of 10 MiB per container).
-- **Skrift's queued notifications** are kept for 24 hours. The progress
-  stream for a Resources answer is sent through them and holds the
-  restated question and the search queries. The limit is
-  `QUEUED_TTL_HOURS` in Skrift's `skrift/lib/notification_backends.py`, a
-  module constant, so bringing it to 6 hours needs a Skrift change.
 
 ## The rule
 
@@ -371,9 +366,19 @@ Skrift kept it, so Resources, title and blogging runs no longer appear there.
 
 Outside the worker tables, the Resources pipeline also
 sends the browser the restated question and its research steps, and the chat
-title, as queued Skrift notifications, which Skrift keeps in
-`stored_notifications` for 24 hours and deletes on a 10-minute cleanup loop:
-the notice rounds that up to 2 days.
+title, as queued Skrift notifications, stored in `stored_notifications`. They
+are in-flight work. When a run completes or fails for good, the job deletes
+the owner's queued notifications (`clear_user_notifications` in
+`smarter_dev/web/resources_jobs.py`); the queue is per user, so a second run
+of the same owner still in flight loses only its stored steps, not what its
+open page shows. A failed delete is logged and leaves them to the lifetime:
+`notifications.queued_ttl_seconds` in `app.yaml` is the 5-hour
+`IN_FLIGHT_SWEEP_WINDOW` (`tests/shared/notification_lifetime_test.py` pins
+the two together). Skrift never replays an older one, and its sweep runs
+every 10 minutes, so a stored copy is gone by 5 hours 10 minutes. A title
+generated after its run finished waits for that lifetime. Nothing here sends
+timeseries notifications, so their 7-day default is left alone. The notice
+still says 2 days, longer than any of this.
 
 The same job bounds Skrift's worker tables
 (`smarter_dev/web/worker_retention.py`), because Skrift's own pruner is not
@@ -456,7 +461,7 @@ change the notice in the same commit as anything here that raises a bound.
 | Games and community features: until a deletion request | User content | bytes balances and transactions, squad memberships, quest and challenge submissions and progress, member activity, forum subscriptions, `/help` and `/tldr` records, legacy `/scan` rows | No bound; member leave removes that guild's bytes balance and squad membership |
 | Rate limits and caches: 30 days | Operational | `chatlimit:*` (4-hour window, `user_message_limit.py`), `hcap:dmuser:*` (1 hour), `hdm:chan:*` (7 days, `handler_emitter.py`), `hclaim:*` (a script's claim, at most 30 days, `CLAIM_TTL_MAX_SECONDS` in `handler_caps.py`), `hrecent:*` (where a member posted, ids and a content hash, at most 4 minutes, `handler_recent_messages.py`), `hhold:*` (a member's live review holds, pruned at every write, at most 28 days and 5 minutes, `handler_holds.py`) | Longest is `hclaim:*` |
 | Your account: until the account is deleted; signed in 30 days after the last visit | User content; sign-in sessions operational | the site account, profile, linked Discord, GitHub and Google logins with the profile and tokens each provider gave (`oauth_accounts`), push subscriptions | Session `max_age` 30 days, rolling (`app.yaml`) |
-| Chat: until deleted; Resources questions until deleted; the AI's own copy of a Resources question, its research and its answer as soon as it finishes, or within 6 hours if it is cut off partway; the progress it shows for 2 days | User content; the AI's own copies are in-flight work | site chat conversations and attachments; Resources questions (`agent_messages`, `resource_agent_runs`), and an older `work_dispatches` row's copy while its run is unfinished (above); the Resources and chat-title agents' Skrift sessions and jobs; Skrift's queued notifications (24 hours) | The member deletes a chat or a question, or all of either, themselves (chat rail or Resources rail; Account → Security → Your data); each delete removes the rows, the uploaded files, a question's queued notifications and the `work_dispatches` rows. A chat's usage rows (`usage_cost_rows.details`) hold a copy of each model reply only while its turn runs, for crash recovery; the turn worker clears them when the turn ends, the hourly retention job clears any it missed, and a chat delete clears them too. Conversations, attachments and Resources conversations also go with the account (a queued job), which deletes the `work_dispatches` rows too. The agents' sessions are deleted when the pipeline or the title finishes, and their jobs' state is emptied (above). A session cut off partway stays until the hourly retention job deletes it, 5 hours after its last write (`SESSION_BACKSTOP`, the in-flight sweep window), so it is gone by 6 hours; runbook step 8 removes it for a request |
+| Chat: until deleted; Resources questions until deleted; the AI's own copy of a Resources question, its research and its answer as soon as it finishes, or within 6 hours if it is cut off partway; the progress it shows for 2 days | User content; the AI's own copies are in-flight work | site chat conversations and attachments; Resources questions (`agent_messages`, `resource_agent_runs`), and an older `work_dispatches` row's copy while its run is unfinished (above); the Resources and chat-title agents' Skrift sessions and jobs; Skrift's queued notifications (in-flight: deleted when the run finishes, 5-hour lifetime as the backstop) | The member deletes a chat or a question, or all of either, themselves (chat rail or Resources rail; Account → Security → Your data); each delete removes the rows, the uploaded files, a question's queued notifications and the `work_dispatches` rows. A chat's usage rows (`usage_cost_rows.details`) hold a copy of each model reply only while its turn runs, for crash recovery; the turn worker clears them when the turn ends, the hourly retention job clears any it missed, and a chat delete clears them too. Conversations, attachments and Resources conversations also go with the account (a queued job), which deletes the `work_dispatches` rows too. The agents' sessions are deleted when the pipeline or the title finishes, and their jobs' state is emptied (above). A session cut off partway stays until the hourly retention job deletes it, 5 hours after its last write (`SESSION_BACKSTOP`, the in-flight sweep window), so it is gone by 6 hours; runbook step 8 removes it for a request |
 | Searches: until deleted; searches made with a search link while signed out 30 minutes | User content; signed-out searches in-flight | dashboard searches; anonymous search keys (`TTL_SECONDS` in `smarter_dev/web/web_search/anonymous.py`), each holding the search text, queries, results, answer, the link owner's ID and the browser session that ran it | The member deletes a search, or all of them, themselves (the search page; Account → Security → Your data), with its `work_dispatches` row. Account deletion removes the searches and the search link (no foreign key, so the job deletes them explicitly); runbook step 5.1 only catches accounts deleted before that |
 | Email: until a deletion request | User content | campaign and waitlist signups | No bound |
 | Security: 30 days in Pydantic Logfire | Operational | security events (below) | Logfire organisation retention |
