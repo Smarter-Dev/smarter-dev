@@ -88,6 +88,7 @@ def test_the_page_shows_the_whole_notice(client):
     html = client.get(PRIVACY_PATH).text
     assert 'href="mailto:admin@smarter.dev"' in html
     assert 'href="https://discord.gg/de8kajxbYS"' in html
+    assert 'href="https://smarter.dev/account/security#your-data"' in html
 
 
 def test_the_page_uses_the_site_layout_and_says_when_it_was_updated(client):
