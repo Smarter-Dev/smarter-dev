@@ -111,6 +111,14 @@ def test_the_bot_is_in_one_server(notice):
     assert "Messages, reactions and commands you post in the server." in notice
 
 
+def test_the_bot_does_not_claim_to_store_avatars(notice):
+    """The bot reads avatar URLs live and stores none; only a linked login's
+    provider profile on the website holds an avatar."""
+    discord = _section(notice, "Data we collect").split("**On smarter.dev**")[0]
+    assert "- Your Discord ID and username." in discord
+    assert "avatar" not in discord
+
+
 def test_messages_are_not_archived(notice):
     """Zech's terms (#86): the assistant's working history and text passing
     through for processing are not an archive. The moderators' log of edited

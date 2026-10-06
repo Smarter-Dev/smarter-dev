@@ -6,7 +6,7 @@ Smarter Dev LLC ("we") operates the Smarter Dev Discord server, its bot and smar
 
 **On Discord**
 
-- Your Discord ID, username and avatar.
+- Your Discord ID and username.
 - Messages, reactions and commands you post in the server. We keep records derived from them, such as activity and participation, and the conversations our AI assistant takes part in. We do not archive your messages.
 - Moderation records: actions taken on your account, and the earlier text of messages you edit or delete.
 
