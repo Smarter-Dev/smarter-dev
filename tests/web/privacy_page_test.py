@@ -79,6 +79,7 @@ def test_the_page_shows_the_whole_notice(client):
         "Who else processes your data",
         "Deleting your data",
         "Data we retain",
+        "Your rights",
         "Changes",
     ):
         assert heading in text

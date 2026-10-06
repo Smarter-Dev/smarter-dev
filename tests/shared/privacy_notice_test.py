@@ -39,6 +39,7 @@ HEADINGS = [
     "Who else processes your data",
     "Deleting your data",
     "Data we retain",
+    "Your rights",
     "Changes",
 ]
 
@@ -75,7 +76,12 @@ def test_no_section_points_at_another(notice):
 
 
 def test_no_fact_is_said_twice(notice):
+    # Zech's rights section repeats the contact address and the 30-day answer
+    # by design (#86); every other fact is stated once outside it.
     plain = " ".join(discord_markdown().split())
+    rights = _section(plain, "Your rights")
+    assert plain.count(rights) == 1
+    plain = plain.replace(rights, "")
     sentences = [s.strip() for s in re.split(r"(?<=[.;:])\s", notice) if len(s.strip()) > 30]
     assert len(sentences) == len(set(sentences))
     for fact in (
@@ -95,6 +101,22 @@ def test_no_fact_is_said_twice(notice):
         "do not include message text",
     ):
         assert plain.count(fact) == 1, fact
+
+
+def test_the_rights_section_is_zechs_text(notice):
+    assert _section(notice, "Your rights").strip() == (
+        "Smarter Dev LLC is responsible for this data; reach us at [admin@smarter.dev](mailto:admin@smarter.dev). "
+        "You can ask us for a copy of your data or to correct it, by the same route as a deletion request, "
+        "and we answer within 30 days. Your data is processed in the United States. "
+        "If you live in the EU or UK, you can also complain to your data protection authority."
+    )
+
+
+def test_the_data_is_processed_in_the_united_states():
+    """The database and files live in DigitalOcean's sfo3 region."""
+    storage = yaml.safe_load((REPO / "app.yaml").read_text())
+    regions = set(re.findall(r"region: (\w+)", yaml.safe_dump(storage)))
+    assert regions == {"sfo3"}
 
 
 def test_what_we_collect_and_why_state_no_retention(notice):
@@ -188,7 +210,7 @@ def test_self_deletion_names_where(notice):
     ("kept", "says"),
     [
         ("Moderation history", "to keep the server safe."),
-        ("The AI assistant's memory of the server", "with you removed from it, so it keeps knowing the server."),
+        ("The AI assistant's memory of the server", "with you removed from it, so it does not lose what it has learned about the community."),
         ("Your Discord ID", "so the AI assistant keeps ignoring your messages."),
         (
             "Records of usage, cost and AI decisions, and other members' transaction histories",

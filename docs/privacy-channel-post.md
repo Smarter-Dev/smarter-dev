@@ -62,11 +62,15 @@ For everything else, message an @admin on the [Smarter Dev Discord server](https
 After a deletion request we keep:
 
 - **Moderation history**, to keep the server safe.
-- **The AI assistant's memory of the server**, with you removed from it, so it keeps knowing the server.
+- **The AI assistant's memory of the server**, with you removed from it, so it does not lose what it has learned about the community.
 - **Your Discord ID**, so the AI assistant keeps ignoring your messages.
 - **Records of usage, cost and AI decisions, and other members' transaction histories**, with your ID and name removed, though they still show which messages and channels were involved, so our accounts stay accurate and we can audit the AI.
 - **Admin records.** If you configured something as an admin, your name, Discord ID or email address stays on it so admins know who set it up.
 - **Messages the bot already posted on Discord**, including moderation log posts, which we do not edit.
+
+## Your rights
+
+Smarter Dev LLC is responsible for this data; reach us at admin@smarter.dev. You can ask us for a copy of your data or to correct it, by the same route as a deletion request, and we answer within 30 days. Your data is processed in the United States. If you live in the EU or UK, you can also complain to your data protection authority.
 
 ## Changes
 
