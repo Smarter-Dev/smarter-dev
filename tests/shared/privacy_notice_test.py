@@ -84,6 +84,7 @@ def test_no_fact_is_said_twice(notice):
         "indefinitely",
         "no fixed time limit",
         "at most 6 hours",
+        "at most 3 hours",
         "at most 30 days",
         "within 30 days",
         "30 days after your last visit",
@@ -135,15 +136,28 @@ def test_the_stated_limits_are_the_code_limits(notice):
     assert session_max_age == 30 * 86400
     assert "Sign-in sessions: 30 days after your last visit." in retention
     assert "Account, subscription records and website content: until you delete them." in retention
-    assert "Discord records, AI assistant conversations and email sign-ups: until you ask us to delete them." in retention
+    assert "Messages the AI assistant has read: at most 3 hours after the conversation goes quiet." in retention
+    assert "Discord records and email sign-ups: until you ask us to delete them." in retention
     assert "Moderation history, usage records and the AI assistant's memory of the server: indefinitely." in retention
     assert "|" not in retention
+
+
+def test_the_assistant_drops_what_it_read_within_the_stated_hours():
+    """The 3 hours is the idle window plus one sweep tick, rounded up to whole
+    hours, with the rest of the hour as room for the fold itself. The constants
+    arrive with task #89 (PR 155), so this test fails until that merges; PR 153
+    merges after it."""
+    from smarter_dev.shared.retention_policy import AGENT_VERBATIM_IDLE_WINDOW
+    from smarter_dev.shared.retention_policy import PROACTIVE_IDLE_SWEEP_TICK
+
+    assert AGENT_VERBATIM_IDLE_WINDOW + PROACTIVE_IDLE_SWEEP_TICK <= timedelta(hours=2, minutes=1)
+    assert timedelta(hours=3) - (AGENT_VERBATIM_IDLE_WINDOW + PROACTIVE_IDLE_SWEEP_TICK) >= timedelta(minutes=30)
 
 
 def test_a_deletion_request_goes_to_the_admins_and_is_done_within_30_days(notice):
     deleting = _section(notice, "Deleting your data")
     assert "For everything else, message an @admin on the [Smarter Dev Discord server](https://discord.gg/de8kajxbYS) or email [admin@smarter.dev](mailto:admin@smarter.dev)." in deleting
-    assert "After confirming you own the Discord account, we delete your data within 30 days, including removing you from the AI assistant's conversations." in deleting
+    assert "After confirming you own the Discord account, we delete your data within 30 days." in deleting
     assert "backup" not in notice.lower()
     assert "cannot remove" not in notice.lower()
 

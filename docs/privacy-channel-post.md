@@ -38,7 +38,8 @@ Smarter Dev LLC ("we") operates the Smarter Dev Discord server, its bot and smar
 - Our servers' own logs: no fixed time limit.
 - Sign-in sessions: 30 days after your last visit.
 - Account, subscription records and website content: until you delete them.
-- Discord records, AI assistant conversations and email sign-ups: until you ask us to delete them.
+- Messages the AI assistant has read: at most 3 hours after the conversation goes quiet.
+- Discord records and email sign-ups: until you ask us to delete them.
 - Moderation history, usage records and the AI assistant's memory of the server: indefinitely.
 
 ## Who else processes your data
@@ -54,7 +55,7 @@ Each handles data under its own privacy policy. Deleting your data from us does 
 
 You can delete your website chats, questions, searches and your whole account from Account → Security & Accounts.
 
-For everything else, message an @admin on the [Smarter Dev Discord server](https://discord.gg/de8kajxbYS) or email admin@smarter.dev. After confirming you own the Discord account, we delete your data within 30 days, including removing you from the AI assistant's conversations. From then on the AI assistant ignores your messages and does not respond to you. Other features still process your new messages, and new activity starts new records.
+For everything else, message an @admin on the [Smarter Dev Discord server](https://discord.gg/de8kajxbYS) or email admin@smarter.dev. After confirming you own the Discord account, we delete your data within 30 days. From then on the AI assistant ignores your messages and does not respond to you. Other features still process your new messages, and new activity starts new records.
 
 === Message 3 of 3 ===
 ## Data we retain
