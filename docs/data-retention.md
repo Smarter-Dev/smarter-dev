@@ -24,7 +24,11 @@ notice states" tags each kind of data with its class.
    pod is removed. `k8s/cron-log-restart.yaml` restarts every Deployment
    each Sunday at 09:00 UTC, which replaces every app pod, so a line lasts
    at most 8 days, and under 15 days if one weekly run fails. A Job's pod
-   goes a day after the Job finishes (`ttlSecondsAfterFinished`).
+   goes a day after the Job finishes (`ttlSecondsAfterFinished`). There is
+   no second copy: DigitalOcean log forwarding is off for the cluster (no
+   logging configuration on the cluster, no log-shipping DaemonSet or
+   Deployment in kube-system; verified 2026-10-06), and nothing in `k8s/`
+   ships stdout anywhere.
 3. **User content.** Kept until the user deletes it, or an admin does on
    their request. A request is done within 30 days.
 4. **Permanent.** Only the chat bot's memories and moderation history.
@@ -468,7 +472,7 @@ change the notice in the same commit as anything here that raises a bound.
 | Searches: until deleted; searches made with a search link while signed out 30 minutes | User content; signed-out searches in-flight | dashboard searches; anonymous search keys (`TTL_SECONDS` in `smarter_dev/web/web_search/anonymous.py`), each holding the search text, queries, results, answer, the link owner's ID and the browser session that ran it | The member deletes a search, or all of them, themselves (the search page; Account → Security → Your data), with its `work_dispatches` row. Account deletion removes the searches and the search link (no foreign key, so the job deletes them explicitly); runbook step 5.1 only catches accounts deleted before that |
 | Email: until a deletion request | User content | campaign and waitlist signups | No bound |
 | Security: 30 days in Pydantic Logfire | Operational | security events (below) | Logfire organisation retention |
-| Monitoring: 30 days in Pydantic Logfire | Operational | errors and traces from the bot and the website; container stdout | Logfire organisation retention (the Personal plan default, never configured otherwise). Container stdout: the weekly restart (`k8s/cron-log-restart.yaml`, Sundays 09:00 UTC) replaces every app pod and its logs with it, so at most 8 days, under 15 days if one run fails; the kubelet also caps each container at five 10 MiB files. Job pods are deleted a day after they finish |
+| Monitoring: 30 days in Pydantic Logfire | Operational | errors and traces from the bot and the website; container stdout | Logfire organisation retention (the Personal plan default, never configured otherwise). Container stdout: the weekly restart (`k8s/cron-log-restart.yaml`, Sundays 09:00 UTC) replaces every app pod and its logs with it, so at most 8 days, under 15 days if one run fails; the kubelet also caps each container at five 10 MiB files. Job pods are deleted a day after they finish. No log forwarding (verified 2026-10-06) |
 
 The notice no longer carries these details, recorded here instead: the
 external proactive-agent worker reads channel messages from Discord directly,

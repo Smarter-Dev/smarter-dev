@@ -26,6 +26,10 @@ RETENTION_DOC = REPO_ROOT / "docs" / "data-retention.md"
 # Deployed from the proactive-agent repo into the same namespace.
 EXTERNAL_DEPLOYMENTS = {"smarter-dev-proactive-agent"}
 
+# Server v1.33.12 on 2026-10-06; kubectl supports one minor of skew, pinned
+# to the same minor.
+CLUSTER_MINOR = "v1.33"
+
 STATED_BOUND = timedelta(days=8)
 STATED_BOUND_ONE_MISSED = timedelta(days=15)
 
@@ -121,6 +125,8 @@ class TestScheduleBound:
         assert "no fixed time limit" not in doc
         assert "`k8s/cron-log-restart.yaml`" in doc
         assert "each Sunday at 09:00 UTC" in doc
+        assert "DigitalOcean log forwarding is off" in doc
+        assert "verified 2026-10-06" in doc
         assert (
             f"at most {STATED_BOUND.days} days, and under {STATED_BOUND_ONE_MISSED.days} days"
             in doc
@@ -193,6 +199,12 @@ class TestRestartCoversEveryDeployment:
         assert (
             docs["RoleBinding"]["roleRef"]["name"] == docs["Role"]["metadata"]["name"]
         )
+
+    def test_kubectl_matches_the_cluster_minor(self, cron):
+        pod = cron["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+        images = {c["image"] for c in pod["initContainers"] + pod["containers"]}
+        (image,) = images
+        assert image.startswith(f"registry.k8s.io/kubectl:{CLUSTER_MINOR}.")
 
     def test_the_deploy_workflow_applies_it(self):
         assert (

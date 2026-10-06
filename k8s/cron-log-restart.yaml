@@ -19,6 +19,14 @@
 # Only these six Deployments are named, never the namespace: it also holds
 # unrelated sites. The Role grants get/patch (rollout restart) and list/watch
 # (rollout status) on exactly these names and nothing else.
+#
+# This CronJob's own Job pods write stdout too (deployment names and rollout
+# progress). ttlSecondsAfterFinished deletes each Job and its pod a day after
+# it finishes, and the history limits of 1 keep at most one finished Job of
+# each outcome, so those lines last about a day, well under 30 days.
+#
+# kubectl is pinned to the cluster's minor version (server v1.33.12 on
+# 2026-10-06); move it with the cluster.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -95,39 +103,39 @@ spec:
                             type: RuntimeDefault
                     initContainers:
                       - name: restart-agent-worker
-                        image: registry.k8s.io/kubectl:v1.35.9
+                        image: registry.k8s.io/kubectl:v1.33.13
                         args: ["rollout", "restart", "deployment/smarter-dev-agent-worker", "-n", "smarter-dev"]
                       - name: wait-agent-worker
-                        image: registry.k8s.io/kubectl:v1.35.9
+                        image: registry.k8s.io/kubectl:v1.33.13
                         args: ["rollout", "status", "deployment/smarter-dev-agent-worker", "-n", "smarter-dev", "--timeout=10m"]
                       - name: restart-chat-child-worker
-                        image: registry.k8s.io/kubectl:v1.35.9
+                        image: registry.k8s.io/kubectl:v1.33.13
                         args: ["rollout", "restart", "deployment/smarter-dev-chat-child-worker", "-n", "smarter-dev"]
                       - name: wait-chat-child-worker
-                        image: registry.k8s.io/kubectl:v1.35.9
+                        image: registry.k8s.io/kubectl:v1.33.13
                         args: ["rollout", "status", "deployment/smarter-dev-chat-child-worker", "-n", "smarter-dev", "--timeout=10m"]
                       - name: restart-media
-                        image: registry.k8s.io/kubectl:v1.35.9
+                        image: registry.k8s.io/kubectl:v1.33.13
                         args: ["rollout", "restart", "deployment/smarter-dev-media", "-n", "smarter-dev"]
                       - name: wait-media
-                        image: registry.k8s.io/kubectl:v1.35.9
+                        image: registry.k8s.io/kubectl:v1.33.13
                         args: ["rollout", "status", "deployment/smarter-dev-media", "-n", "smarter-dev", "--timeout=10m"]
                       - name: restart-website
-                        image: registry.k8s.io/kubectl:v1.35.9
+                        image: registry.k8s.io/kubectl:v1.33.13
                         args: ["rollout", "restart", "deployment/smarter-dev-website", "-n", "smarter-dev"]
                       - name: wait-website
-                        image: registry.k8s.io/kubectl:v1.35.9
+                        image: registry.k8s.io/kubectl:v1.33.13
                         args: ["rollout", "status", "deployment/smarter-dev-website", "-n", "smarter-dev", "--timeout=10m"]
                       - name: restart-bot
-                        image: registry.k8s.io/kubectl:v1.35.9
+                        image: registry.k8s.io/kubectl:v1.33.13
                         args: ["rollout", "restart", "deployment/smarter-dev-bot", "-n", "smarter-dev"]
                       - name: wait-bot
-                        image: registry.k8s.io/kubectl:v1.35.9
+                        image: registry.k8s.io/kubectl:v1.33.13
                         args: ["rollout", "status", "deployment/smarter-dev-bot", "-n", "smarter-dev", "--timeout=10m"]
                       - name: restart-proactive-agent
-                        image: registry.k8s.io/kubectl:v1.35.9
+                        image: registry.k8s.io/kubectl:v1.33.13
                         args: ["rollout", "restart", "deployment/smarter-dev-proactive-agent", "-n", "smarter-dev"]
                     containers:
                       - name: wait-proactive-agent
-                        image: registry.k8s.io/kubectl:v1.35.9
+                        image: registry.k8s.io/kubectl:v1.33.13
                         args: ["rollout", "status", "deployment/smarter-dev-proactive-agent", "-n", "smarter-dev", "--timeout=10m"]
