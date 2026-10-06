@@ -4,10 +4,16 @@ The scripts that run live on ``AdminHandler`` rows; ``scripts/handler_scripts``
 holds reference copies of them (see the README there). Nothing applies a copy
 on its own, and no page takes a pasted script — the Discord ``/adminhandler``
 command hands a description to the author agent, which writes its own. What
-exists is ``PUT /api/admin/handlers/{id}`` with the bot's API key, and that is
-what this does: read the handler back (name, description, settings, channel
-scope), show the diff between its live script and the file, and with
-``--apply`` write the file as the handler's script and read it back to check.
+exists is ``PUT /api/admin/handlers/{id}/script`` with the bot's API key, and
+that is what this does: read the handler back, show the diff between its live
+script and the file, and with ``--apply`` send the file as the script, then
+read it back to check.
+
+That route changes the script and nothing else — not the description, the
+settings, the channel scope, nor whether the handler is enabled (a disabled
+handler stays disabled, and this says so) — and it refuses when the script is
+no longer the one that was read, so an edit made meanwhile is never written
+over.
 
 The API stores the script as given, so the lint runs here first; the judge does
 not run on this path, and a review of the change stands in for it. After an
@@ -19,7 +25,8 @@ apply, the next fire shows on ``/admin/handlers?guild_id=…&admin=1`` as a
         --file scripts/handler_scripts/scam-banner.monty [--apply]
 
 ``API_BASE_URL`` (default ``http://localhost:8000/api``) names the website.
-The key is read from the environment and never printed.
+The key is read from the environment and never printed: error output carries
+the request and status, never a response body.
 """
 
 from __future__ import annotations
@@ -46,6 +53,7 @@ class Plan:
     """What an apply would send, worked out from the live handler and the file."""
 
     handler_id: str
+    enabled: bool
     body: dict
     diff: str
 
@@ -55,11 +63,11 @@ class Plan:
 
 
 def plan(handlers: list[dict], name: str, script: str) -> Plan:
-    """The PUT for ``name`` from the live list, or why there is none.
+    """The write for ``name`` from the live list, or why there is none.
 
-    ``handlers`` is the ``include_scripts`` list from the API. The body keeps
-    the handler's description, settings and channel scope as they are: the
-    PUT overwrites all of them, and only the script is meant to change.
+    ``handlers`` is the ``include_scripts`` list from the API. The body names
+    the live script as what is expected, so the API refuses the write if
+    the script has moved since.
     """
     reason = lint_script(script)
     if reason is not None:
@@ -85,12 +93,8 @@ def plan(handlers: list[dict], name: str, script: str) -> Plan:
     )
     return Plan(
         handler_id=live["handler_id"],
-        body={
-            "description": live["description"],
-            "script": script,
-            "settings": live.get("settings") or {},
-            "channel_ids": list(live.get("channel_ids") or []),
-        },
+        enabled=bool(live.get("enabled", True)),
+        body={"script": script, "expected_script": live["script"]},
         diff=diff,
     )
 
@@ -104,10 +108,15 @@ async def fetch_handlers(client: httpx.AsyncClient, guild_id: str) -> list[dict]
 
 
 async def apply_plan(client: httpx.AsyncClient, guild_id: str, the_plan: Plan) -> None:
-    """Send the PUT, then read the handler back and check the script took."""
+    """Send the script, then read the handler back and check it took."""
     response = await client.put(
-        f"/admin/handlers/{the_plan.handler_id}", json=the_plan.body
+        f"/admin/handlers/{the_plan.handler_id}/script", json=the_plan.body
     )
+    if response.status_code == 409:
+        raise ApplyError(
+            "the handler's script changed after it was read; nothing was written. "
+            "Run again to see the new diff"
+        )
     response.raise_for_status()
     after = await fetch_handlers(client, guild_id)
     stored = next(
@@ -115,7 +124,7 @@ async def apply_plan(client: httpx.AsyncClient, guild_id: str, the_plan: Plan) -
     )
     if stored != the_plan.body["script"]:
         raise ApplyError(
-            "the API accepted the PUT but the script read back differs; "
+            "the API accepted the write but the script read back differs; "
             "check the handler on /admin/handlers before relying on it"
         )
 
@@ -134,6 +143,11 @@ async def run(args: argparse.Namespace) -> int:
         the_plan = plan(
             await fetch_handlers(client, args.guild_id), args.handler, script
         )
+        if not the_plan.enabled:
+            print(
+                f"note: {args.handler} is disabled and stays disabled; the script "
+                "will not fire until the handler is enabled"
+            )
         if not the_plan.changed:
             print(f"{args.handler} ({the_plan.handler_id}) already has this script")
             return 0
@@ -170,9 +184,11 @@ def main(argv: list[str] | None = None) -> int:
         print(str(error), file=sys.stderr)
         return 1
     except httpx.HTTPStatusError as error:
+        # The status and the request, never the response body: a reflected
+        # header would put the key on the terminal.
         print(
-            f"{error.request.method} {error.request.url.path} -> {error.response.status_code}: "
-            f"{error.response.text[:300]}",
+            f"{error.request.method} {error.request.url.path} -> "
+            f"{error.response.status_code} {error.response.reason_phrase}",
             file=sys.stderr,
         )
         return 1

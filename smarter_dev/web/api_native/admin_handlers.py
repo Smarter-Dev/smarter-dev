@@ -96,6 +96,20 @@ class UpdateAdminHandlerRequest(BaseModel):
     name: str | None = None
 
 
+class ReplaceScriptRequest(BaseModel):
+    """Change a handler's script and nothing else.
+
+    ``expected_script`` is the script the caller read; the change is refused
+    when the handler's script is no longer that, so two editors cannot
+    overwrite each other unknowingly. What the full update touches —
+    description, settings, scope, name, whether the handler is enabled — is
+    left as it is.
+    """
+
+    script: str
+    expected_script: str
+
+
 class AdminHandlerResponse(BaseModel):
     handler_id: str
     guild_id: str
@@ -272,6 +286,37 @@ class AdminHandlerController(Controller):
             except ScheduleError as exc:
                 raise plain_error(422, str(exc)) from exc
 
+        await db_session.commit()
+        await db_session.refresh(record)
+        return _to_response(record)
+
+    @put("/{handler_id:str}/script", status_code=HTTP_200_OK, guards=BOT_API_GUARDS)
+    async def replace_admin_handler_script(
+        self,
+        db_session: AsyncSession,
+        handler_id: str,
+        data: ReplaceScriptRequest,
+    ) -> AdminHandlerResponse:
+        """Put a reviewed script on a handler (``scripts/apply_handler_script.py``).
+
+        A disabled handler stays disabled, unlike the full update, which
+        enables on every write.
+        """
+        parsed_handler_id = parse_uuid_path(handler_id, "handler_id")
+        record = await db_session.get(AdminHandler, parsed_handler_id)
+        if record is None:
+            raise plain_error(404, "admin handler not found")
+        if record.script != data.expected_script:
+            raise plain_error(
+                409, "the admin handler's script has changed since it was read"
+            )
+        record.script = data.script
+        # A scheduled handler's settings are validated against its script.
+        if record.trigger_type in _TIME_TRIGGERS:
+            try:
+                await _reschedule(record)
+            except ScheduleError as exc:
+                raise plain_error(422, str(exc)) from exc
         await db_session.commit()
         await db_session.refresh(record)
         return _to_response(record)

@@ -17,7 +17,9 @@ from datetime import datetime
 import pytest
 from litestar.di import Provide
 from litestar.plugins.pydantic import PydanticPlugin
+from litestar.testing import AsyncTestClient
 from litestar.testing import TestClient
+from litestar.testing import create_async_test_client
 from litestar.testing import create_test_client
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -27,6 +29,7 @@ from smarter_dev.shared.database import Base
 from smarter_dev.web import handler_recurrence
 from smarter_dev.web.api_native import admin_handlers as admin_handlers_module
 from smarter_dev.web.api_native.admin_handlers import AdminHandlerController
+from smarter_dev.web.models import AdminHandler
 
 
 class _StubJobHandle:
@@ -90,6 +93,24 @@ def client(db_session, submitted) -> Iterator[TestClient]:
             yield test_client
     finally:
         admin_handlers_module.BOT_API_GUARDS[:] = original_guards
+
+
+@pytest.fixture
+def no_guards():
+    """Guards bypassed, as for ``client``, for a test that builds its own app."""
+    original_guards = list(admin_handlers_module.BOT_API_GUARDS)
+    admin_handlers_module.BOT_API_GUARDS.clear()
+    yield
+    admin_handlers_module.BOT_API_GUARDS[:] = original_guards
+
+
+def _async_client(db_session) -> AsyncTestClient:
+    """The same app as ``client``, for a test that also drives the session."""
+    return create_async_test_client(
+        route_handlers=[AdminHandlerController],
+        plugins=[PydanticPlugin()],
+        dependencies={"db_session": Provide(lambda: db_session, sync_to_thread=False)},
+    )
 
 
 def _body(**over):
@@ -222,6 +243,82 @@ def test_edit_admin_handler(client):
     assert resp.status_code == 200
     assert resp.json()["channel_ids"] == ["MODCHAT"]
     assert resp.json()["description"] == "ban scammers politely"
+
+
+def _script_of(client, handler_id: str) -> dict:
+    rows = client.get(
+        "/api/admin/handlers", params={"guild_id": "G1", "include_scripts": "true"}
+    ).json()
+    return next(r for r in rows if r["handler_id"] == handler_id)
+
+
+async def test_replace_script_changes_the_script_and_nothing_else(
+    db_session, submitted, no_guards
+):
+    # A handler somebody disabled, with settings and a scope. The script-only
+    # write must change the script and leave every one of those as it was —
+    # the full update would switch the handler back on.
+    record = AdminHandler(
+        guild_id="G1",
+        name="scam-banner",
+        trigger_type="message",
+        settings={"include_bot_messages": True},
+        channel_ids=["C1"],
+        description="ban scammers",
+        script="old = 1\n",
+        created_by_admin="A1",
+        enabled=False,
+    )
+    db_session.add(record)
+    await db_session.commit()
+    handler_id = str(record.id)
+
+    async with _async_client(db_session) as client:
+        resp = await client.put(
+            f"/api/admin/handlers/{handler_id}/script",
+            json={"script": "new = 2\n", "expected_script": "old = 1\n"},
+        )
+        assert resp.status_code == 200
+        rows = (
+            await client.get(
+                "/api/admin/handlers",
+                params={"guild_id": "G1", "include_scripts": "true"},
+            )
+        ).json()
+
+    after = next(r for r in rows if r["handler_id"] == handler_id)
+    assert after["script"] == "new = 2\n"
+    assert after["enabled"] is False
+    assert after["description"] == "ban scammers"
+    assert after["settings"] == {"include_bot_messages": True}
+    assert after["channel_ids"] == ["C1"]
+    assert after["name"] == "scam-banner"
+
+
+def test_replace_script_refuses_when_the_script_moved(client):
+    created = client.post("/api/admin/handlers", json=_body()).json()
+    handler_id = created["handler_id"]
+    client.put(
+        f"/api/admin/handlers/{handler_id}/script",
+        json={"script": "first = 1\n", "expected_script": _body()["script"]},
+    )
+
+    resp = client.put(
+        f"/api/admin/handlers/{handler_id}/script",
+        json={"script": "second = 2\n", "expected_script": _body()["script"]},
+    )
+
+    assert resp.status_code == 409
+    assert "changed since it was read" in resp.text
+    assert _script_of(client, handler_id)["script"] == "first = 1\n"
+
+
+def test_replace_script_on_unknown_handler_is_404(client):
+    resp = client.put(
+        "/api/admin/handlers/00000000-0000-0000-0000-000000000000/script",
+        json={"script": "x = 1\n", "expected_script": ""},
+    )
+    assert resp.status_code == 404
 
 
 def test_edit_admin_rename_collision_is_conflict(client):

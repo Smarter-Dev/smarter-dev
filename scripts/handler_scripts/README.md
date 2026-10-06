@@ -13,7 +13,9 @@ and the Discord `/adminhandler` command hands a description to the author agent,
 which writes its own script. `scripts/apply_handler_script.py` does the one
 path that exists: it reads the handler back, runs the lint, shows the diff
 between the live script and the file, and with `--apply` sends
-`PUT /api/admin/handlers/{id}` with the file as the script and reads it back:
+`PUT /api/admin/handlers/{id}/script` — a route that changes the script and
+nothing else (a disabled handler stays disabled, and the script says so) and
+refuses if the script moved since it was read — then reads it back:
 
     BOT_API_KEY=… .venv/bin/python scripts/apply_handler_script.py \
         --guild-id <guild> --handler scam-banner \
