@@ -118,7 +118,12 @@ Check that the clean-up was done before taking the first request.
   it.
 - **Caches:** `search_result_previews` (5 hours),
   `chat_agent:guild:{guild}:events` (about an hour), `mediaread:*` (1 hour),
-  `hclaim:*` (up to 30 days; deleting one can make a handler act twice), the
+  `hclaim:*` (up to 30 days; deleting one can make a handler act twice),
+  `hrecent:*` (where a member posted in the last 2 minutes, ids and a content
+  hash, gone within 4 minutes), `hhold:*` (which review holds are on a
+  member's timeout, pruned at every write and gone 5 minutes after the latest
+  runs out; deleting one while a review runs can leave the hold's timeout
+  in place until it expires, even over a moderator's shorter one it extended), the
   anonymous web search keys (30 minutes) and in-process caches in the bot and
   workers.
 
