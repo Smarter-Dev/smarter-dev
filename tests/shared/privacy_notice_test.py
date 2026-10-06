@@ -82,7 +82,6 @@ def test_no_fact_is_said_twice(notice):
         "admin@smarter.dev",
         "message an @admin",
         "indefinitely",
-        "no fixed time limit",
         "at most 6 hours",
         "at most 3 hours",
         "at most 30 days",
@@ -138,14 +137,16 @@ def test_the_stated_limits_are_the_code_limits(notice):
     assert timedelta(seconds=ANONYMOUS_SEARCH_TTL_SECONDS) <= IN_FLIGHT_MAX
     assert "Temporary working copies and in-progress results: at most 6 hours." in retention
     assert OPERATIONAL_MAX == timedelta(days=30)
-    assert "Error reports, security events, rate limits and caches: at most 30 days." in retention
-    assert "Our servers' own logs: no fixed time limit." in retention
+    # Server logs are bounded by #90's weekly rolling restart; true once it merges.
+    assert "Server logs, error reports, security events, rate limits and caches: at most 30 days." in retention
+    assert "no fixed time limit" not in retention
     session_max_age = yaml.safe_load((REPO / "app.yaml").read_text())["session"]["max_age"]
     assert session_max_age == 30 * 86400
     assert "Sign-in sessions: 30 days after your last visit." in retention
-    assert "Account, subscription records and website content: until you delete them." in retention
+    # Email sign-ups are self-service once #91 merges.
+    assert "Account, subscription records, website content and email sign-ups: until you delete them." in retention
     assert "Messages the AI assistant has read: at most 3 hours after the server goes quiet." in retention
-    assert "Discord records and email sign-ups: until you ask us to delete them." in retention
+    assert "Discord records: until you ask us to delete them." in retention
     assert "Moderation history, usage records and the AI assistant's memory of the server: indefinitely." in retention
     assert "|" not in retention
 
@@ -180,7 +181,7 @@ def test_after_a_request_only_the_assistant_ignores_you(notice):
 
 def test_self_deletion_names_where(notice):
     deleting = _section(notice, "Deleting your data")
-    assert "You can delete your website chats, questions, searches and your whole account from Account → Security & Accounts." in deleting
+    assert "You can delete your website chats, questions, searches, email sign-ups and your whole account from Account → Security & Accounts." in deleting
 
 
 @pytest.mark.parametrize(
@@ -195,7 +196,7 @@ def test_self_deletion_names_where(notice):
             "so our accounts stay accurate and we can audit the AI.",
         ),
         ("Admin records", "your name, Discord ID or email address stays on it so admins know who set it up."),
-        ("Our servers' own logs and messages the bot already posted on Discord", "including moderation log posts, which we do not edit."),
+        ("Messages the bot already posted on Discord", "including moderation log posts, which we do not edit."),
     ],
 )
 def test_what_a_deletion_keeps_is_listed_with_its_reason(notice, kept, says):
@@ -249,10 +250,11 @@ def test_every_processor_is_named(notice, processor):
     assert processor in _section(notice, "Who else processes your data")
 
 
-def test_processors_keep_their_own_copies(notice):
+def test_processors_handle_what_they_receive_under_their_own_policies(notice):
     who = _section(notice, "Who else processes your data")
     assert "including authors' Discord IDs" in who
-    assert "Each handles data under its own privacy policy. Deleting your data from us does not delete their copies." in who
+    assert "Each handles what it receives under its own privacy policy." in who
+    assert "copies" not in who
 
 
 def test_no_placeholder_is_left_in_the_policy(notice):

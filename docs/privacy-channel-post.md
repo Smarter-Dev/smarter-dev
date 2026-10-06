@@ -34,12 +34,11 @@ Smarter Dev LLC ("we") operates the Smarter Dev Discord server, its bot and smar
 ## How long we keep it
 
 - Temporary working copies and in-progress results: at most 6 hours.
-- Error reports, security events, rate limits and caches: at most 30 days.
-- Our servers' own logs: no fixed time limit.
+- Server logs, error reports, security events, rate limits and caches: at most 30 days.
 - Sign-in sessions: 30 days after your last visit.
-- Account, subscription records and website content: until you delete them.
+- Account, subscription records, website content and email sign-ups: until you delete them.
 - Messages the AI assistant has read: at most 3 hours after the server goes quiet.
-- Discord records and email sign-ups: until you ask us to delete them.
+- Discord records: until you ask us to delete them.
 - Moderation history, usage records and the AI assistant's memory of the server: indefinitely.
 
 ## Who else processes your data
@@ -49,11 +48,11 @@ Smarter Dev LLC ("we") operates the Smarter Dev Discord server, its bot and smar
 - DigitalOcean hosts our servers, database and files. Polar processes payments. Resend sends email. Pydantic Logfire receives error reports, traces and security events.
 - Discord stores everything posted there.
 
-Each handles data under its own privacy policy. Deleting your data from us does not delete their copies.
+Each handles what it receives under its own privacy policy.
 
 ## Deleting your data
 
-You can delete your website chats, questions, searches and your whole account from Account → Security & Accounts.
+You can delete your website chats, questions, searches, email sign-ups and your whole account from Account → Security & Accounts.
 
 For everything else, message an @admin on the [Smarter Dev Discord server](https://discord.gg/de8kajxbYS) or email admin@smarter.dev. After confirming you own the Discord account, we delete your data within 30 days. From then on the AI assistant ignores your messages and does not respond to you. Other features still process your new messages, and new activity starts new records.
 
@@ -67,7 +66,7 @@ After a deletion request we keep:
 - **Your Discord ID**, so the AI assistant keeps ignoring your messages.
 - **Records of usage, cost and AI decisions, and other members' transaction histories**, with your ID and name removed, though they still show which messages and channels were involved, so our accounts stay accurate and we can audit the AI.
 - **Admin records.** If you configured something as an admin, your name, Discord ID or email address stays on it so admins know who set it up.
-- **Our servers' own logs and messages the bot already posted on Discord**, including moderation log posts, which we do not edit.
+- **Messages the bot already posted on Discord**, including moderation log posts, which we do not edit.
 
 ## Changes
 
