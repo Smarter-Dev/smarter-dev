@@ -197,7 +197,8 @@ def test_the_assistant_drops_what_it_read_within_the_stated_hours():
 def test_a_deletion_request_goes_to_the_admins_and_is_done_within_30_days(notice):
     deleting = _section(notice, "Deleting your data")
     assert "For everything else, message an @admin on the [Smarter Dev Discord server](https://discord.gg/de8kajxbYS) or email [admin@smarter.dev](mailto:admin@smarter.dev)." in deleting
-    assert "After confirming you own the Discord account, we delete your data within 30 days." in deleting
+    assert "We confirm you own the Discord account and delete your data within 30 days of your request." in deleting
+    assert "After confirming" not in notice
     assert "backup" not in notice.lower()
     assert "cannot remove" not in notice.lower()
 
