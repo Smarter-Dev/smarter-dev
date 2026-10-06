@@ -57,6 +57,9 @@ class FakeBot:
             await asyncio.Event().wait()
         self.started = True
 
+    async def join(self) -> None:
+        await asyncio.Event().wait()  # the gateway stays up
+
     async def close(self) -> None:
         self.closed = True
         self.calls.append("close")
