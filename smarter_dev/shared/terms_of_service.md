@@ -52,7 +52,7 @@ We post changes to these terms on this page and update the date below. If you ke
 
 ## Governing law
 
-These terms are governed by the laws of the State of <STATE>, United States.
+These terms are governed by the laws of the State of New York, United States.
 
 ## Contact
 

@@ -91,7 +91,7 @@ def test_the_page_shows_the_whole_terms(client):
     ):
         assert f">{heading}</h2>" in html
     assert "Smarter Dev LLC (\u201cwe\u201d)" in text
-    assert "the State of &lt;STATE&gt;" in html
+    assert "the State of New York, United States" in html
     assert 'href="/privacy"' in html
     assert 'href="mailto:admin@smarter.dev"' in html
 

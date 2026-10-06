@@ -2,7 +2,7 @@
 
 The terms follow the privacy notice's house style: plain statements, sections
 in a fixed order, no hedging and no bare domain in prose. These tests pin the
-order, the commitments Zech asked for, and the placeholder he still has to fill.
+order, the commitments Zech asked for, and the governing law he chose.
 """
 
 from __future__ import annotations
@@ -113,8 +113,9 @@ def test_privacy_is_one_sentence():
     assert _section("Privacy").strip().count(". ") == 0
 
 
-def test_the_governing_state_is_left_for_zech():
-    assert "the State of <STATE>, United States" in _section("Governing law")
+def test_the_terms_are_governed_by_new_york_law():
+    assert "the State of New York, United States" in _section("Governing law")
+    assert "<STATE>" not in terms_markdown()
 
 
 def test_the_terms_state_facts_without_hedging(terms):
