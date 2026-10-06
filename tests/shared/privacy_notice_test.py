@@ -36,9 +36,10 @@ def test_the_short_version_carries_the_required_statements():
     assert "permanent memories" in points
     assert "Moderation history is kept forever to keep the server safe." in points
     assert "deletion request" not in points
-    assert "only anonymous usage and cost records stay" in points
+    assert "your membership record goes with it; only anonymous usage and cost records and moderation history stay." in points
     assert "including from the chat bot's memories" in points
-    assert "DM an @admin on the Smarter Dev Discord server or email admin@smarter.dev. We delete it within 30 days. Moderation history stays." in points
+    assert "DM an @admin on the Smarter Dev Discord server or email admin@smarter.dev. We delete it within 30 days." in points
+    assert "Moderation history stays" not in points
     assert "within 30 days" in points
 
 
@@ -233,8 +234,7 @@ def test_discord_drops_only_the_server_from_the_deletion_line():
     discord_points = discord_short_version()
     assert discord_points[-1] == (
         "To have your data deleted, including from the chat bot's memories, "
-        "DM an @admin or email admin@smarter.dev. We delete it within 30 days. "
-        "Moderation history stays."
+        "DM an @admin or email admin@smarter.dev. We delete it within 30 days."
     )
     assert discord_points[:-1] == notice_points[:-1]
     assert "Smarter Dev Discord server" not in channel_post(PUBLIC_URL)
