@@ -231,14 +231,13 @@ async def dispatch_handler_event(
         )
 
     # The payloads carry the redacted context; the verbatim one is handed off
-    # in Redis once, on the first fire enqueued, and shared by every fire.
-    handed_off: tuple[dict, str | None] | None = None
-
+    # in Redis once per fire, under that fire's own reference. A fire deletes
+    # its hand-off when it finishes, so a shared one would be gone for every
+    # fire that had not yet loaded it when the first finished: with several
+    # handlers on one message, the fastest one took the message away from
+    # the rest.
     async def fire_context() -> tuple[dict, str | None]:
-        nonlocal handed_off
-        if handed_off is None:
-            handed_off = await hand_off_fire_context(redis, context)
-        return handed_off
+        return await hand_off_fire_context(redis, context)
 
     # Standard tier: every enabled handler for this (channel, trigger) fires,
     # each behind its own windowed cap. The five admin-only member/thread

@@ -27,6 +27,7 @@ from smarter_dev.web.api_native import handlers as handlers_module
 from smarter_dev.web.api_native.handlers import HandlerController
 from smarter_dev.web.handler_caps import MAX_HANDLERS_PER_CHANNEL
 from smarter_dev.web.handler_fire_context import FIRE_CONTEXT_TTL_SECONDS
+from smarter_dev.web.handler_fire_context import discard_fire_context
 from smarter_dev.web.handler_fire_context import fire_context_key
 from smarter_dev.web.handler_fire_context import load_fire_context
 from smarter_dev.web.handler_recent_messages import read_recent_messages
@@ -388,15 +389,45 @@ async def test_dispatch_keeps_message_text_out_of_the_fire_payload(client, submi
     for payload in payloads:
         assert "huzzah" not in payload.model_dump_json()
         assert payload.trigger_context["message_content"] == MESSAGE_CONTENT_PLACEHOLDER
-    # One hand-off, shared by both fires, holding the verbatim context for
-    # the hand-off window and no longer.
-    [context_ref] = {payload.context_ref for payload in payloads}
-    key = fire_context_key(context_ref)
-    restored = await load_fire_context(
-        submitted.redis, payloads[0].trigger_context, context_ref
+    # One hand-off per fire, each holding the verbatim context for the
+    # hand-off window and no longer.
+    refs = [payload.context_ref for payload in payloads]
+    assert len(set(refs)) == 2
+    for payload in payloads:
+        restored = await load_fire_context(
+            submitted.redis, payload.trigger_context, payload.context_ref
+        )
+        assert restored["message_content"] == "huzzah"
+        key = fire_context_key(payload.context_ref)
+        assert 0 < await submitted.redis.ttl(key) <= FIRE_CONTEXT_TTL_SECONDS
+
+
+async def test_a_fire_that_finishes_first_leaves_the_others_their_context(
+    client, submitted
+):
+    # Several handlers on one message, each fire deleting its hand-off when
+    # it finishes. The fastest fire must not take the message away from the
+    # ones still waiting to run: that skipped real fires in production.
+    client.post("/api/handlers", json=_event_body(name="greeter"))
+    client.post("/api/handlers", json=_event_body(name="mood-tracker"))
+    client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "C1",
+            "trigger_type": "message",
+            "trigger_context": {"trigger_type": "message", "message_content": "huzzah"},
+        },
     )
+    first, second = [payload for payload, _ in submitted]
+
+    await discard_fire_context(submitted.redis, first.context_ref)
+
+    restored = await load_fire_context(
+        submitted.redis, second.trigger_context, second.context_ref
+    )
+    assert restored is not None
     assert restored["message_content"] == "huzzah"
-    assert 0 < await submitted.redis.ttl(key) <= FIRE_CONTEXT_TTL_SECONDS
 
 
 def test_dispatch_without_message_text_hands_nothing_off(client, submitted):
