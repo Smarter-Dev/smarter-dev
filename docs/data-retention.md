@@ -242,6 +242,13 @@ allowed — that is a keyword watch, not a command.
   foreign key to the user, so the deletes in `smarter_dev/web/user_content.py`
   remove them with the chat, question or search they dispatched, and so does
   account deletion; runbook step 8 deletes a person's rows for a request.
+- `account_deletion_requests` — one row per site account deletion, the
+  receipt that it was done. While the job runs, or retries a failed Polar
+  revocation, the row holds the account's ID and its Polar subscription IDs.
+  When the job finishes it replaces the account ID with a random one and
+  empties the subscription IDs (`delete_chat_account` in
+  `smarter_dev/web/chat/jobs.py`), leaving only the status and times, kept
+  with no age bound. The admin path in runbook step 5 queues the same job.
 - `proactive_agent_histories` — the proactive agent's own working history,
   with the bounds (and the missing ones) described above; it is not an
   operator-facing audit trail.

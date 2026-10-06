@@ -3771,6 +3771,12 @@ async def delete_chat_account(payload: ChatAccountDeletionPayload) -> dict:
                 deletion.status = "complete"
                 deletion.error = None
                 deletion.finished_at = datetime.now(UTC)
+                if billing_error is None:
+                    # Nothing is left to retry, so keep only the receipt: a
+                    # random id in place of the account's and no Polar ids.
+                    # A failed revocation keeps both for the retry.
+                    deletion.user_id = uuid4()
+                    deletion.subscription_ids = []
             await session.commit()
         if billing_error is not None:
             raise RuntimeError("billing revocation will be retried") from billing_error
