@@ -238,6 +238,12 @@
 (function() {
     var next = new URLSearchParams(location.search).get("next");
     if (!next) return;
+    // A link to a section (/account/security#your-data) arrives here with its
+    // fragment kept by the browser, but the provider round trip drops it, so
+    // it rides along in next.
+    if (next.indexOf("#") === -1 && /^#[A-Za-z0-9_-]+$/.test(location.hash)) {
+        next += location.hash;
+    }
     document.querySelectorAll("a[data-provider]").forEach(function(a) {
         a.href += "?next=" + encodeURIComponent(next);
     });
