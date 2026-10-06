@@ -2,8 +2,8 @@
 
 The notice is a public promise about what the code does, so these tests pin
 the statements that must stay true and the ones it must never make: the chat
-bot's memories are permanent and only the bot edits them, moderation history survives a
-deletion request, and no opt-out or automatic deletion exists yet.
+bot's memories are permanent, moderation history survives a deletion
+request, and no opt-out or automatic deletion exists yet.
 """
 
 from __future__ import annotations
@@ -34,11 +34,12 @@ def test_the_short_version_carries_the_required_statements():
     points = " ".join(short_version())
     assert len(short_version()) == 5
     assert "permanent memories" in points
-    assert "Moderation history is kept so the server can stay safe" in points
-    assert "is not part of a deletion request" in points
-    assert "only anonymous usage and cost records stay" in points
+    assert "Moderation history is kept forever to keep the server safe." in points
+    assert "deletion request" not in points
+    assert "your membership record goes with it; only anonymous usage and cost records and moderation history stay." in points
     assert "including from the chat bot's memories" in points
-    assert "DM an @admin on the Smarter Dev Discord server. We delete it within 30 days." in points
+    assert "DM an @admin on the Smarter Dev Discord server or email admin@smarter.dev. We delete it within 30 days." in points
+    assert "Moderation history stays" not in points
     assert "within 30 days" in points
 
 
@@ -46,7 +47,8 @@ def test_every_deletion_request_goes_to_the_admin_role(notice):
     assert notice.count("DM an @admin on the") == 3
     assert "or email [admin@smarter.dev](mailto:admin@smarter.dev)." in notice
     assert "For those, DM an @admin or email admin@smarter.dev." in notice
-    assert "Moderation history, including those posts, is kept so the server can stay safe, and is not part of a deletion request." in notice
+    assert "Moderation history, including those posts, is kept forever to keep the server safe." in notice
+    assert "not part of a deletion request" not in notice
     deleting = notice.split("## Deleting your data", 1)[1]
     assert "within 30 days of your request" in deleting
     assert "DM an @admin on the Smarter Dev Discord server, or email admin@smarter.dev." in deleting
@@ -60,7 +62,7 @@ def test_the_notice_does_not_describe_an_opt_out_as_available(notice):
     assert "you can opt out" not in lowered
     assert "forget" not in lowered
     assert "blank" not in lowered
-    assert "kept permanently; only the bot edits them" in lowered
+    assert "only the bot edits" not in lowered
 
 
 def test_a_deletion_request_removes_the_person_from_the_chat_bot(notice):
@@ -122,7 +124,7 @@ RETENTION = {
     "Messages being handled.": "Kept for at most 6 hours",
     "Server automations.": "Kept until you ask us to delete it",
     "Records of what the AI did.": "Kept until you ask us to delete them",
-    "Moderation.": "Kept permanently",
+    "Moderation.": "kept forever",
     "Games and community features.": "Kept until you ask us to delete them",
     "Rate limits and caches.": "Kept for 30 days",
     "Your account.": "Kept until you delete your account",
@@ -153,8 +155,9 @@ def test_the_notice_states_figures_not_mechanisms(notice):
 
 def test_ai_records_keep_no_words(notice):
     records = _store(notice, "Records of what the AI did.")
-    assert "without the words" in records
-    assert "only the bot edits them" in _store(notice, "The chat bot's memories.")
+    assert "what it decided, but not the text of any message or reply, so we can check its behaviour and cost." in records
+    assert "without the words" not in notice
+    assert _store(notice, "The chat bot's memories.").endswith("Kept permanently.")
     assert "It names people by username and Discord ID" in notice
 
 
@@ -232,13 +235,13 @@ def test_discord_drops_only_the_server_from_the_deletion_line():
     discord_points = discord_short_version()
     assert discord_points[-1] == (
         "To have your data deleted, including from the chat bot's memories, "
-        "DM an @admin. We delete it within 30 days."
+        "DM an @admin or email admin@smarter.dev. We delete it within 30 days."
     )
     assert discord_points[:-1] == notice_points[:-1]
     assert "Smarter Dev Discord server" not in channel_post(PUBLIC_URL)
 
 
-def test_the_email_address_is_in_the_full_notice_only():
-    assert "admin@smarter.dev" not in " ".join(short_version())
-    assert "admin@smarter.dev" not in channel_post(PUBLIC_URL)
-    assert "admin@smarter.dev" not in command_response(PUBLIC_URL)
+def test_the_short_versions_give_the_email_address():
+    assert "admin@smarter.dev" in " ".join(short_version())
+    assert "admin@smarter.dev" in channel_post(PUBLIC_URL)
+    assert "admin@smarter.dev" in command_response(PUBLIC_URL)

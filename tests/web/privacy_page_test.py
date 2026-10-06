@@ -82,7 +82,7 @@ def test_the_page_shows_the_whole_notice(client):
     ):
         assert heading in text
     assert "permanent" in text
-    assert "Moderation history is kept so the server can stay safe" in text
+    assert "Moderation history is kept forever to keep the server safe" in text
     assert "anonymous usage and cost records" in text
     assert "DM an @admin on the Smarter Dev Discord server" in text
     assert 'href="mailto:admin@smarter.dev"' in client.get(PRIVACY_PATH).text
@@ -100,7 +100,7 @@ def test_the_page_uses_the_site_layout_and_says_when_it_was_updated(client):
     assert 'name="viewport"' in html
     assert "/theme/css/pages/blog.css" in html
     assert 'class="post-body' in html
-    assert "Last updated Oct 04, 2026" in html
+    assert "Last updated Oct 06, 2026" in html
     assert '<link rel="canonical" href="https://smarter.dev/privacy">' in html
 
 
