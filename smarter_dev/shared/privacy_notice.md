@@ -1,48 +1,69 @@
-Smarter Dev LLC runs the Smarter Dev Discord server, its bot and smarter.dev. This is what we store about you, how long we keep it, and how to have it deleted.
+Smarter Dev LLC ("we") operates the Smarter Dev Discord server, its bot and smarter.dev. This policy explains what personal data we collect through them, why, how long we keep it and how to have it deleted.
 
-## What we store and why
+## Data we collect
 
-- **Discord features.** The bot reads messages in the Smarter Dev Discord server but does not keep every message. It keeps your bytes, squad, quest and challenge records, forum subscriptions, commands and when you post, so those features work.
-- **The chat bot.** Conversations it takes part in or watches, with its notes, so it can follow along. One memory of the server in its own words, naming people by username and Discord ID; it is told not to keep anything private or sensitive.
-- **Moderation.** Every moderation action, and the bot's log-channel posts of those actions and of edited and deleted messages with their text.
-- **Automations.** Message text that an automation set up by an admin chose to keep.
-- **AI records.** Whom the AI acted on, where, when, at what cost and what it decided, without the text of any message or reply, so we can check its behaviour and cost.
-- **Your account.** Your profile as Discord, GitHub or Google shares it (ID, username, avatar, email and the public details on your profile) and the sign-in tokens it issues, to sign you in.
-- **Website content.** Your chats and their files, your questions about our resources and your dashboard searches, so you can come back to them.
-- **Billing.** Your membership record, to run your plan.
-- **Email.** Your email address or Discord ID if you join a campaign or waitlist, to confirm it.
-- **Operations.** Rate limits, caches, security events (failed API sign-ins with their IP address, rate-limit refusals and admin operations) and error traces, which can include IDs and message text, so the services work, stay secure and can be fixed.
+**On Discord**
+
+- Your Discord ID, username and avatar.
+- Messages, reactions and commands you post in the server. We keep records derived from them, such as activity and participation, and the conversations our AI assistant takes part in. We do not archive your messages.
+- Moderation actions taken on your account, with the messages involved.
+
+**On smarter.dev**
+
+- Account details from the sign-in provider you choose (Discord, GitHub or Google): ID, username, avatar, email address and public profile details.
+- Content you create: chats, uploaded files, questions and searches.
+- Subscription records if you buy a membership. Card details are held by our payment processor, not by us.
+- Your email address or Discord ID if you join a mailing list or waitlist.
+
+**Automatically**
+
+- IP address with security events, error reports and server logs.
+- Records of AI usage: who used it, when, where, what it cost and what it decided. These records do not include message text.
+
+## Why we collect it
+
+- To run the server, bot and website.
+- To let the AI assistant take part in conversations and remember the server.
+- To moderate the server and keep it safe.
+- To sign you in, bill you and send you email you asked for.
+- To monitor cost, abuse and errors.
 
 ## How long we keep it
 
-- Copies the bot or the AI holds while it works, and the progress it shows you: at most 6 hours. A search made with your search link while signed out: 30 minutes.
-- Operations data: at most 30 days. You stay signed in for 30 days after your last visit. Our servers' own logs have no fixed time limit.
-- Your account, membership record and website content: until you delete them.
-- Chat bot conversations, Discord feature records, automation text and email sign-ups: until you ask us to delete them.
+- Temporary working copies and in-progress results: at most 6 hours.
+- Error reports, security events, rate limits and caches: at most 30 days.
+- Our servers' own logs: no fixed time limit.
+- Sign-in sessions: 30 days after your last visit.
+- Account, subscription records and website content: until you delete them.
+- Discord records, AI assistant conversations and email sign-ups: until you ask us to delete them.
+- Moderation history and usage records: indefinitely.
 
-## Who else handles your data
+## Who else processes your data
 
-- AI model providers (Google, OpenAI, Anthropic, OpenRouter, OpenCode Zen and DigitalOcean) process what is sent to an AI feature; the chat bot includes each author's Discord ID.
-- TypeSafe classifies some messages and searches. Brave runs web searches and Jina reads web pages.
-- DigitalOcean hosts our servers, database and files. Polar takes payments. Resend sends email. Pydantic Logfire receives errors, traces and security events.
-- Discord holds what you post there.
+- AI providers (Google, OpenAI, Anthropic, OpenRouter, OpenCode Zen, DigitalOcean and TypeSafe) receive the content sent to AI features, including authors' Discord IDs.
+- Brave receives web searches and Jina receives the addresses of pages read for you.
+- DigitalOcean hosts our servers, database and files. Polar processes payments. Resend sends email. Pydantic Logfire receives error reports, traces and security events.
+- Discord stores everything posted there.
 
-Each keeps data under its own terms, and deleting yours here does not delete their copies.
+Each handles data under its own privacy policy. Deleting your data from us does not delete their copies.
 
 ## Deleting your data
 
-Delete your chats, questions about our resources and searches yourself where each is shown, or all at once in Account → Security & Accounts → "Your data"; anything still being answered is skipped. Deleting your account there removes all of these and your search link.
+You can delete your website chats, questions, searches and your whole account from Account → Security & Accounts.
 
-For anything else, DM an @admin on the [Smarter Dev Discord server](https://discord.gg/de8kajxbYS) or email [admin@smarter.dev](mailto:admin@smarter.dev). We confirm you own the Discord account, and within 30 days the chat bot removes you from its memory and conversations and we delete the rest, except:
+For everything else, message an @admin on the [Smarter Dev Discord server](https://discord.gg/de8kajxbYS) or email [admin@smarter.dev](mailto:admin@smarter.dev). After confirming you own the Discord account, we delete your data within 30 days, including removing you from the AI assistant's conversations. From then on the AI assistant ignores your messages and does not respond to you. Other features still process your new messages, and new activity starts new records.
 
-- **Moderation history**, kept forever, to keep the server safe.
-- **The chat bot's memory of the server**, kept permanently without you, so it keeps knowing the server.
-- **Records of usage, cost and what the AI and automations did**, with no time limit and without your ID and name, though they still show which messages and channels were involved, so we can track costs and check the AI.
-- **Bytes transfers** in other members' histories, without your ID and name, so their balances stay correct.
-- **Your Discord ID**, so the chat bot leaves out your messages and does not respond to you. Other features still process your new messages, and new activity starts new records.
-- **Your name, Discord ID or email address** on anything you set up as an admin, so admins can see who set it up.
-- **Logs, and the bot's Discord posts and DMs**, which we do not edit.
+## Data we retain
+
+After a deletion request we keep:
+
+- **Moderation history**, to keep the server safe.
+- **The AI assistant's memory of the server**, with you removed from it, so it keeps knowing the server.
+- **Your Discord ID**, so the AI assistant keeps ignoring your messages.
+- **Records of usage, cost and AI decisions, and other members' transaction histories**, with your ID and name removed, though they still show which messages and channels were involved, so our accounts stay accurate and we can audit the AI.
+- **Admin records.** If you configured something as an admin, your name, Discord ID or email address stays on it so admins know who set it up.
+- **Our servers' own logs and messages the bot already posted on Discord**, including moderation log posts, which we do not edit.
 
 ## Changes
 
-We update this page when what we store changes, and say so in the server's privacy channel.
+We update this page when this policy changes and announce it in the server's privacy channel.

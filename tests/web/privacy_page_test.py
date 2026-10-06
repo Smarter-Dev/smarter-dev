@@ -66,23 +66,25 @@ def test_the_notice_renders_without_signing_in(client):
 
     assert response.status_code == 200
     assert "text/html" in response.headers["content-type"]
-    assert "<h1" in response.text and "Privacy notice" in response.text
+    assert "<h1" in response.text and "Privacy policy" in response.text
 
 
 def test_the_page_shows_the_whole_notice(client):
     text = _text(client.get(PRIVACY_PATH).text)
 
     for heading in (
-        "What we store and why",
+        "Data we collect",
+        "Why we collect it",
         "How long we keep it",
-        "Who else handles your data",
+        "Who else processes your data",
         "Deleting your data",
+        "Data we retain",
         "Changes",
     ):
         assert heading in text
     assert "The short version" not in text
     assert "Moderation history" in text
-    assert "DM an @admin on the Smarter Dev Discord server or email admin@smarter.dev" in text
+    assert "message an @admin on the Smarter Dev Discord server or email admin@smarter.dev" in text
     html = client.get(PRIVACY_PATH).text
     assert 'href="mailto:admin@smarter.dev"' in html
     assert 'href="https://discord.gg/de8kajxbYS"' in html

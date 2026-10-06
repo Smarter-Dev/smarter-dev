@@ -27,7 +27,7 @@ limits, which the steps below edit: AI error messages and engagement topics (ste
 automation memory (step 7) and job stores
 (step 8).
 
-The Keep row has a second part, disclosed in the list of what a deletion keeps under the notice's "Deleting your data":
+The Keep row has a second part, disclosed in the list of what a deletion keeps under the notice's "Data we retain":
 creator fields on automations, campaigns and scheduled messages set up by a
 requester who is an admin (`created_by` on `channel_handlers`,
 `admin_handlers`, `forum_agents`, `campaigns`, `scheduled_messages`,

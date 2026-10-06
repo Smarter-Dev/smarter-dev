@@ -455,7 +455,7 @@ token is stored. Preview pages are read-only, unlisted, and marked `noindex`.
 ## What the public notice states
 
 The notice at `/privacy` (`smarter_dev/shared/privacy_notice.md`) lists each
-kind of data a member would recognise and why it is kept, then states the
+kind of data a member would recognise and why it is collected, then states the
 retention classes once, under "How long we keep it": the longest any store of
 a class can keep data, stated as a fact. The table below gives each kind of
 data its class and figure. Where a kind spans several stores the figure is the
@@ -491,8 +491,8 @@ and the answer; the audit log channel posts carry a message's old and new text
 and its author.
 
 Short-lived copies not named in the notice (in Skrift's worker tables, a
-failed job's dead letter, 7 days, and a session cut off partway, 6 hours) fall under the notice's "within 30 days … we delete the
-rest".
+failed job's dead letter, 7 days, and a session cut off partway, 6 hours) fall under the notice's "we delete your data within 30
+days".
 
 ## Retention is not deletion
 
