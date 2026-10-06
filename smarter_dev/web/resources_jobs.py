@@ -136,8 +136,9 @@ async def _clear_progress_safe(user_id: UUID) -> None:
     Skrift keeps them for ``notifications.queued_ttl_seconds``. A finished run
     no longer needs them, so they go now; the lifetime is only the backstop.
     The queue is per user, so this also clears progress from another run of
-    the same owner still in flight: that run's open page keeps what it shows,
-    only a reconnect's replay of its earlier steps is lost. A failure is
+    the same owner still in flight: a reconnect no longer replays its earlier
+    steps, and a step it sends at the moment of the clear may not reach its
+    page. Its answer is sent ephemeral and is not affected. A failure is
     logged and never fails the run.
     """
     try:
@@ -363,6 +364,7 @@ async def run_resources_job(payload: ResourcesRunPayload) -> dict:
             if "api_key" in str(exc).lower()
             else "Agent failed to respond. Try again in a moment."
         )
+        failed_for_good = False
         async with get_db_session_context() as session:
             run = await session.scalar(
                 select(ResourceAgentRun)
@@ -405,13 +407,17 @@ async def run_resources_job(payload: ResourcesRunPayload) -> dict:
                         )
                     )
                 await session.commit()
+                failed_for_good = True
         await _notify_safe(
             owner_user_id,
             "agent_run_error",
             conversation_id=str(conversation_id),
             detail=detail,
         )
-        await _clear_progress_safe(owner_user_id)
+        if failed_for_good:
+            # Only the worker that ended the run clears; one that lost its
+            # lease would clear the progress of the attempt that took over.
+            await _clear_progress_safe(owner_user_id)
         return {"status": "error"}
     finally:
         heartbeat.cancel()

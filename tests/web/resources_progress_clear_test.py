@@ -154,6 +154,46 @@ async def test_a_failed_run_deletes_its_stored_progress(
 
 
 @pytest.mark.asyncio
+async def test_a_run_that_will_be_retried_keeps_its_progress(
+    service, db_session, monkeypatch
+):
+    user_id, run_id = await _run(db_session)
+
+    async def broken(*args, **kwargs):
+        raise RuntimeError("the model failed")
+
+    monkeypatch.delenv("RESOURCE_AGENT_STUB")
+    monkeypatch.setattr(resources_jobs, "run_resources_pipeline", broken)
+
+    with pytest.raises(RuntimeError, match="transient"):
+        await run_resources_job(ResourcesRunPayload(run_id=str(run_id)))
+
+    assert len(await _stored(db_session, f"user:{user_id}")) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_worker_that_lost_its_lease_leaves_the_progress_alone(
+    service, db_session, monkeypatch
+):
+    user_id, run_id = await _run(db_session, attempt_count=4)
+
+    async def taken_over(*args, **kwargs):
+        # Another worker claimed the run while this one was working.
+        run = await db_session.get(ResourceAgentRun, run_id)
+        run.worker_lease_token = "another-worker"
+        await db_session.commit()
+        raise RuntimeError("the model failed")
+
+    monkeypatch.delenv("RESOURCE_AGENT_STUB")
+    monkeypatch.setattr(resources_jobs, "run_resources_pipeline", taken_over)
+
+    result = await run_resources_job(ResourcesRunPayload(run_id=str(run_id)))
+
+    assert result["status"] == "error"
+    assert len(await _stored(db_session, f"user:{user_id}")) == 2
+
+
+@pytest.mark.asyncio
 async def test_a_clear_failure_is_logged_and_the_run_still_completes(
     service, db_session, monkeypatch, caplog
 ):

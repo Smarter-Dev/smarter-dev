@@ -13,12 +13,12 @@ from pathlib import Path
 import pytest
 import yaml
 from skrift.config import NotificationsConfig
+from skrift.lib.notification_backends import CLEANUP_INTERVAL_SECONDS
 
 from smarter_dev.shared.retention_policy import IN_FLIGHT_MAX
 from smarter_dev.shared.retention_policy import IN_FLIGHT_SWEEP_WINDOW
 
 REPO = Path(__file__).resolve().parents[2]
-SKRIFT_SWEEP_INTERVAL_SECONDS = 600
 
 
 @pytest.fixture(params=["app.yaml", "app.development.yaml"])
@@ -32,7 +32,7 @@ def test_queued_notifications_live_for_the_in_flight_sweep_window(notifications)
 
 
 def test_the_sweep_lag_still_ends_inside_the_in_flight_limit(notifications):
-    worst = notifications.queued_ttl_seconds + SKRIFT_SWEEP_INTERVAL_SECONDS
+    worst = notifications.queued_ttl_seconds + CLEANUP_INTERVAL_SECONDS
     assert worst < IN_FLIGHT_MAX.total_seconds()
 
 

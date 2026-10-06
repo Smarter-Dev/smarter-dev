@@ -250,7 +250,8 @@ async def delete_resources_conversation(
     ):
         raise StillRunning
     # The progress the browser was shown (the restated question, the research
-    # steps) is queued for a day under the owner's notification source.
+    # steps) is queued under the owner's notification source until the run
+    # finishes, and for at most notifications.queued_ttl_seconds (app.yaml).
     await session.execute(
         delete(StoredNotification).where(
             StoredNotification.source_key == f"user:{conversation.owner_user_id}",
