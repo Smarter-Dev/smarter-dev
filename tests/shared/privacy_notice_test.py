@@ -155,7 +155,8 @@ def test_the_notice_states_figures_not_mechanisms(notice):
 
 def test_ai_records_keep_no_words(notice):
     records = _store(notice, "Records of what the AI did.")
-    assert "without the words" in records
+    assert "what it decided, but not the text of any message or reply, so we can check its behaviour and cost." in records
+    assert "without the words" not in notice
     assert _store(notice, "The chat bot's memories.").endswith("Kept permanently.")
     assert "It names people by username and Discord ID" in notice
 
