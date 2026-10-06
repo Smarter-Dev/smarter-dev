@@ -13,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from datetime import UTC
 from datetime import datetime
+from datetime import timedelta
 
 import pytest
 from litestar.di import Provide
@@ -360,6 +361,74 @@ async def test_replace_script_lets_only_one_of_two_stale_readers_through(
     assert first_write.status_code == 200
     assert second_write.status_code == 409
     assert stored == "first = 1\n"
+
+
+async def test_replace_script_reschedules_from_the_settings_in_the_row(
+    db_session, submitted, no_guards
+):
+    # A reader loaded the row, then somebody else's full update changed the
+    # interval and armed a new fire. The script write that follows must
+    # validate against, and re-arm from, the interval in the row now, and
+    # cancel the fire that is pending now, not the one it loaded.
+    record = AdminHandler(
+        guild_id="G1",
+        name="ticker",
+        trigger_type="schedule",
+        settings={"interval_seconds": 3600},
+        channel_ids=["MODCHAT"],
+        description="tick",
+        script='await send_message("tick", "MODCHAT")\n',
+        created_by_admin="A1",
+        scheduled_job_id="J0",
+    )
+    db_session.add(record)
+    await db_session.commit()
+    handler_id = str(record.id)
+    stale_session = async_sessionmaker(db_session.bind, expire_on_commit=False)()
+    # Kept referenced: the identity map holds its rows weakly, and a copy
+    # nobody holds is read again fresh, which is not the case under test.
+    stale_copy = await stale_session.get(AdminHandler, record.id)
+    assert stale_copy.settings == {"interval_seconds": 3600}
+
+    async with _async_client(db_session) as other:
+        edited = await other.put(
+            f"/api/admin/handlers/{handler_id}",
+            json={
+                "description": "tick",
+                "script": 'await send_message("tick", "MODCHAT")\n',
+                "settings": {"interval_seconds": 600},
+                "channel_ids": ["MODCHAT"],
+            },
+        )
+    assert edited.status_code == 200
+    assert _StubJobHandle.cancelled == ["J0"]
+    ((_, armed_by_edit),) = submitted
+    async with _async_client(stale_session) as stale:
+        before = datetime.now(UTC)
+        replaced = await stale.put(
+            f"/api/admin/handlers/{handler_id}/script",
+            json={
+                "script": 'await send_message("tock", "MODCHAT")\n',
+                "expected_script": 'await send_message("tick", "MODCHAT")\n',
+            },
+        )
+    assert stale_copy.settings == {"interval_seconds": 600}
+    await stale_session.close()
+
+    assert replaced.status_code == 200
+    assert _StubJobHandle.cancelled == ["J0", armed_by_edit["job_id"]]
+    (_, armed_by_replace) = submitted[-1]
+    assert armed_by_replace["scheduled_for"] - before < timedelta(seconds=600 + 5)
+    async with async_sessionmaker(db_session.bind)() as fresh:
+        stored = (
+            await fresh.execute(
+                select(AdminHandler.settings, AdminHandler.scheduled_job_id).where(
+                    AdminHandler.id == record.id
+                )
+            )
+        ).one()
+    assert stored.settings == {"interval_seconds": 600}
+    assert stored.scheduled_job_id == armed_by_replace["job_id"]
 
 
 def test_replace_script_on_unknown_handler_is_404(client):

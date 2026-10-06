@@ -47,7 +47,6 @@ from sqlalchemy import func
 from sqlalchemy import select
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import set_committed_value
 
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
@@ -326,7 +325,10 @@ class AdminHandlerController(Controller):
             raise plain_error(
                 409, "the admin handler's script has changed since it was read"
             )
-        set_committed_value(record, "script", data.script)
+        # The row is ours until commit; read it again so the settings and
+        # job id below are the ones in it now, not the ones loaded before
+        # another writer's edit went through.
+        await db_session.refresh(record)
         # A scheduled handler's settings are validated against its script.
         if record.trigger_type in _TIME_TRIGGERS:
             try:
