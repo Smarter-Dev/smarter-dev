@@ -30,6 +30,7 @@ Smarter Dev LLC ("we") operates the Smarter Dev Discord server, its bot and smar
 - To sign you in, bill you and send you email you asked for.
 - To monitor cost, abuse and errors.
 
+=== Message 2 of 3 ===
 ## How long we keep it
 
 - Temporary working copies and in-progress results: at most 6 hours.
@@ -38,9 +39,8 @@ Smarter Dev LLC ("we") operates the Smarter Dev Discord server, its bot and smar
 - Sign-in sessions: 30 days after your last visit.
 - Account, subscription records and website content: until you delete them.
 - Discord records, AI assistant conversations and email sign-ups: until you ask us to delete them.
-- Moderation history and usage records: indefinitely.
+- Moderation history, usage records and the AI assistant's memory of the server: indefinitely.
 
-=== Message 2 of 3 ===
 ## Who else processes your data
 
 - AI providers (Google, OpenAI, Anthropic, OpenRouter, OpenCode Zen, DigitalOcean and TypeSafe) receive the content sent to AI features, including authors' Discord IDs.
@@ -56,6 +56,7 @@ You can delete your website chats, questions, searches and your whole account fr
 
 For everything else, message an @admin on the [Smarter Dev Discord server](https://discord.gg/de8kajxbYS) or email admin@smarter.dev. After confirming you own the Discord account, we delete your data within 30 days, including removing you from the AI assistant's conversations. From then on the AI assistant ignores your messages and does not respond to you. Other features still process your new messages, and new activity starts new records.
 
+=== Message 3 of 3 ===
 ## Data we retain
 
 After a deletion request we keep:
@@ -67,7 +68,6 @@ After a deletion request we keep:
 - **Admin records.** If you configured something as an admin, your name, Discord ID or email address stays on it so admins know who set it up.
 - **Our servers' own logs and messages the bot already posted on Discord**, including moderation log posts, which we do not edit.
 
-=== Message 3 of 3 ===
 ## Changes
 
 We update this page when this policy changes and announce it in the server's privacy channel.

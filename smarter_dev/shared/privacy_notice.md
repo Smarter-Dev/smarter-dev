@@ -36,7 +36,7 @@ Smarter Dev LLC ("we") operates the Smarter Dev Discord server, its bot and smar
 - Sign-in sessions: 30 days after your last visit.
 - Account, subscription records and website content: until you delete them.
 - Discord records, AI assistant conversations and email sign-ups: until you ask us to delete them.
-- Moderation history and usage records: indefinitely.
+- Moderation history, usage records and the AI assistant's memory of the server: indefinitely.
 
 ## Who else processes your data
 

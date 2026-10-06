@@ -133,7 +133,7 @@ def test_the_stated_limits_are_the_code_limits(notice):
     assert "Sign-in sessions: 30 days after your last visit." in retention
     assert "Account, subscription records and website content: until you delete them." in retention
     assert "Discord records, AI assistant conversations and email sign-ups: until you ask us to delete them." in retention
-    assert "Moderation history and usage records: indefinitely." in retention
+    assert "Moderation history, usage records and the AI assistant's memory of the server: indefinitely." in retention
     assert "|" not in retention
 
 
