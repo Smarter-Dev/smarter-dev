@@ -177,7 +177,8 @@ def test_the_stated_limits_are_the_code_limits(notice):
     # Email sign-ups are self-service once #91 merges.
     assert "Account, subscription records, website content and email sign-ups: until you delete them." in retention
     assert "Messages the AI assistant has read: at most 3 hours after the server goes quiet." in retention
-    assert "Discord records: until you ask us to delete them." in retention
+    assert "Your Discord ID, username and activity and participation records: until you ask us to delete them." in retention
+    assert "Discord records" not in notice
     assert "Moderation history, usage records and the AI assistant's memory of the server: indefinitely." in retention
     assert "|" not in retention
 
