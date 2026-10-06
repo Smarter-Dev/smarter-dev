@@ -65,7 +65,6 @@ After a deletion request we keep:
 - **The AI assistant's memory of the server**, with you removed from it, so it does not lose what it has learned about the community.
 - **Your Discord ID**, so the AI assistant keeps ignoring your messages.
 - **Records of usage, cost and AI decisions, and other members' transaction histories**, with your ID and name removed, though they still show which messages and channels were involved, so our accounts stay accurate and we can audit the AI.
-- **Admin records.** If you configured something as an admin, your name, Discord ID or email address stays on it so admins know who set it up.
 - **Messages the bot already posted on Discord**, including moderation log posts, which we do not edit.
 
 ## Your rights

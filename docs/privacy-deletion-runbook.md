@@ -18,7 +18,7 @@ help prepare or check a step, but does not run mutations.
 | --- | --- |
 | **Purge (agent)** | Everything the chat bot holds about the person: the guild memory, behavior and personality blocks, pending notes and retained revisions, both agents' working histories and their compaction summaries, the proactive recovery copy and watch instructions, and the external worker's history. The agent does the edit; see step 4. |
 | **Delete** | Bytes balances, squad memberships, quest and challenge submissions and quest progress, member activity dates, forum subscriptions, campaign signups, `/help` and `/tldr` records they started, legacy `/scan` profiles, rate-limit and DM caches, bot API security log rows whose request named them (until #81's migration drops that table), and their site account with its chat, attachments, searches, resources questions, profile, linked logins (and their stored Discord tokens), push subscriptions, roles, API keys, second-factor enrollments, OAuth consent grants, republish links and membership rows. Also these, which can outlast the limits under "Ages out": AI error messages that name them, the running topic and notes of engagements that name them, entries in automation memory that carry them, automation jobs about them still waiting in Skrift's job stores (and any not yet pruned), AI agent sessions that mention them, and their site jobs. |
-| **Anonymise** | Rows other people share. Bytes transfers the person sent or received keep their amount and date for the other member, with the person's id and username replaced and the reason cleared. Chat engagements they started lose the starter's id and username. Usage cost rows lose their Discord id and details. Legacy `/scan` usage rows lose their user id. Chat agent turns and handler runs have the person's id and names replaced where they stand as values; forum agent responses have the author's display name replaced. Site page revisions they wrote lose their author when the account is deleted. |
+| **Anonymise** | Rows other people share. Bytes transfers the person sent or received keep their amount and date for the other member, with the person's id and username replaced and the reason cleared. Chat engagements they started lose the starter's id and username. Usage cost rows lose their Discord id and details. Legacy `/scan` usage rows lose their user id. Chat agent turns and handler runs have the person's id and names replaced where they stand as values; forum agent responses have the author's display name replaced. Site page revisions they wrote lose their author when the account is deleted. What an admin set up (automations, admin and channel handlers, forum agents, campaigns, scheduled and repeating messages, squad sales, extension installs) keeps working, with their id, names and email replaced by `DELETED` where it records who set it up; a privacy purge they requested loses its requester. |
 | **Keep** | Moderation history: `moderation_actions`, the bot's posts in the guild's moderation and audit log channels, and the moderator's `reason` copied into `handler_runs` rows of moderation triggers. Anonymised billing: usage cost rows with no person linked (the membership rows are deleted with the account; Polar keeps its payment records under its own terms). A bare receipt that the request was completed. The person's Discord id alone in `chat_bot_blocked_users`, written by the purge in step 4, so the chat bot sees their messages only as `[BLOCKED BY USER]` and does not respond to them. |
 | **Ages out** | Short-lived records listed below. Nothing in them lasts past 30 days, so a request does not touch them, apart from the live work steps 6 to 8 clear. |
 
@@ -28,14 +28,12 @@ automation memory (step 7) and job stores
 (step 8).
 
 The Keep row has a second part, disclosed in the list of what a deletion keeps under the notice's "Data we retain":
-creator fields on automations, campaigns and scheduled messages set up by a
-requester who is an admin (`created_by` on `channel_handlers`,
-`admin_handlers`, `forum_agents`, `campaigns`, `scheduled_messages`,
-`squad_sale_events` and `repeating_messages`;
-`extension_installs.installed_by`); Pydantic Logfire and server logs; copies
-held by AI model providers and the other processors the notice names; and the
-bot's Discord posts and DMs outside the moderation and audit log channels.
-Site pages and assets an admin authored are reassigned, not kept (step
+the bot's Discord posts and DMs outside the moderation and audit log
+channels. Pydantic Logfire and server logs are not edited; they age out
+within 30 days. Copies held by AI model providers and the other processors
+the notice names are under their own policies. Nothing an admin set up keeps
+their name, id or email: creator fields are anonymised (step 6, "What they
+set up"), and site pages and assets an admin authored are reassigned (step
 5).
 
 ### Ages out
@@ -196,6 +194,18 @@ they have no site account linked to this Discord account; skip every step
 marked *site*. Two or more rows cannot happen (the pair is unique); stop and
 ask a developer if it does.
 
+*Site:* note the account's name and email addresses beside the names from
+step 1. Step 6's "What they set up" replaces them where an admin's work
+records who set it up. Do this now: step 5 deletes the account.
+
+```sql
+BEGIN READ ONLY;
+SELECT name AS identifier FROM users WHERE id = :'uid'
+UNION SELECT email FROM users WHERE id = :'uid'
+UNION SELECT provider_email FROM oauth_accounts WHERE user_id = :'uid';
+ROLLBACK;
+```
+
 A site account made with GitHub or Google sign-in may have no Discord link,
 so the query above does not find it. Do not match it to a Discord account by
 email or name. If its owner asks, by DM or by email, ask which of the two
@@ -209,10 +219,12 @@ ROLLBACK;
 ```
 
 (`'google'` for Google.) One row: set `uid` from it. No row or several: stop
-and ask a developer. Run the *site* part of the dry run (step 3), then ask
-them to delete the account themselves from Account → Security → Delete
-account. That proves they own it, so an emailed request need not be sent
-again by DM. Once their `users` row is gone, run step 5.1 and the *site*
+and ask a developer. Run the *site* name and email query from the Discord
+case above and note what it returns, and run the *site* part of the dry run
+(step 3). Only then ask them to delete the account themselves from Account →
+Security → Delete account. That proves they own it, so an emailed request
+need not be sent again by DM. Once their `users` row is gone, run step
+5.1, step 6's "What they set up" for each name and email, and the *site*
 part of step 8 with that `uid`: they remove what self-deletion leaves. Skip
 every step that needs `did`, unless they also name a Discord account and send
 the request from it by DM.
@@ -304,6 +316,7 @@ BEGIN READ ONLY;
 SELECT 'web_search_runs' AS store, count(*) FROM web_search_runs WHERE owner_user_id = :'uid'
 UNION ALL SELECT 'web_search_links', count(*) FROM web_search_links WHERE owner_user_id = :'uid'
 UNION ALL SELECT 'push_subscriptions', count(*) FROM push_subscriptions WHERE user_id = :'uid'
+UNION ALL SELECT 'chat_bot_purge_requests requested (anonymise)', count(*) FROM chat_bot_purge_requests WHERE requested_by = :'uid'
 UNION ALL SELECT 'web_chat_conversations', count(*) FROM web_chat_conversations WHERE owner_user_id = :'uid'
 UNION ALL SELECT 'sudo_memberships', count(*) FROM sudo_memberships WHERE user_id = :'uid'
 UNION ALL SELECT 'open subscriptions', count(*) FROM sudo_memberships WHERE user_id = :'uid' AND subscription_id IS NOT NULL AND revoked_reason IS NULL
@@ -486,6 +499,8 @@ waitlist sign-ups under its confirmed email addresses or linked Discord login.
    DELETE FROM web_search_links WHERE owner_user_id = :'uid';
    DELETE FROM web_search_runs WHERE owner_user_id = :'uid';
    DELETE FROM push_subscriptions WHERE user_id = :'uid';
+   -- A privacy purge an admin requested keeps its receipt, not who asked.
+   UPDATE chat_bot_purge_requests SET requested_by = NULL WHERE requested_by = :'uid';
    -- stop here: compare each count with the dry run, then run COMMIT; or ROLLBACK;
    ```
 
@@ -769,6 +784,47 @@ normally match.
 The AI's own words in these rows (replies, notes, forum replies) are written
 as the placeholder, and rows from before #80 are redacted by the sweep's first
 hourly run after the deploy; see "Ages out" at the top.
+
+### What they set up
+
+An admin's automations, handlers, campaigns and the like keep running after
+the request, but not with the admin's name on them. Run this once with their
+Discord id, then once for each name from step 1 and each name and email noted
+in step 2. Each update replaces a creator field only when the whole value is
+that identifier (ignoring case), and never the app's own markers (`admin`,
+`extension`, `chatbot`, `DELETED`).
+
+```sql
+\set who 'their_id_name_or_email'
+BEGIN READ ONLY;
+SELECT 'channel_handlers' AS store, count(*) FROM channel_handlers WHERE lower(created_by) = lower(:'who') AND lower(:'who') NOT IN ('admin', 'extension', 'chatbot', 'deleted')
+UNION ALL SELECT 'admin_handlers', count(*) FROM admin_handlers WHERE lower(created_by_admin) = lower(:'who') AND lower(:'who') NOT IN ('admin', 'extension', 'chatbot', 'deleted')
+UNION ALL SELECT 'forum_agents', count(*) FROM forum_agents WHERE lower(created_by) = lower(:'who') AND lower(:'who') NOT IN ('admin', 'extension', 'chatbot', 'deleted')
+UNION ALL SELECT 'campaigns', count(*) FROM campaigns WHERE lower(created_by) = lower(:'who') AND lower(:'who') NOT IN ('admin', 'extension', 'chatbot', 'deleted')
+UNION ALL SELECT 'scheduled_messages', count(*) FROM scheduled_messages WHERE lower(created_by) = lower(:'who') AND lower(:'who') NOT IN ('admin', 'extension', 'chatbot', 'deleted')
+UNION ALL SELECT 'squad_sale_events', count(*) FROM squad_sale_events WHERE lower(created_by) = lower(:'who') AND lower(:'who') NOT IN ('admin', 'extension', 'chatbot', 'deleted')
+UNION ALL SELECT 'repeating_messages', count(*) FROM repeating_messages WHERE lower(created_by) = lower(:'who') AND lower(:'who') NOT IN ('admin', 'extension', 'chatbot', 'deleted')
+UNION ALL SELECT 'extension_installs', count(*) FROM extension_installs WHERE lower(installed_by) = lower(:'who') AND lower(:'who') NOT IN ('admin', 'extension', 'chatbot', 'deleted');
+ROLLBACK;
+BEGIN;
+UPDATE channel_handlers SET created_by = 'DELETED' WHERE lower(created_by) = lower(:'who') AND lower(:'who') NOT IN ('admin', 'extension', 'chatbot', 'deleted');
+UPDATE admin_handlers SET created_by_admin = 'DELETED' WHERE lower(created_by_admin) = lower(:'who') AND lower(:'who') NOT IN ('admin', 'extension', 'chatbot', 'deleted');
+UPDATE forum_agents SET created_by = 'DELETED' WHERE lower(created_by) = lower(:'who') AND lower(:'who') NOT IN ('admin', 'extension', 'chatbot', 'deleted');
+UPDATE campaigns SET created_by = 'DELETED' WHERE lower(created_by) = lower(:'who') AND lower(:'who') NOT IN ('admin', 'extension', 'chatbot', 'deleted');
+UPDATE scheduled_messages SET created_by = 'DELETED' WHERE lower(created_by) = lower(:'who') AND lower(:'who') NOT IN ('admin', 'extension', 'chatbot', 'deleted');
+UPDATE squad_sale_events SET created_by = 'DELETED' WHERE lower(created_by) = lower(:'who') AND lower(:'who') NOT IN ('admin', 'extension', 'chatbot', 'deleted');
+UPDATE repeating_messages SET created_by = 'DELETED' WHERE lower(created_by) = lower(:'who') AND lower(:'who') NOT IN ('admin', 'extension', 'chatbot', 'deleted');
+UPDATE extension_installs SET installed_by = 'DELETED' WHERE lower(installed_by) = lower(:'who') AND lower(:'who') NOT IN ('admin', 'extension', 'chatbot', 'deleted');
+-- stop here: compare each UPDATE count with its line above, then run COMMIT; or ROLLBACK;
+```
+
+A count higher than what the person set up means another admin's record
+holds the same name; roll back and ask a developer. Creator fields that
+hold something other than one whole identifier (a name with a note added,
+say) are not matched; read the values in each of these columns
+(`created_by`, `admin_handlers.created_by_admin` and
+`extension_installs.installed_by`) that are not a marker, and replace any
+that name the person by hand, with a developer.
 
 Expected side effects, all accepted:
 
@@ -1236,7 +1292,8 @@ run out, tell the member what is left and that the request is open.
 
 2. Rerun the dry-run counts of steps 3, 7 and 8 (for agent sessions, rerun
    the collect block first, or the count shows the old list). Every deleted store reads
-   0; the anonymise rows read 0; moderation is unchanged; the agent purge rows
+   0; the anonymise rows read 0, and so does each "What they set up" count
+   rerun for every identifier; moderation is unchanged; the agent purge rows
    match the purge page. Then, for each name (`\set name` as in step 6),
    count it inside longer text in automation memory. Judge any hit by reading
    the memory: the handler's admin page shows it, and a guild key is read

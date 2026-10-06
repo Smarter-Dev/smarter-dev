@@ -217,7 +217,6 @@ def test_self_deletion_names_where(notice):
             "with your ID and name removed, though they still show which messages and channels were involved, "
             "so our accounts stay accurate and we can audit the AI.",
         ),
-        ("Admin records", "your name, Discord ID or email address stays on it so admins know who set it up."),
         ("Messages the bot already posted on Discord", "including moderation log posts, which we do not edit."),
     ],
 )
@@ -230,6 +229,27 @@ def test_the_account_page_is_linked_on_the_web_and_in_the_channel():
     link = "[Account → Security & Accounts](https://smarter.dev/account/security#your-data)"
     assert link in notice_markdown()
     assert link in discord_markdown()
+
+
+def test_what_an_admin_set_up_is_not_kept_after_a_request(notice):
+    """Zech (#86): the runbook anonymises an admin's creator fields, so the
+    policy does not list them as kept."""
+    retained = _section(notice, "Data we retain")
+    assert "Admin records" not in retained
+    assert "set it up" not in retained
+    runbook = (REPO / "docs/privacy-deletion-runbook.md").read_text()
+    for table, column in (
+        ("channel_handlers", "created_by"),
+        ("admin_handlers", "created_by_admin"),
+        ("forum_agents", "created_by"),
+        ("campaigns", "created_by"),
+        ("scheduled_messages", "created_by"),
+        ("squad_sale_events", "created_by"),
+        ("repeating_messages", "created_by"),
+        ("extension_installs", "installed_by"),
+    ):
+        assert f"UPDATE {table} SET {column} = 'DELETED'" in runbook
+    assert "UPDATE chat_bot_purge_requests SET requested_by = NULL" in runbook
 
 
 def test_leaving_the_assistant_says_what_is_excluded_not_how(notice):
