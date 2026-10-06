@@ -86,6 +86,7 @@ controllers:
   - smarter_dev.web.chat.api:ChatApiController
   - smarter_dev.web.search_preview_controller:search_preview_view
   - smarter_dev.web.privacy_controller:privacy_notice
+  - smarter_dev.web.terms_controller:terms_of_service
   - smarter_dev.web.vibe_courses_controller:vibe_courses
   - smarter_dev.web.vibe_courses_controller:vibe_courses_legacy_redirect
   - smarter_dev.web.vibe_courses_controller:vibe_courses_resources_redirect
