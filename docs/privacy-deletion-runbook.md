@@ -27,7 +27,7 @@ limits, which the steps below edit: AI error messages and engagement topics (ste
 automation memory (step 7) and job stores
 (step 8).
 
-The Keep row has a second part, disclosed in the notice's "What we keep":
+The Keep row has a second part, disclosed in the notice's "What we keep, and why":
 creator fields on automations, campaigns and scheduled messages set up by a
 requester who is an admin (`created_by` on `channel_handlers`,
 `admin_handlers`, `forum_agents`, `campaigns`, `scheduled_messages`,

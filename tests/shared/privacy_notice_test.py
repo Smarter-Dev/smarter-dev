@@ -3,11 +3,13 @@
 The notice is a public promise about what the code does, so these tests pin
 the statements that must stay true and the ones it must never make: the chat
 bot's memories are permanent, moderation history survives a deletion
-request, and no opt-out or automatic deletion exists yet.
+request, opting out of the chat bot comes only with a deletion, and the
+notice names no mechanism.
 """
 
 from __future__ import annotations
 
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -18,6 +20,11 @@ from smarter_dev.shared.privacy_notice import command_response
 from smarter_dev.shared.privacy_notice import discord_short_version
 from smarter_dev.shared.privacy_notice import notice_markdown
 from smarter_dev.shared.privacy_notice import short_version
+from smarter_dev.shared.retention_policy import IN_FLIGHT_MAX
+from smarter_dev.shared.retention_policy import OPERATIONAL_MAX
+from smarter_dev.web.web_search.anonymous import (
+    TTL_SECONDS as ANONYMOUS_SEARCH_TTL_SECONDS,
+)
 
 REPO = Path(__file__).resolve().parents[2]
 CHANNEL_POST = REPO / "docs" / "privacy-channel-post.md"
@@ -36,128 +43,167 @@ def test_the_short_version_carries_the_required_statements():
     assert "permanent memories" in points
     assert "Moderation history is kept forever to keep the server safe." in points
     assert "deletion request" not in points
-    assert "your membership record goes with it; only anonymous usage and cost records and moderation history stay." in points
+    assert "A deletion keeps moderation history, usage and cost records with your ID and name removed, and a few other records the full notice lists" in points
     assert "including from the chat bot's memories" in points
     assert "DM an @admin on the Smarter Dev Discord server or email admin@smarter.dev. We delete it within 30 days." in points
-    assert "Moderation history stays" not in points
-    assert "within 30 days" in points
+
+
+def _section(notice: str, heading: str) -> str:
+    return notice.split(f"## {heading}", 1)[1].split(" ## ", 1)[0]
+
+
+def _item(notice: str, label: str) -> str:
+    return notice.split(f"**{label}", 1)[1].split(" - **", 1)[0].split(" ## ", 1)[0]
+
+
+def test_the_notice_is_laid_out_as_a_policy(notice):
+    headings = [
+        "The short version",
+        "Who we are",
+        "What we store and why",
+        "How long we keep it",
+        "Who else handles your data",
+        "Deleting your data",
+        "What we keep, and why",
+        "Opting out of the chat bot",
+        "Changes",
+    ]
+    positions = [notice.index(f"## {heading}") for heading in headings]
+    assert positions == sorted(positions)
+    stored = _section(notice, "What we store and why")
+    for word in ("Kept until", "Kept for", "kept permanently", "at most", "until you", "deleted when"):
+        assert word not in stored
 
 
 def test_every_deletion_request_goes_to_the_admin_role(notice):
     assert notice.count("DM an @admin on the") == 3
     assert "or email [admin@smarter.dev](mailto:admin@smarter.dev)." in notice
-    assert "For those, DM an @admin or email admin@smarter.dev." in notice
-    assert "Moderation history, including those posts, is kept forever to keep the server safe." in notice
-    assert "not part of a deletion request" not in notice
-    deleting = notice.split("## Deleting your data", 1)[1]
-    assert "within 30 days of your request" in deleting
+    deleting = _section(notice, "Deleting your data")
     assert "DM an @admin on the Smarter Dev Discord server, or email admin@smarter.dev." in deleting
     assert "Either way, we check that you own the Discord account" in deleting
+    assert "within 30 days of your request" in deleting
     assert "backup" not in notice.lower()
 
 
-def test_the_notice_does_not_describe_an_opt_out_as_available(notice):
-    lowered = notice.lower()
-    assert "opt-out" not in lowered
-    assert "you can opt out" not in lowered
-    assert "forget" not in lowered
-    assert "blank" not in lowered
-    assert "only the bot edits" not in lowered
+# The five retention classes in docs/data-retention.md, each stated once as a
+# fact. A stated limit must never be shorter than the code keeps the data.
+def test_how_long_states_each_retention_class(notice):
+    retention = _section(notice, "How long we keep it")
+    assert "are kept for at most 6 hours, and most are deleted sooner, when the work finishes." in retention
+    assert "A search made with your search link while signed out lasts 30 minutes." in retention
+    assert "Rate limits, caches, security events, and errors and traces are kept for at most 30 days." in retention
+    assert "You stay signed in for 30 days after your last visit." in retention
+    assert "Our servers' own logs have no fixed time limit." in retention
+    assert "Your account and what you make on the website are kept until you delete them or we delete them at your request." in retention
+    assert "The chat bot's conversations, the other Discord features' records, automation text and email sign-ups are kept until you ask us to delete them." in retention
+    assert "The chat bot's memories and moderation history are kept permanently." in retention
+    assert "hold no message text. They have no time limit. A deletion request removes your ID and name from them." in retention
+
+
+def test_the_stated_limits_are_the_code_limits(notice):
+    retention = _section(notice, "How long we keep it")
+    assert IN_FLIGHT_MAX == timedelta(hours=6)
+    assert OPERATIONAL_MAX == timedelta(days=30)
+    assert ANONYMOUS_SEARCH_TTL_SECONDS == 30 * 60
+    assert "at most 6 hours" in retention
+    assert "at most 30 days" in retention
+    assert "lasts 30 minutes" in retention
 
 
 def test_a_deletion_request_removes_the_person_from_the_chat_bot(notice):
-    deleted = notice.split("**What we delete.**", 1)[1].split("**", 1)[0]
-    assert "removes you from its memories and its conversations" in deleted
-    assert "Everything else above that is kept until you ask us to delete it" in deleted
+    deleting = _section(notice, "Deleting your data")
+    assert "The chat bot removes you from its memories and its conversations." in deleting
+    assert "Everything else above that we keep until you ask, including your website account, is deleted or kept with your ID and name removed." in deleting
+    assert "Apart from what we keep below, everything that can still mention you is gone within 30 days of your request." in deleting
     assert "cannot remove" not in notice.lower()
 
 
-def test_a_deleted_person_stays_on_the_chat_bots_blocked_list(notice):
-    kept = notice.split("**What we keep.**", 1)[1].split("\n\n", 1)[0]
-    assert "chat bot's blocked list" in kept
-    assert "reach the chat bot only as `[BLOCKED BY USER]`" in kept
-    assert "does not respond to you" in kept
-    assert "never reads" not in notice
+def test_self_deletion_names_where_and_what_it_leaves(notice):
+    yourself = _item(notice, "Doing it yourself.")
+    assert 'Account → Security & Accounts → "Your data" lets you delete your chats, your questions about our resources or your searches' in yourself
+    assert "Anything still being answered is skipped; delete it once it finishes." in yourself
+    assert "Each goes with its answers, files and every copy we keep, apart from our logs." in yourself
+    assert "Deleting your account on the same page removes it with all of those and your search link." in yourself
+    assert "What the Discord bot stores, including the chat bot's memories, is deleted only when you ask us." in yourself
 
 
-def test_the_notice_says_the_blocked_list_covers_the_chat_bot_only(notice):
-    assert "The blocked list covers the chat bot only" in notice
+@pytest.mark.parametrize(
+    ("kept", "reason"),
+    [
+        ("Moderation history", "It is kept forever to keep the server safe."),
+        ("The chat bot's memories.", "so they are never reset. A request removes you from them."),
+        ("Records of usage, cost and what the AI and automations did", "such as which messages and channels were involved and what was done, with your ID and name removed."),
+        ("Bytes transfers", "in the other member's history with your ID and name removed"),
+        ("Your Discord ID alone on the chat bot's blocked list", "so the chat bot keeps leaving you out"),
+        ("Your name, Discord ID or email address as the person who set up", "automations, extensions, campaigns, events or scheduled messages as a server admin"),
+        ("A bare record that your request was completed", "with nothing that identifies you"),
+        ("Logs and the bot's posts on Discord", "which are not edited to remove you"),
+        ("Copies held by Discord and the services named above", "under their own terms"),
+    ],
+)
+def test_what_a_deletion_keeps_is_listed_with_its_reason(notice, kept, reason):
+    keep = _section(notice, "What we keep, and why")
+    assert reason in _item(keep, kept)
 
 
-def test_shared_records_are_anonymised_not_deleted(notice):
-    deleted = notice.split("**What we delete.**", 1)[1].split("**What we keep", 1)[0]
-    assert "is deleted or kept with your ID and name removed" in deleted
-    assert "Bytes transfers you sent or received stay in the other member's history with your ID and name removed" in deleted
-    assert "Records of what the AI and automations did, such as which messages and channels were involved and what was done, are kept with your ID and name removed." in deleted
+def test_opting_out_says_what_is_excluded_not_how(notice):
+    opting = _section(notice, "Opting out of the chat bot")
+    assert "Asking us to delete your data also opts you out of the chat bot." in opting
+    assert "your messages are left out of what the chat bot sees, and it does not respond to you. There is no separate opt-out." in opting
+    assert "This covers the chat bot only: other AI features, such as `/help`, forum replies, server automations and moderation, still process your new messages" in opting
+    assert "features like bytes start new records the next time you post" in opting
+    lowered = notice.lower()
+    assert "blocked by user" not in lowered
+    assert "you can opt out" not in lowered
+    assert "opt-out" not in lowered.replace("there is no separate opt-out.", "")
+
+
+def test_the_notice_makes_no_promise_the_code_cannot_keep(notice):
+    lowered = notice.lower()
+    assert "forget" not in lowered
+    assert "blank" not in lowered
+    assert "only the bot edits" not in lowered
+    assert "never reads" not in lowered
+    assert "can no longer sign in" not in notice
+    assert "straight away" not in notice
 
 
 def test_the_account_names_each_sign_in_provider_and_what_it_gives(notice):
-    account = _store(notice, "Your account.")
+    account = _item(notice, "Your account.")
     assert "You sign in with Discord, GitHub or Google." in account
     assert "we receive your profile as that service shares it with us" in account
     assert "email address and whether it is verified, and the sign-in tokens it issues" in account
     assert "whether you use two-factor sign-in or Nitro" in account
     assert "Google's gives your first and last name, language and, for a work or school account, its domain" in account
     assert "GitHub's is your public profile" in account
-    assert "can no longer sign in" not in notice
 
 
-def test_self_deletion_names_what_it_leaves(notice):
-    assert "You can delete a chat, a question about our resources or a search yourself, one at a time where it is listed or all of each kind at once" in notice
-    assert "Deleting your website account from your account settings removes the account with all of those and your search link." in notice
-    assert "Anything the Discord bot stores and the chat bot's memories are kept until you ask us to delete them." in notice
-    assert "A copy of each question you asked about our resources" not in notice
-    assert "The AI's own copies of your questions about our resources and its answers are deleted as soon as it finishes each answer, or within 6 hours if it was cut off partway." in notice
-    assert "straight away" not in notice
-
-
-def _store(notice: str, kind: str) -> str:
-    return notice.split(f"**{kind}**", 1)[1].split(" - **", 1)[0].split(" ## ", 1)[0]
-
-
-# Each kind of data the notice lists, and the retention it states for it. A
-# stated period must never be shorter than the code can keep the data; the
-# stores behind each figure are in docs/data-retention.md and the runbook.
-RETENTION = {
-    "The chat bot's memories.": "Kept permanently",
-    "The chat bot's conversations.": "Kept until you ask us to delete them",
-    "Messages being handled.": "Kept for at most 6 hours",
-    "Server automations.": "Kept until you ask us to delete it",
-    "Records of what the AI did.": "Kept until you ask us to delete them",
-    "Moderation.": "kept forever",
-    "Games and community features.": "Kept until you ask us to delete them",
-    "Rate limits and caches.": "Kept for 30 days",
-    "Your account.": "Kept until you delete your account",
-    "Chat.": "kept until you delete them or your account",
-    "Searches": "kept until you delete them or your account",
-    "Email.": "Kept until you ask us to delete it",
-    "Security.": "Kept for 30 days in Pydantic Logfire",
-}
-
-
-@pytest.mark.parametrize("kind", RETENTION)
-def test_each_kind_of_data_states_how_long_it_is_kept(notice, kind):
-    assert RETENTION[kind] in _store(notice, kind)
-
-
-def test_the_notice_states_figures_not_mechanisms(notice):
+def test_the_notice_states_no_mechanisms(notice):
     lowered = notice.lower()
-    for mechanism in ("up to", "placeholder", "folded", "every 15 minutes", "16 kb", "last five", "api key", "proactive", "chat agent"):
-        assert mechanism not in lowered
-    assert "Searches made with your search link while signed out are kept for 30 minutes" in notice
-    assert "You stay signed in for 30 days after your last visit" in notice
-    assert "it keeps its own copy of the question, its research and its answer, deleted as soon as it finishes, or within 6 hours if it is cut off partway" in notice
-    assert "The progress it shows you while it works is deleted when it finishes, or within 6 hours." in notice
-    monitoring = notice.split("**Monitoring.**", 1)[1].split(" - **", 1)[0]
-    assert "Everything sent to Logfire is kept for 30 days" in monitoring
-    assert "Our servers also keep their own logs, with no fixed time limit" in monitoring
+    for mechanism in (
+        "up to",
+        "roughly",
+        "placeholder",
+        "folded",
+        "hourly",
+        "every 15 minutes",
+        "16 kb",
+        "last five",
+        "api key",
+        "proactive",
+        "chat agent",
+        "sweep",
+        "skrift",
+        "redis",
+        "`[",
+        "_",
+    ):
+        assert mechanism not in lowered.replace("admin@smarter.dev", "")
 
 
 def test_ai_records_keep_no_words(notice):
-    records = _store(notice, "Records of what the AI did.")
+    records = _item(notice, "Records of what the AI did.")
     assert "what it decided, but not the text of any message or reply, so we can check its behaviour and cost." in records
-    assert "without the words" not in notice
-    assert _store(notice, "The chat bot's memories.").endswith("Kept permanently.")
     assert "It names people by username and Discord ID" in notice
 
 
@@ -166,29 +212,22 @@ def test_the_notice_does_not_call_logs_text_free(notice):
 
 
 def test_security_events_name_no_member(notice):
-    security = _store(notice, "Security.")
+    security = _item(notice, "Keeping things running and secure.")
     assert "Failed attempts to authenticate to our API with the IP address they came from" in security
     assert "requests refused for going over a rate limit" in security
     assert "admin operations" in security
-    assert "None records a member's Discord ID" in security
+    assert "none records a member's Discord ID" in security
 
 
 def test_no_placeholder_is_left_in_the_notice(notice):
     assert "[PLACEHOLDER" not in notice
 
 
-def test_the_notice_names_what_a_deletion_keeps(notice):
-    kept = notice.split("**What we keep.**", 1)[1].split("**", 1)[0]
-    assert "Moderation history" in kept
-    assert "Anonymous usage and cost records" in kept
-    assert "completed" in kept
-
-
 @pytest.mark.parametrize(
     "product",
     [
         "Gym and Labs",
-        "**Chat.**",
+        "**What you make on the website.**",
         "Your account",
         "TypeSafe",
         "Resend",

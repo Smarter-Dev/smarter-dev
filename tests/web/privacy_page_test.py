@@ -75,15 +75,17 @@ def test_the_page_shows_the_whole_notice(client):
 
     for heading in (
         "The short version",
-        "What the Discord bot stores",
-        "What the website stores",
+        "What we store and why",
+        "How long we keep it",
         "Who else handles your data",
         "Deleting your data",
+        "What we keep, and why",
+        "Opting out of the chat bot",
     ):
         assert heading in text
     assert "permanent" in text
     assert "Moderation history is kept forever to keep the server safe" in text
-    assert "anonymous usage and cost records" in text
+    assert "usage and cost records with your ID and name removed" in text
     assert "DM an @admin on the Smarter Dev Discord server" in text
     assert 'href="mailto:admin@smarter.dev"' in client.get(PRIVACY_PATH).text
 

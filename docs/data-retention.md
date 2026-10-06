@@ -455,14 +455,16 @@ token is stored. Preview pages are read-only, unlisted, and marked `noindex`.
 ## What the public notice states
 
 The notice at `/privacy` (`smarter_dev/shared/privacy_notice.md`) lists each
-kind of data a member would recognise, with one retention figure: the longest
-any store of that kind can keep it, stated as a fact. Where a kind spans
-several stores the figure is the longest of them, so most of the stores
-behind it keep less. A figure must never be shorter than a store behind it;
-change the notice in the same commit as anything here that raises a bound.
-`tests/shared/privacy_notice_test.py` pins each figure.
+kind of data a member would recognise and why it is kept, then states the
+retention classes once, under "How long we keep it": the longest any store of
+a class can keep data, stated as a fact. The table below gives each kind of
+data its class and figure. Where a kind spans several stores the figure is the
+longest of them, so most of the stores behind it keep less. A figure must
+never be shorter than a store behind it; change the notice in the same commit
+as anything here that raises a bound. `tests/shared/privacy_notice_test.py`
+pins each class's figure.
 
-| Notice says | Class | Stores behind it | Bound, and where it is enforced |
+| Kind of data, and its figure | Class | Stores behind it | Bound, and where it is enforced |
 | --- | --- | --- | --- |
 | The chat bot's memories: permanent | Permanent | `chat_agent_guild_memory`, `chat_agent_memory_revisions` (last five nights), `chat_agent_memory_notes` | No bound (above); only the agent purge edits it for a request |
 | Messages the AI assistant has read: at most 3 hours after the server goes quiet | User content | chat agent working history, running topic and notes (2-hour keys), the guild's bot-event log (one hour); proactive history in Redis and `proactive_agent_histories`, and the external worker's copy | The chat history, topic and notes keys expire 2 hours after their last write. Proactive history is folded to a summary with no verbatim message once it has not been written for 2 hours, checked every minute, so at most 2 hours and one tick. The proactive clock is per server: it restarts when any enabled channel in the server is written. The 3 hours leave room for the fold's own model call and for a sweep that waits on a running wake or purge. A privacy purge's rewrite restarts neither clock. Both clocks restart on every other write, so an active conversation has no fixed end. The agent purge (step 4 of the runbook) removes the person |
