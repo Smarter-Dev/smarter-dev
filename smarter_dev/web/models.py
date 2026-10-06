@@ -6133,10 +6133,12 @@ class ChatBotBlockedUser(Base):
     worker) read the list through the bot API and replace the person's
     messages with ``[BLOCKED BY USER]`` before anything reaches a model.
 
-    ``source`` says why the person is on the list; ``purge`` is the only
-    source today, and the dashboard opt-out (#74) is meant to add its own.
-    The row outlives the purge request that wrote it: the request is stripped
-    to a bare receipt, this is what keeps the deletion true.
+    ``source`` says why the person is on the list: ``purge`` (an admin's
+    deletion request) or ``opt_out`` (the person opted out of the AI assistant
+    from ``/privacy``, #92). Only an ``opt_out`` row can be removed, by the
+    person opting back in; a ``purge`` row outlives the purge request that
+    wrote it (the request is stripped to a bare receipt) and is what keeps the
+    deletion true, so a purge turns an existing ``opt_out`` row into one.
     """
 
     __tablename__ = "chat_bot_blocked_users"
@@ -6160,6 +6162,22 @@ class ChatBotBlockedUsersRevision(Base):
     revision: Mapped[int] = mapped_column(
         BigInteger, nullable=False, default=0, server_default="0"
     )
+
+
+class ChatBotOptIn(Base):
+    """A person who opted out of the AI assistant and then back in (#92).
+
+    Opting back in applies to new messages only, so the block-list row goes
+    and this row holds the moment it went: both runtimes keep hiding the
+    person's messages written before ``read_from``, which Discord history
+    would otherwise hand straight back to them. Only the Discord user id and
+    the time are stored.
+    """
+
+    __tablename__ = "chat_bot_opt_ins"
+
+    discord_user_id: Mapped[str] = mapped_column(String(22), primary_key=True)
+    read_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class ChatBotPurgeRequest(Base):

@@ -2425,7 +2425,9 @@ def _event_involves_blocked(event: Any, blocked: Any) -> bool:
 def _author_blocked(blocked: Any, message: Any) -> bool:
     """Whether a hikari message's author is on the blocked-users list."""
     author = getattr(message, "author", None)
-    return author is not None and blocked.is_blocked(getattr(author, "id", None))
+    return author is not None and blocked.is_blocked(
+        getattr(author, "id", None), getattr(message, "id", None)
+    )
 
 
 def _extract_tokens(usage: RunUsage | None) -> int:

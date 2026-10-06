@@ -18,7 +18,11 @@ the revision it actually holds, so the web's minimum over live processes
 stays at the stale revision and a purge that needs a newer one waits. The
 stale state is logged at most once a minute (age and revision only).
 
-The list is deliberately generic: #74 takes it over as the opt-out list.
+The list is shared by deletion and the opt-out from the AI assistant (#92).
+Someone who opted back in is off the list, but the snapshot keeps the moment
+they did: their messages written before it stay hidden, so passing the
+message id to :meth:`BlockedUsersCache.is_blocked` matters wherever a
+message (not a live event, which is always newer) is checked.
 """
 
 from __future__ import annotations
@@ -32,7 +36,10 @@ import time
 from collections.abc import Awaitable
 from collections.abc import Callable
 from collections.abc import Iterable
+from collections.abc import Mapping
 from dataclasses import dataclass
+from dataclasses import field
+from datetime import datetime
 from typing import Any
 
 from smarter_dev.shared.privacy_purge import BLOCKED_PLACEHOLDER
@@ -45,17 +52,28 @@ REFRESH_SECONDS = 60
 # A Discord user mention; a fixed pattern, the ids come from the list.
 _USER_MENTION = re.compile(r"<@!?([0-9]{15,22})>")
 _BARE_ID = re.compile(r"(?<![0-9])([0-9]{15,22})(?![0-9])")
+# Discord's epoch: a snowflake's top 42 bits are milliseconds since it.
+DISCORD_EPOCH_MS = 1_420_070_400_000
 ENFORCING_KEY = enforcing_key("bot")
 PROCESS_ID = f"{socket.gethostname()}-{os.getpid()}"
 __all__ = ["BLOCKED_PLACEHOLDER", "BlockedUsersCache", "get_blocked_users"]
 
 
+def first_snowflake(moment: datetime) -> int:
+    """The smallest Discord id a message created at ``moment`` can have."""
+    milliseconds = int(moment.timestamp() * 1000) - DISCORD_EPOCH_MS
+    return max(milliseconds, 0) << 22
+
+
 @dataclass(frozen=True)
 class BlockedUsersSnapshot:
-    """One fetch of the list: its revision and the blocked Discord user ids."""
+    """One fetch of the list: its revision, the blocked Discord user ids, and
+    for each person who opted back in the first message id they may be read
+    from (#92)."""
 
     revision: int
     user_ids: frozenset[str]
+    read_from: Mapping[str, int] = field(default_factory=dict)
 
     def __repr__(self) -> str:
         # The ids are the people who asked to be forgotten; never print them.
@@ -94,26 +112,48 @@ class BlockedUsersCache:
     def revision(self) -> int | None:
         return None if self._snapshot is None else self._snapshot.revision
 
-    def is_blocked(self, user_id: Any) -> bool:
-        """True when this user's messages must not reach a model.
+    def is_blocked(self, user_id: Any, message_id: Any = None) -> bool:
+        """True when this user's messages (or this one, given its id) must
+        not reach a model.
 
         Fails closed only on cold start: with no list ever loaded every
-        author counts as blocked.
+        author counts as blocked. With ``message_id``, a message written
+        before its author opted back in counts as blocked too; an id that is
+        not a number does as well.
         """
         if self._snapshot is None:
             return True
-        return str(user_id) in self._snapshot.user_ids
+        user = str(user_id)
+        if user in self._snapshot.user_ids:
+            return True
+        cutoff = self._snapshot.read_from.get(user)
+        if cutoff is None or message_id is None:
+            return False
+        try:
+            return int(message_id) < cutoff
+        except (TypeError, ValueError):
+            return True
 
     def replace(self, snapshot: BlockedUsersSnapshot) -> None:
         self._snapshot = snapshot
         self._fetched_at = self._clock()
         self._loaded.set()
 
-    def load(self, revision: int, user_ids: Iterable[Any]) -> None:
+    def load(
+        self,
+        revision: int,
+        user_ids: Iterable[Any],
+        read_from: Mapping[Any, datetime] | None = None,
+    ) -> None:
         """Install a list directly (startup wiring and tests)."""
         self.replace(
             BlockedUsersSnapshot(
-                revision=revision, user_ids=frozenset(str(u) for u in user_ids)
+                revision=revision,
+                user_ids=frozenset(str(u) for u in user_ids),
+                read_from={
+                    str(u): first_snowflake(moment)
+                    for u, moment in (read_from or {}).items()
+                },
             )
         )
 

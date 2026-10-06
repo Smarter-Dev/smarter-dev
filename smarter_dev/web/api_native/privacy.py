@@ -9,6 +9,12 @@
   newer submit, which tells the runtime to drop its command; before answering,
   any stream entry for that run is deleted, because it carries the ID and
   names. The last ack of a run submits the check.
+- ``POST /api/privacy/opt-out/state`` and ``PUT /api/privacy/opt-out`` → one
+  person's opt-out from the AI assistant (#92): read it, or set it with
+  ``opted_out`` true or false. The bot calls these for the person who
+  clicked in ``/privacy``, never for an id someone typed. The id travels in
+  the body, so no access log records who opted out. Opting back in removes
+  only an opt-out, never a purge's block.
 """
 
 from __future__ import annotations
@@ -19,8 +25,10 @@ from uuid import UUID
 from litestar import Controller
 from litestar import get
 from litestar import post
+from litestar import put
 from litestar.exceptions import HTTPException
 from litestar.status_codes import HTTP_200_OK
+from pydantic import BaseModel
 from skrift.auth.guards import APIKeyOnly
 from skrift.auth.guards import Permission
 from sqlalchemy.exc import SQLAlchemyError
@@ -28,10 +36,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.privacy_purge import BlockedUsers
 from smarter_dev.shared.privacy_purge import PurgeAck
+from smarter_dev.shared.privacy_purge import Snowflake
 from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.api_native.errors import nested_not_found_error
+from smarter_dev.web.chat_bot_opt_out import OptOutState
+from smarter_dev.web.chat_bot_opt_out import opt_in
+from smarter_dev.web.chat_bot_opt_out import opt_out
+from smarter_dev.web.chat_bot_opt_out import read_opt_out
 from smarter_dev.web.chat_bot_purge import STATUS_CHECKING
 from smarter_dev.web.chat_bot_purge import delete_commands
 from smarter_dev.web.chat_bot_purge import read_blocked_users
@@ -44,6 +57,14 @@ BOT_API_PERMISSION = "bot-api"
 BOT_API_GUARDS = [bot_api_auth_guard, APIKeyOnly(), Permission(BOT_API_PERMISSION)]
 
 
+class OptOutSubject(BaseModel):
+    discord_user_id: Snowflake
+
+
+class OptOutChange(OptOutSubject):
+    opted_out: bool
+
+
 class PrivacyController(Controller):
     path = "/api/privacy"
     exception_handlers = BOT_API_EXCEPTION_HANDLERS
@@ -51,6 +72,19 @@ class PrivacyController(Controller):
     @get("/blocked-users", status_code=HTTP_200_OK, guards=BOT_API_GUARDS)
     async def blocked_users(self, db_session: AsyncSession) -> BlockedUsers:
         return await read_blocked_users(db_session)
+
+    @post("/opt-out/state", status_code=HTTP_200_OK, guards=BOT_API_GUARDS)
+    async def get_opt_out(
+        self, db_session: AsyncSession, data: OptOutSubject
+    ) -> OptOutState:
+        return await read_opt_out(db_session, data.discord_user_id)
+
+    @put("/opt-out", status_code=HTTP_200_OK, guards=BOT_API_GUARDS)
+    async def set_opt_out(self, db_session: AsyncSession, data: OptOutChange) -> OptOutState:
+        change = opt_out if data.opted_out else opt_in
+        state = await change(db_session, data.discord_user_id)
+        await db_session.commit()
+        return state
 
     @post("/purges/{run_id:uuid}/acks", status_code=HTTP_200_OK, guards=BOT_API_GUARDS)
     async def acknowledge(

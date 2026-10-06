@@ -60,6 +60,7 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "chat_agent_turns",
     "chat_bot_blocked_users",
     "chat_bot_blocked_users_revision",
+    "chat_bot_opt_ins",
     "chat_bot_purge_requests",
     "chat_catalog_models",
     "chat_settings",

@@ -336,7 +336,7 @@ def channel_message_from_hikari(message) -> ChannelMessage:
     """
     author = message.author
     blocked = get_blocked_users()
-    if blocked.is_blocked(author.id):
+    if blocked.is_blocked(author.id, message.id):
         return blocked_channel_message(message.created_at)
     member = getattr(message, "member", None)
     nickname = getattr(member, "nickname", None) if member else None
@@ -354,7 +354,8 @@ def channel_message_from_hikari(message) -> ChannelMessage:
         str(referenced.id)
         if referenced
         and not (
-            referenced_author is not None and blocked.is_blocked(referenced_author.id)
+            referenced_author is not None
+            and blocked.is_blocked(referenced_author.id, referenced.id)
         )
         else None
     )
@@ -383,7 +384,8 @@ def channel_message_from_hikari(message) -> ChannelMessage:
             else None
         ),
         replies_to_blocked=bool(
-            referenced_author is not None and blocked.is_blocked(referenced_author.id)
+            referenced_author is not None
+            and blocked.is_blocked(referenced_author.id, referenced.id)
         ),
         mention_user_ids=mention_ids,
         mention_everyone=bool(getattr(message, "mentions_everyone", False)),
@@ -411,7 +413,7 @@ def recheck_against_blocked_list(
     blocked users that were added to the list after conversion."""
     rechecked: list[ChannelMessage] = []
     for message in messages:
-        if message.blocked or blocked.is_blocked(message.author_id):
+        if message.blocked or blocked.is_blocked(message.author_id, message.id):
             continue
         content = redact_blocked_mentions(message.content, blocked)
         mentions = tuple(
@@ -420,7 +422,7 @@ def recheck_against_blocked_list(
         )
         reply_to_id = message.reply_to_id
         if message.reply_to_author_id and blocked.is_blocked(
-            message.reply_to_author_id
+            message.reply_to_author_id, message.reply_to_id
         ):
             reply_to_id = None
         if (
@@ -1358,7 +1360,9 @@ def _reaction_preview(message) -> str:
     blocked = get_blocked_users()
     referenced = getattr(message, "referenced_message", None)
     referenced_author = getattr(referenced, "author", None) if referenced else None
-    if referenced_author is not None and blocked.is_blocked(referenced_author.id):
+    if referenced_author is not None and blocked.is_blocked(
+        referenced_author.id, getattr(referenced, "id", None)
+    ):
         return ""
     return redact_blocked_mentions(getattr(message, "content", "") or "", blocked)
 

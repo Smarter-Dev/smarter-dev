@@ -20,7 +20,7 @@ async def test_privacy_replies_with_the_link_only_to_the_caller(monkeypatch):
     monkeypatch.setattr(
         privacy_notice.get_settings(), "site_base_url", "https://smarter.dev"
     )
-    ctx = SimpleNamespace(respond=AsyncMock())
+    ctx = SimpleNamespace(respond=AsyncMock(), author=SimpleNamespace(id=1))
 
     await run_privacy(ctx)
 

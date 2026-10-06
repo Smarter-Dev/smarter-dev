@@ -277,12 +277,13 @@ async def test_blocked_author_engaging_the_bot_gets_no_model_call(
     await mention.on_message_create(event)
 
     registry_getter.assert_not_called()
-    fake_bot.get_me.assert_not_called()
+    # Only the opted-out notice looks up the bot user (#92), and stops there.
+    calls = fake_bot.get_me.call_count
 
     # nia passes the gate (and stops at the stubbed bot user).
     event.message = _message(1007, NIA_USER, "<@999> hi", mentions=(BOT,))
     await mention.on_message_create(event)
-    fake_bot.get_me.assert_called_once()
+    assert fake_bot.get_me.call_count == calls + 1
 
 
 async def test_chat_cold_start_routes_nobody_to_the_engine(monkeypatch):
