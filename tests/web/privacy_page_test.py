@@ -82,7 +82,7 @@ def test_the_page_shows_the_whole_notice(client):
     ):
         assert heading in text
     assert "permanent" in text
-    assert "Moderation history is kept so the server can stay safe" in text
+    assert "Moderation history is kept forever to keep the server safe" in text
     assert "anonymous usage and cost records" in text
     assert "DM an @admin on the Smarter Dev Discord server" in text
     assert 'href="mailto:admin@smarter.dev"' in client.get(PRIVACY_PATH).text
