@@ -1,4 +1,4 @@
-"""``/privacy`` answers with the notice's short version and its link (task #71)."""
+"""``/privacy`` answers with a summary of the notice and its link (task #71)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import hikari
 from smarter_dev.bot import client
 from smarter_dev.bot.plugins import privacy_notice as privacy_plugin
 from smarter_dev.shared import privacy_notice
-from smarter_dev.shared.privacy_notice import discord_short_version
+from smarter_dev.shared.privacy_notice import command_response
 
 run_privacy = privacy_plugin.privacy.callback
 
@@ -27,8 +27,7 @@ async def test_privacy_replies_with_the_link_only_to_the_caller(monkeypatch):
     ctx.respond.assert_awaited_once()
     body = ctx.respond.await_args.args[0]
     assert "https://smarter.dev/privacy" in body
-    for point in discord_short_version():
-        assert point in body
+    assert body == command_response("https://smarter.dev/privacy")
     assert ctx.respond.await_args.kwargs["flags"] == hikari.MessageFlag.EPHEMERAL
 
 
