@@ -1318,6 +1318,40 @@ class _FakeRedis:
     async def delete(self, key):
         self.data.pop(key, None)
 
+    async def zadd(self, key, mapping, nx=False):
+        scores = self.data.setdefault(key, {})
+        added = 0
+        for member, score in mapping.items():
+            if nx and member in scores:
+                continue
+            added += member not in scores
+            scores[member] = score
+        return added
+
+    async def zrem(self, key, member):
+        self.data.get(key, {}).pop(member, None)
+
+    async def zscore(self, key, member):
+        return self.data.get(key, {}).get(member)
+
+    async def zrangebyscore(self, key, low, high):
+        return [
+            member
+            for member, score in sorted(
+                self.data.get(key, {}).items(), key=lambda item: item[1]
+            )
+            if score <= float(high)
+        ]
+
+    async def sadd(self, key, member):
+        self.data.setdefault(key, set()).add(member)
+
+    async def srem(self, key, member):
+        self.data.get(key, set()).discard(member)
+
+    async def sismember(self, key, member):
+        return member in self.data.get(key, set())
+
     async def scan_iter(self, match=None):
         import fnmatch
 

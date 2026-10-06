@@ -2,7 +2,7 @@
 
 Per-channel:
 - `topic` (with timestamp) — 1-2 sentence summary written on every agent turn.
-  Considered "stale" if older than 6 hours OR if more than 25 channel messages
+  Considered "stale" if older than 2 hours OR if more than 25 channel messages
   have arrived since the agent was last active.
 - `notes` — 1-5 sentence topic-tracker, written on each SendResponse and
   carried forward across activations until the engine deactivates.
@@ -26,12 +26,16 @@ from datetime import UTC, datetime, timedelta
 import redis.asyncio as redis
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 
+from smarter_dev.shared.retention_policy import AGENT_VERBATIM_IDLE_WINDOW
+
 logger = logging.getLogger(__name__)
 
 KEY_PREFIX = "chat_agent"
-TOPIC_TTL_SECONDS = int(timedelta(hours=6).total_seconds())
-NOTES_TTL_SECONDS = int(timedelta(hours=2).total_seconds())
-HISTORY_TTL_SECONDS = int(timedelta(hours=2).total_seconds())
+# Topic, notes and history all expire this long after their last write: the
+# same idle window the proactive agent's history is folded on.
+TOPIC_TTL_SECONDS = int(AGENT_VERBATIM_IDLE_WINDOW.total_seconds())
+NOTES_TTL_SECONDS = int(AGENT_VERBATIM_IDLE_WINDOW.total_seconds())
+HISTORY_TTL_SECONDS = int(AGENT_VERBATIM_IDLE_WINDOW.total_seconds())
 COUNTER_TTL_SECONDS = int(timedelta(hours=24).total_seconds())
 
 # Held per guild by a privacy purge while it rewrites chat memory; a turn
@@ -55,7 +59,7 @@ _UNCONDITIONAL = object()
 # read_history_versioned's version for a stored history it could not parse.
 HISTORY_UNREADABLE = object()
 
-TOPIC_STALE_AFTER = timedelta(hours=6)
+TOPIC_STALE_AFTER = AGENT_VERBATIM_IDLE_WINDOW
 TOPIC_STALE_AFTER_MESSAGES = 25
 
 
@@ -296,7 +300,7 @@ class ChatMemory:
     async def topic_for_activation(self, channel_id: int) -> str | None:
         """Return the topic if it isn't stale; otherwise None.
 
-        Stale = older than 6h OR more than 25 idle channel messages observed
+        Stale = older than 2h OR more than 25 idle channel messages observed
         since the agent was last active in this channel.
         """
         topic = await self.get_topic(channel_id)

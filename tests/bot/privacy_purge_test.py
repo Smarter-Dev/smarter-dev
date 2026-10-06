@@ -316,7 +316,9 @@ async def _snapshot(redis) -> dict:
         k for k in await redis.keys("*") if not k.startswith(b"privacy:")
         and b"purge-epoch" not in k
     )
-    return {key: await redis.get(key) for key in keys}
+    # DUMP, not GET: the idle index and fresh flag beside the guild history
+    # are a sorted set and a set.
+    return {key: await redis.dump(key) for key in keys}
 
 
 def _assert_clean(text: str) -> None:

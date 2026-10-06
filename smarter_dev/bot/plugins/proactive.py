@@ -24,6 +24,7 @@ persists in Redis.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import logging
 import os
@@ -56,11 +57,15 @@ from smarter_dev.bot.proactive.adapter import bot_directed_message_ids
 from smarter_dev.bot.proactive.agent import OPERATING_POLICY_BRIEF
 from smarter_dev.bot.proactive.agent import KimiAgentRunner
 from smarter_dev.bot.proactive.agent import build_guild_agent_system_prompt
+from smarter_dev.bot.proactive.agent import fold_whole_history
+from smarter_dev.bot.proactive.agent import is_summary_only
+from smarter_dev.bot.proactive.agent import leading_note_pair
 from smarter_dev.bot.proactive.agent import self_compaction_summary
 from smarter_dev.bot.proactive.contracts import ControlCommand
 from smarter_dev.bot.proactive.contracts import NotificationEnvelope
 from smarter_dev.bot.proactive.environment import ChannelEnvironment
 from smarter_dev.bot.proactive.environment import InstructionStore
+from smarter_dev.bot.proactive.history_store import HistoryUnreadable
 from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
 from smarter_dev.bot.proactive.models import build_twopass_model
 from smarter_dev.bot.proactive.models import build_watcher_runner
@@ -95,6 +100,8 @@ from smarter_dev.bot.proactive.windows import QUIET_SECONDS
 from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.proactive_settings_service import ProactiveSettingsService
 from smarter_dev.shared.exception_logging import log_exception
+from smarter_dev.shared.retention_policy import AGENT_VERBATIM_IDLE_WINDOW
+from smarter_dev.shared.retention_policy import PROACTIVE_IDLE_SWEEP_TICK
 
 logger = logging.getLogger(__name__)
 
@@ -511,6 +518,7 @@ class ProactiveRuntime:
         self.passive_task: asyncio.Task | None = None
         self.recovery_task: asyncio.Task | None = None
         self.control_task: asyncio.Task | None = None
+        self.idle_compaction_task: asyncio.Task | None = None
         self.external_guild_ids = _guild_id_set(os.getenv(EXTERNAL_GUILDS_ENV_VAR, ""))
         self.shadow_guild_ids = _guild_id_set(os.getenv(SHADOW_GUILDS_ENV_VAR, ""))
         self.embedded_guild_ids = _guild_id_set(os.getenv(EMBEDDED_GUILDS_ENV_VAR, ""))
@@ -680,52 +688,67 @@ class ProactiveRuntime:
                 state.consumer_task = asyncio.create_task(_consumer_loop(state))
         return state
 
+    async def compaction_summarize(self, messages) -> str:
+        """The agent writes its own carry-forward memory: the folded
+        transcript rides as message history and the agent's own model
+        decides what its future self needs to keep. Every attempt is
+        bounded — an unbounded ~100k-token summarize once stalled the whole
+        consumer loop (2026-09-01) — and failure degrades to a watcher-model
+        skim, then truncation, so neither a wake nor the idle sweep can
+        block on summarization."""
+        try:
+            summary, usage = await asyncio.wait_for(
+                self_compaction_summary(
+                    build_twopass_model(self.agent_model_id), messages
+                ),
+                timeout=COMPACTION_TIMEOUT_SECONDS,
+            )
+            logger.info("proactive self-compaction: %s", usage)
+            return summary
+        except Exception:  # noqa: BLE001 — fall back, never hang a wake
+            log_exception(
+                logger,
+                "self-compaction failed; falling back to a watcher-model skim"
+            )
+        try:
+            dumped = ModelMessagesTypeAdapter.dump_json(messages).decode()
+            summary, usage = await asyncio.wait_for(
+                self.skim().skim(dumped),
+                timeout=COMPACTION_TIMEOUT_SECONDS,
+            )
+            logger.info(
+                "proactive history compaction (skim fallback): %s", usage
+            )
+            return summary
+        except Exception:  # noqa: BLE001 — truncation beats a hung agent
+            log_exception(
+                logger,
+                "compaction summarize failed on both models; "
+                "compacting by truncation"
+            )
+            return (
+                "[Earlier history could not be summarized this wake "
+                "and was dropped; only recent messages follow.]"
+            )
+
     def agent_runner_for(self, state: GuildAgentState) -> KimiAgentRunner:
         if state.agent_runner is None:
             guild = self.bot.cache.get_guild(int(state.guild_id))
             me = self.bot.get_me()
 
-            async def compaction_summarize(messages) -> str:
-                # The agent writes its own carry-forward memory: the folded
-                # transcript rides as message history and the agent's own
-                # model decides what its future self needs to keep. Every
-                # attempt is bounded — an unbounded ~100k-token summarize
-                # once stalled the whole consumer loop (2026-09-01) — and
-                # failure degrades to a watcher-model skim, then truncation,
-                # so a wake can never block on summarization.
+            async def persist_compacted(history) -> None:
+                # Only over a history this wake loaded: an unreadable key is
+                # never written over (see _consume_guild_once).
+                store = self.history_store()
+                if store is None or not state.history_loaded:
+                    return
                 try:
-                    summary, usage = await asyncio.wait_for(
-                        self_compaction_summary(
-                            build_twopass_model(self.agent_model_id), messages
-                        ),
-                        timeout=COMPACTION_TIMEOUT_SECONDS,
+                    await store.write_guild(
+                        int(state.guild_id), history, freshly_compacted=True
                     )
-                    logger.info("proactive self-compaction: %s", usage)
-                    return summary
-                except Exception:  # noqa: BLE001 — fall back, never hang a wake
+                except Exception:  # noqa: BLE001 — persistence is best-effort
                     log_exception(
-                        logger,
-                        "self-compaction failed; falling back to a watcher-model skim"
-                    )
-                try:
-                    dumped = ModelMessagesTypeAdapter.dump_json(messages).decode()
-                    summary, usage = await asyncio.wait_for(
-                        self.skim().skim(dumped),
-                        timeout=COMPACTION_TIMEOUT_SECONDS,
-                    )
-                    logger.info(
-                        "proactive history compaction (skim fallback): %s", usage
-                    )
-                    return summary
-                except Exception:  # noqa: BLE001 — truncation beats a hung agent
-                    log_exception(
-                        logger,
-                        "compaction summarize failed on both models; "
-                        "compacting by truncation"
-                    )
-                    return (
-                        "[Earlier history could not be summarized this wake "
-                        "and was dropped; only recent messages follow.]"
+                        logger, "failed to persist compacted proactive history"
                     )
 
             state.agent_runner = KimiAgentRunner(
@@ -737,7 +760,8 @@ class ProactiveRuntime:
                         guild_name=(getattr(guild, "name", None) or state.guild_id),
                     ),
                 ),
-                summarize=compaction_summarize,
+                summarize=self.compaction_summarize,
+                on_compacted=persist_compacted,
             )
         return state.agent_runner
 
@@ -1616,6 +1640,113 @@ async def _sweep_expired_envelopes(run: ProactiveRuntime) -> None:
     logger.info("proactive envelope retention trim dropped=%d", dropped)
 
 
+async def _compact_idle_guild(
+    run: ProactiveRuntime, store: ProactiveHistoryStore, guild_id: int
+) -> str:
+    """Fold one idle guild history to its memory note; returns the outcome.
+
+    Under the guild's ``wake_lock`` (a wake or a purge in flight finishes
+    first), and only if the history is still idle once the lock is held.
+    A freshly compacted history drops its kept tail without a model call;
+    any other is folded whole by the agent's own model.
+    """
+    if await _guild_privacy_locked(run, str(guild_id)):
+        return "purge running"
+    if run.execution_mode_for(str(guild_id)) == EXTERNAL_EXECUTION_MODE:
+        # The bot never writes an external guild's key (the worker may still
+        # read it as legacy history), so no wake can race the fold.
+        state = run.guild_states.get(guild_id)
+    else:
+        state = run.guild_state_for(guild_id)
+    lock = state.wake_lock if state is not None else contextlib.nullcontext()
+    async with lock:
+        written_at, fresh = await store.guild_idle_state(guild_id)
+        if written_at is None:
+            return "not indexed"
+        if time.time() - written_at < AGENT_VERBATIM_IDLE_WINDOW.total_seconds():
+            return "written since"
+        raw = await store.read_guild_raw(guild_id)
+        if not raw:
+            await store.forget_idle(guild_id)
+            return "empty"
+        try:
+            history = await store.read_guild(guild_id)
+        except HistoryUnreadable:
+            # Verbatim bytes nobody can use, and no purge can rewrite what it
+            # cannot parse: past the window they are deleted. A loaded runner
+            # starts empty rather than write its old copy back.
+            await store.delete_guild(guild_id)
+            if state is not None and state.agent_runner is not None:
+                state.agent_runner.history = []
+            return "unreadable deleted"
+        if is_summary_only(history):
+            await store.forget_idle(guild_id)
+            return "already summary only"
+        note_pair = leading_note_pair(history) if fresh else None
+        if note_pair is not None:
+            compacted = note_pair
+            outcome = "tail dropped"
+        else:
+            compacted = await fold_whole_history(
+                history, summarize=run.compaction_summarize
+            )
+            outcome = "folded"
+        if await store.read_guild_raw(guild_id) != raw:
+            return "written since"
+        await store.write_guild_idle_compacted(guild_id, compacted)
+        if state is not None and state.agent_runner is not None:
+            state.agent_runner.history = list(compacted)
+        return outcome
+
+
+async def compact_idle_histories(run: ProactiveRuntime) -> dict[int, str]:
+    """One idle-sweep pass: every guild history unwritten for the idle
+    window becomes its memory note alone, with no verbatim message."""
+    store = run.history_store()
+    if store is None:
+        return {}
+    cutoff = time.time() - AGENT_VERBATIM_IDLE_WINDOW.total_seconds()
+    outcomes = {}
+    for guild_id in await store.idle_guild_ids(written_before=cutoff):
+        try:
+            outcomes[guild_id] = await _compact_idle_guild(run, store, guild_id)
+        except Exception:  # noqa: BLE001 — one guild must not stop the sweep
+            log_exception(
+                logger, "proactive idle compaction failed guild=%s", guild_id
+            )
+            continue
+        logger.info(
+            "proactive idle compaction guild=%s outcome=%s",
+            guild_id,
+            outcomes[guild_id],
+        )
+    return outcomes
+
+
+async def _idle_compaction_ticker() -> None:
+    """Runs whether or not any wake happens. The idle clock lives in Redis
+    (``history_store.IDLE_INDEX_KEY``), so a restart resumes it; histories
+    written before the index existed start their clock at the first tick,
+    and the same first pass deletes the legacy per-channel history keys."""
+    indexed = False
+    while True:
+        await asyncio.sleep(PROACTIVE_IDLE_SWEEP_TICK.total_seconds())
+        run = runtime
+        if run is None:
+            return
+        if not leadership.is_acting():
+            continue
+        store = run.history_store()
+        try:
+            if store is not None and not indexed:
+                await store.index_unindexed_guild_histories(now=time.time())
+                await store.delete_legacy_channel_histories()
+                indexed = True
+            await compact_idle_histories(run)
+        except Exception:  # noqa: BLE001 — the ticker must keep running
+            log_exception(logger, "proactive idle compaction sweep failed")
+
+
 async def _passive_ticker() -> None:
     delay = FIRST_PASSIVE_SWEEP_SECONDS
     while True:
@@ -1876,6 +2007,7 @@ async def on_started(event: hikari.StartedEvent) -> None:
         run.passive_task = asyncio.create_task(_passive_ticker())
         run.recovery_task = asyncio.create_task(_recover_channels(run))
         run.control_task = asyncio.create_task(_control_loop(run))
+        run.idle_compaction_task = asyncio.create_task(_idle_compaction_ticker())
         # The loop reads commands only while this process acts; stopping
         # also ends a blocked read. A command already running finishes.
         leadership.on_stop(run.control_task.cancel)
