@@ -199,6 +199,10 @@ This function makes an action happen AT MOST ONCE even when this handler fires C
       [1, 2592000] (1s .. 30 days), or the fire ERRORS; at most 10 claims per fire. Keys are
       private to this handler. A claim is NOT storage — it remembers only that the key was taken,
       and it EXPIRES; use memory_* for values you need to read back.
+  await claimed(key: str) -> bool
+      Whether `key` is claimed RIGHT NOW, without claiming it — for a fire that needs to know
+      what another fire recorded and must not record it itself by asking. Same key rail; counts
+      against the same 10 per fire.
 
 This function lets the handler DEFER work to a future one-shot fire of ITSELF (also `await` it):
 

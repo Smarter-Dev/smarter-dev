@@ -9,6 +9,7 @@ script. These tests pin that boundary.
 
 from __future__ import annotations
 
+import fakeredis.aioredis as fakeredis_aioredis
 import pytest
 
 from smarter_dev.web.handler_caps import (
@@ -17,6 +18,7 @@ from smarter_dev.web.handler_caps import (
     claim_handler_key,
     handler_claim_key,
     handler_fire_claim_key,
+    handler_key_claimed,
 )
 
 
@@ -133,3 +135,28 @@ async def test_falsey_replies_read_as_not_claimed(redis_reply):
             return redis_reply
 
     assert await claim_handler_key(_Reply(), "H1", "k", 60) is False
+
+
+# -- handler_key_claimed: reading a claim without taking it ----------------------
+
+
+async def test_reading_a_claim_does_not_take_it():
+    redis = fakeredis_aioredis.FakeRedis()
+    assert await handler_key_claimed(redis, "H1", "bad:k") is False
+    assert await handler_key_claimed(redis, "H1", "bad:k") is False
+    # Still there for the fire that means to take it.
+    assert await claim_handler_key(redis, "H1", "bad:k", 60) is True
+    assert await handler_key_claimed(redis, "H1", "bad:k") is True
+
+
+async def test_reading_is_namespaced_per_handler_like_claiming():
+    redis = fakeredis_aioredis.FakeRedis()
+    await claim_handler_key(redis, "H1", "bad:k", 60)
+    assert await handler_key_claimed(redis, "H2", "bad:k") is False
+
+
+async def test_an_expired_claim_reads_as_not_claimed():
+    redis = fakeredis_aioredis.FakeRedis()
+    await claim_handler_key(redis, "H1", "bad:k", 60)
+    await redis.delete(handler_claim_key("H1", "bad:k"))
+    assert await handler_key_claimed(redis, "H1", "bad:k") is False

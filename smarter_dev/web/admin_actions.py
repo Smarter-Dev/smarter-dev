@@ -45,6 +45,16 @@ def _snowflake_created_at(snowflake_id: str) -> str | None:
     return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat()
 
 
+def _timeout_expiry(response) -> datetime | None:
+    """``communication_disabled_until`` from a member response, None if unset."""
+    try:
+        raw = response.json().get("communication_disabled_until")
+        until = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return until if until.tzinfo else until.replace(tzinfo=timezone.utc)
+
+
 def _top_role_name(role_ids: list[str], roles_by_id: dict[str, dict]) -> str:
     """Highest-positioned of a member's roles, '@everyone' when they hold none.
 
@@ -164,23 +174,49 @@ class AdminActor(DiscordBotClient):
 
     async def timeout_user(self, user_id: str, duration_seconds: int = 600) -> str:
         """Timeout a member; a member who already left is a successful no-op."""
-        until = (
-            datetime.now(timezone.utc) + timedelta(seconds=int(duration_seconds))
-        ).isoformat()
+        until = datetime.now(timezone.utc) + timedelta(seconds=int(duration_seconds))
+        if await self.set_timeout_until(user_id, until, int(duration_seconds)) is None:
+            return f"timeout target {user_id} already absent"
+        return f"timed out {user_id} for {int(duration_seconds)}s"
+
+    async def set_timeout_until(
+        self, user_id: str, until: datetime, duration_seconds: int
+    ) -> datetime | None:
+        """Timeout a member until ``until``; None when they already left.
+
+        Returns the expiry Discord stored, which is what a later
+        ``timeout_until`` reads back — so a caller can tell this timeout from
+        one somebody else set since.
+        """
         try:
-            await self._request(
+            response = await self._request(
                 "PATCH",
                 f"/guilds/{self.guild_id}/members/{user_id}",
-                json={"communication_disabled_until": until},
+                json={"communication_disabled_until": until.isoformat()},
             )
         except AdminActionError as error:
             if error.status_code == 404:
-                return f"timeout target {user_id} already absent"
+                return None
             raise
         await self._remember_action(
             "timeout", user_id, duration_seconds=int(duration_seconds)
         )
-        return f"timed out {user_id} for {int(duration_seconds)}s"
+        return _timeout_expiry(response) or until
+
+    async def timeout_until(self, user_id: str) -> datetime | None:
+        """When the member's timeout ends; None when free or not a member."""
+        try:
+            response = await self._request(
+                "GET", f"/guilds/{self.guild_id}/members/{user_id}"
+            )
+        except AdminActionError as error:
+            if error.status_code == 404:
+                return None
+            raise
+        until = _timeout_expiry(response)
+        if until is None or until <= datetime.now(timezone.utc):
+            return None
+        return until
 
     async def remove_timeout(self, user_id: str) -> str:
         """Lift a member's timeout; a member who already left is a no-op."""

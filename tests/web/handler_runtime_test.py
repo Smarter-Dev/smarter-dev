@@ -185,6 +185,7 @@ async def _run(
     actor=None, channel_ids=None, allowed_role_ids=None,
     timer_scheduler=None, timer_limiter=None, dm_user_limiter=None, handler_id=None,
     mod_action_reader=None, mod_action_recorder=None, rules_reader=None, claimer=None,
+    recent_messages_reader=None,
 ):
     emitter = emitter or _FakeEmitter()
     limiter = limiter or _StubLimiter()
@@ -197,6 +198,8 @@ async def _run(
         kwargs["mod_action_recorder"] = mod_action_recorder
     if rules_reader is not None:
         kwargs["rules_reader"] = rules_reader
+    if recent_messages_reader is not None:
+        kwargs["recent_messages_reader"] = recent_messages_reader
     if agent_runner is not None:
         kwargs["agent_runner"] = agent_runner
     if actor is not None:
@@ -1493,6 +1496,52 @@ async def test_read_functions_admin_only_and_spend_lookup():
                "search_guild_members('x')"):
         res = await _run(f"await {fn}\n")
         assert res[0].outcome == "error"
+
+
+async def test_list_recent_messages_is_admin_only_and_spends_a_lookup():
+    asked: list[str] = []
+    rows = [
+        {"channel_id": "C2", "message_id": "M2", "age_seconds": 1.5,
+         "attachment_count": 4, "has_link": False},
+        {"channel_id": "C1", "message_id": "M1", "age_seconds": 3.0,
+         "attachment_count": 4, "has_link": False},
+    ]
+
+    async def reader(user_id):
+        asked.append(user_id)
+        return rows
+
+    script = (
+        "recent = await list_recent_messages(context['author_id'])\n"
+        "channels = sorted({row['channel_id'] for row in recent})\n"
+        "await send_message(','.join(channels))\n"
+    )
+    result, emitter, _ = await _run(
+        script,
+        budget=admin_budget("message"),
+        actor=_FakeActor(),
+        recent_messages_reader=reader,
+    )
+    assert result.outcome == "ok"
+    # The guild is bound host-side; the script names only the member.
+    assert asked == ["U1"]
+    assert result.usage["lookups"] == 1
+    assert emitter.messages == [("C1", "C1,C2")]
+
+    # A standard (no-actor) handler has no such function at all.
+    standard, _, _ = await _run("await list_recent_messages('U1')\n")
+    assert standard.outcome == "error"
+
+
+async def test_list_recent_messages_unwired_errors_the_fire():
+    # An admin fire whose job forgot to inject the reader must fail loudly, not
+    # answer "no recent messages" and let a burst through.
+    result, _, _ = await _run(
+        "await list_recent_messages('U1')\n",
+        budget=admin_budget("message"),
+        actor=_FakeActor(),
+    )
+    assert result.outcome == "error"
 
 
 async def test_read_lookup_cap_breach_raises_cap_exceeded():

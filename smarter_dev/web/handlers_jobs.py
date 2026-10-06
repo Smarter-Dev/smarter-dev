@@ -32,6 +32,7 @@ from smarter_dev.web.handler_caps import (
     WindowedLimiter,
     claim_fire_attempt,
     claim_handler_key,
+    handler_key_claimed,
 )
 from smarter_dev.web.handler_emitter import DiscordEmitter
 from smarter_dev.web.handler_fire_context import discard_fire_context
@@ -184,6 +185,7 @@ async def _run_handler_fire(payload: HandlerFirePayload, context: WorkerContext)
     # claims can never suppress another's. This is what dedupes CONCURRENT fires
     # (memory_* can't — it's read at fire start and written at fire end).
     claimer = partial(claim_handler_key, redis, str(handler_id))
+    claim_reader = partial(handler_key_claimed, redis, str(handler_id))
 
     result = await run_handler_script(
         script,
@@ -196,6 +198,7 @@ async def _run_handler_fire(payload: HandlerFirePayload, context: WorkerContext)
         handler_id=str(handler_id),
         timer_scheduler=timer_scheduler.schedule_timer,
         claimer=claimer,
+        claim_reader=claim_reader,
         timer_limiter=timer_limiter,
         budget=budget,
         memory=memory,

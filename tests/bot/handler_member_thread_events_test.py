@@ -675,11 +675,15 @@ async def test_message_in_forum_post_dispatches_to_forum_channel_as_thread(captu
 async def test_message_in_forum_post_carries_attachments_with_filenames(captured):
     # relay-support (e), guild direction: the guild/thread message context includes
     # each attachment's url AND filename so the relay handler can forward staff's
-    # files back to the member's DM.
+    # files back to the member's DM. The size rides along so two uploads of one
+    # file can be told from two files that share a name.
     forum = make_forum_channel(555)
     post = _forum_post_thread(post_id=999, forum_id=555)
     attachment = SimpleNamespace(
-        url="https://cdn/reply.png", media_type="image/png", filename="reply.png"
+        url="https://cdn/reply.png",
+        media_type="image/png",
+        filename="reply.png",
+        size=48_211,
     )
     bot, event = make_message_event(
         channel_id=999, thread_channel=post, forum=forum, attachments=[attachment]
@@ -687,7 +691,12 @@ async def test_message_in_forum_post_carries_attachments_with_filenames(captured
     await dispatch_message(bot, event)
     _, _, _, ctx = captured[0]
     assert ctx["attachments"] == [
-        {"url": "https://cdn/reply.png", "content_type": "image/png", "filename": "reply.png"}
+        {
+            "url": "https://cdn/reply.png",
+            "content_type": "image/png",
+            "filename": "reply.png",
+            "size": 48_211,
+        }
     ]
 
 

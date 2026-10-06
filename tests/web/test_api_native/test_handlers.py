@@ -29,6 +29,7 @@ from smarter_dev.web.handler_caps import MAX_HANDLERS_PER_CHANNEL
 from smarter_dev.web.handler_fire_context import FIRE_CONTEXT_TTL_SECONDS
 from smarter_dev.web.handler_fire_context import fire_context_key
 from smarter_dev.web.handler_fire_context import load_fire_context
+from smarter_dev.web.handler_recent_messages import read_recent_messages
 
 
 class _StubLimiter:
@@ -563,6 +564,87 @@ async def test_dispatch_bot_message_records_no_member_activity(client, db_sessio
         select(MemberActivity).where(MemberActivity.user_id == "BOT9")
     )).scalars().all()
     assert rows == []
+
+
+async def test_dispatch_notes_a_human_message_for_burst_detection(client, submitted):
+    # Each human message is noted under its author before any fire is enqueued,
+    # so a script fired for the second channel of a burst already sees both.
+    for channel_id, message_id in (("C1", "M1"), ("C2", "M2")):
+        client.post(
+            "/api/handlers/dispatch",
+            json={
+                "guild_id": "G1",
+                "channel_id": channel_id,
+                "trigger_type": "message",
+                "trigger_context": {
+                    "trigger_type": "message",
+                    "author_id": "U7",
+                    "message_id": message_id,
+                    "message_content": "claim it at https://scam.example now",
+                    "attachments": [
+                        {"url": "https://cdn.example/a.png", "filename": "a.png"}
+                    ],
+                },
+            },
+        )
+
+    rows = await read_recent_messages(submitted.redis, "G1", "U7")
+
+    assert sorted((row["channel_id"], row["message_id"]) for row in rows) == [
+        ("C1", "M1"),
+        ("C2", "M2"),
+    ]
+    assert all(row["attachment_count"] == 1 and row["has_link"] for row in rows)
+    # The same text and file in two channels: the notes are copies of one post.
+    assert len({row["content_hash"] for row in rows}) == 1
+    # Ids and shape only: neither the text nor a file url reaches the note.
+    [key] = await submitted.redis.keys("hrecent:*")
+    stored = "".join(await submitted.redis.zrange(key, 0, -1))
+    assert "scam.example" not in stored
+    assert "cdn.example" not in stored
+
+
+async def test_dispatch_notes_a_thread_message_under_the_thread(client, submitted):
+    # A thread message dispatches to the PARENT channel; the note names the
+    # thread, because that is where the message has to be deleted from.
+    client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "C-PARENT",
+            "trigger_type": "message",
+            "trigger_context": {
+                "trigger_type": "message",
+                "author_id": "U7",
+                "message_id": "M1",
+                "is_thread": True,
+                "thread_id": "T9",
+            },
+        },
+    )
+
+    [row] = await read_recent_messages(submitted.redis, "G1", "U7")
+
+    assert row["channel_id"] == "T9"
+
+
+async def test_dispatch_notes_nothing_for_a_bot_message(client, submitted):
+    client.post(
+        "/api/handlers/dispatch",
+        json={
+            "guild_id": "G1",
+            "channel_id": "C1",
+            "trigger_type": "message",
+            "trigger_context": {
+                "trigger_type": "message",
+                "author_is_bot": True,
+                "author_id": "BOT9",
+                "message_id": "M1",
+            },
+        },
+    )
+
+    assert await submitted.redis.keys("hrecent:*") == []
 
 
 async def test_dispatch_human_message_fires_all_message_handlers(client, db_session):

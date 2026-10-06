@@ -53,7 +53,7 @@ One input variable `context: dict` describes the trigger:
               message; false for humans; only ever true when the handler opted into bot messages,
               see include_bot_messages below — the bot's OWN messages are never delivered),
               context["attachments"] — a list of files posted with the message, each
-              {"url", "content_type", "filename"} (empty list if none).
+              {"url", "content_type", "filename", "size"} (size in bytes; empty list if none).
               context["embeds"] — the message's embeds, JSON-safe, each {"title", "description",
               "fields": [{"name", "value"}]} with every string truncated to 1024 chars and absent
               parts null (empty list if none) — how a bot-message handler reads a Disboard-style
@@ -225,6 +225,27 @@ Provided async functions — you MUST `await` every call:
       Lifts an active timeout early; a member who already left (404) is a successful no-op. Use
       it ONLY when the requested behavior explicitly calls for reversing a timeout (an appeal, a
       correction) — never to soften a timeout another rule of the same handler just applied.
+  await hold_member(user_id: str, key: str, seconds: int = 300) -> bool
+  await release_hold(user_id: str, key: str) -> bool
+      A HOLD is a timeout placed while something the member posted is under review; `key` names
+      what is under review (a content_hash, or the message id). Use these, NOT timeout_user +
+      remove_timeout, whenever a timeout may later be lifted by a verdict: a member has ONE
+      timeout and concurrent fires share it, so a bare remove_timeout on a clean verdict lifts the
+      timeout another fire's review still needs, and a late timeout_user shortens a longer one.
+      hold_member NEVER shortens a timeout that already runs longer (a moderator's, or a day-long
+      hold), extends a shorter one and remembers it, returns True only for the call that began the
+      key's hold (post the "investigating" notice on True), and does nothing (False) for a key
+      already held or released in the last 5 minutes — so a fire that ran late cannot hold a
+      member a review already cleared.
+      release_hold ends the key's hold and ends the member's timeout ONLY when no key is still
+      held and the timeout in place is one a hold placed: the member goes back to the shorter
+      timeout the holds extended (a moderator's) if it still has time to run, else is freed; True
+      when it did either. Call it on a CLEAN verdict even if this fire placed no hold (another
+      fire may have, for the same key).
+      On a confirmed violation do NOT release: leave the hold to run out, and for a longer
+      timeout call hold_member again with a different key (e.g. "repeat:" + key) and the longer
+      seconds. RAILS: key a non-empty string of at most 128 characters, seconds an int in
+      [1, 2419200], or the fire ERRORS. Each spends a moderation action.
   await warn_user(user_id: str, reason: str, channel_id: str = None, dm: bool = True) -> dict
       The handler-tier /warn: posts a public warning notice, best-effort DMs the member, and
       records a PERMANENT moderation-log row that /history and list_mod_actions both read.
@@ -316,6 +337,27 @@ Provided async functions — you MUST `await` every call:
       (`rules = await list_rules()` once, then pick by number) or to render a rules digest;
       "text" is markdown, so long rules can blow the 2000-char message cap — truncate. Costs a
       lookup (shared 10/fire pool). Call it ONCE per fire and reuse the list.
+  await list_recent_messages(user_id: str) -> list[dict]
+      Where a member posted in THIS guild in the last 2 minutes, NEWEST FIRST, including the
+      message that fired this handler. Each: {"channel_id", "message_id", "age_seconds",
+      "attachment_count", "has_link", "content_hash"} — ids and shape only, never the text.
+      channel_id is where the message LIVES (the thread id for a thread message), so pass it
+      straight to delete_message(message_id, channel_id). content_hash is equal for two rows
+      when they carried the same text, character for character, and files with the same names
+      and sizes: rows that share the fired message's content_hash LOOK THE SAME as it. That is a
+      description, not proof — the files are never read, so two different files with one name
+      and one size share a hash. Use it to see a CROSS-CHANNEL BURST (a compromised account
+      pasting the same scam into several channels within seconds: a same-hash row in another
+      channel_id with a close age_seconds) and, once a review confirms a violation, to find and
+      delete the rows that look the same. Never treat rows with a different content_hash as part
+      of the same post — one review says nothing about them. The list is LIVE: a review takes
+      longer than a burst, so read it AGAIN after spawn_agent returns rather than reusing the
+      list from the start of the fire. Several fires run for one burst: hold the member with
+      hold_member() and take ONE review with claim(), both keyed on content_hash; record a
+      confirmed verdict with a second claim BEFORE re-reading the list, so a fire that lost the
+      review claim can ask claimed() and remove a copy the sweep missed. Costs a lookup each
+      call (shared 10/fire pool) — guard it behind a cheap check (the message has an attachment
+      or a link), never call it for every plain message.
   await create_thread(name: str, message_id: str = None) -> str   # returns the new thread id
       message_id set: spins a thread off that message; omitted: a public thread on the home channel.
   await create_post(title: str, content: str, tag_names: list = None) -> str   # forum post thread id
@@ -356,6 +398,11 @@ Provided async functions — you MUST `await` every call:
       [1, 2592000] (1s .. 30 days), or the fire ERRORS; at most 10 claims per fire. Keys are
       private to this handler. A claim is NOT storage — it remembers only that the key was taken,
       and it EXPIRES; use memory_*/guild_memory_* for values you need to read back.
+  await claimed(key: str) -> bool
+      Whether `key` is claimed RIGHT NOW, without claiming it. claim() tests by taking, which is
+      wrong for a fire that only needs to know what ANOTHER fire recorded: a fire that lost
+      claim("review:" + k) and then asked claim("bad:" + k) would itself record the post as bad.
+      Ask claimed("bad:" + k) instead. Same key rail; counts against the same 10 per fire.
   GUILD-SHARED MEMORY (admin, cross-handler; survives across fires; starts empty):
   await guild_memory_get(key: str, default=None)   -> stored value or default
   await guild_memory_set(key: str, value) -> True  -> store JSON-serializable value (ONLY this persists)
@@ -399,7 +446,8 @@ Provided async functions — you MUST `await` every call:
 - 5 discord-reads (list_threads / get_guild_member_count / get_role_members), 10 thread-ops (create/close/lock/reopen/
   delete thread). A guild thread-op window also caps thread ops server-wide — don't fan out
   creates/deletes in a loop.
-- 10 lookups (list_mod_actions / get_member_info / search_guild_members / list_rules), separate
+- 10 lookups (list_mod_actions / get_member_info / search_guild_members / list_rules /
+  list_recent_messages), separate
   from discord-reads.
   A mod_action-triggered handler runs with 0 moderation actions (it can only format + post) — so
   it cannot warn_user either, which is exactly what stops a warn's own mod-log fire from warning

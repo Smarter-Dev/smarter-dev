@@ -50,6 +50,10 @@ Script-facing surface (Monty external functions):
   fire, like ``schedule_timer``'s delay); at most 10 claims per fire
   (``CapExceeded("claims_per_fire")``). The key is namespaced by handler id
   host-side, so handlers can't collide on a shared key name.
+- ``claimed(key)`` -> bool — whether ``key`` is claimed right now, without
+  claiming it (both tiers; counts against the same 10 per fire). ``claim`` can
+  only test by taking, so a fire that must not take a key — one asking whether
+  ANOTHER fire has recorded a verdict under it — reads it with this.
 
 Admin handlers (``actor`` set) additionally get ``edit_message(message_id,
 content, channel_id=None)`` -> message id (edits a bot-authored message in place,
@@ -83,11 +87,25 @@ limit=10)`` -> list[dict] (this guild's recent actions for a member, newest
 first, via an injected DB reader), ``get_member_info(user_id)`` -> dict (member
 profile; a departed user comes back with ``in_guild=False``), and
 ``search_guild_members(query, limit=10)`` -> dict (prefix name/nick search with a
-per-row top role and an overflow count), and ``list_rules()`` -> list[dict] of
+per-row top role and an overflow count), ``list_rules()`` -> list[dict] of
 the guild's configured rules (``{"number", "title", "text"}``, parsed by
 ``guild_rules.parse_guild_rules`` — the same parse ``/rule`` uses — via an
-injected DB reader; ``[]`` when the guild has none) — each of the four spends the
-lookups budget, plus ``warn_user(user_id, reason, channel_id=None, dm=True)`` ->
+injected DB reader; ``[]`` when the guild has none), and
+``list_recent_messages(user_id)`` -> list[dict] (where a member posted in this
+guild in the last two minutes, newest first: ``{"channel_id", "message_id",
+"age_seconds", "attachment_count", "has_link", "content_hash"}`` — ids, shape
+and a hash that copies of one post share, never the text — via an injected Redis
+reader; what lets a script see a cross-channel burst and find every copy of it
+once a review confirms it) — each of the
+five spends the lookups budget, plus ``hold_member(user_id, key, seconds=300)``
+-> bool and ``release_hold(user_id, key)`` -> bool (time a member out while
+``key`` is under review, and end that hold; see
+:mod:`smarter_dev.web.handler_holds` — the member has one timeout and several
+fires share it, so both run under the member's lock, a hold never shortens a
+longer timeout, and a release ends the timeout only when no key is held any
+more and the timeout in place is a hold's own, handing back a shorter one the
+holds extended; each spends a mod_action;
+``timeout_user`` and ``remove_timeout`` take the same lock), plus ``warn_user(user_id, reason, channel_id=None, dm=True)`` ->
 dict (``{"message_id", "dm_sent", "warn_count"}``: the handler-tier ``/warn`` —
 spends a mod_action FIRST so a mod_action-triggered fire, which runs with zero
 mod actions, structurally cannot warn in response to a warn; then posts the
@@ -159,6 +177,9 @@ from smarter_dev.web.handler_caps import (
 from smarter_dev.web.handler_schedule import validate_timer_delay
 from smarter_dev.web.handler_emitter import DiscordEmitter
 from smarter_dev.web.handler_guild_memory import GuildMemory
+from smarter_dev.web.handler_holds import HOLD_KEY_MAX_LEN
+from smarter_dev.web.handler_holds import HOLD_MAX_SECONDS
+from smarter_dev.web.handler_holds import MemberHolds
 from smarter_dev.web.handler_memory import HandlerMemory
 from smarter_dev.web.admin_actions import AdminActor
 
@@ -204,6 +225,12 @@ ModActionRecorder = Callable[[str, str, str], Awaitable[int]]
 # can never read another guild's rules — same discipline as ModActionReader.
 RulesReader = Callable[[], Awaitable[list[dict[str, Any]]]]
 
+# An async function (author_id) -> where that member posted in this guild in the
+# last two minutes, newest first. Injected by the admin fire job with the Redis
+# client and the guild id bound host-side, so a script can never read another
+# guild's members — same discipline as ModActionReader.
+RecentMessagesReader = Callable[[str], Awaitable[list[dict[str, Any]]]]
+
 
 # An async function (key, ttl_seconds) -> bool implementing SET NX EX for THIS
 # handler: True for the first caller inside the TTL, False for every later one.
@@ -211,6 +238,10 @@ RulesReader = Callable[[], Awaitable[list[dict[str, Any]]]]
 # host-side (so the raw key a script passes is namespaced and can never reach
 # another handler's claims) — the same injection discipline as TimerScheduler.
 Claimer = Callable[[str, int], Awaitable[bool]]
+
+# An async function (key) -> bool: whether THIS handler's ``key`` is claimed
+# right now. The read half of Claimer, bound the same way by the fire job.
+ClaimReader = Callable[[str], Awaitable[bool]]
 
 
 async def _no_agent(prompt: str, has_tools: bool, budget: HandlerBudget) -> str:
@@ -233,8 +264,18 @@ async def _no_rules_reader() -> list[dict[str, Any]]:
     raise RuntimeError("no rules reader configured for this handler execution")
 
 
+async def _no_recent_messages_reader(user_id: str) -> list[dict[str, Any]]:
+    raise RuntimeError(
+        "no recent-messages reader configured for this handler execution"
+    )
+
+
 async def _no_claimer(key: str, ttl_seconds: int) -> bool:
     raise RuntimeError("no claimer configured for this handler execution")
+
+
+async def _no_claim_reader(key: str) -> bool:
+    raise RuntimeError("no claim reader configured for this handler execution")
 
 
 def _clock_os(
@@ -322,6 +363,10 @@ class HandlerExecution:
     # DB-backed reader for list_rules (the guild's parsed rules), injected by the
     # admin fire job with the guild bound host-side. Admin handlers only.
     rules_reader: RulesReader = _no_rules_reader
+    # Redis-backed reader for list_recent_messages (a member's last two minutes
+    # of posts, ids and shape only), injected by the admin fire job with the guild bound
+    # host-side. Admin handlers only.
+    recent_messages_reader: RecentMessagesReader = _no_recent_messages_reader
     # This handler's id — needed only for the per-handler timer-arming window key.
     # Optional (default "") so existing callers that never arm a timer are unaffected.
     handler_id: str = ""
@@ -333,6 +378,13 @@ class HandlerExecution:
     # default makes an unwired call fail loudly rather than silently return a
     # value that would let a duplicate action through.
     claimer: Claimer = _no_claimer
+    # The read half of the claimer, for ``claimed``; injected the same way.
+    claim_reader: ClaimReader = _no_claim_reader
+    # The members' holds for hold_member/release_hold, injected by the admin
+    # fire job with Redis, the guild and the handler id bound host-side. When
+    # set, timeout_user and remove_timeout go through it too, so every write
+    # to one member's timeout happens under that member's lock. Admin only.
+    holds: MemberHolds | None = None
     # Separate 3600s-window limiter for the timer-arming rate cap; self.limiter is
     # fixed at 60s. Falls back to self.limiter (with a per-call window override) in
     # run_handler_script when the fire job doesn't inject a dedicated one.
@@ -398,6 +450,7 @@ class HandlerExecution:
             # standard handler races itself across concurrent fires exactly as an
             # admin one does.
             "claim": self._guard(self._claim),
+            "claimed": self._guard(self._claimed),
         }
         # Randomness as flat globals (Monty can't `import random`); pure compute.
         funcs.update(_random_functions())
@@ -412,6 +465,8 @@ class HandlerExecution:
                     "kick_user": self._guard(self._kick_user),
                     "timeout_user": self._guard(self._timeout_user),
                     "remove_timeout": self._guard(self._remove_timeout),
+                    "hold_member": self._guard(self._hold_member),
+                    "release_hold": self._guard(self._release_hold),
                     "warn_user": self._guard(self._warn_user),
                     "add_role": self._guard(self._add_role),
                     "remove_role": self._guard(self._remove_role),
@@ -420,6 +475,7 @@ class HandlerExecution:
                     # lookup/history/whois commands and the rejoin alert.
                     "list_mod_actions": self._guard(self._list_mod_actions),
                     "list_rules": self._guard(self._list_rules),
+                    "list_recent_messages": self._guard(self._list_recent_messages),
                     "get_member_info": self._guard(self._get_member_info),
                     "search_guild_members": self._guard(self._search_guild_members),
                     "get_role_members": self._guard(self._get_role_members),
@@ -638,6 +694,17 @@ class HandlerExecution:
         self.budget.spend_lookup()
         return await self.actor.get_member_info(str(user_id))
 
+    async def _list_recent_messages(self, user_id: str) -> list[dict]:
+        """Where a member posted in THIS guild in the last two minutes, newest
+        first; spends a lookup.
+
+        Dispatch notes every human message as it arrives, so a second call later
+        in the same fire sees messages posted since the first — which is the
+        point: a review takes longer than a scam burst, and the script re-reads
+        the list when the verdict lands to find every copy."""
+        self.budget.spend_lookup()
+        return await self.recent_messages_reader(str(user_id))
+
     async def _search_guild_members(self, query: str, limit: int = 10) -> dict:
         """Prefix-search guild members with per-row top role; spends ONE lookup
         covering the members/search + roles fetch pair."""
@@ -722,6 +789,8 @@ class HandlerExecution:
     async def _timeout_user(self, user_id: str, duration_seconds: int = 600) -> str:
         """Timeout a member; a 404 is an already-left successful no-op."""
         self.budget.spend_mod_action()
+        if self.holds is not None:
+            return await self.holds.timeout(str(user_id), int(duration_seconds))
         return await self.actor.timeout_user(str(user_id), int(duration_seconds))
 
     async def _remove_timeout(self, user_id: str) -> str:
@@ -731,7 +800,57 @@ class HandlerExecution:
         mod_action-triggered fire must not be able to undo a timeout either.
         """
         self.budget.spend_mod_action()
+        if self.holds is not None:
+            return await self.holds.remove_timeout(str(user_id))
         return await self.actor.remove_timeout(str(user_id))
+
+    async def _hold_member(self, user_id: str, key: str, seconds: int = 300) -> bool:
+        """Time a member out while ``key`` is under review; True when this
+        call began the hold.
+
+        Several fires share one member's timeout. This never shortens a
+        timeout that already runs longer, and does nothing (False) for a key
+        that is already held or was released in the last five minutes — so a
+        fire that ran late cannot hold a member the review already cleared.
+        A bad key or duration is an author bug and raises before anything is
+        spent; a good one spends a mod_action, like the ``timeout_user`` it
+        stands in for.
+        """
+        hold_key = self._hold_key(key)
+        if isinstance(seconds, bool) or not isinstance(seconds, int):
+            raise ValueError("hold seconds must be an integer number of seconds")
+        if not 1 <= seconds <= HOLD_MAX_SECONDS:
+            raise ValueError(
+                f"hold seconds must be between 1 and {HOLD_MAX_SECONDS} seconds"
+            )
+        self.budget.spend_mod_action()
+        return bool(await self._member_holds().hold(str(user_id), hold_key, seconds))
+
+    async def _release_hold(self, user_id: str, key: str) -> bool:
+        """End ``key``'s hold; True when the member's timeout was ended.
+
+        The timeout is ended only when no key is held any more and the
+        timeout in place is the one a hold put there — never a moderator's or
+        a ``timeout_user``'s. A shorter timeout the holds extended comes back
+        if it still has time to run; otherwise the member is freed. Spends a
+        mod_action like ``remove_timeout``: a mod_action-triggered fire must
+        not undo a hold.
+        """
+        hold_key = self._hold_key(key)
+        self.budget.spend_mod_action()
+        return bool(await self._member_holds().release(str(user_id), hold_key))
+
+    def _hold_key(self, key: str) -> str:
+        if not isinstance(key, str) or not key:
+            raise ValueError("hold key must be a non-empty string")
+        if len(key) > HOLD_KEY_MAX_LEN:
+            raise ValueError(f"hold key must be at most {HOLD_KEY_MAX_LEN} characters")
+        return key
+
+    def _member_holds(self) -> MemberHolds:
+        if self.holds is None:
+            raise RuntimeError("no member holds configured for this handler execution")
+        return self.holds
 
     async def _warn_user(
         self,
@@ -1076,12 +1195,7 @@ class HandlerExecution:
         (3) the injected claimer, which namespaces the key by handler id
         host-side. Nothing on Discord is spent either way.
         """
-        if not isinstance(key, str) or not key:
-            raise ValueError("claim key must be a non-empty string")
-        if len(key) > CLAIM_KEY_MAX_LEN:
-            raise ValueError(
-                f"claim key must be at most {CLAIM_KEY_MAX_LEN} characters"
-            )
+        self._check_claim_key(key)
         # bool is an int subclass, and claim(key, True) is a typo, not a 1s TTL.
         if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int):
             raise ValueError("claim ttl_seconds must be an integer number of seconds")
@@ -1090,13 +1204,36 @@ class HandlerExecution:
                 f"claim ttl_seconds must be between {CLAIM_TTL_MIN_SECONDS} and "
                 f"{CLAIM_TTL_MAX_SECONDS} seconds"
             )
+        self._spend_claim()
+        return bool(await self.claimer(key, ttl_seconds))
+
+    async def _claimed(self, key: str) -> bool:
+        """Whether ``key`` is claimed right now, without claiming it.
+
+        ``claim`` tests by taking, which is wrong for a fire that only wants
+        to know what another fire recorded: reading "has the review of this
+        post confirmed it?" with ``claim`` would itself record a yes. Same key
+        rules and the same per-fire count as ``claim``.
+        """
+        self._check_claim_key(key)
+        self._spend_claim()
+        return bool(await self.claim_reader(key))
+
+    def _check_claim_key(self, key: str) -> None:
+        if not isinstance(key, str) or not key:
+            raise ValueError("claim key must be a non-empty string")
+        if len(key) > CLAIM_KEY_MAX_LEN:
+            raise ValueError(
+                f"claim key must be at most {CLAIM_KEY_MAX_LEN} characters"
+            )
+
+    def _spend_claim(self) -> None:
         if self.claims_made >= MAX_CLAIMS_PER_FIRE:
             raise CapExceeded(
                 "claims_per_fire",
                 f"handler hit its {MAX_CLAIMS_PER_FIRE}-claim per-fire cap",
             )
         self.claims_made += 1
-        return bool(await self.claimer(key, ttl_seconds))
 
     # -- persistent per-handler memory (survives across fires) --
 
@@ -1165,9 +1302,12 @@ async def run_handler_script(
     mod_action_reader: ModActionReader = _no_mod_action_reader,
     mod_action_recorder: ModActionRecorder = _no_mod_action_recorder,
     rules_reader: RulesReader = _no_rules_reader,
+    recent_messages_reader: RecentMessagesReader = _no_recent_messages_reader,
     handler_id: str = "",
     timer_scheduler: TimerScheduler = _no_timer,
     claimer: Claimer = _no_claimer,
+    claim_reader: ClaimReader = _no_claim_reader,
+    holds: MemberHolds | None = None,
     timer_limiter: WindowedLimiter | None = None,
     dm_user_limiter: WindowedLimiter | None = None,
     budget: HandlerBudget | None = None,
@@ -1205,9 +1345,12 @@ async def run_handler_script(
         mod_action_reader=mod_action_reader,
         mod_action_recorder=mod_action_recorder,
         rules_reader=rules_reader,
+        recent_messages_reader=recent_messages_reader,
         handler_id=handler_id,
         timer_scheduler=timer_scheduler,
         claimer=claimer,
+        claim_reader=claim_reader,
+        holds=holds,
         timer_limiter=timer_limiter or limiter,
         dm_user_limiter=dm_user_limiter or limiter,
         actor=actor,

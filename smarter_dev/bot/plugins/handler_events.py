@@ -925,6 +925,7 @@ async def dispatch_message(bot: Any, event: Any) -> None:
             "url": a.url,
             "content_type": a.media_type or "",
             "filename": a.filename or "",
+            "size": a.size,
         }
         for a in msg.attachments
     ]

@@ -187,6 +187,16 @@ async def claim_handler_key(
     return bool(claimed)
 
 
+async def handler_key_claimed(redis, handler_id: str, key: str) -> bool:
+    """Whether ``key`` is claimed for ``handler_id`` right now; claims nothing.
+
+    The read ``claim_handler_key`` cannot give: it tests by taking. A fire
+    that wants to know what another fire recorded under a key — and must not
+    record it itself by asking — reads it here.
+    """
+    return bool(await redis.exists(handler_claim_key(handler_id, key)))
+
+
 def channel_message_key(channel_id: str) -> str:
     return f"hcap:chanmsg:{channel_id}"
 
