@@ -1,0 +1,133 @@
+---
+# Weekly rolling restart of every smarter-dev Deployment, so no container's
+# stdout outlives OPERATIONAL_MAX (30 days).
+#
+# Container stdout is kept by the kubelet on each node, rotated by size only
+# (DigitalOcean manages the kubelet config; its defaults are five 10 MiB files
+# per container). The files go when their pod is removed, so replacing every
+# pod once a week is what puts a time bound on them: a line lasts at most
+# 8 days (a week, plus a late start and the roll itself), and under 15 days
+# if one weekly run fails.
+# `tests/test_container_log_bound.py` pins the schedule and the list below.
+#
+# Restarts run one Deployment at a time, each waited on, in the order the
+# deploy workflow rolls them: each roll surges one pod and the nodes have had
+# room for only one (#27). The image has no shell, so every step is its own
+# init container. The proactive agent is deployed from its own repo; it goes
+# last so that, if it is ever removed, only the final step fails.
+#
+# Only these six Deployments are named, never the namespace: it also holds
+# unrelated sites. The Role grants get/patch (rollout restart) and list/watch
+# (rollout status) on exactly these names and nothing else.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+    name: smarter-dev-log-restart
+    namespace: smarter-dev
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+    name: smarter-dev-log-restart
+    namespace: smarter-dev
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames:
+      - smarter-dev-agent-worker
+      - smarter-dev-chat-child-worker
+      - smarter-dev-media
+      - smarter-dev-website
+      - smarter-dev-bot
+      - smarter-dev-proactive-agent
+    verbs: ["get", "patch", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+    name: smarter-dev-log-restart
+    namespace: smarter-dev
+subjects:
+  - kind: ServiceAccount
+    name: smarter-dev-log-restart
+    namespace: smarter-dev
+roleRef:
+    apiGroup: rbac.authorization.k8s.io
+    kind: Role
+    name: smarter-dev-log-restart
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+    name: smarter-dev-log-restart
+    namespace: smarter-dev
+    labels:
+        app: smarter-dev-log-restart
+spec:
+    # Sundays 09:00 UTC, the small hours in the Americas.
+    schedule: "0 9 * * 0"
+    timeZone: "UTC"
+    concurrencyPolicy: Forbid
+    # A run the controller missed (e.g. during a control-plane upgrade) still
+    # starts if it is noticed within 6 hours.
+    startingDeadlineSeconds: 21600
+    successfulJobsHistoryLimit: 1
+    failedJobsHistoryLimit: 1
+    jobTemplate:
+        spec:
+            # OnFailure retries the failed step in place; every step is
+            # idempotent apart from re-rolling a Deployment, which is harmless.
+            backoffLimit: 3
+            activeDeadlineSeconds: 3600
+            ttlSecondsAfterFinished: 86400
+            template:
+                metadata:
+                    labels:
+                        app: smarter-dev-log-restart
+                spec:
+                    serviceAccountName: smarter-dev-log-restart
+                    restartPolicy: OnFailure
+                    securityContext:
+                        runAsNonRoot: true
+                        runAsUser: 65532
+                        runAsGroup: 65532
+                        seccompProfile:
+                            type: RuntimeDefault
+                    initContainers:
+                      - name: restart-agent-worker
+                        image: registry.k8s.io/kubectl:v1.35.9
+                        args: ["rollout", "restart", "deployment/smarter-dev-agent-worker", "-n", "smarter-dev"]
+                      - name: wait-agent-worker
+                        image: registry.k8s.io/kubectl:v1.35.9
+                        args: ["rollout", "status", "deployment/smarter-dev-agent-worker", "-n", "smarter-dev", "--timeout=10m"]
+                      - name: restart-chat-child-worker
+                        image: registry.k8s.io/kubectl:v1.35.9
+                        args: ["rollout", "restart", "deployment/smarter-dev-chat-child-worker", "-n", "smarter-dev"]
+                      - name: wait-chat-child-worker
+                        image: registry.k8s.io/kubectl:v1.35.9
+                        args: ["rollout", "status", "deployment/smarter-dev-chat-child-worker", "-n", "smarter-dev", "--timeout=10m"]
+                      - name: restart-media
+                        image: registry.k8s.io/kubectl:v1.35.9
+                        args: ["rollout", "restart", "deployment/smarter-dev-media", "-n", "smarter-dev"]
+                      - name: wait-media
+                        image: registry.k8s.io/kubectl:v1.35.9
+                        args: ["rollout", "status", "deployment/smarter-dev-media", "-n", "smarter-dev", "--timeout=10m"]
+                      - name: restart-website
+                        image: registry.k8s.io/kubectl:v1.35.9
+                        args: ["rollout", "restart", "deployment/smarter-dev-website", "-n", "smarter-dev"]
+                      - name: wait-website
+                        image: registry.k8s.io/kubectl:v1.35.9
+                        args: ["rollout", "status", "deployment/smarter-dev-website", "-n", "smarter-dev", "--timeout=10m"]
+                      - name: restart-bot
+                        image: registry.k8s.io/kubectl:v1.35.9
+                        args: ["rollout", "restart", "deployment/smarter-dev-bot", "-n", "smarter-dev"]
+                      - name: wait-bot
+                        image: registry.k8s.io/kubectl:v1.35.9
+                        args: ["rollout", "status", "deployment/smarter-dev-bot", "-n", "smarter-dev", "--timeout=10m"]
+                      - name: restart-proactive-agent
+                        image: registry.k8s.io/kubectl:v1.35.9
+                        args: ["rollout", "restart", "deployment/smarter-dev-proactive-agent", "-n", "smarter-dev"]
+                    containers:
+                      - name: wait-proactive-agent
+                        image: registry.k8s.io/kubectl:v1.35.9
+                        args: ["rollout", "status", "deployment/smarter-dev-proactive-agent", "-n", "smarter-dev", "--timeout=10m"]

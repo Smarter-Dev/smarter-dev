@@ -187,6 +187,7 @@ jobs:
         kubectl apply -f $GITHUB_WORKSPACE/k8s/cron-retention-sweep.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/cron-handler-sweep.yaml
         kubectl apply -f $GITHUB_WORKSPACE/k8s/cron-dream-session.yaml
+        kubectl apply -f $GITHUB_WORKSPACE/k8s/cron-log-restart.yaml
 
     - name: Verify web deployment
       run: kubectl rollout status deployment/smarter-dev-website

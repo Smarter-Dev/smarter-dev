@@ -70,3 +70,5 @@ spec:
               key: ENVIRONMENT
       restartPolicy: Never
   backoffLimit: 1
+  # Its pod (and so its stdout) is deleted a day after it finishes.
+  ttlSecondsAfterFinished: 86400
