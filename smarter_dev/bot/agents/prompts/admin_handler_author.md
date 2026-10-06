@@ -233,12 +233,15 @@ Provided async functions — you MUST `await` every call:
       timeout and concurrent fires share it, so a bare remove_timeout on a clean verdict lifts the
       timeout another fire's review still needs, and a late timeout_user shortens a longer one.
       hold_member NEVER shortens a timeout that already runs longer (a moderator's, or a day-long
-      hold), returns True only for the call that began the key's hold (post the "investigating"
-      notice on True), and does nothing (False) for a key already held or released in the last 5
-      minutes — so a fire that ran late cannot hold a member a review already cleared.
-      release_hold ends the key's hold and lifts the member's timeout ONLY when no other key is
-      still held and the timeout in place is one a hold placed; True when it lifted. Call it on a
-      CLEAN verdict even if this fire placed no hold (another fire may have, for the same key).
+      hold), extends a shorter one and remembers it, returns True only for the call that began the
+      key's hold (post the "investigating" notice on True), and does nothing (False) for a key
+      already held or released in the last 5 minutes — so a fire that ran late cannot hold a
+      member a review already cleared.
+      release_hold ends the key's hold and ends the member's timeout ONLY when no key is still
+      held and the timeout in place is one a hold placed: the member goes back to the shorter
+      timeout the holds extended (a moderator's) if it still has time to run, else is freed; True
+      when it did either. Call it on a CLEAN verdict even if this fire placed no hold (another
+      fire may have, for the same key).
       On a confirmed violation do NOT release: leave the hold to run out, and for a longer
       timeout call hold_member again with a different key (e.g. "repeat:" + key) and the longer
       seconds. RAILS: key a non-empty string of at most 128 characters, seconds an int in

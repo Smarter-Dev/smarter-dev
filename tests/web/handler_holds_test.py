@@ -5,7 +5,8 @@ copy, each fire wants the member held while a review runs, and reviews of
 different posts finish at different times. These tests pin what
 :mod:`smarter_dev.web.handler_holds` promises about the timeout the member is
 left under: a hold never shortens a longer one, a clean review never lifts a
-timeout something else still needs, and a call that lands late does nothing.
+timeout something else still needs, a timeout the holds extended comes back
+when they end, and a call that lands late does nothing.
 """
 
 from __future__ import annotations
@@ -34,6 +35,11 @@ from smarter_dev.web.handler_holds import member_holds_lock_key
 DAY = 86400
 
 
+def _to_the_millisecond(until: datetime) -> datetime:
+    """Discord stores a timeout's expiry to the millisecond."""
+    return until.replace(microsecond=until.microsecond // 1000 * 1000)
+
+
 @dataclass
 class _Discord:
     """The member's timeout as Discord holds it, and every write made to it."""
@@ -59,8 +65,8 @@ class _Discord:
         if self.member_left:
             return None
         self.calls.append(("timeout", duration_seconds))
-        self.until = until
-        return until
+        self.until = _to_the_millisecond(until)
+        return self.until
 
     async def timeout_user(self, user_id, duration_seconds=600):
         until = datetime.now(UTC) + timedelta(seconds=duration_seconds)
@@ -79,7 +85,9 @@ class _Discord:
 
     def moderator_times_out(self, seconds: int) -> None:
         """A moderator acting by hand: straight to Discord, past the lock."""
-        self.until = datetime.now(UTC) + timedelta(seconds=seconds, milliseconds=417)
+        self.until = _to_the_millisecond(
+            datetime.now(UTC) + timedelta(seconds=seconds, milliseconds=417)
+        )
 
 
 @pytest.fixture
@@ -236,6 +244,76 @@ async def test_a_release_leaves_a_timeout_the_hold_did_not_place(holds, discord)
     assert discord.seconds_left() > 3500
 
 
+# -- a timeout the holds extended comes back ------------------------------------
+
+
+async def test_a_release_hands_back_a_moderators_shorter_timeout(holds, discord):
+    # A moderator gave two minutes; the review hold stretched that to five and
+    # the post came back clean. The moderator's two minutes still stand.
+    discord.moderator_times_out(120)
+    theirs = discord.until
+    await holds.hold("U1", "post-a", 300)
+    assert discord.seconds_left() in (300, 301)
+
+    assert await holds.release("U1", "post-a") is True
+
+    assert discord.until == theirs
+    assert ("remove_timeout",) not in discord.calls
+
+
+async def test_a_moderators_timeout_that_has_run_out_meanwhile_is_not_put_back(
+    holds, discord, monkeypatch
+):
+    discord.moderator_times_out(60)
+    await holds.hold("U1", "post-a", 300)
+    _Clock(monkeypatch).advance(90)
+
+    assert await holds.release("U1", "post-a") is True
+
+    assert discord.until is None
+
+
+async def test_the_handed_back_timeout_survives_a_chain_of_holds(holds, discord):
+    # The review hold extended the moderator's, then the confirmed repeat
+    # extended the review hold. When the last hold ends, the moderator's
+    # timeout is what comes back, not the review's five minutes.
+    discord.moderator_times_out(120)
+    theirs = discord.until
+    await holds.hold("U1", "post-a", 300)
+    await holds.hold("U1", "repeat:post-a", DAY)
+
+    assert await holds.release("U1", "post-a") is False
+    assert await holds.release("U1", "repeat:post-a") is True
+
+    assert discord.until == theirs
+
+
+async def test_a_release_hands_back_what_timeout_user_set(holds, discord):
+    await holds.timeout("U1", 120)
+    theirs = discord.until
+    await holds.hold("U1", "post-a", 300)
+
+    assert await holds.release("U1", "post-a") is True
+
+    assert discord.until == theirs
+
+
+async def test_a_timeout_a_moderator_lifted_by_hand_is_not_put_back(holds, discord):
+    # The moderator's two minutes were extended by a hold, then the moderator
+    # freed the member outright. A later hold starts from a free member, so
+    # its release must not bring the two minutes back.
+    discord.moderator_times_out(120)
+    await holds.hold("U1", "post-a", 300)
+    discord.until = None
+    assert await holds.release("U1", "post-a") is False
+    await holds.hold("U1", "post-b", 300)
+
+    assert await holds.release("U1", "post-b") is True
+
+    assert discord.until is None
+    assert discord.calls[-1] == ("remove_timeout",)
+
+
 async def test_releasing_a_key_nobody_held_lifts_nothing(holds, discord):
     discord.moderator_times_out(3600)
 
@@ -266,6 +344,23 @@ async def test_a_hold_that_ran_out_does_not_keep_another_keys_timeout(
     await holds.hold("U1", "post-b", 300)
 
     assert await holds.release("U1", "post-b") is True
+
+
+async def test_the_last_release_ends_the_timeout_even_after_its_own_hold_ran_out(
+    holds, discord, monkeypatch
+):
+    # A short hold, a longer one over it. The longer one is cleared first and
+    # rightly leaves the timeout for the short one; the short one runs out
+    # before its own review clears it. That release is still the last, and the
+    # member is still under the longer hold's timeout.
+    await holds.hold("U1", "post-a", 1)
+    await holds.hold("U1", "post-b", 300)
+    assert await holds.release("U1", "post-b") is False
+    _Clock(monkeypatch).advance(2)
+
+    assert await holds.release("U1", "post-a") is True
+
+    assert discord.until is None
 
 
 # -- calls that land late ------------------------------------------------------
@@ -391,13 +486,74 @@ async def test_a_lock_that_never_frees_fails_the_call(holds, redis, monkeypatch)
     assert await redis.get(member_holds_lock_key("G1", "U1")) == b"another-fire"
 
 
+async def test_a_lock_whose_lease_ran_out_does_not_free_its_successors(
+    holds, redis, caplog
+):
+    # The worker holding the lock was paused past the lease; another fire
+    # took the lock meanwhile. Freeing has to check and delete in one step,
+    # or the paused fire's cleanup takes the successor's lock with it and a
+    # third fire walks in on the second.
+    name = member_holds_lock_key("G1", "U1")
+    async with holds.lock("U1"):
+        await redis.delete(name)
+        await redis.set(name, "successor")
+
+    assert await redis.get(name) == b"successor"
+    assert "lost before release" in caplog.text
+
+
+async def test_a_lock_still_held_is_freed_quietly(holds, redis, caplog):
+    async with holds.lock("U1"):
+        pass
+
+    assert await redis.exists(member_holds_lock_key("G1", "U1")) == 0
+    assert "lost" not in caplog.text
+
+
+# -- what the record keeps ------------------------------------------------------
+
+
 async def test_the_record_expires_with_its_longest_hold(holds, redis):
     await holds.hold("U1", "repeat:post-a", DAY)
     await holds.hold("U1", "post-b", 300)
     await holds.release("U1", "post-b")
 
     ttl = await redis.ttl(member_holds_key("G1", "U1"))
-    assert DAY < ttl <= DAY + SETTLED_SECONDS
+    # The hold's expiry is rounded up to the whole second.
+    assert DAY < ttl <= DAY + SETTLED_SECONDS + 1
+
+
+async def test_the_record_keeps_only_live_holds_and_fresh_releases(
+    holds, redis, monkeypatch
+):
+    # A member who keeps the record alive with new holds must not carry
+    # every old key along: what ran out or settled is dropped at the next
+    # write, and the expiry follows the newest hold rather than piling up.
+    clock = _Clock(monkeypatch)
+    await holds.hold("U1", "post-a", 60)
+    await holds.release("U1", "post-a")
+    await holds.hold("U1", "post-b", 60)
+    clock.advance(SETTLED_SECONDS + 1)
+    await holds.hold("U1", "post-c", 300)
+
+    fields = {key.decode() for key in await redis.hkeys(member_holds_key("G1", "U1"))}
+    assert fields == {"H1:post-c", "placed"}
+    assert await redis.ttl(member_holds_key("G1", "U1")) <= 300 + SETTLED_SECONDS + 1
+
+
+async def test_a_record_with_nothing_live_in_it_is_dropped(holds, redis):
+    # A record whose expiry outlived its contents (the hash is written as a
+    # whole; fakeredis shares the test clock, so it is planted here). The
+    # next write finds nothing live and drops it, bookkeeping included.
+    name = member_holds_key("G1", "U1")
+    await redis.hset(
+        name, mapping={"H1:post-a": "h:1000.0", "placed": "1000.0", "prior": "900.0"}
+    )
+    await redis.expire(name, 1000)
+
+    await holds.timeout("U1", 60)
+
+    assert await redis.exists(name) == 0
 
 
 # -- against the real Discord client --------------------------------------------
@@ -462,6 +618,21 @@ async def test_real_actor_keeps_a_moderators_timeout_through_hold_and_release(
 
     assert member["communication_disabled_until"] == week
     assert "writes" not in member
+
+
+async def test_real_actor_hands_back_a_moderators_shorter_timeout(redis, no_event_log):
+    # Discord keeps the moderator's expiry to the millisecond; it has to come
+    # back exactly as stored, or the moderator's own record no longer matches.
+    two_minutes = (datetime.now(UTC) + timedelta(minutes=2)).replace(microsecond=123000)
+    member = {"communication_disabled_until": two_minutes.isoformat()}
+    actor = AdminActor(bot_token="t", guild_id="G1", transport=_discord_api(member))
+    holds = MemberHolds(redis=redis, guild_id="G1", handler_id="H1", actor=actor)
+
+    await holds.hold("U1", "post-a", 300)
+    assert member["communication_disabled_until"] != two_minutes.isoformat()
+    assert await holds.release("U1", "post-a") is True
+
+    assert member["communication_disabled_until"] == two_minutes.isoformat()
 
 
 async def test_real_actor_reads_an_expired_timeout_as_none(redis, no_event_log):

@@ -75,8 +75,8 @@ and remember a `mod_action`-triggered handler runs with 0 moderation actions, so
 `timeout_user` it reverses — count it against the per-fire cap the same way.
 `hold_member(user_id, key, seconds)` and `release_hold(user_id, key)` are the safe pair for a
 timeout that a verdict may later lift (each spends a moderation action): a hold never shortens a
-longer timeout, and a release lifts the member's timeout only when no other key is still held and
-the timeout in place is a hold's own. A script that times a member out pending a review and lifts
+longer timeout, and a release ends the member's timeout only when no key is still held and the
+timeout in place is a hold's own — handing back a moderator's shorter timeout the holds extended. A script that times a member out pending a review and lifts
 it on a clean verdict with bare `timeout_user` + `remove_timeout` can undo a moderator's timeout or
 another fire's hold when it fires concurrently — reject it (`actions_appropriate`) and say to use
 the hold pair. `claimed(key)` reads a claim without taking it and counts as a claim.

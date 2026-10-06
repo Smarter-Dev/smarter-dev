@@ -102,8 +102,9 @@ five spends the lookups budget, plus ``hold_member(user_id, key, seconds=300)``
 ``key`` is under review, and end that hold; see
 :mod:`smarter_dev.web.handler_holds` — the member has one timeout and several
 fires share it, so both run under the member's lock, a hold never shortens a
-longer timeout, and a release lifts the timeout only when no other key is held
-and the timeout in place is a hold's own; each spends a mod_action;
+longer timeout, and a release ends the timeout only when no key is held any
+more and the timeout in place is a hold's own, handing back a shorter one the
+holds extended; each spends a mod_action;
 ``timeout_user`` and ``remove_timeout`` take the same lock), plus ``warn_user(user_id, reason, channel_id=None, dm=True)`` ->
 dict (``{"message_id", "dm_sent", "warn_count"}``: the handler-tier ``/warn`` —
 spends a mod_action FIRST so a mod_action-triggered fire, which runs with zero
@@ -826,12 +827,14 @@ class HandlerExecution:
         return bool(await self._member_holds().hold(str(user_id), hold_key, seconds))
 
     async def _release_hold(self, user_id: str, key: str) -> bool:
-        """End ``key``'s hold; True when the member's timeout was lifted.
+        """End ``key``'s hold; True when the member's timeout was ended.
 
-        The timeout is lifted only when this key was held, no other key still
-        is, and the timeout in place is the one a hold put there — never a
-        moderator's or a ``timeout_user``'s. Spends a mod_action like
-        ``remove_timeout``: a mod_action-triggered fire must not undo a hold.
+        The timeout is ended only when no key is held any more and the
+        timeout in place is the one a hold put there — never a moderator's or
+        a ``timeout_user``'s. A shorter timeout the holds extended comes back
+        if it still has time to run; otherwise the member is freed. Spends a
+        mod_action like ``remove_timeout``: a mod_action-triggered fire must
+        not undo a hold.
         """
         hold_key = self._hold_key(key)
         self.budget.spend_mod_action()
