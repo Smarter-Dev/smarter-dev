@@ -380,8 +380,7 @@ the lifetime. A failed delete is logged and leaves them to the lifetime:
 the two together). Skrift never replays an older one, and its sweep runs
 every 10 minutes, so a stored copy is gone by 5 hours 10 minutes. A title
 generated after its run finished waits for that lifetime. Nothing here sends
-timeseries notifications, so their 7-day default is left alone. The notice
-still says 2 days, longer than any of this.
+timeseries notifications, so their 7-day default is left alone.
 
 The same job bounds Skrift's worker tables
 (`smarter_dev/web/worker_retention.py`), because Skrift's own pruner is not
