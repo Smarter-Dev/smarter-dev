@@ -3,7 +3,7 @@ Smarter Dev runs a Discord server, a Discord bot and the smarter.dev website. Th
 ## The short version
 
 - The bot reads messages in the Discord servers it is in, so its features can work: the chat bot, moderation, bytes, squads, quests and challenges.
-- The chat bot keeps permanent memories about the people it talks with, written in its own words and naming people by username and Discord ID. It never resets them.
+- The chat bot keeps permanent memories about the people it talks with, written in its own words and naming people by username and Discord ID.
 - Moderation history is kept so the server can stay safe, and is not part of a deletion request.
 - When your data is deleted, your membership record goes with it; only anonymous usage and cost records stay.
 - To have your data deleted, including from the chat bot's memories, DM an @admin on the Smarter Dev Discord server. We delete it within 30 days.
@@ -16,7 +16,7 @@ Smarter Dev is run by Smarter Dev LLC. For anything about your data, DM an @admi
 
 The bot reads messages in the servers it is in, so the chat bot can answer people and moderation can act on what was said. It does not keep a copy of every message. It keeps:
 
-- **The chat bot's memories.** A memory for each server, in the bot's own words, about the people there and how it should behave there. It names people by username and Discord ID, and it is told not to keep anything private, sensitive or shared in confidence. Kept permanently: the bot never resets them, and only the bot edits them.
+- **The chat bot's memories.** A memory for each server, in the bot's own words, about the people there and how it should behave there. It names people by username and Discord ID, and it is told not to keep anything private, sensitive or shared in confidence. Kept permanently; only the bot edits them.
 - **The chat bot's conversations.** Messages in conversations the chat bot takes part in or watches, with its notes and summaries of them, so it can follow along. Kept until you ask us to delete them.
 - **Messages being handled.** Copies of messages, of what the AI read in files people post, of `/help` questions, and of the chat bot's web searches with the results it saw, while the bot works on them. Kept for at most 6 hours.
 - **Server automations.** Text from a message that an automation set up by a server admin chose to keep. Kept until you ask us to delete it.

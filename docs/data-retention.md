@@ -260,7 +260,7 @@ allowed — that is a keyword watch, not a command.
   for people to be named by username and Discord id, and the document is about
   them.
 
-  This memory is permanent and the bot never resets it. Only the agent edits
+  This memory is permanent. Only the agent edits
   its own memory; no operator tool rewrites, blanks or deletes it, and none
   should be added. `memory_enabled` on a guild's row is a pause, not a reset:
   set false, the stored document, blocks, notes and revisions are all kept as
