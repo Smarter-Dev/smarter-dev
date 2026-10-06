@@ -56,6 +56,8 @@ You can delete your website chats, questions, searches, email sign-ups and your 
 
 For everything else, message an @admin on the [Smarter Dev Discord server](https://discord.gg/de8kajxbYS) or email admin@smarter.dev. We confirm you own the Discord account and delete your data within 30 days of your request. From then on the AI assistant ignores your messages and does not respond to you. Other features still process your new messages, and new activity starts new records.
 
+You can also opt out of the AI assistant at any time with the /privacy command in the server. From then on it ignores your messages; it keeps what it already learned until you ask us to delete it.
+
 === Message 3 of 3 ===
 ## Data we retain
 

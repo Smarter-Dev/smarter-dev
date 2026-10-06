@@ -32,6 +32,10 @@ from smarter_dev.web.web_search.anonymous import (
 REPO = Path(__file__).resolve().parents[2]
 CHANNEL_POST = REPO / "docs" / "privacy-channel-post.md"
 PUBLIC_URL = "https://smarter.dev/privacy"
+OPT_OUT = (
+    "You can also opt out of the AI assistant at any time with the /privacy command in the server. "
+    "From then on it ignores your messages; it keeps what it already learned until you ask us to delete it."
+)
 HEADINGS = [
     "Data we collect",
     "Why we collect it",
@@ -77,11 +81,14 @@ def test_no_section_points_at_another(notice):
 
 def test_no_fact_is_said_twice(notice):
     # Zech's rights section repeats the contact address and the 30-day answer
-    # by design (#86); every other fact is stated once outside it.
+    # by design (#86), and his opt-out sentence repeats "ignores your
+    # messages" and "until you ask us to delete" (#92); every other fact is
+    # stated once outside them.
     plain = " ".join(discord_markdown().split())
     rights = _section(plain, "Your rights")
     assert plain.count(rights) == 1
-    plain = plain.replace(rights, "")
+    assert plain.count(OPT_OUT) == 1
+    plain = plain.replace(rights, "").replace(OPT_OUT, "")
     sentences = [s.strip() for s in re.split(r"(?<=[.;:])\s", notice) if len(s.strip()) > 30]
     assert len(sentences) == len(set(sentences))
     for fact in (
@@ -212,6 +219,22 @@ def test_after_a_request_only_the_assistant_ignores_you(notice):
     ) in deleting
 
 
+def test_opting_out_sits_right_after_the_deletion_request(notice):
+    deleting = _section(notice, "Deleting your data")
+    assert deleting.strip().endswith(
+        "Other features still process your new messages, and new activity starts new records. " + OPT_OUT
+    )
+
+
+def test_the_opt_out_the_policy_offers_is_on_privacy():
+    # Fails until PR 159 (#92) merges: the opt-out is the button under /privacy.
+    from smarter_dev.bot.plugins import privacy_notice as command
+    from smarter_dev.bot.privacy.opt_out import EXPLANATION
+
+    assert command.open_button
+    assert "does not delete what it already holds" in EXPLANATION
+
+
 def test_self_deletion_names_where(notice):
     deleting = _section(notice, "Deleting your data")
     assert "You can delete your website chats, questions, searches, email sign-ups and your whole account from [Account → Security & Accounts](https://smarter.dev/account/security#your-data)." in deleting
@@ -265,7 +288,7 @@ def test_what_an_admin_set_up_is_not_kept_after_a_request(notice):
 
 def test_leaving_the_assistant_says_what_is_excluded_not_how(notice):
     lowered = notice.lower()
-    for word in ("blocked", "opt-out", "opt out", "opts you out", "exclusion"):
+    for word in ("blocked", "opt-out", "opts you out", "exclusion"):
         assert word not in lowered
 
 
