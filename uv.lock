@@ -3017,7 +3017,7 @@ wheels = [
 
 [[package]]
 name = "skrift"
-version = "0.2.1a2"
+version = "0.2.1a3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "advanced-alchemy" },
@@ -3039,9 +3039,9 @@ dependencies = [
     { name = "ruamel-yaml" },
     { name = "sqlalchemy", extra = ["asyncio"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/bf/8a/c935033a09ab8e7183cdaaace769a756d911728bf1e82e943f427a086cec/skrift-0.2.1a2.tar.gz", hash = "sha256:53e069fa274676490168527dd436333a8f77a3c02a69d9edd97ebb1e96d92c28", size = 489524, upload-time = "2026-10-05T16:37:02.187Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/32/e4/86c1f63199ff3b37c6f156e19ff3245b1ccdc5d963e5cf0d4922cb36b03a/skrift-0.2.1a3.tar.gz", hash = "sha256:079ed08c1ee212f5e3d4fc489a907283575e359fd5395796d599889cd567bf21", size = 493463, upload-time = "2026-10-06T01:59:21.151Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d6/eb/40f34242d63f9251b9e26d36e7110aeecb7019fde780887dbdc4ba5117f3/skrift-0.2.1a2-py3-none-any.whl", hash = "sha256:1700209e607cbc2f8a4f0f77f92ff749aafa0c305c6c7e3ee21aac7b09575a5a", size = 663116, upload-time = "2026-10-05T16:37:00.69Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/91/c4044cfafc49dcad00ee64764b4a30efd94bb2b27584bf851d9c48205406/skrift-0.2.1a3-py3-none-any.whl", hash = "sha256:18133308dd991ccd73383addef66213af972266b2f830dfd4fcf1c972e00efdf", size = 666992, upload-time = "2026-10-06T01:59:19.018Z" },
 ]
 
 [package.optional-dependencies]
@@ -3180,7 +3180,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "redis", specifier = ">=6.2.0" },
     { name = "resend", specifier = ">=2.0.0" },
-    { name = "skrift", extras = ["agents", "passkeys"], specifier = ">=0.2.1a2" },
+    { name = "skrift", extras = ["agents", "passkeys"], specifier = ">=0.2.1a3" },
     { name = "starlette", specifier = ">=0.47.1" },
 ]
 
@@ -3244,7 +3244,7 @@ web = [
     { name = "pdfplumber", specifier = ">=0.11.0" },
     { name = "polar-sdk", specifier = ">=0.31.7" },
     { name = "redis", specifier = ">=5.0.0" },
-    { name = "skrift", extras = ["agents", "s3"], specifier = ">=0.2.1a2" },
+    { name = "skrift", extras = ["agents", "s3"], specifier = ">=0.2.1a3" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.0" },
 ]
 

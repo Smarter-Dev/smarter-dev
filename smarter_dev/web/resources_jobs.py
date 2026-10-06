@@ -27,6 +27,7 @@ from smarter_dev.web.models import ResourceAgentRun
 from smarter_dev.web.resources_agent import begin_run
 from smarter_dev.web.resources_agent import run_resources_pipeline
 from smarter_dev.web.sdanswer import enrich_answer
+from smarter_dev.web.user_content import forget_queued_progress
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,27 @@ async def _notify_safe(user_id: UUID, event: str, **payload) -> None:
         )
     except Exception:
         logger.exception("Resources notification failed after durable state commit")
+
+
+async def _clear_progress_safe(user_id: UUID, conversation_id: UUID) -> None:
+    """Delete the run's queued progress notifications once it is done.
+
+    The pipeline's progress (the restated question, the research steps and the
+    title) is sent as queued notifications to the owner's user queue, where
+    Skrift keeps them for ``notifications.queued_ttl_seconds``. A finished run
+    no longer needs them, so they go now; the lifetime is only the backstop.
+    Only this conversation's go, so another run of the same owner still in
+    flight keeps its steps. The delete is on the shared store, so no replica
+    replays them; it pushes no ``dismissed`` event and leaves no tombstone, so
+    a step sent at the moment of the delete stays until the lifetime. A
+    failure is logged and never fails the run.
+    """
+    try:
+        async with get_db_session_context() as session:
+            await forget_queued_progress(session, user_id, conversation_id)
+            await session.commit()
+    except Exception:
+        logger.exception("Clearing Resources progress notifications failed")
 
 
 @handler(
@@ -333,6 +355,7 @@ async def run_resources_job(payload: ResourcesRunPayload) -> dict:
             content_html=content_html,
             sdanswer_blocks=blocks,
         )
+        await _clear_progress_safe(owner_user_id, conversation_id)
         return {"status": "ok", "assistant_message_id": str(assistant.id)}
     except asyncio.CancelledError:
         raise
@@ -343,6 +366,7 @@ async def run_resources_job(payload: ResourcesRunPayload) -> dict:
             if "api_key" in str(exc).lower()
             else "Agent failed to respond. Try again in a moment."
         )
+        failed_for_good = False
         async with get_db_session_context() as session:
             run = await session.scalar(
                 select(ResourceAgentRun)
@@ -385,12 +409,17 @@ async def run_resources_job(payload: ResourcesRunPayload) -> dict:
                         )
                     )
                 await session.commit()
+                failed_for_good = True
         await _notify_safe(
             owner_user_id,
             "agent_run_error",
             conversation_id=str(conversation_id),
             detail=detail,
         )
+        if failed_for_good:
+            # Only the worker that ended the run clears; one that lost its
+            # lease would clear the progress of the attempt that took over.
+            await _clear_progress_safe(owner_user_id, conversation_id)
         return {"status": "error"}
     finally:
         heartbeat.cancel()

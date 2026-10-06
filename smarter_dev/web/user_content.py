@@ -103,6 +103,25 @@ async def forget_dispatches(
         )
 
 
+async def forget_queued_progress(
+    session: AsyncSession, owner_user_id: UUID, conversation_id: UUID
+) -> None:
+    """Delete the queued progress notifications of one Resources conversation.
+
+    The progress the browser was shown (the restated question, the research
+    steps, the title) is queued under the owner's notification source, which
+    every conversation of theirs shares, so only rows naming this conversation
+    go. The rows are deleted directly rather than through Skrift's clear,
+    which can only take a whole source or a single group.
+    """
+    await session.execute(
+        delete(StoredNotification).where(
+            StoredNotification.source_key == f"user:{owner_user_id}",
+            StoredNotification.payload_json.contains(str(conversation_id)),
+        )
+    )
+
+
 # ── Chat ─────────────────────────────────────────────────────────────
 
 
@@ -249,14 +268,9 @@ async def delete_resources_conversation(
         for run in runs
     ):
         raise StillRunning
-    # The progress the browser was shown (the restated question, the research
-    # steps) is queued for a day under the owner's notification source.
-    await session.execute(
-        delete(StoredNotification).where(
-            StoredNotification.source_key == f"user:{conversation.owner_user_id}",
-            StoredNotification.payload_json.contains(str(conversation.id)),
-        )
-    )
+    # Normally gone when the run finished; a late title, or a run that never
+    # finished, can leave some for notifications.queued_ttl_seconds (app.yaml).
+    await forget_queued_progress(session, conversation.owner_user_id, conversation.id)
     await forget_dispatches(session, "resources.agent.run", [run.id for run in runs])
     await session.delete(conversation)
     await session.commit()

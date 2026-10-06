@@ -155,6 +155,13 @@ redis:
 
 notifications:
   backend: "skrift.lib.notification_backends:RedisBackend"
+  # Queued notifications carry the Resources progress (restated question,
+  # research steps, title). In-flight class: IN_FLIGHT_SWEEP_WINDOW in
+  # smarter_dev/shared/retention_policy.py (5 h), so with Skrift's sweep every
+  # 600 s they are gone inside IN_FLIGHT_MAX. Nothing here sends timeseries
+  # notifications, so that lifetime stays at Skrift's default.
+  # tests/shared/notification_lifetime_test.py pins this to the constant.
+  queued_ttl_seconds: 18000
 
 workers:
   enabled: true

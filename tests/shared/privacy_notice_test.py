@@ -146,7 +146,7 @@ def test_the_notice_states_figures_not_mechanisms(notice):
     assert "Searches made with your search link while signed out are kept for 30 minutes" in notice
     assert "You stay signed in for 30 days after your last visit" in notice
     assert "it keeps its own copy of the question, its research and its answer, deleted as soon as it finishes, or within 6 hours if it is cut off partway" in notice
-    assert "The progress it shows you while it works is kept for 2 days." in notice
+    assert "The progress it shows you while it works is deleted when it finishes, or within 6 hours." in notice
     monitoring = notice.split("**Monitoring.**", 1)[1].split(" - **", 1)[0]
     assert "Everything sent to Logfire is kept for 30 days" in monitoring
     assert "Our servers also keep their own logs, with no fixed time limit" in monitoring
