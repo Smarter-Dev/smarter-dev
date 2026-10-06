@@ -25,3 +25,13 @@ IN_FLIGHT_SWEEP_WINDOW: timedelta = IN_FLIGHT_MAX - timedelta(hours=1)
 # failed-job records, logs and monitoring. A counter expires with its own
 # window, well inside this.
 OPERATIONAL_MAX: timedelta = timedelta(days=30)
+
+# Agent working memory: the chat agent's history, notes and topic keys expire
+# this long after their last write, and the proactive agent's history is
+# folded to its memory note alone (no verbatim message) once it has not been
+# written for this long. One number so the two agents cannot drift apart.
+AGENT_VERBATIM_IDLE_WINDOW: timedelta = timedelta(hours=2)
+
+# How often the bot looks for proactive histories past the idle window. The
+# bound is the window plus one tick.
+PROACTIVE_IDLE_SWEEP_TICK: timedelta = timedelta(minutes=1)

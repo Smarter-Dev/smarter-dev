@@ -99,7 +99,7 @@ was posted to the channel, where the guild's own audit log keeps it.
 | Where | Class | What it holds | Bound |
 | --- | --- | --- | --- |
 | Chat agent working history (`smarter_dev/bot/services/chat_memory.py`, Redis) | User content | The conversation the chat agent is currently in. | 2-hour key TTL, refreshed on write — that TTL is the bound. Compaction (`chat_compaction.py`) folds everything older than roughly the last 20,000 characters into a summary, keeping more when a single turn is larger than that, and the history grows again until the next fold. |
-| Proactive agent history (`smarter_dev/bot/proactive/history_store.py`, Redis, with a recovery copy in `proactive_agent_histories`) | User content | The running history the proactive agent reasons over. | Size, not age: no key TTL and no sweep. Compaction fires only once the history passes 100,000 estimated tokens, and then keeps at most the trailing 8 messages verbatim, summarising the rest. |
+| Proactive agent history (`smarter_dev/bot/proactive/history_store.py`, Redis, with a recovery copy in `proactive_agent_histories`) | User content | The running history the proactive agent reasons over. | Age: 2 hours idle, then summary only. Once a guild's history has not been written for 2 hours (`AGENT_VERBATIM_IDLE_WINDOW` in `smarter_dev/shared/retention_policy.py`), it is folded into the agent's own memory note and keeps no verbatim message. The bot sweeps its Redis copy every minute (`PROACTIVE_IDLE_SWEEP_TICK`), and the external proactive-agent worker sweeps its own copy every minute too (`idle.py` there), so verbatim text lasts at most 2 hours and one 1-minute tick after the last write. The fold itself is a model call, bounded at 2 minutes per model. If that call fails, the history keeps only the note it already had. A history whose last write was a wake's own compaction (note plus the kept tail, flagged in Redis) drops the tail with no model call. The worker writes its fold to Redis and then to the `proactive_agent_histories` row through its debounced writer (5 seconds, retried until it lands). Its next wake reloads the fold instead of writing its in-memory copy back. The idle clock is stored in Redis beside the history, so a restart resumes it. A history written before the clock existed starts its clock at the first sweep. While a guild is active, size bounds the history: compaction at 100,000 estimated tokens keeps the trailing 8 messages verbatim and summarises the rest. |
 | Proactive wake stream, one per guild (Redis) | In-flight | The notification envelope that woke a guild, message text included. | Trimmed to 5 hours by stream id on every publish, and again on the passive tick for guilds that stopped publishing, so an entry nobody consumed lasts at most 5 hours and 15 minutes. The external worker acknowledges and deletes (`XACK` + `XDEL`) each entry when its wake finishes, or when the wake is dead-lettered after its last attempt; a failed attempt with attempts left keeps the entry for the retry. |
 | Proactive shadow stream (Redis) | In-flight | The same envelopes, copied for a canary comparison, for guilds listed in `PROACTIVE_AGENT_SHADOW_GUILD_IDS` (empty in `k8s/configmap.yaml`). No code reads it, so nothing consumes and deletes an entry. | The same 5-hour trim, plus a 10,000-entry cap. |
 | A claimed proactive batch (Redis) | In-flight | The pending-list envelopes a wake claimed, kept until the wake is acknowledged so a retry reads them again. | Deleted when the wake finishes, or when it is dead-lettered after its last attempt (5 by default, retried about every 4 minutes). As a backstop for a wake that never finishes, the key expires 6 hours after its oldest envelope was written: the claim, and each mid-run drain that adds envelopes, can only bring that expiry in, so no claimed envelope outlives 6 hours. Only the external worker claims batches; the bot's own consumer keeps its queue in process memory. |
@@ -121,14 +121,12 @@ the batch key, sets the backstop expiry the table gives, and deletes the
 batch when the wake finishes. Its
 dead-letter stream keeps ids and an error type, no text.
 
-Two places have no age bound at all, stated plainly. The proactive agent's
-history has no clock, so a guild that never talks enough to trigger compaction
-keeps every verbatim message it has read, in Redis and in its
-`proactive_agent_histories` row, for as long as the channel stays enabled.
-Handler script memory keeps whatever a script stored, up to 16 KB per store:
-a handler's own memory for as long as the handler exists, guild memory until a
-script deletes the key. Blog post ideas (`candidate_blog_topics`) were the
-third until migration `2b028ca5a19f` dropped the table.
+One place has no age bound at all, stated plainly. Handler script memory
+keeps whatever a script stored, up to 16 KB per store: a handler's own memory
+for as long as the handler exists, guild memory until a script deletes the
+key. The proactive agent's history was the second until it got the 2-hour
+idle bound in the table above. Blog post ideas (`candidate_blog_topics`) were
+the third until migration `2b028ca5a19f` dropped the table.
 
 Skrift's worker tables hold no handler fire's message text: the payload of a
 fire is redacted at dispatch, and a fire that fails leaves Skrift only its
@@ -243,8 +241,8 @@ allowed — that is a keyword watch, not a command.
   remove them with the chat, question or search they dispatched, and so does
   account deletion; runbook step 8 deletes a person's rows for a request.
 - `proactive_agent_histories` — the proactive agent's own working history,
-  with the bounds (and the missing ones) described above; it is not an
-  operator-facing audit trail.
+  with the bounds described above (summary only after 2 idle hours); it is
+  not an operator-facing audit trail.
 - The chat agent's own memory. Three tables, exempt for two different reasons:
 
   | Table | What it holds | Why it is exempt |
@@ -294,7 +292,7 @@ allowed — that is a keyword watch, not a command.
   query-string values of bot API requests, or httpx's outbound request URLs
   (capped at WARNING in `main.py`).
 - Model-written working notes beside the chat history: the running topic
-  (6-hour key) and notes (2-hour key) per channel, and the guild's recent
+  and notes per channel (2-hour keys), and the guild's recent
   bot-event log (one-hour window, newest 200 events, holding usernames and
   moderation reasons). These are the agent's prose and the bot's own events,
   not message text, and they expire on their own clocks.
@@ -458,7 +456,7 @@ change the notice in the same commit as anything here that raises a bound.
 | Notice says | Class | Stores behind it | Bound, and where it is enforced |
 | --- | --- | --- | --- |
 | The chat bot's memories: permanent | Permanent | `chat_agent_guild_memory`, `chat_agent_memory_revisions` (last five nights), `chat_agent_memory_notes` | No bound (above); only the agent purge edits it for a request |
-| The chat bot's conversations: until a deletion request | User content | chat agent working history, running topic (6-hour key) and notes (2-hour key), the guild's bot-event log (one hour); proactive history in Redis and `proactive_agent_histories`, and the external worker's copy | Proactive history has no age bound; the chat history's 2-hour TTL is refreshed on every write, so an active conversation has no fixed end either. The agent purge (step 4 of the runbook) removes the person |
+| The chat bot's conversations: until a deletion request | User content | chat agent working history, running topic and notes (2-hour keys), the guild's bot-event log (one hour); proactive history in Redis and `proactive_agent_histories`, and the external worker's copy | The chat history, topic and notes keys expire 2 hours after their last write. Proactive history is folded to a summary with no verbatim message once it has not been written for 2 hours, checked every minute, so at most 2 hours and one tick. Both clocks restart on every write, so an active conversation has no fixed end. The agent purge (step 4 of the runbook) removes the person |
 | Messages being handled: at most 6 hours | In-flight | proactive wake and shadow streams, claimed batches, pending lists; `handler-fire:context:*`; `mediaread:*`, the AI's reading of a posted file; `help_conversations.user_question` typed as a slash-command argument; `search_result_previews` | Deleted when the work finishes where there is a finish: a proactive wake's stream entries and claimed batch, a handler fire's hand-off. The rest age out. The streams, pending lists, `/help` questions, previews and `ai_context_summary` use the 5-hour `CONTENT_RETENTION_WINDOW` (`smarter_dev/shared/message_content.py`): the bot trims every 15 minutes, the sweep runs hourly, so at most 6 hours. A claimed batch's backstop is 6 hours from its oldest envelope (`IN_FLIGHT_MAX`). `handler-fire:context:*` and `mediaread:*` (`CACHE_TTL_SECONDS` in `smarter_dev/web/media_read.py`) are 1-hour keys. Pending lists can outlast this only while the bot's passive tick is stopped |
 | Server automations: until a deletion request | User content | handler script memory and guild memory (16 KB each), handler timer payloads | No age bound (above); runbook steps 7 and 8 clear the person's entries |
 | Records of what the AI did: until a deletion request | Usage, cost and audit | `chat_agent_turns`, `chat_agent_engagements`, `chat_agent_compaction_events`, `chat_agent_errors`, `forum_agent_responses`, `handler_runs`, `help_conversations` rows, usage cost rows | No age bound on the rows; text is written as the placeholder or cleared by the sweep. The runbook anonymises or deletes the person's rows; an anonymised row still holds message IDs, channel and tag IDs (including the DM channel ID), times, role details and a permission flag, reaction emoji, and moderation action details. The notice sums these up as "which messages and channels were involved and what was done" |

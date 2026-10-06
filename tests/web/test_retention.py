@@ -21,7 +21,9 @@ from smarter_dev.bot.proactive.redis_queue import (
     SHADOW_STREAM_MAX_ENTRIES,
 )
 from smarter_dev.bot.services.chat_memory import HISTORY_TTL_SECONDS
+from smarter_dev.shared.retention_policy import AGENT_VERBATIM_IDLE_WINDOW
 from smarter_dev.shared.retention_policy import IN_FLIGHT_MAX
+from smarter_dev.shared.retention_policy import PROACTIVE_IDLE_SWEEP_TICK
 
 from smarter_dev.web.models import (
     CONTENT_RETENTION_WINDOW,
@@ -961,20 +963,38 @@ class TestDocumentedBehaviour:
         """The trailing tail only bounds a history that compacted at all."""
         history_row = table_row(retention_doc, "| Proactive agent history")
         assert f"{HISTORY_TOKEN_LIMIT:,}" in history_row
-        assert "no key TTL" in history_row
+
+    def test_states_the_proactive_idle_bound_and_its_tick(self, retention_doc):
+        """#89: summary only once the history is idle for the window, checked
+        every tick; the doc's numbers are the constants'."""
+        history_row = table_row(retention_doc, "| Proactive agent history")
+        window_hours = AGENT_VERBATIM_IDLE_WINDOW.total_seconds() / 3600
+        tick_minutes = PROACTIVE_IDLE_SWEEP_TICK.total_seconds() / 60
+        assert window_hours.is_integer() and tick_minutes.is_integer()
+        assert states_hours(history_row, int(window_hours))
+        assert (
+            f"at most {int(window_hours)} hours and one {int(tick_minutes)}-minute "
+            "tick after the last write"
+        ) in history_row
+        assert not re.search(rf"\b(?!{int(window_hours)}\b)\d+ hours idle", history_row)
+        assert "AGENT_VERBATIM_IDLE_WINDOW" in history_row
+        assert "PROACTIVE_IDLE_SWEEP_TICK" in history_row
+        assert "no verbatim message" in history_row
+        assert "proactive_agent_histories" in history_row
 
     def test_names_each_place_with_no_age_bound(self, retention_doc):
-        """The pending list is bounded now and blog ideas are dropped; the
-        history and handler script memory are the gaps left."""
-        gaps = paragraph_containing(retention_doc, "Two places have no age bound")
-        assert "history" in gaps
+        """The pending list is bounded now, blog ideas are dropped and the
+        proactive history has its idle bound (#89); handler script memory is
+        the gap left."""
+        gaps = paragraph_containing(retention_doc, "One place has no age bound")
         assert "Handler script memory" in gaps
+        assert "idle bound" in gaps
         assert "dropped the table" in gaps
         assert "pending" not in gaps
 
     def test_states_each_proactive_bound_in_one_place(self, retention_doc):
         """The table owns every bound; prose that restates one can drift from it."""
-        assert retention_doc.count("no key TTL") == 1
+        assert retention_doc.count("folded into the agent's own memory note") == 1
         assert retention_doc.count("after its oldest envelope was written") == 1
         out_of_scope = section(retention_doc, "## What is out of scope, and why")
         assert "compaction" not in out_of_scope
