@@ -673,8 +673,10 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
     # "required", structured outputs, and no reasoning parameter, so no
     # reasoning knob. Mistral's own endpoint is the only one. It lists at
     # $0.68/$2.09 with a 50% launch discount against Mistral's $1.36/$4.18. The
-    # ceiling sits at the undiscounted rate so the model keeps serving when the
-    # discount ends, rather than at the discounted rate llm_pricing records.
+    # ceiling sits at the discounted rate llm_pricing records, because usage is
+    # metered from that table: a higher ceiling would let the end of the
+    # discount bill at twice the metered rate. When the discount ends, routing
+    # refuses the model until this ceiling and the price row move together.
     # Mistral publishes the weights on 2026-10-27. Until then it is not an open
     # weight family; when third-party endpoints appear, revisit the routing and
     # OPEN_WEIGHT_FAMILIES.
@@ -688,8 +690,8 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         context_window=524_288,
         max_output_tokens=262_144,
         openrouter_routing=OpenRouterRouting(
-            max_price_input_mtok=1.36,
-            max_price_output_mtok=4.18,
+            max_price_input_mtok=0.68,
+            max_price_output_mtok=2.09,
         ),
     ),
 )

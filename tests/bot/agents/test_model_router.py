@@ -416,7 +416,7 @@ async def test_openrouter_mistral_large_4_request_on_the_wire(monkeypatch):
     assert body["tool_choice"] == "required"
     assert "reasoning_effort" not in body
     assert "reasoning" not in body
-    assert body["provider"] == {"max_price": {"prompt": 1.36, "completion": 4.18}}
+    assert body["provider"] == {"max_price": {"prompt": 0.68, "completion": 2.09}}
 
 
 def test_openrouter_routing_constraints_ride_on_every_request():

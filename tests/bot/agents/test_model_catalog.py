@@ -318,10 +318,10 @@ def test_mistral_large_4_routes_through_openrouter_with_verified_capabilities():
     # Weights unpublished until 2026-10-27: structured output stays on tool
     # calls, not prompted JSON.
     assert model.needs_prompted_output is False
-    # Ceiling at Mistral's undiscounted rate, so the end of OpenRouter's
-    # launch discount does not cut the model off.
+    # Ceiling at the discounted rate llm_pricing meters, so the end of
+    # OpenRouter's launch discount refuses requests instead of under-billing.
     assert model.openrouter_routing.as_provider_block() == {
-        "max_price": {"prompt": 1.36, "completion": 4.18}
+        "max_price": {"prompt": 0.68, "completion": 2.09}
     }
     assert [m.key for m in MODEL_CATALOG if m.family == "Mistral"] == [
         "mistral-large-4"
