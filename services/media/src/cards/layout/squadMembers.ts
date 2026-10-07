@@ -35,7 +35,8 @@ export function layoutSquadMembersCard(
   ops.push(...shadowedText(PADDING_HORIZONTAL, currentY, title, "title_medium", COLORS.info!));
   currentY += metrics.measure("title_medium", title).lineHeight + 32;
 
-  const memberCount = request.members.length;
+  // The bot sends only the rows it can draw; the squad carries the real total.
+  const memberCount = request.squad.member_count ?? request.members.length;
   const subtitle = `${memberCount} member${memberCount !== 1 ? "s" : ""}`;
   ops.push(...shadowedText(PADDING_HORIZONTAL, currentY, subtitle, "text_medium", TEXT_COLOR));
   currentY += metrics.measure("text_medium", subtitle).lineHeight + 32;

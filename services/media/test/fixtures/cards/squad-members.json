@@ -2,7 +2,7 @@
   "squad": {
     "name": "Nightshade Collective",
     "description": "Systems folks who live in the terminal. We take on the gnarly infrastructure bounties and hand out post-mortems like candy.",
-    "member_count": 18,
+    "member_count": 17,
     "max_members": 25,
     "switch_cost": 500,
     "current_join_cost": 350,

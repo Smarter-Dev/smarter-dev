@@ -28,6 +28,10 @@ RETRY_DELAY_SECONDS = 0.25
 LATEX_PATH = "/v1/latex"
 AUDIO_PATH = "/v1/audio/opus-ogg"
 HEALTH_PATH = "/health"
+# The squad cards draw the total from squad.member_count; squad-members draws
+# its first 15 rows. Both stay well under the media schema cap of 500.
+SQUAD_INFO_MEMBER_LIMIT = 0
+SQUAD_MEMBERS_MEMBER_LIMIT = 50
 
 # Filenames the service sets on Content-Disposition. Kept here only as the
 # fallback for a response that omits the header.
@@ -130,6 +134,19 @@ def _squad_payload(squad: Any) -> dict[str, Any]:
         ("name", "description", "member_count", "max_members", "switch_cost", "is_active"),
         ("current_join_cost", "has_join_sale", "role_id", "is_default"),
     )
+
+
+def _squad_card_payload(squad: Any, members: list, limit: int) -> dict[str, Any]:
+    """The squad and at most ``limit`` members, counted from the full list.
+
+    The media schema caps ``members`` at 500 and the cards draw only a few
+    rows, so the real total travels in ``squad.member_count``. The bot already
+    holds every member, so the list length is the count.
+    """
+    return {
+        "squad": {**_squad_payload(squad), "member_count": len(members)},
+        "members": [_squad_member_payload(member) for member in members[:limit]],
+    }
 
 
 def _squad_member_payload(member: Any) -> dict[str, Any]:
@@ -307,8 +324,7 @@ class MediaClient:
         return await self._render_card(
             "squad-info",
             {
-                "squad": _squad_payload(squad),
-                "members": [_squad_member_payload(member) for member in members],
+                **_squad_card_payload(squad, members, SQUAD_INFO_MEMBER_LIMIT),
                 "user_member_info": _user_member_info_payload(user_member_info),
             },
         )
@@ -316,10 +332,7 @@ class MediaClient:
     async def create_squad_members_embed(self, squad, members: list) -> RenderedMedia:
         return await self._render_card(
             "squad-members",
-            {
-                "squad": _squad_payload(squad),
-                "members": [_squad_member_payload(member) for member in members],
-            },
+            _squad_card_payload(squad, members, SQUAD_MEMBERS_MEMBER_LIMIT),
         )
 
     async def create_squad_join_selector_embed(

@@ -54,11 +54,12 @@ export function layoutSquadInfoCard(
     currentY += 48;
   }
 
+  const memberCount = squad.member_count ?? request.members.length;
   const maxMembers = squad.max_members;
   const memberValue =
     maxMembers === undefined || maxMembers === null || maxMembers === 0
-      ? `${request.members.length}`
-      : `${request.members.length}/${maxMembers}`;
+      ? `${memberCount}`
+      : `${memberCount}/${maxMembers}`;
 
   const stats: [string, string][] = [
     ["Members", memberValue],
