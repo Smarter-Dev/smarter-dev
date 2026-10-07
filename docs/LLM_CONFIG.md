@@ -117,7 +117,14 @@ ANTHROPIC_API_KEY=your_anthropic_key_here
 ### Anthropic Claude Models
 - `claude-haiku-4-5-20251001`
 - `claude-sonnet-4-20250514`
-- Any other Claude model identifier
+- Any other Claude model identifier that accepts `temperature`
+
+Claude Haiku 5.5 (`claude-haiku-5-5`) does not work here: it rejects
+`temperature`, `top_p` and `top_k` with a 400, and DSPy sends
+`temperature=0.0` by default. It is served in Chat instead, from the model
+catalogue (`smarter_dev/shared/model_catalog.py`) as `claude-haiku-5-5`
+through OpenRouter (`anthropic/claude-haiku-5.5`), beside
+`claude-sonnet-5-5`.
 
 ### Model Format
 Models should be specified using the DSPy format:

@@ -243,6 +243,29 @@ class TestOpenRouterPricing:
         assert cost == Decimal("1.80")
         assert "priced at the base rate" not in caplog.text
 
+    def test_claude_haiku_5_5_rates(self):
+        # Anthropic's base tier (2026-10-07): $0.10/$0.50 per M.
+        assert calc_cost(
+            1_000_000, 1_000_000, "openrouter:anthropic/claude-haiku-5.5"
+        ) == Decimal("0.60")
+
+    def test_claude_haiku_5_5_cache_rates(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=500_000,
+            cache_write_tokens=200_000,
+            model_name="openrouter:anthropic/claude-haiku-5.5",
+        )
+        # 300K uncached at $0.10/M + 500K reads at $0.01/M + 200K five-minute
+        # writes at $0.125/M.
+        assert cost == Decimal("0.06")
+
+    def test_claude_haiku_5_5_prices_its_catalog_entry(self):
+        rates = price_rates_for_model(get_model("claude-haiku-5-5"))
+        assert rates.input_mtok == Decimal("0.10")
+        assert rates.output_mtok == Decimal("0.50")
+
     def test_mistral_large_4_rates(self):
         # OpenRouter bills $0.68/$2.09 per M at its 50% launch discount
         # (2026-10-06).
@@ -651,6 +674,42 @@ class TestLongContextTier:
             cost = calc_cost(300_000, 0, "x-ai/grok-4.7")
         assert cost == Decimal("0.48")
         assert "priced at the base rate" in caplog.text
+
+    def test_claude_haiku_5_5_request_at_100k_is_5x_everything(self):
+        # 100k @ $0.50 + 1k @ $2.50: OpenRouter's override starts at 100000.
+        cost = calc_cost(
+            100_000, 1_000, "openrouter:anthropic/claude-haiku-5.5", per_request=True
+        )
+        assert cost == Decimal("0.0525")
+
+    def test_claude_haiku_5_5_request_under_100k_is_base_rate(self):
+        cost = calc_cost(
+            99_999, 1_000, "openrouter:anthropic/claude-haiku-5.5", per_request=True
+        )
+        assert cost == Decimal("0.0104999")
+
+    def test_claude_haiku_5_5_tier_applies_to_cache_rates(self):
+        cost = calc_session_cost(
+            input_tokens=300_000,
+            output_tokens=0,
+            cache_read_tokens=100_000,
+            cache_write_tokens=100_000,
+            model_name="openrouter:anthropic/claude-haiku-5.5",
+            per_request=True,
+        )
+        # 100k fresh @ $0.50 + 100k reads @ $0.05 + 100k writes @ $0.625.
+        assert cost == Decimal("0.1175")
+
+    def test_claude_haiku_5_5_settlement_and_preflight_price_the_tier(self):
+        model = get_model("claude-haiku-5-5")
+        # 200k @ $0.50 + 1k @ $2.50, against 200k @ $0.10 + 1k @ $0.50.
+        assert usage_cost(model, 200_000, 1_000, per_request=True) == Decimal("0.1025")
+        assert usage_cost(model, 200_000, 1_000) == Decimal("0.0205")
+        rates = price_rates_for_model(model)
+        assert request_estimate_usd(model, rates, 200_000, 1_000) == Decimal("0.1025")
+
+    def test_claude_sonnet_5_5_is_not_caught_by_the_haiku_tier(self):
+        assert long_context_tier("anthropic/claude-sonnet-5.5", 900_000) is None
 
     def test_tier_matches_flat_and_prefixed_refs(self):
         assert long_context_tier("x-ai/grok-4.7", 200_000) is not None

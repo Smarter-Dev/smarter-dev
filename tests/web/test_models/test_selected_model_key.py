@@ -911,3 +911,139 @@ def test_mistral_large_4_downgrade_deletes_only_its_row():
         "DELETE FROM chat_catalog_models WHERE model_key = :key"
     )
     assert statement.compile().params == {"key": "mistral-large-4"}
+
+
+# e7b3c5a9d2f1 admits Claude Haiku 5.5 as a new key and changes nothing else.
+
+
+def _haiku_5_5_statements(direction: str = "upgrade"):
+    module = _load_migration("e7b3c5a9d2f1")
+    executed: list = []
+
+    class _Op:
+        @staticmethod
+        def execute(statement):
+            executed.append(statement)
+
+    module.op = _Op
+    getattr(module, direction)()
+    return executed
+
+
+def test_haiku_5_5_admission_follows_the_chat_bot_opt_ins_revision():
+    from smarter_dev.shared.model_catalog import RETIRED_SUCCESSORS
+    from smarter_dev.shared.model_catalog import get_model
+
+    module = _load_migration("e7b3c5a9d2f1")
+    assert module.down_revision == "9d2e6f4a8b17"
+    assert get_model(module._KEY).model_id == "anthropic/claude-haiku-5.5"
+    # The cost-tier peer bills the same $0.10/$0.50.
+    assert get_model(module._PRICE_PEER) is not None
+    assert module._KEY not in RETIRED_SUCCESSORS.values()
+
+
+async def test_haiku_5_5_admission_is_enabled_at_luna_tier_and_sorts_last(
+    db_session,
+):
+    from smarter_dev.web.chat.settings import ensure_settings
+    from smarter_dev.web.models import ChatCatalogModel
+
+    await ensure_settings(db_session)
+    seeded = await db_session.get(ChatCatalogModel, "claude-haiku-5-5")
+    await db_session.delete(seeded)
+    luna = await db_session.get(ChatCatalogModel, "gpt-6-luna")
+    luna.cost_tier = "low"
+    luna.enabled = False
+    await db_session.commit()
+    before = await _catalog_rows(db_session)
+    settings_before = (
+        await db_session.execute(text("SELECT * FROM chat_settings"))
+    ).all()
+
+    [statement] = _haiku_5_5_statements()
+    for _ in range(2):  # idempotent
+        await db_session.execute(statement)
+    await db_session.commit()
+
+    after = await _catalog_rows(db_session)
+    max_order = max(order for _, _, order in before.values())
+    # Enabled regardless of Luna, at Luna's tier, after every existing row.
+    assert after.pop("claude-haiku-5-5") == (True, "low", max_order + 1)
+    assert after == before
+    assert (
+        await db_session.execute(text("SELECT * FROM chat_settings"))
+    ).all() == settings_before
+
+
+async def test_haiku_5_5_admission_defaults_to_medium_without_luna(db_session):
+    [statement] = _haiku_5_5_statements()
+    await db_session.execute(statement)
+    await db_session.commit()
+    assert await _catalog_rows(db_session) == {"claude-haiku-5-5": (True, "medium", 0)}
+
+
+async def test_haiku_5_5_admission_leaves_an_existing_row_alone(db_session):
+    from smarter_dev.web.models import ChatCatalogModel
+
+    db_session.add(
+        ChatCatalogModel(
+            model_key="claude-haiku-5-5", enabled=False, cost_tier="ultra", sort_order=3
+        )
+    )
+    await db_session.commit()
+    [statement] = _haiku_5_5_statements()
+    await db_session.execute(statement)
+    await db_session.commit()
+    assert await _catalog_rows(db_session) == {"claude-haiku-5-5": (False, "ultra", 3)}
+
+
+async def test_haiku_5_5_is_selectable_once_admitted(db_session):
+    from smarter_dev.web.chat.api import resolved_conversation_settings
+    from smarter_dev.web.chat.settings import ensure_settings
+    from smarter_dev.web.models import ChatCatalogModel
+
+    await ensure_settings(db_session)
+    seeded = await db_session.get(ChatCatalogModel, "claude-haiku-5-5")
+    await db_session.delete(seeded)
+    await db_session.commit()
+    [statement] = _haiku_5_5_statements()
+    await db_session.execute(statement)
+    await db_session.commit()
+
+    _, key, _ = await resolved_conversation_settings(
+        db_session, permissions=frozenset(), model_key="claude-haiku-5-5"
+    )
+    assert key == "claude-haiku-5-5"
+
+
+async def test_an_unknown_claude_key_is_refused_even_with_an_enabled_row(db_session):
+    # Negative control: a catalog row alone does not admit a key. Only keys the
+    # build's catalog knows are selectable, so a neighbouring Claude name is
+    # refused even when a row for it is enabled.
+    from litestar.exceptions import HTTPException
+
+    from smarter_dev.web.chat.api import resolved_conversation_settings
+    from smarter_dev.web.chat.settings import ensure_settings
+    from smarter_dev.web.models import ChatCatalogModel
+
+    await ensure_settings(db_session)
+    db_session.add(
+        ChatCatalogModel(
+            model_key="claude-haiku-5-6", enabled=True, cost_tier="low", sort_order=99
+        )
+    )
+    await db_session.commit()
+
+    with pytest.raises(HTTPException) as refused:
+        await resolved_conversation_settings(
+            db_session, permissions=frozenset(), model_key="claude-haiku-5-6"
+        )
+    assert refused.value.status_code == 422
+
+
+def test_haiku_5_5_downgrade_deletes_only_its_row():
+    [statement] = _haiku_5_5_statements("downgrade")
+    assert " ".join(str(statement).split()) == (
+        "DELETE FROM chat_catalog_models WHERE model_key = :key"
+    )
+    assert statement.compile().params == {"key": "claude-haiku-5-5"}

@@ -630,6 +630,21 @@ def test_claude_sonnet_5_5_bills_under_openrouter():
     assert provider_key_from_model_name("claude-sonnet-5") == "anthropic"
 
 
+def test_claude_haiku_5_5_bills_under_openrouter():
+    # The provider map is built from the catalog, so admission files Haiku
+    # 5.5 under OpenRouter with no hand-written entry; the retired
+    # direct-Anthropic Haiku 4.5 keeps its own line.
+    from smarter_dev.web.api_native.chat_conversations import _normalized_model_identity
+
+    assert provider_key_from_model_name("anthropic/claude-haiku-5.5") == "openrouter"
+    assert _normalized_model_identity("openrouter:anthropic/claude-haiku-5.5") == (
+        "openrouter",
+        "claude-haiku-5-5",
+        "anthropic/claude-haiku-5.5",
+    )
+    assert provider_key_from_model_name("claude-haiku-4-5") == "anthropic"
+
+
 def test_mistral_large_4_bills_under_openrouter():
     from smarter_dev.web.api_native.chat_conversations import _normalized_model_identity
 
