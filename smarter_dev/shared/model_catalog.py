@@ -614,6 +614,36 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
             max_price_output_mtok=10.00,
         ),
     ),
+    # Haiku 5.5 joined on 2026-10-07, the day Anthropic released it, at the
+    # user's request. Admitted beside Sonnet 5.5 on the same terms: nothing
+    # retires and no selection moves. Capabilities are Anthropic's published
+    # ones (2026-10-07): 1M context, 128K output, text+image input, adaptive
+    # thinking with efforts low → max defaulting to medium. OpenRouter did not
+    # yet list anthropic/claude-haiku-5.5 on admission (its /endpoints 404'd),
+    # so the slug, the endpoints' tool_choice support and their prices are
+    # expected rather than read; test_openrouter_lists_claude_haiku_5_5
+    # re-checks them against the live listing. The opt-out of forced tool
+    # choice follows Sonnet 5.5, whose Anthropic-built endpoints all refuse
+    # "required". The ceiling is Anthropic's base tier ($0.10/$0.50), the
+    # rate below 100K prompt tokens; above that every rate is 5x (llm_pricing's
+    # _LONG_CONTEXT_TIERS).
+    CatalogModel(
+        key="claude-haiku-5-5",
+        label="Claude Haiku 5.5",
+        family="Claude",
+        provider=ModelProvider.OPENROUTER,
+        model_id="anthropic/claude-haiku-5.5",
+        supports_vision=True,
+        context_window=1_000_000,
+        max_output_tokens=128_000,
+        supports_forced_tool_choice=False,
+        reasoning_levels=_CLAUDE_EFFORT,
+        default_reasoning=ReasoningLevel.MEDIUM,
+        openrouter_routing=OpenRouterRouting(
+            max_price_input_mtok=0.10,
+            max_price_output_mtok=0.50,
+        ),
+    ),
     # --- Qwen3.8 via OpenRouter ---
     # The 2.4T A95B weights are NOT on our Digital Ocean account — GET
     # /v1/models lists qwen3.8-max but no A95B, and an unknown DO id 403s — so

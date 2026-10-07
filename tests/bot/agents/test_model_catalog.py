@@ -259,10 +259,54 @@ def test_claude_sonnet_5_5_routes_through_openrouter_with_verified_capabilities(
         "max_price": {"prompt": 2.00, "completion": 10.00}
     }
     assert [m.key for m in MODEL_CATALOG if m.family == "Claude"] == [
-        "claude-sonnet-5-5"
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5",
     ]
     # Additive: no retired key is read as Sonnet 5.5.
     assert "claude-sonnet-5-5" not in RETIRED_SUCCESSORS.values()
+
+
+def test_claude_haiku_5_5_routes_through_openrouter_like_sonnet_5_5():
+    # Anthropic's published capabilities (2026-10-07): 1M context, 128K
+    # output, image input, adaptive thinking with efforts low → max defaulting
+    # to medium. Routed and constrained like Sonnet 5.5, at the $0.10/$0.50
+    # base tier.
+    model = get_model("claude-haiku-5-5")
+    assert model is not None
+    assert model.label == "Claude Haiku 5.5"
+    assert model.model_id == "anthropic/claude-haiku-5.5"
+    assert model.family == "Claude"
+    assert model_vendor(model) == "Anthropic"
+    assert model.provider is ModelProvider.OPENROUTER
+    assert model.supports_vision is True
+    assert model.supports_tools is True
+    assert model.supports_forced_tool_choice is False
+    assert model.context_window == 1_000_000
+    assert model.max_output_tokens == 128_000
+    assert model.reasoning_levels == get_model("claude-sonnet-5-5").reasoning_levels
+    assert model.default_reasoning is ReasoningLevel.MEDIUM
+    assert resolve_reasoning_level(model, ReasoningLevel.NONE) is ReasoningLevel.LOW
+    assert model.needs_prompted_output is False
+    assert model.openrouter_routing.as_provider_block() == {
+        "max_price": {"prompt": 0.10, "completion": 0.50}
+    }
+    # Additive: Haiku 4.5 stays retired and nothing is read as Haiku 5.5.
+    assert "claude-haiku-5-5" not in RETIRED_SUCCESSORS.values()
+    assert successor_key("claude-haiku-4-5") == "claude-haiku-4-5"
+
+
+def test_unknown_claude_ids_are_still_rejected():
+    # Admitting Haiku 5.5 admits exactly its key: neighbouring Claude names,
+    # the retired direct-Anthropic key and the OpenRouter wire id are not keys.
+    for key in (
+        "claude-haiku-5",
+        "claude-haiku-5-6",
+        "claude-haiku-4-5",
+        "claude-haiku-5.5",
+        "anthropic/claude-haiku-5.5",
+    ):
+        assert get_model(key) is None, key
+        assert is_valid_model_key(key) is False, key
 
 
 def test_poolside_left_the_catalog():
