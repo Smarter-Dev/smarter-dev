@@ -300,6 +300,17 @@ describe("squad-info", () => {
     );
     expect(rendered).not.toContain("Your Membership:");
   });
+
+  it("takes the member total from squad.member_count, not the members sent", () => {
+    const rendered = texts(
+      layoutSquadInfoCard(
+        { squad: { ...baseSquad, member_count: 600, max_members: 1000 }, members: [] },
+        metrics,
+        FIXED_NOW,
+      ),
+    );
+    expect(rendered).toContain("600/1000");
+  });
 });
 
 describe("squad-members", () => {
@@ -318,7 +329,7 @@ describe("squad-members", () => {
 
   it("draws at most fifteen rows and then a truncation note", () => {
     const members = Array.from({ length: 17 }, (_unused, index) => member(index));
-    const rendered = texts(layoutSquadMembersCard({ squad: baseSquad, members }, metrics));
+    const rendered = texts(layoutSquadMembersCard({ squad: { ...baseSquad, member_count: 17 }, members }, metrics));
     expect(rendered).toContain("15.");
     expect(rendered).not.toContain("16.");
     expect(rendered).toContain("... and 2 more members");
@@ -338,9 +349,18 @@ describe("squad-members", () => {
     expect(rendered).not.toContain("nope");
   });
 
+  it("counts and truncates from squad.member_count when the bot sends a slice", () => {
+    const members = Array.from({ length: 50 }, (_unused, index) => member(index));
+    const rendered = texts(
+      layoutSquadMembersCard({ squad: { ...baseSquad, member_count: 600 }, members }, metrics),
+    );
+    expect(rendered).toContain("600 members");
+    expect(rendered).toContain("... and 585 more members");
+  });
+
   it("uses the singular subtitle for one member", () => {
     const rendered = texts(
-      layoutSquadMembersCard({ squad: baseSquad, members: [member(0)] }, metrics),
+      layoutSquadMembersCard({ squad: { ...baseSquad, member_count: 1 }, members: [member(0)] }, metrics),
     );
     expect(rendered).toContain("1 member");
   });

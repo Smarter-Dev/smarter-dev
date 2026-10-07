@@ -468,8 +468,8 @@ CARD_CONTRACT = [
         {"squad": SQUAD, "members": [MEMBER], "user_member_info": MEMBER_INFO},
         "/v1/cards/squad-info",
         {
-            "squad": SQUAD_BODY,
-            "members": [MEMBER_BODY],
+            "squad": {**SQUAD_BODY, "member_count": 1},
+            "members": [],
             "user_member_info": {"member_since": "2026-07-01T00:00:00"},
         },
     ),
@@ -477,7 +477,7 @@ CARD_CONTRACT = [
         "create_squad_members_embed",
         {"squad": SQUAD, "members": [MEMBER]},
         "/v1/cards/squad-members",
-        {"squad": SQUAD_BODY, "members": [MEMBER_BODY]},
+        {"squad": {**SQUAD_BODY, "member_count": 1}, "members": [MEMBER_BODY]},
     ),
     (
         "create_squad_join_selector_embed",
@@ -560,6 +560,36 @@ def test_every_card_method_is_covered_by_the_contract_table():
         if name.startswith("create_") and name.endswith("_embed")
     }
     assert declared == covered
+
+
+@pytest.mark.parametrize(
+    "method_name,kwargs,expected_members",
+    [
+        ("create_squad_info_embed", {"user_member_info": MEMBER_INFO}, 0),
+        ("create_squad_members_embed", {}, 50),
+    ],
+)
+async def test_squad_cards_count_every_member_but_send_only_what_they_draw(
+    method_name, kwargs, expected_members
+):
+    # The squad object's own count is stale; the bot holds the full list.
+    members = [
+        _Member(user_id=str(index), username=f"m{index}", joined_at="2026-07-01T00:00:00")
+        for index in range(600)
+    ]
+    requests, handle = _recorder(lambda _request: _png_response())
+    client = _client(handle)
+
+    await getattr(client, method_name)(squad=SQUAD, members=members, **kwargs)
+
+    body = json.loads(requests[0].content)
+    assert body["squad"]["member_count"] == 600
+    assert len(body["members"]) == expected_members
+    assert len(body["members"]) <= 500
+    assert body["members"] == [
+        {"user_id": str(index), "username": f"m{index}", "joined_at": "2026-07-01T00:00:00"}
+        for index in range(expected_members)
+    ]
 
 
 async def test_squad_payload_omits_attributes_the_object_does_not_have():
