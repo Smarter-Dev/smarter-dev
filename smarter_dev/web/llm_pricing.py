@@ -465,12 +465,13 @@ _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
         cache_read_mtok=Decimal("0.20"),
         cache_write_mtok=Decimal("2.50"),
     ),
-    # Claude Haiku 5.5, added 2026-10-07 at Anthropic's published base tier
-    # (prompts up to 100K tokens): $0.10/$0.50, $0.01 cache reads and $0.125
-    # five-minute cache writes. Above 100K every rate is 5x, priced from
-    # _LONG_CONTEXT_TIERS for single requests. OpenRouter did not list the
-    # model yet, so these are Anthropic's rates rather than OpenRouter's
-    # quote; test_openrouter_lists_claude_haiku_5_5 compares them once it does.
+    # Claude Haiku 5.5, added 2026-10-07. Read from GET
+    # https://openrouter.ai/api/v1/models and its /endpoints on 2026-10-07:
+    # Anthropic's only endpoint quotes $0.10/$0.50, $0.01 cache reads and
+    # $0.125 five-minute cache writes — Anthropic's own price list — with an
+    # override from 100K prompt tokens at 5x every rate, priced from
+    # _LONG_CONTEXT_TIERS for single requests. One-hour writes ($0.20) have no
+    # column here; chat sends no one-hour cache breakpoints.
     "anthropic/claude-haiku-5.5": types.ModelPrice(
         input_mtok=Decimal("0.10"),
         output_mtok=Decimal("0.50"),
@@ -682,9 +683,11 @@ _LONG_CONTEXT_TIERS: dict[str, LongContextTier] = {
     # doubles prompt, cache read and completion ($3.20/$0.80/$9.60). Read from
     # GET /api/v1/models/x-ai/grok-4.7/endpoints on 2026-09-24.
     "x-ai/grok-4.7": LongContextTier(200_000, Decimal("2"), Decimal("2")),
-    # Anthropic: Haiku 5.5 prompts above 100K bill 5x on every rate
-    # ($0.50/$2.50, $0.05 reads, $0.625 writes), per its 2026-10-07 price list.
-    "anthropic/claude-haiku-5.5": LongContextTier(100_001, Decimal("5"), Decimal("5")),
+    # OpenRouter's Anthropic endpoint for Haiku 5.5: an override from
+    # min_prompt_tokens 100000 bills 5x every rate ($0.50/$2.50, $0.05 reads,
+    # $0.625 writes). Read from GET
+    # /api/v1/models/anthropic/claude-haiku-5.5/endpoints on 2026-10-07.
+    "anthropic/claude-haiku-5.5": LongContextTier(100_000, Decimal("5"), Decimal("5")),
 }
 
 

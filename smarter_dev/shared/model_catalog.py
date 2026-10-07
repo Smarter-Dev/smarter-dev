@@ -616,17 +616,15 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
     ),
     # Haiku 5.5 joined on 2026-10-07, the day Anthropic released it, at the
     # user's request. Admitted beside Sonnet 5.5 on the same terms: nothing
-    # retires and no selection moves. Capabilities are Anthropic's published
-    # ones (2026-10-07): 1M context, 128K output, text+image input, adaptive
-    # thinking with efforts low → max defaulting to medium. OpenRouter did not
-    # yet list anthropic/claude-haiku-5.5 on admission (its /endpoints 404'd),
-    # so the slug, the endpoints' tool_choice support and their prices are
-    # expected rather than read; test_openrouter_lists_claude_haiku_5_5
-    # re-checks them against the live listing. The opt-out of forced tool
-    # choice follows Sonnet 5.5, whose Anthropic-built endpoints all refuse
-    # "required". The ceiling is Anthropic's base tier ($0.10/$0.50), the
-    # rate below 100K prompt tokens; above that every rate is 5x (llm_pricing's
-    # _LONG_CONTEXT_TIERS).
+    # retires and no selection moves. Capabilities from GET /api/v1/models and
+    # /api/v1/models/anthropic/claude-haiku-5.5/endpoints (2026-10-07): 1M
+    # context, 128K output, text+image input, tools, and reasoning with
+    # efforts low → max (Anthropic's default is medium). Anthropic's own
+    # endpoint is the only one, and like Sonnet 5.5's it refuses tool_choice
+    # "required". The ceiling is the $0.10/$0.50 base tier; from 100K prompt
+    # tokens every rate is 5x (llm_pricing's _LONG_CONTEXT_TIERS).
+    # test_openrouter_lists_claude_haiku_5_5_as_catalogued holds this entry to
+    # the live listing.
     CatalogModel(
         key="claude-haiku-5-5",
         label="Claude Haiku 5.5",

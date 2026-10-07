@@ -425,30 +425,20 @@ async def test_openrouter_claude_haiku_5_5_request_on_the_wire(monkeypatch):
 def test_openrouter_lists_claude_haiku_5_5_as_catalogued():
     """The live OpenRouter listing agrees with the Haiku 5.5 entry.
 
-    Haiku 5.5 was admitted on 2026-10-07 before OpenRouter listed it, so its
-    slug, tool_choice support and prices are expected rather than read. This
-    reads the public endpoints API (no key) and skips, with the reason, while
-    the slug is unlisted or the network is unreachable. Once listed, every
-    endpoint the catalog's ceiling admits must match the entry and the price
-    row, and at least one must be admitted.
+    Reads the public endpoints API (no key). Every endpoint the catalog's
+    ceiling admits must match the entry, the price row and the long-context
+    tier, and at least one must be admitted.
     """
     from decimal import Decimal
 
     import httpx
 
+    from smarter_dev.web.llm_pricing import _LONG_CONTEXT_TIERS
     from smarter_dev.web.llm_pricing import _OPENROUTER_PRICES
 
     model = get_model("claude-haiku-5-5")
     url = f"https://openrouter.ai/api/v1/models/{model.model_id}/endpoints"
-    try:
-        response = httpx.get(url, timeout=10)
-    except httpx.HTTPError as exc:
-        pytest.skip(f"OpenRouter unreachable ({exc!r}); cannot check {model.model_id}")
-    if response.status_code == 404:
-        pytest.skip(
-            f"OpenRouter does not list {model.model_id} yet (404 on {url}); "
-            "the entry's slug, tool_choice support and prices are unverified"
-        )
+    response = httpx.get(url, timeout=10)
     response.raise_for_status()
 
     per_mtok = Decimal(1_000_000)
@@ -478,6 +468,20 @@ def test_openrouter_lists_claude_haiku_5_5_as_catalogued():
         ), name
         assert (
             Decimal(pricing["input_cache_write"]) * per_mtok == price.cache_write_mtok
+        ), name
+        (override,) = pricing["overrides"]
+        tier = _LONG_CONTEXT_TIERS[model.model_id]
+        assert override["min_prompt_tokens"] == tier.min_input_tokens, name
+        for key, base in (
+            ("prompt", price.input_mtok),
+            ("input_cache_read", price.cache_read_mtok),
+            ("input_cache_write", price.cache_write_mtok),
+        ):
+            expected = base * tier.input_multiplier
+            assert Decimal(override[key]) * per_mtok == expected, (name, key)
+        assert (
+            Decimal(override["completion"]) * per_mtok
+            == price.output_mtok * tier.output_multiplier
         ), name
 
 

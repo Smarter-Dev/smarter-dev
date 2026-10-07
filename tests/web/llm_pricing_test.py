@@ -675,18 +675,18 @@ class TestLongContextTier:
         assert cost == Decimal("0.48")
         assert "priced at the base rate" in caplog.text
 
-    def test_claude_haiku_5_5_request_above_100k_is_5x_everything(self):
-        # 100,001 @ $0.50 + 1k @ $2.50: Anthropic's tier starts above 100K.
-        cost = calc_cost(
-            100_001, 1_000, "openrouter:anthropic/claude-haiku-5.5", per_request=True
-        )
-        assert cost == Decimal("0.0525005")
-
-    def test_claude_haiku_5_5_request_at_100k_is_base_rate(self):
+    def test_claude_haiku_5_5_request_at_100k_is_5x_everything(self):
+        # 100k @ $0.50 + 1k @ $2.50: OpenRouter's override starts at 100000.
         cost = calc_cost(
             100_000, 1_000, "openrouter:anthropic/claude-haiku-5.5", per_request=True
         )
-        assert cost == Decimal("0.0105")
+        assert cost == Decimal("0.0525")
+
+    def test_claude_haiku_5_5_request_under_100k_is_base_rate(self):
+        cost = calc_cost(
+            99_999, 1_000, "openrouter:anthropic/claude-haiku-5.5", per_request=True
+        )
+        assert cost == Decimal("0.0104999")
 
     def test_claude_haiku_5_5_tier_applies_to_cache_rates(self):
         cost = calc_session_cost(
