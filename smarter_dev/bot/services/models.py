@@ -335,14 +335,14 @@ class Squad:
     @property
     def has_join_sale(self) -> bool:
         """Check if there's an active sale for joining this squad."""
-        return (self.join_cost_info and
-                self.join_cost_info.get("is_on_sale", False))
+        return bool(self.join_cost_info and
+                    self.join_cost_info.get("is_on_sale", False))
 
     @property
     def has_switch_sale(self) -> bool:
         """Check if there's an active sale for switching to this squad."""
-        return (self.switch_cost_info and
-                self.switch_cost_info.get("is_on_sale", False))
+        return bool(self.switch_cost_info and
+                    self.switch_cost_info.get("is_on_sale", False))
 
     @property
     def join_discount_percent(self) -> int | None:

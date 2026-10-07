@@ -103,6 +103,9 @@ async def squads_group(ctx: lightbulb.Context) -> None:
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def list_command(ctx: lightbulb.Context) -> None:
     """Handle squad list command - show available squads."""
+    # Defer before rendering so a media failure still leaves time for the error card
+    await ctx.respond(hikari.ResponseType.DEFERRED_MESSAGE_CREATE, flags=hikari.MessageFlag.EPHEMERAL)
+
     service: SquadsService = getattr(ctx.bot, "d", {}).get("squads_service")
     if not service:
         # Fallback to _services dict
@@ -473,6 +476,9 @@ async def join_command(ctx: lightbulb.Context) -> None:
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def info_command(ctx: lightbulb.Context) -> None:
     """Handle squad info command - show current squad details."""
+    # Defer before rendering so a media failure still leaves time for the error card
+    await ctx.respond(hikari.ResponseType.DEFERRED_MESSAGE_CREATE, flags=hikari.MessageFlag.EPHEMERAL)
+
     logger.info(f"Squad info command called by user {ctx.user.id} in guild {ctx.guild_id}")
 
     service: SquadsService = getattr(ctx.bot, "d", {}).get("squads_service")
@@ -584,6 +590,9 @@ async def squad_autocomplete(
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def members_command(ctx: lightbulb.Context) -> None:
     """Handle squad members command - show squad member list."""
+    # Defer before rendering so a media failure still leaves time for the error card
+    await ctx.respond(hikari.ResponseType.DEFERRED_MESSAGE_CREATE, flags=hikari.MessageFlag.EPHEMERAL)
+
     service: SquadsService = getattr(ctx.bot, "d", {}).get("squads_service")
     if not service:
         # Fallback to _services dict

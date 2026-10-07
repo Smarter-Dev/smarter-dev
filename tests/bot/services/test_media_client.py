@@ -583,6 +583,31 @@ async def test_squad_payload_omits_attributes_the_object_does_not_have():
     assert "role_id" not in body["squad"]
 
 
+@pytest.mark.parametrize("cost_info", [None, {}])
+async def test_squad_without_a_sale_sends_has_join_sale_false(cost_info):
+    from uuid import uuid4
+
+    from smarter_dev.bot.services.models import Squad
+
+    squad = Squad(
+        id=uuid4(),
+        guild_id="1",
+        role_id="2",
+        name="Alpha",
+        join_cost_info=cost_info,
+        switch_cost_info=cost_info,
+    )
+    assert squad.has_switch_sale is False
+
+    requests, handle = _recorder(lambda _request: _png_response())
+    client = _client(handle)
+
+    await client.create_squad_members_embed(squad, [])
+
+    body = json.loads(requests[0].content)
+    assert body["squad"]["has_join_sale"] is False
+
+
 async def test_datetime_attributes_are_serialised_as_iso_strings():
     from datetime import UTC
     from datetime import datetime
