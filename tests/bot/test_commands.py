@@ -342,6 +342,12 @@ class TestBytesCommands:
         assert kwargs["flags"] == pytest.importorskip("hikari").MessageFlag.EPHEMERAL
 
 
+def _assert_deferred_ephemeral(call) -> None:
+    hikari = pytest.importorskip("hikari")
+    assert call.args == (hikari.ResponseType.DEFERRED_MESSAGE_CREATE,)
+    assert call.kwargs == {"flags": hikari.MessageFlag.EPHEMERAL}
+
+
 class TestSquadCommands:
     """Test suite for squad management commands."""
 
@@ -376,8 +382,9 @@ class TestSquadCommands:
         mock_squads_service.list_squads.assert_called_once_with("123456789")
         mock_squads_service.get_user_squad.assert_called_once_with("123456789", "987654321")
 
-        # Verify response uses image attachment
-        mock_context.respond.assert_called_once()
+        # Verify the command deferred, then sent the image attachment
+        assert mock_context.respond.call_count == 2
+        _assert_deferred_ephemeral(mock_context.respond.call_args_list[0])
         args, kwargs = mock_context.respond.call_args
         assert "attachment" in kwargs
 
@@ -476,11 +483,81 @@ class TestSquadCommands:
         mock_squads_service.get_user_squad.assert_called_once_with("123456789", "987654321")
         mock_squads_service.get_squad_members.assert_called_once_with("123456789", mock_squad.id)
 
-        # Verify response uses image attachment with ephemeral flag
-        mock_context.respond.assert_called_once()
+        # Verify the command deferred, then sent the image attachment ephemerally
+        assert mock_context.respond.call_count == 2
+        _assert_deferred_ephemeral(mock_context.respond.call_args_list[0])
         args, kwargs = mock_context.respond.call_args
         assert kwargs["flags"] == pytest.importorskip("hikari").MessageFlag.EPHEMERAL
-        assert "attachment" in kwargs
+        assert kwargs["attachment"] is mock_image_generator.create_squad_info_embed.return_value
+
+    async def test_info_command_render_failure_sends_error_card(
+        self, mock_context, mock_squads_service, mock_image_generator
+    ):
+        """A rejected squad card is reported with the error card after the defer."""
+        hikari = pytest.importorskip("hikari")
+        from smarter_dev.bot.services.media_client import MediaRenderError
+        from smarter_dev.bot.services.models import SquadMember
+
+        mock_squad = Squad(
+            id=uuid4(),
+            guild_id="123456789",
+            role_id="555666777",
+            name="Test Squad",
+        )
+        mock_squads_service.get_user_squad.return_value = UserSquadResponse(
+            user_id="987654321",
+            squad=mock_squad,
+            member_since=datetime.now()
+        )
+        mock_squads_service.get_squad_members.return_value = [
+            SquadMember(user_id="987654321", username="TestUser", joined_at=datetime.now())
+        ]
+        mock_context.bot = Mock()
+        mock_context.bot.d = {"squads_service": mock_squads_service}
+
+        info_card = mock_image_generator.create_squad_info_embed.return_value
+
+        async def respond(*args, **kwargs):
+            if kwargs.get("attachment") is info_card:
+                raise MediaRenderError(
+                    "body/squad/has_join_sale must be boolean",
+                    code="invalid_request",
+                    status_code=400,
+                )
+
+        mock_context.respond.side_effect = respond
+
+        from smarter_dev.bot.plugins.squads import info_command
+
+        with patch("smarter_dev.bot.plugins.squads.get_generator", return_value=mock_image_generator):
+            await info_command(mock_context)
+
+        calls = mock_context.respond.call_args_list
+        assert len(calls) == 3
+        _assert_deferred_ephemeral(calls[0])
+        assert calls[1].kwargs["attachment"] is info_card
+        assert calls[2].kwargs["attachment"] is mock_image_generator.create_error_embed.return_value
+        assert calls[2].kwargs["flags"] == hikari.MessageFlag.EPHEMERAL
+
+    async def test_members_command_defers_before_rendering(
+        self, mock_context, mock_squads_service, mock_image_generator
+    ):
+        """The members card is sent only after an ephemeral defer."""
+        mock_squads_service.get_squad_members.return_value = []
+        mock_context.bot = Mock()
+        mock_context.bot.d = {"squads_service": mock_squads_service}
+        mock_context.options = Mock()
+        mock_context.options.squad = "Test Squad"
+
+        from smarter_dev.bot.plugins.squads import members_command
+
+        with patch("smarter_dev.bot.plugins.squads.get_generator", return_value=mock_image_generator):
+            await members_command(mock_context)
+
+        calls = mock_context.respond.call_args_list
+        assert len(calls) == 2
+        _assert_deferred_ephemeral(calls[0])
+        assert calls[1].kwargs["attachment"] is mock_image_generator.create_squad_members_embed.return_value
 
 
 class TestCommandErrorHandling:
