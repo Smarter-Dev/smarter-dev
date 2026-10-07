@@ -562,6 +562,7 @@
         if (!response.ok) {
           var error = new Error(body.detail || body.message || 'Request failed');
           error.status = response.status;
+          error.code = body.code || null;
           throw error;
         }
         return body;
@@ -588,6 +589,29 @@
       if (name && modelKey) name.textContent = modelKey;
     }
     setBusy(Boolean(activeTurn));
+  }
+
+  // True only for the refusal that means this conversation's model was retired
+  // or disabled after the page loaded. Every other 409 is left to its caller.
+  function isModelUnavailable(error) {
+    return Boolean(error && error.status === 409 && error.code === 'model_unavailable');
+  }
+
+  // The server has just said the selection cannot run. Lock the composer now,
+  // then reload the catalog so the model select lists what can be chosen and
+  // the stored key reads as unavailable, exactly as a reload would show it.
+  function refreshModelAvailability() {
+    setModelAvailability(false, shell.dataset.modelKey);
+    return api('/v2/api/chat/catalog').then(function (data) {
+      catalog = data;
+      // A change awaiting confirmation keeps its target showing in the select.
+      var select = document.querySelector('[data-chat-model]');
+      var proposed = pendingChange && select ? select.value : null;
+      activateConversationControls(shell.dataset.modelKey, shell.dataset.reasoningLevel || '');
+      if (proposed && catalog.models.some(function (item) { return item.key === proposed; })) {
+        select.value = proposed;
+      }
+    }).catch(function () {});
   }
 
   function showError(message) {
@@ -1997,6 +2021,7 @@
           }).catch(function (error) {
             reasoning.value = reasoning.dataset.original || '';
             showError(error.message);
+            if (isModelUnavailable(error)) refreshModelAvailability();
           });
         });
         reasoning.dataset.bound = 'true';
@@ -2331,9 +2356,22 @@
       syncMediaInstruction();
       if (mode === 'resources') setStatus('Resource Agent is working…');
     }).catch(function (error) {
-      assistant.querySelector('.chat-content').textContent = error.message;
       setStatus('');
       showError(error.message);
+      if (isModelUnavailable(error)) {
+        refreshModelAvailability();
+        // Nothing was sent. A composer draft goes back into an empty box and
+        // the exchange comes off the thread; anywhere else (a quoted question,
+        // text typed since) its bubble stays so the words are not lost.
+        if (!build && input && !input.value.trim()) {
+          user.remove();
+          assistant.remove();
+          input.value = text;
+          autoGrow();
+          return;
+        }
+      }
+      assistant.querySelector('.chat-content').textContent = error.message;
       setBusy(false);
     });
     return true;
@@ -2382,6 +2420,7 @@
     }).catch(function (error) {
       setBusy(false);
       showError(error.message);
+      if (isModelUnavailable(error)) refreshModelAvailability();
     });
   });
 
