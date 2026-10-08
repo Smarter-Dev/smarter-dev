@@ -55,6 +55,8 @@ from smarter_dev.bot.agents.chat_compaction import set_last_model_call
 from smarter_dev.bot.agents.chat_compaction import start_collection
 from smarter_dev.bot.agents.chat_context import build_followup_input
 from smarter_dev.bot.agents.chat_context import build_initial_input
+from smarter_dev.bot.agents.chat_context import input_author_ids
+from smarter_dev.bot.agents.chat_context import reblank_newly_blocked
 from smarter_dev.bot.agents.chat_input_format import build_agent_call
 from smarter_dev.bot.agents.chat_models import BriefingDecision
 from smarter_dev.bot.agents.chat_models import GuildEventView
@@ -76,6 +78,7 @@ from smarter_dev.bot.agents.writer_agent import build_writer_prompt
 from smarter_dev.bot.agents.writer_agent import get_writer_agent
 from smarter_dev.bot.privacy.blocked_users import get_blocked_users
 from smarter_dev.bot.privacy.blocked_users import redact_blocked_mentions
+from smarter_dev.bot.privacy.gate import blank_model_messages
 from smarter_dev.bot.services.channel_token_budget import add_fallback_usage
 from smarter_dev.bot.services.channel_token_budget import add_usage
 from smarter_dev.bot.services.channel_token_budget import fallback_ended_key
@@ -677,6 +680,9 @@ class ChannelEngine:
                         history,
                         self._loaded_history_raw,
                     ) = await memory.read_history_versioned(self.channel_id)
+                    # Kept before someone opted out: blanked for the model,
+                    # and on the next write (#100).
+                    history = blank_model_messages(history)
             except Exception:
                 log_exception(
                     logger,
@@ -822,6 +828,33 @@ class ChannelEngine:
                 override_model_id, override_reasoning
             )
 
+            # The list again, right before anything is persisted or sent to
+            # the model (#100): the checks above ran when the turn started,
+            # and someone may have opted out while it was being prepared.
+            if reblank_newly_blocked(agent_input, get_blocked_users()):
+                logger.info(
+                    "[%s] Chat activation in channel %s dropped: author blocked "
+                    "before the model call",
+                    request_id,
+                    self.channel_id,
+                )
+                return True
+            if not first_activation and all(
+                m.blocked for m in agent_input.new_messages
+            ):
+                # The memory blocks this turn would have re-sent go out on
+                # the next one instead.
+                self._reemit_long_term_memory = (
+                    self._reemit_long_term_memory or reemit_memory
+                )
+                logger.info(
+                    "[%s] Chat turn in channel %s skipped: every new message's "
+                    "author blocked before the model call",
+                    request_id,
+                    self.channel_id,
+                )
+                return True
+
             # Start engagement persistence on the very first turn — gives us
             # an engagement_id we attach to every persisted turn that follows.
             if first_activation and self.engagement_id is None:
@@ -887,6 +920,7 @@ class ChannelEngine:
                 channel_name=getattr(agent_input.channel, "name", None),
                 engagement_id=self.engagement_id,
                 tool_token_budget=resolve_tool_token_budget(channel_budget_left),
+                source_user_ids=input_author_ids(agent_input),
             )
             # Install a per-run compaction collector. The history processor
             # appends events to it; we drain after the run.

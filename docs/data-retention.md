@@ -258,7 +258,7 @@ allowed — that is a keyword watch, not a command.
   | --- | --- | --- |
   | `chat_agent_guild_memory` | One ≤2000-character markdown document per guild: who the people here are to the bot, the running jokes, the opinions it has formed. Beside it, a ≤750-character behavior block (how the bot has learned to act there) and a ≤250-character personality block (who it is there). | Prose the bot wrote about itself, not message text it read. |
   | `chat_agent_memory_revisions` | The last five nights of that document and its two blocks, per guild. | Same — it is the history of the bot's own writing. |
-  | `chat_agent_memory_notes` | Notes the bot keeps mid-conversation, in its own words. | Deleted outright by the nightly job that folds them into the document, so they normally live under a day. A night whose dream fails keeps its notes for the next night, and a guild whose memory is paused (below) keeps them indefinitely, because the dream that consumes them is skipped. |
+  | `chat_agent_memory_notes` | Notes the bot keeps mid-conversation, in its own words. | Deleted outright by the nightly job that folds them into the document, so they normally live under a day. A note about someone on the block list (below) is deleted by the same job without being folded in. A night whose dream fails keeps its notes for the next night, and a guild whose memory is paused (below) keeps them indefinitely, because the dream that consumes them is skipped. |
 
   The rule the bot is held to when writing any of it is *remember the person,
   not the transcript*: no verbatim quotes, and nothing private, sensitive, or
@@ -526,6 +526,15 @@ timestamps, never a reason. There are two sources:
 - `opt_out`: the person opted out of the AI assistant with the button under
   `/privacy` (#92). Opting out deletes nothing the assistant already holds.
   The row stays until the person opts back in, which removes it.
+
+For either source, the chat and proactive agents stop reading the person's
+messages and write nothing new about them to their memory: the `remember`
+tool refuses a note about them, the stored histories hold their messages as
+`[BLOCKED BY USER]`, and handler memories keep no new entry about them. The
+nightly dream is not shown the lines of the guild memory that carry their id
+and keeps those lines as they were; memory notes about them are deleted on
+their usual schedule (above) without being folded in. The bot also blocks the
+person at once when they press the button, rather than at its next refresh.
 
 Opting back in applies to new messages only, so it leaves one row in
 `chat_bot_opt_ins`: the Discord user id and the moment (`read_from`). Both

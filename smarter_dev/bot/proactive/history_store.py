@@ -25,6 +25,8 @@ from datetime import timedelta
 import pydantic
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 
+from smarter_dev.bot.privacy.gate import blank_proactive_messages
+
 CURSOR_TTL_SECONDS = int(timedelta(days=7).total_seconds())
 KEY_PREFIX = "proactive"
 # Outside the ``proactive:guild-history:*`` pattern the purge scans.
@@ -56,6 +58,13 @@ def _as_bytes(value) -> bytes | None:
     return value.encode() if isinstance(value, str) else value
 
 
+def _payload(messages: list[ModelMessage]) -> bytes:
+    """The stored form of a history: anyone on the blocked-users list (opted
+    out while it was being kept) leaves only the placeholder (#100). A
+    purge's rewrites store their own checked output as is."""
+    return ModelMessagesTypeAdapter.dump_json(blank_proactive_messages(messages))
+
+
 class ProactiveHistoryStore:
     """Agent history and recovery cursors on the shared chat-memory Redis."""
 
@@ -85,7 +94,7 @@ class ProactiveHistoryStore:
         return _as_bytes(await self._redis.get(self._guild_history_key(guild_id)))
 
     async def write(self, channel_id: int, messages: list[ModelMessage]) -> None:
-        payload = ModelMessagesTypeAdapter.dump_json(messages)
+        payload = _payload(messages)
         await self._redis.set(self._history_key(channel_id), payload)
 
     async def rewrite(self, channel_id: int, messages: list[ModelMessage]) -> None:
@@ -115,12 +124,14 @@ class ProactiveHistoryStore:
         the mark as they were: a purge is not activity, and must not extend
         how long the rest of the history stays verbatim.
         """
-        payload = ModelMessagesTypeAdapter.dump_json(messages)
         member = str(guild_id)
         if keep_clock:
+            # A purge's rewrite: its own checked output, stored as it is.
+            payload = ModelMessagesTypeAdapter.dump_json(messages)
             await self._redis.zadd(IDLE_INDEX_KEY, {member: time.time()}, nx=True)
             await self._redis.set(self._guild_history_key(guild_id), payload)
             return
+        payload = _payload(messages)
         await self._redis.zadd(IDLE_INDEX_KEY, {member: time.time()})
         if freshly_compacted:
             await self._redis.sadd(FRESH_SET_KEY, member)
@@ -133,7 +144,7 @@ class ProactiveHistoryStore:
     ) -> None:
         """Store the idle sweep's summary-only history. It holds nothing
         verbatim, so the guild leaves the idle index until its next write."""
-        payload = ModelMessagesTypeAdapter.dump_json(messages)
+        payload = _payload(messages)
         await self._redis.set(self._guild_history_key(guild_id), payload)
         await self.forget_idle(guild_id)
 

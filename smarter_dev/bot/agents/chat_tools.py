@@ -10,6 +10,7 @@ from __future__ import annotations
 import codecs
 import logging
 import mimetypes
+import re
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from dataclasses import field
@@ -27,6 +28,9 @@ from smarter_dev.bot.agents.image_prompt_reviewer import review_image_prompt
 from smarter_dev.bot.agents.media_reader import describe_media
 from smarter_dev.bot.agents.url_registry import resolve_escaped_url
 from smarter_dev.bot.agents.web_summarizer import summarize_web_content
+from smarter_dev.bot.privacy.blocked_users import get_blocked_users
+from smarter_dev.bot.privacy.gate import redact
+from smarter_dev.bot.privacy.gate import refuses
 from smarter_dev.bot.utils import web_fetch
 from smarter_dev.shared import pdf_text
 from smarter_dev.shared.config import get_settings
@@ -37,6 +41,7 @@ from smarter_dev.shared.media_reads import MAX_IMAGE_DOWNLOAD_BYTES
 from smarter_dev.shared.media_reads import MediaReaderBusy
 from smarter_dev.shared.media_reads import SpooledImage
 from smarter_dev.shared.media_reads import media_read_slot
+from smarter_dev.shared.privacy_purge import PurgeTarget
 from smarter_dev.web.models import MAX_MEMORY_NOTE_CHARS
 from smarter_dev.web.research_tools import brave_search
 from smarter_dev.web.search_previews import mark_search_preview_failed
@@ -144,6 +149,9 @@ class ChatDeps:
     # would still be offered tools. Used for the overlong-reply rewrite, which
     # only reshapes text it already has.
     tools_disabled: bool = False
+    # Who wrote what this turn read (#100): ``remember`` refuses to keep
+    # anything once one of them is on the blocked-users list.
+    source_user_ids: frozenset[str] = frozenset()
 
 
 # -- web search / read ---------------------------------------------------
@@ -872,11 +880,51 @@ REMEMBER_DUPLICATE = "you already noted that one."
 REMEMBER_DAILY_CAP = "that's all i can hold from today — tomorrow's a fresh page."
 REMEMBER_EMPTY = "there was nothing in that one to keep."
 REMEMBER_API_FAILURE = "couldn't save that note right now."
+REMEMBER_OPTED_OUT = (
+    "that one's about someone who opted out of the assistant — nothing about "
+    "them gets kept."
+)
 
 _SERVER_REFUSALS = {
     "duplicate": REMEMBER_DUPLICATE,
     "daily_cap": REMEMBER_DAILY_CAP,
+    "opted_out": REMEMBER_OPTED_OUT,
 }
+MAX_NOTE_ABOUT_IDS = 200
+# A Discord id written into a note, as ``username (id 123)`` or a mention.
+_NOTE_USER_ID = re.compile(r"(?<![0-9])([0-9]{15,22})(?![0-9])")
+
+
+def _member_names(bot: Any, guild_id: Any, user_id: str) -> list[str]:
+    """The names a guild member goes by, from the gateway cache only."""
+    try:
+        member = bot.cache.get_member(int(guild_id), int(user_id))
+    except Exception:  # noqa: BLE001 — no cache, no names
+        return []
+    if member is None:
+        return []
+    names = [
+        getattr(member, attr, None)
+        for attr in ("username", "global_name", "nickname", "display_name")
+    ]
+    return [name for name in names if isinstance(name, str) and name]
+
+
+def _about_opted_out(ctx: RunContext[ChatDeps], note: str, about: set[str]) -> bool:
+    """Whether a note is about or from someone on the blocked-users list (#100).
+
+    By id: one the note carries, or the author of anything this turn read.
+    By name: a blocked member of this guild the note names, matched the way a
+    privacy purge matches (``PurgeTarget``); a name shared with someone else
+    refuses the note too, which is the safe side.
+    """
+    if refuses(*about) or redact(note) != note:
+        return True
+    for user_id in get_blocked_users().blocked_ids():
+        names = _member_names(ctx.deps.bot, ctx.deps.guild_id, user_id)
+        if names and PurgeTarget.build(user_id, names).name_hits(note):
+            return True
+    return False
 
 
 def _already_kept_this_run(text: str, kept: list[str]) -> bool:
@@ -903,6 +951,10 @@ async def remember(ctx: RunContext[ChatDeps], text: str) -> str:
 
     trimmed = len(note) > MAX_MEMORY_NOTE_CHARS
     note = note[:MAX_MEMORY_NOTE_CHARS]
+    about = set(_NOTE_USER_ID.findall(note)) | set(ctx.deps.source_user_ids)
+    if _about_opted_out(ctx, note, about):
+        logger.info("remember: note refused (guild=%s reason=opted_out)", ctx.deps.guild_id)
+        return REMEMBER_OPTED_OUT
 
     payload = {
         "channel_id": str(ctx.deps.channel_id),
@@ -911,6 +963,8 @@ async def remember(ctx: RunContext[ChatDeps], text: str) -> str:
         "engagement_id": (
             None if ctx.deps.engagement_id is None else str(ctx.deps.engagement_id)
         ),
+        # The web app checks them against the list in the database too.
+        "about_user_ids": sorted(about)[:MAX_NOTE_ABOUT_IDS],
     }
     try:
         async with _bot_api(ctx) as api:

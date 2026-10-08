@@ -259,8 +259,8 @@ async def test_the_service_sends_the_id_in_the_body():
     api = SimpleNamespace(post=AsyncMock(return_value=response), put=AsyncMock(return_value=response))
     service = PrivacyApiService(api)
 
-    assert await service.get_opt_out(str(KAI)) == OptOut(True, "opt_out")
-    assert await service.set_opt_out(str(KAI), opted_out=True) == OptOut(True, "opt_out")
+    assert await service.get_opt_out(str(KAI)) == OptOut(True, "opt_out", revision=1)
+    assert await service.set_opt_out(str(KAI), opted_out=True) == OptOut(True, "opt_out", revision=1)
 
     api.post.assert_awaited_once_with(
         "/privacy/opt-out/state", json_data={"discord_user_id": str(KAI)}

@@ -18,6 +18,10 @@ the revision it actually holds, so the web's minimum over live processes
 stays at the stale revision and a purge that needs a newer one waits. The
 stale state is logged at most once a minute (age and revision only).
 
+An opt-out from ``/privacy`` does not wait for the next fetch: the button's
+handler calls :meth:`BlockedUsersCache.block_now`, which blocks the person in
+this process at once and wakes the refresh loop (#100).
+
 The list is shared by deletion and the opt-out from the AI assistant (#92).
 Someone who opted back in is off the list, but the snapshot keeps the moment
 they did: their messages written before it stay hidden, so passing the
@@ -98,6 +102,10 @@ class BlockedUsersCache:
         self._snapshot: BlockedUsersSnapshot | None = None
         self._fetched_at: float | None = None
         self._loaded = asyncio.Event()
+        # Opted out in this process and not yet in a fetched list: user id ->
+        # the first list revision that must carry them (#100).
+        self._pending: dict[str, int] = {}
+        self._refresh_requested = asyncio.Event()
 
     @property
     def loaded(self) -> bool:
@@ -124,7 +132,7 @@ class BlockedUsersCache:
         if self._snapshot is None:
             return True
         user = str(user_id)
-        if user in self._snapshot.user_ids:
+        if user in self._snapshot.user_ids or user in self._pending:
             return True
         cutoff = self._snapshot.read_from.get(user)
         if cutoff is None or message_id is None:
@@ -134,7 +142,47 @@ class BlockedUsersCache:
         except (TypeError, ValueError):
             return True
 
+    def blocked_ids(self) -> frozenset[str]:
+        """Everyone blocked outright now (not the opt-in cutoffs). Empty before
+        a list has loaded, when :meth:`is_blocked` already answers True."""
+        if self._snapshot is None:
+            return frozenset()
+        return self._snapshot.user_ids | frozenset(self._pending)
+
+    def block_now(self, user_id: Any, revision: int | None = None) -> None:
+        """Block one person in this process at once, ahead of the next fetch.
+
+        The opt-out button calls this the moment the web app confirms the
+        change, so no turn answers them in the up to ``REFRESH_SECONDS`` before
+        the list is fetched again (#100). ``revision`` is the list revision
+        the change produced; the entry holds until a fetched list is at least
+        that new, so a fetch already in flight cannot drop it. Without one it
+        holds until the list moves past the revision held now.
+        """
+        if revision is None:
+            revision = 0 if self._snapshot is None else self._snapshot.revision + 1
+        user = str(user_id)
+        self._pending[user] = max(revision, self._pending.get(user, 0))
+        self.request_refresh()
+
+    def request_refresh(self) -> None:
+        """Wake :func:`refresh_loop` to fetch now instead of at its next tick."""
+        self._refresh_requested.set()
+
+    async def wait_refresh_requested(self, timeout: float) -> None:
+        """Return after ``timeout`` seconds, or sooner if a refresh is asked for."""
+        try:
+            await asyncio.wait_for(self._refresh_requested.wait(), timeout)
+        except TimeoutError:
+            pass
+        self._refresh_requested.clear()
+
     def replace(self, snapshot: BlockedUsersSnapshot) -> None:
+        self._pending = {
+            user: revision
+            for user, revision in self._pending.items()
+            if snapshot.revision < revision
+        }
         self._snapshot = snapshot
         self._fetched_at = self._clock()
         self._loaded.set()
@@ -162,6 +210,8 @@ class BlockedUsersCache:
         self._snapshot = None
         self._fetched_at = None
         self._loaded = asyncio.Event()
+        self._pending = {}
+        self._refresh_requested = asyncio.Event()
 
     async def wait_loaded(self) -> None:
         await self._loaded.wait()
@@ -263,10 +313,11 @@ async def refresh_loop(
     *,
     interval: float = REFRESH_SECONDS,
 ) -> None:
-    """Refresh the list every ``interval`` seconds, forever."""
+    """Refresh the list every ``interval`` seconds, forever, and at once when
+    :meth:`BlockedUsersCache.request_refresh` asks."""
     while True:
         await refresh_once(blocked, fetch, redis)
-        await asyncio.sleep(interval)
+        await blocked.wait_refresh_requested(interval)
 
 
 def redact_blocked_mentions(text: str, blocked: BlockedUsersCache) -> str:

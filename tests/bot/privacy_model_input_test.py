@@ -17,9 +17,11 @@ from unittest.mock import MagicMock
 import pytest
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelMessagesTypeAdapter
+from pydantic_ai.messages import ModelRequest
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.messages import TextPart
 from pydantic_ai.messages import ToolCallPart
+from pydantic_ai.messages import UserPromptPart
 from pydantic_ai.models.function import AgentInfo
 from pydantic_ai.models.function import FunctionModel
 
@@ -724,3 +726,42 @@ async def test_watcher_summary_envelope_carries_no_blocked_content(
     assert "what was that benchmark?" in bodies
     assert BLOCKED_PLACEHOLDER in bodies
     _assert_no_trace(bodies)
+
+
+async def _wake_with_kept_history(run) -> str:
+    """One wake of an agent whose runner already holds a history in which
+    kai spoke (kept before any opt-out, #100); what the model received."""
+    model, seen = _capturing_model([ModelResponse(parts=[TextPart("stayed quiet")])])
+    runner = KimiAgentRunner(
+        agent=build_kimi_agent(model, system_prompt="test"), summarize=AsyncMock()
+    )
+    runner.history = [
+        ModelRequest(
+            parts=[
+                UserPromptPart(
+                    f"[2026-10-03 11:00Z] [id=900] A·kai (uid={KAI}): {KAI_WORDS}"
+                )
+            ]
+        ),
+        ModelResponse(parts=[TextPart("noted")]),
+    ]
+    run.agent_runner_for = lambda state: runner
+    await proactive.on_guild_message(
+        _event(_message(2003, NIA_USER, f"<@{BOT}> hi", mentions=(BOT,), minutes=5))
+    )
+    await proactive._consume_guild_once(run.guild_states[GUILD])
+    return "\n".join(seen)
+
+
+async def test_a_history_kept_before_kai_opted_out_reaches_the_agent_blanked(
+    kai_blocked, proactive_run
+):
+    received = await _wake_with_kept_history(proactive_run.run)
+
+    assert KAI_WORDS not in received and str(KAI) not in received
+    assert BLOCKED_PLACEHOLDER in received
+
+
+async def test_without_the_opt_out_the_kept_history_reaches_the_agent(proactive_run):
+    """Control for the test above."""
+    assert KAI_WORDS in await _wake_with_kept_history(proactive_run.run)

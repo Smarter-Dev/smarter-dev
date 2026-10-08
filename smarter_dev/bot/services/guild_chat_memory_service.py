@@ -29,6 +29,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from dataclasses import field
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -36,6 +37,8 @@ from uuid import UUID
 from pydantic import ValidationError
 
 from smarter_dev.bot.agents.chat_models import MemoryNote
+from smarter_dev.bot.privacy.gate import redact
+from smarter_dev.bot.privacy.gate import without_blocked_lines
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.base import BaseService
 from smarter_dev.bot.services.cache_manager import CacheManager
@@ -157,6 +160,19 @@ def _parsed_snapshot(payload: Any) -> GuildMemorySnapshot:
     )
 
 
+def _without_blocked(snapshot: GuildMemorySnapshot) -> GuildMemorySnapshot:
+    """The snapshot as an agent may see it (#100): no line of a block and no
+    note that carries the id of someone on the blocked-users list. Nothing
+    stored changes; opting out deletes nothing."""
+    return replace(
+        snapshot,
+        long_term_memory=without_blocked_lines(snapshot.long_term_memory) or None,
+        behavior=without_blocked_lines(snapshot.behavior) or None,
+        personality=without_blocked_lines(snapshot.personality) or None,
+        notes=tuple(note for note in snapshot.notes if redact(note.text) == note.text),
+    )
+
+
 class GuildChatMemoryService(BaseService):
     """Read a guild's memory bundle and keep new notes, via the web API."""
 
@@ -186,7 +202,7 @@ class GuildChatMemoryService(BaseService):
             return EMPTY_SNAPSHOT
         try:
             response = await self._api_client.get(self._bundle_path(guild_id))
-            return _parsed_snapshot(response.json())
+            return _without_blocked(_parsed_snapshot(response.json()))
         except (APIError, ValidationError, ValueError, TypeError):
             log_exception(
                 logger,

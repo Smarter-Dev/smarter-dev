@@ -51,6 +51,7 @@ from smarter_dev.web.crud import (
     create_memory_note,
     get_guild_memory_blob,
     list_notes_since,
+    memory_note_opted_out,
 )
 from smarter_dev.web.models import (
     MAX_NOTES_PER_GUILD_PER_DAY,
@@ -136,6 +137,8 @@ class ChatMemoryController(Controller):
         data: ChatMemoryNoteCreate,
     ) -> ChatMemoryNoteSaveResult:
         """Keep one note, or report why it wasn't kept — always 200."""
+        if await memory_note_opted_out(db_session, data.content, data.about_user_ids):
+            return ChatMemoryNoteSaveResult(saved=False, reason="opted_out")
         now = datetime.now(UTC)
         day_start = utc_day_start(now)
         note = await create_memory_note(
@@ -145,6 +148,8 @@ class ChatMemoryController(Controller):
             channel_name=data.channel_name,
             content=data.content,
             engagement_id=data.engagement_id,
+            about_user_ids=data.about_user_ids,
+            opt_out_checked=True,
             created_at=now,
             day_start=day_start,
         )

@@ -26,6 +26,8 @@ from datetime import UTC, datetime, timedelta
 import redis.asyncio as redis
 from pydantic_ai.messages import ModelMessage, ModelMessagesTypeAdapter
 
+from smarter_dev.bot.privacy.gate import blank_model_messages
+from smarter_dev.bot.privacy.gate import redact
 from smarter_dev.shared.retention_policy import AGENT_VERBATIM_IDLE_WINDOW
 
 logger = logging.getLogger(__name__)
@@ -141,6 +143,8 @@ class ChatMemory:
     async def write_topic(self, channel_id: int, text: str) -> None:
         if await self._unreadable(self._topic_key(channel_id)):
             return
+        # The agent's own words, but never a blocked person's id (#100).
+        text = redact(text)
         now = datetime.now(UTC).isoformat()
         pipe = self._redis.pipeline()
         pipe.set(self._topic_key(channel_id), text, ex=TOPIC_TTL_SECONDS)
@@ -163,6 +167,7 @@ class ChatMemory:
     async def write_notes(self, channel_id: int, text: str) -> None:
         if await self._unreadable(self._notes_key(channel_id)):
             return
+        text = redact(text)
         await self._redis.set(self._notes_key(channel_id), text, ex=NOTES_TTL_SECONDS)
 
     async def clear_notes(self, channel_id: int) -> None:
@@ -217,7 +222,9 @@ class ChatMemory:
         """
         if expected_raw is HISTORY_UNREADABLE:
             return False
-        payload = ModelMessagesTypeAdapter.dump_json(messages)
+        # Someone who opted out while the engagement ran leaves only the
+        # placeholder behind in what is kept for the next turn (#100).
+        payload = ModelMessagesTypeAdapter.dump_json(blank_model_messages(messages))
         if expected_raw is _UNCONDITIONAL:
             await self._redis.set(
                 self._history_key(channel_id), payload, ex=HISTORY_TTL_SECONDS

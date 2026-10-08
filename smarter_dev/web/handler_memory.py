@@ -26,6 +26,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.handler_budget import CapExceeded
+from smarter_dev.web.privacy_gate import load_gate
 
 # Cap the serialized blob. Memory is for counters, seen-sets, and timestamps —
 # not bulk storage — so a small ceiling keeps a runaway handler from bloating the
@@ -111,4 +112,6 @@ async def persist_handler_memory(
         return
     record = await session.get(handler_model, handler_id)
     if record is not None:
-        record.memory = memory
+        # Nothing new about someone who opted out of the AI assistant (#100).
+        gate = await load_gate(session)
+        record.memory = gate.scrub_memory(memory, record.memory)

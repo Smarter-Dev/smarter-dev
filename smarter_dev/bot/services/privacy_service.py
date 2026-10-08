@@ -32,10 +32,12 @@ OPT_OUT_PATH = "/privacy/opt-out"
 @dataclass(frozen=True)
 class OptOut:
     """One person's opt-out: ``source`` is ``opt_out`` (they can opt back
-    in), ``purge`` (it comes from a deletion and stays) or None."""
+    in), ``purge`` (it comes from a deletion and stays) or None.
+    ``revision`` is the block list's revision after the read or change."""
 
     opted_out: bool
     source: str | None
+    revision: int | None = None
 
 
 class MalformedBlockedUsersResponse(ValueError):
@@ -100,7 +102,9 @@ def parse_blocked_users(payload: object) -> BlockedUsersSnapshot:
 
 def _opt_out(payload: dict) -> OptOut:
     source = payload.get("source")
+    revision = payload.get("revision")
     return OptOut(
         opted_out=bool(payload["opted_out"]),
         source=source if source in ("opt_out", "purge") else None,
+        revision=revision if isinstance(revision, int) else None,
     )

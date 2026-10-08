@@ -974,6 +974,14 @@ class ChatMemoryNoteCreate(BaseAPIModel):
     engagement_id: UUID | None = Field(
         None, description="Soft link to the engagement the note came from"
     )
+    about_user_ids: list[str] = Field(
+        default_factory=list,
+        max_length=200,
+        description=(
+            "Discord ids the note is about or came from; a note naming anyone "
+            "on the blocked-users list is refused with reason 'opted_out'"
+        ),
+    )
 
 
 class ChatMemoryNoteSaveResult(BaseAPIModel):
@@ -981,12 +989,14 @@ class ChatMemoryNoteSaveResult(BaseAPIModel):
 
     A refused save is a normal outcome the agent is told about in plain words
     (``duplicate`` = it already kept this exact thought today, ``daily_cap`` =
-    the guild has hit its runaway guard), so this stays a 200.
+    the guild has hit its runaway guard, ``opted_out`` = it is about or from
+    someone who opted out of the AI assistant), so this stays a 200.
     """
 
     saved: bool = Field(description="Whether a note row was written")
     reason: str | None = Field(
-        None, description="'duplicate' or 'daily_cap' when saved is false"
+        None,
+        description="'duplicate', 'daily_cap' or 'opted_out' when saved is false",
     )
     id: UUID | None = Field(None, description="Note id when saved")
     created_at: datetime | None = Field(None, description="When it was kept")
