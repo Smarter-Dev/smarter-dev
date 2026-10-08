@@ -610,8 +610,9 @@ async def test_a_block_that_still_fails_after_masking_is_hidden(
     html = (await client.get(CHAT_AGENT_PATH)).text
 
     assert shown_text not in html
-    if field_name == "content":
-        assert "memory is not shown here" in html
+    label = "memory" if field_name == "content" else field_name
+    assert f"The {label} is not shown right now." in html
+    assert "Tonight" not in html
 
 
 async def test_a_signed_in_viewer_sees_only_their_own_tags(db_session, client):
@@ -690,7 +691,8 @@ async def test_raw_html_in_a_block_is_hidden(db_session, client):
     html = (await client.get(CHAT_AGENT_PATH)).text
 
     assert "alert(1)" not in html
-    assert "memory is not shown here" in html
+    assert "The memory is not shown right now." in html
+    assert "The personality is not shown right now." in html
 
 
 async def test_raw_html_that_got_past_the_check_renders_as_text(

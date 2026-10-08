@@ -23,6 +23,10 @@ The one thing it does switch is the public ``/chat-agent`` page (#103), which
 never edits memory: each block sits beside its masked preview (#104), with
 whatever the public check would hide flagged, so the admin reads it before
 switching it on. Switching one guild on switches every other guild off.
+
+And one narrow fix (#105): "tag this name" turns every whole-word occurrence
+of a name the agent left bare in the three blocks into a member tag, with or
+without a Discord id, and records a memory revision. Nothing else is editable.
 """
 
 from __future__ import annotations
@@ -40,6 +44,7 @@ from skrift.flash import flash_error, flash_success, get_flash_messages
 from skrift.forms.core import verify_csrf
 
 from smarter_dev.web.chat_agent_public import check_public_blocks, set_public_page
+from smarter_dev.web.chat_memory_retag import tag_name_in_blocks, tag_request_problem
 
 from smarter_dev.web.api_native.chat_memory import utc_day_start
 from smarter_dev.web.bot_admin.campaigns import fetch_guild_or_error
@@ -52,10 +57,13 @@ from smarter_dev.web.crud import (
 logger = logging.getLogger(__name__)
 
 _ACTIVE_PAGE = "chat_memory"
+# How a memory column reads to the admin.
+_BLOCK_LABELS = {"content": "memory"}
 
 
 class ChatMemoryAdminController(Controller):
-    """Read-only view of a guild's chat-agent memory under ``/admin/bot``."""
+    """A guild's chat-agent memory under ``/admin/bot``: a view, the public-page
+    switch and the one name-tagging fix."""
 
     path = "/admin/bot"
     guards = [auth_guard]
@@ -125,4 +133,52 @@ class ChatMemoryAdminController(Controller):
             if enabled
             else "The public page is off.",
         )
+        return Redirect(path=back)
+
+    @post(
+        "/guilds/{guild_id:str}/chat-memory/tag-name",
+        guards=[auth_guard, Permission("administrator")],
+    )
+    async def chat_memory_tag_name(
+        self, request: Request, db_session: AsyncSession, guild_id: str
+    ) -> Redirect:
+        """Tag every whole-word occurrence of a name in the three blocks."""
+        back = f"/admin/bot/guilds/{guild_id}/chat-memory"
+        if not await verify_csrf(request):
+            flash_error(request, "Your session expired. Please try again.")
+            return Redirect(path=back)
+        form = await request.form()
+        username = str(form.get("name") or "").strip()
+        user_id = str(form.get("discord_id") or "").strip()
+        problem = tag_request_problem(username, user_id)
+        if problem is not None:
+            flash_error(request, problem)
+            return Redirect(path=back)
+        result = await tag_name_in_blocks(
+            db_session, guild_id, username, user_id or None
+        )
+        if not result.found:
+            flash_error(
+                request, "This guild has no memory yet, so there is nothing to tag."
+            )
+        elif result.over_cap:
+            flash_error(
+                request,
+                "Tagging it would put "
+                + ", ".join(_BLOCK_LABELS.get(c, c) for c in result.over_cap)
+                + " over its length limit, so nothing changed.",
+            )
+        elif result.total == 0:
+            flash_error(request, f"No block names {username} outside a tag.")
+        else:
+            logger.info(
+                "Admin tagged %d bare name(s) in guild %s's chat memory",
+                result.total,
+                guild_id,
+            )
+            flash_success(
+                request,
+                f"Tagged {username} {result.total} time(s); "
+                "the memory history has the change.",
+            )
         return Redirect(path=back)

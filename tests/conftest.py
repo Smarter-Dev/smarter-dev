@@ -16,6 +16,8 @@ import pytest_asyncio
 from httpx import AsyncClient
 from skrift.db.base import Base as SkriftBase
 from skrift.db.models import worker as skrift_worker_models
+from skrift.db.models.oauth_account import OAuthAccount
+from skrift.db.models.user import User
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -38,6 +40,8 @@ WORKER_TABLES = [
         skrift_worker_models.WorkerArchiveSnapshotRecord,
     )
 ]
+# The public /chat-agent check reads Discord-linked accounts' names (#105).
+ACCOUNT_TABLES = [User.__table__, OAuthAccount.__table__]
 
 
 # Test configuration
@@ -131,6 +135,7 @@ async def test_engine():
             # The hourly retention job also prunes Skrift's worker tables,
             # which live outside our metadata.
             await conn.run_sync(SkriftBase.metadata.create_all, tables=WORKER_TABLES)
+            await conn.run_sync(SkriftBase.metadata.create_all, tables=ACCOUNT_TABLES)
         
         yield engine
         

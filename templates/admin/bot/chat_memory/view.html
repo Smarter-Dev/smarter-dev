@@ -90,6 +90,9 @@
                 {% if block.problem %}
                 <p><span class="sk-badge sk-badge-danger">hidden on the page: {{ block.problem }}</span></p>
                 {% endif %}
+                {% if block.names_found %}
+                <p class="sk-text-muted" style="font-size:0.85rem;">Names it carries outside a tag: {{ block.names_found|join(", ") }}</p>
+                {% endif %}
                 {% if block.lines_left_out %}
                 <p class="sk-text-muted" style="font-size:0.85rem;">{{ block.lines_left_out }} line(s) about opted-out members left out.</p>
                 {% endif %}
@@ -116,6 +119,19 @@
                     {% endif %}
                 </form>
                 <p class="sk-text-muted" style="font-size:0.85rem;">The page shows one guild; turning it on here turns it off for any other.</p>
+
+                <h4 style="margin:1.5rem 0 0.5rem;">Tag this name</h4>
+                <p class="sk-text-muted" style="font-size:0.85rem;">
+                    Turns every whole-word use of a name in the personality, behavior and memory blocks into a member
+                    tag, so the page masks it. Leave the Discord id empty for someone the agent has no id for.
+                    Tags already there and the notes are left alone; the change is recorded in the dream history.
+                </p>
+                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/chat-memory/tag-name" style="display:flex; gap:0.5rem; flex-wrap:wrap; align-items:flex-end;">
+                    {{ csrf_field() }}
+                    <label>Name<br><input type="text" name="name" required minlength="2" maxlength="64"></label>
+                    <label>Discord id (optional)<br><input type="text" name="discord_id" placeholder="Discord user snowflake ID" inputmode="numeric" pattern="[0-9]{15,22}"></label>
+                    <button class="sk-btn-outline" type="submit">Tag this name</button>
+                </form>
                 {% endif %}
             </div>
         </div>
