@@ -12,6 +12,9 @@ their recipient; the check is what keeps a copied custom id useless.
 
 The web app holds the state (``smarter_dev.web.chat_bot_opt_out``); a change
 reaches both runtimes with their next block-list refresh, within 60 seconds.
+An opt-out also blocks the person in this process the moment the web app
+confirms it and asks for a refresh at once (#100), so the bot that showed the
+button never answers them in that window.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from typing import Any
 
 import hikari
 
+from smarter_dev.bot.privacy.blocked_users import get_blocked_users
 from smarter_dev.bot.services.privacy_service import OptOut
 
 logger = logging.getLogger(__name__)
@@ -126,6 +130,8 @@ async def handle_interaction(event: hikari.InteractionCreateEvent, privacy_servi
         logger.warning("AI assistant opt-out %s failed (%s)", action, type(error).__name__)
         await interaction.edit_initial_response(UNAVAILABLE, components=[])
         return True
+    if action == SET and state.opted_out:
+        get_blocked_users().block_now(user_id, state.revision)
     content, components = render(state, user_id)
     await interaction.edit_initial_response(content, components=components)
     return True

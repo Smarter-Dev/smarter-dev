@@ -49,6 +49,7 @@ from smarter_dev.bot.agents.response_fitting import split_for_discord
 from smarter_dev.bot.plugins.admin_gate import is_admin
 from smarter_dev.bot.privacy.blocked_users import get_blocked_users
 from smarter_dev.bot.privacy.blocked_users import redact_blocked_mentions
+from smarter_dev.bot.privacy.gate import blank_proactive_messages
 from smarter_dev.bot.proactive.adapter import JEV_WATCHER_CONTEXT_SIZE
 from smarter_dev.bot.proactive.adapter import WATCHER_CONTEXT_SIZE
 from smarter_dev.bot.proactive.adapter import AgentConsumer
@@ -1097,6 +1098,10 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
                 type(error).__name__,
             )
             runner.history = []
+    # Kept before someone opted out (or loaded wakes ago): they leave only
+    # the placeholder for this wake, and in what the wake writes back (#100).
+    if runner is not None and runner.history:
+        runner.history = blank_proactive_messages(runner.history)
 
     brief_preamble = ""
     now = time.monotonic()
@@ -1683,6 +1688,8 @@ async def _compact_idle_guild(
             if state is not None and state.agent_runner is not None:
                 state.agent_runner.history = []
             return "unreadable deleted"
+        # The summarising model never reads someone who opted out (#100).
+        history = blank_proactive_messages(history)
         if is_summary_only(history):
             await store.forget_idle(guild_id)
             return "already summary only"

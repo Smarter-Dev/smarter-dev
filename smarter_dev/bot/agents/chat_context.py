@@ -84,8 +84,7 @@ async def build_initial_input(
     raw_history = await _fetch_messages_before(
         bot, channel_id, before_id=trigger_message.id, limit=CONTEXT_MESSAGE_LIMIT
     )
-    topic = await memory.topic_for_activation(channel_id)
-    notes = await memory.get_notes(channel_id)
+    topic, notes = await _read_topic_and_notes(memory, channel_id)
 
     # Convert history + trigger together so authors/channel cover everything.
     all_msgs = raw_history + [trigger_message]
@@ -158,8 +157,7 @@ async def build_followup_input(
         guild_id=guild_id,
         raw_messages=queued,
     )
-    topic = await memory.topic_for_activation(channel_id)
-    notes = await memory.get_notes(channel_id)
+    topic, notes = await _read_topic_and_notes(memory, channel_id)
     return FollowupAgentInput(
         me=me,
         new_messages=messages,
@@ -277,6 +275,20 @@ async def _convert(
     return messages, authors, channel, me
 
 
+async def _read_topic_and_notes(
+    memory: ChatMemory, channel_id: int
+) -> tuple[str | None, str | None]:
+    """The channel's topic and running notes, with blocked ids redacted: they
+    may have been written before someone opted out (#100)."""
+    topic = await memory.topic_for_activation(channel_id)
+    notes = await memory.get_notes(channel_id)
+    blocked = get_blocked_users()
+    return (
+        None if topic is None else redact_blocked_mentions(topic, blocked),
+        None if notes is None else redact_blocked_mentions(notes, blocked),
+    )
+
+
 async def _fetch_recent_messages(
     bot: hikari.GatewayBot,
     channel_id: int,
@@ -368,3 +380,52 @@ async def _build_channel_info(
         name=info.get("channel_name") or f"channel-{channel_id}",
         description=info.get("channel_description"),
     )
+
+
+def reblank_newly_blocked(
+    agent_input: InitialAgentInput | FollowupAgentInput, blocked
+) -> bool:
+    """Apply the blocked-users list again to an input built a moment ago.
+
+    The engine calls this immediately before the model call (#100): someone
+    can opt out while a turn is being prepared, and the input was converted
+    against the list as it was then. Their messages turn into the same
+    position-only placeholder :func:`_convert` writes, and their author entry
+    goes. Returns True when the activation message's author is now blocked,
+    so the turn must not run at all.
+    """
+
+    def blank(messages: list[Message]) -> list[Message]:
+        return [
+            Message(message_id="", author_id="", body="", blocked=True)
+            if not m.blocked and m.author_id and blocked.is_blocked(m.author_id, m.message_id)
+            else m
+            for m in messages
+        ]
+
+    agent_input.authors = [
+        a for a in agent_input.authors if not blocked.is_blocked(a.user_id)
+    ]
+    if isinstance(agent_input, InitialAgentInput):
+        trigger = agent_input.activation_message
+        if trigger.blocked or blocked.is_blocked(trigger.author_id, trigger.message_id):
+            return True
+        agent_input.channel_history = blank(agent_input.channel_history)
+        return False
+    agent_input.new_messages = blank(agent_input.new_messages)
+    return False
+
+
+def input_author_ids(
+    agent_input: InitialAgentInput | FollowupAgentInput,
+) -> frozenset[str]:
+    """Who wrote the messages this input carries (placeholders name no one).
+
+    The ``remember`` tool refuses to keep a note once one of them is on the
+    blocked-users list (#100).
+    """
+    if isinstance(agent_input, InitialAgentInput):
+        messages = [*agent_input.channel_history, agent_input.activation_message]
+    else:
+        messages = agent_input.new_messages
+    return frozenset(m.author_id for m in messages if m.author_id and not m.blocked)

@@ -77,7 +77,7 @@ def guarded_client() -> Iterator[TestClient]:
 
 @pytest.fixture
 def chat_memory_crud_mock() -> Iterator[Mock]:
-    """Patch the four crud functions the chat-memory controller calls."""
+    """Patch the crud functions the chat-memory controller calls."""
     with (
         patch(
             "smarter_dev.web.api_native.chat_memory.get_guild_memory_blob",
@@ -95,12 +95,17 @@ def chat_memory_crud_mock() -> Iterator[Mock]:
             "smarter_dev.web.api_native.chat_memory.count_notes_since",
             new=AsyncMock(return_value=0),
         ) as count_notes_mock,
+        patch(
+            "smarter_dev.web.api_native.chat_memory.memory_note_opted_out",
+            new=AsyncMock(return_value=False),
+        ) as opted_out_mock,
     ):
         namespace = Mock()
         namespace.get_blob = get_blob_mock
         namespace.list_notes = list_notes_mock
         namespace.create_note = create_note_mock
         namespace.count_notes = count_notes_mock
+        namespace.opted_out = opted_out_mock
         yield namespace
 
 
@@ -356,6 +361,39 @@ class TestCreateChatMemoryNote:
 
         assert body["saved"] is False
         assert body["reason"] == "daily_cap"
+
+    def test_a_note_about_someone_opted_out_is_refused_unsaved(
+        self, chat_memory_client: TestClient, chat_memory_crud_mock, session_mock
+    ):
+        # #100: the gate answers before anything is written.
+        chat_memory_crud_mock.opted_out.return_value = True
+
+        body = chat_memory_client.post(
+            _NOTES_URL,
+            json={
+                "channel_id": _CHANNEL,
+                "content": "a thought",
+                "about_user_ids": ["111111111111111111"],
+            },
+        ).json()
+
+        assert body == {"saved": False, "reason": "opted_out", "id": None, "created_at": None}
+        chat_memory_crud_mock.create_note.assert_not_awaited()
+        session_mock.commit.assert_not_awaited()
+        args = chat_memory_crud_mock.opted_out.await_args.args
+        assert args[1:] == ("a thought", ["111111111111111111"])
+
+    def test_the_about_ids_reach_the_writer_too(
+        self, chat_memory_client: TestClient, chat_memory_crud_mock
+    ):
+        chat_memory_crud_mock.create_note.return_value = _note_row()
+
+        chat_memory_client.post(
+            _NOTES_URL,
+            json={"channel_id": _CHANNEL, "content": "a thought", "about_user_ids": ["5"]},
+        )
+
+        assert chat_memory_crud_mock.create_note.call_args.kwargs["about_user_ids"] == ["5"]
 
     def test_over_length_content_is_422(self, chat_memory_client: TestClient):
         response = chat_memory_client.post(

@@ -39,6 +39,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from smarter_dev.web.handler_budget import CapExceeded
 from smarter_dev.web.handler_memory import MAX_MEMORY_BYTES
 from smarter_dev.web.models import GuildHandlerMemory
+from smarter_dev.web.privacy_gate import load_gate
 
 # The GuildHandlerMemory.key column is VARCHAR(64); reject an over-long key at
 # set() time so it never reaches the audit commit as a value-too-long error.
@@ -155,6 +156,15 @@ async def persist_guild_memory(
         )
     if not writes:
         return
+    # Nothing new about someone who opted out of the AI assistant (#100): a
+    # key carrying their id is not written (its stored value stays), and
+    # their id is redacted from every value.
+    gate = await load_gate(session)
+    writes = {
+        key: gate.scrub(value)
+        for key, value in writes.items()
+        if not gate.carries_blocked_id(str(key))
+    }
     # INSERT ... ON CONFLICT (guild_id, key) DO UPDATE: a select-then-insert
     # race between two concurrent fires first-writing the same new key would let
     # the loser's commit raise IntegrityError on uq_guild_handler_memory_guild_key.

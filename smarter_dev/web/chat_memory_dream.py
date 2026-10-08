@@ -32,6 +32,14 @@ Three rules shape everything here:
    not die unread. The delete rides in the same transaction as the blob write,
    so it becomes real only if that write commits.
 
+Someone on the blocked-users list (opted out of the AI assistant, or deleted)
+is never dreamed about (#100). A note carrying their id is not read and so not
+deleted; it waits for the admin's deletion or their opting back in. A line of
+a block carrying their id is withheld from the model and carried over byte for
+byte, so the dream neither rewrites nor reintroduces it, and an output that
+names a blocked id is refused like any other bad night. Opting out deletes
+nothing; that stays the admin's deletion request.
+
 The dream runs in the web image (``scripts/dream_session.py``) and therefore
 talks to :mod:`smarter_dev.web.crud` directly rather than over the bot API.
 """
@@ -76,6 +84,8 @@ from smarter_dev.web.models import MAX_BEHAVIOR_CHARS
 from smarter_dev.web.models import MAX_MEMORY_BLOB_CHARS
 from smarter_dev.web.models import MAX_PERSONALITY_CHARS
 from smarter_dev.web.models import ChatAgentMemoryNote
+from smarter_dev.web.privacy_gate import OptOutGate
+from smarter_dev.web.privacy_gate import load_gate
 
 logger = logging.getLogger(__name__)
 
@@ -318,6 +328,8 @@ class DreamContext:
     notes: list[str]
     previous_behavior: str = ""
     previous_personality: str = ""
+    # The blocked-users list as the dream read it (#100); None checks nothing.
+    gate: OptOutGate | None = None
 
 
 @dataclass(frozen=True)
@@ -728,6 +740,50 @@ def build_dream_user_message(
     return "\n\n".join(sections)
 
 
+# -- people who opted out (#100) -----------------------------------------------
+
+BLOCKED_ID_RETRY_MESSAGE = (
+    "Your memory names a Discord id you were not given tonight. Write only "
+    "about what is in front of you."
+)
+
+
+def withhold_blocked_lines(text: str, gate: OptOutGate) -> tuple[str, list[str]]:
+    """``text`` without its lines that carry a blocked id, and those lines.
+
+    The dream never reads them, and :func:`carry_over` puts them back after
+    tonight's output exactly as they were.
+    """
+    kept: list[str] = []
+    withheld: list[str] = []
+    for line in text.splitlines():
+        (withheld if gate.redact(line) != line else kept).append(line)
+    return ("\n".join(kept) if withheld else text), withheld
+
+
+def carry_over(block: str, shown: str, stored: str, withheld: list[str]) -> str:
+    """Tonight's ``block`` with the withheld lines after it, unchanged.
+
+    ``shown`` is what the model was given and ``stored`` what was saved; a
+    block the model left as it was comes back as ``stored``, in its order.
+    """
+    if not withheld:
+        return block
+    if block == shown:
+        return stored
+    return "\n".join([block.rstrip(), *withheld]).strip()
+
+
+def names_a_blocked_id(blocks: DreamBlocks, gate: OptOutGate | None) -> bool:
+    """Whether tonight's own output carries a blocked id."""
+    if gate is None:
+        return False
+    return any(
+        gate.redact(block) != block
+        for block in (blocks.memory, blocks.behavior, blocks.personality)
+    )
+
+
 # -- the agent -----------------------------------------------------------------
 
 
@@ -765,9 +821,11 @@ def get_dream_agent() -> Agent[DreamContext, DreamOutput]:
         def keep_the_blob_under_the_cap(
             ctx: RunContext[DreamContext], output: DreamOutput
         ) -> DreamOutput:
-            compose_blocks(
+            blocks = compose_blocks(
                 output, ctx.deps, retries_left=DREAM_OUTPUT_RETRIES - ctx.retry
             )
+            if names_a_blocked_id(blocks, ctx.deps.gate):
+                raise ModelRetry(BLOCKED_ID_RETRY_MESSAGE)
             return output
 
         _dream_agent = agent
@@ -807,7 +865,13 @@ async def run_guild_dream(
             guild_id=guild_id, outcome=DreamOutcome.SKIPPED_DISABLED
         )
 
-    notes = await list_notes_before(session, guild_id, cutoff)
+    gate = await load_gate(session)
+    # A note about someone who opted out is not read, so it is not deleted.
+    notes = [
+        note
+        for note in await list_notes_before(session, guild_id, cutoff)
+        if gate.redact(note.content) == note.content
+    ]
     if not notes:
         if memory is not None:
             memory.last_dream_at = dreamed_at
@@ -816,9 +880,14 @@ async def run_guild_dream(
             guild_id=guild_id, outcome=DreamOutcome.SKIPPED_NO_NOTES
         )
 
-    previous_blob = memory.content if memory is not None else ""
-    previous_behavior = (memory.behavior or "") if memory is not None else ""
-    previous_personality = (memory.personality or "") if memory is not None else ""
+    stored_blob = memory.content if memory is not None else ""
+    stored_behavior = (memory.behavior or "") if memory is not None else ""
+    stored_personality = (memory.personality or "") if memory is not None else ""
+    previous_blob, withheld_blob = withhold_blocked_lines(stored_blob, gate)
+    previous_behavior, withheld_behavior = withhold_blocked_lines(stored_behavior, gate)
+    previous_personality, withheld_personality = withhold_blocked_lines(
+        stored_personality, gate
+    )
     user_message = build_dream_user_message(
         previous_blob=previous_blob,
         note_lines=[render_note_line(note) for note in notes],
@@ -832,10 +901,32 @@ async def run_guild_dream(
         notes=[note.content for note in notes],
         previous_behavior=previous_behavior,
         previous_personality=previous_personality,
+        gate=gate,
     )
     result = await dream_agent.run(user_prompt=user_message, deps=context)
     # Validate again at the persistence boundary, including injected agents.
     blocks = compose_blocks(result.output, context, retries_left=0)
+    if names_a_blocked_id(blocks, gate):
+        logger.warning(
+            "Dream for guild %s named a blocked id; keeping all three blocks "
+            "and its %d notes",
+            guild_id,
+            len(notes),
+        )
+        return GuildDreamResult(guild_id=guild_id, outcome=DreamOutcome.KEPT_PREVIOUS)
+    blocks = DreamBlocks(
+        memory=carry_over(blocks.memory, previous_blob, stored_blob, withheld_blob),
+        behavior=carry_over(
+            blocks.behavior, previous_behavior, stored_behavior, withheld_behavior
+        ),
+        personality=carry_over(
+            blocks.personality,
+            previous_personality,
+            stored_personality,
+            withheld_personality,
+        ),
+        refusals=blocks.refusals,
+    )
     new_blob = blocks.memory
 
     if blocks.refusals:
@@ -851,13 +942,13 @@ async def run_guild_dream(
         )
         return GuildDreamResult(guild_id=guild_id, outcome=DreamOutcome.KEPT_PREVIOUS)
 
-    if should_keep_previous_blob(new_blob, previous_blob):
+    if should_keep_previous_blob(new_blob, stored_blob):
         logger.warning(
             "Dream for guild %s returned %d chars against a %d-char blob; "
             "keeping yesterday's memory and its %d notes",
             guild_id,
             len(new_blob),
-            len(previous_blob),
+            len(stored_blob),
             len(notes),
         )
         return GuildDreamResult(guild_id=guild_id, outcome=DreamOutcome.KEPT_PREVIOUS)
@@ -886,7 +977,7 @@ async def run_guild_dream(
     await prune_memory_revisions(session, guild_id)
     await delete_notes_by_id(session, [note.id for note in notes])
     await session.commit()
-    if blocks.personality != previous_personality:
+    if blocks.personality != stored_personality:
         logger.info(
             "Dream for guild %s revised its personality: %s",
             guild_id,

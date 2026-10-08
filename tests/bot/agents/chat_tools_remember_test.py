@@ -129,6 +129,7 @@ async def test_remember_posts_the_note_and_confirms_warmly():
         "channel_name": "dev-help",
         "content": "alice (id 1) is deep in shader work and loves it.",
         "engagement_id": "11111111-2222-3333-4444-555555555555",
+        "about_user_ids": [],
     }
     assert ctx.deps.memories_saved_this_turn == 1
     assert ctx.deps.saved_memory_texts == [
