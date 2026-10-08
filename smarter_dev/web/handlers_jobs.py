@@ -107,7 +107,7 @@ async def _run_handler_fire(payload: HandlerFirePayload, context: WorkerContext)
         memory = dict(record.memory or {})
 
     # Lazy: these pull pydantic-ai / Monty, kept out of web-tier import.
-    from smarter_dev.web.handler_agent import run_gathering_agent
+    from smarter_dev.web.handler_agent import gathering_agent_for
     from smarter_dev.web.handler_runtime import run_handler_script
 
     budget = HandlerBudget()
@@ -194,7 +194,7 @@ async def _run_handler_fire(payload: HandlerFirePayload, context: WorkerContext)
         guild_id=guild_id,
         emitter=emitter,
         limiter=limiter,
-        agent_runner=run_gathering_agent,
+        agent_runner=gathering_agent_for(trigger_context, get_db_session_context),
         handler_id=str(handler_id),
         timer_scheduler=timer_scheduler.schedule_timer,
         claimer=claimer,

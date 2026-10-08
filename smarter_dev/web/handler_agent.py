@@ -17,6 +17,9 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Awaitable
+from collections.abc import Callable
+from typing import Any
 
 import httpx
 from pydantic_ai import Agent
@@ -113,3 +116,45 @@ async def run_gathering_agent(
     agent = _get_agent(has_tools)
     result = await agent.run(prompt, deps=_GatherDeps(budget=budget))
     return str(result.output)
+
+
+# -- the opt-out (#100) ------------------------------------------------------------
+
+# Neutral on purpose: scripts often post the agent's answer publicly, and it
+# must not say who opted out.
+GATHERING_REFUSED = "The AI agent is not available for this event."
+# The trigger-context fields (``bot/plugins/handler_events.py``) that name the
+# member whose action fired a handler: a message's author, a thread's creator,
+# a joining, leaving or updated member, a reaction's user, a slash-command
+# invoker.
+_TRIGGER_AUTHOR_FIELDS = (
+    "author_id",
+    "creator_id",
+    "member_id",
+    "reaction_user_id",
+    "interaction_user_id",
+)
+
+
+def gathering_agent_for(
+    trigger_context: dict, session_factory: Callable[[], Any]
+) -> Callable[..., Awaitable[str]]:
+    """The gathering agent one fire may use, gated on the opt-out (#100).
+
+    Handlers keep firing for everyone: the opt-out covers the AI assistant,
+    not scripted automations. When the script calls the agent, the block list
+    is read from the database: a fire triggered by someone on it gets
+    :data:`GATHERING_REFUSED` and no model call, and any other fire's prompt
+    has blocked ids redacted before the model sees it.
+    """
+
+    async def gated(prompt: str, has_tools: bool, budget: HandlerBudget) -> str:
+        from smarter_dev.web.privacy_gate import load_gate
+
+        async with session_factory() as session:
+            gate = await load_gate(session)
+        if gate.refuses(*(trigger_context.get(key) for key in _TRIGGER_AUTHOR_FIELDS)):
+            return GATHERING_REFUSED
+        return await run_gathering_agent(gate.redact(prompt), has_tools, budget)
+
+    return gated
