@@ -120,12 +120,20 @@ async def run_gathering_agent(
 
 # -- the opt-out (#100) ------------------------------------------------------------
 
-GATHERING_REFUSED = (
-    "The AI agent did not run: the member who triggered this event opted out "
-    "of the AI assistant."
+# Neutral on purpose: scripts often post the agent's answer publicly, and it
+# must not say who opted out.
+GATHERING_REFUSED = "The AI agent is not available for this event."
+# The trigger-context fields (``bot/plugins/handler_events.py``) that name the
+# member whose action fired a handler: a message's author, a thread's creator,
+# a joining, leaving or updated member, a reaction's user, a slash-command
+# invoker.
+_TRIGGER_AUTHOR_FIELDS = (
+    "author_id",
+    "creator_id",
+    "member_id",
+    "reaction_user_id",
+    "interaction_user_id",
 )
-# The trigger-context fields that name whose message or thread fired a handler.
-_TRIGGER_AUTHOR_FIELDS = ("author_id", "creator_id")
 
 
 def gathering_agent_for(

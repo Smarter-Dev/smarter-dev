@@ -60,6 +60,37 @@ async def test_a_thread_started_by_an_opted_out_member_gets_no_agent_either(
     assert await agent("summarise the thread", True, None) == handler_agent.GATHERING_REFUSED
 
 
+@pytest.mark.parametrize(
+    "field", ["member_id", "reaction_user_id", "interaction_user_id"]
+)
+async def test_a_join_reaction_or_command_from_an_opted_out_member_gets_no_agent(
+    db_session, monkeypatch, field
+):
+    await opt_out(db_session, str(KAI))
+    prompts: list[str] = []
+
+    async def model(prompt, has_tools, budget):
+        prompts.append(prompt)
+        return "gathered"
+
+    monkeypatch.setattr(handler_agent, "run_gathering_agent", model)
+
+    @contextlib.asynccontextmanager
+    async def sessions():
+        yield db_session
+
+    agent = handler_agent.gathering_agent_for({field: str(KAI)}, sessions)
+    assert await agent("who is this", False, None) == handler_agent.GATHERING_REFUSED
+    # Control: the same event from nia runs.
+    agent = handler_agent.gathering_agent_for({field: str(NIA)}, sessions)
+    assert await agent("who is this", False, None) == "gathered"
+    assert prompts == ["who is this"]
+
+
+def test_the_refusal_does_not_say_anyone_opted_out():
+    assert "opt" not in handler_agent.GATHERING_REFUSED.lower()
+
+
 @pytest.mark.parametrize("admin", [False, True], ids=["member-handler", "admin-handler"])
 async def test_both_fire_jobs_hand_the_script_the_gated_agent(monkeypatch, admin):
     """Wiring: each job builds its agent from this fire's trigger context."""
