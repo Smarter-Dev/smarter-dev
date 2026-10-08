@@ -61,7 +61,7 @@ _DREAMED_AT = _CUTOFF + timedelta(minutes=20)
 _YESTERDAY_MIDNIGHT = _CUTOFF - timedelta(days=1)
 _YESTERDAY_MORNING = _CUTOFF - timedelta(hours=15)
 
-_MEMORY = "## People & Relationships\nkai (id 7) is deep in embedded rust."
+_MEMORY = "## People & Relationships\n<7:kai> is deep in embedded rust."
 _IDENTITY = "## Identity & Voice\n- I use dry humor.\n- I let others finish."
 _BEHAVIOR = "Wait to be asked before explaining a toolchain."
 _PERSONALITY = "Dry, warm, quietly delighted by good shader work."

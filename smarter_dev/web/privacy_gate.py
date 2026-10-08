@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.bot.privacy.blocked_users import BlockedUsersCache
 from smarter_dev.bot.privacy.blocked_users import redact_blocked_mentions
+from smarter_dev.shared.member_tags import referenced_members
 from smarter_dev.shared.privacy_purge import BLOCKED_PLACEHOLDER
 from smarter_dev.web.chat_bot_purge import read_blocked_users
 
@@ -46,6 +47,29 @@ class OptOutGate:
 
     def carries_blocked_id(self, text: str) -> bool:
         return self.redact(text) != text
+
+    def carries_blocked_member(
+        self, text: str, blocked_names: frozenset[str] = frozenset()
+    ) -> bool:
+        """:meth:`carries_blocked_id`, or a tag with no id, ``<:name>`` (#104),
+        whose name is one of ``blocked_names`` (casefolded). The list holds
+        ids only, so the names come from the caller (see
+        :func:`~smarter_dev.web.chat_agent_public.blocked_member_names`)."""
+        if self.carries_blocked_id(text):
+            return True
+        return bool(blocked_names) and any(
+            ref.user_id is None and (ref.username or "").casefold() in blocked_names
+            for ref in referenced_members(text)
+        )
+
+    def blocked_names_in(self, *texts: str) -> set[str]:
+        """The names ``texts`` give, in a tag or the old form, to someone on
+        the list, casefolded."""
+        return {
+            ref.username.casefold()
+            for ref in referenced_members(*texts)
+            if ref.user_id and ref.username and self.is_blocked(ref.user_id)
+        }
 
     def scrub(self, value: Any) -> Any:
         """A JSON value with blocked ids redacted in every string and number,

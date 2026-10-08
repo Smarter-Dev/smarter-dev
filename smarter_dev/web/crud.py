@@ -5947,7 +5947,6 @@ async def upsert_guild_memory_blob(
     dreamed_at: datetime,
     behavior: str | None = None,
     personality: str | None = None,
-    public_content: str | None = None,
 ) -> ChatAgentGuildMemory:
     """Write the night's blob for ``guild_id``, bumping ``revision`` atomically.
 
@@ -5961,8 +5960,7 @@ async def upsert_guild_memory_blob(
     ``memory_enabled`` is deliberately absent from the update set — a dream must
     never undo the per-guild pause switch. ``behavior`` and ``personality``
     left as ``None`` are absent from it too, so a caller that does not name a
-    block can never wipe it; so is ``public_content`` (#103), and
-    ``public_page_enabled`` always is.
+    block can never wipe it. ``public_page_enabled`` (#103) always is.
     """
     insert = pg_insert if session.bind.dialect.name == "postgresql" else sqlite_insert
     statement = insert(ChatAgentGuildMemory).values(
@@ -5970,7 +5968,6 @@ async def upsert_guild_memory_blob(
         content=content,
         behavior=behavior or "",
         personality=personality or "",
-        public_content=public_content or "",
         revision=1,
         last_dream_at=dreamed_at,
         notes_consumed=notes_consumed,
@@ -5989,8 +5986,6 @@ async def upsert_guild_memory_blob(
         update_set["behavior"] = behavior
     if personality is not None:
         update_set["personality"] = personality
-    if public_content is not None:
-        update_set["public_content"] = public_content
     statement = statement.on_conflict_do_update(
         index_elements=["guild_id"], set_=update_set
     )

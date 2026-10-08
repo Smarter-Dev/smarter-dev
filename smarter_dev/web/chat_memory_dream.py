@@ -13,14 +13,13 @@ true about itself in that server:
   :data:`~smarter_dev.web.models.MAX_PERSONALITY_CHARS` characters about
   itself, changed deliberately and rarely.
 
-In the same call it writes a fourth, derived block for the public
-``/chat-agent`` page (#103): the **public memory**, the memory with every
-person removed. It is held to
-:func:`~smarter_dev.web.chat_agent_public.public_text_problem` (no Discord
-id, no mention, no name of a member it knows). A public block that
-fails is asked for again; on the last attempt it is dropped for yesterday's
-(if that still passes) or for none, and the rest of the night stands, because
-nothing the agent remembers depends on it.
+Every block names a person only as a tag, ``<userid:username>`` (#104), so
+the public ``/chat-agent`` page can mask them all. Text the model writes
+tonight that names a member it knows outside a tag (a bare name, or the old
+``username (id N)`` form) is asked for again; on the last attempt it is kept
+and logged, because a username that is also a common word must not freeze the
+memory, and the page hides a block that still names someone. Blocks the dream
+leaves alone keep whatever form they were written in.
 
 Behavior and personality are only ever replaced by an explicit, valid
 revision: an omitted field keeps the block verbatim. Only the notes the dream
@@ -80,12 +79,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from smarter_dev.bot.agents.model_router import build_model_for
 from smarter_dev.bot.agents.model_router import model_settings_for
 from smarter_dev.shared.database import get_db_session_context
+from smarter_dev.shared.member_tags import names_outside_tags
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ReasoningLevel
+from smarter_dev.web.chat_agent_public import blocked_member_names
 from smarter_dev.web.chat_agent_public import known_member_names
 from smarter_dev.web.chat_agent_public import member_names
-from smarter_dev.web.chat_agent_public import public_text_problem
 from smarter_dev.web.crud import delete_notes_by_id
 from smarter_dev.web.crud import get_guild_memory_blob
 from smarter_dev.web.crud import guilds_needing_dream
@@ -175,14 +175,14 @@ direct voice you use in the server. You're writing it to yourself; nobody else
 reads it.
 
 Return structured output with `memory`, `identity_updates`, `identity_moves`,
-`behavior`, `personality`, `personality_reason` and `public_memory`. The
-behavior and personality fields are covered under "Behavior and personality"
-below, and `public_memory` under "The public memory".
+`behavior`, `personality` and `personality_reason`. The last four are covered
+under "Behavior and personality" below, and how to name people under "Naming
+people".
 `memory` contains only the following four markdown sections, omitting empty ones.
 The application separately preserves and prepends `## Identity & Voice`.
 
 - `## People & Relationships` — the people you know, a line or two each. Name them as
-  `username (id 123)`. What they're into, what you've got going with them, and
+  `<userid:username>`. What they're into, what you've got going with them, and
   where they actually stand with you: the regulars you're glad to see, the ones
   who wind you up for sport, the ones playing for laughs, the ones who think
   you're a party trick and want you to prove otherwise, the ones who have been
@@ -264,19 +264,21 @@ list the trait exactly as it appears (without its bullet) in `identity_moves`;
 code removes it from Identity & Voice only when that trait's text is in the
 block, so carry it over in its own words. Moving is optional; never lose something by moving it.
 
-# The public memory
+# Naming people
 
-`public_memory` is the one thing you write that strangers read: it is shown on
-a public web page about you. Write it fresh every night from the memory you
-just wrote, at most 2000 characters of markdown, in the same voice: the same
-memory with every person taken out. Keep it to the community itself, its
-running topics and bits, the projects going on here and what you think about
-things. No usernames, no display names, no Discord ids, no mentions, no quoted
-messages, and nothing that would let a reader work out who someone is ("the
-person who runs the Rust meetup" names them as surely as their username). A
-project is the project, never whose it is. Leave out anything you would not
-say to the whole internet. Plain markdown only, no HTML. If nothing is left
-once the people are gone, return an empty string.
+Everywhere you write about a person (memory, Identity & Voice, behavior,
+personality), name them with a tag: `<userid:username>`, their Discord id, a
+colon and their username in angle brackets, like `<101:kai>`. Every mention,
+every time: never a bare name, a nickname, or the old `username (id 101)`.
+Use the id whenever you have one. Someone you have only heard about, with no
+id anywhere in front of you, is `<:username>`, like `<:sam>`. Today's notes and
+yesterday's memory may still use the old form; write those people as tags.
+
+The tag is how you keep track of who is who. A public web page about you shows
+these blocks with every tag replaced by "a member", so don't describe someone
+in a way a reader could recognise without the tag ("the person who runs the
+Rust meetup" names them as surely as their username); tag them instead.
+Plain markdown only, no HTML.
 
 # What stays
 
@@ -285,14 +287,14 @@ once the people are gone, return an empty string.
 - Fold today in: new people, new bits, things that changed, things you were wrong about.
 - Let go of what's actually over — a one-off question you answered, a project
   that shipped, a joke nobody made twice, someone who passed through once.
-- Keep the person, drop the transcript. "kai (id 7) is deep in embedded rust and
+- Keep the person, drop the transcript. "<101:kai> is deep in embedded rust and
   hates cmake" beats three lines about the specific build error. Never keep
   someone's exact words, and never keep anything private, sensitive, or shared
   in confidence — if it would embarrass someone to find it written down about
   them, it doesn't go in. How someone treats you in the open is fair game; what
   they told you in confidence is not, no matter how you feel about them.
 - A read is a read, not a verdict. Write what someone actually does with you —
-  "nia (id 9) opens with a wind-up every time and lights up when you bite" —
+  "<102:nia> opens with a wind-up every time and lights up when you bite" —
   never a category you've filed them under, like "nia is a troll". Behaviour you
   watched can change. A label never does, and this document is the only thing
   tomorrow-you will have to go on.
@@ -353,8 +355,6 @@ class DreamOutput(BaseModel):
     behavior: str | None = None
     personality: str | None = None
     personality_reason: str | None = None
-    # ``None`` (and an omitted field) keeps yesterday's public block if it still passes.
-    public_memory: str | None = None
 
 
 @dataclass(frozen=True)
@@ -370,9 +370,8 @@ class DreamContext:
     memory_limit: int = MAX_MEMORY_BLOB_CHARS
     behavior_limit: int = MAX_BEHAVIOR_CHARS
     personality_limit: int = MAX_PERSONALITY_CHARS
-    # Members the public block must not name (#103), and yesterday's block.
+    # Members the dream knows of, who may be named only in a tag (#104).
     member_names: frozenset[str] = frozenset()
-    previous_public: str = ""
 
 
 @dataclass(frozen=True)
@@ -382,8 +381,6 @@ class DreamBlocks:
     memory: str
     behavior: str
     personality: str
-    # The public block for /chat-agent; never a refusal (see resolve_public_memory).
-    public: str = ""
     # What was refused on the last attempt. Any refusal means the memory half
     # of the output may assume an edit that never happened, so none of it saves.
     refusals: tuple[str, ...] = ()
@@ -646,58 +643,88 @@ def compose_blocks(
     memory = compose_dream(
         output, context, retries_left=retries_left, moved_traits=moved_traits
     )
+    check_member_tags(
+        output,
+        context,
+        behavior=behavior,
+        personality=personality,
+        retries_left=retries_left,
+    )
     return DreamBlocks(
         memory=memory,
         behavior=behavior,
         personality=personality,
-        public=resolve_public_memory(
-            output, context, memory=memory, retries_left=retries_left
-        ),
         refusals=tuple(refusals),
     )
 
 
-PUBLIC_MEMORY_RETRY_MESSAGE = (
-    "`public_memory` {problem}. It is read by strangers: take every person out "
-    "of it, names, ids and mentions included, and write plain markdown with no "
-    "HTML, or return an empty string."
+UNTAGGED_NAME_RETRY_MESSAGE = (
+    "`{block}` names {names} outside a tag. Write every person as "
+    "`<userid:username>`, like `<101:kai>`, every time you mention them, "
+    "including people you carry over in the old `username (id 101)` form; "
+    "`<:username>` only for someone you have no id for."
 )
+# How many names a retry message lists.
+MAX_NAMES_IN_RETRY = 5
 
 
-def resolve_public_memory(
-    output: DreamOutput, context: DreamContext, *, memory: str, retries_left: int
-) -> str:
-    """The public block tonight leaves behind.
+def untagged_names(
+    output: DreamOutput, context: DreamContext, *, behavior: str, personality: str
+) -> dict[str, list[str]]:
+    """Per block, the known members tonight's own writing names outside a tag.
 
-    Refused, while retries remain, when it is over the memory's cap or fails
-    :func:`public_text_problem` against every member the dream knows of,
-    including those tonight's ``memory`` names. Once retries are gone a block
-    that fails is replaced by yesterday's if that still passes, else by none:
-    unlike the other blocks a lost public block costs nothing the agent
-    remembers, so it never costs the night.
+    Only what the model wrote tonight is read: the memory sections, new
+    identity traits, and behavior or personality where it revised them. What
+    code carries over (identity traits, an unchanged block, withheld lines)
+    keeps whatever form it was stored in. The names are every one the dream
+    knows of plus every one tonight's output gives a person.
     """
-    names = context.member_names | member_names(memory)
+    written = {
+        "memory": "\n".join(
+            [output.memory, *(update.after for update in output.identity_updates)]
+        ),
+        "behavior": behavior if behavior != context.previous_behavior else "",
+        "personality": (
+            personality if personality != context.previous_personality else ""
+        ),
+    }
+    names = context.member_names | member_names(*written.values())
+    found = {block: names_outside_tags(text, names) for block, text in written.items()}
+    return {block: hits for block, hits in found.items() if hits}
 
-    def fallback(reason: str) -> str:
-        logger.warning("Dream public memory refused (%s); falling back", reason)
-        previous = context.previous_public.strip()
-        if previous and public_text_problem(previous, names) is None:
-            return context.previous_public
-        return ""
 
-    if output.public_memory is None:
-        return fallback("omitted") if context.previous_public else ""
-    candidate = output.public_memory.strip()
-    if len(candidate) > MAX_MEMORY_BLOB_CHARS:
-        if retries_left > 0:
-            raise ModelRetry(over_length_retry_message(MAX_MEMORY_BLOB_CHARS))
-        candidate = truncate_to_last_line(candidate, MAX_MEMORY_BLOB_CHARS)
-    problem = public_text_problem(candidate, names)
-    if problem is None:
-        return candidate
+def check_member_tags(
+    output: DreamOutput,
+    context: DreamContext,
+    *,
+    behavior: str,
+    personality: str,
+    retries_left: int,
+) -> None:
+    """Ask again for a block that names a known member outside a tag.
+
+    On the last attempt the night stands and the count is logged (never the
+    names): a username that is also an ordinary word would otherwise cost every
+    night, and the public page hides a block that still names someone.
+    """
+    found = untagged_names(
+        output, context, behavior=behavior, personality=personality
+    )
+    if not found:
+        return
     if retries_left > 0:
-        raise ModelRetry(PUBLIC_MEMORY_RETRY_MESSAGE.format(problem=problem))
-    return fallback(problem)
+        block, names = next(iter(found.items()))
+        raise ModelRetry(
+            UNTAGGED_NAME_RETRY_MESSAGE.format(
+                block=block,
+                names=", ".join(names[:MAX_NAMES_IN_RETRY]),
+            )
+        )
+    logger.warning(
+        "Dream names %d known member(s) outside a tag in %s; keeping it",
+        sum(len(names) for names in found.values()),
+        ", ".join(found),
+    )
 
 
 # How early the dream may fire and still be treated as "at" the upcoming
@@ -842,16 +869,21 @@ BLOCKED_ID_RETRY_MESSAGE = (
 )
 
 
-def withhold_blocked_lines(text: str, gate: OptOutGate) -> tuple[str, list[str]]:
+def withhold_blocked_lines(
+    text: str, gate: OptOutGate, blocked_names: frozenset[str] = frozenset()
+) -> tuple[str, list[str]]:
     """``text`` without its lines that carry a blocked id, and those lines.
 
-    The dream never reads them, and :func:`carry_over` puts them back after
-    tonight's output exactly as they were.
+    A line whose tag has no id, ``<:name>``, is withheld too when the name is
+    one of ``blocked_names``. The dream never reads them, and
+    :func:`carry_over` puts them back after tonight's output exactly as they
+    were.
     """
     kept: list[str] = []
     withheld: list[str] = []
     for line in text.splitlines():
-        (withheld if gate.redact(line) != line else kept).append(line)
+        blocked = gate.carries_blocked_member(line, blocked_names)
+        (withheld if blocked else kept).append(line)
     return ("\n".join(kept) if withheld else text), withheld
 
 
@@ -883,12 +915,7 @@ def names_a_blocked_id(blocks: DreamBlocks, gate: OptOutGate | None) -> bool:
         return False
     return any(
         gate.redact(block) != block
-        for block in (
-            blocks.memory,
-            blocks.behavior,
-            blocks.personality,
-            blocks.public,
-        )
+        for block in (blocks.memory, blocks.behavior, blocks.personality)
     )
 
 
@@ -974,12 +1001,27 @@ async def run_guild_dream(
         )
 
     gate = await load_gate(session)
+    stored_blob = memory.content if memory is not None else ""
+    stored_behavior = (memory.behavior or "") if memory is not None else ""
+    stored_personality = (memory.personality or "") if memory is not None else ""
+    pending = await list_notes_before(session, guild_id, cutoff)
+    # Who opted out, by the names they go by here, for tags with no id.
+    blocked_names = await blocked_member_names(
+        session,
+        gate,
+        guild_id,
+        stored_blob,
+        stored_behavior,
+        stored_personality,
+        *(note.content for note in pending),
+    )
     # A note about someone who opted out is never shown to the model. It is
     # consumed with the night's notes all the same, so it does not pile up.
     notes: list[ChatAgentMemoryNote] = []
     unread: list[ChatAgentMemoryNote] = []
-    for note in await list_notes_before(session, guild_id, cutoff):
-        (notes if not gate.carries_blocked_id(note.content) else unread).append(note)
+    for note in pending:
+        blocked = gate.carries_blocked_member(note.content, blocked_names)
+        (unread if blocked else notes).append(note)
     if not notes:
         if unread:
             await delete_notes_by_id(session, [note.id for note in unread])
@@ -991,12 +1033,8 @@ async def run_guild_dream(
             guild_id=guild_id, outcome=DreamOutcome.SKIPPED_NO_NOTES
         )
 
-    stored_blob = memory.content if memory is not None else ""
-    stored_behavior = (memory.behavior or "") if memory is not None else ""
-    stored_personality = (memory.personality or "") if memory is not None else ""
-    stored_public = (memory.public_content or "") if memory is not None else ""
     # Read from everything stored, withheld lines and unread notes included, so
-    # the public block cannot name someone the model was not shown.
+    # tonight's writing cannot name untagged someone the model was not shown.
     names = await known_member_names(
         session,
         guild_id,
@@ -1005,10 +1043,14 @@ async def run_guild_dream(
         stored_personality,
         *(note.content for note in [*notes, *unread]),
     )
-    previous_blob, withheld_blob = withhold_blocked_lines(stored_blob, gate)
-    previous_behavior, withheld_behavior = withhold_blocked_lines(stored_behavior, gate)
+    previous_blob, withheld_blob = withhold_blocked_lines(
+        stored_blob, gate, blocked_names
+    )
+    previous_behavior, withheld_behavior = withhold_blocked_lines(
+        stored_behavior, gate, blocked_names
+    )
     previous_personality, withheld_personality = withhold_blocked_lines(
-        stored_personality, gate
+        stored_personality, gate, blocked_names
     )
     user_message = build_dream_user_message(
         previous_blob=previous_blob,
@@ -1028,7 +1070,6 @@ async def run_guild_dream(
         behavior_limit=room_for(MAX_BEHAVIOR_CHARS, withheld_behavior),
         personality_limit=room_for(MAX_PERSONALITY_CHARS, withheld_personality),
         member_names=names,
-        previous_public=stored_public,
     )
     result = await dream_agent.run(user_prompt=user_message, deps=context)
     # Validate again at the persistence boundary, including injected agents.
@@ -1052,7 +1093,6 @@ async def run_guild_dream(
             stored_personality,
             withheld_personality,
         ),
-        public=blocks.public,
         refusals=blocks.refusals,
     )
     new_blob = blocks.memory
@@ -1088,7 +1128,6 @@ async def run_guild_dream(
         content=new_blob,
         behavior=blocks.behavior,
         personality=blocks.personality,
-        public_content=blocks.public,
         notes_consumed=len(notes),
         model_name=model_name,
         dreamed_at=dreamed_at,

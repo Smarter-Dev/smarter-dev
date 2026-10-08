@@ -1,0 +1,40 @@
+# One-off Job: run scripts/retag_chat_agent_memory.py once, after the deploy
+# that carries #104. It rewrites every guild's chat-agent memory, behavior,
+# personality and pending notes from `username (id N)` to `<N:username>`, and
+# logs counts per guild, never text. Safe to run again: a second run converts
+# nothing. A dry run unless ARGS is "--apply"; apply exits 1 if it refused a
+# guild for going over a cap (that guild is left untouched).
+# Not applied by the deploy workflow; apply by hand with the deployed website
+# tag. Dry run first, read the counts, then apply:
+#   sed -e 's|<IMAGE_VERSION>|<tag>|' -e 's|<ARGS>|--dry-run|' k8s/oneoff-retag-chat-agent-memory.yaml | kubectl apply -f -
+#   kubectl logs -n smarter-dev job/smarter-dev-retag-chat-agent-memory
+#   kubectl delete job -n smarter-dev smarter-dev-retag-chat-agent-memory
+#   sed -e 's|<IMAGE_VERSION>|<tag>|' -e 's|<ARGS>|--apply|' k8s/oneoff-retag-chat-agent-memory.yaml | kubectl apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smarter-dev-retag-chat-agent-memory
+  namespace: smarter-dev
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: smarter-dev-retag-chat-agent-memory
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: retag-chat-agent-memory
+          image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
+          workingDir: /app
+          command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/retag_chat_agent_memory.py <ARGS>"]
+          envFrom:
+            - configMapRef:
+                name: smarter-dev-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: database-url

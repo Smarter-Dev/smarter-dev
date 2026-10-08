@@ -46,6 +46,7 @@ from dataclasses import field
 from datetime import datetime
 from typing import Any
 
+from smarter_dev.shared.member_tags import MEMBER_TAG
 from smarter_dev.shared.privacy_purge import BLOCKED_PLACEHOLDER
 from smarter_dev.shared.privacy_purge import ENFORCING_TTL_SECONDS
 from smarter_dev.shared.privacy_purge import enforcing_key
@@ -328,7 +329,13 @@ def redact_blocked_mentions(text: str, blocked: BlockedUsersCache) -> str:
     A bystander's message (or a code block, or a bot's own message) can carry
     a blocked user's id as mention syntax; it becomes ``@[blocked user]`` so
     neither the id nor (after mention resolution) the name reaches the model.
+    A memory tag ``<id:username>`` (#104) of a blocked user goes whole, name
+    included, as ``[blocked user]``; a tag with no id has nothing to match.
     """
+
+    def tag(match: re.Match[str]) -> str:
+        user_id = match.group("tag_id")
+        return "[blocked user]" if user_id and blocked.is_blocked(user_id) else match[0]
 
     def mention(match: re.Match[str]) -> str:
         return "@[blocked user]" if blocked.is_blocked(match.group(1)) else match[0]
@@ -336,6 +343,8 @@ def redact_blocked_mentions(text: str, blocked: BlockedUsersCache) -> str:
     def bare(match: re.Match[str]) -> str:
         return "[blocked user]" if blocked.is_blocked(match.group(1)) else match[0]
 
+    if "<" in text:
+        text = MEMBER_TAG.sub(tag, text)
     if "<@" in text:
         text = _USER_MENTION.sub(mention, text)
     # Any other appearance of a blocked id as a digit run: a bare id, an
