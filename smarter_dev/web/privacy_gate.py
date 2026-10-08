@@ -48,10 +48,15 @@ class OptOutGate:
         return self.redact(text) != text
 
     def scrub(self, value: Any) -> Any:
-        """A JSON value with blocked ids redacted in every string, and every
-        mapping entry whose key carries a blocked id left out."""
+        """A JSON value with blocked ids redacted in every string and number,
+        and every mapping entry whose key carries a blocked id left out."""
         if isinstance(value, str):
             return self.redact(value)
+        if isinstance(value, int) and not isinstance(value, bool):
+            # A snowflake kept as a number; replaced by the same text a
+            # string id gets.
+            redacted = self.redact(str(value))
+            return value if redacted == str(value) else redacted
         if isinstance(value, list):
             return [self.scrub(item) for item in value]
         if isinstance(value, dict):

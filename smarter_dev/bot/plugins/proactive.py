@@ -1716,6 +1716,11 @@ async def compact_idle_histories(run: ProactiveRuntime) -> dict[int, str]:
     store = run.history_store()
     if store is None:
         return {}
+    if not get_blocked_users().loaded:
+        # Before the list loads everyone reads as blocked, so a fold now
+        # would summarise placeholders. The next tick tries again (#100).
+        logger.info("proactive idle compaction deferred: blocked-users list not loaded")
+        return {}
     cutoff = time.time() - AGENT_VERBATIM_IDLE_WINDOW.total_seconds()
     outcomes = {}
     for guild_id in await store.idle_guild_ids(written_before=cutoff):

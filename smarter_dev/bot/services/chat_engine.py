@@ -842,6 +842,11 @@ class ChannelEngine:
             if not first_activation and all(
                 m.blocked for m in agent_input.new_messages
             ):
+                # The memory blocks this turn would have re-sent go out on
+                # the next one instead.
+                self._reemit_long_term_memory = (
+                    self._reemit_long_term_memory or reemit_memory
+                )
                 logger.info(
                     "[%s] Chat turn in channel %s skipped: every new message's "
                     "author blocked before the model call",

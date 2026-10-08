@@ -299,3 +299,31 @@ async def test_idle_compaction_never_shows_the_summariser_an_opted_out_member(
 
         assert await proactive.compact_idle_histories(setup.runtime) == {GUILD: "folded"}
         assert ("my cat is sick" in str(setup.summaries[0])) is seen
+
+
+async def test_idle_compaction_waits_for_the_list_to_load(monkeypatch):
+    from smarter_dev.bot.plugins import proactive
+    from smarter_dev.bot.privacy.blocked_users import BlockedUsersCache
+    from tests.bot.proactive_idle_compaction_test import GUILD
+    from tests.bot.proactive_idle_compaction_test import IDLE
+    from tests.bot.proactive_idle_compaction_test import Setup
+
+    get_blocked_users().load(0, [])  # what the store and the fold read
+    cold = BlockedUsersCache()  # what the sweep asks: never loaded
+    monkeypatch.setattr("smarter_dev.bot.plugins.proactive.get_blocked_users", lambda: cold)
+    setup = Setup(monkeypatch)
+    await setup.store.write_guild(
+        GUILD,
+        [
+            ModelRequest(parts=[UserPromptPart(content=_line(NIA, "my cat is sick"))]),
+            ModelResponse(parts=[TextPart(content="see a vet")]),
+        ],
+    )
+    await setup.backdate(IDLE + 1)
+
+    assert await proactive.compact_idle_histories(setup.runtime) == {}
+    assert setup.summaries == []
+
+    cold.load(1, [])
+    assert await proactive.compact_idle_histories(setup.runtime) == {GUILD: "folded"}
+    assert "my cat is sick" in str(setup.summaries[0])

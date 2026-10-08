@@ -6092,13 +6092,15 @@ async def create_memory_note(
     engagement_id: UUID | None = None,
     daily_cap: int = MAX_NOTES_PER_GUILD_PER_DAY,
     about_user_ids: Iterable[str] = (),
+    opt_out_checked: bool = False,
 ) -> ChatAgentMemoryNote | None:
     """Keep one note for ``guild_id``, or return ``None`` if it must not be kept.
 
     A note about or from someone on the blocked-users list (opted out of the
     AI assistant, or deleted) is never kept (#100): ``about_user_ids`` names
     who it is about and whose words it came from, and the text itself must
-    not carry a blocked id. See :func:`memory_note_opted_out`.
+    not carry a blocked id. See :func:`memory_note_opted_out`; a caller that
+    has just asked it passes ``opt_out_checked``.
 
     ``None`` means one of two soft refusals, both of which the caller reports
     back to the agent as a truthful sentence rather than an error: the guild has
@@ -6110,7 +6112,9 @@ async def create_memory_note(
     so the row's timestamp and the window the caps were checked against are the
     same instant on every dialect.
     """
-    if await memory_note_opted_out(session, content, about_user_ids):
+    if not opt_out_checked and await memory_note_opted_out(
+        session, content, about_user_ids
+    ):
         return None
     if await count_notes_since(session, guild_id, day_start) >= daily_cap:
         return None

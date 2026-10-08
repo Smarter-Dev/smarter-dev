@@ -33,12 +33,14 @@ Three rules shape everything here:
    so it becomes real only if that write commits.
 
 Someone on the blocked-users list (opted out of the AI assistant, or deleted)
-is never dreamed about (#100). A note carrying their id is not read and so not
-deleted; it waits for the admin's deletion or their opting back in. A line of
-a block carrying their id is withheld from the model and carried over byte for
-byte, so the dream neither rewrites nor reintroduces it, and an output that
-names a blocked id is refused like any other bad night. Opting out deletes
-nothing; that stays the admin's deletion request.
+is never dreamed about (#100). A note carrying their id is not shown to the
+model; it is consumed with the notes that were, on the same night, so it lives
+no longer than any other note. A line of a block carrying their id is withheld
+from the model and carried over byte for byte, so the dream neither rewrites
+nor reintroduces it, and each block's limit tonight leaves room for those lines
+so the carried-over block still fits its column. An output that names a
+blocked id is refused like any other bad night. Opting out deletes nothing
+beyond that; the rest stays the admin's deletion request.
 
 The dream runs in the web image (``scripts/dream_session.py``) and therefore
 talks to :mod:`smarter_dev.web.crud` directly rather than over the bot API.
@@ -115,14 +117,18 @@ FIRST_NIGHT_NUDGE = (
 )
 # Restates the *policy*, not the arithmetic: a model told only "too long" shaves
 # every line evenly, which is exactly the flattening the prompt forbids.
-OVER_LENGTH_RETRY_MESSAGE = (
-    f"That's over the {MAX_MEMORY_BLOB_CHARS}-character limit. Don't shave "
-    "every line to fit — that's how you end up remembering everyone equally "
-    "and nobody at all. Drop whole things instead: the quietest thread, the "
-    "joke that's gone still, the person you haven't spoken to in weeks. "
-    "Leave everything that survives written exactly the way you already had it."
-    " Identity is protected: cut episodic content, never identity to make room."
-)
+def over_length_retry_message(limit: int) -> str:
+    return (
+        f"That's over the {limit}-character limit. Don't shave "
+        "every line to fit — that's how you end up remembering everyone equally "
+        "and nobody at all. Drop whole things instead: the quietest thread, the "
+        "joke that's gone still, the person you haven't spoken to in weeks. "
+        "Leave everything that survives written exactly the way you already had it."
+        " Identity is protected: cut episodic content, never identity to make room."
+    )
+
+
+OVER_LENGTH_RETRY_MESSAGE = over_length_retry_message(MAX_MEMORY_BLOB_CHARS)
 
 DREAM_SYSTEM_PROMPT = """\
 You are the Smarter Dev Discord bot, alone at the end of the day.
@@ -330,6 +336,11 @@ class DreamContext:
     previous_personality: str = ""
     # The blocked-users list as the dream read it (#100); None checks nothing.
     gate: OptOutGate | None = None
+    # Each block's limit tonight: its column's, less the room the lines
+    # withheld from the model take when :func:`carry_over` puts them back.
+    memory_limit: int = MAX_MEMORY_BLOB_CHARS
+    behavior_limit: int = MAX_BEHAVIOR_CHARS
+    personality_limit: int = MAX_PERSONALITY_CHARS
 
 
 @dataclass(frozen=True)
@@ -466,6 +477,7 @@ def compose_dream(
     return enforce_blob_limit(
         "\n\n".join(part for part in (identity, memory) if part),
         retries_left=retries_left,
+        limit=context.memory_limit,
     )
 
 
@@ -525,7 +537,7 @@ def resolve_personality(
         output.personality,
         previous,
         name="personality",
-        limit=MAX_PERSONALITY_CHARS,
+        limit=context.personality_limit,
         retries_left=retries_left,
         refusals=refusals,
     )
@@ -575,7 +587,7 @@ def compose_blocks(
         output.behavior,
         context.previous_behavior,
         name="behavior",
-        limit=MAX_BEHAVIOR_CHARS,
+        limit=context.behavior_limit,
         retries_left=retries_left,
         refusals=refusals,
     )
@@ -660,7 +672,9 @@ def truncate_to_last_line(text: str, limit: int) -> str:
     return head[:last_break].rstrip()
 
 
-def enforce_blob_limit(blob: str, *, retries_left: int) -> str:
+def enforce_blob_limit(
+    blob: str, *, retries_left: int, limit: int = MAX_MEMORY_BLOB_CHARS
+) -> str:
     """Return the blob, ask the model to try again, or cut it ourselves.
 
     The ladder the plan specifies: while retries remain, an over-length blob
@@ -669,16 +683,16 @@ def enforce_blob_limit(blob: str, *, retries_left: int) -> str:
     warn, because a slightly short memory beats no memory.
     """
     text = blob.strip()
-    if len(text) <= MAX_MEMORY_BLOB_CHARS:
+    if len(text) <= limit:
         return text
     if retries_left > 0:
-        raise ModelRetry(OVER_LENGTH_RETRY_MESSAGE)
+        raise ModelRetry(over_length_retry_message(limit))
     logger.warning(
         "Dream output still %d chars after retries; truncating to %d",
         len(text),
-        MAX_MEMORY_BLOB_CHARS,
+        limit,
     )
-    return truncate_to_last_line(text, MAX_MEMORY_BLOB_CHARS)
+    return truncate_to_last_line(text, limit)
 
 
 def should_keep_previous_blob(new_blob: str, previous_blob: str) -> bool:
@@ -761,6 +775,14 @@ def withhold_blocked_lines(text: str, gate: OptOutGate) -> tuple[str, list[str]]
     return ("\n".join(kept) if withheld else text), withheld
 
 
+def room_for(limit: int, withheld: list[str]) -> int:
+    """What is left of ``limit`` for the model once ``withheld`` is carried
+    over: the lines and the line break before them."""
+    if not withheld:
+        return limit
+    return max(0, limit - len("\n".join(withheld)) - 1)
+
+
 def carry_over(block: str, shown: str, stored: str, withheld: list[str]) -> str:
     """Tonight's ``block`` with the withheld lines after it, unchanged.
 
@@ -771,7 +793,8 @@ def carry_over(block: str, shown: str, stored: str, withheld: list[str]) -> str:
         return block
     if block == shown:
         return stored
-    return "\n".join([block.rstrip(), *withheld]).strip()
+    head = [block.rstrip()] if block.strip() else []
+    return "\n".join([*head, *withheld])
 
 
 def names_a_blocked_id(blocks: DreamBlocks, gate: OptOutGate | None) -> bool:
@@ -866,15 +889,18 @@ async def run_guild_dream(
         )
 
     gate = await load_gate(session)
-    # A note about someone who opted out is not read, so it is not deleted.
-    notes = [
-        note
-        for note in await list_notes_before(session, guild_id, cutoff)
-        if gate.redact(note.content) == note.content
-    ]
+    # A note about someone who opted out is never shown to the model. It is
+    # consumed with the night's notes all the same, so it does not pile up.
+    notes: list[ChatAgentMemoryNote] = []
+    unread: list[ChatAgentMemoryNote] = []
+    for note in await list_notes_before(session, guild_id, cutoff):
+        (notes if not gate.carries_blocked_id(note.content) else unread).append(note)
     if not notes:
+        if unread:
+            await delete_notes_by_id(session, [note.id for note in unread])
         if memory is not None:
             memory.last_dream_at = dreamed_at
+        if unread or memory is not None:
             await session.commit()
         return GuildDreamResult(
             guild_id=guild_id, outcome=DreamOutcome.SKIPPED_NO_NOTES
@@ -902,6 +928,9 @@ async def run_guild_dream(
         previous_behavior=previous_behavior,
         previous_personality=previous_personality,
         gate=gate,
+        memory_limit=room_for(MAX_MEMORY_BLOB_CHARS, withheld_blob),
+        behavior_limit=room_for(MAX_BEHAVIOR_CHARS, withheld_behavior),
+        personality_limit=room_for(MAX_PERSONALITY_CHARS, withheld_personality),
     )
     result = await dream_agent.run(user_prompt=user_message, deps=context)
     # Validate again at the persistence boundary, including injected agents.
@@ -975,7 +1004,7 @@ async def run_guild_dream(
         model_name=model_name,
     )
     await prune_memory_revisions(session, guild_id)
-    await delete_notes_by_id(session, [note.id for note in notes])
+    await delete_notes_by_id(session, [note.id for note in [*notes, *unread]])
     await session.commit()
     if blocks.personality != stored_personality:
         logger.info(

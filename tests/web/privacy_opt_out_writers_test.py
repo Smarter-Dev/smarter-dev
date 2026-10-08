@@ -3,8 +3,8 @@
 The gate (``smarter_dev.web.privacy_gate``) reads the block list from the
 database. A memory note about or from someone on it is never kept, and the
 nightly dream neither reads notes about them nor rewrites or reintroduces
-lines about them. Opting out deletes nothing. Each test has a negative
-control. Real SQLite tables, stub dream model, synthetic members only: kai
+lines about them. Notes about them are consumed unread on the usual
+schedule; opting out deletes nothing else. Each test has a negative control. Real SQLite tables, stub dream model, synthetic members only: kai
 (opted out) and nia.
 """
 
@@ -156,8 +156,8 @@ async def test_the_dream_reads_nothing_about_an_opted_out_member(db_session):
     assert memory.content.startswith(f"## People\n- nia (id {NIA}) shipped the jam build")
     # ... and a block the model left alone comes back exactly as stored.
     assert memory.behavior == f"Tease kai ({KAI}) gently.\nBe brief."
-    # The note about them was not read, so it was not deleted; nia's was.
-    assert await _note_texts(db_session) == [f"kai (id {KAI}) was quiet today"]
+    # The note about them was not read, but it is consumed with the rest.
+    assert await _note_texts(db_session) == []
 
 
 async def test_without_an_opt_out_the_dream_reads_everything(db_session):
@@ -196,7 +196,74 @@ async def test_a_night_with_only_notes_about_opted_out_members_calls_no_model(db
 
     assert result.outcome is DreamOutcome.SKIPPED_NO_NOTES
     assert agent.prompts == []
-    assert len(await _note_texts(db_session)) == 2
+    # Consumed unread, so they do not pile up night after night.
+    assert await _note_texts(db_session) == []
+    assert (await get_guild_memory_blob(db_session, _GUILD)).content == _BLOB
+
+
+def _column_limits() -> dict[str, int]:
+    from smarter_dev.web.models import ChatAgentGuildMemory
+
+    columns = ChatAgentGuildMemory.__table__.c
+    return {name: columns[name].type.length for name in ("content", "behavior", "personality")}
+
+
+async def test_carried_over_lines_still_fit_the_columns(db_session):
+    """SQLite does not enforce String(n); Postgres does. A carried-over line
+    must not push a block past its column on the night the model writes up to
+    the full cap."""
+    limits = _column_limits()
+    kai_line = f"- kai (id {KAI}) " + "loves shaders " * 40
+    await _seed(
+        db_session,
+        blob=f"## People\n{kai_line}\n- nia (id {NIA}) runs the jam",
+        behavior=f"Tease kai ({KAI}) " + "gently " * 50 + "\nBe brief.",
+    )
+    await opt_out(db_session, KAI)
+    full = "\n".join(f"- nia (id {NIA}) shipped build {i}" for i in range(200))
+    agent = _Dream(memory=full[: limits["content"]], behavior="Be brief. Be kind.")
+
+    result = await _dream(db_session, agent)
+
+    assert result.outcome is DreamOutcome.DREAMED
+    assert agent.contexts[0].memory_limit < limits["content"]  # room was kept
+    memory = await get_guild_memory_blob(db_session, _GUILD)
+    assert kai_line in memory.content and len(memory.content) <= limits["content"]
+    assert f"Tease kai ({KAI})" in memory.behavior
+    assert len(memory.behavior) <= limits["behavior"]
+    assert len(memory.personality) <= limits["personality"]
+
+
+async def test_without_an_opt_out_the_model_gets_the_whole_cap(db_session):
+    """Control for the test above: nothing withheld, nothing reserved."""
+    from smarter_dev.web.models import MAX_BEHAVIOR_CHARS
+    from smarter_dev.web.models import MAX_MEMORY_BLOB_CHARS
+    from smarter_dev.web.models import MAX_PERSONALITY_CHARS
+
+    await _seed(db_session, blob=_BLOB)
+    agent = _Dream(memory=f"## People\n- nia (id {NIA}) shipped")
+
+    await _dream(db_session, agent)
+
+    context = agent.contexts[0]
+    assert (context.memory_limit, context.behavior_limit, context.personality_limit) == (
+        MAX_MEMORY_BLOB_CHARS,
+        MAX_BEHAVIOR_CHARS,
+        MAX_PERSONALITY_CHARS,
+    )
+
+
+def test_the_retry_asks_for_the_room_left_not_the_column():
+    import pytest
+    from pydantic_ai import ModelRetry
+
+    from smarter_dev.web.chat_memory_dream import compose_blocks
+
+    context = DreamContext(previous_blob="", notes=["a note"], memory_limit=100)
+    with pytest.raises(ModelRetry, match="100-character"):
+        compose_blocks(DreamOutput(memory="x" * 101), context, retries_left=1)
+    blocks = compose_blocks(DreamOutput(memory="line\n" * 30), context, retries_left=0)
+    assert len(blocks.memory) <= 100
 
 
 # -- handler memories ---------------------------------------------------------------
@@ -253,7 +320,12 @@ async def test_guild_handler_memory_keeps_nothing_new_about_an_opted_out_member(
     await persist_guild_memory(
         db_session,
         _GUILD,
-        {f"warn:{KAI}": 2, f"warn:{NIA}": 1, "roster": [KAI, NIA]},
+        {
+            f"warn:{KAI}": 2,
+            f"warn:{NIA}": 1,
+            "roster": [KAI, NIA],
+            "ids": [int(KAI), int(NIA)],
+        },
         [],
     )
 
@@ -261,4 +333,5 @@ async def test_guild_handler_memory_keeps_nothing_new_about_an_opted_out_member(
         f"warn:{KAI}": 1,
         f"warn:{NIA}": 1,
         "roster": ["[blocked user]", NIA],
+        "ids": ["[blocked user]", int(NIA)],
     }

@@ -218,11 +218,11 @@ def test_recheck_stops_a_turn_whose_trigger_opted_out():
 
 
 class _OptsOutWhileBuilding:
-    """Wraps the engine-test harness's input builder: the activation's author
-    opts out while the turn is being prepared."""
+    """Wraps one of the engine-test harness's input builders: the author opts
+    out while the turn is being prepared."""
 
-    def __init__(self, harness, user_id: str):
-        self._build = harness._build_initial
+    def __init__(self, build, user_id: str):
+        self._build = build
         self._user_id = user_id
 
     async def __call__(self, **kwargs):
@@ -231,9 +231,7 @@ class _OptsOutWhileBuilding:
         return built
 
 
-async def test_an_engine_turn_whose_author_opts_out_mid_turn_never_calls_the_model(
-    monkeypatch,
-):
+async def test_an_engine_turn_whose_author_opts_out_mid_turn_never_calls_the_model():
     import fakeredis.aioredis
 
     from tests.bot.services.test_chat_engine_memory import EMPTY_SNAPSHOT
@@ -248,12 +246,10 @@ async def test_an_engine_turn_whose_author_opts_out_mid_turn_never_calls_the_mod
         get_blocked_users().load(0, [])
         engine = _make_engine(redis, _memory_service(EMPTY_SNAPSHOT))
         agent = _chat_agent()
-        with _EngineHarness(fake_memory=fake_memory.__wrapped__(), agent=agent) as harness:
-            if opts_out:
-                monkeypatch.setattr(
-                    "smarter_dev.bot.services.chat_engine.build_initial_input",
-                    _OptsOutWhileBuilding(harness, "200"),
-                )
+        harness = _EngineHarness(fake_memory=fake_memory.__wrapped__(), agent=agent)
+        if opts_out:
+            harness._build_initial = _OptsOutWhileBuilding(harness._build_initial, "200")
+        with harness:
             await engine._run_once(first_activation=True)
         assert agent.run.await_count == model_calls
         if model_calls:
@@ -291,3 +287,31 @@ async def test_a_history_kept_before_the_opt_out_reaches_the_model_blanked():
             await engine._run_once(first_activation=False)
         history = str(agent.run.await_args.kwargs["message_history"])
         assert ("kai said this earlier" in history) is seen
+
+
+async def test_a_skipped_follow_up_keeps_the_memory_blocks_for_the_next_turn():
+    """A follow-up whose every new message's author opted out is skipped. The
+    memory blocks it was due to re-send must go out on the next turn."""
+    import fakeredis.aioredis
+
+    from tests.bot.services.test_chat_engine_memory import EMPTY_SNAPSHOT
+    from tests.bot.services.test_chat_engine_memory import _chat_agent
+    from tests.bot.services.test_chat_engine_memory import _EngineHarness
+    from tests.bot.services.test_chat_engine_memory import _make_engine
+    from tests.bot.services.test_chat_engine_memory import _memory_service
+    from tests.bot.services.test_chat_engine_memory import _queue_a_message
+    from tests.bot.services.test_chat_engine_memory import fake_memory
+
+    for opts_out, model_calls, reemit_after in ((False, 1, False), (True, 0, True)):
+        get_blocked_users().load(0, [])
+        engine = _make_engine(fakeredis.aioredis.FakeRedis(), _memory_service(EMPTY_SNAPSHOT))
+        engine._reemit_long_term_memory = True
+        _queue_a_message(engine)
+        agent = _chat_agent()
+        harness = _EngineHarness(fake_memory=fake_memory.__wrapped__(), agent=agent)
+        if opts_out:
+            harness._build_followup = _OptsOutWhileBuilding(harness._build_followup, "200")
+        with harness:
+            await engine._run_once(first_activation=False)
+        assert agent.run.await_count == model_calls
+        assert engine._reemit_long_term_memory is reemit_after

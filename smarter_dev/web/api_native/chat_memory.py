@@ -149,6 +149,7 @@ class ChatMemoryController(Controller):
             content=data.content,
             engagement_id=data.engagement_id,
             about_user_ids=data.about_user_ids,
+            opt_out_checked=True,
             created_at=now,
             day_start=day_start,
         )
