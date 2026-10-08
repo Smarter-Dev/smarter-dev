@@ -7,6 +7,7 @@ Luna, Brave, Jev and the worker queue are replaced."""
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -22,6 +23,7 @@ from sqlalchemy import select
 
 from smarter_dev.web import dashboard_controller
 from smarter_dev.web import search_link_controller as links
+from smarter_dev.web.llm_pricing import calc_cost
 from smarter_dev.web.models import UsageCostRow
 from smarter_dev.web.models import WebSearchLink
 from smarter_dev.web.models import WebSearchRun
@@ -370,3 +372,21 @@ async def test_the_warm_up_runs_only_where_enabled_and_never_blocks_startup(monk
     monkeypatch.setattr(links, "WARM_ON_STARTUP", True)
     await links.warm_address_check(None)  # a failed warm-up is logged, not raised
     assert calls == ["warm"]
+
+
+@pytest.mark.parametrize("input_tokens", [0, 1, 40, 50, 12_345, 924_157])
+async def test_address_cost_is_unchanged_by_reading_the_rate_from_llm_pricing(input_tokens):
+    # Jev's rate moved into llm_pricing (#101); the ledger figure must not move.
+    class Client:
+        async def system_one(self, **_):
+            noul = SimpleNamespace(noul=0.1)
+            return SimpleNamespace(
+                nouls={"open": noul, "file": noul, "code": noul},
+                usage=SimpleNamespace(input_tokens=input_tokens),
+            )
+
+    _, usage = await address.ask_jev(address.parse("getbuild.ing"), client=Client())
+    assert usage["cost_usd"] == round(input_tokens * 0.042 / 1_000_000, 8)
+    assert Decimal(str(usage["cost_usd"])) == calc_cost(
+        input_tokens, 0, "typesafe:jev-1.13.0"
+    ).quantize(Decimal("1e-8"))

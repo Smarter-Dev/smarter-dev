@@ -21,6 +21,8 @@ from pydantic import Field
 from pydantic import create_model
 from pydantic_ai import Agent
 
+from smarter_dev.web.llm_pricing import JEV_INPUT_PRICE_PER_MILLION_USD
+
 RANK_MODEL = os.getenv("WEB_SEARCH_RANK_MODEL", "jev-1.13.0")
 # A score of 0.7 or more counts as relevant: on the eval's labelled sets 0.6
 # to 0.8 score the same, 0.5 lets store and job pages through and 0.9 drops
@@ -31,8 +33,8 @@ BOOLEAN_THRESHOLD = 0.5
 # conferences this week") drops a whole rubric level and is never the top pick.
 LOCAL_PENALTY = 1.0
 TIMEOUT_SECONDS = 60
-# Jev list price; output tokens are free.
-INPUT_PRICE_PER_MILLION_USD = 0.042
+# Jev list price, kept in llm_pricing; output tokens are free.
+INPUT_PRICE_PER_MILLION_USD = float(JEV_INPUT_PRICE_PER_MILLION_USD)
 
 INSTRUCTIONS = (
     "Follow the GUIDE. A result is at least level 1 when the snippet gives useful "

@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC
 from datetime import datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import uuid4
 
 import httpx
@@ -20,6 +21,7 @@ from litestar.exceptions import HTTPException
 from sqlalchemy import select
 
 from smarter_dev.web import dashboard_controller
+from smarter_dev.web.llm_pricing import calc_cost
 from smarter_dev.web.models import UsageCostRow
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.usage_invoice import monthly_invoice
@@ -490,3 +492,29 @@ async def test_searches_that_need_no_answer_never_start_one(search_env):
     await pipeline.run_search(run.id, search_env["notify"])
     assert "answering" not in [event["status"] for event in search_env["events"]]
     assert search_env["events"][-1]["answer"] is None
+
+
+@pytest.mark.parametrize("input_tokens", [0, 1, 999, 10_000, 924_157, 3_141_593])
+async def test_ranking_cost_is_unchanged_by_reading_the_rate_from_llm_pricing(
+    monkeypatch, input_tokens
+):
+    # Jev's rate moved into llm_pricing (#101); the ledger figure must not move.
+    class FakeAgent:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def run(self, *args, **kwargs):
+            verdicts = _verdicts([2], [False], best=1)
+            return SimpleNamespace(
+                output=SimpleNamespace(model_dump=lambda: verdicts),
+                response=SimpleNamespace(provider_details={}, model_name="jev-1.13.0"),
+                usage=SimpleNamespace(input_tokens=input_tokens),
+            )
+
+    monkeypatch.setattr(ranking, "Agent", FakeAgent)
+    monkeypatch.setattr(ranking, "build_model", lambda: None)
+    _, usage = await ranking.rank("q", [{"domain": "a.org", "snippet": "s"}])
+    assert usage["cost_usd"] == round(input_tokens * 0.042 / 1e6, 6)
+    assert usage["cost_usd"] == pytest.approx(
+        float(calc_cost(input_tokens, 0, "typesafe:jev-1.13.0")), abs=5e-7
+    )

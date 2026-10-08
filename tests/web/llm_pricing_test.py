@@ -395,6 +395,49 @@ class TestOpenCodeZenPricing:
         assert cost == Decimal("0.156")
 
 
+class TestTypeSafePricing:
+    """Jev bills $0.042/M input and nothing for output (#101)."""
+
+    def test_jev_rates(self):
+        assert calc_cost(1_000_000, 1_000_000, "jev-1.13.0") == Decimal("0.042")
+
+    def test_prefixed_and_bare_ids_price_the_same(self):
+        # The watcher reports the prefixed id; its ledger rows keep the bare one.
+        assert calc_cost(924_157, 20_244, "typesafe:jev-1.13.0") == Decimal(
+            "0.038814594"
+        )
+        assert calc_cost(924_157, 20_244, "jev-1.13.0") == Decimal("0.038814594")
+
+    def test_jev_has_no_cache_discount(self):
+        assert calc_cost(1_000_000, 0, "jev-1.13.0", 600_000) == Decimal("0.042")
+
+    def test_jev_is_not_a_zero_cost_fallback(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="smarter_dev.web.llm_pricing"):
+            calc_cost(1_000, 0, "typesafe:jev-1.13.0")
+        assert "No pricing found" not in caplog.text
+
+    def test_search_modules_read_the_rate_from_here(self):
+        from smarter_dev.web.web_search import address
+        from smarter_dev.web.web_search import ranking
+
+        rate = float(llm_pricing.JEV_INPUT_PRICE_PER_MILLION_USD)
+        assert ranking.INPUT_PRICE_PER_MILLION_USD == rate == 0.042
+        assert address.INPUT_PRICE_PER_MILLION_USD == rate
+
+    def test_table_is_still_needed(self):
+        # genai-prices has no TypeSafe provider, so _patch_provider would drop
+        # these silently. If the library ever prices Jev, this fails so the
+        # local entry is checked against it rather than left to drift.
+        assert find_provider_by_id(llm_pricing._snapshot.providers, "typesafe") is None
+        known = {
+            model.id
+            for provider in llm_pricing._snapshot.providers
+            for model in provider.models
+            if model.id in llm_pricing._TYPESAFE_PRICES
+        }
+        assert known == set()
+
+
 class TestGooglePricing:
     def test_gemini_31_pro_base_rates(self):
         assert calc_cost(1_000_000, 1_000_000, "gemini-3.1-pro") == Decimal(

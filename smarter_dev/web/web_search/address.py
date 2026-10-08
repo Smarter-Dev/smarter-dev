@@ -21,6 +21,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from smarter_dev.web.llm_pricing import JEV_INPUT_PRICE_PER_MILLION_USD
+
 ADDRESS_MODEL = os.getenv("WEB_SEARCH_ADDRESS_MODEL", "jev-1.13.0")
 # Opens when Jev leans to opening and neither veto fires. On the eval set
 # (scripts/address_eval) sites score 0.58 and up on OPEN and every search 0.37
@@ -33,8 +35,8 @@ TIMEOUT_SECONDS = 5
 # Checks are rare, so keep the connection open between them rather than
 # paying ~70 ms for a new one each time (httpx's default is 5 s).
 KEEPALIVE_SECONDS = 300.0
-# Jev list price; output tokens are free.
-INPUT_PRICE_PER_MILLION_USD = 0.042
+# Jev list price, kept in llm_pricing; output tokens are free.
+INPUT_PRICE_PER_MILLION_USD = float(JEV_INPUT_PRICE_PER_MILLION_USD)
 
 TLDS = frozenset(
     line.strip().lower()
