@@ -1,0 +1,38 @@
+# One-off Job: run scripts/reprice_proactive_jev_usage.py once, after the
+# deploy that priced TypeSafe Jev in llm_pricing (#101). It prices the
+# proactive watcher's jev-1.13.0 usage rows that were written at $0 and logs
+# the row count and total. Safe to run again: priced rows no longer match.
+# Not applied by the deploy workflow; apply by hand with the deployed website
+# tag. Set ARGS to "--dry-run" for a first pass that rolls back:
+#   sed -e 's|<IMAGE_VERSION>|<tag>|' -e 's|<ARGS>|--dry-run|' k8s/oneoff-reprice-proactive-jev.yaml | kubectl apply -f -
+#   kubectl logs -n smarter-dev job/smarter-dev-reprice-proactive-jev
+#   kubectl delete job -n smarter-dev smarter-dev-reprice-proactive-jev
+#   sed -e 's|<IMAGE_VERSION>|<tag>|' -e 's|<ARGS>||' k8s/oneoff-reprice-proactive-jev.yaml | kubectl apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smarter-dev-reprice-proactive-jev
+  namespace: smarter-dev
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: smarter-dev-reprice-proactive-jev
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: reprice-proactive-jev
+          image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
+          workingDir: /app
+          command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/reprice_proactive_jev_usage.py <ARGS>"]
+          envFrom:
+            - configMapRef:
+                name: smarter-dev-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: database-url

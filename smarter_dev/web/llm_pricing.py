@@ -606,6 +606,22 @@ _OPENCODE_ZEN_PRICES: dict[str, types.ModelPrice] = {
     ),
 }
 
+# TypeSafe classifiers. USD per million tokens, Jev's list price: input only,
+# output free, no cache tiers. genai-prices has no TypeSafe provider, so
+# _patch_provider cannot carry these and they are priced directly. The web
+# search ranker and address check price Jev themselves from
+# JEV_INPUT_PRICE_PER_MILLION_USD, so the rate lives only here (#101). The
+# proactive watcher reports "typesafe:jev-1.13.0" and its rows store the bare
+# id; both resolve here.
+JEV_MODEL_ID = "jev-1.13.0"
+_TYPESAFE_PRICES: dict[str, types.ModelPrice] = {
+    JEV_MODEL_ID: types.ModelPrice(
+        input_mtok=Decimal("0.042"),
+        output_mtok=Decimal("0"),
+    ),
+}
+JEV_INPUT_PRICE_PER_MILLION_USD = _TYPESAFE_PRICES[JEV_MODEL_ID].input_mtok
+
 _TOKENS_PER_MTOK = Decimal("1000000")
 
 
@@ -808,6 +824,17 @@ def _base_cost(
                 cache_read_tokens=cache_read_tokens,
                 cache_write_tokens=cache_write_tokens,
                 price=openrouter_price,
+            )
+
+    if provider_id in (None, "typesafe"):
+        typesafe_price = _TYPESAFE_PRICES.get(model_ref)
+        if typesafe_price is not None:
+            return _direct_model_cost(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+                price=typesafe_price,
             )
 
     usage = types.Usage(
