@@ -124,7 +124,8 @@ def _patched(client=None):
 
 async def _render(db_session, guild_id: str = _GUILD, client=None):
     a, b, c = _patched(client)
-    with a, b, c:
+    flash = patch(f"{_MODULE}.get_flash_messages", return_value=[])
+    with a, b, c, flash:
         return await ChatMemoryAdminController.chat_memory_view.fn(
             None,
             request=object(),

@@ -11,6 +11,14 @@
             <p><a href="/admin/bot/guilds/{{ guild.id }}">&larr; {{ guild.name }}</a></p>
         </hgroup>
 
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
         <p class="sk-text-muted">
             The chat agent's three memory layers for this guild. The long-term layer is three
             blocks the nightly dream edits: personality, behavior and memory. Short-term memory is the
@@ -57,6 +65,48 @@
                 <p class="sk-text-muted">The blob exists but is empty &mdash; the agent sees no long-term memory.</p>
                 {% else %}
                 <p class="sk-text-muted">No memory yet &mdash; this guild has never been dreamed.</p>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="sk-panel" style="margin-bottom:1.5rem;">
+            <div class="sk-panel-head">
+                Public memory
+                {% if blob and blob.public_page_enabled %}
+                <span class="sk-badge" style="margin-left:0.5rem;">shown on <a href="/chat-agent">/chat-agent</a></span>
+                {% endif %}
+            </div>
+            <div class="sk-panel-body">
+                <p class="sk-text-muted" style="font-size:0.85rem;">
+                    The memory with every person removed, written by the same nightly dream for the
+                    public <code>/chat-agent</code> page, which shows it with the personality and behavior
+                    blocks. A block that names a member, carries an id or a mention is hidden there.
+                </p>
+                {% if public_blocks %}
+                {% for key, label in [("personality", "Personality"), ("behavior", "Behavior"), ("public_memory", "Public memory")] %}
+                {% if public_blocks[key].problem %}
+                <p><span class="sk-badge sk-badge-danger">{{ label }} hidden on the page: {{ public_blocks[key].problem }}</span></p>
+                {% endif %}
+                {% endfor %}
+                {% endif %}
+                {% if blob and blob.public_content %}
+                <div style="border:1px solid var(--sk-border-color, #e0e0e0); border-radius:6px; padding:1rem; margin-bottom:1rem;">
+                    {{ blob.public_content | markdown }}
+                </div>
+                {% else %}
+                <p class="sk-text-muted">No public memory yet &mdash; the page says the agent has not dreamed yet until a dream writes one.</p>
+                {% endif %}
+                {% if blob %}
+                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/chat-memory/public-page">
+                    {{ csrf_field() }}
+                    {% if blob.public_page_enabled %}
+                    <button class="sk-btn-outline" type="submit">Turn the public page off</button>
+                    {% else %}
+                    <input type="hidden" name="enabled" value="on">
+                    <button class="sk-btn" type="submit">Show this guild on the public page</button>
+                    {% endif %}
+                </form>
+                <p class="sk-text-muted" style="font-size:0.85rem;">The page shows one guild; turning it on here turns it off for any other.</p>
                 {% endif %}
             </div>
         </div>
