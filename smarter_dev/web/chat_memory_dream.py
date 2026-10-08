@@ -275,8 +275,8 @@ things. No usernames, no display names, no Discord ids, no mentions, no quoted
 messages, and nothing that would let a reader work out who someone is ("the
 person who runs the Rust meetup" names them as surely as their username). A
 project is the project, never whose it is. Leave out anything you would not
-say to the whole internet. If nothing is left once the people are gone, return
-an empty string.
+say to the whole internet. Plain markdown only, no HTML. If nothing is left
+once the people are gone, return an empty string.
 
 # What stays
 
@@ -659,7 +659,8 @@ def compose_blocks(
 
 PUBLIC_MEMORY_RETRY_MESSAGE = (
     "`public_memory` {problem}. It is read by strangers: take every person out "
-    "of it, names, ids and mentions included, or return an empty string."
+    "of it, names, ids and mentions included, and write plain markdown with no "
+    "HTML, or return an empty string."
 )
 
 

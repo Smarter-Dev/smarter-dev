@@ -44,6 +44,7 @@ from sqlalchemy import text
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from smarter_dev.shared.config import get_settings
+from smarter_dev.web import chat_agent_page_controller
 from smarter_dev.web.bot_admin.chat_memory import ChatMemoryAdminController
 from smarter_dev.web.chat_agent_page_controller import CHAT_AGENT_PATH
 from smarter_dev.web.chat_agent_page_controller import chat_agent_page
@@ -103,6 +104,26 @@ def test_member_names_reads_the_dreams_naming_form_and_usernames():
 )
 def test_the_check_refuses_ids_mentions_and_names(text, problem):
     assert public_text_problem(text, frozenset({"kai"})) == problem
+
+
+@pytest.mark.parametrize(
+    "html",
+    [
+        "<script>alert(1)</script>",
+        '<img src=x onerror="alert(1)">',
+        "bold</b>",
+        "<!-- x -->",
+    ],
+)
+def test_the_check_refuses_raw_html(html):
+    assert (
+        public_text_problem(f"Shader nights {html}", frozenset())
+        == "it carries raw HTML"
+    )
+
+
+def test_the_check_allows_angle_brackets_that_are_not_html():
+    assert public_text_problem("a < b, and I <3 this place", frozenset()) is None
 
 
 def test_the_check_matches_whole_names_only():
@@ -407,6 +428,13 @@ def _environment() -> Environment:
     return environment
 
 
+@pytest.fixture(autouse=True)
+def _fresh_blocks_cache():
+    chat_agent_page_controller._blocks_cache.clear()
+    yield
+    chat_agent_page_controller._blocks_cache.clear()
+
+
 @pytest.fixture
 async def client(db_session, monkeypatch):
     monkeypatch.setattr(get_settings(), "site_base_url", "https://smarter.dev")
@@ -548,3 +576,61 @@ def test_migration_adds_an_empty_public_block_and_an_off_switch(tmp_path):
         }
         assert columns == {"id", "guild_id", "content"}
     engine.dispose()
+
+
+_INJECTION = '<script>alert(1)</script>\n\n<img src=x onerror="alert(1)">'
+
+
+async def test_raw_html_in_a_block_is_hidden(db_session, client):
+    await _seed_memory(db_session, public=_INJECTION)
+    await _switch_on(db_session, personality=f"Dry. {_INJECTION}")
+
+    html = (await client.get(CHAT_AGENT_PATH)).text
+
+    assert "alert(1)" not in html
+    assert "public memory is not shown here" in html
+
+
+async def test_raw_html_that_got_past_the_check_renders_as_text(
+    db_session, client, monkeypatch
+):
+    # The backstop: the page's markdown renderer escapes raw HTML.
+    monkeypatch.setattr(
+        "smarter_dev.web.chat_agent_public.public_text_problem",
+        lambda text, names: None,
+    )
+    await _seed_memory(db_session, public=_INJECTION)
+    await _switch_on(db_session, behavior=_INJECTION)
+
+    html = (await client.get(CHAT_AGENT_PATH)).text
+
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "<script>alert" not in html and "<img src=x" not in html
+
+
+async def test_the_checked_blocks_are_cached_until_a_block_changes(
+    db_session, client, monkeypatch
+):
+    await _seed_memory(db_session, public=_PUBLIC)
+    await _switch_on(db_session)
+    real = chat_agent_page_controller.check_public_blocks
+    calls = []
+
+    async def counting(session, memory):
+        calls.append(memory.public_content)
+        return await real(session, memory)
+
+    monkeypatch.setattr(chat_agent_page_controller, "check_public_blocks", counting)
+
+    await client.get(CHAT_AGENT_PATH)
+    await client.get(CHAT_AGENT_PATH)
+    assert len(calls) == 1
+
+    await _switch_on(db_session, public_content="Shader nights, now weekly.")
+    assert "now weekly" in (await client.get(CHAT_AGENT_PATH)).text
+    assert len(calls) == 2
+
+    memory = await get_guild_memory_blob(db_session, _GUILD)
+    await set_public_page(db_session, memory, enabled=False)
+    await db_session.commit()
+    assert (await client.get(CHAT_AGENT_PATH)).status_code == 404

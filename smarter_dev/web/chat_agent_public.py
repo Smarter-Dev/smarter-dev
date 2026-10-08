@@ -32,6 +32,9 @@ _SNOWFLAKE = re.compile(r"(?<!\d)\d{15,22}(?!\d)")
 _ID_TAG = re.compile(r"\(\s*id\s*\d+\s*\)", re.IGNORECASE)
 _NAMED_WITH_ID = re.compile(r"([\w.\-]{2,32})\s*\(\s*id\s*\d+\s*\)", re.IGNORECASE)
 _MENTION = "<@"
+# Raw HTML: a tag opening or closing. The page's markdown renderer escapes it
+# anyway; refusing it here means it is never stored for the page at all.
+_HTML_TAG = re.compile(r"<[A-Za-z/!]")
 # Shorter than this a name is a letter, not a person.
 MIN_NAME_CHARS = 2
 
@@ -59,6 +62,8 @@ def public_text_problem(text: str, names: frozenset[str]) -> str | None:
         return "it carries a Discord id"
     if _MENTION in text:
         return "it carries a mention"
+    if _HTML_TAG.search(text):
+        return "it carries raw HTML"
     if _names_someone(text, names):
         return "it names a member"
     return None

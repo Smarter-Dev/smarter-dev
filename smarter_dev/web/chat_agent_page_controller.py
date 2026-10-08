@@ -14,6 +14,7 @@ gate first, and a block that fails is hidden rather than edited.
 from __future__ import annotations
 
 import logging
+import time
 
 from litestar import get
 from litestar.exceptions import NotFoundException
@@ -22,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.privacy_notice import PRIVACY_PATH
+from smarter_dev.web.chat_agent_public import PublicBlock
 from smarter_dev.web.chat_agent_public import check_public_blocks
 from smarter_dev.web.chat_agent_public import public_guild_memory
 
@@ -34,6 +36,35 @@ _DESCRIPTION = (
     "remembers and dreams, and a live look at what it carries forward."
 )
 
+# The checked blocks, kept briefly so a crawler cannot turn every hit into the
+# engagement-name query and a gate load. Keyed on the blocks' own text, so a
+# dream or a purge that changes one is seen on the next hit; the switch is
+# read on every hit, so turning the page off is immediate.
+BLOCKS_CACHE_SECONDS = 300
+_blocks_cache: dict[tuple, tuple[float, dict[str, PublicBlock]]] = {}
+
+
+async def _cached_public_blocks(db_session, memory) -> dict[str, PublicBlock]:
+    key = (
+        memory.guild_id,
+        memory.personality or "",
+        memory.behavior or "",
+        memory.public_content or "",
+    )
+    now = time.monotonic()
+    hit = _blocks_cache.get(key)
+    if hit is not None and now - hit[0] < BLOCKS_CACHE_SECONDS:
+        return hit[1]
+    blocks = await check_public_blocks(db_session, memory)
+    _blocks_cache.clear()
+    _blocks_cache[key] = (now, blocks)
+    for name, block in blocks.items():
+        if block.problem is not None:
+            logger.warning(
+                "Hiding the %s block on %s: %s", name, CHAT_AGENT_PATH, block.problem
+            )
+    return blocks
+
 
 @get(CHAT_AGENT_PATH)
 async def chat_agent_page(db_session: AsyncSession) -> Template:
@@ -41,12 +72,7 @@ async def chat_agent_page(db_session: AsyncSession) -> Template:
     if memory is None:
         raise NotFoundException()
 
-    blocks = await check_public_blocks(db_session, memory)
-    for name, block in blocks.items():
-        if block.problem is not None:
-            logger.warning(
-                "Hiding the %s block on %s: %s", name, CHAT_AGENT_PATH, block.problem
-            )
+    blocks = await _cached_public_blocks(db_session, memory)
 
     url = f"{get_settings().site_base_url.rstrip('/')}{CHAT_AGENT_PATH}"
     return Template(
