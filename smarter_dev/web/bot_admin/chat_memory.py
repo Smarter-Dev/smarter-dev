@@ -18,6 +18,11 @@ never from the admin: a disabled guild's blob still renders here, flagged,
 because "what did it remember before we switched it off" is exactly the
 question an operator with this page open is asking. Only the agent edits its
 own memory, so this page has no edit or reset either.
+
+The one thing it does switch is the public ``/chat-agent`` page (#103), which
+never edits memory: the page sits beside the public block it would show, with
+whatever the public check would hide flagged, so the admin reads it before
+switching it on. Switching one guild on switches every other guild off.
 """
 
 from __future__ import annotations
@@ -25,12 +30,16 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from litestar import Controller, Request, get
-from litestar.response import Response, Template as TemplateResponse
+from litestar import Controller, Request, get, post
+from litestar.response import Redirect, Response, Template as TemplateResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from skrift.admin.helpers import get_admin_context
 from skrift.auth.guards import Permission, auth_guard
+from skrift.flash import flash_error, flash_success, get_flash_messages
+from skrift.forms.core import verify_csrf
+
+from smarter_dev.web.chat_agent_public import check_public_blocks, set_public_page
 
 from smarter_dev.web.api_native.chat_memory import utc_day_start
 from smarter_dev.web.bot_admin.campaigns import fetch_guild_or_error
@@ -70,6 +79,9 @@ class ChatMemoryAdminController(Controller):
         # template uses this boundary to flag older survivors a failed dream
         # left behind.
         notes_since = utc_day_start(datetime.now(UTC))
+        public_blocks = (
+            await check_public_blocks(db_session, blob) if blob is not None else None
+        )
 
         ctx = await get_admin_context(request, db_session)
         return TemplateResponse(
@@ -80,8 +92,37 @@ class ChatMemoryAdminController(Controller):
                 "notes": notes,
                 "revisions": revisions,
                 "notes_since": notes_since,
+                "public_blocks": public_blocks,
+                "flash_messages": get_flash_messages(request),
                 "active_page": _ACTIVE_PAGE,
                 "guild_id": guild_id,
                 **ctx,
             },
         )
+
+    @post(
+        "/guilds/{guild_id:str}/chat-memory/public-page",
+        guards=[auth_guard, Permission("administrator")],
+    )
+    async def chat_memory_public_page(
+        self, request: Request, db_session: AsyncSession, guild_id: str
+    ) -> Redirect:
+        """Switch the public /chat-agent page on for this guild, or off."""
+        back = f"/admin/bot/guilds/{guild_id}/chat-memory"
+        if not await verify_csrf(request):
+            flash_error(request, "Your session expired. Please try again.")
+            return Redirect(path=back)
+        blob = await get_guild_memory_blob(db_session, guild_id)
+        if blob is None:
+            flash_error(request, "This guild has no memory yet, so there is nothing to show.")
+            return Redirect(path=back)
+        enabled = (await request.form()).get("enabled") == "on"
+        await set_public_page(db_session, blob, enabled=enabled)
+        await db_session.commit()
+        flash_success(
+            request,
+            "The public page now shows this guild."
+            if enabled
+            else "The public page is off.",
+        )
+        return Redirect(path=back)

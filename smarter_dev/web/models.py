@@ -5261,6 +5261,10 @@ class ChatAgentGuildMemory(Base):
     - ``personality`` — at most :data:`MAX_PERSONALITY_CHARS` characters about
       itself and how it wants others to feel about it.
 
+    Beside them the dream writes ``public_content``: the same memory with every
+    person taken out, for the public ``/chat-agent`` page (#103). The page
+    shows it only for the guild whose ``public_page_enabled`` is on.
+
     This is authored prose, not captured message content, so it is exempt from
     the retention sweep (see :mod:`smarter_dev.web.retention`).
     """
@@ -5293,6 +5297,16 @@ class ChatAgentGuildMemory(Base):
         default="",
         server_default="",
         doc="Who the agent is and how it wants to be felt about; changed sparingly.",
+    )
+    public_content: Mapped[str] = mapped_column(
+        String(MAX_MEMORY_BLOB_CHARS),
+        nullable=False,
+        default="",
+        server_default="",
+        doc=(
+            "The memory with every person removed, written by the same dream "
+            "call; empty until the first dream that writes one."
+        ),
     )
     revision: Mapped[int] = mapped_column(
         Integer,
@@ -5328,6 +5342,16 @@ class ChatAgentGuildMemory(Base):
             "block, note and revision as it is: dreams skip the guild and "
             "activations load nothing. It is not a reset; nothing blanks "
             "or deletes the memory."
+        ),
+    )
+    public_page_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+        doc=(
+            "Whether /chat-agent shows this guild's blocks. Off by default; at "
+            "most one guild has it on, and the page 404s while none does."
         ),
     )
 

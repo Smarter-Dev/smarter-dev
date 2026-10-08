@@ -13,6 +13,15 @@ true about itself in that server:
   :data:`~smarter_dev.web.models.MAX_PERSONALITY_CHARS` characters about
   itself, changed deliberately and rarely.
 
+In the same call it writes a fourth, derived block for the public
+``/chat-agent`` page (#103): the **public memory**, the memory with every
+person removed. It is held to
+:func:`~smarter_dev.web.chat_agent_public.public_text_problem` (no Discord
+id, no mention, no name of a member it knows). A public block that
+fails is asked for again; on the last attempt it is dropped for yesterday's
+(if that still passes) or for none, and the rest of the night stands, because
+nothing the agent remembers depends on it.
+
 Behavior and personality are only ever replaced by an explicit, valid
 revision: an omitted field keeps the block verbatim. Only the notes the dream
 actually read are deleted.
@@ -74,6 +83,9 @@ from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ReasoningLevel
+from smarter_dev.web.chat_agent_public import known_member_names
+from smarter_dev.web.chat_agent_public import member_names
+from smarter_dev.web.chat_agent_public import public_text_problem
 from smarter_dev.web.crud import delete_notes_by_id
 from smarter_dev.web.crud import get_guild_memory_blob
 from smarter_dev.web.crud import guilds_needing_dream
@@ -163,8 +175,9 @@ direct voice you use in the server. You're writing it to yourself; nobody else
 reads it.
 
 Return structured output with `memory`, `identity_updates`, `identity_moves`,
-`behavior`, `personality` and `personality_reason`. The last four are covered
-under "Behavior and personality" below.
+`behavior`, `personality`, `personality_reason` and `public_memory`. The
+behavior and personality fields are covered under "Behavior and personality"
+below, and `public_memory` under "The public memory".
 `memory` contains only the following four markdown sections, omitting empty ones.
 The application separately preserves and prepends `## Identity & Voice`.
 
@@ -251,6 +264,20 @@ list the trait exactly as it appears (without its bullet) in `identity_moves`;
 code removes it from Identity & Voice only when that trait's text is in the
 block, so carry it over in its own words. Moving is optional; never lose something by moving it.
 
+# The public memory
+
+`public_memory` is the one thing you write that strangers read: it is shown on
+a public web page about you. Write it fresh every night from the memory you
+just wrote, at most 2000 characters of markdown, in the same voice: the same
+memory with every person taken out. Keep it to the community itself, its
+running topics and bits, the projects going on here and what you think about
+things. No usernames, no display names, no Discord ids, no mentions, no quoted
+messages, and nothing that would let a reader work out who someone is ("the
+person who runs the Rust meetup" names them as surely as their username). A
+project is the project, never whose it is. Leave out anything you would not
+say to the whole internet. If nothing is left once the people are gone, return
+an empty string.
+
 # What stays
 
 - Carry forward whatever's still alive from yesterday. Continuity is the whole
@@ -326,6 +353,8 @@ class DreamOutput(BaseModel):
     behavior: str | None = None
     personality: str | None = None
     personality_reason: str | None = None
+    # ``None`` (and an omitted field) keeps yesterday's public block if it still passes.
+    public_memory: str | None = None
 
 
 @dataclass(frozen=True)
@@ -341,6 +370,9 @@ class DreamContext:
     memory_limit: int = MAX_MEMORY_BLOB_CHARS
     behavior_limit: int = MAX_BEHAVIOR_CHARS
     personality_limit: int = MAX_PERSONALITY_CHARS
+    # Members the public block must not name (#103), and yesterday's block.
+    member_names: frozenset[str] = frozenset()
+    previous_public: str = ""
 
 
 @dataclass(frozen=True)
@@ -350,6 +382,8 @@ class DreamBlocks:
     memory: str
     behavior: str
     personality: str
+    # The public block for /chat-agent; never a refusal (see resolve_public_memory).
+    public: str = ""
     # What was refused on the last attempt. Any refusal means the memory half
     # of the output may assume an edit that never happened, so none of it saves.
     refusals: tuple[str, ...] = ()
@@ -616,8 +650,53 @@ def compose_blocks(
         memory=memory,
         behavior=behavior,
         personality=personality,
+        public=resolve_public_memory(
+            output, context, memory=memory, retries_left=retries_left
+        ),
         refusals=tuple(refusals),
     )
+
+
+PUBLIC_MEMORY_RETRY_MESSAGE = (
+    "`public_memory` {problem}. It is read by strangers: take every person out "
+    "of it, names, ids and mentions included, or return an empty string."
+)
+
+
+def resolve_public_memory(
+    output: DreamOutput, context: DreamContext, *, memory: str, retries_left: int
+) -> str:
+    """The public block tonight leaves behind.
+
+    Refused, while retries remain, when it is over the memory's cap or fails
+    :func:`public_text_problem` against every member the dream knows of,
+    including those tonight's ``memory`` names. Once retries are gone a block
+    that fails is replaced by yesterday's if that still passes, else by none:
+    unlike the other blocks a lost public block costs nothing the agent
+    remembers, so it never costs the night.
+    """
+    names = context.member_names | member_names(memory)
+
+    def fallback(reason: str) -> str:
+        logger.warning("Dream public memory refused (%s); falling back", reason)
+        previous = context.previous_public.strip()
+        if previous and public_text_problem(previous, names) is None:
+            return context.previous_public
+        return ""
+
+    if output.public_memory is None:
+        return fallback("omitted") if context.previous_public else ""
+    candidate = output.public_memory.strip()
+    if len(candidate) > MAX_MEMORY_BLOB_CHARS:
+        if retries_left > 0:
+            raise ModelRetry(over_length_retry_message(MAX_MEMORY_BLOB_CHARS))
+        candidate = truncate_to_last_line(candidate, MAX_MEMORY_BLOB_CHARS)
+    problem = public_text_problem(candidate, names)
+    if problem is None:
+        return candidate
+    if retries_left > 0:
+        raise ModelRetry(PUBLIC_MEMORY_RETRY_MESSAGE.format(problem=problem))
+    return fallback(problem)
 
 
 # How early the dream may fire and still be treated as "at" the upcoming
@@ -803,7 +882,12 @@ def names_a_blocked_id(blocks: DreamBlocks, gate: OptOutGate | None) -> bool:
         return False
     return any(
         gate.redact(block) != block
-        for block in (blocks.memory, blocks.behavior, blocks.personality)
+        for block in (
+            blocks.memory,
+            blocks.behavior,
+            blocks.personality,
+            blocks.public,
+        )
     )
 
 
@@ -909,6 +993,17 @@ async def run_guild_dream(
     stored_blob = memory.content if memory is not None else ""
     stored_behavior = (memory.behavior or "") if memory is not None else ""
     stored_personality = (memory.personality or "") if memory is not None else ""
+    stored_public = (memory.public_content or "") if memory is not None else ""
+    # Read from everything stored, withheld lines and unread notes included, so
+    # the public block cannot name someone the model was not shown.
+    names = await known_member_names(
+        session,
+        guild_id,
+        stored_blob,
+        stored_behavior,
+        stored_personality,
+        *(note.content for note in [*notes, *unread]),
+    )
     previous_blob, withheld_blob = withhold_blocked_lines(stored_blob, gate)
     previous_behavior, withheld_behavior = withhold_blocked_lines(stored_behavior, gate)
     previous_personality, withheld_personality = withhold_blocked_lines(
@@ -931,6 +1026,8 @@ async def run_guild_dream(
         memory_limit=room_for(MAX_MEMORY_BLOB_CHARS, withheld_blob),
         behavior_limit=room_for(MAX_BEHAVIOR_CHARS, withheld_behavior),
         personality_limit=room_for(MAX_PERSONALITY_CHARS, withheld_personality),
+        member_names=names,
+        previous_public=stored_public,
     )
     result = await dream_agent.run(user_prompt=user_message, deps=context)
     # Validate again at the persistence boundary, including injected agents.
@@ -954,6 +1051,7 @@ async def run_guild_dream(
             stored_personality,
             withheld_personality,
         ),
+        public=blocks.public,
         refusals=blocks.refusals,
     )
     new_blob = blocks.memory
@@ -989,6 +1087,7 @@ async def run_guild_dream(
         content=new_blob,
         behavior=blocks.behavior,
         personality=blocks.personality,
+        public_content=blocks.public,
         notes_consumed=len(notes),
         model_name=model_name,
         dreamed_at=dreamed_at,

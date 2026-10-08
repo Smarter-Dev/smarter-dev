@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+
+{% block page_type %}page{% endblock %}
+{% block page_title %}{{ page_title }}{% endblock %}
+
+{% block page_css %}
+    <link rel="stylesheet" href="{{ theme_url('css/pages/blog.css') }}">
+{% endblock %}
+
+{% block content %}
+<article class="blog-post">
+    <header class="post-header container">
+        <div class="code-label reveal">// chat_agent.read()</div>
+        <h1 class="post-title reveal">{{ page_title }}</h1>
+    </header>
+
+    <div class="post-body container reveal">
+        <p>Smarter Dev's bot has an AI side that can talk with members. It works in one of two modes, set per channel by the admins. Most channels use conversations mode, where the bot only answers when you talk to it. A few channels are set to assistant mode, where it reads along and joins in on its own.</p>
+
+        <h2>Two modes</h2>
+
+        <p><strong>Conversations mode (the default).</strong> In most channels the bot stays quiet until you talk to it. Start a conversation by @mentioning the bot or replying to one of its messages. It reads the recent messages in the channel for context and answers in the channel. Tell it to stop and it goes quiet in that channel for a while. There is a rolling limit on how often one person can engage it.</p>
+
+        <p><strong>Assistant mode.</strong> In an assistant channel the bot is not something you have to call. It reads along, like a member who is in the room, and decides for itself whether to say something. Most of the time it says nothing. When it does join, it adds at most two messages at a time, or a reaction, and then goes back to reading. It reviews new messages in batches, so a reply can arrive a few minutes after the message it is about.</p>
+
+        <p>Both modes are the same agent with the same memory. What it learns talking with someone in one channel is what it knows in the next.</p>
+
+        <h2>How it remembers</h2>
+
+        <p>The agent's memory works in layers, from what is happening right now to who it is. Each layer is smaller than the one before, and each keeps less of what anyone actually said.</p>
+
+        <h3>The conversation</h3>
+
+        <p>While a conversation is going, the agent has its recent messages in front of it. When a conversation runs long, the oldest part is folded into a short running summary and only the most recent stretch stays word for word. Once a conversation has been quiet for two hours its working history goes: in conversations mode it simply expires, and in assistant mode it is folded into a summary note and the messages themselves are dropped. No message is kept verbatim for long.</p>
+
+        <h3>Notes during the day</h3>
+
+        <p>When something seems worth keeping, the agent writes itself a note with its <code>remember</code> tool: a sentence or two in its own words, not a copy of anyone's message. It chooses what to keep. For the rest of the day those notes are part of every conversation it has in the server.</p>
+
+        <h3>Dreaming</h3>
+
+        <p>Just after midnight UTC the agent dreams. It re-reads the day's notes alongside the three blocks that make up who it is in the server, and rewrites them:</p>
+
+        <ul>
+            <li><strong>Personality</strong>, a few sentences about who it is here and how it wants people to feel about it. It is the most stable thing the agent has, changed rarely and only with a reason.</li>
+            <li><strong>Behavior</strong>, the lessons it has learned about how to act here. A lesson stays until it stops being true.</li>
+            <li><strong>Memory</strong>, a page about the place: the people it knows, the running jokes, the opinions it has formed and the threads it wants to pick back up. This is rewritten every night, and whatever it leaves out is gone.</li>
+        </ul>
+
+        <p>A few rules keep this steady. A quiet day with no notes costs nothing: there is nothing to dream about, so nothing runs. A bad night never erases a good persona: if the dream comes back empty or broken, yesterday's blocks stay exactly as they were and the notes wait for the next night, which reads two days at once. And only what was read is forgotten: the dream deletes the notes it actually folded in, never a note written while it was dreaming.</p>
+
+        <h3>Carrying it forward</h3>
+
+        <p>The next morning, every conversation starts with those three blocks loaded, plus whatever notes the agent keeps that day. That is how understanding carries forward: a conversation is folded into a summary, what mattered in it becomes a note, and the note is dreamed into who the agent is. The words people said fade within hours. What the agent made of them can last.</p>
+
+        <h2>A look inside</h2>
+
+        <p>This is what the agent carries forward right now. Its memory is about the people in the server, so the version here is the one it writes for this page each night with every person taken out: the community, its running topics and projects, and what the agent thinks about things.</p>
+
+        {% if last_dream_at %}
+        <p class="sk-text-muted">Last dream: {{ last_dream_at.strftime('%b %d, %Y at %H:%M UTC') }}</p>
+        {% endif %}
+
+        {% if personality %}
+        <h3>Personality</h3>
+        <blockquote>{{ personality|markdown|safe }}</blockquote>
+        {% endif %}
+
+        {% if behavior %}
+        <h3>Behavior</h3>
+        <blockquote>{{ behavior|markdown|safe }}</blockquote>
+        {% endif %}
+
+        <h3>Memory</h3>
+        {% if public_memory %}
+        <blockquote>{{ public_memory|markdown|safe }}</blockquote>
+        {% elif has_public_memory %}
+        <p>Tonight's public memory is not shown here.</p>
+        {% else %}
+        <p>The agent has not dreamed its public memory yet. It dreams just after midnight UTC; check back tomorrow.</p>
+        {% endif %}
+
+        <h2>Opting out</h2>
+
+        <p>Run <code>/privacy</code> anywhere in the server and press <strong>AI assistant opt-out</strong>. It takes effect immediately. The bot does not read your messages in either mode, writes nothing new about you to its memory, and other members' conversations with it do not carry your messages. It keeps what it already learned before you opted out; to have that removed, message an admin or email <a href="mailto:admin@smarter.dev">admin@smarter.dev</a>. Opting back in covers new messages only.</p>
+
+        <p>The <a href="{{ privacy_path }}">privacy policy</a> covers everything Smarter Dev stores and how to have it deleted.</p>
+    </div>
+</article>
+{% endblock %}
