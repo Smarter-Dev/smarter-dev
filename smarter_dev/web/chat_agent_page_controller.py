@@ -100,6 +100,8 @@ async def chat_agent_page(request: Request, db_session: AsyncSession) -> Templat
             "personality": blocks["personality"].shown(viewer_ids),
             "behavior": blocks["behavior"].shown(viewer_ids),
             "memory": blocks["memory"].shown(viewer_ids),
+            "has_personality": bool(blocks["personality"].masked),
+            "has_behavior": bool(blocks["behavior"].masked),
             "has_memory": bool(blocks["memory"].masked),
             "last_dream_at": memory.last_dream_at,
             "privacy_path": PRIVACY_PATH,

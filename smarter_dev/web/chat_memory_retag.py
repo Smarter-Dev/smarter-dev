@@ -17,19 +17,26 @@ Applying writes each guild in its own transaction, under the lock the dream
 and the admin purge share, and records a memory revision as the dream does,
 so the admin page's history shows the rewrite. ``last_dream_at`` is left as
 it was. Only counts are reported, never the text.
+
+The admin chat-memory page tags one name by hand the same way
+(:func:`tag_name_in_blocks`, #105): a bare name the agent wrote that the page
+hides a block for becomes a tag in the three blocks, with a revision recorded.
 """
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from dataclasses import field
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.shared.member_tags import MAX_TAG_NAME_CHARS
 from smarter_dev.shared.member_tags import names_outside_tags
 from smarter_dev.shared.member_tags import referenced_members
 from smarter_dev.shared.member_tags import retag
+from smarter_dev.shared.member_tags import tag_name
 from smarter_dev.web.chat_agent_public import member_names
 from smarter_dev.web.crud import lock_guild_memory
 from smarter_dev.web.crud import prune_memory_revisions
@@ -206,3 +213,95 @@ async def guild_ids(session: AsyncSession) -> list[str]:
         await session.scalars(select(ChatAgentMemoryNote.guild_id).distinct())
     ).all()
     return sorted({*with_memory, *with_notes})
+
+
+# -- tagging one name by hand (#105) -------------------------------------------
+
+ADMIN_TAG_MODEL_NAME = "admin tag (#105)"
+# A Discord id, as the purge contract spells it.
+_SNOWFLAKE = re.compile(r"[0-9]{15,22}")
+# What may not sit in a tag's name; an id-less tag cannot hold a colon either.
+_NOT_IN_TAG = re.compile(r"[<>\n\r]")
+MIN_TAG_NAME_CHARS = 2
+
+
+def tag_request_problem(username: str, user_id: str) -> str | None:
+    """Why the admin's "tag this name" form cannot be applied, or ``None``."""
+    if len(username) < MIN_TAG_NAME_CHARS:
+        return f"Enter a name of at least {MIN_TAG_NAME_CHARS} characters."
+    if len(username) > MAX_TAG_NAME_CHARS:
+        return f"A name can be at most {MAX_TAG_NAME_CHARS} characters."
+    if _NOT_IN_TAG.search(username):
+        return "A name cannot hold < or > or a line break."
+    if user_id and not _SNOWFLAKE.fullmatch(user_id):
+        return "A Discord id is 15 to 22 digits."
+    if not user_id and ":" in username:
+        return "A name with a colon needs a Discord id."
+    return None
+
+
+@dataclass
+class NameTagging:
+    """What tagging one name in a guild's three blocks did."""
+
+    tagged: dict[str, int] = field(default_factory=dict)
+    # Columns that would go over their cap; any refuses the whole change.
+    over_cap: list[str] = field(default_factory=list)
+    found: bool = True
+
+    @property
+    def total(self) -> int:
+        return sum(self.tagged.values())
+
+
+async def tag_name_in_blocks(
+    session: AsyncSession, guild_id: str, username: str, user_id: str | None
+) -> NameTagging:
+    """Tag every whole-word ``username`` in the guild's memory, behavior and
+    personality, and commit, recording a memory revision as the retag does.
+
+    Under the guild's memory lock, so a dream or purge cannot write between
+    the read and the write. Notes are left alone. A change that would put any
+    block over its cap is refused whole, and nothing is written when there is
+    nothing to tag.
+    """
+    result = NameTagging()
+    await lock_guild_memory(session, guild_id)
+    memory = (
+        await session.execute(
+            select(ChatAgentGuildMemory).where(
+                ChatAgentGuildMemory.guild_id == guild_id
+            )
+        )
+    ).scalar_one_or_none()
+    if memory is None:
+        result.found = False
+        await session.rollback()
+        return result
+    rewritten: dict[str, str] = {}
+    for column, limit in BLOCK_LIMITS.items():
+        new, count = tag_name(getattr(memory, column) or "", username, user_id)
+        result.tagged[column] = count
+        if count:
+            rewritten[column] = new
+            if len(new) > limit:
+                result.over_cap.append(column)
+    if result.over_cap or not rewritten:
+        await session.rollback()
+        return result
+    for column, text in rewritten.items():
+        setattr(memory, column, text)
+    memory.revision += 1
+    await record_memory_revision(
+        session,
+        guild_id=guild_id,
+        content=memory.content,
+        behavior=memory.behavior or "",
+        personality=memory.personality or "",
+        revision=memory.revision,
+        notes_consumed=0,
+        model_name=ADMIN_TAG_MODEL_NAME,
+    )
+    await prune_memory_revisions(session, guild_id)
+    await session.commit()
+    return result

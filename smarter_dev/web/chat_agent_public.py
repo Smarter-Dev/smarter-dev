@@ -20,7 +20,12 @@ back per request (:meth:`PublicBlock.shown`).
 The names are the ones in reach without asking Discord: everyone the stored
 blocks and the day's notes name in a tag or the old form, including the lines
 about opted-out people that the dream carries over unread, and everyone who has
-started a conversation with the agent in the guild.
+started a conversation with the agent in the guild. The page and its admin
+preview reach further (#105), since a bare first name or display name the agent
+picked up in conversation is not in any tag: every tag in every guild's notes
+and memory revisions, the usernames and display names the guild's moderation,
+forum and help records keep, and the Discord username and global name of every
+site account linked to Discord.
 """
 
 from __future__ import annotations
@@ -31,6 +36,7 @@ from dataclasses import dataclass
 from dataclasses import field
 from uuid import UUID
 
+from skrift.db.models.oauth_account import OAuthAccount
 from sqlalchemy import select
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +47,11 @@ from smarter_dev.shared.member_tags import tagged_names
 from smarter_dev.web.account_signups import account_contacts
 from smarter_dev.web.models import ChatAgentEngagement
 from smarter_dev.web.models import ChatAgentGuildMemory
+from smarter_dev.web.models import ChatAgentMemoryNote
+from smarter_dev.web.models import ChatAgentMemoryRevision
+from smarter_dev.web.models import ForumAgentResponse
+from smarter_dev.web.models import HelpConversation
+from smarter_dev.web.models import ModerationAction
 from smarter_dev.web.privacy_gate import OptOutGate
 from smarter_dev.web.privacy_gate import load_gate
 
@@ -68,6 +79,14 @@ def member_names(*texts: str, usernames: Iterable[str] = ()) -> frozenset[str]:
     names = {name.strip(".-") for name in tagged_names(*texts)}
     names.update(name.strip().casefold() for name in usernames if name)
     return frozenset(name for name in names if len(name) >= MIN_NAME_CHARS)
+
+
+def names_in(text: str, names: frozenset[str]) -> list[str]:
+    """Which of ``names`` ``text`` carries as a whole word, sorted."""
+    folded = text.casefold()
+    return sorted(
+        name for name in names if re.search(rf"(?<!\w){re.escape(name)}(?!\w)", folded)
+    )
 
 
 def _names_someone(text: str, names: frozenset[str]) -> bool:
@@ -129,6 +148,93 @@ async def known_member_names(
     return member_names(*texts, usernames=await engagement_usernames(session, guild_id))
 
 
+# Moderation sources whose moderator is a person, not the bot's own account.
+_HUMAN_MODERATION_SOURCES = ("manual", "audit_log")
+# What the masked text itself says for a person: never a name to look for in it.
+_PLACEHOLDER_WORDS = frozenset(
+    {MEMBER_PLACEHOLDER, MEMBER_PLACEHOLDER.split()[-1], VIEWER_PLACEHOLDER}
+)
+
+
+async def stored_tagged_names(session: AsyncSession) -> set[str]:
+    """Every name a tag or the old form gives a person in any guild's notes or
+    memory revisions, casefolded."""
+    names: set[str] = set()
+    for content in await session.scalars(select(ChatAgentMemoryNote.content)):
+        names |= tagged_names(content or "")
+    revisions = await session.execute(
+        select(
+            ChatAgentMemoryRevision.content,
+            ChatAgentMemoryRevision.behavior,
+            ChatAgentMemoryRevision.personality,
+        )
+    )
+    for row in revisions:
+        names |= tagged_names(*(text or "" for text in row))
+    return names
+
+
+async def recorded_member_names(session: AsyncSession, guild_id: str) -> list[str]:
+    """The names the guild's own records keep for its members: moderation
+    targets and moderators, forum post authors' display names, help-agent
+    users, and the Discord username and global name of every site account
+    linked to Discord. Nothing here asks Discord."""
+    names: list[str] = []
+    moderation = await session.execute(
+        select(
+            ModerationAction.target_username,
+            ModerationAction.moderator_username,
+            ModerationAction.source,
+        )
+        .where(ModerationAction.guild_id == guild_id)
+        .distinct()
+    )
+    for target, moderator, source in moderation:
+        names.append(target)
+        if source in _HUMAN_MODERATION_SOURCES:
+            names.append(moderator)
+    names.extend(
+        await session.scalars(
+            select(ForumAgentResponse.author_display_name)
+            .where(ForumAgentResponse.guild_id == guild_id)
+            .distinct()
+        )
+    )
+    names.extend(
+        await session.scalars(
+            select(HelpConversation.user_username)
+            .where(HelpConversation.guild_id == guild_id)
+            .distinct()
+        )
+    )
+    for metadata in await session.scalars(
+        select(OAuthAccount.provider_metadata).where(OAuthAccount.provider == "discord")
+    ):
+        if isinstance(metadata, dict):
+            names.extend(
+                value
+                for value in (metadata.get("username"), metadata.get("global_name"))
+                if isinstance(value, str)
+            )
+    return [name for name in names if name]
+
+
+async def page_member_names(
+    session: AsyncSession, guild_id: str, *texts: str
+) -> frozenset[str]:
+    """Every name the public page hides a block for: :func:`known_member_names`
+    and the wider reach of :func:`stored_tagged_names` and
+    :func:`recorded_member_names` (#105)."""
+    known = await known_member_names(session, guild_id, *texts)
+    wider = member_names(
+        usernames=[
+            *await stored_tagged_names(session),
+            *await recorded_member_names(session, guild_id),
+        ]
+    )
+    return frozenset((known | wider) - _PLACEHOLDER_WORDS)
+
+
 async def public_guild_memory(session: AsyncSession) -> ChatAgentGuildMemory | None:
     """The guild the page is switched on for, if any."""
     result = await session.execute(
@@ -179,6 +285,8 @@ class PublicBlock:
     problem: str | None = None
     # Lines left out because they name someone who opted out.
     lines_left_out: int = 0
+    # The names that hid it, for the admin preview only; never on the page.
+    names_found: tuple[str, ...] = ()
     raw: str = field(default="", repr=False)
 
     def render(self, viewer_ids: frozenset[str] = frozenset()) -> str:
@@ -220,7 +328,11 @@ def public_block(
     if problem is None and gate.carries_blocked_id(masked):
         problem = "it carries a blocked id"
     return PublicBlock(
-        parts=parts, problem=problem, lines_left_out=len(lines) - len(kept), raw=text
+        parts=parts,
+        problem=problem,
+        lines_left_out=len(lines) - len(kept),
+        names_found=tuple(names_in(masked, names)) if masked else (),
+        raw=text,
     )
 
 
@@ -228,15 +340,14 @@ async def check_public_blocks(
     session: AsyncSession, memory: ChatAgentGuildMemory
 ) -> dict[str, PublicBlock]:
     """Personality, behavior and memory, masked and each checked against every
-    member the guild's stored blocks and engagements name, and the opt-out
-    gate."""
+    name :func:`page_member_names` knows, and the opt-out gate."""
     gate = await load_gate(session)
     texts = {
         "personality": memory.personality or "",
         "behavior": memory.behavior or "",
         "memory": memory.content or "",
     }
-    names = await known_member_names(session, memory.guild_id, *texts.values())
+    names = await page_member_names(session, memory.guild_id, *texts.values())
     blocked = await blocked_member_names(
         session, gate, memory.guild_id, *texts.values()
     )

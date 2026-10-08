@@ -142,3 +142,33 @@ def retag(text: str, names_by_id: Mapping[str, str] | None = None) -> tuple[str,
         return member_tag(ref.user_id, name)
 
     return _ANY_MEMBER.sub(convert, text or ""), converted
+
+
+def heard_tag(username: str) -> str:
+    """``<:username>``, for someone with no id; the name must not hold a colon."""
+    return f"<:{username}>"
+
+
+def tag_name(text: str, username: str, user_id: str | None = None) -> tuple[str, int]:
+    """``text`` with every whole-word ``username`` outside a reference as a tag.
+
+    Case-insensitive, like the page's name check. A tag, an old-form name or a
+    mention is left exactly as it is, so a second pass changes nothing. With
+    ``user_id`` the tag is ``<user_id:username>``, without it ``<:username>``.
+    Returns the new text and how many it tagged.
+    """
+    tag = member_tag(user_id, username) if user_id else heard_tag(username)
+    bare = re.compile(rf"(?<!\w){re.escape(username)}(?!\w)", re.IGNORECASE)
+    either = re.compile(
+        rf"(?P<reference>{_ANY_MEMBER.pattern})|{bare.pattern}", re.IGNORECASE
+    )
+    tagged = 0
+
+    def convert(match: re.Match[str]) -> str:
+        nonlocal tagged
+        if match["reference"] is not None:
+            return match[0]
+        tagged += 1
+        return tag
+
+    return either.sub(convert, text or ""), tagged

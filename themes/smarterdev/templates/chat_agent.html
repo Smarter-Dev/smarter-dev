@@ -64,18 +64,24 @@
         {% if personality %}
         <h3>Personality</h3>
         <blockquote>{{ personality|markdown|safe }}</blockquote>
+        {% elif has_personality %}
+        <h3>Personality</h3>
+        <p>The personality is not shown right now.</p>
         {% endif %}
 
         {% if behavior %}
         <h3>Behavior</h3>
         <blockquote>{{ behavior|markdown|safe }}</blockquote>
+        {% elif has_behavior %}
+        <h3>Behavior</h3>
+        <p>The behavior is not shown right now.</p>
         {% endif %}
 
         <h3>Memory</h3>
         {% if memory %}
         <blockquote>{{ memory|markdown|safe }}</blockquote>
         {% elif has_memory %}
-        <p>Tonight's memory is not shown here.</p>
+        <p>The memory is not shown right now.</p>
         {% else %}
         <p>The agent has not dreamed its memory yet. It dreams just after midnight UTC; check back tomorrow.</p>
         {% endif %}
