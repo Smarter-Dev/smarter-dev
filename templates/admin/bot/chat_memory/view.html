@@ -71,33 +71,42 @@
 
         <div class="sk-panel" style="margin-bottom:1.5rem;">
             <div class="sk-panel-head">
-                Public memory
+                Public page
                 {% if blob and blob.public_page_enabled %}
                 <span class="sk-badge" style="margin-left:0.5rem;">shown on <a href="/chat-agent">/chat-agent</a></span>
                 {% endif %}
             </div>
             <div class="sk-panel-body">
                 <p class="sk-text-muted" style="font-size:0.85rem;">
-                    The memory with every person removed, written by the same nightly dream for the
-                    public <code>/chat-agent</code> page, which shows it with the personality and behavior
-                    blocks. A block that names a member, carries an id or a mention is hidden there.
+                    The public <code>/chat-agent</code> page shows these three blocks with every tagged person
+                    as &ldquo;a member&rdquo; and the lines about opted-out members left out. A block that still
+                    names a member, or carries an id, a mention or HTML, is hidden there. Masking only removes
+                    tags: read the masked side for anyone described well enough to recognise.
                 </p>
                 {% if public_blocks %}
-                {% for key, label in [("personality", "Personality"), ("behavior", "Behavior"), ("public_memory", "Public memory")] %}
-                {% if public_blocks[key].problem %}
-                <p><span class="sk-badge sk-badge-danger">{{ label }} hidden on the page: {{ public_blocks[key].problem }}</span></p>
+                {% for key, label in [("personality", "Personality"), ("behavior", "Behavior"), ("memory", "Memory")] %}
+                {% set block = public_blocks[key] %}
+                <h4 style="margin:1rem 0 0.5rem;">{{ label }}</h4>
+                {% if block.problem %}
+                <p><span class="sk-badge sk-badge-danger">hidden on the page: {{ block.problem }}</span></p>
                 {% endif %}
+                {% if block.lines_left_out %}
+                <p class="sk-text-muted" style="font-size:0.85rem;">{{ block.lines_left_out }} line(s) about opted-out members left out.</p>
+                {% endif %}
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:1rem;">
+                    <div>
+                        <div class="sk-text-muted" style="font-size:0.8rem;">Stored</div>
+                        <div style="border:1px solid var(--sk-border-color, #e0e0e0); border-radius:6px; padding:1rem; white-space:pre-wrap;">{{ block.raw or "(empty)" }}</div>
+                    </div>
+                    <div>
+                        <div class="sk-text-muted" style="font-size:0.8rem;">On the page</div>
+                        <div style="border:1px solid var(--sk-border-color, #e0e0e0); border-radius:6px; padding:1rem; white-space:pre-wrap;">{{ block.masked or "(empty)" }}</div>
+                    </div>
+                </div>
                 {% endfor %}
                 {% endif %}
-                {% if blob and blob.public_content %}
-                <div style="border:1px solid var(--sk-border-color, #e0e0e0); border-radius:6px; padding:1rem; margin-bottom:1rem;">
-                    {{ blob.public_content | markdown }}
-                </div>
-                {% else %}
-                <p class="sk-text-muted">No public memory yet &mdash; the page says the agent has not dreamed yet until a dream writes one.</p>
-                {% endif %}
                 {% if blob %}
-                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/chat-memory/public-page">
+                <form method="post" action="/admin/bot/guilds/{{ guild.id }}/chat-memory/public-page" style="margin-top:1rem;">
                     {{ csrf_field() }}
                     {% if blob.public_page_enabled %}
                     <button class="sk-btn-outline" type="submit">Turn the public page off</button>

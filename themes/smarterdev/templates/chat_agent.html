@@ -55,7 +55,7 @@
 
         <h2>A look inside</h2>
 
-        <p>This is what the agent carries forward right now. Its memory is about the people in the server, so the version here is the one it writes for this page each night with every person taken out: the community, its running topics and projects, and what the agent thinks about things.</p>
+        <p>This is what the agent carries forward right now, as it wrote it, with every person it names shown as &ldquo;a member&rdquo;. Lines about people who opted out are left out. Signed in with your Discord account linked, you see your own name where the agent wrote about you, and nobody else's.</p>
 
         {% if last_dream_at %}
         <p class="sk-text-muted">Last dream: {{ last_dream_at.strftime('%b %d, %Y at %H:%M UTC') }}</p>
@@ -72,12 +72,12 @@
         {% endif %}
 
         <h3>Memory</h3>
-        {% if public_memory %}
-        <blockquote>{{ public_memory|markdown|safe }}</blockquote>
-        {% elif has_public_memory %}
-        <p>Tonight's public memory is not shown here.</p>
+        {% if memory %}
+        <blockquote>{{ memory|markdown|safe }}</blockquote>
+        {% elif has_memory %}
+        <p>Tonight's memory is not shown here.</p>
         {% else %}
-        <p>The agent has not dreamed its public memory yet. It dreams just after midnight UTC; check back tomorrow.</p>
+        <p>The agent has not dreamed its memory yet. It dreams just after midnight UTC; check back tomorrow.</p>
         {% endif %}
 
         <h2>Opting out</h2>

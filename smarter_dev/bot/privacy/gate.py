@@ -191,7 +191,8 @@ def without_blocked_lines(text: str | None) -> str | None:
     """``text`` without the lines that carry a blocked id, for a prompt.
 
     For the guild memory the dream wrote (which names people as
-    ``username (id N)``): a line about someone who opted out stays stored but
+    ``<N:username>``, or ``username (id N)`` before #104): a line about someone
+    who opted out stays stored but
     is not shown to any agent (#100). ``None`` stays ``None``.
     """
     if not text:

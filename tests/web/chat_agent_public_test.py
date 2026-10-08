@@ -1,20 +1,20 @@
-"""The public chat-agent page and the public memory block behind it (#103).
+"""The public chat-agent page and the member tags behind it (#103, #104).
 
-Three things are pinned here, all about what strangers may read:
+What is pinned here is about what strangers may read:
 
-- the check (:func:`public_text_problem`) refuses ids, mentions and the names
-  of members the agent knows;
-- the dream refuses a public block that fails it, asks again, and on the last
-  attempt falls back to yesterday's block or none, without costing the night;
-- the page 404s until an admin switches one guild on, never shows the memory
-  block, and hides a block that fails the check or names an opted-out member.
+- the masker turns every ``<id:name>`` tag, id-less ``<:name>`` tag, old
+  ``name (id N)`` form and mention into "a member", and the check
+  (:func:`public_text_problem`) still runs on what is left;
+- the page 404s until an admin switches one guild on, shows the real blocks
+  masked, hides a block that still names someone, leaves out lines about
+  opted-out members, and shows a signed-in visitor their own tags only;
+- the dream asks again for writing that names a known member outside a tag.
 
 The model is always a stub.
 """
 
 from __future__ import annotations
 
-import importlib.util
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import UTC
@@ -35,20 +35,19 @@ from litestar.middleware.session.client_side import CookieBackendConfig
 from litestar.template.config import TemplateConfig
 from litestar.testing import AsyncTestClient
 from pydantic_ai import ModelRetry
+from skrift.auth.session_keys import SESSION_USER_ID
+from skrift.db.models.oauth_account import OAuthAccount
 from skrift.markdown import render_markdown
-from sqlalchemy import create_engine
-from sqlalchemy import inspect
 from sqlalchemy import select
-from sqlalchemy import text
 
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from smarter_dev.shared.config import get_settings
 from smarter_dev.web import chat_agent_page_controller
 from smarter_dev.web.bot_admin.chat_memory import ChatMemoryAdminController
 from smarter_dev.web.chat_agent_page_controller import CHAT_AGENT_PATH
 from smarter_dev.web.chat_agent_page_controller import chat_agent_page
+from smarter_dev.web.chat_agent_public import check_public_blocks
 from smarter_dev.web.chat_agent_public import member_names
+from smarter_dev.web.chat_agent_public import public_block
 from smarter_dev.web.chat_agent_public import public_guild_memory
 from smarter_dev.web.chat_agent_public import public_text_problem
 from smarter_dev.web.chat_agent_public import set_public_page
@@ -56,14 +55,16 @@ from smarter_dev.web.chat_bot_opt_out import opt_out
 from smarter_dev.web.chat_memory_dream import DreamContext
 from smarter_dev.web.chat_memory_dream import DreamOutcome
 from smarter_dev.web.chat_memory_dream import DreamOutput
-from smarter_dev.web.chat_memory_dream import resolve_public_memory
+from smarter_dev.web.chat_memory_dream import IdentityUpdate
+from smarter_dev.web.chat_memory_dream import compose_blocks
 from smarter_dev.web.chat_memory_dream import run_guild_dream
 from smarter_dev.web.crud import create_memory_note
 from smarter_dev.web.crud import get_guild_memory_blob
 from smarter_dev.web.crud import upsert_guild_memory_blob
-from smarter_dev.web.models import MAX_MEMORY_BLOB_CHARS
 from smarter_dev.web.models import ChatAgentEngagement
 from smarter_dev.web.models import ChatAgentGuildMemory
+from smarter_dev.web.privacy_gate import load_gate
+from tests.web.user_content_test import _user
 
 REPO = Path(__file__).resolve().parents[2]
 THEME = REPO / "themes" / "smarterdev"
@@ -77,19 +78,28 @@ _CHANNEL = "555000111222333444"
 _CUTOFF = datetime(2026, 8, 7, 0, 0, tzinfo=UTC)
 _MORNING = _CUTOFF - timedelta(hours=15)
 
-_BLOB = f"## People\n- kai (id {KAI}) loves shaders\n- nia (id {NIA}) runs the jam"
-_PUBLIC = (
-    "## Running topics\nShader nights, the game jam, and whether tabs are a crime."
+_BLOB = (
+    "## People\n"
+    f"- <{KAI}:kai> loves shaders\n"
+    f"- <{NIA}:nia> runs the jam\n"
+    "## Running topics\n"
+    "Shader nights, the game jam, and whether tabs are a crime."
 )
+_BEHAVIOR = "Wait to be asked before explaining."
+_PERSONALITY = "Dry, warm, and curious about what people are building."
 
 
-# -- the check -------------------------------------------------------------------
+# -- the check and the masker -----------------------------------------------------
 
 
-def test_member_names_reads_the_dreams_naming_form_and_usernames():
-    names = member_names(_BLOB, "zed.dev (id 42) waved", usernames=["Mallory", "", "x"])
+def test_member_names_reads_tags_the_old_form_and_usernames():
+    names = member_names(
+        _BLOB,
+        "zed.dev (id 42) waved at <:sam rose>",
+        usernames=["Mallory", "", "x"],
+    )
 
-    assert names == {"kai", "nia", "zed.dev", "mallory"}
+    assert names == {"kai", "nia", "zed.dev", "sam rose", "mallory"}
 
 
 @pytest.mark.parametrize(
@@ -97,7 +107,7 @@ def test_member_names_reads_the_dreams_naming_form_and_usernames():
     [
         (f"someone ({KAI}) likes shaders", "it carries a Discord id"),
         ("the jam lead (id 7) is back", "it carries a Discord id"),
-        ("<@!123> said hi", "it carries a mention"),
+        ("<@&123> said hi", "it carries a mention"),
         ("Kai loves shaders", "it names a member"),
         ("the jam, as kai.", "it names a member"),
     ],
@@ -122,101 +132,197 @@ def test_the_check_refuses_raw_html(html):
     )
 
 
-def test_the_check_allows_angle_brackets_that_are_not_html():
-    assert public_text_problem("a < b, and I <3 this place", frozenset()) is None
-
-
 def test_the_check_matches_whole_names_only():
     names = frozenset({"kai"})
 
     assert public_text_problem("kaiju movies and Bokai tea", names) is None
-    assert public_text_problem(_PUBLIC, names) is None
-    assert public_text_problem("Rust 1.92 ships in 6 weeks", names) is None
+    assert public_text_problem("a < b, and I <3 this place", names) is None
+
+
+async def _block(db_session, raw: str, *, names=frozenset({"kai", "nia"})):
+    return public_block(raw, names, await load_gate(db_session))
+
+
+@pytest.mark.parametrize(
+    "reference",
+    [
+        f"<{KAI}:kai>",
+        "<:kai>",
+        "<7:Big Kai>",
+        f"kai (id {KAI})",
+        "kai(id 7)",
+        f"<@{KAI}>",
+        f"<@!{KAI}>",
+    ],
+)
+async def test_the_masker_masks_tags_both_forms_and_mentions(db_session, reference):
+    block = await _block(db_session, f"- {reference} loves shaders")
+
+    assert block.masked == "- a member loves shaders"
+    assert block.problem is None
+
+
+async def test_the_masker_leaves_emoji_and_timestamps_alone(db_session):
+    block = await _block(db_session, "the jam <:party:123> starts <t:1:R>")
+
+    assert block.masked == "the jam <:party:123> starts <t:1:R>"
+
+
+async def test_a_name_left_outside_a_tag_still_hides_the_block(db_session):
+    block = await _block(db_session, f"<{KAI}:kai> and nia run the jam")
+
+    assert block.masked == "a member and nia run the jam"
+    assert block.problem == "it names a member"
+    assert block.shown() == ""
+
+
+async def test_a_role_mention_is_not_a_member_and_hides_the_block(db_session):
+    block = await _block(db_session, "ping <@&777777777777777777> for jams")
+
+    assert block.masked == "ping <@&777777777777777777> for jams"
+    assert block.problem is not None
+
+
+async def test_lines_about_opted_out_members_are_left_out(db_session):
+    await opt_out(db_session, KAI)
+
+    block = await _block(db_session, _BLOB)
+
+    assert "loves shaders" not in block.masked
+    assert "- a member runs the jam" in block.masked
+    assert block.lines_left_out == 1
+    assert block.problem is None
+
+
+async def test_an_id_less_tag_of_an_opted_out_member_is_left_out_by_name(db_session):
+    await opt_out(db_session, KAI)
+    memory = await _seed_memory(
+        db_session, content=f"- <{KAI}:kai> loves shaders\n- <:kai> hosts shader night"
+    )
+
+    blocks = await check_public_blocks(db_session, memory)
+
+    assert "shader night" not in blocks["memory"].masked
+    assert blocks["memory"].lines_left_out == 2
+
+
+async def test_the_viewer_sees_their_own_tags_and_nobody_elses(db_session):
+    block = await _block(
+        db_session, f"<{KAI}:kai> and <{NIA}:nia> and <@{KAI}> and <:kai>"
+    )
+
+    assert block.shown(frozenset({KAI})) == "kai and a member and you and a member"
+    assert block.shown(frozenset({NIA})) == "a member and nia and a member and a member"
+    assert block.shown() == "a member and a member and a member and a member"
+
+
+# -- the opt-out gate on the tag form ---------------------------------------------
+
+
+async def test_the_gate_redacts_an_opted_out_members_tag_whole(db_session):
+    await opt_out(db_session, KAI)
+    gate = await load_gate(db_session)
+
+    text = f"<{KAI}:kai> and <{NIA}:nia> and <:kai>"
+
+    assert gate.redact(text) == f"[blocked user] and <{NIA}:nia> and <:kai>"
+    assert gate.carries_blocked_id(f"<{KAI}:kai> waved")
+    assert not gate.carries_blocked_id("<:kai> waved")
+    assert gate.carries_blocked_member("<:kai> waved", frozenset({"kai"}))
+    assert gate.blocked_names_in(_BLOB, f"kai2 (id {KAI})") == {"kai", "kai2"}
 
 
 # -- the dream ------------------------------------------------------------------
 
 
-def _context(**kwargs) -> DreamContext:
-    return DreamContext(previous_blob=_BLOB, notes=["a note"], **kwargs)
+def _context(previous_blob: str = "", **kwargs) -> DreamContext:
+    return DreamContext(previous_blob=previous_blob, notes=["a note"], **kwargs)
 
 
-def test_a_public_block_naming_someone_is_asked_for_again():
-    output = DreamOutput(memory="m", public_memory="kai had a good week")
+def test_the_dream_asks_again_for_an_untagged_name():
+    output = DreamOutput(memory=f"<{KAI}:kai> is back; kai shipped it")
 
-    with pytest.raises(ModelRetry, match="names a member"):
-        resolve_public_memory(
-            output, _context(member_names=frozenset({"kai"})), memory="", retries_left=1
+    with pytest.raises(ModelRetry, match="names kai outside a tag"):
+        compose_blocks(output, _context(), retries_left=1)
+
+
+@pytest.mark.parametrize(
+    "memory",
+    [f"kai (id {KAI}) is back", "mallory is back", "Mallory is back"],
+)
+def test_the_old_form_and_known_names_are_untagged_too(memory):
+    context = _context(member_names=frozenset({"mallory"}))
+
+    with pytest.raises(ModelRetry, match="outside a tag"):
+        compose_blocks(DreamOutput(memory=memory), context, retries_left=1)
+
+
+@pytest.mark.parametrize(
+    "memory",
+    [f"<{KAI}:kai> is back", "<:kai> is back", "kaiju night is back"],
+)
+def test_tags_with_and_without_an_id_pass(memory):
+    context = _context(member_names=frozenset({"kai"}))
+
+    blocks = compose_blocks(DreamOutput(memory=memory), context, retries_left=1)
+
+    assert blocks.memory == memory
+
+
+def test_a_revised_block_and_a_new_identity_trait_are_checked():
+    context = _context(member_names=frozenset({"kai"}), previous_behavior="Be kind.")
+
+    with pytest.raises(ModelRetry, match="`behavior` names kai"):
+        compose_blocks(
+            DreamOutput(memory="m", behavior="Be kind. Answer kai first."),
+            context,
+            retries_left=1,
         )
-
-
-def test_a_name_only_tonights_memory_carries_is_refused_too():
-    output = DreamOutput(memory="m", public_memory="zed shipped a thing")
-
-    with pytest.raises(ModelRetry, match="names a member"):
-        resolve_public_memory(
-            output, _context(), memory="- zed (id 77) shipped", retries_left=1
-        )
-
-
-@pytest.mark.parametrize("bad", ["<@1> is great", f"id {KAI} posted"])
-def test_ids_and_mentions_are_asked_for_again(bad):
-    with pytest.raises(ModelRetry):
-        resolve_public_memory(
-            DreamOutput(memory="m", public_memory=bad),
-            _context(),
-            memory="",
+    with pytest.raises(ModelRetry, match="`memory` names kai"):
+        compose_blocks(
+            DreamOutput(
+                memory="m",
+                identity_updates=[
+                    IdentityUpdate(after="I tease kai.", evidence="a note")
+                ],
+            ),
+            context,
             retries_left=1,
         )
 
 
-def test_on_the_last_attempt_a_failing_block_falls_back_to_yesterdays():
-    output = DreamOutput(memory="m", public_memory="kai had a good week")
-    context = _context(member_names=frozenset({"kai"}), previous_public=_PUBLIC)
-
-    assert resolve_public_memory(output, context, memory="", retries_left=0) == _PUBLIC
-
-
-def test_yesterdays_block_is_dropped_too_when_it_now_names_someone():
-    output = DreamOutput(memory="m", public_memory="kai had a good week")
+def test_blocks_the_dream_leaves_alone_keep_the_old_form():
     context = _context(
-        member_names=frozenset({"kai"}), previous_public="kai and the jam"
+        member_names=frozenset({"kai"}),
+        previous_blob="## Identity & Voice\n- I owe kai (id 7) a rematch.",
+        previous_behavior="Answer kai (id 7) first.",
+        previous_personality="kai (id 7) taught me shaders.",
     )
 
-    assert resolve_public_memory(output, context, memory="", retries_left=0) == ""
-
-
-def test_an_omitted_block_keeps_yesterdays():
-    context = _context(previous_public=_PUBLIC)
-
-    assert (
-        resolve_public_memory(
-            DreamOutput(memory="m"), context, memory="", retries_left=1
-        )
-        == _PUBLIC
+    blocks = compose_blocks(
+        DreamOutput(memory="- <7:kai> is back"), context, retries_left=1
     )
 
+    assert blocks.behavior == "Answer kai (id 7) first."
+    assert "kai (id 7) a rematch" in blocks.memory
 
-def test_an_over_long_block_is_asked_for_again_then_cut():
-    long = "\n".join(["Shader nights are back."] * 200)
-    output = DreamOutput(memory="m", public_memory=long)
 
-    with pytest.raises(ModelRetry):
-        resolve_public_memory(output, _context(), memory="", retries_left=1)
-    cut = resolve_public_memory(output, _context(), memory="", retries_left=0)
-    assert 0 < len(cut) <= MAX_MEMORY_BLOB_CHARS
+def test_on_the_last_attempt_the_night_stands():
+    context = _context(member_names=frozenset({"kai"}))
+
+    blocks = compose_blocks(DreamOutput(memory="kai is back"), context, retries_left=0)
+
+    assert blocks.memory == "kai is back" and blocks.refusals == ()
 
 
 @dataclass
 class _Dream:
     memory: str
-    public_memory: str | None
     contexts: list[DreamContext] = field(default_factory=list)
 
     async def run(self, user_prompt: str, *, deps: DreamContext):
         self.contexts.append(deps)
-        output = DreamOutput(memory=self.memory, public_memory=self.public_memory)
-        return type("Result", (), {"output": output})()
+        return type("Result", (), {"output": DreamOutput(memory=self.memory)})()
 
 
 async def _note(session, content: str):
@@ -231,19 +337,19 @@ async def _note(session, content: str):
     )
 
 
-async def _seed_memory(session, *, public: str = "", guild_id: str = _GUILD):
+async def _seed_memory(session, *, guild_id: str = _GUILD, content: str = _BLOB):
     await upsert_guild_memory_blob(
         session,
         guild_id=guild_id,
-        content=_BLOB,
-        behavior="Wait to be asked before explaining.",
-        personality="Dry, warm, and curious about what people are building.",
-        public_content=public,
+        content=content,
+        behavior=_BEHAVIOR,
+        personality=_PERSONALITY,
         notes_consumed=0,
         model_name="stub",
         dreamed_at=_CUTOFF - timedelta(days=1),
     )
     await session.commit()
+    return await get_guild_memory_blob(session, guild_id)
 
 
 async def _dream(session, agent):
@@ -256,60 +362,9 @@ async def _dream(session, agent):
     )
 
 
-async def test_the_dream_saves_a_clean_public_block(db_session):
+async def test_engagement_usernames_and_opted_out_names_are_known(db_session):
     await _seed_memory(db_session)
-    await _note(db_session, f"nia (id {NIA}) shipped the jam build")
-    await db_session.commit()
-
-    result = await _dream(
-        db_session,
-        _Dream(memory=f"## People\n- nia (id {NIA}) shipped", public_memory=_PUBLIC),
-    )
-
-    assert result.outcome is DreamOutcome.DREAMED
-    memory = await get_guild_memory_blob(db_session, _GUILD)
-    assert memory.public_content == _PUBLIC
-    assert memory.public_page_enabled is False
-
-
-async def test_a_refused_public_block_does_not_cost_the_night(db_session):
-    await _seed_memory(db_session, public=_PUBLIC)
-    await _note(db_session, f"nia (id {NIA}) shipped the jam build")
-    await db_session.commit()
-    new_memory = f"## People\n- nia (id {NIA}) shipped the jam build"
-
-    result = await _dream(
-        db_session, _Dream(memory=new_memory, public_memory="nia shipped the jam build")
-    )
-
-    assert result.outcome is DreamOutcome.DREAMED
-    memory = await get_guild_memory_blob(db_session, _GUILD)
-    assert memory.content == new_memory
-    assert memory.public_content == _PUBLIC
-
-
-async def test_an_opted_out_members_name_is_known_though_the_model_never_saw_it(
-    db_session,
-):
-    await _seed_memory(db_session)
-    await _note(db_session, f"nia (id {NIA}) shipped the jam build")
-    await db_session.commit()
-    await opt_out(db_session, KAI)
-    agent = _Dream(
-        memory=f"## People\n- nia (id {NIA}) shipped",
-        public_memory="Kai's shaders rule.",
-    )
-
-    await _dream(db_session, agent)
-
-    assert KAI not in agent.contexts[0].previous_blob
-    assert "kai" in agent.contexts[0].member_names
-    assert (await get_guild_memory_blob(db_session, _GUILD)).public_content == ""
-
-
-async def test_engagement_usernames_are_known_names(db_session):
-    await _seed_memory(db_session)
-    await _note(db_session, "a quiet day in the jam channel")
+    await _note(db_session, f"<{NIA}:nia> shipped the jam build")
     db_session.add(
         ChatAgentEngagement(
             guild_id=_GUILD,
@@ -320,27 +375,37 @@ async def test_engagement_usernames_are_known_names(db_session):
         )
     )
     await db_session.commit()
+    await opt_out(db_session, KAI)
+    agent = _Dream(memory=f"## People\n- <{NIA}:nia> shipped")
 
-    await _dream(
-        db_session,
-        _Dream(
-            memory=f"## People\n- nia (id {NIA}) here", public_memory="mallory won."
-        ),
-    )
+    result = await _dream(db_session, agent)
 
-    assert (await get_guild_memory_blob(db_session, _GUILD)).public_content == ""
+    assert result.outcome is DreamOutcome.DREAMED
+    assert KAI not in agent.contexts[0].previous_blob
+    assert {"kai", "nia", "mallory"} <= agent.contexts[0].member_names
+
+
+async def test_an_id_less_note_about_an_opted_out_member_is_not_read(db_session):
+    await _seed_memory(db_session)
+    await _note(db_session, "<:kai> is hosting shader night")
+    await _note(db_session, f"<{NIA}:nia> shipped the jam build")
+    await db_session.commit()
+    await opt_out(db_session, KAI)
+    agent = _Dream(memory=f"## People\n- <{NIA}:nia> shipped")
+
+    await _dream(db_session, agent)
+
+    assert agent.contexts[0].notes == [f"<{NIA}:nia> shipped the jam build"]
 
 
 # -- the switch -------------------------------------------------------------------
 
 
 async def test_the_switch_is_off_by_default_and_shows_one_guild(db_session):
-    await _seed_memory(db_session)
-    await _seed_memory(db_session, guild_id=_OTHER_GUILD)
+    first = await _seed_memory(db_session)
+    second = await _seed_memory(db_session, guild_id=_OTHER_GUILD)
     assert await public_guild_memory(db_session) is None
 
-    first = await get_guild_memory_blob(db_session, _GUILD)
-    second = await get_guild_memory_blob(db_session, _OTHER_GUILD)
     await set_public_page(db_session, first, enabled=True)
     await db_session.commit()
     assert (await public_guild_memory(db_session)).guild_id == _GUILD
@@ -356,18 +421,14 @@ async def test_the_switch_is_off_by_default_and_shows_one_guild(db_session):
 
 
 async def test_a_dream_never_flips_the_switch(db_session):
-    await _seed_memory(db_session)
-    await set_public_page(
-        db_session, await get_guild_memory_blob(db_session, _GUILD), enabled=True
-    )
+    memory = await _seed_memory(db_session)
+    await set_public_page(db_session, memory, enabled=True)
     await db_session.commit()
 
-    await _seed_memory(db_session, public=_PUBLIC)
+    await _seed_memory(db_session)
 
-    memory = await get_guild_memory_blob(db_session, _GUILD)
     await db_session.refresh(memory)
     assert memory.public_page_enabled is True
-    assert memory.public_content == _PUBLIC
 
 
 def _admin_request(form: dict):
@@ -412,6 +473,19 @@ async def test_the_admin_switch_needs_a_valid_form_and_a_memory(db_session):
     assert error.called and await public_guild_memory(db_session) is None
 
 
+def test_the_admin_preview_shows_raw_beside_masked_and_flags_what_hides():
+    environment = Environment(
+        loader=FileSystemLoader(REPO / "templates"), autoescape=True
+    )
+    source = environment.loader.get_source(
+        environment, "admin/bot/chat_memory/view.html"
+    )[0]
+
+    assert "block.raw" in source and "block.masked" in source
+    assert "hidden on the page: {{ block.problem }}" in source
+    assert "public_content" not in source
+
+
 # -- the page ------------------------------------------------------------------
 
 
@@ -442,15 +516,16 @@ async def client(db_session, monkeypatch):
     async def session():
         return db_session
 
+    session_config = CookieBackendConfig(secret=b"0" * 16)
     app = Litestar(
         route_handlers=[chat_agent_page],
         dependencies={"db_session": Provide(session)},
-        middleware=[CookieBackendConfig(secret=b"0" * 16).middleware],
+        middleware=[session_config.middleware],
         template_config=TemplateConfig(
             instance=JinjaTemplateEngine.from_environment(_environment())
         ),
     )
-    async with AsyncTestClient(app) as c:
+    async with AsyncTestClient(app, session_config=session_config) as c:
         yield c
 
 
@@ -462,15 +537,31 @@ async def _switch_on(db_session, **fields):
     await db_session.commit()
 
 
+async def _sign_in(db_session, client, *discord_ids: str):
+    user = await _user(db_session)
+    for discord_id in discord_ids:
+        db_session.add(
+            OAuthAccount(
+                provider="discord",
+                provider_account_id=discord_id,
+                provider_email=None,
+                provider_email_verified=False,
+                user_id=user.id,
+            )
+        )
+    await db_session.commit()
+    await client.set_session_data({SESSION_USER_ID: str(user.id)})
+
+
 async def test_the_page_is_404_while_switched_off(db_session, client):
     assert (await client.get(CHAT_AGENT_PATH)).status_code == 404
 
-    await _seed_memory(db_session, public=_PUBLIC)
+    await _seed_memory(db_session)
     assert (await client.get(CHAT_AGENT_PATH)).status_code == 404
 
 
-async def test_the_page_shows_the_blocks_never_the_memory(db_session, client):
-    await _seed_memory(db_session, public=_PUBLIC)
+async def test_the_page_shows_the_real_blocks_masked(db_session, client):
+    await _seed_memory(db_session)
     await _switch_on(db_session)
 
     response = await client.get(CHAT_AGENT_PATH)
@@ -478,117 +569,128 @@ async def test_the_page_shows_the_blocks_never_the_memory(db_session, client):
     assert response.status_code == 200
     html = response.text
     assert "Conversations mode (the default)" in html and "Assistant mode." in html
-    assert "Dry, warm, and curious" in html
-    assert "Wait to be asked before explaining." in html
+    assert _PERSONALITY in html and _BEHAVIOR in html
+    assert "a member loves shaders" in html and "a member runs the jam" in html
     assert "whether tabs are a crime" in html
     assert "Last dream: Aug 06, 2026 at 00:00 UTC" in html
-    assert 'href="/privacy"' in html
     assert '<link rel="canonical" href="https://smarter.dev/chat-agent">' in html
-    for private in (KAI, NIA, "loves shaders", "runs the jam"):
-        assert private not in html
+    for private in (KAI, NIA, "kai", "nia"):
+        assert private not in html.casefold().replace("a member", "")
+    assert "cache-control" not in response.headers
 
 
-async def test_before_the_first_public_dream_the_page_says_so(db_session, client):
-    await _seed_memory(db_session)
+async def test_before_the_first_dream_the_page_says_so(db_session, client):
+    await _seed_memory(db_session, content="")
     await _switch_on(db_session)
 
     html = (await client.get(CHAT_AGENT_PATH)).text
 
-    assert "has not dreamed its public memory yet" in html
+    assert "has not dreamed its memory yet" in html
 
 
 @pytest.mark.parametrize(
     ("field_name", "bad", "shown_text"),
     [
-        ("personality", "I like kai a lot.", "I like kai"),
-        ("behavior", f"Never tease <@{NIA}>.", "Never tease"),
-        ("public_content", "nia runs the jam and it is great.", "it is great"),
+        ("personality", "I like kai a lot.", "I like"),
+        ("behavior", "Never tease <@&777777777777777777>.", "Never tease"),
+        (
+            "content",
+            f"<{KAI}:kai> hosts. <{NIA}:nia> and kai run the jam.",
+            "run the jam",
+        ),
         ("behavior", f"Answer {KAI} first.", "Answer"),
     ],
 )
-async def test_a_block_that_fails_the_check_is_hidden(
+async def test_a_block_that_still_fails_after_masking_is_hidden(
     db_session, client, field_name, bad, shown_text
 ):
-    await _seed_memory(db_session, public=_PUBLIC)
+    await _seed_memory(db_session)
     await _switch_on(db_session, **{field_name: bad})
 
     html = (await client.get(CHAT_AGENT_PATH)).text
 
     assert shown_text not in html
-    if field_name == "public_content":
-        assert "public memory is not shown here" in html
+    if field_name == "content":
+        assert "memory is not shown here" in html
 
 
-async def test_a_block_naming_an_opted_out_member_by_id_is_hidden(db_session, client):
-    # The id check refuses this already; the opt-out gate behind it is a
-    # second lock that, today, never sees an id the first one missed.
-    await _seed_memory(db_session, public=_PUBLIC)
-    await opt_out(db_session, KAI)
-    await _switch_on(db_session, personality=f"kai ({KAI}) taught me shaders")
+async def test_a_signed_in_viewer_sees_only_their_own_tags(db_session, client):
+    await _seed_memory(db_session)
+    await _switch_on(db_session)
 
+    await _sign_in(db_session, client, KAI)
+    response = await client.get(CHAT_AGENT_PATH)
+    assert "kai loves shaders" in response.text
+    assert "a member runs the jam" in response.text
+    assert "nia" not in response.text.casefold().replace("a member", "")
+    assert response.headers["cache-control"] == "private, no-store"
+
+    await _sign_in(db_session, client, NIA, "333333333333333333")
     html = (await client.get(CHAT_AGENT_PATH)).text
+    assert "nia runs the jam" in html and "a member loves shaders" in html
+    assert "kai loves" not in html
 
-    assert "taught me shaders" not in html and KAI not in html
-
-
-@pytest.mark.parametrize("config", ["app.yaml", "app.development.yaml"])
-def test_the_route_is_registered(config):
-    controllers = yaml.safe_load((REPO / config).read_text())["controllers"]
-    assert CONTROLLER in controllers
+    client.cookies.clear()
+    html = (await client.get(CHAT_AGENT_PATH)).text
+    assert "a member loves shaders" in html and "a member runs the jam" in html
 
 
-# -- migration -----------------------------------------------------------------
+async def test_a_signed_in_viewer_without_discord_sees_everyone_masked(
+    db_session, client
+):
+    await _seed_memory(db_session)
+    await _switch_on(db_session)
+    await _sign_in(db_session, client)
+
+    response = await client.get(CHAT_AGENT_PATH)
+
+    assert "a member loves shaders" in response.text
+    assert "cache-control" not in response.headers
 
 
-def test_migration_adds_an_empty_public_block_and_an_off_switch(tmp_path):
-    path = next((REPO / "alembic" / "main" / "versions").glob("*_b4e8a1d6c2f9_*.py"))
-    spec = importlib.util.spec_from_file_location("public_block_revision", path)
-    revision = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(revision)
+async def test_the_cache_holds_masked_blocks_never_a_viewers_render(
+    db_session, client, monkeypatch
+):
+    await _seed_memory(db_session)
+    await _switch_on(db_session)
+    real = chat_agent_page_controller.check_public_blocks
+    calls = []
 
-    engine = create_engine(f"sqlite:///{tmp_path / 'migration.db'}")
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                "CREATE TABLE chat_agent_guild_memory (id CHAR(32) PRIMARY KEY, "
-                "guild_id VARCHAR(20) NOT NULL, content VARCHAR(2000) NOT NULL)"
-            )
-        )
-        connection.execute(
-            text("INSERT INTO chat_agent_guild_memory VALUES ('a', :g, :c)"),
-            {"g": _GUILD, "c": _BLOB},
-        )
-        revision.op = Operations(MigrationContext.configure(connection))
-        revision.upgrade()
+    async def counting(session, memory):
+        calls.append(memory.content)
+        return await real(session, memory)
 
-        row = connection.execute(
-            text(
-                "SELECT content, public_content, public_page_enabled "
-                "FROM chat_agent_guild_memory"
-            )
-        ).one()
-        assert row == (_BLOB, "", 0)
+    monkeypatch.setattr(chat_agent_page_controller, "check_public_blocks", counting)
 
-        revision.downgrade()
-        columns = {
-            c["name"]
-            for c in inspect(connection).get_columns("chat_agent_guild_memory")
-        }
-        assert columns == {"id", "guild_id", "content"}
-    engine.dispose()
+    await _sign_in(db_session, client, KAI)
+    assert "kai loves shaders" in (await client.get(CHAT_AGENT_PATH)).text
+    client.cookies.clear()
+    assert "a member loves shaders" in (await client.get(CHAT_AGENT_PATH)).text
+    assert len(calls) == 1
+    for _, blocks in chat_agent_page_controller._blocks_cache.values():
+        assert "kai" not in blocks["memory"].masked
+
+    await _switch_on(db_session, content="Shader nights, now weekly.")
+    assert "now weekly" in (await client.get(CHAT_AGENT_PATH)).text
+    assert len(calls) == 2
+
+    memory = await get_guild_memory_blob(db_session, _GUILD)
+    await set_public_page(db_session, memory, enabled=False)
+    await db_session.commit()
+    assert (await client.get(CHAT_AGENT_PATH)).status_code == 404
 
 
 _INJECTION = '<script>alert(1)</script>\n\n<img src=x onerror="alert(1)">'
 
 
 async def test_raw_html_in_a_block_is_hidden(db_session, client):
-    await _seed_memory(db_session, public=_INJECTION)
+    await _seed_memory(db_session, content=_INJECTION)
     await _switch_on(db_session, personality=f"Dry. {_INJECTION}")
 
     html = (await client.get(CHAT_AGENT_PATH)).text
 
     assert "alert(1)" not in html
-    assert "public memory is not shown here" in html
+    assert "memory is not shown here" in html
 
 
 async def test_raw_html_that_got_past_the_check_renders_as_text(
@@ -599,7 +701,7 @@ async def test_raw_html_that_got_past_the_check_renders_as_text(
         "smarter_dev.web.chat_agent_public.public_text_problem",
         lambda text, names: None,
     )
-    await _seed_memory(db_session, public=_INJECTION)
+    await _seed_memory(db_session)
     await _switch_on(db_session, behavior=_INJECTION)
 
     html = (await client.get(CHAT_AGENT_PATH)).text
@@ -608,29 +710,15 @@ async def test_raw_html_that_got_past_the_check_renders_as_text(
     assert "<script>alert" not in html and "<img src=x" not in html
 
 
-async def test_the_checked_blocks_are_cached_until_a_block_changes(
-    db_session, client, monkeypatch
-):
-    await _seed_memory(db_session, public=_PUBLIC)
-    await _switch_on(db_session)
-    real = chat_agent_page_controller.check_public_blocks
-    calls = []
+@pytest.mark.parametrize("config", ["app.yaml", "app.development.yaml"])
+def test_the_route_is_registered(config):
+    controllers = yaml.safe_load((REPO / config).read_text())["controllers"]
+    assert CONTROLLER in controllers
 
-    async def counting(session, memory):
-        calls.append(memory.public_content)
-        return await real(session, memory)
 
-    monkeypatch.setattr(chat_agent_page_controller, "check_public_blocks", counting)
+# -- the model -----------------------------------------------------------------
 
-    await client.get(CHAT_AGENT_PATH)
-    await client.get(CHAT_AGENT_PATH)
-    assert len(calls) == 1
 
-    await _switch_on(db_session, public_content="Shader nights, now weekly.")
-    assert "now weekly" in (await client.get(CHAT_AGENT_PATH)).text
-    assert len(calls) == 2
-
-    memory = await get_guild_memory_blob(db_session, _GUILD)
-    await set_public_page(db_session, memory, enabled=False)
-    await db_session.commit()
-    assert (await client.get(CHAT_AGENT_PATH)).status_code == 404
+def test_the_model_has_no_public_block():
+    assert "public_content" not in ChatAgentGuildMemory.__table__.columns
+    assert "public_page_enabled" in ChatAgentGuildMemory.__table__.columns

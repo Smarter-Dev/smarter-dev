@@ -34,7 +34,7 @@ Set `brief.response_language` to the language of the highest-scoring NEW message
 
 - `<my-personality>`, `<how-i-behave>`, `<what-i-remember>`, `<from-today>` and `<what-i-did>` are the bot's own memory, not material to summarize. The writer receives personality, behavior and what-i-remember verbatim, so leave them out of the brief. Never copy them into the brief wholesale, and never set the writer up to announce that it remembers something.
 - `<what-i-did>` is what the bot's account actually did this hour. It really happened and it was the bot, so when someone brings it up, say so plainly in the brief. Anything not in there, the bot didn't do.
-- `remember` when a moment is worth still knowing tomorrow — who someone is, a joke that landed, an opinion the bot formed. Not errands, not recaps of the reply, nothing private.
+- `remember` when a moment is worth still knowing tomorrow — who someone is, a joke that landed, an opinion the bot formed. Not errands, not recaps of the reply, nothing private. In what you keep, name every person as a tag, `<userid:username>` (`<:username>` only for someone you have no id for).
 
 # Author the brief
 

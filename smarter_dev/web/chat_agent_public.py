@@ -1,15 +1,26 @@
-"""What the public ``/chat-agent`` page may show of the agent's memory (#103).
+"""What the public ``/chat-agent`` page may show of the agent's memory (#103, #104).
 
-The memory block is about the people in a guild, so the page never shows it.
-The nightly dream writes a fourth block beside it, the same memory with every
-person removed, and both the dream and the page hold that block (and the
-personality and behavior blocks) to one check: no Discord id, no mention, and
-no name of a member the agent knows.
+The page shows the real personality, behavior and memory blocks with every
+person masked: each ``<userid:username>`` tag (and the old ``username (id N)``
+form, and any ``<@N>`` mention) becomes "a member". A line about someone who
+opted out is left out first, as it is for every agent. What is left is held to
+one check: no Discord id, no mention, no raw HTML and no name of a member the
+agent knows. A block that still fails is hidden, not edited.
 
-The names are the ones in reach without asking Discord: everyone the memory
-and the day's notes name in the dream's own ``username (id 123)`` form,
-including the lines about opted-out people that the dream carries over unread,
-and everyone who has started a conversation with the agent in the guild.
+Masking only removes tagged references. A description that identifies someone
+without a name ("the person who runs the Rust meetup") is not caught; the
+dream is asked not to write those, and the admin reads the preview before
+switching the page on.
+
+A signed-in visitor whose account has linked Discord ids sees their own tags
+by name; everyone else stays "a member". The masked blocks are the same for
+every visitor, so they are what is cached, and the visitor's own names are put
+back per request (:meth:`PublicBlock.shown`).
+
+The names are the ones in reach without asking Discord: everyone the stored
+blocks and the day's notes name in a tag or the old form, including the lines
+about opted-out people that the dream carries over unread, and everyone who has
+started a conversation with the agent in the guild.
 """
 
 from __future__ import annotations
@@ -17,36 +28,44 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable
 from dataclasses import dataclass
+from dataclasses import field
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.shared.member_tags import MemberRef
+from smarter_dev.shared.member_tags import split_members
+from smarter_dev.shared.member_tags import tagged_names
+from smarter_dev.web.account_signups import account_contacts
 from smarter_dev.web.models import ChatAgentEngagement
 from smarter_dev.web.models import ChatAgentGuildMemory
+from smarter_dev.web.privacy_gate import OptOutGate
 from smarter_dev.web.privacy_gate import load_gate
 
+# What a masked person reads as.
+MEMBER_PLACEHOLDER = "a member"
+# A visitor's own mention, which carries no name.
+VIEWER_PLACEHOLDER = "you"
 # A snowflake, as the purge contract spells it (15-22 digits).
 _SNOWFLAKE = re.compile(r"(?<!\d)\d{15,22}(?!\d)")
-# The dream's way of naming a person, whatever the id's length.
+# The old way of naming a person, whatever the id's length.
 _ID_TAG = re.compile(r"\(\s*id\s*\d+\s*\)", re.IGNORECASE)
-_NAMED_WITH_ID = re.compile(r"([\w.\-]{2,32})\s*\(\s*id\s*\d+\s*\)", re.IGNORECASE)
 _MENTION = "<@"
 # Raw HTML: a tag opening or closing. The page's markdown renderer escapes it
-# anyway; refusing it here means it is never stored for the page at all.
+# anyway; refusing it here means it is never shown at all.
 _HTML_TAG = re.compile(r"<[A-Za-z/!]")
 # Shorter than this a name is a letter, not a person.
 MIN_NAME_CHARS = 2
+# The blocks the page shows, in order.
+PUBLIC_BLOCKS = ("personality", "behavior", "memory")
 
 
 def member_names(*texts: str, usernames: Iterable[str] = ()) -> frozenset[str]:
-    """Every name in ``texts`` written as ``name (id N)``, plus ``usernames``,
-    casefolded."""
-    names = {
-        match.group(1).strip(".-").casefold()
-        for text in texts
-        for match in _NAMED_WITH_ID.finditer(text or "")
-    }
+    """Every name ``texts`` give a person (``<id:name>`` or ``name (id N)``),
+    plus ``usernames``, casefolded."""
+    names = {name.strip(".-") for name in tagged_names(*texts)}
     names.update(name.strip().casefold() for name in usernames if name)
     return frozenset(name for name in names if len(name) >= MIN_NAME_CHARS)
 
@@ -77,6 +96,30 @@ async def engagement_usernames(session: AsyncSession, guild_id: str) -> list[str
         .distinct()
     )
     return [name for name in result.scalars() if name]
+
+
+async def blocked_member_names(
+    session: AsyncSession, gate: OptOutGate, guild_id: str, *texts: str
+) -> frozenset[str]:
+    """The names of the people on the opt-out list as far as they are in
+    reach: what ``texts`` call them in a tag or the old form, and the username
+    each started a conversation in the guild under. Matches a tag with no id,
+    ``<:name>``, to someone who opted out (#104)."""
+    names = gate.blocked_names_in(*texts)
+    result = await session.execute(
+        select(
+            ChatAgentEngagement.activation_user_id,
+            ChatAgentEngagement.activation_username,
+        )
+        .where(ChatAgentEngagement.guild_id == guild_id)
+        .distinct()
+    )
+    names.update(
+        username.strip().casefold()
+        for user_id, username in result
+        if username and gate.is_blocked(user_id)
+    )
+    return frozenset(name for name in names if name)
 
 
 async def known_member_names(
@@ -114,41 +157,89 @@ async def set_public_page(
     memory.public_page_enabled = enabled
 
 
+async def viewer_discord_ids(
+    session: AsyncSession, user_id: UUID | None
+) -> frozenset[str]:
+    """The Discord ids a signed-in account has linked; none signed out."""
+    if user_id is None:
+        return frozenset()
+    return (await account_contacts(session, user_id)).discord_ids
+
+
 @dataclass(frozen=True)
 class PublicBlock:
-    """One block as the public page would show it: ``problem`` hides it."""
+    """One block as the public page would show it: ``problem`` hides it.
 
-    text: str
-    problem: str | None
+    ``parts`` is the block with the opted-out lines left out, as plain text
+    and the people it references; :attr:`masked` is it with every person as
+    "a member", and the text every check ran on.
+    """
+
+    parts: tuple[str | MemberRef, ...] = ()
+    problem: str | None = None
+    # Lines left out because they name someone who opted out.
+    lines_left_out: int = 0
+    raw: str = field(default="", repr=False)
+
+    def render(self, viewer_ids: frozenset[str] = frozenset()) -> str:
+        """The block with everyone masked but the people ``viewer_ids`` are."""
+        out = []
+        for part in self.parts:
+            if isinstance(part, str):
+                out.append(part)
+            elif part.user_id in viewer_ids:
+                out.append(part.username or VIEWER_PLACEHOLDER)
+            else:
+                out.append(MEMBER_PLACEHOLDER)
+        return "".join(out).strip()
 
     @property
-    def shown(self) -> str:
-        return self.text if self.problem is None else ""
+    def masked(self) -> str:
+        return self.render()
+
+    def shown(self, viewer_ids: frozenset[str] = frozenset()) -> str:
+        """What the page shows a visitor: nothing if the block fails."""
+        return "" if self.problem is not None else self.render(viewer_ids)
+
+
+def public_block(
+    text: str,
+    names: frozenset[str],
+    gate: OptOutGate,
+    blocked_names: frozenset[str] = frozenset(),
+) -> PublicBlock:
+    """``text`` checked for the page: opted-out lines out, people masked."""
+    text = (text or "").strip()
+    lines = text.splitlines()
+    kept = [
+        line for line in lines if not gate.carries_blocked_member(line, blocked_names)
+    ]
+    parts = split_members("\n".join(kept))
+    masked = PublicBlock(parts=parts).masked
+    problem = public_text_problem(masked, names) if masked else None
+    if problem is None and gate.carries_blocked_id(masked):
+        problem = "it carries a blocked id"
+    return PublicBlock(
+        parts=parts, problem=problem, lines_left_out=len(lines) - len(kept), raw=text
+    )
 
 
 async def check_public_blocks(
     session: AsyncSession, memory: ChatAgentGuildMemory
 ) -> dict[str, PublicBlock]:
-    """Personality, behavior and public memory, each checked against every
+    """Personality, behavior and memory, masked and each checked against every
     member the guild's stored blocks and engagements name, and the opt-out
     gate."""
     gate = await load_gate(session)
-    names = await known_member_names(
-        session,
-        memory.guild_id,
-        memory.content or "",
-        memory.behavior or "",
-        memory.personality or "",
+    texts = {
+        "personality": memory.personality or "",
+        "behavior": memory.behavior or "",
+        "memory": memory.content or "",
+    }
+    names = await known_member_names(session, memory.guild_id, *texts.values())
+    blocked = await blocked_member_names(
+        session, gate, memory.guild_id, *texts.values()
     )
-    blocks: dict[str, PublicBlock] = {}
-    for name, text in (
-        ("personality", memory.personality),
-        ("behavior", memory.behavior),
-        ("public_memory", memory.public_content),
-    ):
-        text = (text or "").strip()
-        problem = public_text_problem(text, names) if text else None
-        if problem is None and gate.carries_blocked_id(text):
-            problem = "it carries a blocked id"
-        blocks[name] = PublicBlock(text=text, problem=problem)
-    return blocks
+    return {
+        name: public_block(texts[name], names, gate, blocked) for name in PUBLIC_BLOCKS
+    }

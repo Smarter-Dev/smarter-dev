@@ -188,7 +188,7 @@ removed. Keep everything else, attributed exactly as before.
 Output three fields:
 - `summary`: the running summary the agent will read in place of the whole
   history. Same rules as always: attribute every kept question, claim,
-  request or decision as `username (id <user-id>)`; structure it as a
+  request or decision as a tag, `<user-id:username>`; structure it as a
   `Participants:` line, topic bullets, and an `Agent state:` section. At most
   {max_chars} characters. If there is no transcript, return an empty string.
   If nothing remains once the person is removed, say briefly that the
@@ -317,7 +317,8 @@ you write now. Write the memory your future self needs to continue
 seamlessly, exactly as you would for an ordinary compaction — conversations
 still in motion and who is in them, commitments or follow-ups you made, what
 you have learned about the people and channels you watch — attributing every
-statement to WHO said or did it and WHERE (channel name and id).
+statement to WHO said or did it, as a tag `<user-id:username>`, and WHERE
+(channel name and id).
 
 Leave out every trace of the person below: their messages, what they asked,
 said, shared or decided, your replies to them, facts about them, and the fact

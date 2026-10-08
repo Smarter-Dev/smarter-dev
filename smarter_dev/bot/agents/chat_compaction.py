@@ -27,7 +27,7 @@ Net effect: compaction naturally happens on re-engagement after a lull
 (cache already cold, fold costs nothing extra) and only interrupts an
 active burst when history is genuinely bloated on an expensive model.
 
-The summary REQUIRES per-user attribution (username + user-id) so the
+The summary REQUIRES per-user attribution (a ``<user-id:username>`` tag) so the
 agent's multi-user discipline survives compaction — a summary that says
 "someone asked about webhooks" is worse than no summary at all.
 
@@ -246,12 +246,12 @@ facts into your output so nothing attributed is lost.
 Non-negotiable rules:
 
 1. ATTRIBUTION. Every question, claim, request, decision, or position you
-   keep must name the user it came from as `username (id <user-id>)`.
+   keep must name the user it came from as a tag, `<user-id:username>`.
    Never merge two users' statements into one, never say "someone" or
    "users discussed" when the transcript names them. If you cannot tell
    who said something, drop it rather than guess.
 2. Structure the summary as:
-   - `Participants:` one line listing each user as username (id ...).
+   - `Participants:` one line listing each user as `<user-id:username>`.
    - Topic bullets: per topic, who said/asked what and how it resolved.
    - `Agent state:` what the agent itself said, promised, or produced
      (tool calls made and what they returned that still matters).

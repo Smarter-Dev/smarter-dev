@@ -47,8 +47,11 @@ REMEMBER_DOCSTRING = (
     'over someone, answered a question nobody asked, missed that a joke was a '
     'joke), and the shape of the place itself: what a channel is really for, '
     'server traditions and lore, who runs what. Write it in first person, one '
-    "thought per call, the way you'd tell a friend about your day; name people "
-    "as `username (id 123)`. When it's a read on someone, write what they did "
+    "thought per call, the way you'd tell a friend about your day; name every "
+    "person as a tag, `<userid:username>` like `<123456789012345678:kai>`, "
+    "using the id you see beside their name (`<:username>` only for someone "
+    "you've only heard about and have no id for). When it's a read on someone, "
+    "write what they did "
     'with you, not a label you\'re filing them under — "wound me up about being '
     'a chatbot again, enjoyed it" beats "is a troll", because tonight you\'ll be '
     'deciding what to carry forward and a label outlives the day that earned '

@@ -20,7 +20,7 @@ question an operator with this page open is asking. Only the agent edits its
 own memory, so this page has no edit or reset either.
 
 The one thing it does switch is the public ``/chat-agent`` page (#103), which
-never edits memory: the page sits beside the public block it would show, with
+never edits memory: each block sits beside its masked preview (#104), with
 whatever the public check would hide flagged, so the admin reads it before
 switching it on. Switching one guild on switches every other guild off.
 """

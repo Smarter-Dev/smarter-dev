@@ -199,7 +199,8 @@ sentence, or a part of a sentence). For every segment listed under
 - `remove` — it is about this person, or came from them;
 - `rewrite` — it mixes this person with someone else: give the new `text` for
   that segment only, about the other person, without the person's name or ID
-  (do not repeat a list marker such as "- "; it is kept for you);
+  (do not repeat a list marker such as "- "; it is kept for you). Name the
+  other person the way the memory does, as a tag `<userid:username>`;
 - `keep` — the name belongs to a different person who shares it. Say so in
   `unresolved` for that block or note.
 
