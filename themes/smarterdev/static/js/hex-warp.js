@@ -300,15 +300,21 @@
 
   // Initialize reveal animations
   function initReveals() {
-    var obs = new IntersectionObserver(function (entries) {
-      entries.forEach(function (entry) {
-        if (entry.isIntersecting) {
-          entry.target.classList.add('visible');
-          obs.unobserve(entry.target);
-        }
-      });
-    }, { threshold: 0.1 });
-    document.querySelectorAll('.reveal:not(.visible)').forEach(function (el) { obs.observe(el); });
+    var targets = document.querySelectorAll('.reveal:not(.visible)');
+    if (!targets.length) return;
+    var observers = [];
+    function show(entry) {
+      if (!entry.isIntersecting) return;
+      entry.target.classList.add('visible');
+      observers.forEach(function (o) { o.unobserve(entry.target); });
+    }
+    function onEntries(entries) { entries.forEach(show); }
+    // Short elements: reveal once 10% of the element is on screen.
+    observers.push(new IntersectionObserver(onEntries, { threshold: 0.1 }));
+    // Tall elements never reach 10% of their own area on a phone, so also
+    // reveal once they reach 15% of the viewport height from the bottom edge.
+    observers.push(new IntersectionObserver(onEntries, { rootMargin: '0px 0px -15% 0px', threshold: 0 }));
+    targets.forEach(function (el) { observers.forEach(function (o) { o.observe(el); }); });
   }
 
   // Auto-init
