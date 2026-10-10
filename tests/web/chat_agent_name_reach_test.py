@@ -77,25 +77,26 @@ async def test_a_bare_name_nothing_knows_still_shows(db_session):
     block = await _behavior_check(db_session)
 
     assert block.problem is None
-    assert block.names_found == ()
+    assert block.names_masked == ()
 
 
-async def test_a_linked_accounts_global_name_hides_the_block(db_session):
+async def test_a_linked_accounts_global_name_is_masked(db_session):
     await _link_discord(
         db_session, RIO, {"id": RIO, "username": "rio_dev", "global_name": "Rio"}
     )
 
     block = await _behavior_check(db_session)
 
-    assert block.problem == "it names a member"
-    assert block.names_found == ("rio",)
-    assert block.shown() == ""
+    assert block.problem is None
+    assert block.names_masked == ("rio",)
+    assert block.shown() == "Report failures to a member in #bot-dev."
+    assert block.shown(frozenset({RIO})) == "Report failures to a member in #bot-dev."
 
 
-async def test_a_linked_accounts_username_hides_the_block(db_session):
+async def test_a_linked_accounts_username_is_masked(db_session):
     await _link_discord(db_session, RIO, {"username": "rio", "global_name": None})
 
-    assert (await _behavior_check(db_session)).names_found == ("rio",)
+    assert (await _behavior_check(db_session)).names_masked == ("rio",)
 
 
 async def test_a_tag_in_another_guilds_revision_or_note_is_known(db_session):
@@ -105,7 +106,7 @@ async def test_a_tag_in_another_guilds_revision_or_note_is_known(db_session):
         )
     )
     await db_session.commit()
-    assert (await _behavior_check(db_session)).names_found == ("rio",)
+    assert (await _behavior_check(db_session)).names_masked == ("rio",)
 
 
 async def test_a_tag_in_a_note_is_known(db_session):
@@ -118,7 +119,7 @@ async def test_a_tag_in_a_note_is_known(db_session):
     )
     await db_session.commit()
 
-    assert (await _behavior_check(db_session)).names_found == ("rio",)
+    assert (await _behavior_check(db_session)).names_masked == ("rio",)
 
 
 @pytest.mark.parametrize(
@@ -177,7 +178,7 @@ async def test_the_guilds_own_records_name_members(db_session, record):
     db_session.add(record())
     await db_session.commit()
 
-    assert (await _behavior_check(db_session)).names_found == ("rio",)
+    assert (await _behavior_check(db_session)).names_masked == ("rio",)
 
 
 async def test_another_guilds_records_and_the_bots_own_account_are_not_members(
@@ -206,7 +207,9 @@ async def test_another_guilds_records_and_the_bots_own_account_are_not_members(
     )
     await db_session.commit()
 
-    assert (await _behavior_check(db_session)).problem is None
+    block = await _behavior_check(db_session)
+    assert block.problem is None
+    assert block.names_masked == ()
 
 
 async def test_a_name_that_is_the_placeholder_does_not_hide_every_block(db_session):
@@ -219,15 +222,16 @@ async def test_a_name_that_is_the_placeholder_does_not_hide_every_block(db_sessi
     assert "a member loves shaders" in blocks["memory"].shown()
 
 
-async def test_the_page_hides_a_block_with_a_linked_display_name(db_session, client):  # noqa: F811
+async def test_the_page_masks_a_linked_display_name(db_session, client):  # noqa: F811
     await _seed_memory(db_session)
     await _switch_on(db_session, behavior=_REPORT_LINE)
     await _link_discord(db_session, RIO, {"username": "rio_dev", "global_name": "Rio"})
 
     html = (await client.get(CHAT_AGENT_PATH)).text
 
-    assert "Report failures" not in html
-    assert "The behavior is not shown right now." in html
+    assert "Report failures to a member in #bot-dev." in html
+    assert "Rio" not in html
+    assert "The behavior is not shown right now." not in html
 
 
 # -- tagging a name -------------------------------------------------------------------
@@ -305,7 +309,7 @@ async def test_the_admin_tags_a_name_in_all_three_blocks(db_session, client):  #
     await _link_discord(db_session, RIO, {"username": "rio_dev", "global_name": "Rio"})
     before = await get_guild_memory_blob(db_session, _GUILD)
     revision = before.revision
-    assert "Report failures" not in (await client.get(CHAT_AGENT_PATH)).text
+    assert "Report failures to a member" in (await client.get(CHAT_AGENT_PATH)).text
 
     response, success, error = await _post_tag(
         db_session, {"name": "Rio", "discord_id": RIO}
@@ -399,4 +403,4 @@ def test_the_admin_page_has_the_tag_form_and_lists_the_names():
 
     assert "/chat-memory/tag-name" in source
     assert 'name="name"' in source and 'name="discord_id"' in source
-    assert "block.names_found" in source
+    assert "block.names_masked" in source

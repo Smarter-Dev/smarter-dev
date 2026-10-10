@@ -78,10 +78,11 @@
             </div>
             <div class="sk-panel-body">
                 <p class="sk-text-muted" style="font-size:0.85rem;">
-                    The public <code>/chat-agent</code> page shows these three blocks with every tagged person
-                    as &ldquo;a member&rdquo; and the lines about opted-out members left out. A block that still
-                    names a member, or carries an id, a mention or HTML, is hidden there. Masking only removes
-                    tags: read the masked side for anyone described well enough to recognise.
+                    The public <code>/chat-agent</code> page shows these three blocks with every tagged person,
+                    and every known member name left outside a tag, as &ldquo;a member&rdquo; and the lines about
+                    opted-out members left out. A block that still carries an id, a mention or HTML is hidden
+                    there. Masking only removes tags and names it knows: read the masked side for anyone
+                    described well enough to recognise.
                 </p>
                 {% if public_blocks %}
                 {% for key, label in [("personality", "Personality"), ("behavior", "Behavior"), ("memory", "Memory")] %}
@@ -90,8 +91,8 @@
                 {% if block.problem %}
                 <p><span class="sk-badge sk-badge-danger">hidden on the page: {{ block.problem }}</span></p>
                 {% endif %}
-                {% if block.names_found %}
-                <p class="sk-text-muted" style="font-size:0.85rem;">Names it carries outside a tag: {{ block.names_found|join(", ") }}</p>
+                {% if block.names_masked %}
+                <p class="sk-text-muted" style="font-size:0.85rem;">Names outside a tag masked on the page: {{ block.names_masked|join(", ") }}</p>
                 {% endif %}
                 {% if block.lines_left_out %}
                 <p class="sk-text-muted" style="font-size:0.85rem;">{{ block.lines_left_out }} line(s) about opted-out members left out.</p>

@@ -3,10 +3,10 @@
 What is pinned here is about what strangers may read:
 
 - the masker turns every ``<id:name>`` tag, id-less ``<:name>`` tag, old
-  ``name (id N)`` form and mention into "a member", and the check
-  (:func:`public_text_problem`) still runs on what is left;
+  ``name (id N)`` form, mention and bare known name (#108) into "a member",
+  and the check (:func:`public_text_problem`) still runs on what is left;
 - the page 404s until an admin switches one guild on, shows the real blocks
-  masked, hides a block that still names someone, leaves out lines about
+  masked, hides a block that still carries an id, a mention or HTML, leaves out lines about
   opted-out members, and shows a signed-in visitor their own tags only;
 - the dream asks again for writing that names a known member outside a tag.
 
@@ -168,12 +168,79 @@ async def test_the_masker_leaves_emoji_and_timestamps_alone(db_session):
     assert block.masked == "the jam <:party:123> starts <t:1:R>"
 
 
-async def test_a_name_left_outside_a_tag_still_hides_the_block(db_session):
+async def test_a_name_left_outside_a_tag_is_masked(db_session):
     block = await _block(db_session, f"<{KAI}:kai> and nia run the jam")
 
-    assert block.masked == "a member and nia run the jam"
-    assert block.problem == "it names a member"
+    assert block.masked == "a member and a member run the jam"
+    assert block.problem is None
+    assert block.names_masked == ("nia",)
+
+
+@pytest.mark.parametrize(
+    ("raw", "masked"),
+    [
+        ("Ask Nia first.", "Ask a member first."),
+        ("NIA and nIa and Nia.", "a member and a member and a member."),
+        ("Nia's build is green.", "a member's build is green."),
+        ("Kaiju and Bokai tea, not kai2.", "Kaiju and Bokai tea, not kai2."),
+        ("#nia-chat is quiet.", "#a member-chat is quiet."),
+    ],
+    ids=["bare", "any case", "possessive", "whole words only", "channel"],
+)
+async def test_bare_known_names_are_masked_as_whole_words(db_session, raw, masked):
+    block = await _block(db_session, raw)
+
+    assert block.masked == masked
+    assert block.problem is None
+
+
+async def test_the_longest_name_is_masked_first(db_session):
+    names = frozenset({"zech", "zech z", "z"})
+
+    block = await _block(db_session, "Zech Z and Zech wrote it.", names=names)
+
+    assert block.masked == "a member and a member wrote it."
+    assert block.names_masked == ("zech", "zech z")
+
+
+async def test_a_name_inside_a_tag_is_masked_once(db_session):
+    block = await _block(db_session, f"<{KAI}:kai> <:Big Kai> kai (id 7) said hi")
+
+    assert block.masked == "a member a member a member said hi"
+    assert block.names_masked == ()
+
+
+async def test_a_masked_bare_name_stays_masked_for_its_owner(db_session):
+    block = await _block(db_session, f"kai and <{KAI}:kai> host")
+
+    assert block.shown(frozenset({KAI})) == "a member and kai host"
+
+
+@pytest.mark.parametrize(
+    ("raw", "problem"),
+    [
+        (f"Nia ({KAI}) hosts", "it carries a Discord id"),
+        ("Nia pings <@&7>", "it carries a mention"),
+        ("Nia says <b>hi</b>", "it carries raw HTML"),
+    ],
+)
+async def test_masking_a_name_does_not_save_a_block_that_fails_otherwise(
+    db_session, raw, problem
+):
+    block = await _block(db_session, raw)
+
+    assert block.problem == problem
     assert block.shown() == ""
+
+
+async def test_opted_out_lines_are_left_out_before_names_are_masked(db_session):
+    await opt_out(db_session, KAI)
+
+    block = await _block(db_session, f"- <{KAI}:kai> and Nia pair\n- Nia runs the jam")
+
+    assert block.masked == "- a member runs the jam"
+    assert block.lines_left_out == 1
+    assert block.names_masked == ("nia",)
 
 
 async def test_a_role_mention_is_not_a_member_and_hides_the_block(db_session):
@@ -591,13 +658,8 @@ async def test_before_the_first_dream_the_page_says_so(db_session, client):
 @pytest.mark.parametrize(
     ("field_name", "bad", "shown_text"),
     [
-        ("personality", "I like kai a lot.", "I like"),
+        ("personality", "I like <@&7> and kai a lot.", "I like"),
         ("behavior", "Never tease <@&777777777777777777>.", "Never tease"),
-        (
-            "content",
-            f"<{KAI}:kai> hosts. <{NIA}:nia> and kai run the jam.",
-            "run the jam",
-        ),
         ("behavior", f"Answer {KAI} first.", "Answer"),
     ],
 )

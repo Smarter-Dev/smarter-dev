@@ -18,7 +18,7 @@ the public ``/chat-agent`` page can mask them all. Text the model writes
 tonight that names a member it knows outside a tag (a bare name, or the old
 ``username (id N)`` form) is asked for again; on the last attempt it is kept
 and logged, because a username that is also a common word must not freeze the
-memory, and the page hides a block that still names someone. Blocks the dream
+memory, and the page masks a known name left outside a tag. Blocks the dream
 leaves alone keep whatever form they were written in.
 
 Behavior and personality are only ever replaced by an explicit, valid
