@@ -3,17 +3,21 @@
 The page shows the real personality, behavior and memory blocks with every
 person masked: each ``<userid:username>`` tag (and the old ``username (id N)``
 form, and any ``<@N>`` mention) becomes "a member". A line about someone who
-opted out is left out first, as it is for every agent. What is left is held to
-one check: no Discord id, no mention, no raw HTML and no name of a member the
-agent knows. A block that still fails is hidden, not edited.
+opted out is left out first, as it is for every agent. A name of a member the
+agent knows that is left outside a tag, a bare "Zech" or "Zech's", is masked
+too, matched as a whole word with the same rule the check below uses (#108).
+What is left is held to one check: no Discord id, no mention, no raw HTML and
+no name of a member the agent knows. A block that still fails is hidden, not
+edited.
 
-Masking only removes tagged references. A description that identifies someone
-without a name ("the person who runs the Rust meetup") is not caught; the
-dream is asked not to write those, and the admin reads the preview before
-switching the page on.
+Masking only removes references and names it knows. A description that
+identifies someone without a name ("the person who runs the Rust meetup") is
+not caught; the dream is asked not to write those, and the admin reads the
+preview before switching the page on.
 
 A signed-in visitor whose account has linked Discord ids sees their own tags
-by name; everyone else stays "a member". The masked blocks are the same for
+by name; everyone else stays "a member". A masked bare name has no id, so it
+stays "a member" for everyone. The masked blocks are the same for
 every visitor, so they are what is cached, and the visitor's own names are put
 back per request (:meth:`PublicBlock.shown`).
 
@@ -81,17 +85,60 @@ def member_names(*texts: str, usernames: Iterable[str] = ()) -> frozenset[str]:
     return frozenset(name for name in names if len(name) >= MIN_NAME_CHARS)
 
 
+def _whole_word(name: str) -> str:
+    """The pattern for ``name`` (casefolded) as a whole word: the one rule both
+    the masking and the check match names by."""
+    return rf"(?<!\w){re.escape(name)}(?!\w)"
+
+
 def names_in(text: str, names: frozenset[str]) -> list[str]:
     """Which of ``names`` ``text`` carries as a whole word, sorted."""
     folded = text.casefold()
-    return sorted(
-        name for name in names if re.search(rf"(?<!\w){re.escape(name)}(?!\w)", folded)
-    )
+    return sorted(name for name in names if re.search(_whole_word(name), folded))
 
 
 def _names_someone(text: str, names: frozenset[str]) -> bool:
     folded = text.casefold()
-    return any(re.search(rf"(?<!\w){re.escape(name)}(?!\w)", folded) for name in names)
+    return any(re.search(_whole_word(name), folded) for name in names)
+
+
+def _bare_names(names: frozenset[str]) -> re.Pattern[str] | None:
+    """Any of ``names`` as a whole word, longest first, so a longer name that
+    holds a shorter one is masked whole."""
+    if not names:
+        return None
+    ordered = sorted(names, key=lambda name: (-len(name), name))
+    return re.compile("|".join(_whole_word(name) for name in ordered))
+
+
+def _mask_bare_names(
+    text: str, pattern: re.Pattern[str]
+) -> tuple[list[str | MemberRef], set[str]]:
+    """``text`` with every whole-word name ``pattern`` matches as an id-less
+    reference, and the names it masked, casefolded.
+
+    Matched on the casefolded text, as :func:`names_in` is. Casefolding a
+    character never shortens it, so the same length means the positions line
+    up with ``text``; otherwise (an "ß" folding to "ss") it falls back to a
+    case-insensitive match on ``text``, and the check is the backstop.
+    """
+    folded = text.casefold()
+    if len(folded) == len(text):
+        matches = list(pattern.finditer(folded))
+    else:
+        matches = list(re.compile(pattern.pattern, re.IGNORECASE).finditer(text))
+    parts: list[str | MemberRef] = []
+    masked: set[str] = set()
+    last = 0
+    for match in matches:
+        if match.start() > last:
+            parts.append(text[last : match.start()])
+        parts.append(MemberRef(None, None))
+        masked.add(match[0].casefold())
+        last = match.end()
+    if last < len(text):
+        parts.append(text[last:])
+    return parts, masked
 
 
 def public_text_problem(text: str, names: frozenset[str]) -> str | None:
@@ -222,7 +269,7 @@ async def recorded_member_names(session: AsyncSession, guild_id: str) -> list[st
 async def page_member_names(
     session: AsyncSession, guild_id: str, *texts: str
 ) -> frozenset[str]:
-    """Every name the public page hides a block for: :func:`known_member_names`
+    """Every name the public page masks and checks a block for: :func:`known_member_names`
     and the wider reach of :func:`stored_tagged_names` and
     :func:`recorded_member_names` (#105)."""
     known = await known_member_names(session, guild_id, *texts)
@@ -277,16 +324,17 @@ class PublicBlock:
     """One block as the public page would show it: ``problem`` hides it.
 
     ``parts`` is the block with the opted-out lines left out, as plain text
-    and the people it references; :attr:`masked` is it with every person as
-    "a member", and the text every check ran on.
+    and the people it references, a bare known name among them as a reference
+    with no id; :attr:`masked` is it with every person as "a member", and the
+    text every check ran on.
     """
 
     parts: tuple[str | MemberRef, ...] = ()
     problem: str | None = None
     # Lines left out because they name someone who opted out.
     lines_left_out: int = 0
-    # The names that hid it, for the admin preview only; never on the page.
-    names_found: tuple[str, ...] = ()
+    # The bare names masked in it, for the admin preview only; never on the page.
+    names_masked: tuple[str, ...] = ()
     raw: str = field(default="", repr=False)
 
     def render(self, viewer_ids: frozenset[str] = frozenset()) -> str:
@@ -316,22 +364,32 @@ def public_block(
     gate: OptOutGate,
     blocked_names: frozenset[str] = frozenset(),
 ) -> PublicBlock:
-    """``text`` checked for the page: opted-out lines out, people masked."""
+    """``text`` checked for the page: opted-out lines out, people masked,
+    tagged or bare."""
     text = (text or "").strip()
     lines = text.splitlines()
     kept = [
         line for line in lines if not gate.carries_blocked_member(line, blocked_names)
     ]
-    parts = split_members("\n".join(kept))
-    masked = PublicBlock(parts=parts).masked
+    pattern = _bare_names(names)
+    parts: list[str | MemberRef] = []
+    names_masked: set[str] = set()
+    for part in split_members("\n".join(kept)):
+        if isinstance(part, str) and pattern is not None:
+            plain, found = _mask_bare_names(part, pattern)
+            parts.extend(plain)
+            names_masked |= found
+        else:
+            parts.append(part)
+    masked = PublicBlock(parts=tuple(parts)).masked
     problem = public_text_problem(masked, names) if masked else None
     if problem is None and gate.carries_blocked_id(masked):
         problem = "it carries a blocked id"
     return PublicBlock(
-        parts=parts,
+        parts=tuple(parts),
         problem=problem,
         lines_left_out=len(lines) - len(kept),
-        names_found=tuple(names_in(masked, names)) if masked else (),
+        names_masked=tuple(sorted(names_masked)),
         raw=text,
     )
 
@@ -339,7 +397,7 @@ def public_block(
 async def check_public_blocks(
     session: AsyncSession, memory: ChatAgentGuildMemory
 ) -> dict[str, PublicBlock]:
-    """Personality, behavior and memory, masked and each checked against every
+    """Personality, behavior and memory, each masked and checked against every
     name :func:`page_member_names` knows, and the opt-out gate."""
     gate = await load_gate(session)
     texts = {
