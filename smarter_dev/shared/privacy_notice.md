@@ -60,7 +60,7 @@ You can also opt out of the AI assistant at any time with the /privacy command i
 After a deletion request we keep:
 
 - **Moderation history**, to keep the server safe.
-- **The AI assistant's memory of the server**, with you removed from it, so it does not lose what it has learned about the community.
+- **The AI assistant's memory of the server**, with you removed from it, so it does not lose what it has learned about the community. You can read what it remembers about the server on [its public page](https://smarter.dev/chat-agent).
 - **Your Discord ID**, so the AI assistant keeps ignoring your messages.
 - **Records of usage, cost and AI decisions, and other members' transaction histories**, with your ID and name removed, though they still show which messages and channels were involved, so our accounts stay accurate and we can audit the AI.
 - **Messages the bot already posted on Discord**, including moderation log posts, which we do not edit.
