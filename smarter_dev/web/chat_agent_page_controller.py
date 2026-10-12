@@ -16,7 +16,6 @@ request; a visitor's render is never cached.
 from __future__ import annotations
 
 import logging
-import time
 from uuid import UUID
 
 from litestar import Request
@@ -29,7 +28,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.privacy_notice import PRIVACY_PATH
 from smarter_dev.web.chat_agent_public import PublicBlock
-from smarter_dev.web.chat_agent_public import check_public_blocks
+from smarter_dev.web.chat_agent_public import cached_public_blocks
 from smarter_dev.web.chat_agent_public import public_guild_memory
 from smarter_dev.web.chat_agent_public import viewer_discord_ids
 
@@ -42,29 +41,9 @@ _DESCRIPTION = (
     "remembers and dreams, and a live look at what it carries forward."
 )
 
-# The checked, masked blocks, kept briefly so a crawler cannot turn every hit
-# into the engagement-name query and a gate load. Keyed on the blocks' own
-# text, so a dream or a purge that changes one is seen on the next hit; the
-# switch is read on every hit, so turning the page off is immediate. They are
-# the same for every visitor: a visitor's own names go back on per request.
-BLOCKS_CACHE_SECONDS = 300
-_blocks_cache: dict[tuple, tuple[float, dict[str, PublicBlock]]] = {}
-
 
 async def _cached_public_blocks(db_session, memory) -> dict[str, PublicBlock]:
-    key = (
-        memory.guild_id,
-        memory.personality or "",
-        memory.behavior or "",
-        memory.content or "",
-    )
-    now = time.monotonic()
-    hit = _blocks_cache.get(key)
-    if hit is not None and now - hit[0] < BLOCKS_CACHE_SECONDS:
-        return hit[1]
-    blocks = await check_public_blocks(db_session, memory)
-    _blocks_cache.clear()
-    _blocks_cache[key] = (now, blocks)
+    blocks = await cached_public_blocks(db_session, memory)
     for name, block in blocks.items():
         if block.problem is not None:
             logger.warning(

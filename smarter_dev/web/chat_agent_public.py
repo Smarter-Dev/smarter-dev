@@ -35,6 +35,7 @@ site account linked to Discord.
 from __future__ import annotations
 
 import re
+import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from dataclasses import field
@@ -412,3 +413,29 @@ async def check_public_blocks(
     return {
         name: public_block(texts[name], names, gate, blocked) for name in PUBLIC_BLOCKS
     }
+
+
+# The checked, masked blocks, kept briefly so a crawler cannot turn every hit
+# into the engagement-name query and a gate load. Keyed on the blocks' own
+# text, so a dream or a purge that changes one is seen on the next hit; the
+# switch is read on every hit, so turning the page off is immediate. They are
+# the same for every visitor: a visitor's own names go back on per request.
+BLOCKS_CACHE_SECONDS = 300
+_blocks_cache: dict[tuple, tuple[float, dict[str, PublicBlock]]] = {}
+
+
+async def cached_public_blocks(db_session, memory) -> dict[str, PublicBlock]:
+    key = (
+        memory.guild_id,
+        memory.personality or "",
+        memory.behavior or "",
+        memory.content or "",
+    )
+    now = time.monotonic()
+    hit = _blocks_cache.get(key)
+    if hit is not None and now - hit[0] < BLOCKS_CACHE_SECONDS:
+        return hit[1]
+    blocks = await check_public_blocks(db_session, memory)
+    _blocks_cache.clear()
+    _blocks_cache[key] = (now, blocks)
+    return blocks

@@ -213,3 +213,14 @@ deploy has closed:
 - Update the bot key-validation tests
   (`tests/bot/services/test_api_client_key_validation.py`) to drop the legacy
   `sk-` acceptance cases.
+
+## Site service key
+
+For the site backend, mint a separate key in `/admin/api-keys`: owner with the
+`site-service` role, principal type `service`, service name `site`, and explicit
+scoped permissions `site-memory` and (when needed) `site-privacy`. Keep this
+key in the site's server-side secret store. Do not reuse the Discord bot key
+or expose it in browser code. Validate it against
+`GET /api/site/guilds/{guild_id}/memory/blocks`, not the bot's `/api/auth/validate`.
+The [site memory contract](../../../site-memory.md) defines the routes and
+trusted member/viewer assertions.

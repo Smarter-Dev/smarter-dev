@@ -129,11 +129,12 @@ async def _write_note(
     guild_id: str = _GUILD,
     created_at: datetime = _YESTERDAY_MORNING,
     channel_name: str | None = "dev-help",
+    channel_id: str = _CHANNEL,
 ) -> ChatAgentMemoryNote:
     note = await create_memory_note(
         session,
         guild_id=guild_id,
-        channel_id=_CHANNEL,
+        channel_id=channel_id,
         channel_name=channel_name,
         content=content,
         created_at=created_at,
@@ -714,3 +715,26 @@ def test_default_dream_model_is_gpt_6_1_sol_and_resolves_through_the_catalog(
     model = chat_memory_dream._dream_catalog_model()
     assert model.model_id == "gpt-6.1-sol"
     assert chat_memory_dream.DREAM_REASONING_LEVEL in model.reasoning_levels
+
+
+async def test_dream_consumes_site_originated_note(db_session):
+    note = await _write_note(
+        db_session,
+        content="<@111111111111111111> shared a shader project on the site.",
+        channel_id="site",
+        channel_name="site",
+    )
+    note_id = note.id
+    agent = _StubDreamAgent(output="## Projects\nA new shader project.")
+    result = await run_guild_dream(
+        db_session,
+        guild_id=_GUILD,
+        cutoff=_CUTOFF,
+        dreamed_at=_DREAMED_AT,
+        agent=agent,
+    )
+    assert result.outcome == DreamOutcome.DREAMED
+    assert result.notes_consumed == 1
+    assert "shared a shader project on the site" in agent.prompts[0]
+    assert "#site" in agent.prompts[0]
+    assert await db_session.get(ChatAgentMemoryNote, note_id) is None
