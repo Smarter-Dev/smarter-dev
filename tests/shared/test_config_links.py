@@ -62,17 +62,17 @@ def test_garbage_is_rejected_without_raising():
     assert config_links.verify_config_link("") is None
 
 
-def test_link_url_is_built_from_the_public_base_url(monkeypatch):
+def test_link_url_is_built_from_the_admin_base_url(monkeypatch):
     class _Settings:
         api_secret_key = "test-secret"
-        site_base_url = "https://smarter.dev/"
+        admin_base_url = "https://admin.smarter.dev/"
 
     monkeypatch.setattr(config_links, "get_settings", lambda: _Settings())
     url = config_links.build_config_link_url(
         guild_id=GUILD, channel_id=CHANNEL, discord_user_id=USER
     )
-    assert url.startswith("https://smarter.dev/admin/bot/configure/")
-    assert not url.startswith("https://smarter.dev//")
+    assert url.startswith("https://admin.smarter.dev/admin/bot/configure/")
+    assert not url.startswith("https://admin.smarter.dev//")
     token = url.rsplit("/", 1)[1]
     assert config_links.verify_config_link(token).channel_id == CHANNEL
 

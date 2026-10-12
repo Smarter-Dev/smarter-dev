@@ -232,7 +232,7 @@ def link_state(link: WebSearchLink | None) -> dict | None:
     """The user's search link as the dashboard shows it."""
     if link is None:
         return None
-    base = get_settings().site_base_url.rstrip("/")
+    base = get_settings().admin_base_url.rstrip("/")
     return {
         "url": f"{base}/s/{link.token}?q=%s",
         "opensearch": f"/s/{link.token}/opensearch.xml",

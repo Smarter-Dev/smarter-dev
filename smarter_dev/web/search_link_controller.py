@@ -261,7 +261,7 @@ class SearchLinkController(Controller):
         link = await db_session.scalar(select(WebSearchLink).where(WebSearchLink.token == token))
         if link is None:
             raise HTTPException(status_code=404, detail="This search link doesn't exist.")
-        base = get_settings().site_base_url.rstrip("/")
+        base = get_settings().admin_base_url.rstrip("/")
         return Response(
             content=OPENSEARCH.format(base=base, token=link.token),
             media_type="application/opensearchdescription+xml",

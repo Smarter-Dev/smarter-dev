@@ -38,8 +38,10 @@ data:
   PROACTIVE_WATCHER_MODEL: "typesafe:jev-1.13.0"
   PROACTIVE_SKIM_MODEL: "z-ai/glm-5.3-flash"
 
-  # Site base URL
+  # Public pages keep their canonical, OG and policy links on the public host.
   SITE_BASE_URL: "https://smarter.dev"
+  # Keep Python-owned links on the current host; flip to https://admin.smarter.dev at cutover (#123).
+  ADMIN_BASE_URL: "https://smarter.dev"
 
   # Internal media service (LaTeX, audio transcode, cards). ClusterIP DNS name
   # from k8s/deploy-media.yaml; no trailing slash. The matching MEDIA_API_KEY is

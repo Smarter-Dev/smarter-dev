@@ -86,7 +86,7 @@ async def create_search_preview(
     session.add(row)
     await session.flush()
 
-    base_url = (site_base_url or get_settings().site_base_url).rstrip("/")
+    base_url = (site_base_url or get_settings().admin_base_url).rstrip("/")
     return SearchPreviewReservation(
         id=row.id,
         url=f"{base_url}/ai/search/{raw_token}",

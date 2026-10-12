@@ -24,6 +24,7 @@ from skrift.auth.session_keys import SESSION_USER_ID
 from skrift.db.models.user import User
 from skrift.markdown import render_markdown
 
+from smarter_dev.shared.config import get_settings
 from smarter_dev.web.agent_api import resources_quota_state
 from smarter_dev.web.models import AgentConversation
 from smarter_dev.web.sdanswer import enrich_answer
@@ -159,7 +160,7 @@ async def answer_view(
         )
 
     title = conversation.title or "Smarter Dev answer"
-    answer_url = f"https://smarter.dev/ai/answer/{conversation.id}"
+    answer_url = f"{get_settings().admin_base_url.rstrip('/')}/ai/answer/{conversation.id}"
 
     return Template(
         "ai/answer.html",
