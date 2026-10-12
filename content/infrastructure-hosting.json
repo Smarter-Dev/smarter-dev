@@ -1,0 +1,2106 @@
+{
+  "categories": [
+    {
+      "intro": "The choice is rarely \"which cloud.\" It's how locked-in you can stomach. AWS has the deepest service catalog and the most painful exit cost. GCP and Azure offer competitive primitives with different pain points. The second tier (DigitalOcean, Hetzner, Vultr) wins when you're trading service depth for simpler billing and lower margins. Each major provider has its own managed data services in the section below.",
+      "name": "Cloud providers",
+      "slug": "cloud-providers",
+      "tools": [
+        {
+          "blurb": "The dominant cloud. Deepest service catalog and the most painful exit cost.",
+          "home_key": "infra:tool:aws:home",
+          "name": "Amazon Web Services (AWS)",
+          "slug": "aws",
+          "url": "https://aws.amazon.com/"
+        },
+        {
+          "blurb": "Google's cloud. Strongest on Kubernetes (GKE), BigQuery, and global networking.",
+          "home_key": "infra:tool:gcp:home",
+          "name": "Google Cloud Platform (GCP)",
+          "slug": "gcp",
+          "url": "https://cloud.google.com/"
+        },
+        {
+          "blurb": "Microsoft's cloud. Best identity story and the deepest enterprise relationships.",
+          "home_key": "infra:tool:azure:home",
+          "name": "Microsoft Azure",
+          "slug": "azure",
+          "url": "https://azure.microsoft.com/"
+        },
+        {
+          "blurb": "Predictable pricing, simple ops, generous free egress on managed offerings.",
+          "home_key": "infra:tool:digitalocean:home",
+          "name": "DigitalOcean",
+          "slug": "digitalocean",
+          "url": "https://www.digitalocean.com/"
+        },
+        {
+          "blurb": "German provider with the cheapest serious-grade compute money can buy.",
+          "home_key": "infra:tool:hetzner:home",
+          "name": "Hetzner Cloud",
+          "slug": "hetzner",
+          "url": "https://www.hetzner.com/cloud"
+        },
+        {
+          "blurb": "Wide region coverage, competitive on bare-metal and high-CPU instances.",
+          "home_key": "infra:tool:vultr:home",
+          "name": "Vultr",
+          "slug": "vultr",
+          "url": "https://www.vultr.com/"
+        },
+        {
+          "blurb": "Generous always-free tier. Deepest discount you'll find on dedicated workloads.",
+          "home_key": "infra:tool:oracle-cloud:home",
+          "name": "Oracle Cloud",
+          "slug": "oracle-cloud",
+          "url": "https://www.oracle.com/cloud/"
+        }
+      ]
+    },
+    {
+      "intro": "Hosting where you don't think about hosting. Fly, Railway, Render, Vercel each let you push code and get a URL. The differences are data tier, regional control, and how much they abstract. Pick by whether you want to think about regions, networking, and persistence, or specifically not think about them.",
+      "name": "App hosting / PaaS",
+      "slug": "paas",
+      "tools": [
+        {
+          "blurb": "Edge-native PaaS that keeps multi-region in mind. Best-in-class data tier.",
+          "home_key": "infra:tool:fly:home",
+          "name": "Fly.io",
+          "slug": "fly",
+          "url": "https://fly.io/"
+        },
+        {
+          "blurb": "Push code, get a URL. Honest pricing per service-hour with a nice DX.",
+          "home_key": "infra:tool:railway:home",
+          "name": "Railway",
+          "slug": "railway",
+          "url": "https://railway.com/"
+        },
+        {
+          "blurb": "Managed-but-flexible Heroku replacement; first-class background workers and cron.",
+          "home_key": "infra:tool:render:home",
+          "name": "Render",
+          "slug": "render",
+          "url": "https://render.com/"
+        },
+        {
+          "blurb": "Next.js production company. Best edge story for frontend frameworks.",
+          "home_key": "infra:tool:vercel:home",
+          "name": "Vercel",
+          "slug": "vercel",
+          "url": "https://vercel.com/"
+        },
+        {
+          "blurb": "Long-running Jamstack PaaS; still strong for static sites plus functions.",
+          "home_key": "infra:tool:netlify:home",
+          "name": "Netlify",
+          "slug": "netlify",
+          "url": "https://www.netlify.com/"
+        },
+        {
+          "blurb": "The original PaaS. Pricing's higher; the ergonomics are still battle-tested.",
+          "home_key": "infra:tool:heroku:home",
+          "name": "Heroku",
+          "slug": "heroku",
+          "url": "https://www.heroku.com/"
+        },
+        {
+          "blurb": "Generous free tier; pairs naturally with Cloudflare Workers.",
+          "home_key": "infra:tool:cloudflare-pages:home",
+          "name": "Cloudflare Pages",
+          "slug": "cloudflare-pages",
+          "url": "https://pages.cloudflare.com/"
+        }
+      ]
+    },
+    {
+      "intro": "Postgres-as-a-service is the new default for most teams. Neon, Supabase, Tiger Data, and Crunchy Bridge each take different trade-offs on branching, vector, time-series, and pricing. PlanetScale runs MySQL with serverless branching. Turso runs distributed SQLite. Decision is usually which workload you're optimizing for, plus how much you trust their backup story. The database itself is a <a href=\"/resources/system-architecture#databases\">System Architecture decision</a>; this list is about who runs it for you.",
+      "name": "Managed data services",
+      "slug": "managed-data",
+      "tools": [
+        {
+          "blurb": "Serverless Postgres with branching. The new default for ephemeral environments.",
+          "home_key": "infra:tool:neon:home",
+          "name": "Neon",
+          "slug": "neon",
+          "url": "https://neon.com/"
+        },
+        {
+          "blurb": "Postgres plus auth, storage, realtime, and edge functions as one open-source stack.",
+          "home_key": "infra:tool:supabase:home",
+          "name": "Supabase",
+          "slug": "supabase",
+          "url": "https://supabase.com/"
+        },
+        {
+          "blurb": "Time-series Postgres (formerly Timescale). The team behind hypertables.",
+          "home_key": "infra:tool:tiger-data:home",
+          "name": "Tiger Data",
+          "slug": "tiger-data",
+          "url": "https://www.tigerdata.com/"
+        },
+        {
+          "blurb": "Hosted Postgres from the Crunchy Data team. Deep Postgres expertise, conservative defaults.",
+          "home_key": "infra:tool:crunchy-bridge:home",
+          "name": "Crunchy Bridge",
+          "slug": "crunchy-bridge",
+          "url": "https://www.crunchybridge.com/"
+        },
+        {
+          "blurb": "Serverless MySQL with branching. The Vitess-based reference offering.",
+          "home_key": "infra:tool:planetscale:home",
+          "name": "PlanetScale",
+          "slug": "planetscale",
+          "url": "https://planetscale.com/"
+        },
+        {
+          "blurb": "Distributed SQLite. Edge databases that replicate close to users.",
+          "home_key": "infra:tool:turso:home",
+          "name": "Turso",
+          "slug": "turso",
+          "url": "https://turso.tech/"
+        },
+        {
+          "blurb": "Serverless Redis and Kafka with per-request pricing for in-memory workloads.",
+          "home_key": "infra:tool:upstash:home",
+          "name": "Upstash",
+          "slug": "upstash",
+          "url": "https://upstash.com/"
+        },
+        {
+          "blurb": "Multi-database managed offering: Postgres, Kafka, Redis, OpenSearch, ClickHouse, more.",
+          "home_key": "infra:tool:aiven:home",
+          "name": "Aiven",
+          "slug": "aiven",
+          "url": "https://aiven.io/"
+        }
+      ]
+    },
+    {
+      "intro": "The container is the unit of deployment everywhere except where it isn't. Docker still owns mindshare; Podman is the rootless alternative. The registry choice matters more than the build tool. That's where bandwidth, image scanning, and supply-chain attacks live.",
+      "name": "Containers & registries",
+      "slug": "containers",
+      "tools": [
+        {
+          "blurb": "Still owns the mindshare. The default for building and running containers.",
+          "home_key": "infra:tool:docker:home",
+          "name": "Docker",
+          "slug": "docker",
+          "url": "https://www.docker.com/"
+        },
+        {
+          "blurb": "Daemonless and rootless. Drop-in for most Docker workflows.",
+          "home_key": "infra:tool:podman:home",
+          "name": "Podman",
+          "slug": "podman",
+          "url": "https://podman.io/"
+        },
+        {
+          "blurb": "Focused on building OCI images. Often used alongside Podman in non-Docker stacks.",
+          "home_key": "infra:tool:buildah:home",
+          "name": "Buildah",
+          "slug": "buildah",
+          "url": "https://buildah.io/"
+        },
+        {
+          "blurb": "The original public registry. Rate-limited free tier; ubiquitous official images.",
+          "home_key": "infra:tool:docker-hub:home",
+          "name": "Docker Hub",
+          "slug": "docker-hub",
+          "url": "https://hub.docker.com/"
+        },
+        {
+          "blurb": "Free for public images, deep GitHub Actions integration, no rate limits for auth users.",
+          "home_key": "infra:tool:ghcr:home",
+          "name": "GitHub Container Registry",
+          "slug": "ghcr",
+          "url": "https://ghcr.io/"
+        },
+        {
+          "blurb": "Amazon's container registry. Tight IAM integration if you're AWS-native.",
+          "home_key": "infra:tool:ecr:home",
+          "name": "Amazon ECR",
+          "slug": "ecr",
+          "url": "https://aws.amazon.com/ecr/"
+        }
+      ]
+    },
+    {
+      "intro": "Kubernetes is right when scaling out makes operating it cheaper than not. That's later than most teams reach for it. Docker Compose on a VM is often enough. Nomad is a serious alternative if you want orchestration without the YAML universe. Cloud Run and ECS sit in between: orchestration without the operational tax. Coolify and Kamal are the new wave for teams that want a single command to deploy.",
+      "name": "Orchestration & runtime",
+      "slug": "orchestration",
+      "tools": [
+        {
+          "blurb": "The dominant container orchestrator. Complex but ubiquitous; managed offerings everywhere.",
+          "home_key": "infra:tool:kubernetes:home",
+          "name": "Kubernetes",
+          "slug": "kubernetes",
+          "url": "https://kubernetes.io/"
+        },
+        {
+          "blurb": "Simpler orchestrator supporting more than containers. Pairs well with Consul and Vault.",
+          "home_key": "infra:tool:nomad:home",
+          "name": "HashiCorp Nomad",
+          "slug": "nomad",
+          "url": "https://www.nomadproject.io/"
+        },
+        {
+          "blurb": "Multi-container apps on a single host. Often enough for small deployments.",
+          "home_key": "infra:tool:docker-compose:home",
+          "name": "Docker Compose",
+          "slug": "docker-compose",
+          "url": "https://docs.docker.com/compose/"
+        },
+        {
+          "blurb": "Managed container orchestration on AWS. Simpler than EKS; AWS-locked.",
+          "home_key": "infra:tool:amazon-ecs:home",
+          "name": "Amazon ECS",
+          "slug": "amazon-ecs",
+          "url": "https://aws.amazon.com/ecs/"
+        },
+        {
+          "blurb": "Run containers without thinking about clusters. Per-request billing, scale-to-zero.",
+          "home_key": "infra:tool:cloud-run:home",
+          "name": "Google Cloud Run",
+          "slug": "cloud-run",
+          "url": "https://cloud.google.com/run"
+        },
+        {
+          "blurb": "Self-hosted Heroku alternative. PaaS ergonomics on your own infrastructure.",
+          "home_key": "infra:tool:coolify:home",
+          "name": "Coolify",
+          "slug": "coolify",
+          "url": "https://coolify.io/"
+        },
+        {
+          "blurb": "Basecamp's deployment tool. SSH plus Docker; no orchestrator required.",
+          "home_key": "infra:tool:kamal:home",
+          "name": "Kamal",
+          "slug": "kamal",
+          "url": "https://kamal-deploy.org/"
+        },
+        {
+          "blurb": "Single-server PaaS. Heroku's buildpack experience on a Linux box.",
+          "home_key": "infra:tool:dokku:home",
+          "name": "Dokku",
+          "slug": "dokku",
+          "url": "https://dokku.com/"
+        }
+      ]
+    },
+    {
+      "intro": "The proxy is where your traffic story lives: TLS, routing, rate limits, auth. Nginx and HAProxy are the battle-tested defaults. Caddy makes TLS automatic. Reach for Envoy when you're building a service mesh, Traefik when you're already in orchestrated containers.",
+      "name": "Ingress, proxies & routing",
+      "slug": "ingress",
+      "tools": [
+        {
+          "blurb": "Battle-tested high-performance web server and reverse proxy.",
+          "home_key": "infra:tool:nginx:home",
+          "name": "Nginx",
+          "slug": "nginx",
+          "url": "https://nginx.org/"
+        },
+        {
+          "blurb": "Modern proxy designed for container orchestrators; auto-discovers services.",
+          "home_key": "infra:tool:traefik:home",
+          "name": "Traefik",
+          "slug": "traefik",
+          "url": "https://traefik.io/traefik/"
+        },
+        {
+          "blurb": "Web server with automatic TLS by default. Written in Go. Simplest config of the bunch.",
+          "home_key": "infra:tool:caddy:home",
+          "name": "Caddy",
+          "slug": "caddy",
+          "url": "https://caddyserver.com/"
+        },
+        {
+          "blurb": "High-performance TCP/HTTP proxy with deep tuning surface for serious load.",
+          "home_key": "infra:tool:haproxy:home",
+          "name": "HAProxy",
+          "slug": "haproxy",
+          "url": "https://www.haproxy.org/"
+        },
+        {
+          "blurb": "Proxy designed for service meshes. Powers Istio, Consul Connect, Linkerd.",
+          "home_key": "infra:tool:envoy:home",
+          "name": "Envoy",
+          "slug": "envoy",
+          "url": "https://www.envoyproxy.io/"
+        }
+      ]
+    },
+    {
+      "intro": "Networking is the layer everyone forgets until it bites them. The big three are DNS (where your domain lives), CDN (where users hit before your origin), and private networking (how your services find each other without going through the internet). Tailscale changed the calculus on the last one: operating a private network is now as easy as adding users to a group.",
+      "name": "Networking",
+      "slug": "networking",
+      "tools": [
+        {
+          "blurb": "DNS, CDN, WAF, edge compute as one stack. The default for most teams.",
+          "home_key": "infra:tool:cloudflare:home",
+          "name": "Cloudflare",
+          "slug": "cloudflare",
+          "url": "https://www.cloudflare.com/"
+        },
+        {
+          "blurb": "Amazon's DNS service. Strong health checks; tight Route53 ↔ ALB integration.",
+          "home_key": "infra:tool:route53:home",
+          "name": "AWS Route 53",
+          "slug": "route53",
+          "url": "https://aws.amazon.com/route53/"
+        },
+        {
+          "blurb": "AWS's CDN. Deepest integration with the rest of the AWS ecosystem.",
+          "home_key": "infra:tool:cloudfront:home",
+          "name": "AWS CloudFront",
+          "slug": "cloudfront",
+          "url": "https://aws.amazon.com/cloudfront/"
+        },
+        {
+          "blurb": "Programmable CDN. VCL gives you real control at the edge.",
+          "home_key": "infra:tool:fastly:home",
+          "name": "Fastly",
+          "slug": "fastly",
+          "url": "https://www.fastly.com/"
+        },
+        {
+          "blurb": "Low-cost, high-quality CDN with simple pricing. The new wave.",
+          "home_key": "infra:tool:bunny:home",
+          "name": "Bunny.net",
+          "slug": "bunny",
+          "url": "https://bunny.net/"
+        },
+        {
+          "blurb": "Mesh VPN built on WireGuard. Operating a private network became trivial.",
+          "home_key": "infra:tool:tailscale:home",
+          "name": "Tailscale",
+          "slug": "tailscale",
+          "url": "https://tailscale.com/"
+        },
+        {
+          "blurb": "Zero-trust network access. Closer to enterprise than Tailscale's developer-first feel.",
+          "home_key": "infra:tool:twingate:home",
+          "name": "Twingate",
+          "slug": "twingate",
+          "url": "https://www.twingate.com/"
+        },
+        {
+          "blurb": "Modern VPN protocol. Underlies Tailscale; run it raw if you want full control.",
+          "home_key": "infra:tool:wireguard:home",
+          "name": "WireGuard",
+          "slug": "wireguard",
+          "url": "https://www.wireguard.com/"
+        },
+        {
+          "blurb": "Mesh networking with a different design point than Tailscale. Layer-2 virtual networks.",
+          "home_key": "infra:tool:zerotier:home",
+          "name": "ZeroTier",
+          "slug": "zerotier",
+          "url": "https://www.zerotier.com/"
+        }
+      ]
+    },
+    {
+      "intro": "The functional argument for serverless was \"don't manage servers.\" The actual argument that won was \"don't manage cold starts.\" Edge pushes compute closer to users at the cost of less local state. Pick when latency-to-user matters more than compute density, or when you specifically want stateless scale-to-zero pricing.",
+      "name": "Edge & functions",
+      "slug": "edge",
+      "tools": [
+        {
+          "blurb": "Runs JavaScript and TypeScript on Cloudflare's edge. Sub-millisecond cold starts.",
+          "home_key": "infra:tool:cloudflare-workers:home",
+          "name": "Cloudflare Workers",
+          "slug": "cloudflare-workers",
+          "url": "https://workers.cloudflare.com/"
+        },
+        {
+          "blurb": "Single-instance, stateful objects on Workers. The coordinator pattern at the edge.",
+          "home_key": "infra:tool:durable-objects:home",
+          "name": "Cloudflare Durable Objects",
+          "slug": "durable-objects",
+          "url": "https://www.cloudflare.com/developer-platform/products/durable-objects/"
+        },
+        {
+          "blurb": "Edge and serverless functions tied to Next.js apps. Hot path for the Vercel stack.",
+          "home_key": "infra:tool:vercel-functions:home",
+          "name": "Vercel Functions",
+          "slug": "vercel-functions",
+          "url": "https://vercel.com/docs/functions"
+        },
+        {
+          "blurb": "The original serverless platform. Deepest service-integration story in the AWS ecosystem.",
+          "home_key": "infra:tool:lambda:home",
+          "name": "AWS Lambda",
+          "slug": "lambda",
+          "url": "https://aws.amazon.com/lambda/"
+        },
+        {
+          "blurb": "WebAssembly at the edge. Higher cold-start floor than Workers; broader language support.",
+          "home_key": "infra:tool:fastly-compute:home",
+          "name": "Fastly Compute",
+          "slug": "fastly-compute",
+          "url": "https://www.fastly.com/products/edge-compute"
+        },
+        {
+          "blurb": "Edge platform built around the Deno runtime. TypeScript first-class.",
+          "home_key": "infra:tool:deno-deploy:home",
+          "name": "Deno Deploy",
+          "slug": "deno-deploy",
+          "url": "https://deno.com/deploy"
+        }
+      ]
+    },
+    {
+      "intro": "For 99% of teams, the OS is whatever the platform gives you. The real decision points are long-term support cycles (Ubuntu LTS, Debian stable, RHEL/Rocky), minimal surface area (Alpine, Wolfi for hardened images), and reproducibility (NixOS if you've drunk that kool-aid).",
+      "name": "Server OS",
+      "slug": "server-os",
+      "tools": [
+        {
+          "blurb": "The most common server OS. LTS releases every two years; sane defaults.",
+          "home_key": "infra:tool:ubuntu:home",
+          "name": "Ubuntu Server",
+          "slug": "ubuntu",
+          "url": "https://ubuntu.com/server"
+        },
+        {
+          "blurb": "The stable foundation Ubuntu is built on. Slower-moving, very predictable.",
+          "home_key": "infra:tool:debian:home",
+          "name": "Debian",
+          "slug": "debian",
+          "url": "https://www.debian.org/"
+        },
+        {
+          "blurb": "Minimal distro built on musl libc. Tiny container images; smaller attack surface.",
+          "home_key": "infra:tool:alpine:home",
+          "name": "Alpine Linux",
+          "slug": "alpine",
+          "url": "https://alpinelinux.org/"
+        },
+        {
+          "blurb": "Red Hat's enterprise distro and its community-driven rebuild. The compliance default.",
+          "home_key": "infra:tool:rhel-rocky:home",
+          "name": "RHEL / Rocky Linux",
+          "slug": "rhel-rocky",
+          "url": "https://rockylinux.org/"
+        },
+        {
+          "blurb": "Declarative, reproducible OS. Steep learning curve; deep payoff once you're in.",
+          "home_key": "infra:tool:nixos:home",
+          "name": "NixOS",
+          "slug": "nixos",
+          "url": "https://nixos.org/"
+        },
+        {
+          "blurb": "Container-focused secure base images from Chainguard. Built for SBOM and CVE hygiene.",
+          "home_key": "infra:tool:wolfi:home",
+          "name": "Wolfi",
+          "slug": "wolfi",
+          "url": "https://wolfi.dev/"
+        }
+      ]
+    }
+  ],
+  "category_resources": {
+    "cloud-providers": [
+      {
+        "blurb": "Official onboarding hub with decision guides, cloud essentials, and first-build tutorials across AWS services.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:aws:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "AWS",
+        "title": "Getting started with AWS",
+        "tool_slugs": [
+          "aws"
+        ],
+        "tools": [
+          "aws"
+        ],
+        "url": "https://aws.amazon.com/getting-started/"
+      },
+      {
+        "blurb": "Central hub for GCP product docs, quickstarts, architecture references, and code samples.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:gcp:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Google Cloud",
+        "title": "Google Cloud documentation",
+        "tool_slugs": [
+          "gcp"
+        ],
+        "tools": [
+          "gcp"
+        ],
+        "url": "https://cloud.google.com/docs"
+      },
+      {
+        "blurb": "Microsoft's full Azure docs hub: getting-started paths, product catalog, SDKs, and architecture guidance.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:azure:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Microsoft Learn",
+        "title": "Azure documentation",
+        "tool_slugs": [
+          "azure"
+        ],
+        "tools": [
+          "azure"
+        ],
+        "url": "https://learn.microsoft.com/en-us/azure/"
+      },
+      {
+        "blurb": "Product docs for Droplets, App Platform, Managed Databases, Kubernetes, and developer tooling.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:digitalocean:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "DigitalOcean",
+        "title": "DigitalOcean documentation",
+        "tool_slugs": [
+          "digitalocean"
+        ],
+        "tools": [
+          "digitalocean"
+        ],
+        "url": "https://docs.digitalocean.com/"
+      },
+      {
+        "blurb": "Hetzner's cloud product docs covering servers, networks, volumes, firewalls, billing, and API.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:hetzner:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Hetzner",
+        "title": "Hetzner Cloud documentation",
+        "tool_slugs": [
+          "hetzner"
+        ],
+        "tools": [
+          "hetzner"
+        ],
+        "url": "https://docs.hetzner.com/cloud/"
+      },
+      {
+        "blurb": "Independent benchmarks across Hetzner's CPX, CCX, and CAX fleets with cost-per-score recommendations.",
+        "category": "Discussion",
+        "category_slug": "discussion",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:hetzner:comparison",
+        "learning_type": "Discussion",
+        "published_at": null,
+        "source": "Achromatic",
+        "title": "Hetzner Server Comparison",
+        "tool_slugs": [
+          "hetzner"
+        ],
+        "tools": [
+          "hetzner"
+        ],
+        "url": "https://www.achromatic.dev/blog/hetzner-server-comparison"
+      },
+      {
+        "blurb": "Quickstarts, guides, and references for Vultr Compute, Managed Database, Kubernetes, and Object Storage.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:vultr:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Vultr",
+        "title": "Vultr Docs",
+        "tool_slugs": [
+          "vultr"
+        ],
+        "tools": [
+          "vultr"
+        ],
+        "url": "https://docs.vultr.com/"
+      },
+      {
+        "blurb": "Welcome path: learn OCI basics, create your first instances, and explore role-specific guides.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:oracle-cloud:gsg",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Oracle",
+        "title": "Get started with Oracle Cloud Infrastructure",
+        "tool_slugs": [
+          "oracle-cloud"
+        ],
+        "tools": [
+          "oracle-cloud"
+        ],
+        "url": "https://docs.oracle.com/en-us/iaas/Content/GSG/Concepts/baremetalintro.htm"
+      }
+    ],
+    "containers": [
+      {
+        "blurb": "Essential learning path: install, build, run, and ship containers with the canonical Docker tooling.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:docker:get-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Docker",
+        "title": "Get started with Docker",
+        "tool_slugs": [
+          "docker"
+        ],
+        "tools": [
+          "docker"
+        ],
+        "url": "https://docs.docker.com/get-started/"
+      },
+      {
+        "blurb": "Daemonless, rootless container engine; install, run, manage, network, and checkpoint containers.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:podman:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Podman",
+        "title": "Podman documentation",
+        "tool_slugs": [
+          "podman"
+        ],
+        "tools": [
+          "podman"
+        ],
+        "url": "https://podman.io/docs"
+      },
+      {
+        "blurb": "Script OCI image builds without a daemon or Dockerfile. Install, tutorials, and release news.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:buildah:home",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "containers project",
+        "title": "Buildah",
+        "tool_slugs": [
+          "buildah"
+        ],
+        "tools": [
+          "buildah"
+        ],
+        "url": "https://buildah.io/"
+      },
+      {
+        "blurb": "Push, pull, and manage public/private images; webhooks, CI/CD integrations, and Trusted Content.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:docker-hub:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Docker",
+        "title": "Docker Hub documentation",
+        "tool_slugs": [
+          "docker-hub"
+        ],
+        "tools": [
+          "docker-hub"
+        ],
+        "url": "https://docs.docker.com/docker-hub/"
+      },
+      {
+        "blurb": "Authenticate, push, pull, tag, and label OCI images at ghcr.io tied to your GitHub repos.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:ghcr:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "GitHub Docs",
+        "title": "Working with the GitHub Container Registry",
+        "tool_slugs": [
+          "ghcr"
+        ],
+        "tools": [
+          "ghcr"
+        ],
+        "url": "https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry"
+      },
+      {
+        "blurb": "User guides and API references for ECR private and public registries, IAM, and CLI usage.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:ecr:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "AWS",
+        "title": "Amazon Elastic Container Registry documentation",
+        "tool_slugs": [
+          "ecr"
+        ],
+        "tools": [
+          "ecr"
+        ],
+        "url": "https://docs.aws.amazon.com/ecr/"
+      }
+    ],
+    "edge": [
+      {
+        "blurb": "Serverless edge compute with Wrangler CLI, multi-language runtimes, and bindings to Cloudflare services.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:cloudflare-workers:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Cloudflare",
+        "title": "Cloudflare Workers documentation",
+        "tool_slugs": [
+          "cloudflare-workers"
+        ],
+        "tools": [
+          "cloudflare-workers"
+        ],
+        "url": "https://developers.cloudflare.com/workers/"
+      },
+      {
+        "blurb": "Stateful Workers combining compute with storage, WebSocket hibernation, and scheduled alarms.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:durable-objects:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Cloudflare",
+        "title": "Cloudflare Durable Objects",
+        "tool_slugs": [
+          "durable-objects"
+        ],
+        "tools": [
+          "durable-objects"
+        ],
+        "url": "https://developers.cloudflare.com/durable-objects/"
+      },
+      {
+        "blurb": "Run server-side code on Vercel with Fluid compute, autoscaling, and region-aware data locality.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:vercel-functions:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Vercel",
+        "title": "Vercel Functions documentation",
+        "tool_slugs": [
+          "vercel-functions"
+        ],
+        "tools": [
+          "vercel-functions"
+        ],
+        "url": "https://vercel.com/docs/functions"
+      },
+      {
+        "blurb": "Lambda developer guide: triggers, runtimes, permissions, scaling, layers, SnapStart, and VPC integration.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:lambda:welcome",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "AWS",
+        "title": "What is AWS Lambda?",
+        "tool_slugs": [
+          "lambda"
+        ],
+        "tools": [
+          "lambda"
+        ],
+        "url": "https://docs.aws.amazon.com/lambda/latest/dg/welcome.html"
+      },
+      {
+        "blurb": "Serverless WebAssembly edge runtime; supported languages, deploy tooling, and logging integrations.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:fastly-compute:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Fastly",
+        "title": "Fastly Compute",
+        "tool_slugs": [
+          "fastly-compute"
+        ],
+        "tools": [
+          "fastly-compute"
+        ],
+        "url": "https://docs.fastly.com/products/compute"
+      },
+      {
+        "blurb": "Serverless JS/TS platform with apps, KV, cron, environments, and the REST API reference.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:deno-deploy:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Deno",
+        "title": "Deno Deploy documentation",
+        "tool_slugs": [
+          "deno-deploy"
+        ],
+        "tools": [
+          "deno-deploy"
+        ],
+        "url": "https://docs.deno.com/deploy/"
+      }
+    ],
+    "ingress": [
+      {
+        "blurb": "Official intro: serving static content, reverse proxy, FastCGI, and load balancing basics.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:nginx:beginners",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Nginx docs",
+        "title": "Nginx Beginner's Guide",
+        "tool_slugs": [
+          "nginx"
+        ],
+        "tools": [
+          "nginx"
+        ],
+        "url": "https://nginx.org/en/docs/beginners_guide.html"
+      },
+      {
+        "blurb": "Operator guide covering configuration patterns, hardening, performance, and debugging.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:nginx:admins-handbook",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "GitHub · trimstray",
+        "title": "Nginx Admin's Handbook",
+        "tool_slugs": [
+          "nginx"
+        ],
+        "tools": [
+          "nginx"
+        ],
+        "url": "https://github.com/trimstray/nginx-admins-handbook"
+      },
+      {
+        "blurb": "Run Traefik with Docker, discover services automatically, and route HTTP traffic.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:traefik:quick-start",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Traefik docs",
+        "title": "Traefik Quick Start",
+        "tool_slugs": [
+          "traefik"
+        ],
+        "tools": [
+          "traefik"
+        ],
+        "url": "https://doc.traefik.io/traefik/getting-started/quick-start/"
+      },
+      {
+        "blurb": "Run Caddy as a static file server, reverse proxy, and HTTPS terminator with automatic TLS.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:caddy:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Caddy docs",
+        "title": "Caddy Getting Started",
+        "tool_slugs": [
+          "caddy"
+        ],
+        "tools": [
+          "caddy"
+        ],
+        "url": "https://caddyserver.com/docs/getting-started"
+      },
+      {
+        "blurb": "Caddyfile syntax, matchers, directives, and snippets for typical reverse-proxy setups.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:caddy:caddyfile",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Caddy docs",
+        "title": "Caddyfile Concepts",
+        "tool_slugs": [
+          "caddy"
+        ],
+        "tools": [
+          "caddy"
+        ],
+        "url": "https://caddyserver.com/docs/caddyfile/concepts"
+      },
+      {
+        "blurb": "Introduction to load balancing concepts, frontends, backends, and ACLs in HAProxy.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:haproxy:intro",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "HAProxy docs",
+        "title": "HAProxy Starter Guide",
+        "tool_slugs": [
+          "haproxy"
+        ],
+        "tools": [
+          "haproxy"
+        ],
+        "url": "https://docs.haproxy.org/3.0/intro.html"
+      },
+      {
+        "blurb": "Canonical reference for every config directive: timeouts, health checks, stick tables, SSL.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:haproxy:config-manual",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "HAProxy docs",
+        "title": "HAProxy Configuration Manual",
+        "tool_slugs": [
+          "haproxy"
+        ],
+        "tools": [
+          "haproxy"
+        ],
+        "url": "https://docs.haproxy.org/3.0/configuration.html"
+      },
+      {
+        "blurb": "Run Envoy in Docker, configure listeners, clusters, and basic HTTP routing.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:envoy:start",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Envoy docs",
+        "title": "Envoy Getting Started",
+        "tool_slugs": [
+          "envoy"
+        ],
+        "tools": [
+          "envoy"
+        ],
+        "url": "https://www.envoyproxy.io/docs/envoy/latest/start/start"
+      },
+      {
+        "blurb": "Working Docker Compose examples for front proxy, gRPC bridge, JWT auth, and more.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:envoy:sandboxes",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Envoy docs",
+        "title": "Envoy Sandboxes",
+        "tool_slugs": [
+          "envoy"
+        ],
+        "tools": [
+          "envoy"
+        ],
+        "url": "https://www.envoyproxy.io/docs/envoy/latest/start/sandboxes/sandboxes"
+      }
+    ],
+    "managed-data": [
+      {
+        "blurb": "Serverless Postgres with autoscaling, branching, and instant restore; framework quickstarts included.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:neon:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Neon",
+        "title": "Neon documentation",
+        "tool_slugs": [
+          "neon"
+        ],
+        "tools": [
+          "neon"
+        ],
+        "url": "https://neon.com/docs"
+      },
+      {
+        "blurb": "Postgres-backed BaaS: Database, Auth, Storage, Realtime, Edge Functions, and per-framework quickstarts.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:supabase:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Supabase",
+        "title": "Supabase documentation",
+        "tool_slugs": [
+          "supabase"
+        ],
+        "tools": [
+          "supabase"
+        ],
+        "url": "https://supabase.com/docs"
+      },
+      {
+        "blurb": "Time-series Postgres: hypertables, continuous aggregates, columnstore compression, and Tiger Cloud.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:tiger-data:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Tiger Data",
+        "title": "Tiger Data (TimescaleDB) documentation",
+        "tool_slugs": [
+          "tiger-data"
+        ],
+        "tools": [
+          "tiger-data"
+        ],
+        "url": "https://www.tigerdata.com/docs/"
+      },
+      {
+        "blurb": "Fully managed Postgres with dashboard, cb CLI, and REST API for connections, networking, and logging.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:crunchy-bridge:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Crunchy Data",
+        "title": "Crunchy Bridge documentation",
+        "tool_slugs": [
+          "crunchy-bridge"
+        ],
+        "tools": [
+          "crunchy-bridge"
+        ],
+        "url": "https://docs.crunchybridge.com/"
+      },
+      {
+        "blurb": "Docs for PlanetScale's Vitess-based MySQL and PostgreSQL platforms, deployments, branching, and pricing.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:planetscale:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "PlanetScale",
+        "title": "PlanetScale documentation",
+        "tool_slugs": [
+          "planetscale"
+        ],
+        "tools": [
+          "planetscale"
+        ],
+        "url": "https://planetscale.com/docs"
+      },
+      {
+        "blurb": "Embedded and cloud SQLite-compatible databases with vector search, sync, and AgentFS.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:turso:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Turso",
+        "title": "Turso documentation",
+        "tool_slugs": [
+          "turso"
+        ],
+        "tools": [
+          "turso"
+        ],
+        "url": "https://docs.turso.tech/"
+      },
+      {
+        "blurb": "Serverless Redis, Vector, QStash, and Workflow with scale-to-zero, per-request pricing.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:upstash:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Upstash",
+        "title": "Upstash documentation",
+        "tool_slugs": [
+          "upstash"
+        ],
+        "tools": [
+          "upstash"
+        ],
+        "url": "https://upstash.com/docs"
+      },
+      {
+        "blurb": "Managed open-source data services (Postgres, Kafka, ClickHouse, OpenSearch) across multiple clouds.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:aiven:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Aiven",
+        "title": "Aiven documentation",
+        "tool_slugs": [
+          "aiven"
+        ],
+        "tools": [
+          "aiven"
+        ],
+        "url": "https://aiven.io/docs"
+      }
+    ],
+    "networking": [
+      {
+        "blurb": "Unified portal for DNS, CDN, WAF, Workers, R2, and Zero Trust products with code-first examples.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:cloudflare:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Cloudflare",
+        "title": "Cloudflare developer docs",
+        "tool_slugs": [
+          "cloudflare"
+        ],
+        "tools": [
+          "cloudflare"
+        ],
+        "url": "https://developers.cloudflare.com/"
+      },
+      {
+        "blurb": "Domain registration, authoritative DNS routing, health checks, traffic flow, and VPC resolver.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:route53:welcome",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "AWS",
+        "title": "What is Amazon Route 53?",
+        "tool_slugs": [
+          "route53"
+        ],
+        "tools": [
+          "route53"
+        ],
+        "url": "https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/Welcome.html"
+      },
+      {
+        "blurb": "Distribute content from AWS edges with origins, distributions, caching, and SaaS multi-tenant modes.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:cloudfront:intro",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "AWS",
+        "title": "What is Amazon CloudFront?",
+        "tool_slugs": [
+          "cloudfront"
+        ],
+        "tools": [
+          "cloudfront"
+        ],
+        "url": "https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html"
+      },
+      {
+        "blurb": "CDN, security, and edge Compute reference covering VCL, configuration, and platform APIs.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:fastly:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Fastly",
+        "title": "Fastly documentation",
+        "tool_slugs": [
+          "fastly"
+        ],
+        "tools": [
+          "fastly"
+        ],
+        "url": "https://docs.fastly.com/"
+      },
+      {
+        "blurb": "CDN, Stream, Storage, Optimizer, DNS, and Magic Containers quickstarts and reference docs.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:bunny:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Bunny.net",
+        "title": "Bunny.net Developer Hub",
+        "tool_slugs": [
+          "bunny"
+        ],
+        "tools": [
+          "bunny"
+        ],
+        "url": "https://docs.bunny.net/"
+      },
+      {
+        "blurb": "Create a tailnet, install clients, add devices, and configure your first mesh in minutes.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:tailscale:install",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Tailscale",
+        "title": "Tailscale quickstart",
+        "tool_slugs": [
+          "tailscale"
+        ],
+        "tools": [
+          "tailscale"
+        ],
+        "url": "https://tailscale.com/kb/1017/install"
+      },
+      {
+        "blurb": "Architecture writeup on WireGuard, the coordination server, NAT traversal, and DERP relay fallbacks.",
+        "category": "Discussion",
+        "category_slug": "discussion",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:tailscale:how-it-works",
+        "learning_type": "Discussion",
+        "published_at": null,
+        "source": "Tailscale",
+        "title": "How Tailscale works",
+        "tool_slugs": [
+          "tailscale"
+        ],
+        "tools": [
+          "tailscale"
+        ],
+        "url": "https://tailscale.com/blog/how-tailscale-works"
+      },
+      {
+        "blurb": "Zero Trust access docs: connectors, resources, identity, policies, and replacing traditional VPNs.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:twingate:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Twingate",
+        "title": "Twingate documentation",
+        "tool_slugs": [
+          "twingate"
+        ],
+        "tools": [
+          "twingate"
+        ],
+        "url": "https://www.twingate.com/docs"
+      },
+      {
+        "blurb": "Generate keys, configure interfaces, traverse NAT, and bring up a minimal WireGuard tunnel.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:wireguard:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "WireGuard",
+        "title": "WireGuard quick start",
+        "tool_slugs": [
+          "wireguard"
+        ],
+        "tools": [
+          "wireguard"
+        ],
+        "url": "https://www.wireguard.com/quickstart/"
+      },
+      {
+        "blurb": "Sign up, create a network, install the client, authorize devices, and verify mesh connectivity.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:zerotier:start",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "ZeroTier",
+        "title": "ZeroTier: Create a Network",
+        "tool_slugs": [
+          "zerotier"
+        ],
+        "tools": [
+          "zerotier"
+        ],
+        "url": "https://docs.zerotier.com/start/"
+      }
+    ],
+    "orchestration": [
+      {
+        "blurb": "Official tutorials: Kubernetes Basics, stateful apps, services, and ConfigMaps.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:kubernetes:tutorials",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Kubernetes docs",
+        "title": "Kubernetes Tutorials",
+        "tool_slugs": [
+          "kubernetes"
+        ],
+        "tools": [
+          "kubernetes"
+        ],
+        "url": "https://kubernetes.io/docs/tutorials/"
+      },
+      {
+        "blurb": "Checklist covering app health, scalability, observability, security, and resource governance.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:kubernetes:learnk8s-prod",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Learnk8s",
+        "title": "Kubernetes Production Best Practices",
+        "tool_slugs": [
+          "kubernetes"
+        ],
+        "tools": [
+          "kubernetes"
+        ],
+        "url": "https://learnk8s.io/production-best-practices"
+      },
+      {
+        "blurb": "Official learning path: install, run jobs, schedule services, batch jobs, and integrate Consul.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:nomad:tutorials",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "HashiCorp Developer",
+        "title": "Nomad Tutorials",
+        "tool_slugs": [
+          "nomad"
+        ],
+        "tools": [
+          "nomad"
+        ],
+        "url": "https://developer.hashicorp.com/nomad/tutorials"
+      },
+      {
+        "blurb": "Get started defining multi-container apps with compose.yaml, networks, volumes, and profiles.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:docker-compose:overview",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Docker docs",
+        "title": "Docker Compose Overview",
+        "tool_slugs": [
+          "docker-compose"
+        ],
+        "tools": [
+          "docker-compose"
+        ],
+        "url": "https://docs.docker.com/compose/"
+      },
+      {
+        "blurb": "Official sample compose files: Django + Postgres, Flask + Redis, Nginx, and other common stacks.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:docker-compose:awesome",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "GitHub · Docker",
+        "title": "Awesome Compose",
+        "tool_slugs": [
+          "docker-compose"
+        ],
+        "tools": [
+          "docker-compose"
+        ],
+        "url": "https://github.com/docker/awesome-compose"
+      },
+      {
+        "blurb": "ECS developer guide covering capacity (EC2, Fargate, Anywhere), task definitions, services, and scaling.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:amazon-ecs:welcome",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "AWS",
+        "title": "What is Amazon ECS?",
+        "tool_slugs": [
+          "amazon-ecs"
+        ],
+        "tools": [
+          "amazon-ecs"
+        ],
+        "url": "https://docs.aws.amazon.com/AmazonECS/latest/developerguide/Welcome.html"
+      },
+      {
+        "blurb": "Run request- and event-driven containers serverlessly with quickstarts, custom domains, and authentication.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:cloud-run:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Google Cloud",
+        "title": "Cloud Run documentation",
+        "tool_slugs": [
+          "cloud-run"
+        ],
+        "tools": [
+          "cloud-run"
+        ],
+        "url": "https://cloud.google.com/run/docs"
+      },
+      {
+        "blurb": "Self-hosted PaaS for apps, databases, and services. Heroku/Netlify-style UX on your own servers.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:coolify:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Coolify",
+        "title": "Coolify documentation",
+        "tool_slugs": [
+          "coolify"
+        ],
+        "tools": [
+          "coolify"
+        ],
+        "url": "https://coolify.io/docs"
+      },
+      {
+        "blurb": "Install Kamal, run kamal init/setup, and deploy Dockerized apps to bare servers with zero downtime.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:kamal:install",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Basecamp · 37signals",
+        "title": "Kamal installation guide",
+        "tool_slugs": [
+          "kamal"
+        ],
+        "tools": [
+          "kamal"
+        ],
+        "url": "https://kamal-deploy.org/docs/installation/"
+      },
+      {
+        "blurb": "Install Dokku, configure SSH, and deploy your first app to a single-server open-source PaaS.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:dokku:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Dokku",
+        "title": "Dokku getting started",
+        "tool_slugs": [
+          "dokku"
+        ],
+        "tools": [
+          "dokku"
+        ],
+        "url": "https://dokku.com/docs/getting-started/installation/"
+      }
+    ],
+    "paas": [
+      {
+        "blurb": "Install flyctl, fly launch, then learn Machines, Volumes, networking, and language-specific deploy guides.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:fly:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Fly.io",
+        "title": "Fly.io documentation",
+        "tool_slugs": [
+          "fly"
+        ],
+        "tools": [
+          "fly"
+        ],
+        "url": "https://fly.io/docs/"
+      },
+      {
+        "blurb": "Quick start, CLI, templates, and framework guides for deploying apps and databases on Railway.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:railway:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Railway",
+        "title": "Railway documentation",
+        "tool_slugs": [
+          "railway"
+        ],
+        "tools": [
+          "railway"
+        ],
+        "url": "https://docs.railway.com/"
+      },
+      {
+        "blurb": "Ship-your-first-app quickstarts plus configure and operate guides for services, databases, and Docker.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:render:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Render",
+        "title": "Render documentation",
+        "tool_slugs": [
+          "render"
+        ],
+        "tools": [
+          "render"
+        ],
+        "url": "https://render.com/docs"
+      },
+      {
+        "blurb": "Framework deploys, Functions, Image Optimization, environments, and the broader AI-cloud platform.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:vercel:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Vercel",
+        "title": "Vercel documentation",
+        "tool_slugs": [
+          "vercel"
+        ],
+        "tools": [
+          "vercel"
+        ],
+        "url": "https://vercel.com/docs"
+      },
+      {
+        "blurb": "Build, deploy, manage, and extend sites with Netlify's frameworks, Functions, and Edge Functions.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:netlify:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Netlify",
+        "title": "Netlify documentation",
+        "tool_slugs": [
+          "netlify"
+        ],
+        "tools": [
+          "netlify"
+        ],
+        "url": "https://docs.netlify.com/"
+      },
+      {
+        "blurb": "Language-organized guides for deploying apps, Postgres, pipelines, and the original Procfile / buildpack model.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:heroku:dev-center",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Heroku",
+        "title": "Heroku Dev Center",
+        "tool_slugs": [
+          "heroku"
+        ],
+        "tools": [
+          "heroku"
+        ],
+        "url": "https://devcenter.heroku.com/"
+      },
+      {
+        "blurb": "Deploy static and full-stack apps with Git integration, Pages Functions, and Cloudflare's global network.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:cloudflare-pages:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Cloudflare",
+        "title": "Cloudflare Pages documentation",
+        "tool_slugs": [
+          "cloudflare-pages"
+        ],
+        "tools": [
+          "cloudflare-pages"
+        ],
+        "url": "https://developers.cloudflare.com/pages/"
+      }
+    ],
+    "server-os": [
+      {
+        "blurb": "Install, configure, secure, and administer Ubuntu Server LTS, covering networking, virtualization, and HA.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:ubuntu:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Canonical",
+        "title": "Ubuntu Server documentation",
+        "tool_slugs": [
+          "ubuntu"
+        ],
+        "tools": [
+          "ubuntu"
+        ],
+        "url": "https://ubuntu.com/server/docs"
+      },
+      {
+        "blurb": "Installation guide, FAQ, release notes, admin handbook, and the broader Debian Documentation Project.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:debian:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Debian Project",
+        "title": "Debian documentation",
+        "tool_slugs": [
+          "debian"
+        ],
+        "tools": [
+          "debian"
+        ],
+        "url": "https://www.debian.org/doc/"
+      },
+      {
+        "blurb": "Install, configure, and develop with musl/BusyBox-based Alpine. The de facto minimal container base.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:alpine:wiki",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Alpine Linux Project",
+        "title": "Alpine Linux Wiki",
+        "tool_slugs": [
+          "alpine"
+        ],
+        "tools": [
+          "alpine"
+        ],
+        "url": "https://wiki.alpinelinux.org/wiki/Main_Page"
+      },
+      {
+        "blurb": "Guides, books, and labs for installing and operating the community RHEL-compatible enterprise Linux.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:rhel-rocky:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Rocky Enterprise Software Foundation",
+        "title": "Rocky Linux documentation",
+        "tool_slugs": [
+          "rhel-rocky"
+        ],
+        "tools": [
+          "rhel-rocky"
+        ],
+        "url": "https://docs.rockylinux.org/"
+      },
+      {
+        "blurb": "Install Nix, take first steps, and dig into the Nix, Nixpkgs, and NixOS manuals plus Nix Pills.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:nixos:learn",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "NixOS Foundation",
+        "title": "Learn Nix and NixOS",
+        "tool_slugs": [
+          "nixos"
+        ],
+        "tools": [
+          "nixos"
+        ],
+        "url": "https://nixos.org/learn/"
+      },
+      {
+        "blurb": "Wolfi is a container-native Linux undistro built for supply-chain security; intro and how it differs.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "infra:res:wolfi:overview",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Chainguard Academy",
+        "title": "Wolfi overview",
+        "tool_slugs": [
+          "wolfi"
+        ],
+        "tools": [
+          "wolfi"
+        ],
+        "url": "https://edu.chainguard.dev/open-source/wolfi/overview/"
+      }
+    ]
+  },
+  "faqs": [
+    {
+      "answer": "Probably not yet. Kubernetes pays off when scaling out makes operating it cheaper than not (multi-region, many services, a dedicated platform team). For most teams, Docker Compose on a VM, a managed PaaS, or Cloud Run / ECS will run the same workload with a fraction of the operational tax. The honest question is whether you're choosing Kubernetes for the workload or for the résumé.",
+      "question": "Do I really need Kubernetes?",
+      "source_key": "infra:faq:k8s-do-i-need",
+      "source_label": "Matthias Endler: Maybe you don't need Kubernetes",
+      "source_url": "https://endler.dev/2019/maybe-you-dont-need-kubernetes/"
+    },
+    {
+      "answer": "The alternatives are real. Hetzner gives you serious-grade compute at a fraction of AWS prices. Fly and Render handle most of what Elastic Beanstalk did with a tenth of the surface area. The honest reasons to choose AWS now are deep service integrations (RDS, S3, Lambda, EventBridge), enterprise contracts you're locked into, or a specific compliance bar. For most teams, the lock-in cost has gotten bigger relative to the alternatives.",
+      "question": "Should I default to AWS, or are the alternatives real?",
+      "source_key": "infra:faq:aws-vs-alternatives",
+      "source_label": "DHH: Why we're leaving the cloud",
+      "source_url": "https://world.hey.com/dhh/why-we-re-leaving-the-cloud-654b47e0"
+    },
+    {
+      "answer": "Almost always when you weigh in operational cost. Neon, Supabase, Tiger Data, and Crunchy Bridge each handle backups, point-in-time recovery, replication, and version upgrades. Self-hosting wins on cost at significant scale and when you need extensions the hosts don't support. The break-even is later than most teams think; the day you need an unplanned recovery, you'll be glad you outsourced.",
+      "question": "When does managed Postgres beat self-hosting?",
+      "source_key": "infra:faq:managed-postgres",
+      "source_label": "Crunchy Data: Postgres hosting checklist",
+      "source_url": "https://www.crunchydata.com/postgres-hosting-checklist"
+    },
+    {
+      "answer": "Each is the right answer at a different point. A VM is the simplest substrate: predictable cost, full control, you do the ops. PaaS wins when you'd rather pay for someone else's ops. Containers are the unit of deployment if you have multiple services or environments. Serverless wins on idle cost and burst-able workloads, loses on long-running connections and warm-state. Default to the simplest thing that scales to your year-2 traffic, not your year-5 fantasy.",
+      "question": "Should I host on a VM, a PaaS, containers, or serverless?",
+      "source_key": "infra:faq:vm-paas-containers-serverless",
+      "source_label": "Dan McKinley: Choose Boring Technology",
+      "source_url": "https://mcfunley.com/choose-boring-technology"
+    },
+    {
+      "answer": "Lock-in is a cost. Every cost is fine if the value's higher. The question isn't avoiding lock-in, it's matching depth-of-integration to your exit cost tolerance. Use standard interfaces (Postgres, S3-compatible, OAuth, OpenTelemetry) wherever the value of vendor-specific features doesn't justify the migration cost. AWS's value is exactly the inverse: deep proprietary integrations. If you don't need them, don't pay the lock-in tax.",
+      "question": "How do I think about vendor lock-in without overdoing it?",
+      "source_key": "infra:faq:vendor-lock-in",
+      "source_label": "Gregor Hohpe: Don't get locked up into avoiding lock-in",
+      "source_url": "https://martinfowler.com/articles/oss-lockin.html"
+    },
+    {
+      "answer": "A single VM running Docker Compose, a managed Postgres, a managed Redis, and Cloudflare in front. That setup runs more production traffic than most teams will ever ship. Add secrets in a real manager (Vault, Doppler, 1Password), observability via Honeycomb or Logfire, and deploys via Kamal or GitHub Actions. You can run a real company on this stack and only outgrow it when you actually have to.",
+      "question": "What's the smallest production-ready hosting setup that scales?",
+      "source_key": "infra:faq:smallest-production-ready",
+      "source_label": "Ably Engineering: No, we don't use Kubernetes",
+      "source_url": "https://ably.com/blog/no-we-dont-use-kubernetes"
+    },
+    {
+      "answer": "As soon as you have more than a couple of servers that need to talk to each other without going through the public internet. Tailscale gives you SSH access, internal services, and database connections from a developer's laptop without managing a bastion or a VPN. The cost is per-user pricing at scale; the value is that \"connect to the internal network\" becomes the same thing as \"log in.\"",
+      "question": "When does it make sense to add a private mesh like Tailscale?",
+      "source_key": "infra:faq:tailscale-mesh",
+      "source_label": "Tailscale: How Tailscale works",
+      "source_url": "https://tailscale.com/blog/how-tailscale-works"
+    }
+  ],
+  "last_updated": "2026-05-12",
+  "learning_types": [
+    "Tutorial",
+    "Course",
+    "Discussion",
+    "Best Practices",
+    "Talk"
+  ],
+  "og_meta": {
+    "description": "An index of writing, courses, and tutorials on hosting modern systems: cloud providers, PaaS, managed data services, containers, orchestration, networking, and the rest of the production substrate.",
+    "image": "",
+    "site_name": "Smarter Dev",
+    "title": "Hosting Modern Systems: An Index",
+    "type": "article",
+    "url": "https://smarter.dev/resources/infrastructure-hosting"
+  },
+  "people": [
+    {
+      "blurb": "Ex-Google; the Kubernetes whisperer who argues constantly for simplicity over orchestration.",
+      "handle": "kelseyhightower",
+      "key": "infra:person:x:kelseyhightower",
+      "name": "Kelsey Hightower",
+      "platform": "x",
+      "url": "https://x.com/kelseyhightower"
+    },
+    {
+      "blurb": "Last Week in AWS; the canonical commentator on AWS strategy, cost, and absurdity.",
+      "handle": "QuinnyPig",
+      "key": "infra:person:newsletter:corey-quinn",
+      "name": "Corey Quinn",
+      "platform": "newsletter",
+      "url": "https://www.lastweekinaws.com/"
+    },
+    {
+      "blurb": "Ex-AWS; writes on \"the good and bad of AWS\" and small-team hosting trade-offs.",
+      "handle": "dvassallo",
+      "key": "infra:person:blog:daniel-vassallo",
+      "name": "Daniel Vassallo",
+      "platform": "blog",
+      "url": "https://dvassallo.medium.com/"
+    },
+    {
+      "blurb": "Cloud educator and cartoonist; the most accessible explainer of AWS architecture decisions.",
+      "handle": "forrestbrazeal",
+      "key": "infra:person:blog:forrest-brazeal",
+      "name": "Forrest Brazeal",
+      "platform": "blog",
+      "url": "https://goodtechthings.com/"
+    },
+    {
+      "blurb": "Docker Captain; the canonical Docker and containers teacher with deep practical workshops.",
+      "handle": "BretFisher",
+      "key": "infra:person:youtube:bret-fisher",
+      "name": "Bret Fisher",
+      "platform": "youtube",
+      "url": "https://www.youtube.com/@bretfisher"
+    },
+    {
+      "blurb": "CNCF Chief Open Source Officer; container security and eBPF foundations.",
+      "handle": "lizrice",
+      "key": "infra:person:blog:liz-rice",
+      "name": "Liz Rice",
+      "platform": "blog",
+      "url": "https://lizrice.com/"
+    },
+    {
+      "blurb": "Honeycomb co-founder; writes on hosting cost, reliability, and the case against premature K8s.",
+      "handle": "mipsytipsy",
+      "key": "infra:person:blog:charity",
+      "name": "Charity Majors",
+      "platform": "blog",
+      "url": "https://charity.wtf/"
+    },
+    {
+      "blurb": "Engineering leader writing concrete frameworks for hosting and infra strategy decisions.",
+      "handle": "lethain",
+      "key": "infra:person:blog:lethain",
+      "name": "Will Larson",
+      "platform": "blog",
+      "url": "https://lethain.com/"
+    },
+    {
+      "blurb": "Long-time Docker educator; deep container internals and pragmatic Kubernetes guidance.",
+      "handle": "jpetazzo",
+      "key": "infra:person:blog:jerome-petazzoni",
+      "name": "Jérôme Petazzoni",
+      "platform": "blog",
+      "url": "https://jpetazzo.github.io/"
+    },
+    {
+      "blurb": "Thomas Ptacek and the Fly engineering team write some of the best hosting prose on the web.",
+      "handle": "flydotio",
+      "key": "infra:person:blog:flyio",
+      "name": "Fly.io Engineering",
+      "platform": "blog",
+      "url": "https://fly.io/blog/"
+    }
+  ],
+  "popularity_unlocked": false,
+  "seo_meta": {
+    "canonical_url": "https://smarter.dev/resources/infrastructure-hosting",
+    "description": "An index of writing, courses, and tutorials on hosting modern systems: cloud providers, PaaS, managed data services, containers, orchestration, networking, and the rest of the production substrate.",
+    "robots": "index,follow"
+  },
+  "spine": [
+    {
+      "blurb": "Twelve principles for portable, declaratively-configured services that thrive across modern hosting environments.",
+      "category": "Best Practices",
+      "category_slug": "best-practices",
+      "first_indexed_at": "2026-05-12",
+      "key": "infra:spine:twelve-factor",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Adam Wiggins · Heroku",
+      "title": "The Twelve-Factor App",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://12factor.net/"
+    },
+    {
+      "blurb": "Six pillars (ops, security, reliability, performance, cost, sustainability) for evaluating any cloud workload.",
+      "category": "Best Practices",
+      "category_slug": "best-practices",
+      "first_indexed_at": "2026-05-12",
+      "key": "infra:spine:aws-well-architected",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "AWS",
+      "title": "AWS Well-Architected Framework",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://aws.amazon.com/architecture/well-architected/"
+    },
+    {
+      "blurb": "Interactive map of cloud-native projects categorized by layer, maturity, and license.",
+      "category": "Discussion",
+      "category_slug": "discussion",
+      "first_indexed_at": "2026-05-12",
+      "key": "infra:spine:cncf-landscape",
+      "learning_type": "Discussion",
+      "published_at": null,
+      "source": "Cloud Native Computing Foundation",
+      "title": "CNCF Landscape",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://landscape.cncf.io/"
+    },
+    {
+      "blurb": "Bootstrap a Kubernetes cluster manually, lab by lab, to learn what the abstractions hide.",
+      "category": "Tutorial",
+      "category_slug": "tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "infra:spine:k8s-hard-way",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Kelsey Hightower",
+      "title": "Kubernetes The Hard Way",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://github.com/kelseyhightower/kubernetes-the-hard-way"
+    },
+    {
+      "blurb": "Open-access book treating warehouse-scale machines as the unit of design for modern cloud computing.",
+      "category": "Course",
+      "category_slug": "course",
+      "first_indexed_at": "2026-05-12",
+      "key": "infra:spine:datacenter-as-computer",
+      "learning_type": "Course",
+      "published_at": null,
+      "source": "Barroso, Hölzle, Ranganathan · OAPEN",
+      "title": "The Datacenter as a Computer (3rd ed.)",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://library.oapen.org/handle/20.500.12657/61844"
+    },
+    {
+      "blurb": "Weekly newsletter filtering AWS announcements through cost-economist snark and practitioner skepticism.",
+      "category": "Discussion",
+      "category_slug": "discussion",
+      "first_indexed_at": "2026-05-12",
+      "key": "infra:spine:last-week-aws",
+      "learning_type": "Discussion",
+      "published_at": null,
+      "source": "Corey Quinn · The Duckbill Group",
+      "title": "Last Week in AWS",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://www.lastweekinaws.com/"
+    },
+    {
+      "blurb": "Three free books on running planet-scale systems: SRE, the Workbook, and Building Secure & Reliable Systems.",
+      "category": "Course",
+      "category_slug": "course",
+      "first_indexed_at": "2026-05-12",
+      "key": "infra:spine:sre-books",
+      "learning_type": "Course",
+      "published_at": null,
+      "source": "Google SRE",
+      "title": "Google SRE Books (free online)",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://sre.google/books/"
+    },
+    {
+      "blurb": "Signal handling, layer caching, tagging, and image hygiene rules from Google's container team.",
+      "category": "Best Practices",
+      "category_slug": "best-practices",
+      "first_indexed_at": "2026-05-12",
+      "key": "infra:spine:container-best-practices",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Google Cloud Architecture Center",
+      "title": "Best practices for building containers",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://cloud.google.com/architecture/best-practices-for-building-containers"
+    },
+    {
+      "blurb": "37signals' founder argues cloud economics break down for stable, mid-sized workloads worth owning.",
+      "category": "Discussion",
+      "category_slug": "discussion",
+      "first_indexed_at": "2026-05-12",
+      "key": "infra:spine:dhh-leaving-cloud",
+      "learning_type": "Discussion",
+      "published_at": null,
+      "source": "DHH · 37signals",
+      "title": "Why we're leaving the cloud",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://world.hey.com/dhh/why-we-re-leaving-the-cloud-654b47e0"
+    },
+    {
+      "blurb": "Benchmarked value comparison across Hetzner's Intel, AMD, and Ampere fleets with price-per-score tables.",
+      "category": "Discussion",
+      "category_slug": "discussion",
+      "first_indexed_at": "2026-05-12",
+      "key": "infra:spine:hetzner-comparison",
+      "learning_type": "Discussion",
+      "published_at": null,
+      "source": "Achromatic",
+      "title": "Hetzner Server Comparison (with benchmarks)",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://www.achromatic.dev/blog/hetzner-server-comparison"
+    },
+    {
+      "blurb": "Spend your limited innovation tokens carefully; default to well-understood infrastructure for everything else.",
+      "category": "Talk",
+      "category_slug": "talk",
+      "first_indexed_at": "2026-05-12",
+      "key": "infra:spine:choose-boring-tech",
+      "learning_type": "Talk",
+      "published_at": null,
+      "source": "Dan McKinley",
+      "title": "Choose Boring Technology",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://mcfunley.com/choose-boring-technology"
+    },
+    {
+      "blurb": "Engineering writeups on global app runtimes, anycast, Postgres replication, and edge compute trade-offs.",
+      "category": "Discussion",
+      "category_slug": "discussion",
+      "first_indexed_at": "2026-05-12",
+      "key": "infra:spine:flyio-blog",
+      "learning_type": "Discussion",
+      "published_at": null,
+      "source": "Fly.io",
+      "title": "The Fly.io Blog",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://fly.io/blog/"
+    }
+  ]
+}

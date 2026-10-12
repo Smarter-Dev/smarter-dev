@@ -15,7 +15,8 @@ import logging
 
 from litestar import get
 from litestar.exceptions import NotFoundException
-from litestar.response import Redirect, Template
+from litestar.response import Redirect
+from litestar.response import Template
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.resources_data import load_directory_payload
@@ -41,17 +42,14 @@ async def vibe_courses_resources_redirect() -> Redirect:
     return Redirect("/resources/agentic-coding-courses", status_code=301)
 
 
-@get("/resources/agentic-coding-courses")
-async def vibe_courses(db_session: AsyncSession) -> Template:
-    payload = await load_directory_payload(db_session, "agentic-coding-courses")
-    if payload is None:
-        raise NotFoundException()
-
+def build_vibe_courses_context(payload):
     # tool_courses = all sources placed under any tool inside the (single)
     # category. workflow_courses = spine.
-    tool_courses_sources = list(
-        payload.category_resources.get(payload.categories[0].slug, [])
-    ) if payload.categories else []
+    tool_courses_sources = (
+        list(payload.category_resources.get(payload.categories[0].slug, []))
+        if payload.categories
+        else []
+    )
     workflow_courses = list(payload.spine)
 
     all_courses = tool_courses_sources + workflow_courses
@@ -82,34 +80,41 @@ async def vibe_courses(db_session: AsyncSession) -> Template:
         "coding."
     )
 
-    return Template(
-        "vibe-coding-courses.html",
-        context={
-            "tools": payload.categories[0].tools if payload.categories else (),
-            "people": creators,
-            "stay_current": stay_current,
-            # The vibe template's `categories` chip is actually the learning-
-            # type chip; keep the existing template field name.
-            "categories": payload.learning_types,
-            "featured": featured,
-            "featured_mode": featured_mode,
-            "tool_courses": tool_courses,
-            "workflow_courses": workflow_courses,
-            "popularity_unlocked": popularity_unlocked,
-            "last_updated": payload.last_updated,
-            "faqs": payload.faqs,
-            "seo_meta": {
-                "description": description,
-                "canonical_url": "https://smarter.dev/resources/agentic-coding-courses",
-                "robots": "index,follow",
-            },
-            "og_meta": {
-                "title": "Building Software with AI Agents: An Index",
-                "description": description,
-                "url": "https://smarter.dev/resources/agentic-coding-courses",
-                "site_name": "Smarter Dev",
-                "type": "article",
-                "image": "",
-            },
+    return {
+        "tools": payload.categories[0].tools if payload.categories else (),
+        "people": creators,
+        "stay_current": stay_current,
+        # The vibe template's `categories` chip is actually the learning-
+        # type chip; keep the existing template field name.
+        "categories": payload.learning_types,
+        "featured": featured,
+        "featured_mode": featured_mode,
+        "tool_courses": tool_courses,
+        "workflow_courses": workflow_courses,
+        "popularity_unlocked": popularity_unlocked,
+        "last_updated": payload.last_updated,
+        "faqs": payload.faqs,
+        "seo_meta": {
+            "description": description,
+            "canonical_url": "https://smarter.dev/resources/agentic-coding-courses",
+            "robots": "index,follow",
         },
+        "og_meta": {
+            "title": "Building Software with AI Agents: An Index",
+            "description": description,
+            "url": "https://smarter.dev/resources/agentic-coding-courses",
+            "site_name": "Smarter Dev",
+            "type": "article",
+            "image": "",
+        },
+    }
+
+
+@get("/resources/agentic-coding-courses")
+async def vibe_courses(db_session: AsyncSession) -> Template:
+    payload = await load_directory_payload(db_session, "agentic-coding-courses")
+    if payload is None:
+        raise NotFoundException()
+    return Template(
+        "vibe-coding-courses.html", context=build_vibe_courses_context(payload)
     )

@@ -1,0 +1,1788 @@
+{
+  "categories": [
+    {
+      "intro": "Postgres handles 99% of what most teams need. Specialized stores buy specific things: ClickHouse for analytics over billions of rows, DuckDB for local-first columnar work, DynamoDB for flat scaling, SQLite for embedded. Pick by what you'll do too much of.",
+      "name": "Databases & data stores",
+      "slug": "databases",
+      "tools": [
+        {
+          "blurb": "The default for almost everything: relational, JSON, full-text, geospatial, vectors.",
+          "home_key": "arch:tool:postgres:home",
+          "name": "PostgreSQL",
+          "slug": "postgres",
+          "url": "https://www.postgresql.org/"
+        },
+        {
+          "blurb": "Relational alternative to Postgres with slightly different operational characteristics.",
+          "home_key": "arch:tool:mysql:home",
+          "name": "MySQL",
+          "slug": "mysql",
+          "url": "https://www.mysql.com/"
+        },
+        {
+          "blurb": "Embedded relational, single file, no server. The most widely deployed database on earth.",
+          "home_key": "arch:tool:sqlite:home",
+          "name": "SQLite",
+          "slug": "sqlite",
+          "url": "https://www.sqlite.org/"
+        },
+        {
+          "blurb": "Document database with flexible schemas. Hosted offering (Atlas) is the common path.",
+          "home_key": "arch:tool:mongodb:home",
+          "name": "MongoDB",
+          "slug": "mongodb",
+          "url": "https://www.mongodb.com/"
+        },
+        {
+          "blurb": "Managed key-value with predictable performance at any scale. Real lock-in to AWS.",
+          "home_key": "arch:tool:dynamodb:home",
+          "name": "DynamoDB",
+          "slug": "dynamodb",
+          "url": "https://aws.amazon.com/dynamodb/"
+        },
+        {
+          "blurb": "SQLite for analytics. Columnar, in-process, embarrassingly fast on local data.",
+          "home_key": "arch:tool:duckdb:home",
+          "name": "DuckDB",
+          "slug": "duckdb",
+          "url": "https://duckdb.org/"
+        },
+        {
+          "blurb": "Column-store OLAP for billions of rows. The fastest analytical database in widespread use.",
+          "home_key": "arch:tool:clickhouse:home",
+          "name": "ClickHouse",
+          "slug": "clickhouse",
+          "url": "https://clickhouse.com/"
+        }
+      ]
+    },
+    {
+      "intro": "A cache is a second source of truth with worse durability. The decision isn't Redis or Memcached. It's what you're caching, how stale it can be, and what happens when the cache fails. Most cache-related outages are about the failure mode, not throughput.",
+      "name": "Caching & in-memory",
+      "slug": "caching",
+      "tools": [
+        {
+          "blurb": "In-memory data structure store. Defaults to caching but also queues, streams, pub/sub.",
+          "home_key": "arch:tool:redis:home",
+          "name": "Redis",
+          "slug": "redis",
+          "url": "https://redis.io/"
+        },
+        {
+          "blurb": "Linux Foundation Redis fork; BSD-licensed, growing fast since Redis's license shift.",
+          "home_key": "arch:tool:valkey:home",
+          "name": "Valkey",
+          "slug": "valkey",
+          "url": "https://valkey.io/"
+        },
+        {
+          "blurb": "Minimal in-memory cache. No persistence, no data types, no fuss.",
+          "home_key": "arch:tool:memcached:home",
+          "name": "Memcached",
+          "slug": "memcached",
+          "url": "https://memcached.org/"
+        }
+      ]
+    },
+    {
+      "intro": "Queues let work outlive the request that asked for it. Streams let multiple consumers read the same log with their own pointers. Pick a queue when downstream is slower than upstream. Pick a stream when you need to replay.",
+      "name": "Queues & streams",
+      "slug": "queues",
+      "tools": [
+        {
+          "blurb": "Mature message broker with multiple protocols. The default work-queue choice.",
+          "home_key": "arch:tool:rabbitmq:home",
+          "name": "RabbitMQ",
+          "slug": "rabbitmq",
+          "url": "https://www.rabbitmq.com/"
+        },
+        {
+          "blurb": "Durable append-only log. The canonical event-streaming platform.",
+          "home_key": "arch:tool:kafka:home",
+          "name": "Apache Kafka",
+          "slug": "kafka",
+          "url": "https://kafka.apache.org/"
+        },
+        {
+          "blurb": "Lightweight high-performance messaging. Queues, streams, request/reply, key-value.",
+          "home_key": "arch:tool:nats:home",
+          "name": "NATS",
+          "slug": "nats",
+          "url": "https://nats.io/"
+        },
+        {
+          "blurb": "Managed queue from AWS. Simple, reliable, no infrastructure to operate.",
+          "home_key": "arch:tool:sqs:home",
+          "name": "Amazon SQS",
+          "slug": "sqs",
+          "url": "https://aws.amazon.com/sqs/"
+        },
+        {
+          "blurb": "Redis-native append-only log. Lightweight Kafka alternative if you already run Redis.",
+          "home_key": "arch:tool:redis-streams:home",
+          "name": "Redis Streams",
+          "slug": "redis-streams",
+          "url": "https://redis.io/docs/latest/develop/data-types/streams/"
+        },
+        {
+          "blurb": "Node.js job queue library on top of Redis. Most popular choice in the JS ecosystem.",
+          "home_key": "arch:tool:bullmq:home",
+          "name": "BullMQ",
+          "slug": "bullmq",
+          "url": "https://docs.bullmq.io/"
+        },
+        {
+          "blurb": "Ruby background job processor; uses Redis. The standard in Rails apps.",
+          "home_key": "arch:tool:sidekiq:home",
+          "name": "Sidekiq",
+          "slug": "sidekiq",
+          "url": "https://sidekiq.org/"
+        },
+        {
+          "blurb": "Python distributed task queue. Uses Redis or RabbitMQ as broker.",
+          "home_key": "arch:tool:celery:home",
+          "name": "Celery",
+          "slug": "celery",
+          "url": "https://docs.celeryq.dev/"
+        }
+      ]
+    },
+    {
+      "intro": "Most teams reach for Elasticsearch before they need it. Postgres full-text handles more than people think. When you actually need search (relevance tuning, facets, real-time indexing over millions of docs), pick between heavyweight (Elastic, OpenSearch) and lightweight (Meili, Typesense).",
+      "name": "Search",
+      "slug": "search",
+      "tools": [
+        {
+          "blurb": "Heavyweight distributed search engine. License shifted to SSPL/Elastic License.",
+          "home_key": "arch:tool:elasticsearch:home",
+          "name": "Elasticsearch",
+          "slug": "elasticsearch",
+          "url": "https://www.elastic.co/elasticsearch"
+        },
+        {
+          "blurb": "Apache-2.0 fork of Elasticsearch maintained by AWS and the community.",
+          "home_key": "arch:tool:opensearch:home",
+          "name": "OpenSearch",
+          "slug": "opensearch",
+          "url": "https://opensearch.org/"
+        },
+        {
+          "blurb": "Lightweight typo-tolerant search. Trivial to operate, great defaults.",
+          "home_key": "arch:tool:meilisearch:home",
+          "name": "Meilisearch",
+          "slug": "meilisearch",
+          "url": "https://www.meilisearch.com/"
+        },
+        {
+          "blurb": "Lightweight search alternative to Meili with slightly different feature surface.",
+          "home_key": "arch:tool:typesense:home",
+          "name": "Typesense",
+          "slug": "typesense",
+          "url": "https://typesense.org/"
+        }
+      ]
+    },
+    {
+      "intro": "Object storage is solved. The decisions are cost and lock-in. R2 and B2 have no egress fees, S3 has the deepest ecosystem, MinIO runs on your own hardware. For most workloads, S3-compatible is the only spec that matters.",
+      "name": "Object storage",
+      "slug": "storage",
+      "tools": [
+        {
+          "blurb": "The canonical object storage service. Deepest ecosystem; you'll integrate with this.",
+          "home_key": "arch:tool:s3:home",
+          "name": "Amazon S3",
+          "slug": "s3",
+          "url": "https://aws.amazon.com/s3/"
+        },
+        {
+          "blurb": "S3-compatible with no egress fees. Great when you serve files directly to users.",
+          "home_key": "arch:tool:r2:home",
+          "name": "Cloudflare R2",
+          "slug": "r2",
+          "url": "https://www.cloudflare.com/developer-platform/products/r2/"
+        },
+        {
+          "blurb": "S3-compatible with low storage prices and free egress to many CDNs.",
+          "home_key": "arch:tool:b2:home",
+          "name": "Backblaze B2",
+          "slug": "b2",
+          "url": "https://www.backblaze.com/cloud-storage"
+        },
+        {
+          "blurb": "Self-hosted S3-compatible storage. Run on your own hardware or k8s.",
+          "home_key": "arch:tool:minio:home",
+          "name": "MinIO",
+          "slug": "minio",
+          "url": "https://min.io/"
+        }
+      ]
+    },
+    {
+      "intro": "For most teams, pgvector inside Postgres is the right answer. Specialized vector databases buy scale (billions of vectors), advanced filtering, or hosted SLAs. The decision point is when retrieval workload starts to dominate normal load. Usually later than you think.",
+      "name": "Vector & retrieval",
+      "slug": "vector",
+      "tools": [
+        {
+          "blurb": "Postgres extension that adds vector similarity search. The default for most teams.",
+          "home_key": "arch:tool:pgvector:home",
+          "name": "pgvector",
+          "slug": "pgvector",
+          "url": "https://github.com/pgvector/pgvector"
+        },
+        {
+          "blurb": "Rust-based vector database with strong filtering. Open source; hosted offering available.",
+          "home_key": "arch:tool:qdrant:home",
+          "name": "Qdrant",
+          "slug": "qdrant",
+          "url": "https://qdrant.tech/"
+        },
+        {
+          "blurb": "Vector database with knowledge-graph features. Open source; hosted offering available.",
+          "home_key": "arch:tool:weaviate:home",
+          "name": "Weaviate",
+          "slug": "weaviate",
+          "url": "https://weaviate.io/"
+        },
+        {
+          "blurb": "Managed vector database. The original commercial offering in the space.",
+          "home_key": "arch:tool:pinecone:home",
+          "name": "Pinecone",
+          "slug": "pinecone",
+          "url": "https://www.pinecone.io/"
+        }
+      ]
+    },
+    {
+      "intro": "REST is the default for most public-facing APIs. GraphQL pays off when clients have wildly varying data needs and you can absorb the resolver complexity. gRPC and Protobuf win for internal service-to-service traffic where latency and schema discipline matter. The protocol is a contract: pick once, change rarely.",
+      "name": "APIs & protocols",
+      "slug": "apis",
+      "tools": [
+        {
+          "blurb": "REST spec format and tooling ecosystem; the lingua franca for documenting HTTP APIs.",
+          "home_key": "arch:tool:openapi:home",
+          "name": "OpenAPI (Swagger)",
+          "slug": "openapi",
+          "url": "https://www.openapis.org/"
+        },
+        {
+          "blurb": "Schema validation standard for JSON; backbone of OpenAPI, AsyncAPI, and a lot of tooling.",
+          "home_key": "arch:tool:json-schema:home",
+          "name": "JSON Schema",
+          "slug": "json-schema",
+          "url": "https://json-schema.org/"
+        },
+        {
+          "blurb": "Google's IDL and binary wire format; used by gRPC and many in-house RPC systems.",
+          "home_key": "arch:tool:protobuf:home",
+          "name": "Protocol Buffers",
+          "slug": "protobuf",
+          "url": "https://protobuf.dev/"
+        },
+        {
+          "blurb": "Query language and runtime spec for client-driven APIs with flexible field selection.",
+          "home_key": "arch:tool:graphql:home",
+          "name": "GraphQL",
+          "slug": "graphql",
+          "url": "https://graphql.org/"
+        },
+        {
+          "blurb": "Google's binary RPC framework over HTTP/2; the default for service-to-service traffic.",
+          "home_key": "arch:tool:grpc:home",
+          "name": "gRPC",
+          "slug": "grpc",
+          "url": "https://grpc.io/"
+        },
+        {
+          "blurb": "TypeScript-native end-to-end typed RPC; no codegen, no schema, just function calls.",
+          "home_key": "arch:tool:trpc:home",
+          "name": "tRPC",
+          "slug": "trpc",
+          "url": "https://trpc.io/"
+        },
+        {
+          "blurb": "The most-used GraphQL server in the JS/TS ecosystem; the path of least resistance.",
+          "home_key": "arch:tool:apollo-server:home",
+          "name": "Apollo Server",
+          "slug": "apollo-server",
+          "url": "https://www.apollographql.com/docs/apollo-server"
+        },
+        {
+          "blurb": "Instant GraphQL over Postgres (and other DBs); subscriptions and authorization built in.",
+          "home_key": "arch:tool:hasura:home",
+          "name": "Hasura",
+          "slug": "hasura",
+          "url": "https://hasura.io/"
+        },
+        {
+          "blurb": "Instant REST over Postgres; tables and views become endpoints with row-level security.",
+          "home_key": "arch:tool:postgrest:home",
+          "name": "PostgREST",
+          "slug": "postgrest",
+          "url": "https://postgrest.org/"
+        },
+        {
+          "blurb": "gRPC-compatible RPC that also works in browsers; the friendly modern face of Protobuf.",
+          "home_key": "arch:tool:connect:home",
+          "name": "Connect (Buf)",
+          "slug": "connect",
+          "url": "https://connectrpc.com/"
+        }
+      ]
+    }
+  ],
+  "category_resources": {
+    "apis": [
+      {
+        "blurb": "Official guided entry point that walks new authors through writing their first OpenAPI description.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:openapi:learn",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "OpenAPI Initiative",
+        "title": "Getting Started with the OpenAPI Specification",
+        "tool_slugs": [
+          "openapi"
+        ],
+        "tools": [
+          "openapi"
+        ],
+        "url": "https://learn.openapis.org/"
+      },
+      {
+        "blurb": "Step-by-step product-catalog example covering types, required fields, constraints, and $ref.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:json-schema:first",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "JSON Schema docs",
+        "title": "Creating your first JSON Schema",
+        "tool_slugs": [
+          "json-schema"
+        ],
+        "tools": [
+          "json-schema"
+        ],
+        "url": "https://json-schema.org/learn/getting-started-step-by-step"
+      },
+      {
+        "blurb": "Reference companion that explains keywords and idiomatic patterns for real-world schema design.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:json-schema:understanding",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "JSON Schema docs",
+        "title": "Understanding JSON Schema",
+        "tool_slugs": [
+          "json-schema"
+        ],
+        "tools": [
+          "json-schema"
+        ],
+        "url": "https://json-schema.org/understanding-json-schema"
+      },
+      {
+        "blurb": "Official per-language quickstarts (Go, Python, Java, C++) covering .proto files and codegen.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:protobuf:tutorials",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "protobuf.dev",
+        "title": "Protocol Buffers Tutorials",
+        "tool_slugs": [
+          "protobuf"
+        ],
+        "tools": [
+          "protobuf"
+        ],
+        "url": "https://protobuf.dev/getting-started/"
+      },
+      {
+        "blurb": "Google's vetted rules on tag numbers, enum zero values, and safe schema evolution.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:protobuf:best-practices",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "protobuf.dev",
+        "title": "Proto Best Practices",
+        "tool_slugs": [
+          "protobuf"
+        ],
+        "tools": [
+          "protobuf"
+        ],
+        "url": "https://protobuf.dev/best-practices/dos-donts/"
+      },
+      {
+        "blurb": "Official tour through schemas, queries, mutations, subscriptions, HTTP transport, and authorization.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:graphql:learn",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "GraphQL Foundation",
+        "title": "Learn GraphQL",
+        "tool_slugs": [
+          "graphql"
+        ],
+        "tools": [
+          "graphql"
+        ],
+        "url": "https://graphql.org/learn/"
+      },
+      {
+        "blurb": "Shopify/GitHub veteran's book on schema design, performance, security, and migrating legacy APIs.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:graphql:production-ready",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Marc-Andre Giroux",
+        "title": "Production Ready GraphQL",
+        "tool_slugs": [
+          "graphql"
+        ],
+        "tools": [
+          "graphql"
+        ],
+        "url": "https://book.productionreadygraphql.com/"
+      },
+      {
+        "blurb": "Conceptual primer plus links to per-language quickstarts that build a working client and server.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:grpc:intro",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "grpc.io",
+        "title": "Introduction to gRPC",
+        "tool_slugs": [
+          "grpc"
+        ],
+        "tools": [
+          "grpc"
+        ],
+        "url": "https://grpc.io/docs/what-is-grpc/introduction/"
+      },
+      {
+        "blurb": "Framework-agnostic walkthrough of routers, queries, mutations, and zod input validation.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:trpc:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "tRPC docs",
+        "title": "tRPC Quickstart",
+        "tool_slugs": [
+          "trpc"
+        ],
+        "tools": [
+          "trpc"
+        ],
+        "url": "https://trpc.io/docs/quickstart"
+      },
+      {
+        "blurb": "Decision-framework video on when tRPC beats GraphQL or REST for typed full-stack TypeScript.",
+        "category": "Talk",
+        "category_slug": "talk",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:trpc:theo-pick-your-poison",
+        "learning_type": "Talk",
+        "published_at": null,
+        "source": "YouTube · Theo",
+        "title": "GraphQL, tRPC, REST and more: Pick Your Poison",
+        "tool_slugs": [
+          "trpc",
+          "graphql",
+          "grpc"
+        ],
+        "tools": [
+          "trpc",
+          "graphql",
+          "grpc"
+        ],
+        "url": "https://www.youtube.com/watch?v=ZfccwYUD8H0"
+      },
+      {
+        "blurb": "Eight-step TypeScript tutorial building a Books schema, resolvers, and Apollo Sandbox queries.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:apollo-server:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Apollo GraphQL docs",
+        "title": "Get Started with Apollo Server",
+        "tool_slugs": [
+          "apollo-server"
+        ],
+        "tools": [
+          "apollo-server"
+        ],
+        "url": "https://www.apollographql.com/docs/apollo-server/getting-started"
+      },
+      {
+        "blurb": "30-minute course building a realtime todo backend with queries, subscriptions, and authorization.",
+        "category": "Course",
+        "category_slug": "course",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:hasura:basics",
+        "learning_type": "Course",
+        "published_at": null,
+        "source": "Hasura Learn",
+        "title": "Hasura Basics",
+        "tool_slugs": [
+          "hasura"
+        ],
+        "tools": [
+          "hasura"
+        ],
+        "url": "https://hasura.io/learn/graphql/hasura/introduction/"
+      },
+      {
+        "blurb": "Spin up Hasura Engine plus Postgres locally and get an auto-generated GraphQL API in minutes.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:hasura:docker-quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Hasura docs",
+        "title": "Hasura Quickstart with Docker",
+        "tool_slugs": [
+          "hasura"
+        ],
+        "tools": [
+          "hasura"
+        ],
+        "url": "https://hasura.io/docs/2.0/getting-started/docker-simple/"
+      },
+      {
+        "blurb": "Install PostgREST and build a todo API backed by a schema with role-based access.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:postgrest:tut0",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "PostgREST docs",
+        "title": "PostgREST Tutorial 0: Get it Running",
+        "tool_slugs": [
+          "postgrest"
+        ],
+        "tools": [
+          "postgrest"
+        ],
+        "url": "https://docs.postgrest.org/en/latest/tutorials/tut0.html"
+      },
+      {
+        "blurb": "Layer JWT authentication and per-role authorization on top of the Tutorial 0 API.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:postgrest:tut1",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "PostgREST docs",
+        "title": "PostgREST Tutorial 1: The Golden Key",
+        "tool_slugs": [
+          "postgrest"
+        ],
+        "tools": [
+          "postgrest"
+        ],
+        "url": "https://docs.postgrest.org/en/latest/tutorials/tut1.html"
+      },
+      {
+        "blurb": "Overview of Connect's browser- and gRPC-compatible protocol with codegen across Go, TS, and more.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:connect:intro",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Connect RPC docs",
+        "title": "Connect Introduction",
+        "tool_slugs": [
+          "connect"
+        ],
+        "tools": [
+          "connect"
+        ],
+        "url": "https://connectrpc.com/docs/introduction/"
+      },
+      {
+        "blurb": "Fifteen-minute walkthrough writing a protobuf schema and serving it with connect-go.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:connect:go-getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Connect RPC docs",
+        "title": "Connect Getting Started in Go",
+        "tool_slugs": [
+          "connect"
+        ],
+        "tools": [
+          "connect"
+        ],
+        "url": "https://connectrpc.com/docs/go/getting-started/"
+      }
+    ],
+    "caching": [
+      {
+        "blurb": "Official getting-started covering installation, redis-cli, key types, and common commands.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:redis:quick-start",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Redis docs",
+        "title": "Redis Quick Start",
+        "tool_slugs": [
+          "redis"
+        ],
+        "tools": [
+          "redis"
+        ],
+        "url": "https://redis.io/docs/latest/get-started/"
+      },
+      {
+        "blurb": "Free structured courses on data structures, caching patterns, and Redis Stack modules.",
+        "category": "Course",
+        "category_slug": "course",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:redis:university",
+        "learning_type": "Course",
+        "published_at": null,
+        "source": "Redis University",
+        "title": "Redis University",
+        "tool_slugs": [
+          "redis"
+        ],
+        "tools": [
+          "redis"
+        ],
+        "url": "https://university.redis.io/"
+      },
+      {
+        "blurb": "Introduction to the Linux Foundation Redis fork, including installation and command reference.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:valkey:intro",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Valkey docs",
+        "title": "Valkey: Introduction",
+        "tool_slugs": [
+          "valkey"
+        ],
+        "tools": [
+          "valkey"
+        ],
+        "url": "https://valkey.io/topics/introduction/"
+      },
+      {
+        "blurb": "Official wiki covering protocol, configuration, tuning, and common usage patterns.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:memcached:wiki",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "GitHub · memcached",
+        "title": "Memcached Wiki",
+        "tool_slugs": [
+          "memcached"
+        ],
+        "tools": [
+          "memcached"
+        ],
+        "url": "https://github.com/memcached/memcached/wiki"
+      }
+    ],
+    "databases": [
+      {
+        "blurb": "Official tutorial covering SQL basics, schemas, transactions, inheritance, and Postgres-specific features.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:postgres:docs-tutorial",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "PostgreSQL docs",
+        "title": "PostgreSQL Tutorial (official)",
+        "tool_slugs": [
+          "postgres"
+        ],
+        "tools": [
+          "postgres"
+        ],
+        "url": "https://www.postgresql.org/docs/current/tutorial.html"
+      },
+      {
+        "blurb": "Free comprehensive tutorial covering psql, queries, joins, transactions, indexes, and performance.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:postgres:pgtutorial",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "PostgreSQL Tutorial",
+        "title": "PostgreSQL Tutorial (third-party)",
+        "tool_slugs": [
+          "postgres"
+        ],
+        "tools": [
+          "postgres"
+        ],
+        "url": "https://www.postgresqltutorial.com/"
+      },
+      {
+        "blurb": "Canonical guide to SQL indexing and query performance tuning for application developers.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:postgres:use-the-index-luke",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Markus Winand",
+        "title": "Use The Index, Luke!",
+        "tool_slugs": [
+          "postgres",
+          "mysql"
+        ],
+        "tools": [
+          "postgres",
+          "mysql"
+        ],
+        "url": "https://use-the-index-luke.com/"
+      },
+      {
+        "blurb": "How to queue background jobs inside a database transaction by staging them in a table — so jobs only fire once their data has actually committed.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:postgres:job-drain",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Brandur Leach",
+        "title": "Transactionally Staged Job Drains in Postgres",
+        "tool_slugs": [
+          "postgres"
+        ],
+        "tools": [
+          "postgres"
+        ],
+        "url": "https://brandur.org/job-drain"
+      },
+      {
+        "blurb": "Official walkthrough of the mysql client, creating databases, tables, and running queries.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:mysql:docs-tutorial",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "MySQL docs",
+        "title": "MySQL Tutorial",
+        "tool_slugs": [
+          "mysql"
+        ],
+        "tools": [
+          "mysql"
+        ],
+        "url": "https://dev.mysql.com/doc/refman/8.0/en/tutorial.html"
+      },
+      {
+        "blurb": "Three-hour video course covering installation, SQL syntax, joins, and database design.",
+        "category": "Course",
+        "category_slug": "course",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:mysql:freecodecamp",
+        "learning_type": "Course",
+        "published_at": null,
+        "source": "YouTube · freeCodeCamp",
+        "title": "MySQL Course for Beginners",
+        "tool_slugs": [
+          "mysql"
+        ],
+        "tools": [
+          "mysql"
+        ],
+        "url": "https://www.youtube.com/watch?v=7S_tz1z_5bA"
+      },
+      {
+        "blurb": "Official quickstart for the sqlite3 CLI: creating databases, schemas, and running queries.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:sqlite:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "SQLite docs",
+        "title": "SQLite Quickstart",
+        "tool_slugs": [
+          "sqlite"
+        ],
+        "tools": [
+          "sqlite"
+        ],
+        "url": "https://www.sqlite.org/quickstart.html"
+      },
+      {
+        "blurb": "When SQLite is the right choice versus a client/server database, with concrete scenarios.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:sqlite:when-to-use",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "SQLite docs",
+        "title": "Appropriate Uses For SQLite",
+        "tool_slugs": [
+          "sqlite"
+        ],
+        "tools": [
+          "sqlite"
+        ],
+        "url": "https://www.sqlite.org/whentouse.html"
+      },
+      {
+        "blurb": "Official getting-started covering documents, collections, CRUD operations, and aggregation.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:mongodb:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "MongoDB docs",
+        "title": "MongoDB Getting Started",
+        "tool_slugs": [
+          "mongodb"
+        ],
+        "tools": [
+          "mongodb"
+        ],
+        "url": "https://www.mongodb.com/docs/manual/tutorial/getting-started/"
+      },
+      {
+        "blurb": "Free structured courses on data modeling, indexing, aggregation, and operational topics.",
+        "category": "Course",
+        "category_slug": "course",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:mongodb:university",
+        "learning_type": "Course",
+        "published_at": null,
+        "source": "MongoDB University",
+        "title": "MongoDB University",
+        "tool_slugs": [
+          "mongodb"
+        ],
+        "tools": [
+          "mongodb"
+        ],
+        "url": "https://learn.mongodb.com/"
+      },
+      {
+        "blurb": "Official tutorial walking through tables, items, queries, and the DynamoDB Local environment.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:dynamodb:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "AWS docs",
+        "title": "Getting Started with DynamoDB",
+        "tool_slugs": [
+          "dynamodb"
+        ],
+        "tools": [
+          "dynamodb"
+        ],
+        "url": "https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GettingStartedDynamoDB.html"
+      },
+      {
+        "blurb": "Opinionated guide to single-table design, access patterns, and DynamoDB modeling fundamentals.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:dynamodb:debrie-guide",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Alex DeBrie",
+        "title": "The DynamoDB Guide",
+        "tool_slugs": [
+          "dynamodb"
+        ],
+        "tools": [
+          "dynamodb"
+        ],
+        "url": "https://www.dynamodbguide.com/"
+      },
+      {
+        "blurb": "Official quickstart for the embedded analytical database, with CLI, Python, and SQL examples.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:duckdb:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "DuckDB docs",
+        "title": "DuckDB Getting Started",
+        "tool_slugs": [
+          "duckdb"
+        ],
+        "tools": [
+          "duckdb"
+        ],
+        "url": "https://duckdb.org/docs/stable/"
+      },
+      {
+        "blurb": "Hands-on intro to querying CSV, Parquet, and JSON files directly with DuckDB.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:duckdb:motherduck-tutorial",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "MotherDuck blog",
+        "title": "DuckDB Tutorial for Beginners",
+        "tool_slugs": [
+          "duckdb"
+        ],
+        "tools": [
+          "duckdb"
+        ],
+        "url": "https://motherduck.com/blog/duckdb-tutorial-for-beginners/"
+      },
+      {
+        "blurb": "Install, load data, and run analytical queries on the columnar OLAP database.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:clickhouse:quick-start",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "ClickHouse docs",
+        "title": "ClickHouse Quick Start",
+        "tool_slugs": [
+          "clickhouse"
+        ],
+        "tools": [
+          "clickhouse"
+        ],
+        "url": "https://clickhouse.com/docs/getting-started/quick-start"
+      },
+      {
+        "blurb": "Free courses on data modeling, MergeTree engines, and production operations.",
+        "category": "Course",
+        "category_slug": "course",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:clickhouse:academy",
+        "learning_type": "Course",
+        "published_at": null,
+        "source": "ClickHouse Academy",
+        "title": "ClickHouse Academy",
+        "tool_slugs": [
+          "clickhouse"
+        ],
+        "tools": [
+          "clickhouse"
+        ],
+        "url": "https://learn.clickhouse.com/"
+      }
+    ],
+    "queues": [
+      {
+        "blurb": "Six canonical tutorials: work queues, pub/sub, routing, topics, RPC, and acknowledgements.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:rabbitmq:tutorials",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "RabbitMQ docs",
+        "title": "RabbitMQ Tutorials",
+        "tool_slugs": [
+          "rabbitmq"
+        ],
+        "tools": [
+          "rabbitmq"
+        ],
+        "url": "https://www.rabbitmq.com/tutorials"
+      },
+      {
+        "blurb": "Full documentation hub: clustering, persistence, flow control, monitoring, and production tuning.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:rabbitmq:docs",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "RabbitMQ docs",
+        "title": "RabbitMQ Documentation",
+        "tool_slugs": [
+          "rabbitmq"
+        ],
+        "tools": [
+          "rabbitmq"
+        ],
+        "url": "https://www.rabbitmq.com/docs"
+      },
+      {
+        "blurb": "Start a broker, create topics, produce and consume messages, and run Kafka Connect.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:kafka:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Kafka docs",
+        "title": "Apache Kafka Quickstart",
+        "tool_slugs": [
+          "kafka"
+        ],
+        "tools": [
+          "kafka"
+        ],
+        "url": "https://kafka.apache.org/quickstart"
+      },
+      {
+        "blurb": "Free video course on Kafka fundamentals: topics, partitions, producers, consumers, and brokers.",
+        "category": "Course",
+        "category_slug": "course",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:kafka:101-course",
+        "learning_type": "Course",
+        "published_at": null,
+        "source": "Confluent Developer",
+        "title": "Apache Kafka 101",
+        "tool_slugs": [
+          "kafka"
+        ],
+        "tools": [
+          "kafka"
+        ],
+        "url": "https://developer.confluent.io/courses/apache-kafka/events/"
+      },
+      {
+        "blurb": "Concept overview and walkthroughs covering core NATS, JetStream, and key/value stores.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:nats:overview",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "NATS docs",
+        "title": "NATS Concepts & Walkthrough",
+        "tool_slugs": [
+          "nats"
+        ],
+        "tools": [
+          "nats"
+        ],
+        "url": "https://docs.nats.io/nats-concepts/overview"
+      },
+      {
+        "blurb": "Create queues, send and receive messages, and configure dead-letter queues via console or SDK.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:sqs:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "AWS docs",
+        "title": "Getting Started with Amazon SQS",
+        "tool_slugs": [
+          "sqs"
+        ],
+        "tools": [
+          "sqs"
+        ],
+        "url": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-getting-started.html"
+      },
+      {
+        "blurb": "Official guidance on visibility timeouts, polling, idempotency, and queue throughput tuning.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:sqs:best-practices",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "AWS docs",
+        "title": "SQS Best Practices",
+        "tool_slugs": [
+          "sqs"
+        ],
+        "tools": [
+          "sqs"
+        ],
+        "url": "https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-best-practices.html"
+      },
+      {
+        "blurb": "Official guide: XADD, consumer groups, XREADGROUP, acknowledgement, and stream trimming.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:redis-streams:intro",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Redis docs",
+        "title": "Introduction to Redis Streams",
+        "tool_slugs": [
+          "redis-streams"
+        ],
+        "tools": [
+          "redis-streams"
+        ],
+        "url": "https://redis.io/docs/latest/develop/data-types/streams/"
+      },
+      {
+        "blurb": "Official guide for the Node.js queue library: producers, workers, flows, repeatable jobs.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:bullmq:guide",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "BullMQ docs",
+        "title": "BullMQ Guide",
+        "tool_slugs": [
+          "bullmq"
+        ],
+        "tools": [
+          "bullmq"
+        ],
+        "url": "https://docs.bullmq.io/guide/introduction"
+      },
+      {
+        "blurb": "Official wiki: install, define workers, enqueue jobs, and run the Sidekiq process.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:sidekiq:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Sidekiq wiki",
+        "title": "Sidekiq Getting Started",
+        "tool_slugs": [
+          "sidekiq"
+        ],
+        "tools": [
+          "sidekiq"
+        ],
+        "url": "https://github.com/sidekiq/sidekiq/wiki/Getting-Started"
+      },
+      {
+        "blurb": "Job idempotency, small arguments, embracing concurrency, and operational guidance.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:sidekiq:best-practices",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Sidekiq wiki",
+        "title": "Sidekiq Best Practices",
+        "tool_slugs": [
+          "sidekiq"
+        ],
+        "tools": [
+          "sidekiq"
+        ],
+        "url": "https://github.com/sidekiq/sidekiq/wiki/Best-Practices"
+      },
+      {
+        "blurb": "Official tutorial: define tasks, configure brokers, run workers, and check results.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:celery:first-steps",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Celery docs",
+        "title": "First Steps with Celery",
+        "tool_slugs": [
+          "celery"
+        ],
+        "tools": [
+          "celery"
+        ],
+        "url": "https://docs.celeryq.dev/en/stable/getting-started/first-steps-with-celery.html"
+      },
+      {
+        "blurb": "Canonical post on idempotent tasks, retries, naming, and avoiding common Celery pitfalls.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:celery:best-practices",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Deni Bertovic",
+        "title": "Celery Best Practices",
+        "tool_slugs": [
+          "celery"
+        ],
+        "tools": [
+          "celery"
+        ],
+        "url": "https://denibertovic.com/posts/celery-best-practices/"
+      }
+    ],
+    "search": [
+      {
+        "blurb": "Run Elasticsearch locally, index documents, and run match, term, and aggregation queries.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:elasticsearch:quick-start",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Elastic docs",
+        "title": "Elasticsearch Quick Start",
+        "tool_slugs": [
+          "elasticsearch"
+        ],
+        "tools": [
+          "elasticsearch"
+        ],
+        "url": "https://www.elastic.co/guide/en/elasticsearch/reference/current/getting-started.html"
+      },
+      {
+        "blurb": "Long-form guide to mapping, analyzers, relevance, aggregations, and cluster scaling.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:elasticsearch:definitive-guide",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Elastic docs",
+        "title": "Elasticsearch: The Definitive Guide",
+        "tool_slugs": [
+          "elasticsearch"
+        ],
+        "tools": [
+          "elasticsearch"
+        ],
+        "url": "https://www.elastic.co/guide/en/elasticsearch/guide/current/index.html"
+      },
+      {
+        "blurb": "Run OpenSearch and Dashboards, index data, and run search and aggregation queries.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:opensearch:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "OpenSearch docs",
+        "title": "OpenSearch Quickstart",
+        "tool_slugs": [
+          "opensearch"
+        ],
+        "tools": [
+          "opensearch"
+        ],
+        "url": "https://opensearch.org/docs/latest/getting-started/"
+      },
+      {
+        "blurb": "Install, add documents, and run typo-tolerant searches with filters and ranking rules.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:meilisearch:quick-start",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Meilisearch docs",
+        "title": "Meilisearch Quick Start",
+        "tool_slugs": [
+          "meilisearch"
+        ],
+        "tools": [
+          "meilisearch"
+        ],
+        "url": "https://www.meilisearch.com/docs/learn/getting_started/quick_start"
+      },
+      {
+        "blurb": "Install, create collections, index documents, and tune ranking and faceting in Typesense.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:typesense:guide",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Typesense docs",
+        "title": "Typesense Guide",
+        "tool_slugs": [
+          "typesense"
+        ],
+        "tools": [
+          "typesense"
+        ],
+        "url": "https://typesense.org/docs/guide/"
+      }
+    ],
+    "storage": [
+      {
+        "blurb": "Create buckets, upload objects, manage access, and configure lifecycle and versioning.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:s3:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "AWS docs",
+        "title": "Getting Started with Amazon S3",
+        "tool_slugs": [
+          "s3"
+        ],
+        "tools": [
+          "s3"
+        ],
+        "url": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/GetStartedWithS3.html"
+      },
+      {
+        "blurb": "Official guidance on request rates, key naming, multipart uploads, and Transfer Acceleration.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:s3:performance",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "AWS docs",
+        "title": "S3 Performance Best Practices",
+        "tool_slugs": [
+          "s3"
+        ],
+        "tools": [
+          "s3"
+        ],
+        "url": "https://docs.aws.amazon.com/AmazonS3/latest/userguide/optimizing-performance.html"
+      },
+      {
+        "blurb": "Create R2 buckets, upload objects via Wrangler or the S3-compatible API, and serve them.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:r2:get-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Cloudflare docs",
+        "title": "Cloudflare R2 Get Started",
+        "tool_slugs": [
+          "r2"
+        ],
+        "tools": [
+          "r2"
+        ],
+        "url": "https://developers.cloudflare.com/r2/get-started/"
+      },
+      {
+        "blurb": "Create buckets and application keys, upload files via web UI, CLI, and S3-compatible API.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:b2:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Backblaze docs",
+        "title": "Backblaze B2 Getting Started",
+        "tool_slugs": [
+          "b2"
+        ],
+        "tools": [
+          "b2"
+        ],
+        "url": "https://www.backblaze.com/docs/cloud-storage-getting-started-with-backblaze-b2"
+      },
+      {
+        "blurb": "Install MinIO single-node and distributed, use the mc client, and configure access policies.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:minio:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "MinIO docs",
+        "title": "MinIO Quickstart",
+        "tool_slugs": [
+          "minio"
+        ],
+        "tools": [
+          "minio"
+        ],
+        "url": "https://min.io/docs/minio/linux/index.html"
+      }
+    ],
+    "vector": [
+      {
+        "blurb": "Install the extension, create vector columns, build HNSW/IVFFlat indexes, and run kNN queries.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:pgvector:readme",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "GitHub · pgvector",
+        "title": "pgvector README",
+        "tool_slugs": [
+          "pgvector"
+        ],
+        "tools": [
+          "pgvector"
+        ],
+        "url": "https://github.com/pgvector/pgvector"
+      },
+      {
+        "blurb": "Run Qdrant in Docker, create collections, upsert vectors with payloads, and run filtered searches.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:qdrant:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Qdrant docs",
+        "title": "Qdrant Quickstart",
+        "tool_slugs": [
+          "qdrant"
+        ],
+        "tools": [
+          "qdrant"
+        ],
+        "url": "https://qdrant.tech/documentation/quickstart/"
+      },
+      {
+        "blurb": "Spin up Weaviate Cloud, define collections, import data, and run vector and hybrid queries.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:weaviate:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Weaviate docs",
+        "title": "Weaviate Quickstart",
+        "tool_slugs": [
+          "weaviate"
+        ],
+        "tools": [
+          "weaviate"
+        ],
+        "url": "https://weaviate.io/developers/weaviate/quickstart"
+      },
+      {
+        "blurb": "Create an index, upsert vectors with metadata, and run similarity queries via Python SDK.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "arch:res:pinecone:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Pinecone docs",
+        "title": "Pinecone Quickstart",
+        "tool_slugs": [
+          "pinecone"
+        ],
+        "tools": [
+          "pinecone"
+        ],
+        "url": "https://docs.pinecone.io/guides/get-started/quickstart"
+      }
+    ]
+  },
+  "faqs": [
+    {
+      "answer": "Forget the enterprise diagrams. For a small team, architecture is the set of recurring decisions you're making every few months: which database, which queue, which observability stack, which auth provider. Will Larson's framing is to write down five real architecture decisions you've made, then find the pattern. That pattern is your architecture. Documents that don't change anything aren't architecture; they're paperwork.",
+      "question": "What does system architecture actually mean for a small team?",
+      "source_key": "arch:faq:larson-strategy-is-boring",
+      "source_label": "Will Larson: Good engineering strategy is boring",
+      "source_url": "https://lethain.com/good-engineering-strategy-is-boring/"
+    },
+    {
+      "answer": "If you need work to outlive the request that asked for it, you need persistence somewhere. A database table with a poll loop is the simplest version. A real queue (RabbitMQ, SQS) buys fair scheduling, backpressure, and retries handled properly. Marc Brooker's point: queues don't actually deliver exactly-once. They deliver at-least-once and you handle the duplicates. If your workload can't tolerate that, you need idempotency in the consumer regardless of which tool.",
+      "question": "When should I use a queue vs. just a database table?",
+      "source_key": "arch:faq:brooker-exactly-once",
+      "source_label": "Marc Brooker: Exactly-Once Delivery May Not Be What You Want",
+      "source_url": "https://brooker.co.za/blog/2014/11/15/exactly-once.html"
+    },
+    {
+      "answer": "Later than you think. Postgres handles relational workloads, full-text search, JSON, time-series (with extensions), geospatial (with PostGIS), and vector search (with pgvector). The hard line comes when one workload starts to dominate enough that operating Postgres for it becomes harder than running a specialized store: analytics over billions of rows (ClickHouse), key-value at flat scale (DynamoDB), columnar local-first (DuckDB). For most teams, the right answer is to wait for the actual pain before splitting it out.",
+      "question": "Postgres vs. specialized stores: when does it stop being enough?",
+      "source_key": "arch:faq:tigerdata-just-use-postgres",
+      "source_label": "Tiger Data: It's 2026, Just Use Postgres",
+      "source_url": "https://www.tigerdata.com/blog/its-2026-just-use-postgres"
+    },
+    {
+      "answer": "Caches add a metastable failure mode that load tests usually miss. When your cache is warm, the database sees 10% of traffic. When the cache empties (eviction storm, network blip, restart), the database suddenly sees 100%. Usually more than it can handle, which keeps the cache from refilling, which keeps the database overloaded. Decide what cache-miss looks like at full hit-rate before you ship. The fix is usually request coalescing, stale-while-revalidate, or some kind of admission control.",
+      "question": "What do I need to know about caching before I deploy a cache?",
+      "source_key": "arch:faq:brooker-caches",
+      "source_label": "Marc Brooker: Caches, Modes, and Unstable Systems",
+      "source_url": "https://brooker.co.za/blog/2021/08/27/caches.html"
+    },
+    {
+      "answer": "GraphQL pays off at client-server edges where the client wants to fetch exactly the fields it needs in one round trip, and where the complexity of writing resolvers is a price you can afford. gRPC wins for internal service-to-service traffic: binary framing, HTTP/2 streaming, generated clients, tight schema discipline. REST is still the right default for everything else, especially public APIs where caching, browser support, and developer familiarity matter more than the protocol's expressive power.",
+      "question": "When should I reach for GraphQL or gRPC instead of REST?",
+      "source_key": "arch:faq:so-blog-grpc-vs-graphql",
+      "source_label": "Stack Overflow Blog: When to use gRPC vs GraphQL",
+      "source_url": "https://stackoverflow.blog/2022/11/28/when-to-use-grpc-vs-graphql/"
+    },
+    {
+      "answer": "Postgres full-text search is more capable than most teams realize. For typical workloads (tens of millions of rows, basic ranking, single-language stemming) it's competitive with Elasticsearch and Meilisearch and skips the operational cost of running a second system. The line is when you need fuzzy/typo-tolerant matching, rich faceting, multi-language ranking, or real-time updates over very large indexes. Until then, the right move is staying in Postgres.",
+      "question": "Do I need a separate search index, or can Postgres full-text handle it?",
+      "source_key": "arch:faq:supabase-postgres-fts",
+      "source_label": "Supabase Engineering: Postgres FTS vs the rest",
+      "source_url": "https://supabase.com/blog/postgres-full-text-search-vs-the-rest"
+    },
+    {
+      "answer": "pgvector inside the Postgres you already run wins until the retrieval workload starts to dominate normal load. Specialized vector databases buy you horizontal sharding past tens of millions of vectors, faster index rebuilds, and best-in-class filtered approximate-nearest-neighbor search. If your collection fits comfortably alongside your transactional data and your query patterns are simple kNN with a few filters, stay in Postgres.",
+      "question": "When does pgvector stop being enough?",
+      "source_key": "arch:faq:tigerdata-pgvector-vs-qdrant",
+      "source_label": "Tiger Data Engineering: pgvector vs Qdrant",
+      "source_url": "https://www.tigerdata.com/blog/pgvector-vs-qdrant"
+    }
+  ],
+  "last_updated": "2026-05-12",
+  "learning_types": [
+    "Tutorial",
+    "Course",
+    "Discussion",
+    "Best Practices",
+    "Talk"
+  ],
+  "og_meta": {
+    "description": "An index of writing, courses, and tutorials on architecting modern systems: how to choose between databases, queues, caches, search engines, APIs, and the rest of the data and integration stack.",
+    "image": "",
+    "site_name": "Smarter Dev",
+    "title": "Architecting Modern Systems: An Index",
+    "type": "article",
+    "url": "https://smarter.dev/resources/system-architecture"
+  },
+  "people": [
+    {
+      "blurb": "DDIA author and Cambridge researcher; writes on distributed systems and local-first software.",
+      "handle": "martinkl",
+      "key": "arch:person:blog:martinkl",
+      "name": "Martin Kleppmann",
+      "platform": "blog",
+      "url": "https://martin.kleppmann.com/"
+    },
+    {
+      "blurb": "AWS distinguished engineer publishing weekly on databases, queues, retries, and durability.",
+      "handle": "MarcJBrooker",
+      "key": "arch:person:blog:brooker",
+      "name": "Marc Brooker",
+      "platform": "blog",
+      "url": "https://brooker.co.za/blog/"
+    },
+    {
+      "blurb": "Jepsen author. The empirical voice on what distributed systems actually do under failure.",
+      "handle": "aphyr",
+      "key": "arch:person:blog:aphyr",
+      "name": "Kyle Kingsbury (Aphyr)",
+      "platform": "blog",
+      "url": "https://aphyr.com/posts"
+    },
+    {
+      "blurb": "Engineering leader writing concrete frameworks for strategy, architecture, and staff-engineer work.",
+      "handle": "lethain",
+      "key": "arch:person:blog:lethain",
+      "name": "Will Larson",
+      "platform": "blog",
+      "url": "https://lethain.com/"
+    },
+    {
+      "blurb": "TLA+ and formal-methods writer. Teaches how to reason about systems before shipping.",
+      "handle": "hillelogram",
+      "key": "arch:person:blog:hillel",
+      "name": "Hillel Wayne",
+      "platform": "blog",
+      "url": "https://www.hillelwayne.com/"
+    },
+    {
+      "blurb": "Ex-ZooKeeper maintainer; pragmatic essays on technical strategy and engineering leadership.",
+      "handle": "skamille",
+      "key": "arch:person:blog:camille",
+      "name": "Camille Fournier",
+      "platform": "blog",
+      "url": "https://skamille.medium.com/"
+    },
+    {
+      "blurb": "High-volume system design explainers; great for surveying patterns and interview vocabulary.",
+      "handle": "bytebytego",
+      "key": "arch:person:newsletter:bytebytego",
+      "name": "Alex Xu (ByteByteGo)",
+      "platform": "newsletter",
+      "url": "https://www.bytebytego.com/"
+    },
+    {
+      "blurb": "Companion to Aphyr's blog: vendor-funded but uncompromising correctness analyses.",
+      "handle": "jepsen",
+      "key": "arch:person:blog:jepsen",
+      "name": "Jepsen",
+      "platform": "blog",
+      "url": "https://jepsen.io/"
+    }
+  ],
+  "popularity_unlocked": false,
+  "seo_meta": {
+    "canonical_url": "https://smarter.dev/resources/system-architecture",
+    "description": "An index of writing, courses, and tutorials on architecting modern systems: how to choose between databases, queues, caches, search engines, APIs, and the rest of the data and integration stack.",
+    "robots": "index,follow"
+  },
+  "spine": [
+    {
+      "blurb": "The canonical map of databases, replication, consensus, and stream-processing tradeoffs.",
+      "category": "Best Practices",
+      "category_slug": "best-practices",
+      "first_indexed_at": "2026-05-12",
+      "key": "arch:spine:ddia",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Martin Kleppmann",
+      "title": "Designing Data-Intensive Applications",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://dataintensive.net/"
+    },
+    {
+      "blurb": "Principal engineers explaining how Amazon actually builds and operates production services.",
+      "category": "Best Practices",
+      "category_slug": "best-practices",
+      "first_indexed_at": "2026-05-12",
+      "key": "arch:spine:aws-builders-library",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "AWS Builders' Library",
+      "title": "The Amazon Builders' Library",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://aws.amazon.com/builders-library/"
+    },
+    {
+      "blurb": "AWS distinguished engineer on databases, durability, queues, retries, and metastability.",
+      "category": "Discussion",
+      "category_slug": "discussion",
+      "first_indexed_at": "2026-05-12",
+      "key": "arch:spine:brooker-blog",
+      "learning_type": "Discussion",
+      "published_at": null,
+      "source": "Marc Brooker (AWS)",
+      "title": "Marc Brooker's Blog",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://brooker.co.za/blog/"
+    },
+    {
+      "blurb": "Empirical safety tests of databases and queues under partitions, clock skew, and faults.",
+      "category": "Best Practices",
+      "category_slug": "best-practices",
+      "first_indexed_at": "2026-05-12",
+      "key": "arch:spine:jepsen-analyses",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Kyle Kingsbury (Aphyr)",
+      "title": "Jepsen Analyses",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://jepsen.io/analyses"
+    },
+    {
+      "blurb": "Safety-first engineering doctrine: assertions, static allocation, batching, zero dependencies.",
+      "category": "Best Practices",
+      "category_slug": "best-practices",
+      "first_indexed_at": "2026-05-12",
+      "key": "arch:spine:tiger-style",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "TigerBeetle",
+      "title": "TIGER_STYLE",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/TIGER_STYLE.md"
+    },
+    {
+      "blurb": "Eight-lecture Cambridge series on clocks, replication, consensus, linearizability, and Spanner.",
+      "category": "Course",
+      "category_slug": "course",
+      "first_indexed_at": "2026-05-12",
+      "key": "arch:spine:kleppmann-lectures",
+      "learning_type": "Course",
+      "published_at": null,
+      "source": "Martin Kleppmann (Cambridge)",
+      "title": "Distributed Systems lecture series",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://www.youtube.com/playlist?list=PLeKd45zvjcDFUEv_ohr_HdUFe97RItdiB"
+    },
+    {
+      "blurb": "With enough users, every observable behavior of your API becomes a contract someone depends on.",
+      "category": "Discussion",
+      "category_slug": "discussion",
+      "first_indexed_at": "2026-05-12",
+      "key": "arch:spine:hyrums-law",
+      "learning_type": "Discussion",
+      "published_at": null,
+      "source": "Hyrum Wright",
+      "title": "Hyrum's Law",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://www.hyrumslaw.com/"
+    },
+    {
+      "blurb": "Multi-tenant fault isolation pattern that limits blast radius without dedicated capacity.",
+      "category": "Best Practices",
+      "category_slug": "best-practices",
+      "first_indexed_at": "2026-05-12",
+      "key": "arch:spine:shuffle-sharding",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Colm MacCárthaigh, AWS Builders' Library",
+      "title": "Workload Isolation Using Shuffle-Sharding",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://aws.amazon.com/builders-library/workload-isolation-using-shuffle-sharding/"
+    },
+    {
+      "blurb": "Archive of daily computer-science paper summaries. Paused since 2021; back catalog is foundational.",
+      "category": "Discussion",
+      "category_slug": "discussion",
+      "first_indexed_at": "2026-05-12",
+      "key": "arch:spine:morning-paper",
+      "learning_type": "Discussion",
+      "published_at": null,
+      "source": "Adrian Colyer",
+      "title": "The Morning Paper (archive)",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://blog.acolyer.org/"
+    },
+    {
+      "blurb": "Why caches create metastable failure modes load tests miss until production explodes.",
+      "category": "Best Practices",
+      "category_slug": "best-practices",
+      "first_indexed_at": "2026-05-12",
+      "key": "arch:spine:brooker-caches",
+      "learning_type": "Best Practices",
+      "published_at": "2021-08-27",
+      "source": "Marc Brooker",
+      "title": "Caches, Modes, and Unstable Systems",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://brooker.co.za/blog/2021/08/27/caches.html"
+    }
+  ]
+}

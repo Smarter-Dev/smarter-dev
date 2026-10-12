@@ -1,0 +1,963 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "categories": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "intro": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "tools": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "blurb": {
+                  "type": "string"
+                },
+                "home_key": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "slug": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "slug",
+                "name",
+                "url",
+                "home_key",
+                "blurb"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "intro",
+          "tools"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "category_resources": {
+      "additionalProperties": false,
+      "properties": {
+        "cloud-providers": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "blurb": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "category_slug": {
+                "type": "string"
+              },
+              "first_indexed_at": {
+                "format": "date",
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "learning_type": {
+                "type": "string"
+              },
+              "published_at": {
+                "anyOf": [
+                  {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "tool_slugs": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "tools": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "url",
+              "source",
+              "blurb",
+              "key",
+              "learning_type",
+              "published_at",
+              "first_indexed_at",
+              "tool_slugs",
+              "category",
+              "tools",
+              "category_slug"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "containers": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "blurb": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "category_slug": {
+                "type": "string"
+              },
+              "first_indexed_at": {
+                "format": "date",
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "learning_type": {
+                "type": "string"
+              },
+              "published_at": {
+                "anyOf": [
+                  {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "tool_slugs": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "tools": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "url",
+              "source",
+              "blurb",
+              "key",
+              "learning_type",
+              "published_at",
+              "first_indexed_at",
+              "tool_slugs",
+              "category",
+              "tools",
+              "category_slug"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "edge": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "blurb": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "category_slug": {
+                "type": "string"
+              },
+              "first_indexed_at": {
+                "format": "date",
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "learning_type": {
+                "type": "string"
+              },
+              "published_at": {
+                "anyOf": [
+                  {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "tool_slugs": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "tools": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "url",
+              "source",
+              "blurb",
+              "key",
+              "learning_type",
+              "published_at",
+              "first_indexed_at",
+              "tool_slugs",
+              "category",
+              "tools",
+              "category_slug"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "ingress": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "blurb": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "category_slug": {
+                "type": "string"
+              },
+              "first_indexed_at": {
+                "format": "date",
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "learning_type": {
+                "type": "string"
+              },
+              "published_at": {
+                "anyOf": [
+                  {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "tool_slugs": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "tools": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "url",
+              "source",
+              "blurb",
+              "key",
+              "learning_type",
+              "published_at",
+              "first_indexed_at",
+              "tool_slugs",
+              "category",
+              "tools",
+              "category_slug"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "managed-data": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "blurb": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "category_slug": {
+                "type": "string"
+              },
+              "first_indexed_at": {
+                "format": "date",
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "learning_type": {
+                "type": "string"
+              },
+              "published_at": {
+                "anyOf": [
+                  {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "tool_slugs": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "tools": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "url",
+              "source",
+              "blurb",
+              "key",
+              "learning_type",
+              "published_at",
+              "first_indexed_at",
+              "tool_slugs",
+              "category",
+              "tools",
+              "category_slug"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "networking": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "blurb": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "category_slug": {
+                "type": "string"
+              },
+              "first_indexed_at": {
+                "format": "date",
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "learning_type": {
+                "type": "string"
+              },
+              "published_at": {
+                "anyOf": [
+                  {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "tool_slugs": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "tools": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "url",
+              "source",
+              "blurb",
+              "key",
+              "learning_type",
+              "published_at",
+              "first_indexed_at",
+              "tool_slugs",
+              "category",
+              "tools",
+              "category_slug"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "orchestration": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "blurb": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "category_slug": {
+                "type": "string"
+              },
+              "first_indexed_at": {
+                "format": "date",
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "learning_type": {
+                "type": "string"
+              },
+              "published_at": {
+                "anyOf": [
+                  {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "tool_slugs": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "tools": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "url",
+              "source",
+              "blurb",
+              "key",
+              "learning_type",
+              "published_at",
+              "first_indexed_at",
+              "tool_slugs",
+              "category",
+              "tools",
+              "category_slug"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "paas": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "blurb": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "category_slug": {
+                "type": "string"
+              },
+              "first_indexed_at": {
+                "format": "date",
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "learning_type": {
+                "type": "string"
+              },
+              "published_at": {
+                "anyOf": [
+                  {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "tool_slugs": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "tools": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "url",
+              "source",
+              "blurb",
+              "key",
+              "learning_type",
+              "published_at",
+              "first_indexed_at",
+              "tool_slugs",
+              "category",
+              "tools",
+              "category_slug"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "server-os": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "blurb": {
+                "type": "string"
+              },
+              "category": {
+                "type": "string"
+              },
+              "category_slug": {
+                "type": "string"
+              },
+              "first_indexed_at": {
+                "format": "date",
+                "type": "string"
+              },
+              "key": {
+                "type": "string"
+              },
+              "learning_type": {
+                "type": "string"
+              },
+              "published_at": {
+                "anyOf": [
+                  {
+                    "format": "date",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "source": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "tool_slugs": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "tools": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "title",
+              "url",
+              "source",
+              "blurb",
+              "key",
+              "learning_type",
+              "published_at",
+              "first_indexed_at",
+              "tool_slugs",
+              "category",
+              "tools",
+              "category_slug"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "cloud-providers",
+        "paas",
+        "managed-data",
+        "containers",
+        "orchestration",
+        "ingress",
+        "networking",
+        "edge",
+        "server-os"
+      ],
+      "type": "object"
+    },
+    "faqs": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "source_key": {
+            "type": "string"
+          },
+          "source_label": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "answer",
+          "source_label",
+          "source_url",
+          "source_key"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "last_updated": {
+      "format": "date",
+      "type": "string"
+    },
+    "learning_types": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "og_meta": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "image": {
+          "type": "string"
+        },
+        "site_name": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "description",
+        "url",
+        "site_name",
+        "type",
+        "image"
+      ],
+      "type": "object"
+    },
+    "people": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "blurb": {
+            "type": "string"
+          },
+          "handle": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "handle",
+          "platform",
+          "url",
+          "key",
+          "blurb"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "popularity_unlocked": {
+      "type": "boolean"
+    },
+    "seo_meta": {
+      "additionalProperties": false,
+      "properties": {
+        "canonical_url": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "robots": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "description",
+        "canonical_url",
+        "robots"
+      ],
+      "type": "object"
+    },
+    "spine": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "blurb": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "category_slug": {
+            "type": "string"
+          },
+          "first_indexed_at": {
+            "format": "date",
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "learning_type": {
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tool_slugs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tools": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "url",
+          "source",
+          "blurb",
+          "key",
+          "learning_type",
+          "published_at",
+          "first_indexed_at",
+          "tool_slugs",
+          "category",
+          "tools",
+          "category_slug"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "categories",
+    "category_resources",
+    "learning_types",
+    "spine",
+    "people",
+    "faqs",
+    "popularity_unlocked",
+    "last_updated",
+    "seo_meta",
+    "og_meta"
+  ],
+  "title": "infrastructure-hosting",
+  "type": "object"
+}
