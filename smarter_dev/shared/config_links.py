@@ -90,5 +90,5 @@ def build_config_link_url(
         channel_id=channel_id,
         discord_user_id=discord_user_id,
     )
-    base = get_settings().site_base_url.rstrip("/")
+    base = get_settings().admin_base_url.rstrip("/")
     return f"{base}{CONFIG_LINK_PATH}/{token}"

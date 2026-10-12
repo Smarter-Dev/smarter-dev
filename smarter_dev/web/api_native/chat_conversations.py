@@ -562,7 +562,7 @@ class ChatConversationController(Controller):
         await db_session.commit()
         await db_session.refresh(error)
         admin_url = (
-            f"{get_settings().site_base_url.rstrip('/')}/admin/chat-errors/{error.id}"
+            f"{get_settings().admin_base_url.rstrip('/')}/admin/chat-errors/{error.id}"
         )
         return ChatAgentErrorCreateResponse(
             id=error.id,

@@ -429,7 +429,7 @@ class BillingController(Controller):
             return Redirect(path="/account/billing")
 
         settings = get_settings()
-        return_url = f"{settings.site_base_url.rstrip('/')}/account/billing"
+        return_url = f"{settings.admin_base_url.rstrip('/')}/account/billing"
 
         try:
             url = await create_portal_session(

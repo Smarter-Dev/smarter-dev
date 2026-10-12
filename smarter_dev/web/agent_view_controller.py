@@ -160,7 +160,7 @@ async def answer_view(
         )
 
     title = conversation.title or "Smarter Dev answer"
-    answer_url = f"{get_settings().site_base_url.rstrip('/')}/ai/answer/{conversation.id}"
+    answer_url = f"{get_settings().admin_base_url.rstrip('/')}/ai/answer/{conversation.id}"
 
     return Template(
         "ai/answer.html",

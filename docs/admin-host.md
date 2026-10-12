@@ -33,13 +33,94 @@ task. No DNS or Cloudflare Worker change is part of this deploy.
 
 ## Site service key
 
-After the site memory API lands, create a dedicated Skrift service owner and
-grant it the `site-memory` and `site-privacy` permissions used by those API
-routes. In `/admin/api-keys`, mint a `sk_` key for that owner with principal
-type **service**, service name `cloudflare-site`, and scoped permissions
-`site-memory` and `site-privacy`. The owner's permissions and key scopes must
-both include those names; Skrift intersects them when authorizing a request.
-The key value appears once. Store it in a secret manager immediately.
+After the site memory API and privacy routes land, create a dedicated Skrift
+service user (for example `site@smarter.dev`) and assign it a role granting
+`site-memory` and `site-privacy`. The owner's role and key scopes must both
+include these permissions, because Skrift intersects them when authorizing a
+request. The API also requires `service_name="site"` exactly. Skrift's
+`/admin/api-keys` **New Key** form cannot set the principal type or service
+name, so mint this key through `create_api_key`, as the bot-key runbook does.
+
+Run a one-off Job based on `k8s/migrate-job.yaml`, using the same deployed web
+image, `smarter-dev-config` and `smarter-dev-migrate-secrets/database-url`.
+Replace `<IMAGE_VERSION>` with the deployed image tag. The dedicated owner
+and its role must already exist; the snippet checks its effective permissions
+before it creates a key. Save this as a private `site-key-job.yaml`:
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: smarter-dev-site-key
+  namespace: smarter-dev
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: mint
+          image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
+          workingDir: /app
+          command: ["sh", "-c"]
+          args:
+            - |
+              PYTHONPATH=/app uv run --no-sync python - <<'PY'
+              import asyncio
+              from sqlalchemy import select
+              from sqlalchemy.ext.asyncio import async_sessionmaker
+              from skrift.auth.services import get_user_permissions
+              from skrift.db.models.user import User
+              from skrift.db.services.api_key_service import create_api_key
+              from smarter_dev.shared.config import get_settings
+              from smarter_dev.shared.database import convert_postgres_url_for_asyncpg, create_async_engine
+
+              async def mint():
+                  url = convert_postgres_url_for_asyncpg(get_settings().effective_database_url)
+                  engine = create_async_engine(url).execution_options(
+                      schema_translate_map={None: "skrift"}
+                  )
+                  try:
+                      async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+                          owner = await session.scalar(
+                              select(User).where(User.email == "site@smarter.dev")
+                          )
+                          if owner is None:
+                              raise RuntimeError("site key owner is missing")
+                          required = {"site-memory", "site-privacy"}
+                          permissions = await get_user_permissions(session, str(owner.id))
+                          if not required <= permissions.permissions:
+                              raise RuntimeError("site key owner lacks required permissions")
+                          _, raw_key, _ = await create_api_key(
+                              session, owner.id, "site",
+                              principal_type="service",
+                              service_name="site",
+                              scoped_permissions=sorted(required),
+                              expires_at=None,
+                          )
+                          await session.commit()
+                          print(raw_key, flush=True)  # sk_...; capture once
+                  finally:
+                      await engine.dispose()
+
+              asyncio.run(mint())
+              PY
+          envFrom:
+            - configMapRef:
+                name: smarter-dev-config
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-migrate-secrets
+                  key: database-url
+```
+
+Run `kubectl -n smarter-dev apply -f site-key-job.yaml`, then read the raw key
+once with `kubectl -n smarter-dev logs job/smarter-dev-site-key`. Store it in a
+secret manager immediately and delete the Job after capture. This does not
+execute code inside a running web or bot pod.
 
 Patch only the `site-api-key` field of the existing `smarter-dev-secrets`
 Kubernetes Secret in namespace `smarter-dev`. Follow the safe one-field
@@ -52,11 +133,11 @@ before discarding the one-time value.
 
 ## URL ownership
 
-Production `SITE_BASE_URL` points to `admin.smarter.dev` because the Python
-app uses it for confirmation emails, account billing, bot configuration,
-privacy/terms links and API-generated admin links. The default in
-`smarter_dev/shared/config.py` remains `http://localhost:8000` for local
-development. The answer view URL follows this setting as well.
+Production `SITE_BASE_URL` points to `smarter.dev` for public privacy, terms
+and chat-agent URLs. `ADMIN_BASE_URL` points to `admin.smarter.dev` for
+Python-owned confirmation, account, billing, bot configuration, search and
+admin links, including the answer view. Both default to
+`http://localhost:8000` for local development.
 
 Public content literals intentionally stay on `smarter.dev`: canonical and
 Open Graph URLs in the resource controllers, the marketing link in the signup

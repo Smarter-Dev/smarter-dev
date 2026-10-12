@@ -16,7 +16,7 @@ async def create_portal_session(
             request={
                 "customer_id": customer_id,
                 "return_url": return_url
-                or f"{settings.site_base_url.rstrip('/')}/account/billing",
+                or f"{settings.admin_base_url.rstrip('/')}/account/billing",
             }
         )
     return customer_session.customer_portal_url

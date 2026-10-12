@@ -137,7 +137,7 @@ class SudoController(Controller):
             return Redirect(path="/auth/login?next=/sudo")
 
         settings = get_settings()
-        base = settings.site_base_url.rstrip("/")
+        base = settings.admin_base_url.rstrip("/")
 
         try:
             checkout_url = await create_checkout_session(

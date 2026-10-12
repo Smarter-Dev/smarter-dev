@@ -249,7 +249,11 @@ class Settings(BaseSettings):
     )
     site_base_url: str = Field(
         default="http://localhost:8000",
-        description="Public base URL for the site (used in confirmation links)",
+        description="Public base URL for canonical, OG and policy links",
+    )
+    admin_base_url: str = Field(
+        default="http://localhost:8000",
+        description="Base URL for Python-owned auth, account and admin routes",
     )
 
     # Analytics
@@ -399,11 +403,7 @@ class Settings(BaseSettings):
         if self.discord_redirect_uri:
             return self.discord_redirect_uri
         
-        # Default redirect URIs based on environment
-        if self.is_development:
-            return "http://localhost:8000/bot-admin/auth/discord/callback"
-        else:
-            return "https://admin.smarter.dev/bot-admin/auth/discord/callback"
+        return f"{self.admin_base_url.rstrip('/')}/bot-admin/auth/discord/callback"
 
 
 # Global settings instance
