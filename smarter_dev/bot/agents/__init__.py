@@ -6,14 +6,14 @@
 - ForumMonitorAgent: Forum post evaluation and response agent
 - StreakCelebrationAgent: Daily streak celebration message generator
 
-Every name is resolved lazily (PEP 562). Half the agents here are DSPy-backed,
-and ``dspy`` lives in the ``bot`` dependency group only — but this package also
-holds bot-agnostic modules the *web* image imports, notably ``model_router``,
-which the nightly dream session needs. Eagerly importing the submodules made
+Every name is resolved lazily (PEP 562). Several agents here import bot-only
+dependencies such as ``hikari``, but this package also holds bot-agnostic
+modules the *web* image imports, notably ``model_router``, which the nightly
+dream session needs. Eagerly importing the submodules once made
 ``from smarter_dev.bot.agents.model_router import build_model_for`` drag DSPy in
-through this file and die with ``ModuleNotFoundError`` anywhere outside the bot
-image. Attribute access still works exactly as before; only the import is
-deferred to first use.
+through this file and die with ``ModuleNotFoundError`` outside the bot image.
+Attribute access works exactly as before; only the import is deferred to first
+use.
 """
 
 from importlib import import_module

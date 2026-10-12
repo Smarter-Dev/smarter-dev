@@ -14,12 +14,12 @@ create_mention_tools in tools.py.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
 import hikari
 import lightbulb
+from pydantic_ai import Tool
 
 from smarter_dev.bot.guild_event_recorder import record_guild_event
 from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
@@ -167,7 +167,7 @@ def create_moderation_tools(
     channel_id: str,
     trigger_message_id: str | None = None,
     enabled_tools: list[str] | None = None,
-) -> tuple[list[Callable], ActionTracker]:
+) -> tuple[list[Tool], ActionTracker]:
     """Create context-bound triage tools for the AI moderation agent.
 
     Returns both the tools list and an ActionTracker that accumulates
@@ -566,19 +566,26 @@ def create_moderation_tools(
             return {"success": False, "error": str(e)}
 
     # ── Build tool list ──────────────────────────────────────────────
-    tools: list[Callable] = []
+    functions = []
 
     if "timeout" in enabled:
-        tools.append(timeout_user)
+        functions.append(timeout_user)
     if "purge" in enabled:
-        tools.append(purge_messages)
+        functions.append(purge_messages)
     if "delete" in enabled:
-        tools.append(delete_message)
+        functions.append(delete_message)
 
     # Always include utility tools
-    tools.append(flag_users)
-    tools.append(send_mod_message)
-    tools.append(get_user_info)
-    tools.append(get_user_history)
+    functions.append(flag_users)
+    functions.append(send_mod_message)
+    functions.append(get_user_info)
+    functions.append(get_user_history)
+
+    # Each docstring's Args section becomes the parameter descriptions. The
+    # tools share the action count and the tracker, so they run one at a time.
+    tools = [
+        Tool(function, docstring_format="google", sequential=True)
+        for function in functions
+    ]
 
     return tools, tracker

@@ -1,6 +1,6 @@
 """LLM-powered features plugin for Discord bot.
 
-This module provides AI-powered commands using DSPy agents for various
+This module provides AI-powered commands using pydantic-ai agents for various
 text processing tasks like summarization, translation, etc.
 """
 

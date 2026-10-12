@@ -29,7 +29,7 @@ def _delete_tool(bot):
         trigger_message_id=None,
         enabled_tools=["delete"],
     )
-    delete_message = next(t for t in tools if t.__name__ == "delete_message")
+    delete_message = next(t.function for t in tools if t.name == "delete_message")
     return delete_message, tracker
 
 
@@ -127,7 +127,7 @@ async def test_triage_timeout_dispatches_with_the_bot_for_the_event_log(monkeypa
     tools, _ = mod_tools.create_moderation_tools(
         bot, guild_id=GUILD_ID, channel_id=CHANNEL_ID, trigger_message_id=None
     )
-    timeout_user = next(t for t in tools if t.__name__ == "timeout_user")
+    timeout_user = next(t.function for t in tools if t.name == "timeout_user")
 
     result = await timeout_user("222", "10m", "invite-link spam")
 

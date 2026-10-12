@@ -18,7 +18,9 @@ from unittest.mock import patch
 
 import hikari
 import pytest
+from pydantic_ai.models.test import TestModel
 
+from smarter_dev.bot.agents.forum_agent import get_forum_combined_agent
 from smarter_dev.bot.client import extract_forum_post_data
 from smarter_dev.bot.client import handle_forum_thread_create
 from smarter_dev.bot.plugins import mod_monitor
@@ -312,12 +314,14 @@ class TestForumAgentServiceLogs:
             SimpleNamespace(name="A post title", id=456, parent_id=123),
             _attachment_only_message(),
         )
-        evaluation = SimpleNamespace(
-            decision="reasoned", confidence=0.1, response="", matching_topics=[]
+        model = TestModel(
+            custom_output_args={
+                "decision": "reasoned",
+                "confidence": 0.1,
+                "response": "",
+                "matching_topics": [],
+            }
         )
-
-        async def evaluate(**kwargs):
-            return evaluation
 
         with caplog.at_level(
             logging.DEBUG, logger="smarter_dev.bot.services.forum_agent_service"
@@ -329,10 +333,9 @@ class TestForumAgentServiceLogs:
             service, "record_response", new=AsyncMock(return_value="recorded-id")
         ), patch.object(
             service, "get_notification_topics", new=AsyncMock(return_value=["topic"])
-        ), patch("smarter_dev.bot.agents.forum_agent.dspy") as fake_dspy:
-            fake_dspy.context.return_value.__enter__ = MagicMock(return_value=None)
-            fake_dspy.context.return_value.__exit__ = MagicMock(return_value=None)
-            fake_dspy.asyncify.return_value = evaluate
+        ), patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}), (
+            get_forum_combined_agent().override(model=model)
+        ):
             responses, _ = await service.process_forum_post_with_tagging(
                 "777", post, user_subscriptions=[]
             )
