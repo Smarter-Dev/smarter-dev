@@ -23,6 +23,13 @@ spec:
                 app: smarter-dev-website
                 tier: frontend
         spec:
+            volumes:
+              - name: identity-rollout
+                configMap:
+                  name: site-identity-rollout
+                  items:
+                    - key: phase
+                      path: phase
             topologySpreadConstraints:
             - maxSkew: 1
               topologyKey: kubernetes.io/hostname
@@ -35,10 +42,22 @@ spec:
                 image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
                 ports:
                   - containerPort: 8000
+                command: ["/app/.venv/bin/python", "-m", "scripts.identity_web_gate"]
+                volumeMounts:
+                  - name: identity-rollout
+                    mountPath: /var/run/site-identity-rollout
+                    readOnly: true
                 envFrom:
                   - configMapRef:
                       name: smarter-dev-config
                 env:
+                  # Stable, independently managed deletion-fence key; never rotate
+                  # with API/session keys. Pin before rolling these writers.
+                  - name: SITE_IDENTITY_FENCE_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: site-identity-fence-key
                   - name: DATABASE_URL
                     valueFrom:
                       secretKeyRef:

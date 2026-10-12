@@ -147,7 +147,12 @@ jobs:
     # so the new code never starts against an old schema. Runs in-cluster (the
     # DB's only trusted source) as a one-shot Job with admin creds. A failed
     # migration fails this step and halts the deploy (Jobs use backoffLimit 0).
-    - name: Run database migrations
+    # The operator must first establish a reviewed admission/capture/drain
+    # boundary. Missing control is a deployment failure, never an implicit go.
+    - name: Verify identity transition prerequisite
+      run: python scripts/identity_rollout_control.py preflight
+
+    - name: Run database migrations and trusted identity key pin/check
       run: |
         kubectl delete job smarter-dev-migrate -n smarter-dev --ignore-not-found
         kubectl apply -f $GITHUB_WORKSPACE/k8s/migrate-job.yaml
@@ -162,7 +167,7 @@ jobs:
         if [ "$COMPLETE" != "True" ]; then
           echo "::error::migration job did not complete (complete=$COMPLETE failed=$FAILED)"; exit 1
         fi
-        echo "migrations applied"
+        echo "migrations and trusted identity pin/check complete"
 
     # Workers must know every new job payload before web pods can enqueue it.
     # One at a time: each surges a 512Mi-request pod, and the nodes have had
@@ -194,3 +199,7 @@ jobs:
 
     - name: Verify bot deployment
       run: kubectl rollout status deployment/smarter-dev-bot
+
+    # Deliberately no automatic phase release. First-transition web deletion
+    # routes and the agents consumer remain held until the operator verifies
+    # all writers plus captured/historical UUID reconciliation (runbook).

@@ -62,6 +62,10 @@ Imported Python-owned bindings are not unlinked by this API.
 ## Operator rollout and rollback
 
 No deployment, secret update or remote migration is performed by this change.
+The mandatory transition ordering, supported worker-first hold, durable captures,
+all-writer checks and explicit release are in
+[the #143 rollout runbook](site-identity-rollout.md). The overview below does not
+replace that gate or authorize an ordinary rolling upgrade across old writers.
 
 1. Generate one dedicated high-entropy `SITE_IDENTITY_FENCE_KEY` (at least 32
    characters) in the existing secret manager. Configure the **same** stable value

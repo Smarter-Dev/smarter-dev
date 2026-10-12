@@ -1,6 +1,6 @@
 ---
 # Agent-worker tier: a standalone Skrift worker process that drains the
-# shared Redis 'agents' queue and executes every agent/LLM job out-of-process,
+# shared PostgreSQL 'agents' queue and executes every agent/LLM job out-of-process,
 # off the web tier. Runs the WEB image (it imports smarter_dev.web.* agent
 # handler modules and needs the pydantic-ai/google-genai/openai stack), but
 # starts the worker CLI instead of the HTTP server. Pairs with
@@ -29,16 +29,40 @@ spec:
                 app: smarter-dev-agent-worker
                 tier: backend
         spec:
+            volumes:
+              - name: identity-rollout
+                configMap:
+                  name: site-identity-rollout
+                  items:
+                    - key: phase
+                      path: phase
             containers:
               - name: agent-worker
                 image: zzmmrmn/smarter-dev-website:<IMAGE_VERSION>
                 # Drain root jobs only. Chat roots may await child jobs, so a separate
                 # deployment drains chat-subagents without queue starvation.
-                command: ["/app/.venv/bin/skrift", "workers", "run", "--queue", "agents", "--concurrency", "8"]
+                command: ["/app/.venv/bin/python", "-m", "scripts.identity_worker_gate", "/app/.venv/bin/skrift", "workers", "run", "--queue", "agents", "--concurrency", "8"]
+                # During the first transition, Ready means key verified, but the
+                # consumer stays held until the operator verifies all writers.
+                readinessProbe:
+                  exec:
+                    command: ["test", "-f", "/tmp/site-identity-key-ready"]
+                  periodSeconds: 5
+                volumeMounts:
+                  - name: identity-rollout
+                    mountPath: /var/run/site-identity-rollout
+                    readOnly: true
                 envFrom:
                   - configMapRef:
                       name: smarter-dev-config
                 env:
+                  # Stable, independently managed deletion-fence key; never rotate
+                  # with API/session keys. Pin before rolling these writers.
+                  - name: SITE_IDENTITY_FENCE_KEY
+                    valueFrom:
+                      secretKeyRef:
+                        name: smarter-dev-secrets
+                        key: site-identity-fence-key
                   - name: DATABASE_URL
                     valueFrom:
                       secretKeyRef:
