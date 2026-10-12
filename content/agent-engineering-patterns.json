@@ -791,6 +791,7 @@
       "url": "https://huyenchip.com/"
     }
   ],
+  "popularity_unlocked": false,
   "seo_meta": {
     "canonical_url": "https://smarter.dev/resources/agent-engineering-patterns",
     "description": "Patterns for the Age of Agents. How a codebase is shaped so an agent can do useful work, how that work is verified at machine speed, and how humans stay in the decision path without becoming the bottleneck.",

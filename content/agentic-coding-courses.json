@@ -250,6 +250,7 @@
       "url": "https://lucumr.pocoo.org/"
     }
   ],
+  "popularity_unlocked": false,
   "seo_meta": {
     "canonical_url": "https://smarter.dev/resources/agentic-coding-courses",
     "description": "Tutorials, courses, and notes on Claude Code, Cursor, Codex, Copilot, Lovable, and the rest of this generation of coding tools. Also known as pair programming, agent mode, or vibe coding.",

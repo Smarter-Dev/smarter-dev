@@ -3923,6 +3923,7 @@
       "url": "https://tidyfirst.substack.com/"
     }
   ],
+  "popularity_unlocked": false,
   "seo_meta": {
     "canonical_url": "https://smarter.dev/resources/patterns-of-practice",
     "description": "The recurring shapes of software, what they cost, and when not to reach for them. Design patterns, architectural patterns, disciplines, and the anti-patterns worth refusing on purpose.",

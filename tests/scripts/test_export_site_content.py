@@ -38,7 +38,6 @@ TEMPLATE_GLOBALS = {
     "r",
     "course",
 }
-RUNTIME_KEYS = {"popularity_unlocked"}
 
 
 def _template_names(slug):
@@ -72,8 +71,11 @@ def test_export_site_content_round_trips_and_validates(tmp_path):
     for slug in SOURCE_PAGE_DATA:
         document = json.loads((tmp_path / f"{slug}.json").read_text())
         assert document == to_json_value(build_page_context(slug))
-        assert _template_names(slug) - RUNTIME_KEYS <= document.keys()
-        assert not RUNTIME_KEYS & document.keys()
+        template_names = _template_names(slug)
+        assert "popularity_unlocked" in template_names
+        assert template_names <= document.keys()
+        assert document["popularity_unlocked"] is False
+        assert not template_names <= (document.keys() - {"popularity_unlocked"})
         sources = (
             document["tool_courses"] + document["workflow_courses"]
             if slug == "agentic-coding-courses"

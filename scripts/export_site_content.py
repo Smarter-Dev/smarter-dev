@@ -109,9 +109,7 @@ def build_page_context(slug: str) -> dict:
         item for item in _resources_seed._DIRECTORIES if item["slug"] == slug
     )
     payload = build_seed_directory_payload(directory, SOURCE_PAGE_DATA[slug], {})
-    context = CONTEXT_BUILDERS[slug](payload)
-    context.pop("popularity_unlocked", None)
-    return context
+    return CONTEXT_BUILDERS[slug](payload)
 
 
 def to_json_value(value):

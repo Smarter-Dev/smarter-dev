@@ -1637,6 +1637,7 @@
       "url": "https://jepsen.io/"
     }
   ],
+  "popularity_unlocked": false,
   "seo_meta": {
     "canonical_url": "https://smarter.dev/resources/system-architecture",
     "description": "An index of writing, courses, and tutorials on architecting modern systems: how to choose between databases, queues, caches, search engines, APIs, and the rest of the data and integration stack.",

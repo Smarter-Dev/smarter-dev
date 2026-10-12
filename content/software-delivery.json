@@ -2027,6 +2027,7 @@
       "url": "https://martinfowler.com/articles/exploring-gen-ai.html"
     }
   ],
+  "popularity_unlocked": false,
   "seo_meta": {
     "canonical_url": "https://smarter.dev/resources/software-delivery",
     "description": "An index of writing, courses, and tutorials on shipping software: version control, CI/CD, infrastructure-as-code, deployment, container builds, local dev, database migrations, and feature flags.",

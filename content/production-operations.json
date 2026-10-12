@@ -2572,6 +2572,7 @@
       "url": "https://lethain.com/"
     }
   ],
+  "popularity_unlocked": false,
   "seo_meta": {
     "canonical_url": "https://smarter.dev/resources/production-operations",
     "description": "An index of writing, courses, and tutorials on running modern systems in production: observability, incident response, performance, identity, secrets, and network security.",

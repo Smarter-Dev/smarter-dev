@@ -773,6 +773,9 @@
       },
       "type": "array"
     },
+    "popularity_unlocked": {
+      "type": "boolean"
+    },
     "seo_meta": {
       "additionalProperties": false,
       "properties": {
@@ -875,6 +878,7 @@
     "spine",
     "people",
     "faqs",
+    "popularity_unlocked",
     "last_updated",
     "seo_meta",
     "og_meta"

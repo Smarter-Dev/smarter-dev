@@ -1927,6 +1927,7 @@
       "url": "https://fly.io/blog/"
     }
   ],
+  "popularity_unlocked": false,
   "seo_meta": {
     "canonical_url": "https://smarter.dev/resources/infrastructure-hosting",
     "description": "An index of writing, courses, and tutorials on hosting modern systems: cloud providers, PaaS, managed data services, containers, orchestration, networking, and the rest of the production substrate.",
