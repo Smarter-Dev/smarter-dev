@@ -7,6 +7,17 @@ The key must have `principal_type=service`, `service_name=site`, and explicit
 and keys scoped only to `site-privacy` receive 401. `site-privacy` is a
 separate permission reserved for the site's privacy endpoints.
 
+The site's deletion handoff calls `POST /api/site/privacy/delete-account/{user_id}`
+with its `site-privacy` service key and the shared account UUID. A known account
+is deactivated and queued for the same durable purge as Python's `/account/delete`;
+the response is `202 {"status":"pending"}` until that worker finishes. A later
+`404` means the account no longer exists, including after a completed purge,
+and the site may mark its D1 request processed. Invalid UUIDs return 400; an
+unknown UUID returns 404. Other responses leave the D1 request pending for retry.
+The existing purge removes Skrift identity, linked logins, user-owned chat and
+attachments, account-linked records, and sudo membership. Discord privacy
+preferences are independent of account deletion and remain in force.
+
 Keep the service key on the server. The site backend is responsible for
 validating the signed-in account's linked Discord IDs and guild access before
 forwarding requests. Member IDs and `viewer_discord_ids` are trusted assertions

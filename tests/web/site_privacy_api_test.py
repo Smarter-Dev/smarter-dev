@@ -17,6 +17,7 @@ from skrift.auth.services import sync_roles_to_database
 from skrift.db.base import Base as SkriftBase
 from skrift.db.models.user import User as SkriftUser
 from skrift.db.services import api_key_service
+from sqlalchemy import delete
 from sqlalchemy import select
 
 import smarter_dev.web.roles  # noqa: F401 — registers the site-service role
@@ -25,8 +26,10 @@ from smarter_dev.web.api_native import site_guards
 from smarter_dev.web.api_native.site_privacy import SitePrivacyController
 from smarter_dev.web.chat_bot_opt_out import read_opt_out
 from smarter_dev.web.chat_bot_purge import STATUS_QUEUED
+from smarter_dev.web.models import AccountDeletionRequest
 from smarter_dev.web.models import ChatBotBlockedUser
 from smarter_dev.web.models import ChatBotPurgeRequest
+from smarter_dev.web.models import WorkDispatch
 
 _USER = "111111111111111111"
 _PATH = f"/api/site/privacy/opt-out/{_USER}"
@@ -218,3 +221,73 @@ async def test_real_skrift_site_key_and_principal_boundary(test_engine):
             assert test_client.get(_PATH, headers=auth(bot_key)).status_code == 401
             assert test_client.get(_PATH, headers=auth(unscoped_key)).status_code == 401
     invalidate_user_permissions_cache()
+
+
+async def test_site_deletion_queues_existing_purge_and_retries_safely(
+    client, db_session, monkeypatch
+):
+    test_client, _ = client
+    user = SkriftUser(email="delete@example.test", name="Delete me", is_active=True)
+    db_session.add(user)
+    await db_session.commit()
+    user_id = user.id
+    path = f"/api/site/privacy/delete-account/{user_id}"
+    submitted = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        "smarter_dev.web.api_native.site_privacy.dispatch_one", submitted
+    )
+
+    first = test_client.post(path)
+    assert first.status_code == 202
+    assert first.json() == {"status": "pending"}
+    db_session.expire_all()
+    assert (
+        await db_session.scalar(
+            select(SkriftUser.is_active).where(SkriftUser.id == user_id)
+        )
+        is False
+    )
+    deletion = await db_session.scalar(
+        select(AccountDeletionRequest).where(AccountDeletionRequest.user_id == user_id)
+    )
+    assert deletion.status == "pending"
+    dispatch = await db_session.scalar(
+        select(WorkDispatch).where(WorkDispatch.aggregate_id == deletion.id)
+    )
+    assert dispatch.job_type == "chat.account.delete"
+    assert dispatch.payload == {"request_id": str(deletion.id)}
+    await db_session.commit()
+
+    second = test_client.post(path)
+    assert second.status_code == 202
+    assert second.json() == {"status": "pending"}
+    assert len((await db_session.scalars(select(AccountDeletionRequest))).all()) == 1
+    assert len((await db_session.scalars(select(WorkDispatch))).all()) == 1
+    assert submitted.await_count == 2
+    await db_session.commit()
+
+    await db_session.execute(delete(SkriftUser).where(SkriftUser.id == user_id))
+    await db_session.commit()
+    assert test_client.post(path).status_code == 404
+    assert submitted.await_count == 2
+
+
+async def test_site_deletion_unknown_and_invalid_ids(client):
+    test_client, _ = client
+    assert (
+        test_client.post(f"/api/site/privacy/delete-account/{uuid4()}").status_code
+        == 404
+    )
+    assert (
+        test_client.post("/api/site/privacy/delete-account/not-a-uuid").status_code
+        == 400
+    )
+
+
+async def test_site_deletion_requires_site_privacy_scope(client):
+    test_client, key = client
+    key.scoped_permission_list = ["site-memory"]
+    assert (
+        test_client.post(f"/api/site/privacy/delete-account/{uuid4()}").status_code
+        == 401
+    )
