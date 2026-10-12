@@ -271,3 +271,43 @@ sequence, payload) so chat, Gym and Lab share it.
 - Whether the session secret may be shared with Cloudflare.
 - The OpenAI Decisions API is in beta; pricing and types from its launch
   notes, not from use.
+
+## 10. Decisions since this plan was written (Oct 12 2026)
+
+Zech's calls during phase 1, recorded here so sections 2, 3, 7 and 8 are
+read with them. Where they conflict, this section wins.
+
+- **Data: Cloudflare D1, not Hyperdrive to the shared Postgres.** The site
+  owns its data in D1 (`users`, `oauth_accounts`, `user_profiles`,
+  `campaign_signups`, `tracked_link_counters`; resources content is JSON
+  in the repo). The Python app keeps sudo memberships and billing, opt-out
+  and deletion, and chat memory, and serves them over the site API. The
+  cutover copies the site tables into D1 with ids preserved behind a short
+  freeze. Reason: take load off the overloaded managed Postgres.
+- **Session: the site mints its own cookie (`sd_session`, host-only).** It
+  does not write Skrift's `session-*` cookie. It does *read* it: a user
+  signed in on the admin host (`.smarter.dev` cookie) is signed in on the
+  site too, resolved to the D1 user by id, then by email, else created.
+  This is the permanent single sign-on between the two hosts and also how
+  the preview host gets a signed-in user before cutover.
+- **Login is Worker-owned** (Discord, GitHub, Google with Skrift's account
+  resolution rules), not proxied. The provider apps keep
+  `https://smarter.dev/auth/<provider>/callback`, which becomes the
+  Worker's at cutover; `https://admin.smarter.dev/auth/<provider>/callback`
+  is added for the Python app at cutover. No temporary or dev callbacks.
+- **Framework: React Router v7 framework mode on the Cloudflare Vite
+  plugin**, SSR throughout (the plugin has no prerender), `/app` as a
+  client-rendered route group. One framework for content and dashboard.
+- **Preview before cutover.** The Worker ships to `next.smarter.dev`
+  (`wrangler deploy --env preview`, its own D1, noindex and robots
+  Disallow driven by `SITE_PUBLIC_ORIGIN`). Production `smarter.dev` is
+  not touched, and the production Worker and D1 are not deployed or
+  migrated, until Zech's explicit go in the cutover task. The site repo is
+  `Smarter-Dev/smarter-dev-site`.
+- **Secrets** for the preview Worker come from the k8s secret
+  `smarter-dev-secrets` (provider client ids and secrets, Resend key, the
+  web session secret as `SKRIFT_SESSION_SECRET`); the site service key is
+  minted per `docs/admin-host.md`.
+- Phase 1 scope is otherwise as section 8 lists; "prerendered" there means
+  bundled at build time with edge caching, and "Hyperdrive" in section 3
+  and phase 2 reads as D1 plus the site API.
