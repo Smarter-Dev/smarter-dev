@@ -2908,8 +2908,12 @@ class AdventOfCodeConfig(Base):
     """Advent of Code configuration per guild for daily challenge threads.
 
     Stores guild-specific settings for automatic creation of daily Advent of Code
-    discussion threads in a designated forum channel. Threads are created at midnight
-    EST when each day's challenge is released.
+    discussion threads in a designated forum channel.
+
+    Retained for its data only. The bot feature, its API and its admin page were
+    removed in 2026-10; nothing reads or writes this table. The model stays so
+    the table keeps its alembic owner and autogenerate never proposes dropping
+    it. Dropping it is a separate, deliberate migration.
     """
 
     __tablename__ = "advent_of_code_configs"
@@ -2976,6 +2980,8 @@ class AdventOfCodeThread(Base):
 
     Records which day's threads have been successfully posted to prevent
     duplicate thread creation and provide audit history.
+
+    Retained for its data only, like :class:`AdventOfCodeConfig`.
     """
 
     __tablename__ = "advent_of_code_threads"

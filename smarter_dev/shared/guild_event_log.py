@@ -38,8 +38,8 @@ Excluded, deliberately:
 - Per-action notice echoes (content-filter, spam, mod-monitor, timeout and warn
   notices) — the underlying action is already logged, so these would double
   every moderation event.
-- Audit-logger embeds and social sends (squads, bytes, rules, forum, streaks,
-  Advent of Code) — high volume, no personality value.
+- Audit-logger embeds and social sends (squads, bytes, rules, forum,
+  streaks) — high volume, no personality value.
 
 Reads return ``(events, cursor)``. A channel engine takes the full window at
 activation and then only what's strictly newer than its cursor, which is why the

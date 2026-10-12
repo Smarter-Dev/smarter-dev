@@ -1,11 +1,10 @@
 """Discord bot AI agents module.
 
 - ChatAgent (Pydantic AI): @mention / reply driven conversational agent
-- HelpAgent: Support agent for /help commands (ChainOfThought-based)
+- HelpAgent: Support agent for /help commands
 - TLDRAgent: Message summarization agent
 - ForumMonitorAgent: Forum post evaluation and response agent
 - StreakCelebrationAgent: Daily streak celebration message generator
-- AoCThreadAgent: Advent of Code thread intro message generator
 
 Every name is resolved lazily (PEP 562). Half the agents here are DSPy-backed,
 and ``dspy`` lives in the ``bot`` dependency group only — but this package also
@@ -21,7 +20,6 @@ from importlib import import_module
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from smarter_dev.bot.agents.aoc_thread_agent import AoCThreadAgent
     from smarter_dev.bot.agents.chat_agent import get_chat_agent
     from smarter_dev.bot.agents.chat_models import (
         AgentReturn,
@@ -43,7 +41,6 @@ if TYPE_CHECKING:
 
 # Exported name -> the submodule that defines it.
 _EXPORTS = {
-    "AoCThreadAgent": "aoc_thread_agent",
     "get_chat_agent": "chat_agent",
     "AgentReturn": "chat_models",
     "Author": "chat_models",
@@ -93,7 +90,6 @@ __all__ = [
     "TLDRAgent",
     "ForumMonitorAgent",
     "StreakCelebrationAgent",
-    "AoCThreadAgent",
     "DiscordMessage",
     "estimate_message_tokens",
 ]

@@ -40,7 +40,6 @@ import smarter_dev.web.roles  # noqa: F401 — registers the bot-service role
 from smarter_dev.web.api_native.activity import ActivityController
 from smarter_dev.web.api_native.admin import AdminController
 from smarter_dev.web.api_native.admin_handlers import AdminHandlerController
-from smarter_dev.web.api_native.advent_of_code import AdventOfCodeController
 from smarter_dev.web.api_native.auth import ApiHealthController
 from smarter_dev.web.api_native.auth import AuthController
 from smarter_dev.web.api_native.billing import PolarWebhookController
@@ -76,7 +75,6 @@ ALL_API_CONTROLLERS = [
     QuestController,
     ScheduledMessageController,
     RepeatingMessageController,
-    AdventOfCodeController,
     ForumAgentController,
     ForumNotificationController,
     ChatConversationController,
