@@ -1,0 +1,377 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "resource_categories": {
+      "items": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "directory_slug": {
+                "type": "string"
+              },
+              "intro_html": {
+                "type": "null"
+              },
+              "name": {
+                "type": "string"
+              },
+              "slug": {
+                "type": "string"
+              },
+              "sort_order": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "directory_slug",
+              "slug",
+              "name",
+              "intro_html",
+              "sort_order"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "directory_slug": {
+                "type": "string"
+              },
+              "intro_html": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "slug": {
+                "type": "string"
+              },
+              "sort_order": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "directory_slug",
+              "slug",
+              "name",
+              "intro_html",
+              "sort_order"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "type": "array"
+    },
+    "resource_creators": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "blurb": {
+            "type": "string"
+          },
+          "directory_slug": {
+            "type": "string"
+          },
+          "handle": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "sort_order": {
+            "type": "integer"
+          },
+          "track_key": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "directory_slug",
+          "slug",
+          "name",
+          "handle",
+          "platform",
+          "url",
+          "track_key",
+          "blurb",
+          "sort_order"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "resource_directories": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "sort_order": {
+            "type": "integer"
+          },
+          "track_key_prefix": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "track_key_prefix",
+          "sort_order"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "resource_directory_spine": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "directory_slug": {
+            "type": "string"
+          },
+          "sort_order": {
+            "type": "integer"
+          },
+          "source_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "directory_slug",
+          "source_key",
+          "sort_order"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "resource_faqs": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "directory_slug": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "sort_order": {
+            "type": "integer"
+          },
+          "source_label": {
+            "type": "string"
+          },
+          "source_track_key": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "directory_slug",
+          "question",
+          "answer",
+          "source_label",
+          "source_url",
+          "source_track_key",
+          "sort_order"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "resource_sources": {
+      "items": {
+        "anyOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "blurb": {
+                "type": "string"
+              },
+              "byline": {
+                "type": "string"
+              },
+              "first_indexed_at": {
+                "format": "date",
+                "type": "string"
+              },
+              "learning_type": {
+                "type": "string"
+              },
+              "published_at": {
+                "format": "date",
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "track_key": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "track_key",
+              "title",
+              "url",
+              "byline",
+              "blurb",
+              "learning_type",
+              "published_at",
+              "first_indexed_at"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "blurb": {
+                "type": "string"
+              },
+              "byline": {
+                "type": "string"
+              },
+              "first_indexed_at": {
+                "format": "date",
+                "type": "string"
+              },
+              "learning_type": {
+                "type": "string"
+              },
+              "published_at": {
+                "type": "null"
+              },
+              "title": {
+                "type": "string"
+              },
+              "track_key": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "track_key",
+              "title",
+              "url",
+              "byline",
+              "blurb",
+              "learning_type",
+              "published_at",
+              "first_indexed_at"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "type": "array"
+    },
+    "resource_tool_sources": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "directory_slug": {
+            "type": "string"
+          },
+          "sort_order": {
+            "type": "integer"
+          },
+          "source_key": {
+            "type": "string"
+          },
+          "tool_slug": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "directory_slug",
+          "tool_slug",
+          "source_key",
+          "sort_order"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "resource_tools": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "blurb": {
+            "type": "string"
+          },
+          "category_slug": {
+            "type": "string"
+          },
+          "directory_slug": {
+            "type": "string"
+          },
+          "home_track_key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "sort_order": {
+            "type": "integer"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "directory_slug",
+          "category_slug",
+          "slug",
+          "name",
+          "url",
+          "home_track_key",
+          "blurb",
+          "sort_order"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "resource_directories",
+    "resource_categories",
+    "resource_tools",
+    "resource_sources",
+    "resource_directory_spine",
+    "resource_tool_sources",
+    "resource_creators",
+    "resource_faqs"
+  ],
+  "title": "resources-catalog",
+  "type": "object"
+}

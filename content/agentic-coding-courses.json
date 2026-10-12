@@ -1,0 +1,1565 @@
+{
+  "categories": [
+    "Tutorial",
+    "Course",
+    "Discussion",
+    "Best Practices",
+    "Talk"
+  ],
+  "courses": [
+    {
+      "blurb": "The Feb 2025 post that named the practice: give in to the LLM, forget the code.",
+      "category": "Discussion",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:karpathy-vibe-coding-tweet",
+      "published_at": "2025-02-02",
+      "source": "X · Andrej Karpathy",
+      "title": "Vibe coding (the original tweet)",
+      "tools": [],
+      "url": "https://x.com/karpathy/status/1886192184808149383"
+    },
+    {
+      "blurb": "Plan-implement-verify loop: write a constitution and specs your coding agent can ship from.",
+      "category": "Course",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:dlai-spec-driven-development",
+      "published_at": "2026-04-15",
+      "source": "DeepLearning.AI (with JetBrains)",
+      "title": "Spec-Driven Development with Coding Agents",
+      "tools": [],
+      "url": "https://www.deeplearning.ai/courses/spec-driven-development-with-coding-agents"
+    },
+    {
+      "blurb": "Walkthrough of Spec Kit: turn markdown specs into agent-built features across Copilot, Claude, Gemini.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:gh-spec-kit",
+      "published_at": "2025-09-02",
+      "source": "GitHub blog",
+      "title": "Spec-driven development with AI: Get started with the open-source toolkit",
+      "tools": [],
+      "url": "https://github.blog/ai-and-ml/generative-ai/spec-driven-development-with-ai-get-started-with-a-new-open-source-toolkit/"
+    },
+    {
+      "blurb": "Beginner specialization on shipping real apps with Copilot, Cursor, Claude Code, and ChatGPT.",
+      "category": "Course",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:coursera-vibe-coding-essentials",
+      "published_at": null,
+      "source": "Coursera (Scrimba)",
+      "title": "Vibe Coding Essentials: Build Apps with AI",
+      "tools": [],
+      "url": "https://www.coursera.org/specializations/vibe-coding"
+    },
+    {
+      "blurb": "Multi-course path on orchestrating coding agents to build, ship, and maintain real applications.",
+      "category": "Course",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:coursera-vanderbilt-genai-se",
+      "published_at": null,
+      "source": "Coursera (Vanderbilt)",
+      "title": "Generative AI Software Engineering Specialization",
+      "tools": [],
+      "url": "https://www.coursera.org/specializations/generative-ai-software-engineering"
+    },
+    {
+      "blurb": "Sabrina Goldfarb teaches prompting strategies that transfer across Cursor, Copilot, and Claude.",
+      "category": "Course",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:fem-practical-prompt-engineering",
+      "published_at": null,
+      "source": "Frontend Masters",
+      "title": "Practical Prompt Engineering",
+      "tools": [],
+      "url": "https://frontendmasters.com/courses/prompt-engineering/"
+    },
+    {
+      "blurb": "Multi-tool specialization on prompt engineering, AI-assisted editing, full-stack agents, and shipping production code.",
+      "category": "Course",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:coursera-vibe-coding-for-developers",
+      "published_at": null,
+      "source": "Coursera (Edureka)",
+      "title": "Vibe Coding for Developers",
+      "tools": [],
+      "url": "https://www.coursera.org/specializations/vibe-coding-for-developers"
+    },
+    {
+      "blurb": "Ray Villalobos on driver/navigator pair programming with agents — agentic modes, system prompts, responsible practice.",
+      "category": "Course",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:linkedin-structured-vibe-coding",
+      "published_at": null,
+      "source": "LinkedIn Learning",
+      "title": "Structured Vibe Coding with AI Coding Agents",
+      "tools": [],
+      "url": "https://www.linkedin.com/learning/structured-vibe-coding-with-ai-coding-agents"
+    },
+    {
+      "blurb": "AI-assisted dev with Codex CLI, spec-driven development, TDD, and context engineering — the practice past basic vibe coding.",
+      "category": "Course",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:codecademy-ai-dev-tools",
+      "published_at": null,
+      "source": "Codecademy",
+      "title": "AI Development Tools",
+      "tools": [],
+      "url": "https://www.codecademy.com/learn/ai-development-tools"
+    },
+    {
+      "blurb": "Cross-tool workflow course: inline edits, markdown plans, background agents, MCP servers.",
+      "category": "Course",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:fem-pro-ai",
+      "published_at": null,
+      "source": "Frontend Masters",
+      "title": "Cursor & Claude Code: Professional AI Setup",
+      "tools": [
+        "cursor",
+        "claude-code"
+      ],
+      "url": "https://frontendmasters.com/courses/pro-ai/"
+    },
+    {
+      "blurb": "Practitioner playbook: hand the agent a job, pick boring stacks, keep tools fast and observable.",
+      "category": "Best Practices",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:ronacher-agentic-coding",
+      "published_at": "2025-06-12",
+      "source": "Armin Ronacher",
+      "title": "Agentic Coding Recommendations",
+      "tools": [],
+      "url": "https://lucumr.pocoo.org/2025/6/12/agentic-coding/"
+    },
+    {
+      "blurb": "How to actually fire off multiple agents at once across worktrees without losing the plot.",
+      "category": "Best Practices",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:simonw-parallel-agents",
+      "published_at": "2025-10-05",
+      "source": "Simon Willison",
+      "title": "Embracing the parallel coding agent lifestyle",
+      "tools": [],
+      "url": "https://simonwillison.net/2025/Oct/5/parallel-coding-agents/"
+    },
+    {
+      "blurb": "Use coding agents as throwaway research workers to answer library and POC questions fast.",
+      "category": "Best Practices",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:simonw-async-research",
+      "published_at": "2025-11-06",
+      "source": "Simon Willison",
+      "title": "Code research projects with async coding agents",
+      "tools": [],
+      "url": "https://simonwillison.net/2025/Nov/6/async-code-research/"
+    },
+    {
+      "blurb": "The Ralph loop: a bash while-loop with fresh context per iteration that ships specs into code overnight.",
+      "category": "Best Practices",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:ghuntley-ralph",
+      "published_at": "2025-09-08",
+      "source": "Geoffrey Huntley",
+      "title": "Ralph Wiggum as a software engineer",
+      "tools": [],
+      "url": "https://ghuntley.com/ralph/"
+    },
+    {
+      "blurb": "Yegge's map of the six waves from autocomplete to agent fleets and how to ride them as a working dev.",
+      "category": "Discussion",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:yegge-revenge-junior-dev",
+      "published_at": "2025-03-22",
+      "source": "Steve Yegge · Sourcegraph",
+      "title": "Revenge of the junior developer",
+      "tools": [],
+      "url": "https://sourcegraph.com/blog/revenge-of-the-junior-developer"
+    },
+    {
+      "blurb": "Lovable's first pro vibe coder on PRD-driven workflows, parallel prototypes, and the 4×4 debugging method.",
+      "category": "Discussion",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:lennys-professional-vibe-coder",
+      "published_at": "2026-02-08",
+      "source": "Lenny's Newsletter",
+      "title": "The rise of the professional vibe coder",
+      "tools": [],
+      "url": "https://www.lennysnewsletter.com/p/getting-paid-to-vibe-code"
+    },
+    {
+      "blurb": "Hour-long livestream wiring three coding agents into one shipping workflow.",
+      "category": "Talk",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:theo-multi-agent-vibe-coding",
+      "published_at": null,
+      "source": "YouTube · Theo (t3.gg)",
+      "title": "How to Use Claude Code, Codex, and Cursor for Multi-Agent Vibe Coding",
+      "tools": [
+        "claude-code",
+        "codex",
+        "cursor"
+      ],
+      "url": "https://www.youtube.com/watch?v=8OX_ZjQTu34"
+    },
+    {
+      "blurb": "Long-form practitioner walkthroughs that build real apps end-to-end by voice in Cursor.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:riley-brown-cursor-playlist",
+      "published_at": null,
+      "source": "YouTube · Riley Brown",
+      "title": "Vibe Coding Tutorial: Cursor + 4 Projects",
+      "tools": [
+        "cursor"
+      ],
+      "url": "https://www.youtube.com/playlist?list=PLrBQjB7hqzJlsP-oKSbJ0I0otzevS17xA"
+    },
+    {
+      "blurb": "Long-running playlist on planning, building, and agent orchestration patterns for shipping with coding agents.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:indydevdan-claude-code-mastery",
+      "published_at": null,
+      "source": "YouTube · IndyDevDan",
+      "title": "Claude Code Deep Mastery",
+      "tools": [
+        "claude-code"
+      ],
+      "url": "https://www.youtube.com/playlist?list=PLS_o2ayVCKvBR3jawG9JFIzJ1vXffi8fS"
+    },
+    {
+      "blurb": "Simon Willison on tests, scaffolding, and review habits that make coding agents actually ship.",
+      "category": "Talk",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:pragmatic-eng-coding-agents",
+      "published_at": null,
+      "source": "YouTube · Pragmatic Engineer",
+      "title": "Engineering practices that make coding agents work",
+      "tools": [],
+      "url": "https://www.youtube.com/watch?v=owmJyKVu5f8"
+    },
+    {
+      "blurb": "Official intro covering install paths, supported IDEs, and where Claude Code fits in your workflow.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:anthropic-claude-code-overview",
+      "published_at": null,
+      "source": "Anthropic docs",
+      "title": "Claude Code overview",
+      "tools": [
+        "claude-code"
+      ],
+      "url": "https://code.claude.com/docs/en/overview"
+    },
+    {
+      "blurb": "Anthropic's distilled patterns for context, memory, subagents, and long-running tasks.",
+      "category": "Best Practices",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:anthropic-claude-code-best-practices",
+      "published_at": null,
+      "source": "Anthropic docs",
+      "title": "Best practices for Claude Code",
+      "tools": [
+        "claude-code"
+      ],
+      "url": "https://code.claude.com/docs/en/best-practices"
+    },
+    {
+      "blurb": "Free short course with Elie Schoppik covering subagents, GitHub integration, MCP, and Figma-to-app builds.",
+      "category": "Course",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:dlai-claude-code-agentic",
+      "published_at": null,
+      "source": "DeepLearning.AI",
+      "title": "Claude Code: A Highly Agentic Coding Assistant",
+      "tools": [
+        "claude-code"
+      ],
+      "url": "https://www.deeplearning.ai/courses/claude-code-a-highly-agentic-coding-assistant"
+    },
+    {
+      "blurb": "Walkthrough of Claude Code's loop, tool calls, and what makes its agentic design different from autocomplete.",
+      "category": "Discussion",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:theo-claude-code-internals",
+      "published_at": null,
+      "source": "YouTube · Theo (t3.gg)",
+      "title": "How does Claude Code actually work?",
+      "tools": [
+        "claude-code"
+      ],
+      "url": "https://www.youtube.com/watch?v=I82j7AzMU80"
+    },
+    {
+      "blurb": "Orchestrate Claude Code like a tech lead: Best-of-N, CLAUDE.md, parallel git branch workflows.",
+      "category": "Course",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:coursera-vanderbilt-claude-code",
+      "published_at": null,
+      "source": "Coursera (Vanderbilt)",
+      "title": "Claude Code: Software Engineering with Generative AI Agents",
+      "tools": [
+        "claude-code"
+      ],
+      "url": "https://www.coursera.org/learn/claude-code"
+    },
+    {
+      "blurb": "Ray Villalobos walks pro devs through Claude Code setup, slash commands, and GitHub PR flows.",
+      "category": "Course",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:linkedin-claude-code-4",
+      "published_at": "2025-06-25",
+      "source": "LinkedIn Learning",
+      "title": "Claude Code 4: Agentic Coding for Professional Developers",
+      "tools": [
+        "claude-code"
+      ],
+      "url": "https://www.linkedin.com/learning/claude-code-4-agentic-coding-for-professional-developers"
+    },
+    {
+      "blurb": "Install Codex CLI, sign in with ChatGPT or API key, and run your first repo-aware task.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:openai-codex-quickstart",
+      "published_at": null,
+      "source": "OpenAI docs",
+      "title": "Codex Quickstart",
+      "tools": [
+        "codex"
+      ],
+      "url": "https://developers.openai.com/codex/quickstart"
+    },
+    {
+      "blurb": "Full CLI surface: approval modes, /model switching, screenshot input, and sandbox controls.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:openai-codex-cli-reference",
+      "published_at": null,
+      "source": "OpenAI docs",
+      "title": "Codex CLI reference",
+      "tools": [
+        "codex"
+      ],
+      "url": "https://developers.openai.com/codex/cli"
+    },
+    {
+      "blurb": "From install to first useful edit: codebase Q&A, inline edits, and reviewing agent output.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:cursor-quickstart",
+      "published_at": null,
+      "source": "Cursor docs",
+      "title": "Cursor Quickstart",
+      "tools": [
+        "cursor"
+      ],
+      "url": "https://cursor.com/docs/get-started/quickstart"
+    },
+    {
+      "blurb": "Bite-size lessons on AI foundations, coding with agents, and reviewing & testing agent diffs.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:cursor-learn",
+      "published_at": null,
+      "source": "Cursor docs",
+      "title": "Learn Cursor: Official Tutorials",
+      "tools": [
+        "cursor"
+      ],
+      "url": "https://cursor.com/learn"
+    },
+    {
+      "blurb": "End-to-end beginner walkthrough of Cursor 2.0's Composer, Agent mode, and parallel-agents window.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:cursor-2-beginner-tutorial",
+      "published_at": null,
+      "source": "YouTube",
+      "title": "Cursor 2.0: Full Tutorial for Beginners",
+      "tools": [
+        "cursor"
+      ],
+      "url": "https://www.youtube.com/watch?v=l30Eb76Tk5s"
+    },
+    {
+      "blurb": "Ten concrete prompts spanning refactors, tests, and migrations that show Cursor's strengths.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:datacamp-cursor-10-examples",
+      "published_at": null,
+      "source": "DataCamp",
+      "title": "Cursor AI: A Guide With 10 Practical Examples",
+      "tools": [
+        "cursor"
+      ],
+      "url": "https://www.datacamp.com/tutorial/cursor-ai-code-editor"
+    },
+    {
+      "blurb": "Download Windsurf and learn how Cascade plans multi-step edits across your project.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:windsurf-official",
+      "published_at": null,
+      "source": "Windsurf",
+      "title": "Windsurf Editor: official site",
+      "tools": [
+        "windsurf"
+      ],
+      "url": "https://windsurf.com/"
+    },
+    {
+      "blurb": "Beginner tour of Cascade, Supercomplete, and how Windsurf differs from Cursor on multi-file edits.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:windsurf-beginner-yt",
+      "published_at": null,
+      "source": "YouTube",
+      "title": "Windsurf Tutorial for Beginners (AI Code Editor)",
+      "tools": [
+        "windsurf"
+      ],
+      "url": "https://www.youtube.com/watch?v=8TcWGk1DJVs"
+    },
+    {
+      "blurb": "Spin up your first Lovable project, connect Supabase, and ship a working full-stack app.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:lovable-quickstart",
+      "published_at": null,
+      "source": "Lovable docs",
+      "title": "Lovable Quick start",
+      "tools": [
+        "lovable"
+      ],
+      "url": "https://docs.lovable.dev/introduction/getting-started"
+    },
+    {
+      "blurb": "A video library walking through auth, databases, payments, and deploys in Lovable.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:lovable-tutorials",
+      "published_at": null,
+      "source": "Lovable",
+      "title": "Lovable Tutorials: Build Apps with AI",
+      "tools": [
+        "lovable"
+      ],
+      "url": "https://lovable.dev/videos/tutorial"
+    },
+    {
+      "blurb": "End-to-end mobile build with Lovable, including App Store submission and review prep.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:lovable-app-store-yt",
+      "published_at": null,
+      "source": "YouTube",
+      "title": "Lovable AI: How to Build an App & Upload to App Store",
+      "tools": [
+        "lovable"
+      ],
+      "url": "https://www.youtube.com/watch?v=N7NsveOiG-g"
+    },
+    {
+      "blurb": "How Bolt's in-browser WebContainers run your prompted project end to end, no setup required.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:bolt-intro",
+      "published_at": null,
+      "source": "Bolt.new docs",
+      "title": "Introduction to Bolt",
+      "tools": [
+        "bolt-new"
+      ],
+      "url": "https://support.bolt.new/building/intro-bolt"
+    },
+    {
+      "blurb": "Prompt-to-deployment walkthrough of a small full-stack app inside Bolt's browser environment.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:bolt-beginner-yt",
+      "published_at": null,
+      "source": "YouTube",
+      "title": "Bolt.new AI Tutorial for Beginners",
+      "tools": [
+        "bolt-new"
+      ],
+      "url": "https://www.youtube.com/watch?v=5zfOitaKfmM"
+    },
+    {
+      "blurb": "Build a workout tracker with Bolt: UI prompts, Supabase wiring, and deploy to production.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:codecademy-bolt-fullstack",
+      "published_at": null,
+      "source": "Codecademy",
+      "title": "Bolt.new: Build a Full-Stack App in Minutes",
+      "tools": [
+        "bolt-new"
+      ],
+      "url": "https://www.codecademy.com/article/build-an-app-with-bolt-new"
+    },
+    {
+      "blurb": "Describe a UI, iterate with chat, then push the generated components into your Next.js repo.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:v0-quickstart",
+      "published_at": null,
+      "source": "Vercel docs",
+      "title": "v0 Quickstart",
+      "tools": [
+        "v0"
+      ],
+      "url": "https://v0.app/docs/quickstart"
+    },
+    {
+      "blurb": "Free Vercel lesson on prompting v0 to produce production-grade shadcn/ui components.",
+      "category": "Course",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:vercel-academy-ui-v0",
+      "published_at": null,
+      "source": "Vercel Academy",
+      "title": "UI with v0",
+      "tools": [
+        "v0"
+      ],
+      "url": "https://vercel.com/academy/ai-sdk/ui-with-v0"
+    },
+    {
+      "blurb": "Reference for Plan mode, browser-based self-testing, and connecting Agent to external data.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:replit-agent-docs",
+      "published_at": null,
+      "source": "Replit docs",
+      "title": "Replit Agent docs",
+      "tools": [
+        "replit-agent"
+      ],
+      "url": "https://docs.replit.com/core-concepts/agent"
+    },
+    {
+      "blurb": "Hands-on examples of prompting Replit Agent to build, test, and deploy a small web app.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:datacamp-replit-agent",
+      "published_at": null,
+      "source": "DataCamp",
+      "title": "Replit Agent: A Guide With Practical Examples",
+      "tools": [
+        "replit-agent"
+      ],
+      "url": "https://www.datacamp.com/tutorial/replit-agent-ai-code-editor"
+    },
+    {
+      "blurb": "Wire Replit Agent to a Neon Postgres database and ship a data-driven app from one prompt.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:neon-replit-agent",
+      "published_at": null,
+      "source": "Neon guides",
+      "title": "Building AI-powered apps with Replit Agent",
+      "tools": [
+        "replit-agent"
+      ],
+      "url": "https://neon.com/guides/replit-neon"
+    },
+    {
+      "blurb": "Onboard Devin, scope your first task well, and understand when to use it vs. an IDE agent.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:devin-intro",
+      "published_at": null,
+      "source": "Devin docs",
+      "title": "Devin: Get started",
+      "tools": [
+        "devin"
+      ],
+      "url": "https://docs.devin.ai/get-started/devin-intro"
+    },
+    {
+      "blurb": "How to brief Devin so it ships: task scoping, repo setup, knowledge files, and review habits.",
+      "category": "Best Practices",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:devin-best-practices",
+      "published_at": null,
+      "source": "Devin docs",
+      "title": "Best practices for delegating to Devin",
+      "tools": [
+        "devin"
+      ],
+      "url": "https://docs.devin.ai/get-started/best-practices"
+    },
+    {
+      "blurb": "Set up Devin, connect GitHub, prompt it to modernize a repo, monitor execution, and ship the PR.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:datacamp-devin-first-pr",
+      "published_at": "2025-06-26",
+      "source": "DataCamp",
+      "title": "Software Development With Devin: Setup and First Pull Request",
+      "tools": [
+        "devin"
+      ],
+      "url": "https://www.datacamp.com/tutorial/devin-ai"
+    },
+    {
+      "blurb": "Reference for Editor and Manager views, agent orchestration, and switching between Gemini and Claude.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:antigravity-docs",
+      "published_at": null,
+      "source": "Google docs",
+      "title": "Google Antigravity Documentation",
+      "tools": [
+        "antigravity"
+      ],
+      "url": "https://antigravity.google/docs/home"
+    },
+    {
+      "blurb": "Step-by-step codelab: install Antigravity, set up Agent Manager, and ship a first agentic project.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:antigravity-codelab",
+      "published_at": null,
+      "source": "Google Codelabs",
+      "title": "Getting Started with Google Antigravity",
+      "tools": [
+        "antigravity"
+      ],
+      "url": "https://codelabs.developers.google.com/getting-started-google-antigravity"
+    },
+    {
+      "blurb": "Connect Jules to a GitHub repo, submit your first async task, and review its PR.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:jules-getting-started",
+      "published_at": null,
+      "source": "Google docs",
+      "title": "Jules: Getting started",
+      "tools": [
+        "jules"
+      ],
+      "url": "https://jules.google/docs/"
+    },
+    {
+      "blurb": "Connect Jules to a repo, prompt refactors and unit tests, review the plan, publish branch, open PR.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:mlm-jules-walkthrough",
+      "published_at": null,
+      "source": "Machine Learning Mastery",
+      "title": "Practical Agentic Coding with Google Jules",
+      "tools": [
+        "jules"
+      ],
+      "url": "https://machinelearningmastery.com/practical-agentic-coding-with-google-jules/"
+    },
+    {
+      "blurb": "Enable Copilot, choose an IDE, and try chat, inline suggestions, and the in-repo agent.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:gh-copilot-quickstart",
+      "published_at": null,
+      "source": "GitHub docs",
+      "title": "Quickstart for GitHub Copilot",
+      "tools": [
+        "github-copilot"
+      ],
+      "url": "https://docs.github.com/en/copilot/get-started/quickstart"
+    },
+    {
+      "blurb": "Prompt patterns, repo setup, and review habits that make Copilot's output trustworthy.",
+      "category": "Best Practices",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:gh-copilot-best-practices",
+      "published_at": null,
+      "source": "GitHub docs",
+      "title": "Best practices for using GitHub Copilot",
+      "tools": [
+        "github-copilot"
+      ],
+      "url": "https://docs.github.com/en/copilot/get-started/best-practices"
+    },
+    {
+      "blurb": "Install Copilot CLI, authenticate, and run your first terminal-driven prompts and code edits.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:gh-copilot-cli-beginners",
+      "published_at": null,
+      "source": "GitHub blog",
+      "title": "GitHub Copilot CLI for Beginners",
+      "tools": [
+        "github-copilot"
+      ],
+      "url": "https://github.blog/ai-and-ml/github-copilot/github-copilot-cli-for-beginners-getting-started-with-github-copilot-cli/"
+    },
+    {
+      "blurb": "Sign in, configure chat participants, and try Copilot's edits and agent modes inside VS Code.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:vscode-copilot-getting-started",
+      "published_at": null,
+      "source": "VS Code docs",
+      "title": "Get started with GitHub Copilot in VS Code",
+      "tools": [
+        "github-copilot"
+      ],
+      "url": "https://code.visualstudio.com/docs/copilot/getting-started"
+    },
+    {
+      "blurb": "Practical walkthrough of Copilot's three chat modes with concrete \"reach for this when\" examples.",
+      "category": "Best Practices",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:gh-copilot-modes",
+      "published_at": null,
+      "source": "GitHub blog",
+      "title": "Copilot ask, edit, and agent modes: what they do and when to use them",
+      "tools": [
+        "github-copilot"
+      ],
+      "url": "https://github.blog/ai-and-ml/github-copilot/copilot-ask-edit-and-agent-modes-what-they-do-and-when-to-use-them/"
+    },
+    {
+      "blurb": "Four-course Microsoft path on shipping code with GitHub Copilot across VS Code workflows.",
+      "category": "Course",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:coursera-microsoft-copilot-spec",
+      "published_at": null,
+      "source": "Coursera (Microsoft)",
+      "title": "Generative AI for Software Developers Specialization",
+      "tools": [
+        "github-copilot"
+      ],
+      "url": "https://www.coursera.org/specializations/microsoft-copilot-for-software-development"
+    },
+    {
+      "blurb": "Eight-course path on prompting Copilot for reviews, tests, refactors, and secure development.",
+      "category": "Course",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:pluralsight-copilot-in-practice",
+      "published_at": null,
+      "source": "Pluralsight",
+      "title": "GitHub Copilot in Practice",
+      "tools": [
+        "github-copilot"
+      ],
+      "url": "https://www.pluralsight.com/paths/github-copilot-in-practice"
+    },
+    {
+      "blurb": "Free six-unit module on driving Copilot Agent Mode to build, refactor, and fix codebases.",
+      "category": "Course",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:ms-learn-copilot-agent-mode",
+      "published_at": null,
+      "source": "Microsoft Learn",
+      "title": "Building applications with GitHub Copilot agent mode",
+      "tools": [
+        "github-copilot"
+      ],
+      "url": "https://learn.microsoft.com/en-us/training/modules/github-copilot-agent-mode/"
+    },
+    {
+      "blurb": "Install aider with pipx, point it at Claude or GPT, and start pairing in your terminal.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:aider-install",
+      "published_at": null,
+      "source": "Aider docs",
+      "title": "Aider: Installation",
+      "tools": [
+        "aider"
+      ],
+      "url": "https://aider.chat/docs/install.html"
+    },
+    {
+      "blurb": "Full reference for repo maps, model selection, edit formats, and Git-backed commit flow.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:aider-docs",
+      "published_at": null,
+      "source": "Aider docs",
+      "title": "Aider Documentation",
+      "tools": [
+        "aider"
+      ],
+      "url": "https://aider.chat/docs/"
+    },
+    {
+      "blurb": "Community videos showing real refactors, test-writing, and multi-file edits with Aider.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:aider-tutorial-videos",
+      "published_at": null,
+      "source": "Aider docs",
+      "title": "Aider tutorial videos",
+      "tools": [
+        "aider"
+      ],
+      "url": "https://aider.chat/docs/usage/tutorials.html"
+    },
+    {
+      "blurb": "Install Cline in VS Code, pick a provider, and use Plan/Act mode to control agentic edits.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:cline-docs",
+      "published_at": null,
+      "source": "Cline docs",
+      "title": "Cline Documentation",
+      "tools": [
+        "cline"
+      ],
+      "url": "https://docs.cline.bot/home"
+    },
+    {
+      "blurb": "Walkthrough of Cline's Plan/Act split, browser tool use, and approval-gated terminal commands.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:cline-getting-started-yt",
+      "published_at": null,
+      "source": "YouTube",
+      "title": "Getting Started with Cline: The Best VS Code AI Plugin",
+      "tools": [
+        "cline"
+      ],
+      "url": "https://www.youtube.com/watch?v=f33Fw6NiPpw"
+    },
+    {
+      "blurb": "Nine concrete tasks, from bugfix to refactor, showing Cline's tool-use patterns in practice.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:datacamp-cline",
+      "published_at": null,
+      "source": "DataCamp",
+      "title": "Cline AI: A Guide With Nine Practical Examples",
+      "tools": [
+        "cline"
+      ],
+      "url": "https://www.datacamp.com/tutorial/cline-ai"
+    },
+    {
+      "blurb": "Overview of Continue's Agent mode, context providers, and source-controlled config model.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:continue-overview",
+      "published_at": null,
+      "source": "Continue docs",
+      "title": "What is Continue?",
+      "tools": [
+        "continue"
+      ],
+      "url": "https://docs.continue.dev/"
+    },
+    {
+      "blurb": "Install the VS Code or JetBrains extension, pick a model, and run your first Agent task.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:continue-quickstart",
+      "published_at": null,
+      "source": "Continue docs",
+      "title": "Continue Quick Start",
+      "tools": [
+        "continue"
+      ],
+      "url": "https://docs.continue.dev/ide-extensions/quick-start"
+    },
+    {
+      "blurb": "Configure Continue to run fully local with Ollama, including autocomplete and chat models.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:sitepoint-continue-local",
+      "published_at": null,
+      "source": "SitePoint",
+      "title": "Continue.dev: The Complete Local AI Coding Assistant Setup",
+      "tools": [
+        "continue"
+      ],
+      "url": "https://www.sitepoint.com/continuedev-for-developers-the-complete-local-ai-coding-assistant-setup/"
+    },
+    {
+      "blurb": "Reference for Roo's multi-mode agents, custom instructions, and per-mode model routing.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:roo-code-docs",
+      "published_at": null,
+      "source": "Roo Code docs",
+      "title": "Roo Code Docs",
+      "tools": [
+        "roo-code"
+      ],
+      "url": "https://docs.roocode.com/"
+    },
+    {
+      "blurb": "Install Roo Code from VS Marketplace or Open VSX and pick a provider for your first task.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:roo-code-install",
+      "published_at": null,
+      "source": "Roo Code docs",
+      "title": "Installing Roo Code",
+      "tools": [
+        "roo-code"
+      ],
+      "url": "https://docs.roocode.com/getting-started/installing/"
+    },
+    {
+      "blurb": "Seven hands-on tasks showing Roo's Architect, Code, and Ask modes on a real project.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:datacamp-roo-code",
+      "published_at": null,
+      "source": "DataCamp",
+      "title": "Roo Code: A Guide With 7 Practical Examples",
+      "tools": [
+        "roo-code"
+      ],
+      "url": "https://www.datacamp.com/tutorial/roo-code"
+    },
+    {
+      "blurb": "Install the terminal agent, connect a provider, and run build vs. plan agents on your repo.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:opencode-docs",
+      "published_at": null,
+      "source": "OpenCode docs",
+      "title": "OpenCode docs",
+      "tools": [
+        "opencode"
+      ],
+      "url": "https://opencode.ai/docs/"
+    },
+    {
+      "blurb": "Source repo for OpenCode with config examples, LSP setup notes, and provider matrix.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:opencode-github",
+      "published_at": null,
+      "source": "GitHub · sst/opencode",
+      "title": "sst/opencode on GitHub",
+      "tools": [
+        "opencode"
+      ],
+      "url": "https://github.com/sst/opencode"
+    },
+    {
+      "blurb": "Step-by-step setup from install to AGENTS.md, with model switching and first real tasks.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:devto-opencode-quickstart",
+      "published_at": null,
+      "source": "DEV.to",
+      "title": "OpenCode Quickstart: Install, Configure, and Use the Terminal AI Coding Agent",
+      "tools": [
+        "opencode"
+      ],
+      "url": "https://dev.to/rosgluk/opencode-quickstart-install-configure-and-use-the-terminal-ai-coding-agent-4kcb"
+    },
+    {
+      "blurb": "Install Goose desktop or CLI, connect a model, and add extensions for your workflow.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:goose-docs",
+      "published_at": null,
+      "source": "Block / Goose docs",
+      "title": "Goose Documentation",
+      "tools": [
+        "goose"
+      ],
+      "url": "https://block.github.io/goose/"
+    },
+    {
+      "blurb": "Practical tour of Goose extensions for shell, Git, and browser automation, fully local.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:kdnuggets-goose",
+      "published_at": null,
+      "source": "KDnuggets",
+      "title": "Free Agentic Coding with Goose",
+      "tools": [
+        "goose"
+      ],
+      "url": "https://www.kdnuggets.com/free-agentic-coding-with-goose"
+    },
+    {
+      "blurb": "Toggle Agent Mode, hand off multi-step shell tasks, and inspect Warp's auto-correcting plans.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:warp-using-agents",
+      "published_at": null,
+      "source": "Warp docs",
+      "title": "Using Agents in Warp",
+      "tools": [
+        "warp"
+      ],
+      "url": "https://docs.warp.dev/agents/using-agents"
+    },
+    {
+      "blurb": "Overview of Warp's natural-language CLI: chained commands, output reading, and model choice.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:warp-ai-overview",
+      "published_at": null,
+      "source": "Warp",
+      "title": "Warp AI Terminal: Agent Mode",
+      "tools": [
+        "warp"
+      ],
+      "url": "https://www.warp.dev/ai"
+    },
+    {
+      "blurb": "Hands-on walk through Agent Mode, workflows, and shell suggestions on real day-to-day tasks.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:datacamp-warp",
+      "published_at": null,
+      "source": "DataCamp",
+      "title": "Warp Terminal Tutorial: AI-Powered Features",
+      "tools": [
+        "warp"
+      ],
+      "url": "https://www.datacamp.com/tutorial/warp-terminal-tutorial"
+    },
+    {
+      "blurb": "Open Zed's agent panel, add @-context, and follow the agent's edits in real time.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:zed-agent-panel",
+      "published_at": null,
+      "source": "Zed docs",
+      "title": "Zed Agent Panel",
+      "tools": [
+        "zed"
+      ],
+      "url": "https://zed.dev/docs/ai/agent-panel"
+    },
+    {
+      "blurb": "How Zed wires up providers, edit prediction, inline assistant, and external agents.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:zed-ai-overview",
+      "published_at": null,
+      "source": "Zed docs",
+      "title": "Zed AI overview",
+      "tools": [
+        "zed"
+      ],
+      "url": "https://zed.dev/docs/ai/overview"
+    },
+    {
+      "blurb": "Run Claude Agent, Gemini CLI, or Codex inside Zed's agent panel via the ACP adapter.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:zed-external-agents",
+      "published_at": null,
+      "source": "Zed docs",
+      "title": "External Agents in Zed",
+      "tools": [
+        "zed"
+      ],
+      "url": "https://zed.dev/docs/ai/external-agents"
+    },
+    {
+      "blurb": "Video walkthrough of Zed's Agent Panel: configuring providers, prompting edits, and reviewing change hunks.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:zed-agent-panel-yt",
+      "published_at": null,
+      "source": "YouTube · Zed Industries",
+      "title": "How to use the Agent Panel in Zed",
+      "tools": [
+        "zed"
+      ],
+      "url": "https://www.youtube.com/watch?v=K1K84PSgp5g"
+    },
+    {
+      "blurb": "Install Kiro, sign in, and learn its spec-first flow: requirements, design, and tasks files.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:kiro-docs",
+      "published_at": null,
+      "source": "Kiro docs",
+      "title": "Kiro: Get started",
+      "tools": [
+        "kiro"
+      ],
+      "url": "https://kiro.dev/docs/"
+    },
+    {
+      "blurb": "Build a feature end-to-end in Kiro: generate the spec triad and let the agent execute tasks.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:kiro-first-project",
+      "published_at": null,
+      "source": "Kiro docs",
+      "title": "Your first Kiro project",
+      "tools": [
+        "kiro"
+      ],
+      "url": "https://kiro.dev/docs/getting-started/first-project/"
+    },
+    {
+      "blurb": "Install the droid CLI, sign in, and run your first specialized droid against a repo.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:factory-quickstart",
+      "published_at": null,
+      "source": "Factory docs",
+      "title": "Factory: Quickstart",
+      "tools": [
+        "factory"
+      ],
+      "url": "https://docs.factory.ai/cli/getting-started/quickstart"
+    },
+    {
+      "blurb": "Overview of Factory's droid IDE: parallel droids, review flow, and SDLC coverage.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:factory-ide",
+      "published_at": null,
+      "source": "Factory",
+      "title": "Factory IDE: AI Coding Agents",
+      "tools": [
+        "factory"
+      ],
+      "url": "https://factory.ai/product/ide"
+    },
+    {
+      "blurb": "Mental model for delegating to droids: scoping, briefing, and accepting work products.",
+      "category": "Best Practices",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:buckhouse-droids",
+      "published_at": null,
+      "source": "Medium · James Buckhouse",
+      "title": "How to Code with Droids",
+      "tools": [
+        "factory"
+      ],
+      "url": "https://buckhouse.medium.com/how-to-code-with-droids-e1f1c52f9482"
+    },
+    {
+      "blurb": "Official open-source repo for the Gemini terminal agent — install, configure, and contribute.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:gemini-cli-github",
+      "published_at": null,
+      "source": "GitHub · google-gemini/gemini-cli",
+      "title": "Gemini CLI on GitHub",
+      "tools": [
+        "gemini-cli"
+      ],
+      "url": "https://github.com/google-gemini/gemini-cli"
+    },
+    {
+      "blurb": "Jack Wotherspoon (Google) on context management, MCP servers, and multi-step workflows with Gemini CLI.",
+      "category": "Course",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:dlai-gemini-cli",
+      "published_at": null,
+      "source": "DeepLearning.AI",
+      "title": "Gemini CLI: Code & Create with an Open-Source Agent",
+      "tools": [
+        "gemini-cli"
+      ],
+      "url": "https://learn.deeplearning.ai/courses/gemini-cli-code-and-create-with-an-open-source-agent/information"
+    },
+    {
+      "blurb": "Google Cloud's installation-through-advanced walkthrough of Gemini CLI for real coding workflows.",
+      "category": "Tutorial",
+      "first_indexed_at": "2026-05-12",
+      "key": "vibe:course:google-cloud-gemini-cli-guide",
+      "published_at": null,
+      "source": "Google Cloud Blog",
+      "title": "Mastering Gemini CLI: From Installation to Advanced Use-Cases",
+      "tools": [
+        "gemini-cli"
+      ],
+      "url": "https://cloud.google.com/blog/topics/developers-practitioners/mastering-gemini-cli-your-complete-guide-from-installation-to-advanced-use-cases"
+    }
+  ],
+  "faqs": [
+    {
+      "answer": "It's the practice of using AI coding agents to ship software while staying the engineer. You decide what gets built. You write the briefs. You read the diffs. The agent handles the typing and most of the rote work. The thinking part stays yours. Karpathy framed it as orchestrating agents and acting as oversight: you're not writing the code directly 99% of the time, but you're still responsible for it.",
+      "question": "What is agentic engineering?",
+      "source_key": "vibe:faq:karpathy-agentic-engineering",
+      "source_label": "Andrej Karpathy, via The New Stack",
+      "source_url": "https://thenewstack.io/vibe-coding-is-passe/"
+    },
+    {
+      "answer": "AI pair programming in its classic Copilot-autocomplete sense is real-time and granular: you're at the keyboard, the AI suggests the next line or block, you accept or reject. The human stays the primary author. Agentic engineering is delegation. You write a brief, the agent does the work end-to-end (often asynchronously), and you review the result. The agent's the author. You're the director who decided what gets built and verifies it did. Modern Copilot ships both modes now, so the line lives in how you use it.",
+      "question": "How is it different from AI pair programming?",
+      "source_key": "vibe:faq:github-copilot-docs",
+      "source_label": "GitHub Copilot documentation",
+      "source_url": "https://docs.github.com/en/copilot/get-started/what-is-github-copilot"
+    },
+    {
+      "answer": "Same tools, different relationship to the code. Vibe coding is Karpathy's casual mode: describe what you want, let the agent run, don't really read the diff. Fine for low-stakes work where being wrong is cheap. Agentic engineering is what you do when the code matters: when it handles secrets, money, or other people's decisions. Same tools. Different stakes.",
+      "question": "How is it different from vibe coding?",
+      "source_key": "vibe:faq:simonw-vibe-coding-distinction",
+      "source_label": "Simon Willison",
+      "source_url": "https://simonwillison.net/2025/Mar/19/vibe-coding/"
+    },
+    {
+      "answer": "Pick one tool and stay with it for a week. The picks worth starting with: Claude Code or Codex if you live in the terminal, Cursor for a dedicated AI-native editor, or VS Code with the Claude Code, Codex, or GitHub Copilot extensions if you want to stay in your current setup. Pick a small task you already know how to do. Watch the agent attempt it. Read every line of the diff. Anthropic's recommendation: explore first, then plan, then code. Start with scope you can verify quickly before expanding what you delegate.",
+      "question": "Where do I start?",
+      "source_key": "vibe:faq:anthropic-best-practices-start",
+      "source_label": "Anthropic: Claude Code best practices",
+      "source_url": "https://code.claude.com/docs/en/best-practices"
+    },
+    {
+      "answer": "Three habits matter most. Write briefs the agent can actually use: what you want, what context it can use, what done looks like. Keep tasks small and feedback loops fast (Anthropic's own team puts 2–3× quality on tight feedback loops alone). Read every diff. The agent's worst failures don't look like errors. They look like plausible code that does the wrong thing.",
+      "question": "How do I get better at it?",
+      "source_key": "vibe:faq:anthropic-best-practices-improve",
+      "source_label": "Anthropic: Claude Code best practices",
+      "source_url": "https://code.claude.com/docs/en/best-practices"
+    },
+    {
+      "answer": "Anything where being subtly wrong is expensive. Security-critical changes. Migrations. Cross-cutting refactors in code you don't fully understand. Work where \"looks right\" isn't sufficient. Scoped tasks inside well-tested boundaries are where agents pay off the most. Anthropic's 2026 trends report saw the same pattern across teams: engineers delegate work that's easily verifiable or low-stakes and keep the conceptually difficult work for themselves.",
+      "question": "What kinds of work should I not hand to an agent?",
+      "source_key": "vibe:faq:bockeler-to-vibe-or-not",
+      "source_label": "Birgitta Böckeler: To vibe or not to vibe",
+      "source_url": "https://martinfowler.com/articles/exploring-gen-ai/to-vibe-or-not-vibe.html"
+    },
+    {
+      "answer": "Almost never on production. The point of agentic engineering is that someone (you) understood what was supposed to happen. If you didn't read the PR, no one did. Auto-merge is fine on scratch repos, generated config, throwaway prototypes. The line is whether anyone else's data, time, or trust depends on the code. GitHub's own guidance for the Coding Agent era keeps a human review gate on anything touching production.",
+      "question": "Should I let an agent merge its own PRs?",
+      "source_key": "vibe:faq:github-agent-prs",
+      "source_label": "GitHub Engineering",
+      "source_url": "https://github.blog/ai-and-ml/generative-ai/agent-pull-requests-are-everywhere-heres-how-to-review-them/"
+    },
+    {
+      "answer": "It's converging within categories. Among terminal agents (Claude Code, Codex, OpenCode), among editor agents (Cursor, Windsurf), and among async cloud agents (Devin, Jules), the tools are doing very similar things. Pick whatever fits your workflow. Try a second one a week later. The bigger lever is on the human side: how well you brief, how carefully you review, how small you keep the tasks.",
+      "question": "Which tool should I pick?",
+      "source_key": "vibe:faq:ronacher-year-of-vibes",
+      "source_label": "Armin Ronacher: A Year of Vibes",
+      "source_url": "https://lucumr.pocoo.org/2025/12/22/a-year-of-vibes/"
+    }
+  ],
+  "people": [
+    {
+      "blurb": "Coined \"vibe coding\"; posts the canonical hands-on takes on building real software with LLMs.",
+      "handle": "karpathy",
+      "key": "vibe:person:x:karpathy",
+      "name": "Andrej Karpathy",
+      "platform": "x",
+      "url": "https://x.com/karpathy"
+    },
+    {
+      "blurb": "Near-daily deep notes on every coding-agent release, model, and CLI workflow.",
+      "handle": "simonwillison",
+      "key": "vibe:person:blog:simonwillison",
+      "name": "Simon Willison",
+      "platform": "blog",
+      "url": "https://simonwillison.net/"
+    },
+    {
+      "blurb": "Same-week reviews of Cursor, Claude Code, and Codex with opinionated full-stack TypeScript context.",
+      "handle": "t3dotgg",
+      "key": "vibe:person:youtube:t3dotgg",
+      "name": "Theo Browne",
+      "platform": "youtube",
+      "url": "https://www.youtube.com/@t3dotgg"
+    },
+    {
+      "blurb": "Fast, technically tight breakdowns of every new agentic-coding tool the day it ships.",
+      "handle": "fireship",
+      "key": "vibe:person:youtube:fireship",
+      "name": "Fireship",
+      "platform": "youtube",
+      "url": "https://www.youtube.com/@Fireship"
+    },
+    {
+      "blurb": "Skeptical, terminal-pilled takes on AI coding tools and his \"99\" pattern as a vibe-coding alternative.",
+      "handle": "ThePrimeagen",
+      "key": "vibe:person:youtube:theprimeagen",
+      "name": "ThePrimeagen",
+      "platform": "youtube",
+      "url": "https://www.youtube.com/@ThePrimeagen"
+    },
+    {
+      "blurb": "Anti-hype, tactical Claude Code playbooks — hooks, sub-agents, multi-agent observability.",
+      "handle": "indydevdan",
+      "key": "vibe:person:youtube:indydevdan",
+      "name": "IndyDevDan",
+      "platform": "youtube",
+      "url": "https://www.youtube.com/@indydevdan"
+    },
+    {
+      "blurb": "Cursor's CEO; shipping notes and product philosophy from the company defining the AI-IDE category.",
+      "handle": "mntruell",
+      "key": "vibe:person:x:mntruell",
+      "name": "Michael Truell",
+      "platform": "x",
+      "url": "https://x.com/mntruell"
+    },
+    {
+      "blurb": "Vercel CEO showing how v0 is used in real Git workflows — prompt-to-PR patterns at production scale.",
+      "handle": "rauchg",
+      "key": "vibe:person:x:rauchg",
+      "name": "Guillermo Rauch",
+      "platform": "x",
+      "url": "https://x.com/rauchg"
+    },
+    {
+      "blurb": "Thoughtworks' lead for AI-assisted software delivery; long-form memos on context engineering and agent workflows.",
+      "handle": "birgittabockeler",
+      "key": "vibe:person:blog:birgittabockeler",
+      "name": "Birgitta Böckeler",
+      "platform": "blog",
+      "url": "https://birgitta.info/"
+    },
+    {
+      "blurb": "Practical workflows for shipping with Claude Code, Codex, Cursor, and Gemini CLI — prompts, recipes, parallel agents.",
+      "handle": "mckaywrigley",
+      "key": "vibe:person:x:mckaywrigley",
+      "name": "Mckay Wrigley",
+      "platform": "x",
+      "url": "https://x.com/mckaywrigley"
+    },
+    {
+      "blurb": "Every's CEO chronicling how a team of 15 ships multiple AI products with engineers writing almost no code by hand.",
+      "handle": "danshipper",
+      "key": "vibe:person:newsletter:danshipper",
+      "name": "Dan Shipper",
+      "platform": "newsletter",
+      "url": "https://every.to/@danshipper"
+    },
+    {
+      "blurb": "Creator of Claude Code; posts setup tips, internals, and how the team actually uses it day-to-day.",
+      "handle": "bcherny",
+      "key": "vibe:person:x:bcherny",
+      "name": "Boris Cherny",
+      "platform": "x",
+      "url": "https://x.com/bcherny"
+    },
+    {
+      "blurb": "Originated the \"Ralph loop\" autonomous-agent pattern; field notes from running coding agents at the edge.",
+      "handle": "ghuntley",
+      "key": "vibe:person:blog:ghuntley",
+      "name": "Geoffrey Huntley",
+      "platform": "blog",
+      "url": "https://ghuntley.com/"
+    },
+    {
+      "blurb": "Sourcegraph Amp lead writes the long-form essays mapping where coding agents and agent fleets are headed.",
+      "handle": "Steve_Yegge",
+      "key": "vibe:person:blog:steveyegge",
+      "name": "Steve Yegge",
+      "platform": "blog",
+      "url": "https://steve-yegge.medium.com/"
+    },
+    {
+      "blurb": "Flask creator's sharp, skeptical essays on agent design, tool ergonomics, and AI-PR review bottlenecks.",
+      "handle": "mitsuhiko",
+      "key": "vibe:person:blog:mitsuhiko",
+      "name": "Armin Ronacher",
+      "platform": "blog",
+      "url": "https://lucumr.pocoo.org/"
+    },
+    {
+      "blurb": "Latent Space podcast / newsletter; interviews the people actually building coding agents and harnesses.",
+      "handle": "swyx",
+      "key": "vibe:person:newsletter:swyx",
+      "name": "swyx",
+      "platform": "newsletter",
+      "url": "https://www.latent.space/"
+    },
+    {
+      "blurb": "The Pragmatic Engineer; deep-dives on AI tooling, agent workflows, and what AI is doing to the craft.",
+      "handle": "pragmaticengineer",
+      "key": "vibe:person:newsletter:pragmaticengineer",
+      "name": "Gergely Orosz",
+      "platform": "newsletter",
+      "url": "https://newsletter.pragmaticengineer.com/"
+    },
+    {
+      "blurb": "Wes Bos and Scott Tolinski's web-dev podcast; regular Claude Code, Cursor, and agent-mode episodes.",
+      "handle": "syntaxfm",
+      "key": "vibe:person:podcast:syntaxfm",
+      "name": "Syntax",
+      "platform": "podcast",
+      "url": "https://syntax.fm/"
+    },
+    {
+      "blurb": "Long-running software interview podcast with frequent episodes on coding agents and how teams actually use them.",
+      "handle": "changelog",
+      "key": "vibe:person:podcast:changelog",
+      "name": "The Changelog",
+      "platform": "podcast",
+      "url": "https://changelog.com/podcast"
+    },
+    {
+      "blurb": "Daily 5-minute roundup of AI news, papers, and tooling — a fast scan to stay on top of the field.",
+      "handle": "tldrnewsletter",
+      "key": "vibe:person:newsletter:tldr-ai",
+      "name": "TLDR AI",
+      "platform": "newsletter",
+      "url": "https://tldr.tech/ai"
+    }
+  ],
+  "stay_current_platforms": [
+    "newsletter",
+    "podcast"
+  ],
+  "tools": [
+    {
+      "description": "Terminal-native agentic coder from Anthropic that reads codebases, edits files, runs tests, and coordinates parallel agent teams.",
+      "home_key": "vibe:tool:claude-code:home",
+      "name": "Claude Code",
+      "slug": "claude-code",
+      "url": "https://www.anthropic.com/product/claude-code"
+    },
+    {
+      "description": "OpenAI's Rust-based terminal agent plus IDE extensions and a cloud agent, powered by the GPT-5.x Codex models.",
+      "home_key": "vibe:tool:codex:home",
+      "name": "OpenAI Codex",
+      "slug": "codex",
+      "url": "https://openai.com/codex/"
+    },
+    {
+      "description": "VS Code fork with the Composer model and a unified local-plus-cloud agent workspace spanning desktop, web, and mobile.",
+      "home_key": "vibe:tool:cursor:home",
+      "name": "Cursor",
+      "slug": "cursor",
+      "url": "https://cursor.com/"
+    },
+    {
+      "description": "Cognition-owned agentic IDE with Cascade and the SWE-1.5 model; the Codeium editor reborn as an AI-native IDE.",
+      "home_key": "vibe:tool:windsurf:home",
+      "name": "Windsurf",
+      "slug": "windsurf",
+      "url": "https://windsurf.com/"
+    },
+    {
+      "description": "Prompt-to-app builder that generates full-stack React + Supabase projects with auth, database, and one-click deploy.",
+      "home_key": "vibe:tool:lovable:home",
+      "name": "Lovable",
+      "slug": "lovable",
+      "url": "https://lovable.dev/"
+    },
+    {
+      "description": "StackBlitz in-browser agent that prompts, builds, and hosts full-stack web apps through Bolt Cloud.",
+      "home_key": "vibe:tool:bolt-new:home",
+      "name": "Bolt.new",
+      "slug": "bolt-new",
+      "url": "https://bolt.new/"
+    },
+    {
+      "description": "Vercel's generative app tool that produces production React UIs, multi-page apps, and end-to-end agent workflows.",
+      "home_key": "vibe:tool:v0:home",
+      "name": "v0",
+      "slug": "v0",
+      "url": "https://v0.app/"
+    },
+    {
+      "description": "Cloud agent that builds, deploys, and collaborates on full apps inside Replit's browser workspace and Design Canvas.",
+      "home_key": "vibe:tool:replit-agent:home",
+      "name": "Replit Agent",
+      "slug": "replit-agent",
+      "url": "https://replit.com/products/agent"
+    },
+    {
+      "description": "Cognition's autonomous AI software engineer that plans, codes, tests, and opens PRs on long-horizon engineering tasks.",
+      "home_key": "vibe:tool:devin:home",
+      "name": "Devin",
+      "slug": "devin",
+      "url": "https://devin.ai/"
+    },
+    {
+      "description": "Google's agent-first VS Code fork with a Manager view for orchestrating parallel Gemini coding agents.",
+      "home_key": "vibe:tool:antigravity:home",
+      "name": "Google Antigravity",
+      "slug": "antigravity",
+      "url": "https://antigravity.google/"
+    },
+    {
+      "description": "Google's async coding agent that clones repos into a cloud VM and ships PRs while you're offline.",
+      "home_key": "vibe:tool:jules:home",
+      "name": "Jules",
+      "slug": "jules",
+      "url": "https://jules.google/"
+    },
+    {
+      "description": "GitHub's IDE assistant with an autonomous coding agent that takes issues to PRs across VS Code, JetBrains, and Visual Studio.",
+      "home_key": "vibe:tool:github-copilot:home",
+      "name": "GitHub Copilot",
+      "slug": "github-copilot",
+      "url": "https://github.com/features/copilot"
+    },
+    {
+      "description": "Open-source terminal pair programmer that edits any Git repo and commits each change atomically, architect/editor split.",
+      "home_key": "vibe:tool:aider:home",
+      "name": "Aider",
+      "slug": "aider",
+      "url": "https://aider.chat/"
+    },
+    {
+      "description": "Open-source autonomous coding agent for VS Code with Plan and Act modes, browser control, and 30+ model providers.",
+      "home_key": "vibe:tool:cline:home",
+      "name": "Cline",
+      "slug": "cline",
+      "url": "https://cline.bot/"
+    },
+    {
+      "description": "Open-source VS Code and JetBrains agent with source-controlled AI rules enforceable in CI, BYO-model.",
+      "home_key": "vibe:tool:continue:home",
+      "name": "Continue",
+      "slug": "continue",
+      "url": "https://www.continue.dev/"
+    },
+    {
+      "description": "Open-source VS Code agent with role-specific modes (Architect, Code, Debug, Test) acting as a whole AI dev team.",
+      "home_key": "vibe:tool:roo-code:home",
+      "name": "Roo Code",
+      "slug": "roo-code",
+      "url": "https://roocode.com/"
+    },
+    {
+      "description": "Open-source Go-based terminal agent by SST with a Bubble Tea TUI and 75+ model providers, no lock-in.",
+      "home_key": "vibe:tool:opencode:home",
+      "name": "OpenCode",
+      "slug": "opencode",
+      "url": "https://opencode.ai/"
+    },
+    {
+      "description": "Block's open-source extensible agent with desktop, CLI, and MCP-based extensions for any LLM provider.",
+      "home_key": "vibe:tool:goose:home",
+      "name": "Goose",
+      "slug": "goose",
+      "url": "https://block.github.io/goose/"
+    },
+    {
+      "description": "Open-source Rust terminal with Agent Mode that runs multi-step plans in your shell and orchestrates cloud agents.",
+      "home_key": "vibe:tool:warp:home",
+      "name": "Warp",
+      "slug": "warp",
+      "url": "https://www.warp.dev/"
+    },
+    {
+      "description": "Rust-native editor with parallel agents and Agent Client Protocol for Claude, Gemini, and Codex CLIs.",
+      "home_key": "vibe:tool:zed:home",
+      "name": "Zed",
+      "slug": "zed",
+      "url": "https://zed.dev/"
+    },
+    {
+      "description": "AWS's spec-driven agentic IDE and CLI built around Specs, Hooks, and Steering files.",
+      "home_key": "vibe:tool:kiro:home",
+      "name": "Kiro",
+      "slug": "kiro",
+      "url": "https://kiro.dev/"
+    },
+    {
+      "description": "Agent-native platform whose Droids run Missions across the full SDLC — planning, coding, reviewing, and deploying in parallel.",
+      "home_key": "vibe:tool:factory:home",
+      "name": "Factory",
+      "slug": "factory",
+      "url": "https://factory.ai/"
+    },
+    {
+      "description": "Google's open-source terminal agent (Apache 2.0) using Gemini with a 1M-token context and MCP tools.",
+      "home_key": "vibe:tool:gemini-cli:home",
+      "name": "Gemini CLI",
+      "slug": "gemini-cli",
+      "url": "https://github.com/google-gemini/gemini-cli"
+    }
+  ]
+}

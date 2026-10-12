@@ -1,0 +1,2127 @@
+{
+  "categories": [
+    {
+      "intro": "The three pillars (metrics, logs, traces) are a taxonomy, not a plan. What you want is structured events you can slice arbitrarily: OpenTelemetry to instrument, plus a backend that handles high-cardinality (Honeycomb, Logfire) or a predictable metrics stack (Prometheus + Grafana + Loki). Start with one signal you'll actually look at. What to instrument is a design decision (see <a href=\"/resources/system-architecture\">System Architecture</a>); this list is about the tools that store and query what you've chosen.",
+      "name": "Observability",
+      "slug": "observability",
+      "tools": [
+        {
+          "blurb": "Pull-based metrics collection. Deeply integrated with the Kubernetes ecosystem.",
+          "home_key": "ops:tool:prometheus:home",
+          "name": "Prometheus",
+          "slug": "prometheus",
+          "url": "https://prometheus.io/"
+        },
+        {
+          "blurb": "Dashboard tool that fronts Prometheus, Loki, and most observability backends.",
+          "home_key": "ops:tool:grafana:home",
+          "name": "Grafana",
+          "slug": "grafana",
+          "url": "https://grafana.com/"
+        },
+        {
+          "blurb": "Vendor-neutral instrumentation standard for traces, metrics, and logs.",
+          "home_key": "ops:tool:opentelemetry:home",
+          "name": "OpenTelemetry",
+          "slug": "opentelemetry",
+          "url": "https://opentelemetry.io/"
+        },
+        {
+          "blurb": "Log aggregation system designed to pair with Prometheus and Grafana.",
+          "home_key": "ops:tool:loki:home",
+          "name": "Grafana Loki",
+          "slug": "loki",
+          "url": "https://grafana.com/oss/loki/"
+        },
+        {
+          "blurb": "Grafana's distributed tracing backend. Pairs with Loki and Mimir as the LGTM stack.",
+          "home_key": "ops:tool:tempo:home",
+          "name": "Grafana Tempo",
+          "slug": "tempo",
+          "url": "https://grafana.com/oss/tempo/"
+        },
+        {
+          "blurb": "Horizontally-scalable Prometheus-compatible metrics backend for very large deployments.",
+          "home_key": "ops:tool:mimir:home",
+          "name": "Grafana Mimir",
+          "slug": "mimir",
+          "url": "https://grafana.com/oss/mimir/"
+        },
+        {
+          "blurb": "Observability platform from the Pydantic team. Structured tracing, OpenTelemetry-native.",
+          "home_key": "ops:tool:logfire:home",
+          "name": "Pydantic Logfire",
+          "slug": "logfire",
+          "url": "https://pydantic.dev/logfire"
+        },
+        {
+          "blurb": "High-cardinality structured-event observability. Pioneered the \"observability 2.0\" frame.",
+          "home_key": "ops:tool:honeycomb:home",
+          "name": "Honeycomb",
+          "slug": "honeycomb",
+          "url": "https://www.honeycomb.io/"
+        },
+        {
+          "blurb": "The commercial heavyweight. Observability plus APM plus security, with pricing to match.",
+          "home_key": "ops:tool:datadog:home",
+          "name": "Datadog",
+          "slug": "datadog",
+          "url": "https://www.datadoghq.com/"
+        },
+        {
+          "blurb": "Error and performance monitoring. The default for catching frontend and backend exceptions.",
+          "home_key": "ops:tool:sentry:home",
+          "name": "Sentry",
+          "slug": "sentry",
+          "url": "https://sentry.io/"
+        },
+        {
+          "blurb": "Long-time APM vendor reorganized around usage-based pricing and a single observability platform.",
+          "home_key": "ops:tool:new-relic:home",
+          "name": "New Relic",
+          "slug": "new-relic",
+          "url": "https://newrelic.com/"
+        },
+        {
+          "blurb": "Combined logs, uptime, and dashboards in one commercial offering. Lightweight pricing.",
+          "home_key": "ops:tool:better-stack:home",
+          "name": "Better Stack",
+          "slug": "better-stack",
+          "url": "https://betterstack.com/"
+        },
+        {
+          "blurb": "Log management and analytics with structured-event focus. The cheap-for-volume alternative.",
+          "home_key": "ops:tool:axiom:home",
+          "name": "Axiom",
+          "slug": "axiom",
+          "url": "https://axiom.co/"
+        },
+        {
+          "blurb": "Open-source full observability platform. The Datadog alternative if you want to self-host.",
+          "home_key": "ops:tool:signoz:home",
+          "name": "SigNoz",
+          "slug": "signoz",
+          "url": "https://signoz.io/"
+        }
+      ]
+    },
+    {
+      "intro": "The page going off at 3 AM is one piece. The other pieces are knowing who responds, what runbook they follow, how the team coordinates during the incident, what gets fixed afterward, and how customers find out. PagerDuty and Opsgenie are the legacy defaults; FireHydrant and Incident.io are the new wave with deeper opinions about coordination. Statuspage handles the outward-facing part.",
+      "name": "Incident response & alerting",
+      "slug": "incident-response",
+      "tools": [
+        {
+          "blurb": "The original on-call platform. Deepest integration ecosystem; expensive at scale.",
+          "home_key": "ops:tool:pagerduty:home",
+          "name": "PagerDuty",
+          "slug": "pagerduty",
+          "url": "https://www.pagerduty.com/"
+        },
+        {
+          "blurb": "Atlassian's PagerDuty competitor. Strong if you're already in the Atlassian stack.",
+          "home_key": "ops:tool:opsgenie:home",
+          "name": "Opsgenie",
+          "slug": "opsgenie",
+          "url": "https://www.atlassian.com/software/opsgenie"
+        },
+        {
+          "blurb": "OSS on-call scheduling. Pairs cleanly with Grafana Alertmanager.",
+          "home_key": "ops:tool:grafana-oncall:home",
+          "name": "Grafana OnCall",
+          "slug": "grafana-oncall",
+          "url": "https://grafana.com/products/oncall/"
+        },
+        {
+          "blurb": "Incident response with strong runbook automation and Slack coordination.",
+          "home_key": "ops:tool:firehydrant:home",
+          "name": "FireHydrant",
+          "slug": "firehydrant",
+          "url": "https://firehydrant.com/"
+        },
+        {
+          "blurb": "Slack-native incident management; opinionated about coordination patterns.",
+          "home_key": "ops:tool:incident-io:home",
+          "name": "Incident.io",
+          "slug": "incident-io",
+          "url": "https://incident.io/"
+        },
+        {
+          "blurb": "The outward-facing status-communication standard.",
+          "home_key": "ops:tool:statuspage:home",
+          "name": "Atlassian Statuspage",
+          "slug": "statuspage",
+          "url": "https://www.atlassian.com/software/statuspage"
+        },
+        {
+          "blurb": "Combined uptime, on-call rotations, and status page in one lightweight offering.",
+          "home_key": "ops:tool:better-stack-incident:home",
+          "name": "Better Stack (incident management)",
+          "slug": "better-stack-incident",
+          "url": "https://betterstack.com/incident-management"
+        }
+      ]
+    },
+    {
+      "intro": "Shipping logs from your servers to your backend is its own discipline. Vector and Fluent Bit dominate the open-source side. Fluentd is the older sibling that's still widely deployed. Cribl is the commercial heavyweight when you need to filter, transform, or route to multiple backends. The choice is usually about throughput and how much processing you want at the edge before logs hit storage.",
+      "name": "Logging pipelines",
+      "slug": "logging",
+      "tools": [
+        {
+          "blurb": "Datadog's Rust-based log and metric pipeline. The high-performance default for modern stacks.",
+          "home_key": "ops:tool:vector:home",
+          "name": "Vector",
+          "slug": "vector",
+          "url": "https://vector.dev/"
+        },
+        {
+          "blurb": "Lightweight log collector and forwarder. The OpenTelemetry-adjacent default in Kubernetes.",
+          "home_key": "ops:tool:fluent-bit:home",
+          "name": "Fluent Bit",
+          "slug": "fluent-bit",
+          "url": "https://fluentbit.io/"
+        },
+        {
+          "blurb": "The older Ruby + C log aggregator. Still widely deployed; broader plugin ecosystem.",
+          "home_key": "ops:tool:fluentd:home",
+          "name": "Fluentd",
+          "slug": "fluentd",
+          "url": "https://www.fluentd.org/"
+        },
+        {
+          "blurb": "Stream-processing toolkit (formerly Benthos). Filter, transform, and route at the edge.",
+          "home_key": "ops:tool:bento:home",
+          "name": "Bento",
+          "slug": "bento",
+          "url": "https://warpstreamlabs.github.io/bento/"
+        },
+        {
+          "blurb": "Commercial heavyweight for routing logs to many backends with filter, transform, and replay.",
+          "home_key": "ops:tool:cribl:home",
+          "name": "Cribl Stream",
+          "slug": "cribl",
+          "url": "https://cribl.io/stream/"
+        }
+      ]
+    },
+    {
+      "intro": "Performance is the discipline observability won't teach you. Metrics tell you something's slow. Profiles tell you why. Tools split into continuous profiling (always running, sampling) and on-demand profiling (you reach for them during an incident). eBPF unlocks the kernel-level view that used to be a Brendan Gregg exclusive.",
+      "name": "Performance & profiling",
+      "slug": "performance",
+      "tools": [
+        {
+          "blurb": "Grafana's continuous profiling backend. eBPF-powered, language-agnostic.",
+          "home_key": "ops:tool:pyroscope:home",
+          "name": "Grafana Pyroscope",
+          "slug": "pyroscope",
+          "url": "https://grafana.com/oss/pyroscope/"
+        },
+        {
+          "blurb": "OSS continuous profiling. Polar Signals' open-source foundation.",
+          "home_key": "ops:tool:parca:home",
+          "name": "Parca",
+          "slug": "parca",
+          "url": "https://www.parca.dev/"
+        },
+        {
+          "blurb": "Continuous profiling as a service. Pyroscope-compatible, hosted offering.",
+          "home_key": "ops:tool:polar-signals:home",
+          "name": "Polar Signals",
+          "slug": "polar-signals",
+          "url": "https://www.polarsignals.com/"
+        },
+        {
+          "blurb": "eBPF-based observability for Kubernetes. Auto-instrumented; no code changes.",
+          "home_key": "ops:tool:pixie:home",
+          "name": "Pixie",
+          "slug": "pixie",
+          "url": "https://px.dev/"
+        },
+        {
+          "blurb": "Datadog's profiling product, deeply integrated with their APM and request tracing.",
+          "home_key": "ops:tool:datadog-profiler:home",
+          "name": "Datadog Continuous Profiler",
+          "slug": "datadog-profiler",
+          "url": "https://docs.datadoghq.com/profiler/"
+        },
+        {
+          "blurb": "Brendan Gregg's flamegraph tooling. The Linux profiling stack practitioners reach for.",
+          "home_key": "ops:tool:perf-flamegraph:home",
+          "name": "perf / flamegraph",
+          "slug": "perf-flamegraph",
+          "url": "https://www.brendangregg.com/flamegraphs.html"
+        },
+        {
+          "blurb": "eBPF-based dynamic tracing. Kernel-level visibility without recompiling the kernel.",
+          "home_key": "ops:tool:bpftrace:home",
+          "name": "BCC / bpftrace",
+          "slug": "bpftrace",
+          "url": "https://github.com/iovisor/bpftrace"
+        }
+      ]
+    },
+    {
+      "intro": "Auth is one of the few things worth outsourcing early. Auth0 if you need it now. Clerk and WorkOS are the new generation with better B2B ergonomics. Keycloak or Ory if you self-host. Supertokens, FusionAuth, and Logto are the lighter-weight self-hostable options. Decision is usually how much B2B complexity you have (SAML, SCIM, RBAC) and how much you want to pay someone else to manage it. The choice of how much identity you build into your domain model is an API decision (see <a href=\"/resources/system-architecture#apis\">APIs &amp; protocols</a>); this section is about who runs identity for you.",
+      "name": "Identity & auth",
+      "slug": "identity",
+      "tools": [
+        {
+          "blurb": "Managed identity-as-a-service. Fastest to integrate; expensive at scale.",
+          "home_key": "ops:tool:auth0:home",
+          "name": "Auth0",
+          "slug": "auth0",
+          "url": "https://auth0.com/"
+        },
+        {
+          "blurb": "Developer-first auth-as-a-service. Excellent React/Next.js story and UI components.",
+          "home_key": "ops:tool:clerk:home",
+          "name": "Clerk",
+          "slug": "clerk",
+          "url": "https://clerk.com/"
+        },
+        {
+          "blurb": "B2B-first auth: SSO, SCIM, audit logs. The \"enterprise-ready\" middleware.",
+          "home_key": "ops:tool:workos:home",
+          "name": "WorkOS",
+          "slug": "workos",
+          "url": "https://workos.com/"
+        },
+        {
+          "blurb": "Passwordless-first auth platform. Strong on email magic links and B2B SSO.",
+          "home_key": "ops:tool:stytch:home",
+          "name": "Stytch",
+          "slug": "stytch",
+          "url": "https://stytch.com/"
+        },
+        {
+          "blurb": "Self-hostable identity and access management. Full OAuth, OIDC, SAML support.",
+          "home_key": "ops:tool:keycloak:home",
+          "name": "Keycloak",
+          "slug": "keycloak",
+          "url": "https://www.keycloak.org/"
+        },
+        {
+          "blurb": "Modern OSS identity stack split into composable services (Kratos, Hydra, Oathkeeper).",
+          "home_key": "ops:tool:ory:home",
+          "name": "Ory",
+          "slug": "ory",
+          "url": "https://www.ory.sh/"
+        },
+        {
+          "blurb": "Self-hostable auth library. Open source, modern, language-agnostic.",
+          "home_key": "ops:tool:supertokens:home",
+          "name": "Supertokens",
+          "slug": "supertokens",
+          "url": "https://supertokens.com/"
+        },
+        {
+          "blurb": "Self-hostable auth platform. Generous free tier; deep CIAM features.",
+          "home_key": "ops:tool:fusionauth:home",
+          "name": "FusionAuth",
+          "slug": "fusionauth",
+          "url": "https://fusionauth.io/"
+        },
+        {
+          "blurb": "Modern OSS auth and identity platform. The lighter alternative to Keycloak.",
+          "home_key": "ops:tool:logto:home",
+          "name": "Logto",
+          "slug": "logto",
+          "url": "https://logto.io/"
+        }
+      ]
+    },
+    {
+      "intro": "Everyone outgrows .env files. The question is where you go next. Cloud-native secrets managers (AWS, GCP, Azure) win on integration if you're already in that cloud. Vault is the heavyweight when you need dynamic credentials and deep audit. Doppler and Infisical are the modern alternatives with better DX. SOPS and age handle the \"encrypt at rest, decrypt at deploy\" pattern for Git-backed secrets. Wiring secrets through your pipeline is a delivery concern (see <a href=\"/resources/software-delivery#cicd\">Software Delivery</a>).",
+      "name": "Secrets management",
+      "slug": "secrets",
+      "tools": [
+        {
+          "blurb": "Secrets management: dynamic credentials, encryption-as-a-service, deep audit.",
+          "home_key": "ops:tool:vault:home",
+          "name": "HashiCorp Vault",
+          "slug": "vault",
+          "url": "https://www.vaultproject.io/"
+        },
+        {
+          "blurb": "AWS-native secrets storage with rotation. Deep IAM integration if you're in AWS.",
+          "home_key": "ops:tool:aws-secrets-manager:home",
+          "name": "AWS Secrets Manager",
+          "slug": "aws-secrets-manager",
+          "url": "https://aws.amazon.com/secrets-manager/"
+        },
+        {
+          "blurb": "GCP-native secrets storage. Versioned, IAM-controlled, integrated with Cloud Build.",
+          "home_key": "ops:tool:gcp-secret-manager:home",
+          "name": "Google Cloud Secret Manager",
+          "slug": "gcp-secret-manager",
+          "url": "https://cloud.google.com/secret-manager"
+        },
+        {
+          "blurb": "1Password for app secrets. Strong developer UX; CLI + service tokens for CI.",
+          "home_key": "ops:tool:1password-secrets:home",
+          "name": "1Password Secrets Automation",
+          "slug": "1password-secrets",
+          "url": "https://1password.com/developers"
+        },
+        {
+          "blurb": "Modern secrets manager with team workflows. Sync to most platforms.",
+          "home_key": "ops:tool:doppler:home",
+          "name": "Doppler",
+          "slug": "doppler",
+          "url": "https://www.doppler.com/"
+        },
+        {
+          "blurb": "Open-source Doppler alternative. Self-hostable, modern UI, growing ecosystem.",
+          "home_key": "ops:tool:infisical:home",
+          "name": "Infisical",
+          "slug": "infisical",
+          "url": "https://infisical.com/"
+        },
+        {
+          "blurb": "Mozilla's secret-encryption tool. Encrypt YAML/JSON files in Git.",
+          "home_key": "ops:tool:sops:home",
+          "name": "SOPS",
+          "slug": "sops",
+          "url": "https://getsops.io/"
+        },
+        {
+          "blurb": "Modern file encryption tool. The cryptographic primitive under SOPS and many others.",
+          "home_key": "ops:tool:age:home",
+          "name": "age",
+          "slug": "age",
+          "url": "https://github.com/FiloSottile/age"
+        }
+      ]
+    },
+    {
+      "intro": "The perimeter is everywhere. WAFs (Cloudflare, AWS) handle the edge. Host firewalls (iptables, nftables, ufw) handle the server. mTLS and service-mesh policies handle service-to-service. Let's Encrypt handles TLS certificates. Each layer is mandatory if you care about the layer beneath.",
+      "name": "Network security & firewalls",
+      "slug": "network-security",
+      "tools": [
+        {
+          "blurb": "Edge WAF rules. The default for most teams already behind Cloudflare.",
+          "home_key": "ops:tool:cloudflare-waf:home",
+          "name": "Cloudflare WAF",
+          "slug": "cloudflare-waf",
+          "url": "https://www.cloudflare.com/application-services/products/waf/"
+        },
+        {
+          "blurb": "AWS's WAF for CloudFront, ALB, and API Gateway. AWS-native rules and managed rule groups.",
+          "home_key": "ops:tool:aws-waf:home",
+          "name": "AWS WAF",
+          "slug": "aws-waf",
+          "url": "https://aws.amazon.com/waf/"
+        },
+        {
+          "blurb": "GCP's WAF and DDoS protection. Integrates with Load Balancing.",
+          "home_key": "ops:tool:gcp-armor:home",
+          "name": "Google Cloud Armor",
+          "slug": "gcp-armor",
+          "url": "https://cloud.google.com/security/products/armor"
+        },
+        {
+          "blurb": "Linux's host firewall. The packet-filtering foundation everything else builds on.",
+          "home_key": "ops:tool:iptables:home",
+          "name": "iptables / nftables",
+          "slug": "iptables",
+          "url": "https://netfilter.org/projects/nftables/"
+        },
+        {
+          "blurb": "Friendlier wrapper around iptables. The Ubuntu/Debian default for simple host firewall rules.",
+          "home_key": "ops:tool:ufw:home",
+          "name": "ufw (Uncomplicated Firewall)",
+          "slug": "ufw",
+          "url": "https://help.ubuntu.com/community/UFW"
+        },
+        {
+          "blurb": "Open-source firewall and router OS. The default for serious on-prem firewalls.",
+          "home_key": "ops:tool:pfsense:home",
+          "name": "pfSense",
+          "slug": "pfsense",
+          "url": "https://www.pfsense.org/"
+        },
+        {
+          "blurb": "Fork of pfSense with a different update cadence and license posture.",
+          "home_key": "ops:tool:opnsense:home",
+          "name": "OPNsense",
+          "slug": "opnsense",
+          "url": "https://opnsense.org/"
+        },
+        {
+          "blurb": "Free, automated TLS certificate authority. The reason HTTPS is the default now.",
+          "home_key": "ops:tool:letsencrypt:home",
+          "name": "Let's Encrypt",
+          "slug": "letsencrypt",
+          "url": "https://letsencrypt.org/"
+        },
+        {
+          "blurb": "Service mesh with built-in mTLS. The lightweight alternative to Istio.",
+          "home_key": "ops:tool:linkerd:home",
+          "name": "Linkerd",
+          "slug": "linkerd",
+          "url": "https://linkerd.io/"
+        }
+      ]
+    }
+  ],
+  "faqs": [
+    {
+      "answer": "One signal you'll actually look at, instrumented well, beats four signals you glance at during incidents. Charity Majors frames this as observability 1.0 vs. 2.0: the three pillars (metrics, logs, traces) are 1.0. Structured wide events you can slice arbitrarily are 2.0. For most teams, OpenTelemetry to instrument plus one backend that handles high-cardinality (Honeycomb, Logfire) is the smallest setup that pays off. Add the other pillars once you're actually using the first one.",
+      "question": "What's the smallest observability stack that's actually useful?",
+      "source_key": "ops:faq:charity-observability-2",
+      "source_label": "Charity Majors: Observability 1.0 vs 2.0",
+      "source_url": "https://www.honeycomb.io/blog/one-key-difference-observability1dot0-2dot0"
+    },
+    {
+      "answer": "Static stability is the cleanest mental model: design so that when a dependency fails, your system behaves the same. Pre-provision instead of reacting. Pre-build instead of pulling at request time. Decide what works looks like when half your dependencies are down. Most overengineering is reacting to abstract failures instead of ones that have actually hurt you. Re-read your last three postmortems, then design for those.",
+      "question": "How do I think about reliability without overengineering?",
+      "source_key": "ops:faq:aws-static-stability",
+      "source_label": "AWS Builders' Library: Static Stability",
+      "source_url": "https://aws.amazon.com/builders-library/static-stability-using-availability-zones/"
+    },
+    {
+      "answer": "Start with one SLO on the one user-facing thing you'd be paged for: requests successful within some latency budget. Pick a target you'd actually defend in a meeting (99% is fine; 99.99% is a research project), and burn-rate alerts that page you before the budget runs out, not after. The Google SRE Workbook is still the canonical step-by-step. Skip the elaborate multi-SLO error-budget machinery until you have one SLO running for six months.",
+      "question": "How do I think about SLOs without overcomplicating them?",
+      "source_key": "ops:faq:google-slo-workbook",
+      "source_label": "Google SRE Workbook: Implementing SLOs",
+      "source_url": "https://sre.google/workbook/implementing-slos/"
+    },
+    {
+      "answer": "Slack is enough until your team is big enough that the absence of structure costs more than the cost of the tool. Concretely: when you have multiple concurrent incidents, a postmortem backlog that's not getting written, or new on-call engineers asking \"what do I do first?\", Slack alone isn't covering you. Incident.io and FireHydrant give you channel orchestration, role tracking, and a clean handoff to the postmortem. The cost is per-responder pricing; the value is consistency.",
+      "question": "Do I need a real incident management tool, or is Slack enough?",
+      "source_key": "ops:faq:incident-mgmt-tool",
+      "source_label": "Incident.io: The case for incident management software",
+      "source_url": "https://incident.io/blog"
+    },
+    {
+      "answer": "When the alternative is one person fielding every page, or nobody fielding pages at night. Both happen earlier than teams admit. A formal rotation buys predictable handoffs, escalation, and a clear answer to \"who's the primary?\" — but it only works if there's a real runbook for the common pages and a review of what's actually paging you. The cost of a bad rotation (alert fatigue, burnout) is higher than the cost of no rotation. Build the page-quality discipline first.",
+      "question": "When does my team need a formal on-call rotation?",
+      "source_key": "ops:faq:on-call-rotation",
+      "source_label": "PagerDuty: Setting up your first on-call rotation",
+      "source_url": "https://www.pagerduty.com/resources/learn/call-rotations-schedules/"
+    },
+    {
+      "answer": "Outsource. Auth is one of the highest blast-radius things you'll ever ship, and the cost of getting it wrong is everyone else's data. The strongest argument for rolling your own is when your domain model genuinely needs identity primitives the vendors don't offer (rare). For most teams, Auth0 / Clerk / WorkOS / Stytch are worth the price; Keycloak / Ory / Supertokens are the self-hostable middle ground if you want OSS without writing your own.",
+      "question": "Should I outsource auth, or roll my own?",
+      "source_key": "ops:faq:outsource-auth",
+      "source_label": "Reflag: Why we use Clerk for auth",
+      "source_url": "https://reflag.com/blog/clerk"
+    },
+    {
+      "answer": "Blameless doesn't mean accountability-free. It means the goal is learning, not punishment, and the operator's actions made sense given what they knew at the time. Three habits: write the timeline before the meeting; ask \"how did this make sense to do, in the moment?\" instead of \"who did this?\"; and end with concrete, owned action items that target the system, not the operator. John Allspaw's writing is the canonical reference.",
+      "question": "How do I run a blameless postmortem that doesn't devolve into blame?",
+      "source_key": "ops:faq:blameless-postmortems",
+      "source_label": "John Allspaw: Blameless PostMortems and a Just Culture",
+      "source_url": "https://www.etsy.com/codeascraft/blameless-postmortems"
+    }
+  ],
+  "people": [
+    {
+      "blurb": "The reference for Linux performance, flame graphs, and BPF observability.",
+      "handle": "brendangregg",
+      "key": "ops:person:blog:brendangregg",
+      "name": "Brendan Gregg",
+      "platform": "blog",
+      "url": "https://www.brendangregg.com/"
+    },
+    {
+      "blurb": "Honeycomb co-founder. Defines what modern observability means and where it's going.",
+      "handle": "mipsytipsy",
+      "key": "ops:person:blog:charity",
+      "name": "Charity Majors",
+      "platform": "blog",
+      "url": "https://charity.wtf/"
+    },
+    {
+      "blurb": "Honeycomb dev advocate; systems-thinking essays on observability and socio-technical design.",
+      "handle": "jessitron",
+      "key": "ops:person:blog:jessitron",
+      "name": "Jessica Kerr",
+      "platform": "blog",
+      "url": "https://jessitron.com/"
+    },
+    {
+      "blurb": "Distributed systems and observability writing; essays on testing in production and reliability.",
+      "handle": "copyconstruct",
+      "key": "ops:person:blog:copyconstruct",
+      "name": "Cindy Sridharan",
+      "platform": "blog",
+      "url": "https://copyconstruct.medium.com/"
+    },
+    {
+      "blurb": "Honeycomb principal developer advocate. SRE practice and production-excellence framework.",
+      "handle": "lizthegrey",
+      "key": "ops:person:x:liz-fong-jones",
+      "name": "Liz Fong-Jones",
+      "platform": "x",
+      "url": "https://x.com/lizthegrey"
+    },
+    {
+      "blurb": "Adaptive Capacity Labs; canonical voice on incident analysis and learning from failure.",
+      "handle": "allspaw",
+      "key": "ops:person:blog:allspaw",
+      "name": "John Allspaw",
+      "platform": "blog",
+      "url": "https://www.adaptivecapacitylabs.com/blog/"
+    },
+    {
+      "blurb": "Netflix SRE alum; chaos engineering, postmortem culture, and resilience engineering.",
+      "handle": "norootcause",
+      "key": "ops:person:blog:lorin-hochstein",
+      "name": "Lorin Hochstein",
+      "platform": "blog",
+      "url": "https://surfingcomplexity.blog/"
+    },
+    {
+      "blurb": "Formerly Netflix Chaos team; co-author of the canonical chaos engineering book.",
+      "handle": "caseyrosenthal",
+      "key": "ops:person:blog:casey-rosenthal",
+      "name": "Casey Rosenthal",
+      "platform": "blog",
+      "url": "https://www.verica.io/blog/"
+    },
+    {
+      "blurb": "Security chaos engineering; author of the canonical book of the same name.",
+      "handle": "swagitda_",
+      "key": "ops:person:blog:kelly-shortridge",
+      "name": "Kelly Shortridge",
+      "platform": "blog",
+      "url": "https://kellyshortridge.com/"
+    },
+    {
+      "blurb": "Engineering leader writing concrete frameworks for ops strategy, on-call, and platform investment.",
+      "handle": "lethain",
+      "key": "ops:person:blog:lethain",
+      "name": "Will Larson",
+      "platform": "blog",
+      "url": "https://lethain.com/"
+    }
+  ],
+  "spine": [
+    {
+      "blurb": "Google's foundational SRE book, free online: SLOs, error budgets, toil, on-call, and postmortems.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:spine:sre-book",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Google · sre.google",
+      "title": "Site Reliability Engineering",
+      "url": "https://sre.google/sre-book/table-of-contents/"
+    },
+    {
+      "blurb": "Practical companion to the SRE book with worked examples for implementing SLOs and incident response.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:spine:sre-workbook",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Google · sre.google",
+      "title": "The Site Reliability Workbook",
+      "url": "https://sre.google/workbook/table-of-contents/"
+    },
+    {
+      "blurb": "Canonical O'Reilly text on events-first observability; free PDF behind a form on Honeycomb.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:spine:observability-engineering",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Majors, Fong-Jones, Miranda · Honeycomb / O'Reilly",
+      "title": "Observability Engineering",
+      "url": "https://www.honeycomb.io/observability-engineering-oreilly-book"
+    },
+    {
+      "blurb": "The definitive deep-dive on Linux performance: CPUs, memory, disks, networks, tracing, and methodology.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:spine:systems-performance",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Brendan Gregg",
+      "title": "Systems Performance, 2nd Edition",
+      "url": "https://www.brendangregg.com/systems-performance-2nd-edition-book.html"
+    },
+    {
+      "blurb": "USE Method and other systematic approaches to finding real performance bottlenecks fast.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:spine:gregg-methodology",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Brendan Gregg",
+      "title": "Performance Analysis Methodology",
+      "url": "https://www.brendangregg.com/methodology.html"
+    },
+    {
+      "blurb": "Design so a dependency's failure changes nothing. Pre-provision instead of reacting.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:spine:static-stability",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "AWS Builders' Library",
+      "title": "Static Stability Using Availability Zones",
+      "url": "https://aws.amazon.com/builders-library/static-stability-using-availability-zones/"
+    },
+    {
+      "blurb": "How Amazon designs queue-based systems that recover from backlogs instead of compounding them.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:spine:queue-backlogs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "David Yanacek · AWS Builders' Library",
+      "title": "Avoiding insurmountable queue backlogs",
+      "url": "https://aws.amazon.com/builders-library/avoiding-insurmountable-queue-backlogs/"
+    },
+    {
+      "blurb": "Short free e-book defining monitoring vs observability and the three pillars: logs, metrics, traces.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:spine:sridharan-observability",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Cindy Sridharan · O'Reilly",
+      "title": "Distributed Systems Observability",
+      "url": "https://www.oreilly.com/library/view/distributed-systems-observability/9781492033431/"
+    },
+    {
+      "blurb": "The case that deploy fear is technical debt; small, frequent, author-owned changes beat blanket freezes.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:spine:friday-deploys",
+      "learning_type": "Discussion",
+      "published_at": null,
+      "source": "Charity Majors",
+      "title": "Friday Deploy Freezes Are Exactly Like Murdering Puppies",
+      "url": "https://charity.wtf/2019/05/01/friday-deploy-freezes-are-exactly-like-murdering-puppies/"
+    },
+    {
+      "blurb": "Latest State of DevOps research linking delivery practices, AI, and reliability to org performance.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:spine:dora-2025",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "DORA · Google Cloud",
+      "title": "DORA Research 2025",
+      "url": "https://dora.dev/research/2025/"
+    },
+    {
+      "blurb": "Production excellence as a practice: shared ownership, observability, SLOs, and risk-based prioritization.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:spine:production-excellence",
+      "learning_type": "Talk",
+      "published_at": null,
+      "source": "Liz Fong-Jones · InfoQ",
+      "title": "Cultivating Production Excellence",
+      "url": "https://www.infoq.com/presentations/complex-distributed-systems/"
+    },
+    {
+      "blurb": "Active blog from the observability vendor that practitioners actually read: SLOs, OTel, incidents, on-call.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:spine:honeycomb-blog",
+      "learning_type": "Discussion",
+      "published_at": null,
+      "source": "Honeycomb",
+      "title": "The Honeycomb Blog",
+      "url": "https://www.honeycomb.io/blog"
+    }
+  ],
+  "tool_resources": [
+    {
+      "blurb": "Install Prometheus, scrape targets, run PromQL queries, and configure your first alert.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:prometheus:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Prometheus docs",
+      "title": "Prometheus Getting Started",
+      "tool_slugs": [
+        "prometheus"
+      ],
+      "url": "https://prometheus.io/docs/prometheus/latest/getting_started/"
+    },
+    {
+      "blurb": "Approachable intro to PromQL data types, selectors, rate, and aggregation operators.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:prometheus:promql-intro",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Grafana Labs blog",
+      "title": "PromQL for Mere Mortals",
+      "tool_slugs": [
+        "prometheus"
+      ],
+      "url": "https://grafana.com/blog/2020/02/04/introduction-to-promql-the-prometheus-query-language/"
+    },
+    {
+      "blurb": "Install Grafana, connect a data source, build dashboards, and configure alerting.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:grafana:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Grafana docs",
+      "title": "Grafana Getting Started",
+      "tool_slugs": [
+        "grafana"
+      ],
+      "url": "https://grafana.com/docs/grafana/latest/getting-started/"
+    },
+    {
+      "blurb": "Instrument an app with traces, metrics, and logs using the Collector and language SDKs.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:opentelemetry:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "OpenTelemetry docs",
+      "title": "OpenTelemetry Getting Started",
+      "tool_slugs": [
+        "opentelemetry"
+      ],
+      "url": "https://opentelemetry.io/docs/getting-started/"
+    },
+    {
+      "blurb": "Microservices reference app showing real instrumentation across many languages and signals.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:opentelemetry:demo",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "OpenTelemetry docs",
+      "title": "OpenTelemetry Demo",
+      "tool_slugs": [
+        "opentelemetry"
+      ],
+      "url": "https://opentelemetry.io/docs/demo/"
+    },
+    {
+      "blurb": "Install Loki, ship logs with Promtail or Alloy, and query them with LogQL in Grafana.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:loki:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Grafana docs",
+      "title": "Grafana Loki Get Started",
+      "tool_slugs": [
+        "loki"
+      ],
+      "url": "https://grafana.com/docs/loki/latest/get-started/"
+    },
+    {
+      "blurb": "Deploy Tempo, instrument an app, configure a collector, and visualize traces in Grafana.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:tempo:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Grafana docs",
+      "title": "Grafana Tempo Getting Started",
+      "tool_slugs": [
+        "tempo"
+      ],
+      "url": "https://grafana.com/docs/tempo/latest/getting-started/"
+    },
+    {
+      "blurb": "Spin up a local Tempo instance via Docker Compose to explore distributed tracing end-to-end.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:tempo:docker-quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Grafana docs",
+      "title": "Tempo Quick Start (Docker)",
+      "tool_slugs": [
+        "tempo"
+      ],
+      "url": "https://grafana.com/docs/tempo/latest/getting-started/docker-example/"
+    },
+    {
+      "blurb": "Run Mimir in monolithic mode, scrape Prometheus metrics, and query them through Grafana.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:mimir:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Grafana docs",
+      "title": "Grafana Mimir Get Started",
+      "tool_slugs": [
+        "mimir"
+      ],
+      "url": "https://grafana.com/docs/mimir/latest/get-started/"
+    },
+    {
+      "blurb": "Architecture, operations, and tenancy patterns for long-term Prometheus storage at scale.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:mimir:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Grafana docs",
+      "title": "Grafana Mimir Documentation",
+      "tool_slugs": [
+        "mimir"
+      ],
+      "url": "https://grafana.com/docs/mimir/latest/"
+    },
+    {
+      "blurb": "Install Logfire, instrument Python apps, and view structured traces and logs in the UI.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:logfire:docs",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Pydantic docs",
+      "title": "Pydantic Logfire Documentation",
+      "tool_slugs": [
+        "logfire"
+      ],
+      "url": "https://logfire.pydantic.dev/docs/"
+    },
+    {
+      "blurb": "Send events via OpenTelemetry, run BubbleUp queries, and investigate production issues.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:honeycomb:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Honeycomb docs",
+      "title": "Honeycomb Get Started",
+      "tool_slugs": [
+        "honeycomb"
+      ],
+      "url": "https://docs.honeycomb.io/get-started/"
+    },
+    {
+      "blurb": "Install the Datadog Agent, instrument an app, and explore your first traces.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:datadog:tracing-getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Datadog docs",
+      "title": "Getting Started with Datadog APM",
+      "tool_slugs": [
+        "datadog"
+      ],
+      "url": "https://docs.datadoghq.com/getting_started/tracing/"
+    },
+    {
+      "blurb": "APM landing page: instrumentation, configuration, and trace correlation for production workloads.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:datadog:apm-docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Datadog docs",
+      "title": "Datadog APM Documentation",
+      "tool_slugs": [
+        "datadog"
+      ],
+      "url": "https://docs.datadoghq.com/tracing/"
+    },
+    {
+      "blurb": "SDK install, DSN configuration, and verification across backend languages and frameworks.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:sentry:basics",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Sentry docs",
+      "title": "Getting Started with Sentry",
+      "tool_slugs": [
+        "sentry"
+      ],
+      "url": "https://docs.sentry.io/product/sentry-basics/"
+    },
+    {
+      "blurb": "Docs root covering error tracking, performance, profiling, alerts, and release health.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:sentry:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Sentry docs",
+      "title": "Sentry Documentation",
+      "tool_slugs": [
+        "sentry"
+      ],
+      "url": "https://docs.sentry.io/"
+    },
+    {
+      "blurb": "Introductory tour of APM, infrastructure, browser, and alerting flows with quick install paths.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:new-relic:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "New Relic docs",
+      "title": "Get Started with New Relic",
+      "tool_slugs": [
+        "new-relic"
+      ],
+      "url": "https://docs.newrelic.com/docs/new-relic-solutions/get-started/intro-new-relic/"
+    },
+    {
+      "blurb": "Language-agent install guides plus the core APM concepts for instrumenting a production service.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:new-relic:apm-intro",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "New Relic docs",
+      "title": "Introduction to New Relic APM",
+      "tool_slugs": [
+        "new-relic"
+      ],
+      "url": "https://docs.newrelic.com/docs/apm/new-relic-apm/getting-started/introduction-apm/"
+    },
+    {
+      "blurb": "Vendor-maintained primer on metrics, traces, logs, dashboards, and alerting strategies.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:better-stack:observability-guide",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Better Stack docs",
+      "title": "Better Stack: Observability Guide",
+      "tool_slugs": [
+        "better-stack"
+      ],
+      "url": "https://betterstack.com/community/guides/observability/"
+    },
+    {
+      "blurb": "Send OTLP traces into Better Stack using the collector or OpenTelemetry directly.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:better-stack:tracing",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Better Stack docs",
+      "title": "Distributed Tracing with Better Stack",
+      "tool_slugs": [
+        "better-stack"
+      ],
+      "url": "https://betterstack.com/docs/logs/tracing/"
+    },
+    {
+      "blurb": "Introduction to Axiom's EventDB and MetricsDB platform for telemetry at scale.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:axiom:introduction",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Axiom docs",
+      "title": "Axiom Docs",
+      "tool_slugs": [
+        "axiom"
+      ],
+      "url": "https://axiom.co/docs/introduction"
+    },
+    {
+      "blurb": "Install SigNoz via cloud, Docker Compose, or Kubernetes Helm to start ingesting OTLP signals.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:signoz:install",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "SigNoz docs",
+      "title": "Get Started with SigNoz",
+      "tool_slugs": [
+        "signoz"
+      ],
+      "url": "https://signoz.io/docs/install/"
+    },
+    {
+      "blurb": "Overview of SigNoz's open-source logs, traces, and metrics on OpenTelemetry.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:signoz:introduction",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "SigNoz docs",
+      "title": "Introduction to SigNoz",
+      "tool_slugs": [
+        "signoz"
+      ],
+      "url": "https://signoz.io/docs/introduction/"
+    },
+    {
+      "blurb": "Official knowledge-base entry point with onboarding training and configuration guidance.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:pagerduty:kb-intro",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "PagerDuty docs",
+      "title": "PagerDuty Knowledge Base",
+      "tool_slugs": [
+        "pagerduty"
+      ],
+      "url": "https://support.pagerduty.com/main/docs/introduction"
+    },
+    {
+      "blurb": "PagerDuty's open documentation on building an incident response practice, including roles and process.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:pagerduty:incident-response",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "PagerDuty Incident Response",
+      "title": "PagerDuty Incident Response: Getting Started",
+      "tool_slugs": [
+        "pagerduty"
+      ],
+      "url": "https://response.pagerduty.com/getting_started/"
+    },
+    {
+      "blurb": "Configure profile, notification rules, schedules, and integrations to start receiving alerts.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:opsgenie:quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Atlassian docs",
+      "title": "Opsgenie Quickstart Guide",
+      "tool_slugs": [
+        "opsgenie"
+      ],
+      "url": "https://support.atlassian.com/opsgenie/docs/read-opsgenies-quickstart-guide/"
+    },
+    {
+      "blurb": "Mental model for teams, schedules, escalations, and routing rules in Opsgenie.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:opsgenie:how-it-works",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Atlassian docs",
+      "title": "Learn How Opsgenie Works",
+      "tool_slugs": [
+        "opsgenie"
+      ],
+      "url": "https://support.atlassian.com/opsgenie/docs/learn-how-opsgenie-works/"
+    },
+    {
+      "blurb": "Stand up OnCall, wire integrations, define notification policies, and connect Slack.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:grafana-oncall:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Grafana docs",
+      "title": "Get Started with Grafana OnCall",
+      "tool_slugs": [
+        "grafana-oncall"
+      ],
+      "url": "https://grafana.com/docs/oncall/latest/set-up/get-started/"
+    },
+    {
+      "blurb": "Reference for OnCall scheduling, escalations, integrations, and notification policies.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:grafana-oncall:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Grafana docs",
+      "title": "Grafana OnCall Documentation",
+      "tool_slugs": [
+        "grafana-oncall"
+      ],
+      "url": "https://grafana.com/docs/oncall/latest/"
+    },
+    {
+      "blurb": "Walks first-time admins through the integrations and configuration needed before the first incident.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:firehydrant:quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "FireHydrant docs",
+      "title": "FireHydrant Onboarding Quickstart",
+      "tool_slugs": [
+        "firehydrant"
+      ],
+      "url": "https://firehydrant.com/docs/getting-started/configuration-quick-start-guide"
+    },
+    {
+      "blurb": "Full docs covering Signals alerting, incident lifecycle, catalog, and runbooks.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:firehydrant:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "FireHydrant docs",
+      "title": "FireHydrant Documentation",
+      "tool_slugs": [
+        "firehydrant"
+      ],
+      "url": "https://docs.firehydrant.com/"
+    },
+    {
+      "blurb": "Searchable docs for On-call, Response, Status Pages, Catalog, Workflows, and Insights.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:incident-io:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "incident.io docs",
+      "title": "incident.io Help Center",
+      "tool_slugs": [
+        "incident-io"
+      ],
+      "url": "https://docs.incident.io/"
+    },
+    {
+      "blurb": "Configure components, subscriber channels, and your first incident communication.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:statuspage:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Atlassian docs",
+      "title": "Get Started with Statuspage",
+      "tool_slugs": [
+        "statuspage"
+      ],
+      "url": "https://support.atlassian.com/statuspage/docs/get-started-with-statuspage/"
+    },
+    {
+      "blurb": "Pre-launch checklist covering branding, components, automation, and subscriber setup.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:statuspage:launch",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Atlassian docs",
+      "title": "Statuspage: Launch Your Status Page",
+      "tool_slugs": [
+        "statuspage"
+      ],
+      "url": "https://support.atlassian.com/statuspage/docs/launch-your-status-page/"
+    },
+    {
+      "blurb": "Create incidents from monitors, manually, or via API; resolve, group, and post-mortem them.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:better-stack-incident:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Better Stack docs",
+      "title": "Better Stack: Get Started with Incidents",
+      "tool_slugs": [
+        "better-stack-incident"
+      ],
+      "url": "https://betterstack.com/docs/uptime/working-with-incidents/"
+    },
+    {
+      "blurb": "Product overview tying on-call schedules, Slack workflows, and status pages into one offering.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:better-stack-incident:overview",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Better Stack docs",
+      "title": "Better Stack Incident Management",
+      "tool_slugs": [
+        "better-stack-incident"
+      ],
+      "url": "https://betterstack.com/incident-management"
+    },
+    {
+      "blurb": "Install Vector and build your first sources to transforms to sinks observability pipeline.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:vector:quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Vector docs",
+      "title": "Vector Quickstart",
+      "tool_slugs": [
+        "vector"
+      ],
+      "url": "https://vector.dev/docs/setup/quickstart/"
+    },
+    {
+      "blurb": "Reference for every Vector component, plus operating-at-scale guidance.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:vector:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Vector docs",
+      "title": "Vector Documentation",
+      "tool_slugs": [
+        "vector"
+      ],
+      "url": "https://vector.dev/docs/"
+    },
+    {
+      "blurb": "Install Fluent Bit on Linux, macOS, Windows, or BSD and ship your first pipeline.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:fluent-bit:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Fluent Bit docs",
+      "title": "Get Started with Fluent Bit",
+      "tool_slugs": [
+        "fluent-bit"
+      ],
+      "url": "https://docs.fluentbit.io/manual/installation/getting-started-with-fluent-bit"
+    },
+    {
+      "blurb": "Inputs, parsers, filters, outputs, and operating Fluent Bit in production.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:fluent-bit:manual",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Fluent Bit docs",
+      "title": "Fluent Bit Manual",
+      "tool_slugs": [
+        "fluent-bit"
+      ],
+      "url": "https://docs.fluentbit.io/manual"
+    },
+    {
+      "blurb": "Installation, configuration, and the basic log forwarder pattern with Fluentd.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:fluentd:quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Fluentd docs",
+      "title": "Fluentd Quickstart",
+      "tool_slugs": [
+        "fluentd"
+      ],
+      "url": "https://docs.fluentd.org/quickstart"
+    },
+    {
+      "blurb": "Plugin, deployment, and tuning guides for Fluentd in production.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:fluentd:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Fluentd docs",
+      "title": "Fluentd Documentation",
+      "tool_slugs": [
+        "fluentd"
+      ],
+      "url": "https://docs.fluentd.org/"
+    },
+    {
+      "blurb": "Install Bento (the WarpStream-maintained Benthos fork) and run your first stream-processing config.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:bento:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Bento docs",
+      "title": "Bento Getting Started",
+      "tool_slugs": [
+        "bento"
+      ],
+      "url": "https://warpstreamlabs.github.io/bento/docs/guides/getting_started/"
+    },
+    {
+      "blurb": "Conceptual intro to Bento's declarative, at-least-once stream processing pipelines.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:bento:about",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Bento docs",
+      "title": "What is Bento For?",
+      "tool_slugs": [
+        "bento"
+      ],
+      "url": "https://warpstreamlabs.github.io/bento/docs/about/"
+    },
+    {
+      "blurb": "One-hour hands-on tour of Sources, Routes, Pipelines, Functions, and Destinations.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:cribl:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Cribl docs",
+      "title": "Get Started with Cribl Stream",
+      "tool_slugs": [
+        "cribl"
+      ],
+      "url": "https://docs.cribl.io/stream/getting-started-guide/"
+    },
+    {
+      "blurb": "Documentation root for Cribl Stream covering deployment, processing, and routing.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:cribl:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Cribl docs",
+      "title": "Cribl Stream Documentation",
+      "tool_slugs": [
+        "cribl"
+      ],
+      "url": "https://docs.cribl.io/stream/"
+    },
+    {
+      "blurb": "Run Pyroscope, instrument your app with an SDK or Alloy, and explore flame graphs in Grafana.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:pyroscope:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Grafana docs",
+      "title": "Get Started with Pyroscope",
+      "tool_slugs": [
+        "pyroscope"
+      ],
+      "url": "https://grafana.com/docs/pyroscope/latest/get-started/"
+    },
+    {
+      "blurb": "Hands-on demo app that walks through diagnosing CPU and memory issues with continuous profiling.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:pyroscope:ride-share",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Grafana docs",
+      "title": "Pyroscope Ride-Share Tutorial",
+      "tool_slugs": [
+        "pyroscope"
+      ],
+      "url": "https://grafana.com/docs/pyroscope/latest/get-started/ride-share-tutorial/"
+    },
+    {
+      "blurb": "Intro to Parca's server plus eBPF agent architecture for always-on continuous profiling.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:parca:overview",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Parca docs",
+      "title": "Parca Overview",
+      "tool_slugs": [
+        "parca"
+      ],
+      "url": "https://www.parca.dev/docs/overview/"
+    },
+    {
+      "blurb": "How Polar Signals Cloud combines a zero-instrumentation eBPF agent with hosted symbolization.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:polar-signals:overview",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Polar Signals docs",
+      "title": "Polar Signals Overview",
+      "tool_slugs": [
+        "polar-signals"
+      ],
+      "url": "https://www.polarsignals.com/docs/overview"
+    },
+    {
+      "blurb": "Deploy the Polar Signals agent and stream profiles into Polar Signals Cloud.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:polar-signals:agent",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Polar Signals docs",
+      "title": "Polar Signals Agent Deployment Guide",
+      "tool_slugs": [
+        "polar-signals"
+      ],
+      "url": "https://www.polarsignals.com/docs/agent-deployment-guide"
+    },
+    {
+      "blurb": "How Pixie uses eBPF for auto-telemetry on Kubernetes without manual instrumentation.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:pixie:overview",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Pixie docs",
+      "title": "Pixie Overview",
+      "tool_slugs": [
+        "pixie"
+      ],
+      "url": "https://docs.px.dev/about-pixie/what-is-pixie/"
+    },
+    {
+      "blurb": "Profile a sample service, find a real performance problem, and fix it with the Datadog Profiler.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:datadog-profiler:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Datadog docs",
+      "title": "Getting Started with Datadog Continuous Profiler",
+      "tool_slugs": [
+        "datadog-profiler"
+      ],
+      "url": "https://docs.datadoghq.com/getting_started/profiler/"
+    },
+    {
+      "blurb": "Reference docs for enabling, configuring, and interpreting profile data across runtimes.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:datadog-profiler:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Datadog docs",
+      "title": "Datadog Continuous Profiler",
+      "tool_slugs": [
+        "datadog-profiler"
+      ],
+      "url": "https://docs.datadoghq.com/profiler/"
+    },
+    {
+      "blurb": "Brendan Gregg's canonical page introducing flame graphs, types, and how to read them.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:perf-flamegraph:gregg-page",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Brendan Gregg",
+      "title": "Flame Graphs",
+      "tool_slugs": [
+        "perf-flamegraph"
+      ],
+      "url": "https://www.brendangregg.com/flamegraphs.html"
+    },
+    {
+      "blurb": "The official flamegraph.pl toolchain with stack-collapse scripts for perf, DTrace, and friends.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:perf-flamegraph:github",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "GitHub",
+      "title": "FlameGraph Toolchain",
+      "tool_slugs": [
+        "perf-flamegraph"
+      ],
+      "url": "https://github.com/brendangregg/FlameGraph"
+    },
+    {
+      "blurb": "Learn bpftrace in 12 lessons through one-liners covering probes, maps, and printf actions.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:bpftrace:one-liners",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "bpftrace docs",
+      "title": "bpftrace One-Liner Tutorial",
+      "tool_slugs": [
+        "bpftrace"
+      ],
+      "url": "https://bpftrace.org/tutorial-one-liners"
+    },
+    {
+      "blurb": "Reference docs, language guides, and labs for dynamic Linux tracing with bpftrace.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:bpftrace:home",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "bpftrace docs",
+      "title": "bpftrace Project Home",
+      "tool_slugs": [
+        "bpftrace"
+      ],
+      "url": "https://bpftrace.org/"
+    },
+    {
+      "blurb": "Set up a tenant, create applications, and integrate login via Universal Login and SDKs.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:auth0:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Auth0 docs",
+      "title": "Auth0 Get Started",
+      "tool_slugs": [
+        "auth0"
+      ],
+      "url": "https://auth0.com/docs/get-started"
+    },
+    {
+      "blurb": "Reference architectures for SPA+API, mobile+API, and B2B/B2C identity scenarios.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:auth0:architecture-scenarios",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Auth0 docs",
+      "title": "Auth0 Architecture Scenarios",
+      "tool_slugs": [
+        "auth0"
+      ],
+      "url": "https://auth0.com/docs/get-started/architecture-scenarios"
+    },
+    {
+      "blurb": "Framework-specific quickstarts (Next.js, React, Express, etc.) for adding Clerk auth in minutes.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:clerk:quickstarts",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Clerk docs",
+      "title": "Clerk Quickstarts",
+      "tool_slugs": [
+        "clerk"
+      ],
+      "url": "https://clerk.com/docs/getting-started/quickstart/overview"
+    },
+    {
+      "blurb": "Docs root covering auth strategies, components, organizations, billing, and deployment.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:clerk:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Clerk docs",
+      "title": "Clerk Documentation",
+      "tool_slugs": [
+        "clerk"
+      ],
+      "url": "https://clerk.com/docs"
+    },
+    {
+      "blurb": "Add a hosted auth flow with SSO, social login, and passkeys in under ten minutes.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:workos:authkit",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "WorkOS docs",
+      "title": "Get Started with WorkOS AuthKit",
+      "tool_slugs": [
+        "workos"
+      ],
+      "url": "https://workos.com/docs/authkit"
+    },
+    {
+      "blurb": "Enterprise-ready auth APIs: SSO, SCIM directory sync, audit logs, user management.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:workos:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "WorkOS docs",
+      "title": "WorkOS Documentation",
+      "tool_slugs": [
+        "workos"
+      ],
+      "url": "https://workos.com/docs"
+    },
+    {
+      "blurb": "Overview of B2B and Consumer auth suites plus framework-specific quickstart paths.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:stytch:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Stytch docs",
+      "title": "Stytch Get Started",
+      "tool_slugs": [
+        "stytch"
+      ],
+      "url": "https://stytch.com/docs/get-started/overview"
+    },
+    {
+      "blurb": "Full API reference covering magic links, OTP, OAuth, sessions, and fraud detection.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:stytch:api",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Stytch docs",
+      "title": "Stytch API Reference",
+      "tool_slugs": [
+        "stytch"
+      ],
+      "url": "https://stytch.com/docs/api"
+    },
+    {
+      "blurb": "Run Keycloak in Docker, create a realm, register a client, and secure a sample app.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:keycloak:docker-start",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Keycloak docs",
+      "title": "Keycloak Getting Started (Docker)",
+      "tool_slugs": [
+        "keycloak"
+      ],
+      "url": "https://www.keycloak.org/getting-started/getting-started-docker"
+    },
+    {
+      "blurb": "Reference for realms, clients, identity brokering, user federation, and authentication flows.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:keycloak:server-admin",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Keycloak docs",
+      "title": "Keycloak Server Administration Guide",
+      "tool_slugs": [
+        "keycloak"
+      ],
+      "url": "https://www.keycloak.org/docs/latest/server_admin/"
+    },
+    {
+      "blurb": "Get started with Ory Kratos identities, Hydra OAuth2/OIDC, Keto permissions, and Oathkeeper.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:ory:docs",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Ory docs",
+      "title": "Ory Documentation",
+      "tool_slugs": [
+        "ory"
+      ],
+      "url": "https://www.ory.sh/docs/"
+    },
+    {
+      "blurb": "CLI-based quickstart for integrating SuperTokens SDKs across common backend and frontend stacks.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:supertokens:docs",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "SuperTokens docs",
+      "title": "SuperTokens Documentation",
+      "tool_slugs": [
+        "supertokens"
+      ],
+      "url": "https://supertokens.com/docs"
+    },
+    {
+      "blurb": "Authentication recipes: email/password, passwordless, social/enterprise SSO, and MFA.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:supertokens:auth-overview",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "SuperTokens docs",
+      "title": "SuperTokens Authentication Overview",
+      "tool_slugs": [
+        "supertokens"
+      ],
+      "url": "https://supertokens.com/docs/authentication/overview"
+    },
+    {
+      "blurb": "Pick a 15-minute quickstart for your language or framework and stand up FusionAuth CIAM.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:fusionauth:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "FusionAuth docs",
+      "title": "FusionAuth Get Started",
+      "tool_slugs": [
+        "fusionauth"
+      ],
+      "url": "https://fusionauth.io/docs/get-started/"
+    },
+    {
+      "blurb": "Install, identity providers, MFA, passkeys, and APIs reference.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:fusionauth:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "FusionAuth docs",
+      "title": "FusionAuth Documentation",
+      "tool_slugs": [
+        "fusionauth"
+      ],
+      "url": "https://fusionauth.io/docs/"
+    },
+    {
+      "blurb": "Logto identity-and-access overview: SSO, MFA, RBAC, multi-tenancy on OIDC and OAuth 2.1.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:logto:introduction",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Logto docs",
+      "title": "Logto Introduction",
+      "tool_slugs": [
+        "logto"
+      ],
+      "url": "https://docs.logto.io/introduction"
+    },
+    {
+      "blurb": "Framework quickstarts (Python shown; 30+ SDKs available) for adding Logto auth to an app.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:logto:quick-starts",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Logto docs",
+      "title": "Logto Quick Starts",
+      "tool_slugs": [
+        "logto"
+      ],
+      "url": "https://docs.logto.io/quick-starts/python"
+    },
+    {
+      "blurb": "Hands-on tutorials for KV secrets, dynamic database creds, transit encryption, and auth methods.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:vault:tutorials",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "HashiCorp Developer",
+      "title": "Vault Tutorials",
+      "tool_slugs": [
+        "vault"
+      ],
+      "url": "https://developer.hashicorp.com/vault/tutorials"
+    },
+    {
+      "blurb": "Official checklist: end-to-end TLS, root token rotation, auditing, and least-privilege policies.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:vault:production-hardening",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "HashiCorp Developer",
+      "title": "Vault Production Hardening",
+      "tool_slugs": [
+        "vault"
+      ],
+      "url": "https://developer.hashicorp.com/vault/tutorials/operations/production-hardening"
+    },
+    {
+      "blurb": "Conceptual intro plus links into setup, retrieval, and rotation patterns.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:aws-secrets-manager:intro",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "AWS docs",
+      "title": "What Is AWS Secrets Manager?",
+      "tool_slugs": [
+        "aws-secrets-manager"
+      ],
+      "url": "https://docs.aws.amazon.com/secretsmanager/latest/userguide/intro.html"
+    },
+    {
+      "blurb": "Hands-on tutorials covering moving hardcoded secrets, configuring rotation, and CodeGuru integration.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:aws-secrets-manager:tutorials",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "AWS docs",
+      "title": "AWS Secrets Manager Tutorials",
+      "tool_slugs": [
+        "aws-secrets-manager"
+      ],
+      "url": "https://docs.aws.amazon.com/secretsmanager/latest/userguide/tutorials.html"
+    },
+    {
+      "blurb": "Create, access, and rotate a secret via console, gcloud, or client library.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:gcp-secret-manager:quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Google Cloud docs",
+      "title": "GCP Secret Manager Quickstart",
+      "tool_slugs": [
+        "gcp-secret-manager"
+      ],
+      "url": "https://docs.cloud.google.com/secret-manager/docs/create-secret-quickstart"
+    },
+    {
+      "blurb": "Concepts, IAM, regional configs, and integration patterns for Secret Manager.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:gcp-secret-manager:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Google Cloud docs",
+      "title": "GCP Secret Manager Documentation",
+      "tool_slugs": [
+        "gcp-secret-manager"
+      ],
+      "url": "https://docs.cloud.google.com/secret-manager/docs"
+    },
+    {
+      "blurb": "Overview of Service Accounts and Connect server approaches to automating secret retrieval.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:1password-secrets:automation",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "1Password Developer",
+      "title": "1Password Secrets Automation",
+      "tool_slugs": [
+        "1password-secrets"
+      ],
+      "url": "https://developer.1password.com/docs/secrets-automation/"
+    },
+    {
+      "blurb": "Create a service account, scope its vaults, and authenticate the 1Password CLI in CI/CD.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:1password-secrets:service-accounts",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "1Password Developer",
+      "title": "Get Started with 1Password Service Accounts",
+      "tool_slugs": [
+        "1password-secrets"
+      ],
+      "url": "https://developer.1password.com/docs/service-accounts/get-started/"
+    },
+    {
+      "blurb": "Project and config setup, then sync secrets to local apps, cloud providers, and other stores.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:doppler:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Doppler docs",
+      "title": "Getting Started with Doppler",
+      "tool_slugs": [
+        "doppler"
+      ],
+      "url": "https://docs.doppler.com/docs/getting-started"
+    },
+    {
+      "blurb": "SecretOps workflows, RBAC, audit logs, and integrations.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:doppler:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Doppler docs",
+      "title": "Doppler Documentation",
+      "tool_slugs": [
+        "doppler"
+      ],
+      "url": "https://docs.doppler.com/"
+    },
+    {
+      "blurb": "Sign up for Infisical Cloud or self-host, then manage secrets, certs, and access across environments.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:infisical:introduction",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Infisical docs",
+      "title": "What is Infisical?",
+      "tool_slugs": [
+        "infisical"
+      ],
+      "url": "https://infisical.com/docs/documentation/getting-started/introduction"
+    },
+    {
+      "blurb": "Platform overview for secrets storage, rotation, references, and audit logging.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:infisical:secrets-mgmt",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Infisical docs",
+      "title": "Infisical Secrets Management",
+      "tool_slugs": [
+        "infisical"
+      ],
+      "url": "https://infisical.com/docs/documentation/platform/secrets-mgmt/overview"
+    },
+    {
+      "blurb": "CNCF-hosted project site for the editor that encrypts values inside YAML/JSON/ENV/INI files.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:sops:home",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "getsops.io",
+      "title": "SOPS: Secrets OPerationS",
+      "tool_slugs": [
+        "sops"
+      ],
+      "url": "https://getsops.io/"
+    },
+    {
+      "blurb": "README with install and usage walkthroughs for SOPS with KMS, age, PGP, and Vault backends.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:sops:github",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "GitHub",
+      "title": "SOPS on GitHub",
+      "tool_slugs": [
+        "sops"
+      ],
+      "url": "https://github.com/getsops/sops"
+    },
+    {
+      "blurb": "Official repo and README for age, a simple modern file-encryption tool with small explicit keys.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:age:github",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "GitHub",
+      "title": "age File Encryption",
+      "tool_slugs": [
+        "age"
+      ],
+      "url": "https://github.com/FiloSottile/age"
+    },
+    {
+      "blurb": "Enable Cloudflare's Managed Rulesets and OWASP Core Ruleset, tune paranoia and score thresholds.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:cloudflare-waf:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Cloudflare docs",
+      "title": "Cloudflare WAF: Get Started",
+      "tool_slugs": [
+        "cloudflare-waf"
+      ],
+      "url": "https://developers.cloudflare.com/waf/get-started/"
+    },
+    {
+      "blurb": "Custom rules, rate limiting, exposed credentials, and bot rules.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:cloudflare-waf:overview",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Cloudflare docs",
+      "title": "Cloudflare WAF Overview",
+      "tool_slugs": [
+        "cloudflare-waf"
+      ],
+      "url": "https://developers.cloudflare.com/waf/"
+    },
+    {
+      "blurb": "Build your first Web ACL, attach managed rule groups, and protect a CloudFront or ALB resource.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:aws-waf:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "AWS docs",
+      "title": "Get Started with AWS WAF",
+      "tool_slugs": [
+        "aws-waf"
+      ],
+      "url": "https://docs.aws.amazon.com/waf/latest/developerguide/getting-started.html"
+    },
+    {
+      "blurb": "Rules, rule groups, Firewall Manager, and Shield Advanced reference.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:aws-waf:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "AWS docs",
+      "title": "AWS WAF Developer Guide",
+      "tool_slugs": [
+        "aws-waf"
+      ],
+      "url": "https://docs.aws.amazon.com/waf/"
+    },
+    {
+      "blurb": "Conceptual intro to Cloud Armor security policies, preconfigured WAF rules, and load-balancer attach points.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:gcp-armor:overview",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Google Cloud docs",
+      "title": "Cloud Armor Product Overview",
+      "tool_slugs": [
+        "gcp-armor"
+      ],
+      "url": "https://docs.cloud.google.com/armor/docs/cloud-armor-overview"
+    },
+    {
+      "blurb": "Create a security policy, add prioritized rules, and attach it to a backend service.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:gcp-armor:configure",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Google Cloud docs",
+      "title": "Configure Cloud Armor Security Policies",
+      "tool_slugs": [
+        "gcp-armor"
+      ],
+      "url": "https://docs.cloud.google.com/armor/docs/configure-security-policies"
+    },
+    {
+      "blurb": "Upstream wiki primer on tables, chains, rules, and families; the successor to iptables.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:iptables:nftables-quickref",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "nftables wiki",
+      "title": "nftables in 10 Minutes",
+      "tool_slugs": [
+        "iptables"
+      ],
+      "url": "https://wiki.nftables.org/wiki-nftables/index.php/Quick_reference-nftables_in_10_minutes"
+    },
+    {
+      "blurb": "Examples, migration-from-iptables guides, and command reference.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:iptables:nftables-wiki",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "nftables wiki",
+      "title": "nftables Wiki",
+      "tool_slugs": [
+        "iptables"
+      ],
+      "url": "https://wiki.nftables.org/wiki-nftables/index.php/Main_Page"
+    },
+    {
+      "blurb": "Official Ubuntu community wiki on enabling, configuring, and logging the Uncomplicated Firewall.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:ufw:wiki",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Ubuntu wiki",
+      "title": "UFW Community Help Wiki",
+      "tool_slugs": [
+        "ufw"
+      ],
+      "url": "https://help.ubuntu.com/community/UFW"
+    },
+    {
+      "blurb": "Canonical's server-docs section on configuring host firewalls with UFW.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:ufw:server-docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Ubuntu docs",
+      "title": "Ubuntu Server: Firewalls",
+      "tool_slugs": [
+        "ufw"
+      ],
+      "url": "https://documentation.ubuntu.com/server/how-to/security/firewalls/"
+    },
+    {
+      "blurb": "Project landing page linking to install media, the docs portal, and configuration walkthroughs.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:pfsense:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "pfSense",
+      "title": "pfSense Getting Started",
+      "tool_slugs": [
+        "pfsense"
+      ],
+      "url": "https://www.pfsense.org/getting-started/"
+    },
+    {
+      "blurb": "Netgate-maintained pfSense manual covering install, networking, VPN, and high availability.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:pfsense:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Netgate docs",
+      "title": "pfSense Documentation",
+      "tool_slugs": [
+        "pfsense"
+      ],
+      "url": "https://docs.netgate.com/pfsense/en/latest/"
+    },
+    {
+      "blurb": "Hardware selection, install media, and first-boot configuration for OPNsense.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:opnsense:quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "OPNsense docs",
+      "title": "OPNsense Quickstart",
+      "tool_slugs": [
+        "opnsense"
+      ],
+      "url": "https://docs.opnsense.org/hardware/quickstart.html"
+    },
+    {
+      "blurb": "Install, manual configuration, and the development manual.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:opnsense:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "OPNsense docs",
+      "title": "OPNsense Documentation",
+      "tool_slugs": [
+        "opnsense"
+      ],
+      "url": "https://docs.opnsense.org/index.html"
+    },
+    {
+      "blurb": "Decide between provider-managed and self-managed ACME flows, with Certbot recommended for self-managed.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:letsencrypt:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Let's Encrypt",
+      "title": "Let's Encrypt: Getting Started",
+      "tool_slugs": [
+        "letsencrypt"
+      ],
+      "url": "https://letsencrypt.org/getting-started/"
+    },
+    {
+      "blurb": "Rate limits, challenge types, ACME clients, and best practices.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:letsencrypt:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Let's Encrypt",
+      "title": "Let's Encrypt Documentation",
+      "tool_slugs": [
+        "letsencrypt"
+      ],
+      "url": "https://letsencrypt.org/docs/"
+    },
+    {
+      "blurb": "Install the CLI, deploy the control plane to Kubernetes, and mesh your first application.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:linkerd:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Linkerd docs",
+      "title": "Linkerd Getting Started",
+      "tool_slugs": [
+        "linkerd"
+      ],
+      "url": "https://linkerd.io/2.13/getting-started/"
+    },
+    {
+      "blurb": "Conceptual overview of Linkerd's Rust-based service-mesh data plane and control plane.",
+      "first_indexed_at": "2026-05-12",
+      "key": "ops:res:linkerd:overview",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Linkerd docs",
+      "title": "Linkerd Overview",
+      "tool_slugs": [
+        "linkerd"
+      ],
+      "url": "https://linkerd.io/2-edge/overview/"
+    }
+  ]
+}

@@ -1,0 +1,1730 @@
+{
+  "categories": [
+    {
+      "intro": "Git is the protocol. The host is what matters in practice. GitHub for default, GitLab for self-host-friendly, Codeberg and Forgejo for the ideological alternatives. The choice mostly determines your CI/CD options and how much of your workflow lives in the same UI as your code.",
+      "name": "Version control",
+      "slug": "version-control",
+      "tools": [
+        {
+          "blurb": "The distributed version control protocol everything else is built on.",
+          "home_key": "deliv:tool:git:home",
+          "name": "Git",
+          "slug": "git",
+          "url": "https://git-scm.com/"
+        },
+        {
+          "blurb": "The dominant code-hosting platform. Default if you want the biggest CI/CD ecosystem.",
+          "home_key": "deliv:tool:github:home",
+          "name": "GitHub",
+          "slug": "github",
+          "url": "https://github.com/"
+        },
+        {
+          "blurb": "Self-host-friendly Git host with first-party CI/CD, packages, and registries.",
+          "home_key": "deliv:tool:gitlab:home",
+          "name": "GitLab",
+          "slug": "gitlab",
+          "url": "https://about.gitlab.com/"
+        },
+        {
+          "blurb": "Non-profit, community-run Forgejo instance for OSS projects.",
+          "home_key": "deliv:tool:codeberg:home",
+          "name": "Codeberg",
+          "slug": "codeberg",
+          "url": "https://codeberg.org/"
+        },
+        {
+          "blurb": "Self-hostable Gitea fork governed by a non-profit. The community-first alternative.",
+          "home_key": "deliv:tool:forgejo:home",
+          "name": "Forgejo",
+          "slug": "forgejo",
+          "url": "https://forgejo.org/"
+        },
+        {
+          "blurb": "Lightweight self-hostable Git host. The smallest, fastest option to run yourself.",
+          "home_key": "deliv:tool:gitea:home",
+          "name": "Gitea",
+          "slug": "gitea",
+          "url": "https://about.gitea.com/"
+        },
+        {
+          "blurb": "Atlassian's Git host. Strongest when your team is already on Jira and Confluence.",
+          "home_key": "deliv:tool:bitbucket:home",
+          "name": "Bitbucket",
+          "slug": "bitbucket",
+          "url": "https://bitbucket.org/product"
+        }
+      ]
+    },
+    {
+      "intro": "CI runs on every push; CD ships what passed. The line between them blurs in modern platforms. GitHub Actions wins by default because most teams are already on GitHub. CircleCI and Buildkite remain strong standalone offerings. Dagger and Earthly are the new wave that runs the same pipeline locally and remotely, important if you've ever debugged a YAML file by force-pushing.",
+      "name": "CI/CD platforms",
+      "slug": "cicd",
+      "tools": [
+        {
+          "blurb": "Default CI/CD for GitHub repos. Largest marketplace; YAML-driven workflows.",
+          "home_key": "deliv:tool:github-actions:home",
+          "name": "GitHub Actions",
+          "slug": "github-actions",
+          "url": "https://github.com/features/actions"
+        },
+        {
+          "blurb": "GitLab's first-party pipelines. Tight integration with the GitLab feature set.",
+          "home_key": "deliv:tool:gitlab-ci:home",
+          "name": "GitLab CI",
+          "slug": "gitlab-ci",
+          "url": "https://about.gitlab.com/solutions/continuous-integration/"
+        },
+        {
+          "blurb": "Standalone CI/CD with strong caching, orbs, and Docker-native execution.",
+          "home_key": "deliv:tool:circleci:home",
+          "name": "CircleCI",
+          "slug": "circleci",
+          "url": "https://circleci.com/"
+        },
+        {
+          "blurb": "Hybrid model: hosted control plane, self-hosted agents. Strong at scale.",
+          "home_key": "deliv:tool:buildkite:home",
+          "name": "Buildkite",
+          "slug": "buildkite",
+          "url": "https://buildkite.com/"
+        },
+        {
+          "blurb": "The classic OSS CI server. Massive plugin ecosystem; operational cost is real.",
+          "home_key": "deliv:tool:jenkins:home",
+          "name": "Jenkins",
+          "slug": "jenkins",
+          "url": "https://www.jenkins.io/"
+        },
+        {
+          "blurb": "Container-native CI from Harness. Lightweight YAML pipelines, easy self-host.",
+          "home_key": "deliv:tool:drone:home",
+          "name": "Drone (Harness)",
+          "slug": "drone",
+          "url": "https://www.drone.io/"
+        },
+        {
+          "blurb": "Earthfile-based builds that run identically locally and in any CI.",
+          "home_key": "deliv:tool:earthly:home",
+          "name": "Earthly",
+          "slug": "earthly",
+          "url": "https://earthly.dev/"
+        },
+        {
+          "blurb": "Programmable CI/CD: write pipelines in real languages, run anywhere with a container runtime.",
+          "home_key": "deliv:tool:dagger:home",
+          "name": "Dagger",
+          "slug": "dagger",
+          "url": "https://dagger.io/"
+        },
+        {
+          "blurb": "JetBrains' CI/CD server. Polished UI, strong build-chain modeling, free for small teams.",
+          "home_key": "deliv:tool:teamcity:home",
+          "name": "TeamCity",
+          "slug": "teamcity",
+          "url": "https://www.jetbrains.com/teamcity/"
+        }
+      ]
+    },
+    {
+      "intro": "IaC lets you describe infrastructure as text and commit it. Terraform is the lingua franca; OpenTofu is its OSS fork after the license change. Pulumi gives you real programming languages. CDK is AWS's TypeScript/Python wrapper around CloudFormation. Crossplane brings IaC patterns into Kubernetes itself. Pick by how much programmability you want, and how much surface area your team can review.",
+      "name": "Infrastructure as Code (IaC)",
+      "slug": "iac",
+      "tools": [
+        {
+          "blurb": "HashiCorp's IaC tool. The default declarative language for cloud resources.",
+          "home_key": "deliv:tool:terraform:home",
+          "name": "Terraform",
+          "slug": "terraform",
+          "url": "https://www.terraform.io/"
+        },
+        {
+          "blurb": "OSS fork of Terraform after the BSL license change. Drop-in compatible.",
+          "home_key": "deliv:tool:opentofu:home",
+          "name": "OpenTofu",
+          "slug": "opentofu",
+          "url": "https://opentofu.org/"
+        },
+        {
+          "blurb": "IaC in real programming languages (TypeScript, Python, Go, C#) instead of HCL.",
+          "home_key": "deliv:tool:pulumi:home",
+          "name": "Pulumi",
+          "slug": "pulumi",
+          "url": "https://www.pulumi.com/"
+        },
+        {
+          "blurb": "AWS's TypeScript/Python wrapper around CloudFormation. AWS-only, deeply integrated.",
+          "home_key": "deliv:tool:aws-cdk:home",
+          "name": "AWS CDK",
+          "slug": "aws-cdk",
+          "url": "https://aws.amazon.com/cdk/"
+        },
+        {
+          "blurb": "Manage cloud resources from inside Kubernetes via CRDs. The K8s-native IaC pattern.",
+          "home_key": "deliv:tool:crossplane:home",
+          "name": "Crossplane",
+          "slug": "crossplane",
+          "url": "https://www.crossplane.io/"
+        },
+        {
+          "blurb": "Agentless config management and orchestration via SSH. Still the default for VM provisioning.",
+          "home_key": "deliv:tool:ansible:home",
+          "name": "Ansible",
+          "slug": "ansible",
+          "url": "https://www.ansible.com/"
+        }
+      ]
+    },
+    {
+      "intro": "GitOps means Git is the source of truth for what runs in production. ArgoCD and Flux are the Kubernetes-native canonical implementations. Helm is the package format underneath. For non-K8s deployments, the toolchain is more fragmented: Spinnaker for the heavyweight Netflix legacy, Tekton for the pipelines-as-code framework. The orchestration runtime itself is in <a href=\"/resources/infrastructure-hosting#orchestration\">Infrastructure &amp; Hosting</a>; this section is about how code gets there.",
+      "name": "Deployment & GitOps",
+      "slug": "deployment-gitops",
+      "tools": [
+        {
+          "blurb": "CNCF GitOps controller for Kubernetes. The canonical declarative deploy tool.",
+          "home_key": "deliv:tool:argocd:home",
+          "name": "ArgoCD",
+          "slug": "argocd",
+          "url": "https://argo-cd.readthedocs.io/"
+        },
+        {
+          "blurb": "CNCF GitOps toolkit for Kubernetes. Composable controllers; the other canonical option.",
+          "home_key": "deliv:tool:flux:home",
+          "name": "Flux",
+          "slug": "flux",
+          "url": "https://fluxcd.io/"
+        },
+        {
+          "blurb": "The Kubernetes package manager. Templates, releases, and chart repositories.",
+          "home_key": "deliv:tool:helm:home",
+          "name": "Helm",
+          "slug": "helm",
+          "url": "https://helm.sh/"
+        },
+        {
+          "blurb": "Netflix-born multi-cloud continuous delivery platform. Heavy but battle-tested.",
+          "home_key": "deliv:tool:spinnaker:home",
+          "name": "Spinnaker",
+          "slug": "spinnaker",
+          "url": "https://spinnaker.io/"
+        },
+        {
+          "blurb": "CNCF pipelines-as-code framework. Composable building blocks for CI/CD on K8s.",
+          "home_key": "deliv:tool:tekton:home",
+          "name": "Tekton",
+          "slug": "tekton",
+          "url": "https://tekton.dev/"
+        },
+        {
+          "blurb": "Google's CLI for K8s dev loops. Watch, build, push, deploy on file change.",
+          "home_key": "deliv:tool:skaffold:home",
+          "name": "Skaffold",
+          "slug": "skaffold",
+          "url": "https://skaffold.dev/"
+        }
+      ]
+    },
+    {
+      "intro": "Building a container image is no longer just docker build. BuildKit gives you parallelism and better caching. Buildpacks (Cloud Native, Heroku) and Nixpacks auto-detect your stack. Ko builds Go binaries straight into images, no Dockerfile required. The right pick depends on whether you want Dockerfiles, declarative configs, or zero config at all. The container runtime itself is in <a href=\"/resources/infrastructure-hosting#containers\">Infrastructure &amp; Hosting</a>.",
+      "name": "Container build tools",
+      "slug": "container-builds",
+      "tools": [
+        {
+          "blurb": "Modern image builder for Docker/OCI. Parallel stages, better caching, secret mounts.",
+          "home_key": "deliv:tool:buildkit:home",
+          "name": "BuildKit",
+          "slug": "buildkit",
+          "url": "https://github.com/moby/buildkit"
+        },
+        {
+          "blurb": "CNCF spec for building OCI images from source. Auto-detects language and dependencies.",
+          "home_key": "deliv:tool:buildpacks:home",
+          "name": "Cloud Native Buildpacks",
+          "slug": "buildpacks",
+          "url": "https://buildpacks.io/"
+        },
+        {
+          "blurb": "Railway's Nix-backed alternative to buildpacks. Auto-detect with reproducible builds.",
+          "home_key": "deliv:tool:nixpacks:home",
+          "name": "Nixpacks",
+          "slug": "nixpacks",
+          "url": "https://nixpacks.com/"
+        },
+        {
+          "blurb": "Build Go binaries directly into OCI images. No Dockerfile required.",
+          "home_key": "deliv:tool:ko:home",
+          "name": "ko",
+          "slug": "ko",
+          "url": "https://ko.build/"
+        },
+        {
+          "blurb": "Google's Java-to-container builder. Maven and Gradle plugins; no Docker daemon.",
+          "home_key": "deliv:tool:jib:home",
+          "name": "Jib",
+          "slug": "jib",
+          "url": "https://github.com/GoogleContainerTools/jib"
+        },
+        {
+          "blurb": "Google's hermetic build system. The heavyweight choice when you want fully reproducible builds.",
+          "home_key": "deliv:tool:bazel:home",
+          "name": "Bazel",
+          "slug": "bazel",
+          "url": "https://bazel.build/"
+        }
+      ]
+    },
+    {
+      "intro": "Local dev is half the developer experience. Dev Containers run a containerized dev environment in any editor that speaks the spec. mise and asdf manage runtime versions. direnv handles per-directory env vars. Nix flakes give you fully reproducible environments at the cost of a steep learning curve. Devbox wraps Nix in friendlier abstractions. Tilt is the option for Kubernetes-aware local dev. Docker Compose is in <a href=\"/resources/infrastructure-hosting#orchestration\">Infrastructure &amp; Hosting</a>; most teams use it locally too.",
+      "name": "Local development environments",
+      "slug": "local-dev",
+      "tools": [
+        {
+          "blurb": "Open spec for editor-agnostic containerized dev environments. The default in VS Code.",
+          "home_key": "deliv:tool:dev-containers:home",
+          "name": "Dev Containers",
+          "slug": "dev-containers",
+          "url": "https://containers.dev/"
+        },
+        {
+          "blurb": "Polyglot runtime version manager (formerly rtx). asdf-compatible, faster, with task running.",
+          "home_key": "deliv:tool:mise:home",
+          "name": "mise",
+          "slug": "mise",
+          "url": "https://mise.jdx.dev/"
+        },
+        {
+          "blurb": "Multi-language runtime version manager with a wide plugin ecosystem.",
+          "home_key": "deliv:tool:asdf:home",
+          "name": "asdf",
+          "slug": "asdf",
+          "url": "https://asdf-vm.com/"
+        },
+        {
+          "blurb": "Per-directory environment variables. Auto-loaded when you cd into a project.",
+          "home_key": "deliv:tool:direnv:home",
+          "name": "direnv",
+          "slug": "direnv",
+          "url": "https://direnv.net/"
+        },
+        {
+          "blurb": "Functional package manager and reproducible-environment system. Steep but powerful.",
+          "home_key": "deliv:tool:nix:home",
+          "name": "Nix / Nix Flakes",
+          "slug": "nix",
+          "url": "https://nixos.org/"
+        },
+        {
+          "blurb": "Jetify's friendlier Nix wrapper. Per-project shells with simple JSON config.",
+          "home_key": "deliv:tool:devbox:home",
+          "name": "Devbox",
+          "slug": "devbox",
+          "url": "https://www.jetify.com/devbox"
+        },
+        {
+          "blurb": "Live-update workflow for Kubernetes dev. Smart rebuilds and a unified status UI.",
+          "home_key": "deliv:tool:tilt:home",
+          "name": "Tilt",
+          "slug": "tilt",
+          "url": "https://tilt.dev/"
+        }
+      ]
+    },
+    {
+      "intro": "Schema changes are deploys with no rollback. Migration tools force you to encode every change as a forward-only script. Atlas is the modern declarative entrant. Goose and golang-migrate are the language-agnostic mainstays. Alembic, Flyway, and Liquibase are the long-running standards in Python and JVM ecosystems. The database itself is a <a href=\"/resources/system-architecture#databases\">System Architecture decision</a>; this section is about safely changing its shape over time.",
+      "name": "Database migrations",
+      "slug": "db-migrations",
+      "tools": [
+        {
+          "blurb": "Declarative schema-as-code migrations. Plans diffs, validates with linting and CI checks.",
+          "home_key": "deliv:tool:atlas:home",
+          "name": "Atlas",
+          "slug": "atlas",
+          "url": "https://atlasgo.io/"
+        },
+        {
+          "blurb": "Lightweight Go migration tool. SQL or Go-based migrations; ergonomic CLI.",
+          "home_key": "deliv:tool:goose:home",
+          "name": "Goose",
+          "slug": "goose",
+          "url": "https://github.com/pressly/goose"
+        },
+        {
+          "blurb": "Language-agnostic CLI + Go library for SQL migrations across most databases.",
+          "home_key": "deliv:tool:golang-migrate:home",
+          "name": "golang-migrate",
+          "slug": "golang-migrate",
+          "url": "https://github.com/golang-migrate/migrate"
+        },
+        {
+          "blurb": "SQLAlchemy's migration tool. The Python standard for relational schemas.",
+          "home_key": "deliv:tool:alembic:home",
+          "name": "Alembic",
+          "slug": "alembic",
+          "url": "https://alembic.sqlalchemy.org/"
+        },
+        {
+          "blurb": "JVM-era migration mainstay. SQL-first, broad DB support, strong baseline workflow.",
+          "home_key": "deliv:tool:flyway:home",
+          "name": "Flyway",
+          "slug": "flyway",
+          "url": "https://flywaydb.org/"
+        },
+        {
+          "blurb": "Enterprise schema-change platform. Tracks change sets with rich rollback support.",
+          "home_key": "deliv:tool:liquibase:home",
+          "name": "Liquibase",
+          "slug": "liquibase",
+          "url": "https://www.liquibase.com/"
+        },
+        {
+          "blurb": "Migrations for Prisma ORM. Generated from schema changes; tight TypeScript story.",
+          "home_key": "deliv:tool:prisma-migrate:home",
+          "name": "Prisma Migrate",
+          "slug": "prisma-migrate",
+          "url": "https://www.prisma.io/migrate"
+        },
+        {
+          "blurb": "The migration CLI shipped with Rust's sqlx. SQL-first with compile-time query checks.",
+          "home_key": "deliv:tool:sqlx-migrate:home",
+          "name": "sqlx migrate",
+          "slug": "sqlx-migrate",
+          "url": "https://github.com/launchbadge/sqlx"
+        }
+      ]
+    },
+    {
+      "intro": "Feature flags decouple deploy from release. You can ship code today and turn it on for 1% of users tomorrow. LaunchDarkly is the heavyweight commercial player. Statsig and PostHog combine flags with analytics. Unleash, Flagsmith, and GrowthBook are the OSS contenders. OpenFeature is the emerging standard for vendor-neutral SDKs. The decision is mostly whether you need experimentation (A/B testing) or just safe rollouts.",
+      "name": "Feature flags & progressive delivery",
+      "slug": "feature-flags",
+      "tools": [
+        {
+          "blurb": "The heavyweight commercial feature-flag platform. Deepest experimentation features.",
+          "home_key": "deliv:tool:launchdarkly:home",
+          "name": "LaunchDarkly",
+          "slug": "launchdarkly",
+          "url": "https://launchdarkly.com/"
+        },
+        {
+          "blurb": "Flags + experimentation + analytics in one stack. Generous free tier.",
+          "home_key": "deliv:tool:statsig:home",
+          "name": "Statsig",
+          "slug": "statsig",
+          "url": "https://www.statsig.com/"
+        },
+        {
+          "blurb": "Open-source product analytics with first-class feature flags and experiments.",
+          "home_key": "deliv:tool:posthog:home",
+          "name": "PostHog",
+          "slug": "posthog",
+          "url": "https://posthog.com/"
+        },
+        {
+          "blurb": "Open-source feature-flag service. Self-hostable, with a hosted offering.",
+          "home_key": "deliv:tool:unleash:home",
+          "name": "Unleash",
+          "slug": "unleash",
+          "url": "https://www.getunleash.io/"
+        },
+        {
+          "blurb": "OSS feature-flag and remote-config platform. Strong on multi-environment workflows.",
+          "home_key": "deliv:tool:flagsmith:home",
+          "name": "Flagsmith",
+          "slug": "flagsmith",
+          "url": "https://www.flagsmith.com/"
+        },
+        {
+          "blurb": "Open-source A/B testing and feature flags built around your existing data warehouse.",
+          "home_key": "deliv:tool:growthbook:home",
+          "name": "GrowthBook",
+          "slug": "growthbook",
+          "url": "https://www.growthbook.io/"
+        },
+        {
+          "blurb": "Lightweight feature-flag service with a generous free tier and simple SDKs.",
+          "home_key": "deliv:tool:configcat:home",
+          "name": "ConfigCat",
+          "slug": "configcat",
+          "url": "https://configcat.com/"
+        },
+        {
+          "blurb": "CNCF-incubating standard for vendor-neutral feature-flag SDKs. Not a service; a spec.",
+          "home_key": "deliv:tool:openfeature:home",
+          "name": "OpenFeature",
+          "slug": "openfeature",
+          "url": "https://openfeature.dev/"
+        }
+      ]
+    }
+  ],
+  "faqs": [
+    {
+      "answer": "On-push: lint, test, build. On-merge-to-main: deploy to staging automatically. On-tag (or manual approval): deploy to production. Three pipelines, three triggers; that's the whole shape. Almost any platform (GitHub Actions, GitLab CI, CircleCI) can do this in well under a hundred lines of YAML. Resist the urge to add review apps, canaries, or environments-per-branch until the basic flow is reliable and fast for everyone on the team.",
+      "question": "What's the minimum CI/CD setup for a small team?",
+      "source_key": "deliv:faq:min-cicd",
+      "source_label": "Martin Fowler: Continuous Integration",
+      "source_url": "https://martinfowler.com/articles/continuousIntegration.html"
+    },
+    {
+      "answer": "Roughly when reproducing your infrastructure stops being a one-day task. If a new environment takes you a week of clicking in cloud consoles, IaC has already paid for itself. The other trigger is auditability: when you need to know who changed what in prod, plain SCM history beats a CloudTrail digest. Start with the resources that change most often (DNS, load balancers, IAM) and grow outward. You don't need to import everything on day one.",
+      "question": "When should I add IaC to my project?",
+      "source_key": "deliv:faq:when-iac",
+      "source_label": "HashiCorp: What is Infrastructure as Code?",
+      "source_url": "https://developer.hashicorp.com/terraform/intro"
+    },
+    {
+      "answer": "If your team is fluent in TypeScript, Python, or Go and you want loops, conditionals, and real testing, Pulumi is the natural fit. If you want the largest ecosystem of modules, the most provider coverage, and the easiest hiring story, Terraform (or OpenTofu) is still the default. The license change pushed many OSS teams to OpenTofu; check whether your CI provider's Terraform Cloud integration matters before picking.",
+      "question": "Should I use Terraform or Pulumi?",
+      "source_key": "deliv:faq:terraform-vs-pulumi",
+      "source_label": "Thoughtworks Radar: OpenTofu (Adopt)",
+      "source_url": "https://www.thoughtworks.com/radar/tools/opentofu"
+    },
+    {
+      "answer": "kubectl apply scales to small teams and short feedback loops. GitOps starts paying off when you have more than one cluster, more than a handful of services per cluster, or audit requirements that demand a clear answer to \"what's running and who put it there?\". The four OpenGitOps principles (declarative, versioned, pulled, continuously reconciled) describe what you gain. If you don't need the gains yet, the operational cost is real.",
+      "question": "Do I really need GitOps, or is kubectl apply enough?",
+      "source_key": "deliv:faq:need-gitops",
+      "source_label": "OpenGitOps Principles",
+      "source_url": "https://opengitops.dev/"
+    },
+    {
+      "answer": "Three rules: migrations are forward-only; every migration is backward-compatible with the previous app version; and migrations run before the app version that depends on them is deployed. That means expand/contract: add the new column or table first, ship the app that reads both old and new, backfill, then drop the old shape in a later release. Atlas, Alembic, Flyway, and Liquibase all support this pattern; the discipline comes from your team, not the tool.",
+      "question": "How do I handle database migrations in CI/CD safely?",
+      "source_key": "deliv:faq:migrations-cicd",
+      "source_label": "Martin Fowler: Evolutionary Database Design",
+      "source_url": "https://martinfowler.com/articles/evodb.html"
+    },
+    {
+      "answer": "Roughly when you start wanting to deploy more often than you want to release. Flags decouple the two: ship the code today, turn it on for 1% of users next week, ramp to 100% when the metrics hold. If your release cadence is monthly, you probably don't need a flag service yet. If it's daily and you have real users, the small operational cost pays for itself the first time you can roll back a bad release without rolling back a deploy.",
+      "question": "When does feature flagging actually pay off?",
+      "source_key": "deliv:faq:feature-flags-pay-off",
+      "source_label": "LaunchDarkly: What are Feature Flags?",
+      "source_url": "https://launchdarkly.com/blog/what-are-feature-flags/"
+    },
+    {
+      "answer": "The DORA research is unambiguous: high-performing teams deploy more often AND have lower change-failure rates. The way they get there is small batch sizes, fast feedback, and automation of the boring parts. The path is not to deploy more by relaxing review; it's to make each deploy smaller and the rollback cheaper. Charity Majors's framing is the right one: deploys shouldn't be scary because each one carries less risk, not because you've removed risk by waiting.",
+      "question": "How do I think about deploy frequency without breaking things?",
+      "source_key": "deliv:faq:deploy-frequency",
+      "source_label": "DORA Research",
+      "source_url": "https://dora.dev/research/"
+    }
+  ],
+  "people": [
+    {
+      "blurb": "Continuous Delivery co-author, DORA co-founder, and the canonical voice on modern release practices.",
+      "handle": "jezhumble",
+      "key": "deliv:person:x:jez-humble",
+      "name": "Jez Humble",
+      "platform": "x",
+      "url": "https://x.com/jezhumble"
+    },
+    {
+      "blurb": "Continuous Delivery co-author. Runs the Continuous Delivery YouTube channel.",
+      "handle": "davefarley77",
+      "key": "deliv:person:youtube:dave-farley",
+      "name": "Dave Farley",
+      "platform": "youtube",
+      "url": "https://www.youtube.com/@ContinuousDelivery"
+    },
+    {
+      "blurb": "Phoenix Project and DevOps Handbook author; founder of IT Revolution and DevOps Enterprise Summit.",
+      "handle": "RealGeneKim",
+      "key": "deliv:person:x:gene-kim",
+      "name": "Gene Kim",
+      "platform": "x",
+      "url": "https://x.com/RealGeneKim"
+    },
+    {
+      "blurb": "Accelerate co-author and the researcher behind the DORA metrics.",
+      "handle": "nicolefv",
+      "key": "deliv:person:x:nicole-forsgren",
+      "name": "Nicole Forsgren",
+      "platform": "x",
+      "url": "https://x.com/nicolefv"
+    },
+    {
+      "blurb": "HashiCorp founder. Origin of Terraform, Vault, and Vagrant; deep writing on tooling and dev experience.",
+      "handle": "mitchellh",
+      "key": "deliv:person:x:mitchell-hashimoto",
+      "name": "Mitchell Hashimoto",
+      "platform": "x",
+      "url": "https://x.com/mitchellh"
+    },
+    {
+      "blurb": "Ex-Netflix cloud architect; the canonical voice on microservices delivery patterns.",
+      "handle": "adrianco",
+      "key": "deliv:person:x:adrian-cockcroft",
+      "name": "Adrian Cockcroft",
+      "platform": "x",
+      "url": "https://x.com/adrianco"
+    },
+    {
+      "blurb": "InfoQ news editor and prolific DevOps practitioner; runs deep technical interviews and analysis.",
+      "handle": "danielbryantuk",
+      "key": "deliv:person:x:daniel-bryant",
+      "name": "Daniel Bryant",
+      "platform": "x",
+      "url": "https://x.com/danielbryantuk"
+    },
+    {
+      "blurb": "Docker Captain with deep Docker, Kubernetes, and CI/CD content. Weekly live YouTube show.",
+      "handle": "BretFisher",
+      "key": "deliv:person:youtube:bret-fisher",
+      "name": "Bret Fisher",
+      "platform": "youtube",
+      "url": "https://www.youtube.com/@BretFisher"
+    },
+    {
+      "blurb": "Elixir/Erlang deployment writing at underjord.io. Practical, opinionated, BEAM-focused.",
+      "handle": "lawik",
+      "key": "deliv:person:blog:lars-wikman",
+      "name": "Lars Wikman",
+      "platform": "blog",
+      "url": "https://underjord.io/"
+    },
+    {
+      "blurb": "Thoughtworks; lead contributor on Martin Fowler's \"Exploring Generative AI\" series on AI-assisted delivery.",
+      "handle": "BBoeckeler",
+      "key": "deliv:person:blog:birgitta-boeckeler",
+      "name": "Birgitta Böckeler",
+      "platform": "blog",
+      "url": "https://martinfowler.com/articles/exploring-gen-ai.html"
+    }
+  ],
+  "spine": [
+    {
+      "blurb": "The canonical text on building reliable, rapid, low-risk software releases through automation and discipline.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:spine:continuous-delivery",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Jez Humble & David Farley",
+      "title": "Continuous Delivery",
+      "url": "https://continuousdelivery.com/"
+    },
+    {
+      "blurb": "Data-driven follow-up to Continuous Delivery; the research foundation behind the DORA metrics.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:spine:accelerate",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Forsgren, Humble, Kim · IT Revolution",
+      "title": "Accelerate",
+      "url": "https://itrevolution.com/product/accelerate/"
+    },
+    {
+      "blurb": "Comprehensive practitioner's guide to applying DevOps principles across the value stream.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:spine:devops-handbook",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Kim, Humble, Debois, Willis · IT Revolution",
+      "title": "The DevOps Handbook",
+      "url": "https://itrevolution.com/product/the-devops-handbook-second-edition/"
+    },
+    {
+      "blurb": "The narrative DevOps text. A novel that introduced a generation of engineers to flow, feedback, and learning.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:spine:phoenix-project",
+      "learning_type": "Discussion",
+      "published_at": null,
+      "source": "Kim, Behr, Spafford · IT Revolution",
+      "title": "The Phoenix Project",
+      "url": "https://itrevolution.com/product/the-phoenix-project/"
+    },
+    {
+      "blurb": "Canonical reference on trunk-based development: short-lived branches, fast review, continuous integration.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:spine:trunk-based-dev",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Paul Hammant",
+      "title": "Trunk-Based Development",
+      "url": "https://trunkbaseddevelopment.com/"
+    },
+    {
+      "blurb": "The CNCF-backed spec defining what GitOps is and what it isn't. Four principles, vendor-neutral.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:spine:opengitops",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "OpenGitOps · CNCF",
+      "title": "OpenGitOps Principles",
+      "url": "https://opengitops.dev/"
+    },
+    {
+      "blurb": "Lightweight convention for commit messages that machines can parse and humans can scan.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:spine:conventional-commits",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Conventional Commits",
+      "title": "Conventional Commits",
+      "url": "https://www.conventionalcommits.org/"
+    },
+    {
+      "blurb": "MAJOR.MINOR.PATCH and the contract a version number actually conveys. The default for shared libraries.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:spine:semver",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Tom Preston-Werner",
+      "title": "Semantic Versioning",
+      "url": "https://semver.org/"
+    },
+    {
+      "blurb": "Fowler's canonical 2006 essay defining CI: integrate often, automate the build, keep main releasable.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:spine:fowler-ci",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Martin Fowler",
+      "title": "Continuous Integration",
+      "url": "https://martinfowler.com/articles/continuousIntegration.html"
+    },
+    {
+      "blurb": "The case that deploy fear is technical debt; small, frequent, author-owned changes beat blanket freezes.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:spine:charity-friday-deploys",
+      "learning_type": "Discussion",
+      "published_at": null,
+      "source": "Charity Majors",
+      "title": "Deploys: It's Not Actually About Friday",
+      "url": "https://charity.wtf/2019/05/01/friday-deploy-freezes-are-exactly-like-murdering-puppies/"
+    },
+    {
+      "blurb": "Quarterly opinionated assessment of tools, techniques, platforms, and languages by Thoughtworks practitioners.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:spine:tw-radar",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Thoughtworks",
+      "title": "Technology Radar",
+      "url": "https://www.thoughtworks.com/radar"
+    },
+    {
+      "blurb": "Annual research linking delivery practices to org performance. The empirical backbone of modern delivery.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:spine:dora",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "DORA · Google Cloud",
+      "title": "State of DevOps Report (DORA)",
+      "url": "https://dora.dev/research/"
+    }
+  ],
+  "tool_resources": [
+    {
+      "blurb": "The free official Git book. The definitive learn-Git-from-scratch and Git-reference resource.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:git:pro-git",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "git-scm.com",
+      "title": "Pro Git Book",
+      "tool_slugs": [
+        "git"
+      ],
+      "url": "https://git-scm.com/book/en/v2"
+    },
+    {
+      "blurb": "Documentation root for GitHub features: repos, Actions, packages, security, and Codespaces.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:github:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "GitHub docs",
+      "title": "GitHub Docs",
+      "tool_slugs": [
+        "github"
+      ],
+      "url": "https://docs.github.com/"
+    },
+    {
+      "blurb": "Reference for GitLab repos, CI/CD, registries, security, and self-managed installs.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:gitlab:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "GitLab docs",
+      "title": "GitLab Documentation",
+      "tool_slugs": [
+        "gitlab"
+      ],
+      "url": "https://docs.gitlab.com/"
+    },
+    {
+      "blurb": "Walks new users through account setup, repos, and Codeberg's community-driven Forgejo-based platform.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:codeberg:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Codeberg docs",
+      "title": "Getting Started with Codeberg",
+      "tool_slugs": [
+        "codeberg"
+      ],
+      "url": "https://docs.codeberg.org/getting-started/"
+    },
+    {
+      "blurb": "Create a repo, connect your local environment, and push your first commit.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:codeberg:first-repo",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Codeberg docs",
+      "title": "Your First Codeberg Repository",
+      "tool_slugs": [
+        "codeberg"
+      ],
+      "url": "https://docs.codeberg.org/getting-started/first-repository/"
+    },
+    {
+      "blurb": "Official user-facing docs for repositories, pull requests, issues, and collaboration on a Forgejo instance.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:forgejo:user-guide",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Forgejo docs",
+      "title": "Forgejo User Guide",
+      "tool_slugs": [
+        "forgejo"
+      ],
+      "url": "https://forgejo.org/docs/latest/user/"
+    },
+    {
+      "blurb": "Run your first CI workflow with Forgejo Actions.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:forgejo:actions-quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Forgejo docs",
+      "title": "Forgejo Actions Quick Start",
+      "tool_slugs": [
+        "forgejo"
+      ],
+      "url": "https://forgejo.org/docs/latest/user/actions/quick-start/"
+    },
+    {
+      "blurb": "Installation, usage, and administration of the self-hosted Git forge.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:gitea:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Gitea docs",
+      "title": "Gitea Documentation",
+      "tool_slugs": [
+        "gitea"
+      ],
+      "url": "https://docs.gitea.com/"
+    },
+    {
+      "blurb": "Pull the Gitea image, configure volumes, and complete the install wizard.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:gitea:docker-install",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Gitea docs",
+      "title": "Gitea Install with Docker",
+      "tool_slugs": [
+        "gitea"
+      ],
+      "url": "https://docs.gitea.com/installation/install-with-docker"
+    },
+    {
+      "blurb": "Atlassian's onboarding for repos, push/pull, issues, and wikis in Bitbucket Cloud.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:bitbucket:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Atlassian docs",
+      "title": "Get Started with Bitbucket Cloud",
+      "tool_slugs": [
+        "bitbucket"
+      ],
+      "url": "https://support.atlassian.com/bitbucket-cloud/docs/get-started-with-bitbucket-cloud/"
+    },
+    {
+      "blurb": "Bitbucket's built-in CI/CD with a first pipeline configured via bitbucket-pipelines.yml.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:bitbucket:pipelines",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Atlassian docs",
+      "title": "Get Started with Bitbucket Pipelines",
+      "tool_slugs": [
+        "bitbucket"
+      ],
+      "url": "https://support.atlassian.com/bitbucket-cloud/docs/get-started-with-bitbucket-pipelines/"
+    },
+    {
+      "blurb": "Create your first workflow, trigger it on push, and explore the marketplace of pre-built actions.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:github-actions:quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "GitHub docs",
+      "title": "GitHub Actions Quickstart",
+      "tool_slugs": [
+        "github-actions"
+      ],
+      "url": "https://docs.github.com/en/actions/quickstart"
+    },
+    {
+      "blurb": "Add a .gitlab-ci.yml, define your first job, and run it on shared or self-hosted runners.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:gitlab-ci:quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "GitLab docs",
+      "title": "GitLab CI/CD Getting Started",
+      "tool_slugs": [
+        "gitlab-ci"
+      ],
+      "url": "https://docs.gitlab.com/ee/ci/quick_start/"
+    },
+    {
+      "blurb": "Connect a repo, commit a config.yml, and watch your first CircleCI build run.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:circleci:quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "CircleCI docs",
+      "title": "CircleCI Quickstart",
+      "tool_slugs": [
+        "circleci"
+      ],
+      "url": "https://circleci.com/docs/guides/getting-started/getting-started/"
+    },
+    {
+      "blurb": "Hands-on tutorial creating a basic Buildkite pipeline from an example.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:buildkite:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Buildkite docs",
+      "title": "Getting Started with Buildkite Pipelines",
+      "tool_slugs": [
+        "buildkite"
+      ],
+      "url": "https://buildkite.com/docs/pipelines/getting-started"
+    },
+    {
+      "blurb": "Official guided tour: install Jenkins and create your first Pipeline.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:jenkins:guided-tour",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Jenkins docs",
+      "title": "Jenkins Guided Tour",
+      "tool_slugs": [
+        "jenkins"
+      ],
+      "url": "https://www.jenkins.io/doc/pipeline/tour/getting-started/"
+    },
+    {
+      "blurb": "Comprehensive reference for installing, configuring, and operating Jenkins in production.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:jenkins:handbook",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Jenkins docs",
+      "title": "Jenkins User Handbook",
+      "tool_slugs": [
+        "jenkins"
+      ],
+      "url": "https://www.jenkins.io/doc/book/"
+    },
+    {
+      "blurb": "Stand up a Drone server and run your first .drone.yml pipeline.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:drone:quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Drone docs",
+      "title": "Drone Quick Start",
+      "tool_slugs": [
+        "drone"
+      ],
+      "url": "https://docs.drone.io/quickstart/"
+    },
+    {
+      "blurb": "Write pipelines in Go, Python, or TypeScript and run them anywhere with a container runtime.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:dagger:docs",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Dagger docs",
+      "title": "Dagger Documentation",
+      "tool_slugs": [
+        "dagger"
+      ],
+      "url": "https://docs.dagger.io/"
+    },
+    {
+      "blurb": "Earthfile syntax, caching, and the local-equals-remote build model.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:earthly:docs",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Earthly docs",
+      "title": "Earthly Documentation",
+      "tool_slugs": [
+        "earthly"
+      ],
+      "url": "https://docs.earthly.dev/"
+    },
+    {
+      "blurb": "Covers CI fundamentals, TeamCity concepts, and installing the server on Windows, Linux, or macOS.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:teamcity:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "JetBrains docs",
+      "title": "Getting Started with TeamCity",
+      "tool_slugs": [
+        "teamcity"
+      ],
+      "url": "https://www.jetbrains.com/help/teamcity/getting-started-with-teamcity.html"
+    },
+    {
+      "blurb": "Point TeamCity at a repo URL and let auto-detection scaffold your first build configuration.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:teamcity:first-build",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "JetBrains docs",
+      "title": "Run Your First TeamCity Build",
+      "tool_slugs": [
+        "teamcity"
+      ],
+      "url": "https://www.jetbrains.com/help/teamcity/configure-and-run-your-first-build.html"
+    },
+    {
+      "blurb": "Hands-on tutorials covering AWS, Azure, GCP, Kubernetes, and Terraform Cloud workflows.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:terraform:tutorials",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "HashiCorp Developer",
+      "title": "Terraform Tutorials",
+      "tool_slugs": [
+        "terraform"
+      ],
+      "url": "https://developer.hashicorp.com/terraform/tutorials"
+    },
+    {
+      "blurb": "Install OpenTofu and run your first plan/apply against any supported provider.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:opentofu:docs",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "OpenTofu docs",
+      "title": "OpenTofu Documentation",
+      "tool_slugs": [
+        "opentofu"
+      ],
+      "url": "https://opentofu.org/docs/"
+    },
+    {
+      "blurb": "Pick a language and cloud, stand up your first stack, and deploy it via the Pulumi CLI.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:pulumi:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Pulumi docs",
+      "title": "Pulumi Get Started",
+      "tool_slugs": [
+        "pulumi"
+      ],
+      "url": "https://www.pulumi.com/docs/get-started/"
+    },
+    {
+      "blurb": "Install the CDK CLI, bootstrap an environment, and deploy your first stack.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:aws-cdk:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "AWS docs",
+      "title": "Getting Started with AWS CDK",
+      "tool_slugs": [
+        "aws-cdk"
+      ],
+      "url": "https://docs.aws.amazon.com/cdk/v2/guide/getting-started.html"
+    },
+    {
+      "blurb": "End-to-end walkthrough scaffolding, synthing, and deploying a real CDK application.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:aws-cdk:hello-world",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "AWS docs",
+      "title": "AWS CDK Hello World Tutorial",
+      "tool_slugs": [
+        "aws-cdk"
+      ],
+      "url": "https://docs.aws.amazon.com/cdk/v2/guide/hello-world.html"
+    },
+    {
+      "blurb": "Install Crossplane, manage cloud resources, and build compositions from one entry point.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:crossplane:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Crossplane docs",
+      "title": "Get Started with Crossplane",
+      "tool_slugs": [
+        "crossplane"
+      ],
+      "url": "https://docs.crossplane.io/latest/get-started/"
+    },
+    {
+      "blurb": "Install Ansible, build an inventory, and write your first 'Hello World' playbook.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:ansible:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Ansible docs",
+      "title": "Getting Started with Ansible",
+      "tool_slugs": [
+        "ansible"
+      ],
+      "url": "https://docs.ansible.com/projects/ansible/latest/getting_started/index.html"
+    },
+    {
+      "blurb": "Install ArgoCD, register a Git repo as a source of truth, and deploy your first application.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:argocd:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "ArgoCD docs",
+      "title": "ArgoCD Getting Started",
+      "tool_slugs": [
+        "argocd"
+      ],
+      "url": "https://argo-cd.readthedocs.io/en/stable/getting_started/"
+    },
+    {
+      "blurb": "Bootstrap Flux into a cluster, point it at a Git repo, and reconcile your first deployment.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:flux:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Flux docs",
+      "title": "Flux Get Started",
+      "tool_slugs": [
+        "flux"
+      ],
+      "url": "https://fluxcd.io/flux/get-started/"
+    },
+    {
+      "blurb": "Install Helm, search the chart repository, and release your first chart into a cluster.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:helm:quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Helm docs",
+      "title": "Helm Quickstart",
+      "tool_slugs": [
+        "helm"
+      ],
+      "url": "https://helm.sh/docs/intro/quickstart/"
+    },
+    {
+      "blurb": "Orientation for new Spinnaker users covering applications, pipelines, and deployment strategies.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:spinnaker:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Spinnaker docs",
+      "title": "Get Started Using Spinnaker",
+      "tool_slugs": [
+        "spinnaker"
+      ],
+      "url": "https://spinnaker.io/docs/guides/user/get-started/"
+    },
+    {
+      "blurb": "Hands-on codelab introducing Spinnaker by deploying a simple service end to end.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:spinnaker:hello-deployment",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Spinnaker docs",
+      "title": "Spinnaker Hello Deployment Codelab",
+      "tool_slugs": [
+        "spinnaker"
+      ],
+      "url": "https://spinnaker.io/docs/guides/tutorials/codelabs/hello-deployment/"
+    },
+    {
+      "blurb": "Build two Tasks, chain them into a Pipeline, and run them with a PipelineRun on minikube.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:tekton:pipelines",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Tekton docs",
+      "title": "Tekton: Getting Started with Pipelines",
+      "tool_slugs": [
+        "tekton"
+      ],
+      "url": "https://tekton.dev/docs/getting-started/pipelines/"
+    },
+    {
+      "blurb": "Author and run your first standalone Tekton Task before moving up to full Pipelines.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:tekton:tasks",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Tekton docs",
+      "title": "Tekton: Getting Started with Tasks",
+      "tool_slugs": [
+        "tekton"
+      ],
+      "url": "https://tekton.dev/docs/getting-started/tasks/"
+    },
+    {
+      "blurb": "Run skaffold dev against a sample Node app on minikube to see the build/deploy inner loop.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:skaffold:quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Skaffold docs",
+      "title": "Skaffold Quickstart",
+      "tool_slugs": [
+        "skaffold"
+      ],
+      "url": "https://skaffold.dev/docs/quickstart/"
+    },
+    {
+      "blurb": "Use skaffold init to scaffold a skaffold.yaml for an existing application.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:skaffold:your-project",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Skaffold docs",
+      "title": "Skaffold: Getting Started With Your Project",
+      "tool_slugs": [
+        "skaffold"
+      ],
+      "url": "https://skaffold.dev/docs/workflows/getting-started-with-your-project/"
+    },
+    {
+      "blurb": "Project README covering frontends, caching, and modern Dockerfile features.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:buildkit:github",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "GitHub",
+      "title": "BuildKit on GitHub",
+      "tool_slugs": [
+        "buildkit"
+      ],
+      "url": "https://github.com/moby/buildkit"
+    },
+    {
+      "blurb": "Build OCI images from source with the pack CLI; no Dockerfile required.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:buildpacks:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Buildpacks docs",
+      "title": "Cloud Native Buildpacks: Get Started",
+      "tool_slugs": [
+        "buildpacks"
+      ],
+      "url": "https://buildpacks.io/docs/for-app-developers/"
+    },
+    {
+      "blurb": "Official source-to-OCI-image builder docs. Note: the project is in maintenance mode; Railway directs new projects to Railpack.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:nixpacks:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Nixpacks docs",
+      "title": "Nixpacks Documentation",
+      "tool_slugs": [
+        "nixpacks"
+      ],
+      "url": "https://nixpacks.com/docs"
+    },
+    {
+      "blurb": "Install ko, authenticate to a registry, and build a Go app into a container without a Dockerfile.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:ko:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "ko docs",
+      "title": "Get Started with ko",
+      "tool_slugs": [
+        "ko"
+      ],
+      "url": "https://ko.build/get-started/"
+    },
+    {
+      "blurb": "Quickstart, configuration, and goals for containerizing Java apps without Docker.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:jib:maven",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "GitHub",
+      "title": "Jib Maven Plugin",
+      "tool_slugs": [
+        "jib"
+      ],
+      "url": "https://github.com/GoogleContainerTools/jib/blob/master/jib-maven-plugin/README.md"
+    },
+    {
+      "blurb": "Gradle plugin for building OCI images from Java projects directly from your build.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:jib:gradle",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "GitHub",
+      "title": "Jib Gradle Plugin",
+      "tool_slugs": [
+        "jib"
+      ],
+      "url": "https://github.com/GoogleContainerTools/jib/blob/master/jib-gradle-plugin/README.md"
+    },
+    {
+      "blurb": "Install Bazel and follow language-specific tutorials (C++, Java, Go, etc.) to set up your first workspace.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:bazel:start",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Bazel docs",
+      "title": "Bazel: Getting Started",
+      "tool_slugs": [
+        "bazel"
+      ],
+      "url": "https://bazel.build/start"
+    },
+    {
+      "blurb": "Conceptual overview of how Bazel approaches builds, dependencies, and reproducibility.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:bazel:intro",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Bazel docs",
+      "title": "Intro to Bazel",
+      "tool_slugs": [
+        "bazel"
+      ],
+      "url": "https://bazel.build/about/intro"
+    },
+    {
+      "blurb": "The devcontainer.json spec that VS Code, JetBrains, GitHub Codespaces, and others implement.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:dev-containers:spec",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "containers.dev",
+      "title": "Dev Containers Specification",
+      "tool_slugs": [
+        "dev-containers"
+      ],
+      "url": "https://containers.dev/implementors/spec/"
+    },
+    {
+      "blurb": "Install mise and start managing runtime versions, env vars, and tasks per project.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:mise:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "mise docs",
+      "title": "mise Documentation",
+      "tool_slugs": [
+        "mise"
+      ],
+      "url": "https://mise.jdx.dev/getting-started.html"
+    },
+    {
+      "blurb": "Install asdf, configure your shell, and add plugins for the language runtimes you need.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:asdf:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "asdf docs",
+      "title": "asdf Getting Started",
+      "tool_slugs": [
+        "asdf"
+      ],
+      "url": "https://asdf-vm.com/guide/getting-started.html"
+    },
+    {
+      "blurb": "Project landing page with the canonical .envrc walkthrough and shell hook setup.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:direnv:home",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "direnv docs",
+      "title": "direnv",
+      "tool_slugs": [
+        "direnv"
+      ],
+      "url": "https://direnv.net/"
+    },
+    {
+      "blurb": "Install direnv and wire it into bash, zsh, fish, or your shell of choice.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:direnv:install",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "direnv docs",
+      "title": "direnv Installation",
+      "tool_slugs": [
+        "direnv"
+      ],
+      "url": "https://direnv.net/docs/installation.html"
+    },
+    {
+      "blurb": "Official learning hub pointing to nix.dev tutorials and the Nix reference manual.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:nix:learn",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "NixOS.org",
+      "title": "Learn Nix",
+      "tool_slugs": [
+        "nix"
+      ],
+      "url": "https://nixos.org/learn/"
+    },
+    {
+      "blurb": "Initialize a devbox.json, add Nix-powered packages, and enter an isolated dev shell in minutes.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:devbox:quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Jetify docs",
+      "title": "Devbox Quickstart",
+      "tool_slugs": [
+        "devbox"
+      ],
+      "url": "https://www.jetify.com/docs/devbox/quickstart"
+    },
+    {
+      "blurb": "Build a Kubernetes dev loop with live updates, smart rebuilds, and a status UI.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:tilt:tutorial",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Tilt docs",
+      "title": "Tilt Tutorial",
+      "tool_slugs": [
+        "tilt"
+      ],
+      "url": "https://docs.tilt.dev/tutorial.html"
+    },
+    {
+      "blurb": "Declarative schema migrations: plan diffs, validate with linting, and ship via CI.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:atlas:docs",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Atlas docs",
+      "title": "Atlas Documentation",
+      "tool_slugs": [
+        "atlas"
+      ],
+      "url": "https://atlasgo.io/docs"
+    },
+    {
+      "blurb": "Canonical README for the Go migration tool: CLI usage, SQL and Go migration formats, embed examples.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:goose:github",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "GitHub",
+      "title": "pressly/goose",
+      "tool_slugs": [
+        "goose"
+      ],
+      "url": "https://github.com/pressly/goose"
+    },
+    {
+      "blurb": "Drivers, library usage, and recommended migration workflows.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:goose:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Goose docs",
+      "title": "Goose Documentation",
+      "tool_slugs": [
+        "goose"
+      ],
+      "url": "https://pressly.github.io/goose/"
+    },
+    {
+      "blurb": "Create up/down migration files, run them with the CLI, and embed migrations into a Go program.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:golang-migrate:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "GitHub",
+      "title": "Getting Started with golang-migrate",
+      "tool_slugs": [
+        "golang-migrate"
+      ],
+      "url": "https://github.com/golang-migrate/migrate/blob/master/GETTING_STARTED.md"
+    },
+    {
+      "blurb": "Database-specific walkthrough for running golang-migrate against Postgres.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:golang-migrate:postgres-tutorial",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "GitHub",
+      "title": "golang-migrate Postgres Tutorial",
+      "tool_slugs": [
+        "golang-migrate"
+      ],
+      "url": "https://github.com/golang-migrate/migrate/blob/master/database/postgres/TUTORIAL.md"
+    },
+    {
+      "blurb": "Set up Alembic with SQLAlchemy, generate your first revision, and apply it to a database.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:alembic:tutorial",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Alembic docs",
+      "title": "Alembic Tutorial",
+      "tool_slugs": [
+        "alembic"
+      ],
+      "url": "https://alembic.sqlalchemy.org/en/latest/tutorial.html"
+    },
+    {
+      "blurb": "Install Flyway and version-control your database schema with SQL-first migrations.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:flyway:docs",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Redgate / Flyway",
+      "title": "Flyway Documentation",
+      "tool_slugs": [
+        "flyway"
+      ],
+      "url": "https://documentation.red-gate.com/fd"
+    },
+    {
+      "blurb": "Install Liquibase and run your first changelog using the bundled H2 sandbox database.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:liquibase:start",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Liquibase docs",
+      "title": "Get Started with Liquibase",
+      "tool_slugs": [
+        "liquibase"
+      ],
+      "url": "https://docs.liquibase.com/start/home.html"
+    },
+    {
+      "blurb": "Authoritative reference covering changelogs, contexts, rollbacks, and CI/CD integration patterns.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:liquibase:docs",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Liquibase docs",
+      "title": "Liquibase Documentation",
+      "tool_slugs": [
+        "liquibase"
+      ],
+      "url": "https://docs.liquibase.com/"
+    },
+    {
+      "blurb": "Set up Prisma Migrate, create a baseline migration, and generate SQL from your Prisma schema.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:prisma-migrate:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Prisma docs",
+      "title": "Getting Started with Prisma Migrate",
+      "tool_slugs": [
+        "prisma-migrate"
+      ],
+      "url": "https://www.prisma.io/docs/orm/prisma-migrate/getting-started"
+    },
+    {
+      "blurb": "From-scratch tutorial wiring Prisma Migrate to a TypeScript + Postgres project.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:prisma-migrate:typescript-postgres",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Prisma docs",
+      "title": "Prisma Migrate with TypeScript and PostgreSQL",
+      "tool_slugs": [
+        "prisma-migrate"
+      ],
+      "url": "https://www.prisma.io/docs/getting-started/setup-prisma/start-from-scratch/relational-databases/using-prisma-migrate-typescript-postgresql"
+    },
+    {
+      "blurb": "Install sqlx-cli and use sqlx migrate add/run to manage SQLx migrations in Rust projects.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:sqlx-migrate:cli",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "crates.io",
+      "title": "sqlx-cli",
+      "tool_slugs": [
+        "sqlx-migrate"
+      ],
+      "url": "https://crates.io/crates/sqlx-cli"
+    },
+    {
+      "blurb": "API reference for embedding migrations into a Rust binary via the sqlx::migrate! macro.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:sqlx-migrate:api",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "docs.rs",
+      "title": "sqlx::migrate Migrator API",
+      "tool_slugs": [
+        "sqlx-migrate"
+      ],
+      "url": "https://docs.rs/sqlx/latest/sqlx/migrate/struct.Migrator.html"
+    },
+    {
+      "blurb": "Create a project, add an SDK, and ship your first flag-gated release.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:launchdarkly:get-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "LaunchDarkly docs",
+      "title": "LaunchDarkly Get Started",
+      "tool_slugs": [
+        "launchdarkly"
+      ],
+      "url": "https://docs.launchdarkly.com/home/getting-started"
+    },
+    {
+      "blurb": "Install a Statsig SDK in your language of choice and start checking feature gates in a few lines.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:statsig:quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Statsig docs",
+      "title": "Get Started with the Statsig SDK",
+      "tool_slugs": [
+        "statsig"
+      ],
+      "url": "https://docs.statsig.com/sdks/quickstart"
+    },
+    {
+      "blurb": "Concept guide explaining feature gates, targeting, rollouts, and overrides in Statsig.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:statsig:overview",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "Statsig docs",
+      "title": "Statsig Feature Flags Overview",
+      "tool_slugs": [
+        "statsig"
+      ],
+      "url": "https://docs.statsig.com/feature-flags/overview"
+    },
+    {
+      "blurb": "Use PostHog's flags plus analytics plus experimentation in one stack.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:posthog:feature-flags",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "PostHog docs",
+      "title": "PostHog Feature Flags",
+      "tool_slugs": [
+        "posthog"
+      ],
+      "url": "https://posthog.com/docs/feature-flags"
+    },
+    {
+      "blurb": "\"Get up and running with Unleash in less than 5 minutes\" with links to SDKs and tutorials.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:unleash:docs",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Unleash docs",
+      "title": "Unleash Documentation",
+      "tool_slugs": [
+        "unleash"
+      ],
+      "url": "https://docs.getunleash.io/"
+    },
+    {
+      "blurb": "Create a flag, define strategies, and refine with constraints, segments, and variants.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:unleash:create-flag",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Unleash docs",
+      "title": "Unleash: Create and Configure a Feature Flag",
+      "tool_slugs": [
+        "unleash"
+      ],
+      "url": "https://docs.getunleash.io/guides/how-to-create-feature-flags"
+    },
+    {
+      "blurb": "Four-step tutorial: create a project and flag, import the JS SDK, fetch flags, and toggle behavior.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:flagsmith:quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "Flagsmith docs",
+      "title": "Flagsmith Quick Start",
+      "tool_slugs": [
+        "flagsmith"
+      ],
+      "url": "https://docs.flagsmith.com/getting-started/quick-start"
+    },
+    {
+      "blurb": "End-to-end walkthrough for feature flagging and experimentation with GrowthBook Cloud or self-host.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:growthbook:quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "GrowthBook docs",
+      "title": "GrowthBook Quick Start",
+      "tool_slugs": [
+        "growthbook"
+      ],
+      "url": "https://docs.growthbook.io/quick-start"
+    },
+    {
+      "blurb": "Wire a GrowthBook SDK into your app to start evaluating feature flags.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:growthbook:sdk-quickstart",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "GrowthBook docs",
+      "title": "GrowthBook SDK Quickstart",
+      "tool_slugs": [
+        "growthbook"
+      ],
+      "url": "https://docs.growthbook.io/lib/quickstart"
+    },
+    {
+      "blurb": "Add a flag in the ConfigCat dashboard and evaluate it from any of 20+ supported SDKs.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:configcat:getting-started",
+      "learning_type": "Tutorial",
+      "published_at": null,
+      "source": "ConfigCat docs",
+      "title": "ConfigCat Getting Started",
+      "tool_slugs": [
+        "configcat"
+      ],
+      "url": "https://configcat.com/docs/getting-started/"
+    },
+    {
+      "blurb": "The CNCF-incubating spec for vendor-neutral feature-flag SDKs.",
+      "first_indexed_at": "2026-05-12",
+      "key": "deliv:res:openfeature:spec",
+      "learning_type": "Best Practices",
+      "published_at": null,
+      "source": "OpenFeature docs",
+      "title": "OpenFeature Specification",
+      "tool_slugs": [
+        "openfeature"
+      ],
+      "url": "https://openfeature.dev/specification/"
+    }
+  ]
+}

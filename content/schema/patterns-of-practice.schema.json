@@ -1,0 +1,312 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "categories": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "intro": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "tools": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "blurb": {
+                  "type": "string"
+                },
+                "home_key": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "slug": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "slug",
+                "name",
+                "url",
+                "home_key",
+                "blurb"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "intro",
+          "tools"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "faqs": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "answer": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "source_key": {
+            "type": "string"
+          },
+          "source_label": {
+            "type": "string"
+          },
+          "source_url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "question",
+          "answer",
+          "source_label",
+          "source_url",
+          "source_key"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "people": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "blurb": {
+            "type": "string"
+          },
+          "handle": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "handle",
+          "platform",
+          "url",
+          "key",
+          "blurb"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "sections_by_slug": {
+      "additionalProperties": false,
+      "properties": {
+        "anti-patterns": {
+          "type": "string"
+        },
+        "boundaries-abstraction": {
+          "type": "string"
+        },
+        "change-patterns": {
+          "type": "string"
+        },
+        "composition-construction": {
+          "type": "string"
+        },
+        "concurrency": {
+          "type": "string"
+        },
+        "control-flow": {
+          "type": "string"
+        },
+        "data-state": {
+          "type": "string"
+        },
+        "error-handling-resilience": {
+          "type": "string"
+        },
+        "evolution-migration": {
+          "type": "string"
+        },
+        "messaging-coordination": {
+          "type": "string"
+        },
+        "operational-patterns": {
+          "type": "string"
+        },
+        "resilience-at-scale": {
+          "type": "string"
+        },
+        "review-verification": {
+          "type": "string"
+        },
+        "topology": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "composition-construction",
+        "control-flow",
+        "boundaries-abstraction",
+        "error-handling-resilience",
+        "concurrency",
+        "data-state",
+        "messaging-coordination",
+        "topology",
+        "resilience-at-scale",
+        "evolution-migration",
+        "change-patterns",
+        "review-verification",
+        "operational-patterns",
+        "anti-patterns"
+      ],
+      "type": "object"
+    },
+    "spine": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "blurb": {
+            "type": "string"
+          },
+          "first_indexed_at": {
+            "format": "date",
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "learning_type": {
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "url",
+          "source",
+          "key",
+          "learning_type",
+          "first_indexed_at",
+          "published_at",
+          "blurb"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "tool_resources": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "blurb": {
+            "type": "string"
+          },
+          "first_indexed_at": {
+            "format": "date",
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "learning_type": {
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "tool_slugs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "url",
+          "source",
+          "key",
+          "tool_slugs",
+          "learning_type",
+          "first_indexed_at",
+          "published_at",
+          "blurb"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "categories",
+    "spine",
+    "tool_resources",
+    "people",
+    "faqs",
+    "sections_by_slug"
+  ],
+  "title": "patterns-of-practice",
+  "type": "object"
+}
