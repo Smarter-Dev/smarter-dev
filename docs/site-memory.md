@@ -85,3 +85,45 @@ To mint the key, use `/admin/api-keys` with a dedicated site service-owner
 account holding `site-service`: principal **service**, service name **site**,
 explicit scopes **site-memory** and, if needed, **site-privacy**. Store the raw
 key only in the site backend's secret store. See the [key runbook](v2/legacy-sunset/runbooks/01-rotate-bot-key.md#site-service-key).
+
+## Site billing API
+
+All `/api/site/billing` routes require the same site service principal boundary
+and an explicit **site-billing** scope, plus the owner's `site-service` role.
+Older memory/privacy-only keys receive 401. The Worker must render billing
+unavailable on missing permission, missing Python account, or upstream failure.
+No Polar credentials belong in the Worker.
+
+- `GET /catalog`: `{launched, offerings, offerings_by_role, hacker, founder}`,
+  using the shared Polar pricing context. The public catalog resolves
+  `sudo_launch=enabled` only; `disabled` and `admin_only` return an empty teaser
+  context without contacting Polar. Admin previews remain on the Python site;
+  the service key owner's administrator permission never launches public pricing.
+- `GET /users/{user_id}/membership`: `{status, plan, expires_at, will_renew,
+  portal_available}`. Status is `none`, `active`, or `expired`; plan is `hacker`,
+  `founder`, or null. Uses the account page's current non-revoked membership
+  selection. Comp memberships have no portal. No customer IDs leave Python.
+- `POST /users/{user_id}/checkout`: JSON `{plan_id, success_url, cancel_url}`.
+  `plan_id` is the catalog offering ID or its active price ID, never an arbitrary
+  Polar product. Both URLs must be absolute and use exactly `SITE_BASE_URL`'s
+  origin (scheme, host and port), without credentials or fragments. The launch
+  gate is rechecked. The existing checkout helper forwards `cancel_url` as
+  Polar's `return_url` back button, and returns `{url}`.
+- `POST /users/{user_id}/portal`: returns `{url}` from the existing portal helper;
+  return location is `SITE_BASE_URL/account/billing`. Available for expired
+  memberships too, independently of the launch flag.
+
+User IDs are shared Skrift account UUIDs, resolved to an active Python user;
+unknown/deactivated users return 404. These endpoints do not create users or
+memberships. The Worker must use its authenticated user's UUID, never a form ID.
+Malformed IDs/return URLs/unknown plans return 400; provider failures return a
+sanitized 503. All API responses are private/no-store. Only the anonymous Worker
+`/sudo` catalog page may be publicly cached. Existing Python `/sudo`, webhook,
+and role-convergence behavior is unchanged. Opening the success page does not
+grant membership; webhooks remain authoritative.
+
+Preview checkout requires its configured origin to match Python `SITE_BASE_URL`;
+this API deliberately does not widen the redirect allowlist to arbitrary preview
+hosts. Rotate the preview service key to include `site-billing` after deploying
+the Python API (see `admin-host.md`). No key rotation or production rollout is
+part of this change.
