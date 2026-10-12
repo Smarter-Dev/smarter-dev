@@ -17,7 +17,7 @@ data:
   SKRIFT_ENV: "production"
 
   # Discord OAuth redirect URI
-  DISCORD_REDIRECT_URI: "https://smarter.dev/bot-admin/auth/discord/callback"
+  DISCORD_REDIRECT_URI: "https://admin.smarter.dev/bot-admin/auth/discord/callback"
   
   # Rate limiting configuration
   RATE_LIMIT_ENABLED: "true"
@@ -38,8 +38,8 @@ data:
   PROACTIVE_WATCHER_MODEL: "typesafe:jev-1.13.0"
   PROACTIVE_SKIM_MODEL: "z-ai/glm-5.3-flash"
 
-  # Site base URL
-  SITE_BASE_URL: "https://smarter.dev"
+  # Python-owned links (confirmation, account and admin routes) stay on the app.
+  SITE_BASE_URL: "https://admin.smarter.dev"
 
   # Internal media service (LaTeX, audio transcode, cards). ClusterIP DNS name
   # from k8s/deploy-media.yaml; no trailing slash. The matching MEDIA_API_KEY is

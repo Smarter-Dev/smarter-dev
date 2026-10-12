@@ -403,7 +403,7 @@ class Settings(BaseSettings):
         if self.is_development:
             return "http://localhost:8000/bot-admin/auth/discord/callback"
         else:
-            return "https://smarter.dev/bot-admin/auth/discord/callback"
+            return "https://admin.smarter.dev/bot-admin/auth/discord/callback"
 
 
 # Global settings instance
