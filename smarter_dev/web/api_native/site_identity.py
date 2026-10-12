@@ -6,6 +6,7 @@ from uuid import UUID
 from litestar import Controller
 from litestar import Response
 from litestar import put
+from litestar.exceptions import HTTPException
 from pydantic import ValidationError
 from skrift.auth.guards import Permission
 from sqlalchemy.exc import IntegrityError
@@ -21,7 +22,10 @@ from smarter_dev.web.site_identity import provision_identity
 
 class SiteIdentityController(Controller):
     path = "/api/site/identities"
-    exception_handlers = {Exception: _billing_error_response}
+    exception_handlers = {
+        Exception: _billing_error_response,
+        HTTPException: _billing_error_response,
+    }
 
     @put("/{user_id:str}", guards=[*SITE_API_GUARDS, Permission("site-identity")])
     async def ensure(

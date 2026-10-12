@@ -9,6 +9,7 @@ import pytest
 from litestar.di import Provide
 from litestar.plugins.pydantic import PydanticPlugin
 from litestar.testing import create_test_client
+from skrift.app_factory import EXCEPTION_HANDLERS
 from skrift.db.base import Base as SkriftBase
 from skrift.db.models.oauth_account import OAuthAccount
 from skrift.db.models.user import User
@@ -81,6 +82,7 @@ async def client(test_engine, monkeypatch):
             site_privacy.SitePrivacyController,
         ],
         plugins=[PydanticPlugin()],
+        exception_handlers=EXCEPTION_HANDLERS,
         dependencies={"db_session": Provide(session)},
     ) as tc:
         yield tc, key
@@ -258,6 +260,7 @@ def test_service_scope_is_explicit(client, scopes, principal, name):
     )
     response = put(client, uuid4())
     assert response.status_code == 401
+    assert response.json()["status_code"] == 401
     assert response.headers["Cache-Control"] == "private, no-store"
 
 
@@ -403,7 +406,7 @@ async def test_operator_can_pin_key_without_identity_marker(db_session):
     )
 
 
-@pytest.mark.parametrize("failure", ["token", "fetch", "remove"])
+@pytest.mark.parametrize("failure", ["config", "token", "fetch", "remove"])
 async def test_strict_unlink_projection_failure_is_reported(monkeypatch, failure):
     import httpx
 
@@ -412,7 +415,11 @@ async def test_strict_unlink_projection_failure_is_reported(monkeypatch, failure
     monkeypatch.setattr(
         projection.catalog,
         "get_discord_config",
-        AsyncMock(return_value={"guild_id": "1", "base_role_id": "2"}),
+        AsyncMock(
+            return_value=None
+            if failure == "config"
+            else {"guild_id": "1", "base_role_id": "2"}
+        ),
     )
     monkeypatch.setattr(
         projection,
@@ -431,3 +438,61 @@ async def test_strict_unlink_projection_failure_is_reported(monkeypatch, failure
         await projection.strip_discord_roles("123456789012345678", strict=True)
     # Existing non-strict callers keep their best-effort behavior.
     assert await projection.strip_discord_roles("123456789012345678") == {"removed": []}
+
+
+async def test_missing_catalog_unlink_keeps_owned_binding_and_retry_state(
+    client, db_session, monkeypatch
+):
+    from smarter_dev.web.billing import converge as projection
+
+    uid = uuid4()
+    assert put(client, uid).status_code == 201
+    state = await db_session.get(SiteIdentityState, uid)
+    owned = list(state.owned_accounts)
+    fingerprint = state.fingerprint
+    await db_session.commit()
+    monkeypatch.setattr(
+        site_identity, "strip_discord_roles", projection.strip_discord_roles
+    )
+    config = AsyncMock(return_value=None)
+    monkeypatch.setattr(projection.catalog, "get_discord_config", config)
+    monkeypatch.setattr(projection, "_bot_token", lambda: "test-only-token")
+    monkeypatch.setattr(projection, "_fetch_member_roles", AsyncMock(return_value=None))
+    result = put(client, uid, snapshot(2, []).model_dump())
+    assert result.status_code == 503
+    db_session.expire_all()
+    state = await db_session.get(SiteIdentityState, uid)
+    assert state.revision == 1
+    assert state.fingerprint == fingerprint
+    assert state.owned_accounts == owned
+    assert (
+        str(
+            await db_session.scalar(
+                select(OAuthAccount.id).where(OAuthAccount.user_id == uid)
+            )
+        )
+        == owned[0]
+    )
+    await db_session.commit()
+    config.return_value = {"guild_id": "1", "base_role_id": "2"}
+    assert put(client, uid, snapshot(2, []).model_dump()).status_code == 200
+    db_session.expire_all()
+    state = await db_session.get(SiteIdentityState, uid)
+    assert state.revision == 2 and state.owned_accounts == []
+    assert (
+        await db_session.scalar(
+            select(OAuthAccount.id).where(OAuthAccount.user_id == uid)
+        )
+        is None
+    )
+
+
+def test_malformed_json_uses_private_api_error_under_skrift_parent_handlers(client):
+    response = client[0].put(
+        f"/api/site/identities/{uuid4()}",
+        content="{broken",
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 400
+    assert response.headers["Cache-Control"] == "private, no-store"
+    assert response.json()["status_code"] == 400

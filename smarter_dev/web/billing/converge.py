@@ -247,6 +247,8 @@ async def strip_discord_roles(discord_user_id: str, *, strict: bool = False) -> 
     cfg = await catalog.get_discord_config()
     token = _bot_token()
     if cfg is None:
+        if strict:
+            raise RuntimeError("Discord projection unavailable")
         return {"removed": []}
     if not token:
         if strict:
