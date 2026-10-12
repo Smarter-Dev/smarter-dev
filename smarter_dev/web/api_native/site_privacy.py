@@ -16,6 +16,7 @@ from skrift.auth.guards import Permission
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.shared.privacy_purge import SNOWFLAKE_PATTERN
 from smarter_dev.shared.privacy_purge import Snowflake
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.api_native.errors import plain_error
@@ -28,7 +29,7 @@ from smarter_dev.web.models import ChatBotBlockedUser
 from smarter_dev.web.models import ChatBotPurgeRequest
 
 SITE_PRIVACY_GUARDS = [*SITE_API_GUARDS, Permission("site-privacy")]
-_DISCORD_USER_ID = re.compile(r"[0-9]{17,20}\Z")
+_DISCORD_USER_ID = re.compile(SNOWFLAKE_PATTERN)
 
 
 def _validate_discord_user_id(discord_user_id: str) -> None:

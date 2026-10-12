@@ -134,7 +134,7 @@ async def test_writes_refused_while_purge_is_in_flight(client, db_session):
 @pytest.mark.parametrize("method", ["get", "post", "delete"])
 @pytest.mark.parametrize(
     "bad_id",
-    ["not-a-snowflake", "1234567890123456", "１２３４５６７８９０１２３４５６７"],
+    ["not-a-snowflake", "1" * 14, "1" * 23, "１２３４５６７８９０１２３４５６７"],
 )
 async def test_invalid_path_id_is_rejected_without_mutation(
     client, db_session, method, bad_id
@@ -144,6 +144,14 @@ async def test_invalid_path_id_is_rejected_without_mutation(
     assert response.status_code == 400
     assert (await db_session.scalars(select(ChatBotBlockedUser))).all() == []
     assert (await read_opt_out(db_session, _USER)).revision == 0
+
+
+@pytest.mark.parametrize("method", ["get", "post", "delete"])
+@pytest.mark.parametrize("user_id", ["1" * 15, "1" * 22])
+def test_shared_snowflake_boundary_lengths_are_accepted(client, method, user_id):
+    test_client, _ = client
+    response = getattr(test_client, method)(f"/api/site/privacy/opt-out/{user_id}")
+    assert response.status_code == 200
 
 
 async def test_real_skrift_site_key_and_principal_boundary(test_engine):
