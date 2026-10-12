@@ -402,3 +402,54 @@ def test_reconciliation_rejects_reused_or_previously_anonymized_receipt(
     after = {"receipts": [{"id": "r", "user_id": "different", "recoverable": True}]}
     with pytest.raises(RuntimeError, match="identity changed"):
         capture.reconcile_captures(before, after)
+
+
+class UniqueKeyLoader(yaml.SafeLoader):
+    """Reject ambiguous deployment YAML instead of silently keeping the last key."""
+
+    def construct_mapping(self, node, deep=False):
+        keys = set()
+        for key_node, _ in node.value:
+            key = self.construct_object(key_node, deep=deep)
+            if key in keys:
+                raise yaml.constructor.ConstructorError(
+                    "while reading rollout YAML",
+                    node.start_mark,
+                    f"duplicate key: {key}",
+                    key_node.start_mark,
+                )
+            keys.add(key)
+        return super().construct_mapping(node, deep=deep)
+
+
+def test_strict_manifest_loader_detects_duplicate_nested_probe():
+    with pytest.raises(
+        yaml.constructor.ConstructorError, match="duplicate key: readinessProbe"
+    ):
+        yaml.load(
+            "container:\n  readinessProbe: {}\n  readinessProbe: {}\n",
+            Loader=UniqueKeyLoader,
+        )
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "k8s/deploy.yaml",
+        "k8s/deploy-worker.yaml",
+        "k8s/migrate-job.yaml",
+        "k8s/secrets.template.yaml",
+        ".github/workflows/deploy.yaml",
+    ],
+)
+def test_rollout_yaml_has_no_duplicate_keys(name):
+    list(yaml.load_all((ROOT / name).read_text(), Loader=UniqueKeyLoader))
+
+
+def test_effective_worker_readiness_requires_verified_key_marker():
+    manifest = yaml.safe_load((ROOT / "k8s/deploy-worker.yaml").read_text())
+    worker_container = manifest["spec"]["template"]["spec"]["containers"][0]
+    assert worker_container["readinessProbe"] == {
+        "exec": {"command": ["test", "-f", "/tmp/site-identity-key-ready"]},
+        "periodSeconds": 5,
+    }
