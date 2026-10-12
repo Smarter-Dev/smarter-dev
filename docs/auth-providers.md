@@ -80,7 +80,10 @@ clears the stored one.
    `second_factors`; passkey sign-in needs the enrollment store.
 2. Check the matching secret keys still exist in `smarter-dev-secrets`
    (`github-client-id`/`-secret`, `google-client-id`/`-secret`) and that the
-   provider's OAuth app lists `https://admin.smarter.dev/auth/<provider>/callback`.
+   provider's OAuth app lists `https://smarter.dev/auth/<provider>/callback`.
+   At the admin-host cutover, add
+   `https://admin.smarter.dev/auth/<provider>/callback` first; see
+   `docs/admin-host.md`.
 3. Update `tests/web/test_sign_in_methods.py` for the new set of methods.
 4. Merge and deploy as usual. `app.yaml` is an image input, so web, bot and
    the workers roll on the new tag; there is no migration.

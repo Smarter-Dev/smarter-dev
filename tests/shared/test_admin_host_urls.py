@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.parse import urlparse
 from unittest.mock import AsyncMock
 
 import yaml
@@ -29,18 +30,26 @@ def _production_settings():
 
 def test_production_url_bases_route_public_and_admin_links(monkeypatch):
     settings = _production_settings()
-    assert settings.site_base_url == "https://smarter.dev"
-    assert settings.admin_base_url == "https://admin.smarter.dev"
-    assert settings.site_base_url != settings.admin_base_url
+    for base in (settings.site_base_url, settings.admin_base_url):
+        parsed = urlparse(base)
+        assert parsed.scheme == "https"
+        assert parsed.netloc == "smarter.dev"
+        assert parsed.path == ""
 
     monkeypatch.setattr(privacy_notice, "get_settings", lambda: settings)
-    monkeypatch.setattr(config_links, "get_settings", lambda: settings)
     assert privacy_notice.privacy_url() == "https://smarter.dev/privacy"
+
+    # The builder is wired to the admin setting even while production keeps
+    # both settings on the current public host until cutover.
+    cutover_settings = settings.model_copy(
+        update={"admin_base_url": "https://admin.smarter.dev"}
+    )
+    monkeypatch.setattr(config_links, "get_settings", lambda: cutover_settings)
     assert config_links.build_config_link_url(
         guild_id="1", channel_id="2", discord_user_id="3"
     ).startswith("https://admin.smarter.dev/admin/bot/configure/")
     assert settings.effective_discord_redirect_uri == (
-        "https://admin.smarter.dev/bot-admin/auth/discord/callback"
+        "https://smarter.dev/bot-admin/auth/discord/callback"
     )
 
 

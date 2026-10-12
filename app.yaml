@@ -14,7 +14,7 @@ session:
   max_age: 2592000  # 30 days
 
 auth:
-  redirect_base_url: "https://admin.smarter.dev"
+  redirect_base_url: "https://smarter.dev"
   allowed_redirect_domains:
     - "*.smarter.dev"
   providers:

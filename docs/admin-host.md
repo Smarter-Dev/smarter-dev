@@ -1,35 +1,18 @@
 # Python app on admin.smarter.dev
 
 The Python web app, bot API and workers remain behind the `smarter-dev-website`
-service. During the transition, its ingress accepts both `smarter.dev` and
-`admin.smarter.dev`; the public hostname is removed by the separate cutover
-task. No DNS or Cloudflare Worker change is part of this deploy.
+service. The ingress can accept both `smarter.dev` and `admin.smarter.dev`, but
+production login and Python-owned links stay on `smarter.dev` until Zech signs
+off on the new site and the cutover task runs. Nothing about login changes
+until the **At cutover** section runs.
 
-## Before switching public traffic
+## Now
 
-1. Point `admin.smarter.dev` at the existing ingress. Verify cert-manager has
-   issued `smarter-dev-website-cert` with **both** hostnames in its SANs; the
-   ingress TLS entry and rules must contain both hosts until cutover. Confirm
-   HTTPS to the admin host reaches the Python app before changing the public
-   hostname.
-2. Zech adds the following callback URI to each existing provider OAuth app,
-   keeping its `smarter.dev` callback until sessions and rollback no longer
-   need it:
-
-   | Provider | Callback URI |
-   | --- | --- |
-   | Discord | `https://admin.smarter.dev/auth/discord/callback` |
-   | GitHub | `https://admin.smarter.dev/auth/github/callback` |
-   | Google | `https://admin.smarter.dev/auth/google/callback` |
-
-   The separate bot-admin Discord OAuth flow uses
-   `https://admin.smarter.dev/bot-admin/auth/discord/callback`; add that URI
-   to its Discord app too if the same app is not used for site sign-in.
-   `app.yaml` generates the three site callbacks from
-   `auth.redirect_base_url`. `DISCORD_REDIRECT_URI` in `k8s/configmap.yaml`
-   controls the bot-admin flow.
-3. Check a sign-in on `admin.smarter.dev` for each provider. The session cookie
-   stays scoped to `.smarter.dev`, so a login is shared with the public site.
+1. Point `admin.smarter.dev` at the existing ingress. The ingress alias is
+   additive: both hostnames remain in its TLS entry and rules. Verify
+   cert-manager has issued `smarter-dev-website-cert` with **both** hostnames
+   in its SANs, then confirm HTTPS to the admin host reaches the Python app.
+2. Prepare the site service key below after its API role is registered.
 
 ## Site service key
 
@@ -131,13 +114,41 @@ deployment consumes the same key under its own secret configuration; that
 deployment is handled separately. Validate the new key against the memory API
 before discarding the one-time value.
 
+## At cutover
+
+1. Zech adds the admin callback URI to each provider OAuth app **before**
+   changing the running app. Keep the existing `smarter.dev` callbacks for
+   rollback:
+
+   | Provider | Add this callback URI |
+   | --- | --- |
+   | Discord | `https://admin.smarter.dev/auth/discord/callback` |
+   | GitHub | `https://admin.smarter.dev/auth/github/callback` |
+   | Google | `https://admin.smarter.dev/auth/google/callback` |
+
+   Add `https://admin.smarter.dev/bot-admin/auth/discord/callback` to the
+   Discord app for the separate bot-admin flow too.
+2. In `app.yaml`, set `auth.redirect_base_url` to
+   `https://admin.smarter.dev`. In `k8s/configmap.yaml`, set
+   `DISCORD_REDIRECT_URI` to
+   `https://admin.smarter.dev/bot-admin/auth/discord/callback` and
+   `ADMIN_BASE_URL` to `https://admin.smarter.dev`. Update the production
+   fallback of `effective_discord_redirect_uri` in
+   `smarter_dev/shared/config.py` to the admin host in the same change.
+   Leave `SITE_BASE_URL=https://smarter.dev` and the `.smarter.dev` session
+   cookie in place.
+3. Deploy the cutover change. Check sign-in on `admin.smarter.dev` with
+   Discord, GitHub and Google. The shared cookie lets the public site and
+   admin host share the login.
+
 ## URL ownership
 
 Production `SITE_BASE_URL` points to `smarter.dev` for public privacy, terms,
 chat-agent, signup confirmation and account billing URLs. `ADMIN_BASE_URL`
-points to `admin.smarter.dev` for Python-owned bot configuration, search and
-admin links, including the answer view. Both default to
-`http://localhost:8000` for local development.
+also points to `smarter.dev` now, then changes to `admin.smarter.dev` at
+cutover for Python-owned bot configuration, search and admin links, including
+the answer view. Both default to `http://localhost:8000` for local
+development.
 
 Public content literals intentionally stay on `smarter.dev`: canonical and
 Open Graph URLs in the resource controllers, the marketing link in the signup

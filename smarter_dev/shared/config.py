@@ -403,7 +403,9 @@ class Settings(BaseSettings):
         if self.discord_redirect_uri:
             return self.discord_redirect_uri
         
-        return f"{self.admin_base_url.rstrip('/')}/bot-admin/auth/discord/callback"
+        if self.is_development:
+            return "http://localhost:8000/bot-admin/auth/discord/callback"
+        return "https://smarter.dev/bot-admin/auth/discord/callback"
 
 
 # Global settings instance

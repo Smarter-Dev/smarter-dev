@@ -121,7 +121,7 @@ def test_login_redirects_to_the_provider(client, prod_settings, provider):
     assert target.hostname == AUTHORIZE_HOSTS[provider]
     query = parse_qs(target.query)
     assert query["client_id"] == [prod_settings.auth.providers[provider].client_id]
-    assert query["redirect_uri"] == [f"https://admin.smarter.dev/auth/{provider}/callback"]
+    assert query["redirect_uri"] == [f"https://smarter.dev/auth/{provider}/callback"]
     assert set(query["scope"][0].split()) == SCOPES[provider]
 
 
