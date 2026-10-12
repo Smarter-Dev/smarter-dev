@@ -21,6 +21,7 @@ from skrift.db.services import api_key_service
 from sqlalchemy import select
 
 from smarter_dev.web import chat_agent_page_controller
+from smarter_dev.web import chat_agent_public
 from smarter_dev.web.api_native import auth
 from smarter_dev.web.api_native import rate_limiting
 from smarter_dev.web.api_native.site_memory import SiteMemoryController
@@ -37,6 +38,13 @@ OTHER = "222222222222222222"
 URL = f"/api/site/guilds/{GUILD}/memory"
 MEMBER_URL = f"{URL}/members/{MEMBER}"
 AT = datetime(2026, 10, 1, tzinfo=UTC)
+
+
+@pytest.fixture(autouse=True)
+def fresh_public_cache():
+    chat_agent_public._blocks_cache.clear()
+    yield
+    chat_agent_public._blocks_cache.clear()
 
 
 @pytest.fixture
@@ -189,7 +197,7 @@ async def test_public_matches_page_and_hides_unsafe_block(
     memory = await seed_memory(db_session, behavior="<script>unsafe</script>")
     await opt_out(db_session, OTHER)
     await db_session.commit()
-    chat_agent_page_controller._blocks_cache.clear()
+    chat_agent_public._blocks_cache.clear()
     page_blocks = await chat_agent_page_controller._cached_public_blocks(
         db_session, memory
     )
@@ -502,3 +510,161 @@ async def test_real_skrift_site_key_authorization_on_every_route(
                     )
     finally:
         invalidate_user_permissions_cache()
+
+
+@pytest.fixture
+def note_selects(db_session):
+    from sqlalchemy import event
+
+    statements = []
+    engine = db_session.bind.sync_engine
+
+    def record(_connection, _cursor, statement, _parameters, _context, _executemany):
+        sql = " ".join(statement.lower().split())
+        if sql.startswith("select") and "from chat_agent_memory_notes" in sql:
+            statements.append(sql)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        yield statements
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+
+@pytest.mark.parametrize("count", [1000, 1201])
+async def test_invisible_history_has_bounded_scans_and_empty_page_cursors(
+    site_client, db_session, note_selects, count
+):
+    client, _ = site_client
+    db_session.add_all(
+        ChatAgentMemoryNote(
+            id=note_uuid(i),
+            guild_id=GUILD,
+            channel_id="site",
+            channel_name="site",
+            content=f"<9{MEMBER}:prefix collision> note {i}",
+            created_at=AT,
+            updated_at=AT,
+        )
+        for i in range(1, count + 1)
+    )
+    await db_session.commit()
+    response = await client.get(MEMBER_URL, params={"limit": 1})
+    assert response.status_code == 200
+    first = response.json()
+    assert first["notes"] == []
+    assert first["next_before"] is not None
+    assert len(note_selects) == 5  # 1,000 candidates, in five batches of 200.
+    note_selects.clear()
+    response = await client.get(
+        MEMBER_URL, params={"limit": 1, "before": first["next_before"]}
+    )
+    assert response.json() == {"notes": [], "next_before": None}
+    assert len(note_selects) == (1 if count == 1000 else 2)
+
+
+async def test_scan_budget_cursor_resumes_after_last_examined_candidate(
+    site_client, db_session, note_selects
+):
+    client, _ = site_client
+    db_session.add_all(
+        ChatAgentMemoryNote(
+            id=note_uuid(i),
+            guild_id=GUILD,
+            channel_id="site",
+            channel_name="site",
+            content=f"<9{MEMBER}:prefix collision> note {i}",
+            created_at=AT,
+            updated_at=AT,
+        )
+        for i in range(202, 1202)
+    )
+    await seed_note(
+        db_session, f"<{MEMBER}:alice> immediately after the budget", number=201
+    )
+    first = (await client.get(MEMBER_URL, params={"limit": 1})).json()
+    assert first["notes"] == [] and first["next_before"]
+    assert len(note_selects) == 5
+    note_selects.clear()
+    second = (
+        await client.get(
+            MEMBER_URL, params={"limit": 1, "before": first["next_before"]}
+        )
+    ).json()
+    assert [note["id"] for note in second["notes"]] == [str(note_uuid(201))]
+    assert second["next_before"] is None
+    assert len(note_selects) == 1
+
+
+@pytest.mark.parametrize("history_size", [1, 1201])
+async def test_public_history_queries_are_shared_cached_and_viewer_independent(
+    site_client, db_session, history_size
+):
+    from sqlalchemy import event
+
+    from smarter_dev.web.models import ChatAgentMemoryRevision
+
+    client, _ = site_client
+    memory = await seed_memory(db_session, behavior="historian remembers.")
+    db_session.add_all(
+        ChatAgentMemoryNote(
+            guild_id=OTHER,
+            channel_id="site",
+            content=f"<333333333333333333:historian> {i}",
+            created_at=AT,
+            updated_at=AT,
+        )
+        for i in range(history_size)
+    )
+    db_session.add_all(
+        ChatAgentMemoryRevision(
+            guild_id=OTHER,
+            content=f"<333333333333333333:historian> {i}",
+            revision=i,
+        )
+        for i in range(history_size)
+    )
+    await db_session.commit()
+    statements = []
+    engine = db_session.bind.sync_engine
+
+    def record(_connection, _cursor, statement, _parameters, _context, _executemany):
+        sql = " ".join(statement.lower().split())
+        if sql.startswith("select") and any(
+            f"from {table}" in sql
+            for table in ("chat_agent_memory_notes", "chat_agent_memory_revisions")
+        ):
+            statements.append(sql)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        first = (
+            await client.get(URL + "/public", params={"viewer_discord_ids": MEMBER})
+        ).json()
+        assert "alice" in first["memory"] and "bob" not in first["memory"]
+        assert first["behavior"] == "a member remembers."
+        second = (
+            await client.get(URL + "/public", params={"viewer_discord_ids": OTHER})
+        ).json()
+        assert "bob" in second["memory"] and "alice" not in second["memory"]
+        assert len(statements) == 2  # Once each, not once per viewer/request.
+        # The page uses this same cached value, not a second copy of the cache.
+        blocks = await chat_agent_page_controller._cached_public_blocks(
+            db_session, memory
+        )
+        assert (
+            blocks["memory"].shown()
+            == (await client.get(URL + "/public")).json()["memory"]
+        )
+        assert len(statements) == 2
+        memory.content += "\nA changed block."
+        await db_session.commit()
+        assert "changed block" in (await client.get(URL + "/public")).json()["memory"]
+        assert len(statements) == 4
+        # Expiration recomputes even with unchanged text; viewer renders stay uncached.
+        for key, (created, cached) in chat_agent_public._blocks_cache.copy().items():
+            chat_agent_public._blocks_cache[key] = (created - 301, cached)
+        assert "alice" not in (await client.get(URL + "/public")).json()["memory"]
+        assert len(statements) == 6
+    finally:
+        event.remove(engine, "before_cursor_execute", record)

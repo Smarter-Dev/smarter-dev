@@ -41,7 +41,7 @@ from skrift.markdown import render_markdown
 from sqlalchemy import select
 
 from smarter_dev.shared.config import get_settings
-from smarter_dev.web import chat_agent_page_controller
+from smarter_dev.web import chat_agent_public
 from smarter_dev.web.bot_admin.chat_memory import ChatMemoryAdminController
 from smarter_dev.web.chat_agent_page_controller import CHAT_AGENT_PATH
 from smarter_dev.web.chat_agent_page_controller import chat_agent_page
@@ -571,9 +571,9 @@ def _environment() -> Environment:
 
 @pytest.fixture(autouse=True)
 def _fresh_blocks_cache():
-    chat_agent_page_controller._blocks_cache.clear()
+    chat_agent_public._blocks_cache.clear()
     yield
-    chat_agent_page_controller._blocks_cache.clear()
+    chat_agent_public._blocks_cache.clear()
 
 
 @pytest.fixture
@@ -716,21 +716,21 @@ async def test_the_cache_holds_masked_blocks_never_a_viewers_render(
 ):
     await _seed_memory(db_session)
     await _switch_on(db_session)
-    real = chat_agent_page_controller.check_public_blocks
+    real = chat_agent_public.check_public_blocks
     calls = []
 
     async def counting(session, memory):
         calls.append(memory.content)
         return await real(session, memory)
 
-    monkeypatch.setattr(chat_agent_page_controller, "check_public_blocks", counting)
+    monkeypatch.setattr(chat_agent_public, "check_public_blocks", counting)
 
     await _sign_in(db_session, client, KAI)
     assert "kai loves shaders" in (await client.get(CHAT_AGENT_PATH)).text
     client.cookies.clear()
     assert "a member loves shaders" in (await client.get(CHAT_AGENT_PATH)).text
     assert len(calls) == 1
-    for _, blocks in chat_agent_page_controller._blocks_cache.values():
+    for _, blocks in chat_agent_public._blocks_cache.values():
         assert "kai" not in blocks["memory"].masked
 
     await _switch_on(db_session, content="Shader nights, now weekly.")

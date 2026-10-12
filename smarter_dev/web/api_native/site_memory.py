@@ -33,7 +33,7 @@ from smarter_dev.web.api_native.schemas import BaseAPIModel
 from smarter_dev.web.api_native.schemas import ChatMemoryNoteSaveResult
 from smarter_dev.web.api_native.site_guards import SITE_API_GUARDS
 from smarter_dev.web.chat_agent_public import blocked_member_names
-from smarter_dev.web.chat_agent_public import check_public_blocks
+from smarter_dev.web.chat_agent_public import cached_public_blocks
 from smarter_dev.web.chat_agent_public import public_guild_memory
 from smarter_dev.web.crud import count_notes_since
 from smarter_dev.web.crud import create_memory_note
@@ -49,6 +49,7 @@ from smarter_dev.web.privacy_gate import load_gate
 SITE_CHANNEL_ID = "site"
 _MAX_GUILD_ID_CHARS = ChatAgentMemoryNote.__table__.c.guild_id.type.length
 _SCAN_PAGE = 200
+MEMBER_NOTE_SCAN_LIMIT = 1000
 
 
 class SiteNoteCreate(BaseAPIModel):
@@ -208,7 +209,10 @@ class SiteMemoryController(Controller):
         gate = await _member_gate(db_session, discord_user_id)
         position = _parse_cursor(before) if before is not None else None
         found: list[tuple[ChatAgentMemoryNote, str]] = []
-        while len(found) <= limit:
+        scanned = 0
+        scan_cursor = None
+        while len(found) <= limit and scanned < MEMBER_NOTE_SCAN_LIMIT:
+            batch_limit = min(_SCAN_PAGE, MEMBER_NOTE_SCAN_LIMIT - scanned)
             query = select(ChatAgentMemoryNote).where(
                 ChatAgentMemoryNote.guild_id == guild_id,
                 # Only a candidate filter; the shared parser checks exact tags
@@ -223,10 +227,11 @@ class SiteMemoryController(Controller):
                         query.order_by(
                             ChatAgentMemoryNote.created_at.desc(),
                             ChatAgentMemoryNote.id.desc(),
-                        ).limit(_SCAN_PAGE)
+                        ).limit(batch_limit)
                     )
                 ).all()
             )
+            scanned += len(rows)
             if not rows:
                 break
             names = await blocked_member_names(
@@ -242,7 +247,12 @@ class SiteMemoryController(Controller):
                     if len(found) > limit:
                         break
             position = rows[-1].created_at, rows[-1].id
-            if len(rows) < _SCAN_PAGE:
+            if len(rows) < batch_limit:
+                break
+            if scanned == MEMBER_NOTE_SCAN_LIMIT:
+                # Exact matching/privacy can hide every candidate in the batch.
+                # Continue after what we examined, even for an empty visible page.
+                scan_cursor = _cursor(rows[-1])
                 break
         return SiteMemberRead(
             notes=[
@@ -255,7 +265,9 @@ class SiteMemoryController(Controller):
                 )
                 for row, content in found[:limit]
             ],
-            next_before=_cursor(found[limit - 1][0]) if len(found) > limit else None,
+            next_before=_cursor(found[limit - 1][0])
+            if len(found) > limit
+            else scan_cursor,
         )
 
     @post(
@@ -328,7 +340,7 @@ class SiteMemoryController(Controller):
         memory = await public_guild_memory(db_session)
         if memory is None or memory.guild_id != guild_id:
             raise plain_error(404, "Public memory not found")
-        blocks = await check_public_blocks(db_session, memory)
+        blocks = await cached_public_blocks(db_session, memory)
         return SitePublicRead(
             guild_id=guild_id,
             revision=memory.revision,

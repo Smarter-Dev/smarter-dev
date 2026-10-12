@@ -32,6 +32,21 @@ work if the dream deletes the anchor note. The `before` cursor is at most 200
 characters. Invalid cursors/limits, including
 timestamps that cannot be represented in UTC, return 422. The comma-separated
 `viewer_discord_ids` query is at most 2300 characters.
+Each member-note request examines at most 1,000 candidate rows in at most five
+batches of 200. If exact-tag or privacy filtering exhausts that budget, the
+response includes a cursor after the last examined row, even when `notes` is
+empty. Keep paging until `next_before` is null. An exact-budget final batch
+may therefore require one final empty request to discover the end.
+
+The public endpoint and `/chat-agent` share a 300-second in-process cache of
+checked, masked blocks, keyed by guild and the three block texts. A text change
+clears the cache; the public switch is still read on every request. Viewer
+names are restored only after cache lookup and are never cached. Cold requests
+read the complete known-name history, just as the existing page does: cache
+reuse bounds that work's frequency, not its per-refresh size. Changes only to
+privacy/name records can take up to 300 seconds to appear on both surfaces.
+No history is truncated for masking.
+
 Notes are temporary: the dream consumes them, so this is not an audit archive.
 
 Member read and write return 404 for an opted-out member or any open purge
