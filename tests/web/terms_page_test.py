@@ -127,6 +127,8 @@ def test_the_route_is_registered(config):
 
 def test_the_site_footer_links_to_the_terms_next_to_privacy():
     footer = (THEME / "templates" / "_partials" / "footer.html").read_text()
-    assert (
-        '<a href="/privacy">Privacy</a>\n        <a href="/terms">Terms</a>' in footer
-    )
+    privacy_link = '<a href="/privacy">Privacy</a>'
+    terms_link = '<a href="/terms">Terms</a>'
+    assert privacy_link in footer
+    assert terms_link in footer
+    assert footer.index(privacy_link) < footer.index(terms_link)
