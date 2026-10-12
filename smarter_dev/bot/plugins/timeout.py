@@ -9,6 +9,7 @@ from datetime import timedelta
 import hikari
 import lightbulb
 
+from smarter_dev.bot.agents.base import strip_dspy_markers
 from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.crud import ModerationActionOperations
@@ -203,7 +204,7 @@ async def timeout_user(ctx: lightbulb.Context) -> None:
                 duration=duration_display
             )
 
-            public_message = result.polite_message
+            public_message = strip_dspy_markers(result.polite_message)
             logger.info(f"AI generated message: {public_message}")
 
         except Exception as e:

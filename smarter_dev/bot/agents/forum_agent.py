@@ -8,6 +8,7 @@ import logging
 import dspy
 
 from smarter_dev.bot.agents.base import BaseAgent
+from smarter_dev.bot.agents.base import strip_dspy_markers
 from smarter_dev.llm_config import get_llm_model
 from smarter_dev.llm_config import get_model_info
 
@@ -251,7 +252,7 @@ class ForumMonitorAgent(BaseAgent):
         # Ensure confidence is bounded between 0.0 and 1.0
         confidence = max(0.0, min(1.0, float(result.confidence)))
 
-        return result.decision, confidence, result.response, tokens_used
+        return result.decision, confidence, strip_dspy_markers(result.response), tokens_used
 
     async def classify_topics_only(
         self,
@@ -353,7 +354,7 @@ class ForumMonitorAgent(BaseAgent):
         # Filter to only include topics that are actually available
         valid_topics = [topic for topic in matching_topics if topic in available_topics]
 
-        return result.decision, confidence, result.response, valid_topics, tokens_used
+        return result.decision, confidence, strip_dspy_markers(result.response), valid_topics, tokens_used
 
 
 # Global forum monitor agent instance

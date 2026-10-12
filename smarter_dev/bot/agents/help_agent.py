@@ -8,6 +8,7 @@ import dspy
 import hikari
 
 from smarter_dev.bot.agents.base import BaseAgent
+from smarter_dev.bot.agents.base import strip_dspy_markers
 from smarter_dev.llm_config import get_llm_model
 from smarter_dev.llm_config import get_model_info
 
@@ -257,7 +258,7 @@ class HelpAgent(BaseAgent):
         logger.info(f"HelpAgent response generated: {len(result.response)} chars, {tokens_used} tokens")
 
         # Validate response length for Discord
-        response = self._validate_response_length(result.response)
+        response = self._validate_response_length(strip_dspy_markers(result.response))
 
         return response, tokens_used
 
