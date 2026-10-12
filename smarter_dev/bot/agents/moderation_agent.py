@@ -5,123 +5,134 @@ timeout users, purge harmful messages, flag users for review, and send
 a channel message explaining the situation. A full report is sent to
 the configured mod channel.
 
-Uses DSPy ReAct with triage tools.
+Runs on pydantic-ai with the triage tools from :mod:`mod_tools`.
 """
 
 from __future__ import annotations
 
 import logging
 
-import dspy
+from pydantic import BaseModel
+from pydantic import Field
+from pydantic_ai import Agent
+from pydantic_ai import UsageLimits
+from pydantic_ai.toolsets import FunctionToolset
 
-from smarter_dev.bot.agents.base import strip_dspy_markers
 from smarter_dev.bot.agents.mod_tools import ActionTracker
 from smarter_dev.bot.agents.mod_tools import create_moderation_tools
 from smarter_dev.bot.agents.models import DiscordMessage
-from smarter_dev.llm_config import get_llm_model
-from smarter_dev.llm_config import get_model_info
+from smarter_dev.bot.agents.utility_model import build_utility_agent
+from smarter_dev.bot.agents.utility_model import render_inputs
 from smarter_dev.shared.exception_logging import log_exception
 
 logger = logging.getLogger(__name__)
 
-# Use medium model for moderation decisions (needs good judgment)
-MODERATION_LM = get_llm_model("medium")
+# DSPy's ReAct took up to 8 tool steps and then one extract step. Here one
+# model request can carry several tool calls, so 8 tool rounds plus the final
+# answer is at least the old budget.
+MAX_TRIAGE_REQUESTS = 9
 
-model_info = get_model_info("medium")
-logger.info(
-    f"ModerationAgent using LLM model: {model_info['model_name']} "
-    f"(provider: {model_info['provider']})"
-)
+MODERATION_INSTRUCTIONS = """You are a Discord moderation triage assistant. Your job is to FREEZE
+dangerous situations and alert human moderators. You are NOT a full
+moderator — you are a stopgap while waiting for humans to arrive.
 
+## YOUR ROLE
 
-class ModerationSignature(dspy.Signature):
-    """You are a Discord moderation triage assistant. Your job is to FREEZE
-    dangerous situations and alert human moderators. You are NOT a full
-    moderator — you are a stopgap while waiting for humans to arrive.
+Assess the situation quickly, take minimal action to contain harm, and
+hand off to human mods via a report. Your available actions are:
+- Timeout users who are ACTIVELY causing harm (to stop the damage)
+- Purge harmful messages in bulk (spam, slurs, threats, NSFW) to limit exposure
+- Delete a single specific message by its message ID [msg:ID]
+- Flag users for human moderator review
+- Send a channel message explaining the situation
 
-    ## YOUR ROLE
+## WORKFLOW
 
-    Assess the situation quickly, take minimal action to contain harm, and
-    hand off to human mods via a report. Your available actions are:
-    - Timeout users who are ACTIVELY causing harm (to stop the damage)
-    - Purge harmful messages in bulk (spam, slurs, threats, NSFW) to limit exposure
-    - Delete a single specific message by its message ID [msg:ID]
-    - Flag users for human moderator review
-    - Send a channel message explaining the situation
+1. Use get_user_info() and get_user_history() to understand the context
+2. Decide if immediate action is needed (timeout, purge, or both)
+3. Use flag_users() to mark users that need human mod review
+4. ALWAYS use send_mod_message() to post a channel message at the end
 
-    ## WORKFLOW
+## CHANNEL MESSAGE GUIDELINES
 
-    1. Use get_user_info() and get_user_history() to understand the context
-    2. Decide if immediate action is needed (timeout, purge, or both)
-    3. Use flag_users() to mark users that need human mod review
-    4. ALWAYS use send_mod_message() to post a channel message at the end
+You MUST call send_mod_message() with a message that:
+- Addresses the impacted users DIRECTLY (the system will ping them)
+- Uses a firm but professional moderator tone
+- If actions were taken: tells them what you did and WHY (e.g. "I've given
+  you a timeout and removed your messages. Racism is not allowed in this server.")
+- If no actions were taken: clearly states what behavior must stop
+- Does NOT mention any users by name or @ — the system appends pings automatically
+- Is concise (2-4 sentences)
 
-    ## CHANNEL MESSAGE GUIDELINES
+## ACTION GUIDELINES
 
-    You MUST call send_mod_message() with a message that:
-    - Addresses the impacted users DIRECTLY (the system will ping them)
-    - Uses a firm but professional moderator tone
-    - If actions were taken: tells them what you did and WHY (e.g. "I've given
-      you a timeout and removed your messages. Racism is not allowed in this server.")
-    - If no actions were taken: clearly states what behavior must stop
-    - Does NOT mention any users by name or @ — the system appends pings automatically
-    - Is concise (2-4 sentences)
+- Only timeout users who are ACTIVELY causing harm right now
+- Prefer short timeouts (10-30 minutes) — just enough for a human mod to arrive
+- Only purge messages that are clearly harmful (spam, hate speech, threats, NSFW)
+- New accounts (< 7 days) engaging in spam/hate are higher risk — consider timeout
+- If the situation is ambiguous or low-severity, flag and message only — no timeout/purge
+- False positives are worse than false negatives
 
-    ## ACTION GUIDELINES
+## SAFETY RULES
 
-    - Only timeout users who are ACTIVELY causing harm right now
-    - Prefer short timeouts (10-30 minutes) — just enough for a human mod to arrive
-    - Only purge messages that are clearly harmful (spam, hate speech, threats, NSFW)
-    - New accounts (< 7 days) engaging in spam/hate are higher risk — consider timeout
-    - If the situation is ambiguous or low-severity, flag and message only — no timeout/purge
-    - False positives are worse than false negatives
+- NEVER take action against moderators or administrators
+- When in doubt, flag and message only — human mods will handle the rest
 
-    ## SAFETY RULES
+## INPUTS
+- conversation_context: Recent channel messages providing context for the moderation review
+- trigger_message: The message that mentioned the moderator role, triggering this review
+- trigger_author: Username of who sent the trigger message
+- guild_instructions: Guild-specific moderation instructions and rules to follow
+"""
 
-    - NEVER take action against moderators or administrators
-    - When in doubt, flag and message only — human mods will handle the rest
-    """
+FOLLOW_UP_MESSAGE_INSTRUCTIONS = """You took moderation actions but forgot to send a channel message.
+You MUST compose a message now addressing the impacted users directly.
 
-    conversation_context: str = dspy.InputField(
-        desc="Recent channel messages providing context for the moderation review"
-    )
-    trigger_message: str = dspy.InputField(
-        desc="The message that mentioned the moderator role, triggering this review"
-    )
-    trigger_author: str = dspy.InputField(
-        desc="Username of who sent the trigger message"
-    )
-    guild_instructions: str = dspy.InputField(
-        desc="Guild-specific moderation instructions and rules to follow"
-    )
-    assessment: str = dspy.OutputField(
-        desc="Your assessment of the situation and what action (if any) you took"
-    )
+Tell them what you did and why. Use a firm but professional tone.
+Do NOT mention any users by name or @ — the system appends pings automatically.
+Keep it to 2-4 sentences.
+
+## INPUTS
+- actions_summary: Summary of the moderation actions you took
+- assessment: Your assessment of the situation
+"""
 
 
-class FollowUpMessageSignature(dspy.Signature):
-    """You took moderation actions but forgot to send a channel message.
-    You MUST compose a message now addressing the impacted users directly.
-
-    Tell them what you did and why. Use a firm but professional tone.
-    Do NOT mention any users by name or @ — the system appends pings automatically.
-    Keep it to 2-4 sentences.
-    """
-
-    actions_summary: str = dspy.InputField(
-        desc="Summary of the moderation actions you took"
-    )
-    assessment: str = dspy.InputField(
-        desc="Your assessment of the situation"
-    )
-    message: str = dspy.OutputField(
-        desc="The channel message to send to impacted users"
+class ModerationAssessment(BaseModel):
+    assessment: str = Field(
+        description="Your assessment of the situation and what action (if any) you took"
     )
 
 
-async def _enforce_channel_message(
-    tracker: ActionTracker, assessment: str, lm: dspy.LM
-) -> None:
+class FollowUpMessage(BaseModel):
+    message: str = Field(description="The channel message to send to impacted users")
+
+
+_moderation_agent: Agent[None, ModerationAssessment] | None = None
+_follow_up_agent: Agent[None, FollowUpMessage] | None = None
+
+
+def get_moderation_agent() -> Agent[None, ModerationAssessment]:
+    """Return the singleton triage agent; each run brings its own tools."""
+    global _moderation_agent
+    if _moderation_agent is None:
+        _moderation_agent = build_utility_agent(
+            ModerationAssessment, MODERATION_INSTRUCTIONS
+        )
+    return _moderation_agent
+
+
+def get_follow_up_agent() -> Agent[None, FollowUpMessage]:
+    """Return the singleton follow-up message agent, building it on first use."""
+    global _follow_up_agent
+    if _follow_up_agent is None:
+        _follow_up_agent = build_utility_agent(
+            FollowUpMessage, FOLLOW_UP_MESSAGE_INSTRUCTIONS
+        )
+    return _follow_up_agent
+
+
+async def _enforce_channel_message(tracker: ActionTracker, assessment: str) -> None:
     """Generate a channel message when the agent took actions but didn't send one."""
     # Build a summary of what was done
     parts = []
@@ -134,13 +145,10 @@ async def _enforce_channel_message(
     actions_summary = "\n".join(parts) if parts else "Actions were taken."
 
     try:
-        predict = dspy.Predict(FollowUpMessageSignature)
-        with dspy.context(lm=lm):
-            result = await dspy.asyncify(predict)(
-                actions_summary=actions_summary,
-                assessment=assessment,
-            )
-        tracker.channel_message = strip_dspy_markers(result.message)
+        result = await get_follow_up_agent().run(
+            render_inputs(actions_summary=actions_summary, assessment=assessment)
+        )
+        tracker.channel_message = result.output.message.strip()
     except Exception:
         log_exception(logger, "Failed to generate follow-up channel message")
         # Fallback: generic message
@@ -203,23 +211,20 @@ async def run_moderation_agent(
 
     context_text = format_context_messages(context_messages)
 
-    # Build the ReAct agent with triage tools
-    react_agent = dspy.ReAct(
-        ModerationSignature,
-        tools=tools,
-        max_iters=8,
-    )
-
     try:
-        with dspy.context(lm=MODERATION_LM):
-            result = await dspy.asyncify(react_agent)(
+        result = await get_moderation_agent().run(
+            render_inputs(
                 conversation_context=context_text,
                 trigger_message=trigger_message_content,
                 trigger_author=trigger_author,
-                guild_instructions=guild_instructions or "Use your best judgment to moderate fairly.",
-            )
+                guild_instructions=guild_instructions
+                or "Use your best judgment to moderate fairly.",
+            ),
+            toolsets=[FunctionToolset(tools)],
+            usage_limits=UsageLimits(request_limit=MAX_TRIAGE_REQUESTS),
+        )
 
-        assessment = result.assessment
+        assessment = result.output.assessment
 
         # Enforce: if actions were taken, a channel message MUST be sent.
         # Give the agent one more turn with only send_mod_message available.
@@ -228,7 +233,7 @@ async def run_moderation_agent(
                 f"Agent took actions but didn't send a channel message for guild {guild_id}. "
                 "Running follow-up to generate message."
             )
-            await _enforce_channel_message(tracker, assessment, MODERATION_LM)
+            await _enforce_channel_message(tracker, assessment)
 
         logger.info(
             f"Moderation triage completed for guild {guild_id}: {assessment[:100]}..."

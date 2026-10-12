@@ -1,30 +1,74 @@
-"""The streak celebration prompt quotes the member's message, so a failure
-is logged as its type, never its text."""
+"""The streak celebration on pydantic-ai.
+
+The prompt quotes the member's message, so a failure is logged as its type,
+never its text.
+"""
 
 from __future__ import annotations
 
 import logging
 
 import pytest
+from pydantic_ai.messages import ModelMessage
+from pydantic_ai.messages import ModelResponse
+from pydantic_ai.messages import ToolCallPart
+from pydantic_ai.messages import UserPromptPart
+from pydantic_ai.models.function import AgentInfo
+from pydantic_ai.models.function import FunctionModel
 
 from smarter_dev.bot.agents import streak_agent
 
 
-async def test_a_provider_error_echoing_the_message_logs_only_its_type(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    async def echoing_provider(**kwargs):
-        raise ValueError(f"bad request: {kwargs['user_message']}")
+@pytest.fixture(autouse=True)
+def _openai_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The real model is built before the test swaps in its FunctionModel.
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
-    monkeypatch.setattr(streak_agent.dspy, "asyncify", lambda _agent: echoing_provider)
+
+def _prompt(messages: list[ModelMessage]) -> str:
+    return "\n".join(
+        part.content
+        for message in messages
+        for part in message.parts
+        if isinstance(part, UserPromptPart) and isinstance(part.content, str)
+    )
+
+
+def _answering(response: str, seen: list[str] | None = None) -> FunctionModel:
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        if seen is not None:
+            seen.append(_prompt(messages))
+        return ModelResponse(
+            parts=[ToolCallPart(info.output_tools[0].name, {"response": response})]
+        )
+
+    return FunctionModel(respond)
+
+
+async def _celebrate(model: FunctionModel, **overrides) -> tuple[str, int]:
+    kwargs = {
+        "bytes_earned": 32,
+        "streak_multiplier": 4,
+        "streak_days": 48,
+        "user_id": 42,
+        "user_message": "hi",
+        **overrides,
+    }
+    with streak_agent.get_streak_celebration_agent().override(model=model):
+        return await streak_agent.StreakCelebrationAgent().generate_celebration_message(
+            **kwargs
+        )
+
+
+async def test_a_provider_error_echoing_the_message_logs_only_its_type(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    def echoing_provider(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        raise ValueError(f"bad request: {_prompt(messages)}")
 
     with caplog.at_level(logging.DEBUG, logger=streak_agent.logger.name):
-        result = await streak_agent.StreakCelebrationAgent().generate_celebration_message(
-            bytes_earned=10,
-            streak_multiplier=2,
-            streak_days=3,
-            user_id=42,
-            user_message="my private words",
+        result = await _celebrate(
+            FunctionModel(echoing_provider), user_message="my private words"
         )
 
     assert result == ("", 0)
@@ -32,37 +76,34 @@ async def test_a_provider_error_echoing_the_message_logs_only_its_type(
     assert "my private words" not in caplog.text
 
 
-def _stub_prediction(monkeypatch: pytest.MonkeyPatch, response: str) -> None:
-    class Prediction:
-        def __init__(self) -> None:
-            self.response = response
+async def test_the_celebration_mentions_the_member_and_reports_real_tokens() -> None:
+    seen: list[str] = []
 
-        def get_lm_usage(self) -> dict:
-            return {"total_tokens": 7}
-
-    async def provider(**kwargs):
-        return Prediction()
-
-    monkeypatch.setattr(streak_agent.dspy, "asyncify", lambda _agent: provider)
-
-
-async def _celebrate() -> tuple[str, int]:
-    return await streak_agent.StreakCelebrationAgent().generate_celebration_message(
-        bytes_earned=32, streak_multiplier=4, streak_days=48, user_id=42, user_message="hi"
+    message, tokens = await _celebrate(
+        _answering("  Your 48-day run earned 32 BYTES!  ", seen)
     )
 
-
-async def test_a_loose_completed_marker_is_not_posted(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_prediction(monkeypatch, "Your 48-day run earned 32 BYTES!\n[[ ## completed ##]]")
-
-    assert await _celebrate() == ("-# <@42> Your 48-day run earned 32 BYTES!", 7)
-
-
-async def test_a_response_that_is_only_a_marker_posts_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
-    _stub_prediction(monkeypatch, "[[ ## completed ##]]")
-
-    assert await _celebrate() == ("", 0)
+    assert message == "-# <@42> Your 48-day run earned 32 BYTES!"
+    assert tokens > 0
+    for label, value in (
+        ("bytes_earned", "32"),
+        ("streak_multiplier", "4"),
+        ("streak_days", "48"),
+        ("user_message", "hi"),
+    ):
+        assert f"## {label}\n{value}" in seen[0]
 
 
-def test_the_signature_tells_the_model_not_to_greet_by_time_of_day() -> None:
-    assert "greet by time of day" in streak_agent.StreakCelebrationSignature.__doc__
+async def test_an_empty_response_posts_nothing() -> None:
+    assert await _celebrate(_answering("   ")) == ("", 0)
+
+
+async def test_no_bonus_means_no_model_call() -> None:
+    def never(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        raise AssertionError("the model must not be called without a bonus")
+
+    assert await _celebrate(FunctionModel(never), streak_multiplier=1) == ("", 0)
+
+
+def test_the_instructions_tell_the_model_not_to_greet_by_time_of_day() -> None:
+    assert "greet by time of day" in streak_agent.STREAK_CELEBRATION_INSTRUCTIONS

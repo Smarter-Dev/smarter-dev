@@ -610,7 +610,6 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         cache_manager = None
 
         # Create services
-        from smarter_dev.bot.services.advent_of_code_service import AdventOfCodeService
         from smarter_dev.bot.services.bytes_service import BytesService
         from smarter_dev.bot.services.challenge_service import ChallengeService
         from smarter_dev.bot.services.chat_memory import init_chat_memory
@@ -640,7 +639,6 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         repeating_message_service = RepeatingMessageService(
             api_client, cache_manager, bot
         )
-        advent_of_code_service = AdventOfCodeService(api_client, cache_manager, bot)
         voice_service = VoiceService(
             api_client, cache_manager, settings, media_client=media_client
         )
@@ -713,10 +711,6 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         await repeating_message_service.initialize()
         logger.info("✓ Repeating message service initialized")
 
-        logger.info("Initializing advent of code service...")
-        await advent_of_code_service.initialize()
-        logger.info("✓ Advent of Code service initialized")
-
         logger.info("Initializing voice service...")
         await voice_service.initialize()
         logger.info("✓ Voice service initialized")
@@ -743,7 +737,6 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             quests_health = await quests_service.health_check()
             scheduled_message_health = await scheduled_message_service.health_check()
             repeating_message_health = await repeating_message_service.health_check()
-            advent_of_code_health = await advent_of_code_service.health_check()
             voice_health = await voice_service.health_check()
 
             logger.info(
@@ -766,9 +759,6 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             )
             logger.info(
                 f"Repeating message service health: {'healthy' if repeating_message_health.is_healthy else 'unhealthy'}"
-            )
-            logger.info(
-                f"Advent of Code service health: {'healthy' if advent_of_code_health.is_healthy else 'unhealthy'}"
             )
 
             logger.info(
@@ -801,10 +791,6 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
                 logger.warning(
                     f"Repeating message service not healthy: {repeating_message_health.details}"
                 )
-            if not advent_of_code_health.is_healthy:
-                logger.warning(
-                    f"Advent of Code service not healthy: {advent_of_code_health.details}"
-                )
             if not voice_health.is_healthy:
                 logger.warning(
                     f"Voice service not healthy: {voice_health.details}"
@@ -826,7 +812,6 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
         bot.d["quests_service"] = quests_service
         bot.d["scheduled_message_service"] = scheduled_message_service
         bot.d["repeating_message_service"] = repeating_message_service
-        bot.d["advent_of_code_service"] = advent_of_code_service
         bot.d["chat_memory_redis"] = chat_memory_redis
         bot.d["voice_service"] = voice_service
         bot.d["model_override_service"] = model_override_service
@@ -844,7 +829,6 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             "quests_service": quests_service,
             "scheduled_message_service": scheduled_message_service,
             "repeating_message_service": repeating_message_service,
-            "advent_of_code_service": advent_of_code_service,
             "voice_service": voice_service,
             "model_override_service": model_override_service,
             "proactive_settings_service": proactive_settings_service,
@@ -1224,9 +1208,6 @@ async def cleanup_bot_services(bot: lightbulb.BotApp) -> None:
 
         if hasattr(bot, "d") and "repeating_message_service" in bot.d:
             await bot.d["repeating_message_service"].cleanup()
-
-        if hasattr(bot, "d") and "advent_of_code_service" in bot.d:
-            await bot.d["advent_of_code_service"].cleanup()
 
         # Clean up cache manager (if used)
         if hasattr(bot, "d") and "cache_manager" in bot.d and bot.d["cache_manager"]:

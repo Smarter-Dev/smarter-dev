@@ -32,19 +32,28 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-import dspy
 import pytest
+from pydantic_ai import Agent
+from pydantic_ai import UsageLimits
+from pydantic_ai.models import Model
+from pydantic_ai.toolsets import FunctionToolset
 
 # Add project root to path when running as standalone script
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 from smarter_dev.bot.agents.moderation_agent import (
-    FollowUpMessageSignature,
-    ModerationSignature,
+    FOLLOW_UP_MESSAGE_INSTRUCTIONS,
+    MAX_TRIAGE_REQUESTS,
+    MODERATION_INSTRUCTIONS,
+    FollowUpMessage,
+    ModerationAssessment,
     format_context_messages,
 )
 from smarter_dev.bot.agents.models import DiscordMessage
-from smarter_dev.llm_config import get_llm_model, _get_api_key_for_model, _get_provider_from_model
+from smarter_dev.bot.agents.utility_model import render_inputs
+from smarter_dev.shared.model_catalog import ModelProvider
+from smarter_dev.shared.model_catalog import get_model
+from smarter_dev.shared.model_router import build_model_for
 
 logger = logging.getLogger(__name__)
 
@@ -53,29 +62,33 @@ logger = logging.getLogger(__name__)
 # Models to test
 # ---------------------------------------------------------------------------
 
+# Label -> catalog key. Each runs through the shared model router, the same
+# path the bot's triage agent takes.
 MODELS_TO_TEST = {
-    "gpt-5.4-nano": "openai/gpt-5.4-nano",
-    "gemini-flash-lite": "gemini/gemini-3.1-flash-lite-preview",
-    "claude-haiku": "claude-haiku-4-5-20251001",
+    "gpt-6-luna": "gpt-6-luna",
+    "gemini-flash": "gemini-3-8-flash",
+    "claude-haiku": "claude-haiku-5-5",
+}
+
+_KEY_ENV_VARS = {
+    ModelProvider.OPENAI: ("OPENAI_API_KEY",),
+    ModelProvider.GOOGLE: ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+    ModelProvider.ANTHROPIC: ("ANTHROPIC_API_KEY",),
+    ModelProvider.OPENROUTER: ("OPENROUTER_API_KEY", "OPEN_ROUTER"),
 }
 
 
-def _build_lm(model_name: str) -> dspy.LM | None:
-    """Build a dspy.LM for a model, returning None if API key is missing."""
-    api_key = _get_api_key_for_model(model_name)
-    if not api_key:
-        provider = _get_provider_from_model(model_name)
-        logger.warning(f"Skipping {model_name} — no {provider.upper()}_API_KEY found")
+def _build_model(model_key: str) -> Model | None:
+    """Build a routed model for a catalog key, returning None if its API key is missing."""
+    catalog_model = get_model(model_key)
+    if catalog_model is None:
+        logger.warning(f"Skipping {model_key} — not in the model catalog")
         return None
-
-    kwargs: dict = {"api_key": api_key, "cache": False}
-
-    # Reasoning-model tweaks
-    if any(tag in model_name for tag in ("gpt-5", "o1")):
-        kwargs["temperature"] = 1.0
-        kwargs["max_tokens"] = 25000
-
-    return dspy.LM(model_name, **kwargs)
+    env_vars = _KEY_ENV_VARS.get(catalog_model.provider, ())
+    if not any(os.getenv(name) for name in env_vars):
+        logger.warning(f"Skipping {model_key} — no {' or '.join(env_vars) or 'API key'} set")
+        return None
+    return build_model_for(catalog_model)
 
 
 # ---------------------------------------------------------------------------
@@ -109,9 +122,6 @@ class ActionLog:
 
 def create_mock_tools(action_log: ActionLog) -> list:
     """Create mock triage tools that log actions instead of calling Discord.
-
-    Tools are synchronous because DSPy ReAct calls tools synchronously internally
-    (dspy.asyncify only wraps the outer agent call).
 
     Matches the triage tool set in mod_tools.py:
     - timeout_user, purge_messages (punitive, configurable)
@@ -589,27 +599,27 @@ def evaluate_result(scenario: Scenario, model_name: str, action_log: ActionLog, 
 # Runner
 # ---------------------------------------------------------------------------
 
-async def run_scenario(scenario: Scenario, lm: dspy.LM, model_label: str) -> ScenarioResult:
+async def run_scenario(scenario: Scenario, model: Model, model_label: str) -> ScenarioResult:
     """Run a single scenario against a model."""
     action_log = ActionLog()
     tools = create_mock_tools(action_log)
     context_text = format_context_messages(scenario.context_messages)
 
-    react_agent = dspy.ReAct(
-        ModerationSignature,
-        tools=tools,
-        max_iters=8,
-    )
-
     start = time.monotonic()
     try:
-        with dspy.context(lm=lm):
-            result = await dspy.asyncify(react_agent)(
+        # The bot's prompts and output types, on the model under test.
+        triage = Agent(model, output_type=ModerationAssessment, instructions=MODERATION_INSTRUCTIONS)
+        result = await triage.run(
+            render_inputs(
                 conversation_context=context_text,
                 trigger_message=scenario.trigger_message,
                 trigger_author=scenario.trigger_author,
                 guild_instructions=scenario.guild_instructions,
-            )
+            ),
+            toolsets=[FunctionToolset(tools)],
+            usage_limits=UsageLimits(request_limit=MAX_TRIAGE_REQUESTS),
+        )
+        assessment = result.output.assessment
 
         # Enforce: if punitive actions taken but no send_mod_message, give a follow-up turn
         has_punitive = any(a["tool"] in ("timeout", "purge", "delete") for a in action_log.actions)
@@ -626,16 +636,18 @@ async def run_scenario(scenario: Scenario, lm: dspy.LM, model_label: str) -> Sce
                     parts.append(f"Deleted message {a['args']['message_id']}: {a['args']['reason']}")
             actions_summary = "\n".join(parts) if parts else "Actions were taken."
 
-            predict = dspy.Predict(FollowUpMessageSignature)
-            with dspy.context(lm=lm):
-                followup = await dspy.asyncify(predict)(
-                    actions_summary=actions_summary,
-                    assessment=result.assessment,
-                )
-            action_log.actions.append({"tool": "send_mod_message", "args": {"message": followup.message}})
+            follow_up = Agent(
+                model, output_type=FollowUpMessage, instructions=FOLLOW_UP_MESSAGE_INSTRUCTIONS
+            )
+            followup = await follow_up.run(
+                render_inputs(actions_summary=actions_summary, assessment=assessment)
+            )
+            action_log.actions.append(
+                {"tool": "send_mod_message", "args": {"message": followup.output.message}}
+            )
 
         latency = (time.monotonic() - start) * 1000
-        return evaluate_result(scenario, model_label, action_log, result.assessment, latency)
+        return evaluate_result(scenario, model_label, action_log, assessment, latency)
 
     except Exception as e:
         latency = (time.monotonic() - start) * 1000
@@ -643,35 +655,35 @@ async def run_scenario(scenario: Scenario, lm: dspy.LM, model_label: str) -> Sce
         return evaluate_result(scenario, model_label, action_log, "", latency, error=str(e))
 
 
-async def run_all_scenarios(models: dict[str, dspy.LM] | None = None) -> dict[str, list[ScenarioResult]]:
+async def run_all_scenarios(models: dict[str, Model] | None = None) -> dict[str, list[ScenarioResult]]:
     """Run all scenarios against all models.
 
     Args:
-        models: Dict of {label: dspy.LM}. If None, builds from MODELS_TO_TEST.
+        models: Dict of {label: Model}. If None, builds from MODELS_TO_TEST.
 
     Returns:
         Dict of {model_label: [ScenarioResult, ...]}
     """
     if models is None:
         models = {}
-        for label, model_name in MODELS_TO_TEST.items():
-            lm = _build_lm(model_name)
-            if lm is not None:
-                models[label] = lm
+        for label, model_key in MODELS_TO_TEST.items():
+            model = _build_model(model_key)
+            if model is not None:
+                models[label] = model
 
     if not models:
         raise RuntimeError("No models available — check API keys in .env")
 
     all_results: dict[str, list[ScenarioResult]] = {}
 
-    for label, lm in models.items():
+    for label, model in models.items():
         print(f"\n{'='*60}")
         print(f"Testing: {label}")
         print(f"{'='*60}")
         results = []
         for scenario in SCENARIOS:
             print(f"  Running: {scenario.name}...", end=" ", flush=True)
-            result = await run_scenario(scenario, lm, label)
+            result = await run_scenario(scenario, model, label)
             status = "PASS" if result.correct_action else ("ERROR" if result.error else "MISS")
             action = _classify_action(result.actions_taken)
             print(f"{status} (expected={scenario.expected_action}, got={action}, {result.latency_ms:.0f}ms)")
@@ -920,16 +932,16 @@ def compare_reports(report_a_path: str, report_b_path: str):
 # Pytest integration
 # ---------------------------------------------------------------------------
 
-def _get_available_models() -> dict[str, dspy.LM]:
+def _get_available_models() -> dict[str, Model]:
     """Get all models that have valid API keys."""
     import dotenv
     dotenv.load_dotenv()
 
     models = {}
-    for label, model_name in MODELS_TO_TEST.items():
-        lm = _build_lm(model_name)
-        if lm is not None:
-            models[label] = lm
+    for label, model_key in MODELS_TO_TEST.items():
+        model = _build_model(model_key)
+        if model is not None:
+            models[label] = model
     return models
 
 
@@ -946,10 +958,10 @@ async def test_moderation_model(model_key, available_models):
     if model_key not in available_models:
         pytest.skip(f"No API key for {model_key}")
 
-    lm = available_models[model_key]
+    model = available_models[model_key]
     results = []
     for scenario in SCENARIOS:
-        result = await run_scenario(scenario, lm, model_key)
+        result = await run_scenario(scenario, model, model_key)
         results.append(result)
 
     # Print results for this model
@@ -1012,14 +1024,14 @@ async def main():
     print(f"Models: {', '.join(models_to_run.keys())}")
     print()
 
-    # Build LMs for selected models
-    lms = {}
-    for label, model_name in models_to_run.items():
-        lm = _build_lm(model_name)
-        if lm is not None:
-            lms[label] = lm
+    # Build the selected models
+    models = {}
+    for label, model_key in models_to_run.items():
+        model = _build_model(model_key)
+        if model is not None:
+            models[label] = model
 
-    results = await run_all_scenarios(lms)
+    results = await run_all_scenarios(models)
     print_comparison(results)
 
     # Save report

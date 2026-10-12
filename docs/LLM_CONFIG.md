@@ -1,22 +1,34 @@
 # LLM Model Configuration
 
-This project supports flexible LLM model configuration using environment variables. You can switch between different providers (OpenAI, Google Gemini, Anthropic Claude) without code changes.
+Every LLM call in the project goes through pydantic-ai. Models come from the
+model catalogue (`smarter_dev/shared/model_catalog.py`), and
+`build_model_for` in `smarter_dev/shared/model_router.py` turns a catalogue
+entry into a configured pydantic-ai model: provider, API key, endpoint and
+reasoning settings.
 
-## Model Types
+## Bot agents
 
-The project uses three model types for different purposes:
+| Agent | Catalogue key | Where it is set |
+|-------|---------------|-----------------|
+| Chat agent | `gpt-6-luna` by default | `CHAT_AGENT_MODEL`; per-channel overrides in the admin |
+| Conversation compactor | `gpt-6-luna` | `CHAT_AGENT_COMPACT_MODEL` |
+| HelpAgent (`/help`) | `gpt-6-luna` | `UTILITY_MODEL_KEY` in `smarter_dev/bot/agents/utility_model.py` |
+| TLDRAgent (`/tldr`) | `gpt-6-luna` | `UTILITY_MODEL_KEY` |
+| StreakCelebrationAgent | `gpt-6-luna` | `UTILITY_MODEL_KEY` |
+| Timeout announcement | `gpt-6-luna` | `UTILITY_MODEL_KEY` |
+| ForumMonitorAgent | `gpt-6-luna` | `UTILITY_MODEL_KEY` |
+| Moderation triage | `gpt-6-luna` | `UTILITY_MODEL_KEY` |
 
-| Model Type | Environment Variable | Default | Purpose |
-|------------|---------------------|---------|---------|
-| `fast` | `LLM_FAST_MODEL` | `gpt-6-luna` | Quick operations (most agents) |
-| `medium` | `LLM_MEDIUM_MODEL` | `gpt-6-luna` | Higher quality reasoning (forum agent) |
-| `judge` | `LLM_JUDGE_MODEL` | `gpt-6-luna` | Evaluation/testing |
+The six utility agents ran on DSPy until 2026-10 and read `LLM_FAST_MODEL`
+(help, tldr, streak, timeout) and `LLM_MEDIUM_MODEL` (forum, moderation).
+Both were `gpt-6-luna` everywhere, so they map to the `gpt-6-luna` catalogue
+entry at its default reasoning level. `LLM_JUDGE_MODEL` was used only by
+LLM-as-judge tests. All three variables are gone; to change these agents'
+model, change `UTILITY_MODEL_KEY` to another catalogue key.
 
-The primary Discord chat agent and its conversation compactor also default to
-`gpt-6-luna`. Override them with `CHAT_AGENT_MODEL` and
-`CHAT_AGENT_COMPACT_MODEL`, respectively.
+## Voice
 
-Discord voice messages use Gemini TTS directly rather than DSPy:
+Discord voice messages use Gemini TTS directly:
 
 | Environment Variable | Default | Purpose |
 |----------------------|---------|---------|
@@ -27,158 +39,22 @@ Discord voice messages use Gemini TTS directly rather than DSPy:
 | `VOICE_MAX_DURATION_SECONDS` | `30` | Target maximum spoken duration for voice responses |
 | `VOICE_OPUS_BITRATE` | `48k` | Opus bitrate for the Discord voice attachment |
 
-## API Keys Required
+## API keys
 
-Add the appropriate API key to your `.env` file:
-
-```bash
-# For OpenAI models (GPT-5, GPT-4, etc.)
-OPENAI_API_KEY=your_openai_api_key
-
-# For Google Gemini models
-GEMINI_API_KEY=your_gemini_api_key
-
-# For Anthropic Claude models
-ANTHROPIC_API_KEY=your_anthropic_api_key
-```
-
-## Usage Examples
-
-### Switch Fast Model
+`build_model_for` reads keys from the environment (and `.env` locally):
 
 ```bash
-# Use GPT-5 Nano for quick operations
-LLM_FAST_MODEL=gpt-5-nano-2025-08-07 uv run python -m smarter_dev.bot.client
-
-# Use Gemini 2.5 Flash for quick operations
-LLM_FAST_MODEL=gemini/gemini-2.5-flash uv run python -m smarter_dev.bot.client
+OPENAI_API_KEY=your_openai_api_key        # OpenAI catalogue models
+GEMINI_API_KEY=your_gemini_api_key        # Gemini models and voice TTS
+ANTHROPIC_API_KEY=your_anthropic_api_key  # Anthropic models
+OPENROUTER_API_KEY=your_openrouter_key    # OpenRouter models
 ```
 
-### Switch Medium Model
+## Comparing models for moderation
+
+`tests/bot/agents/test_moderation_harness.py` runs the moderation scenarios
+against several catalogue models with the bot's prompts and mock tools:
 
 ```bash
-# Use Claude Sonnet for complex reasoning
-LLM_MEDIUM_MODEL=claude-sonnet-4-20250514 uv run python -m smarter_dev.bot.client
+uv run python tests/bot/agents/test_moderation_harness.py --models gpt-6-luna gemini-flash
 ```
-
-### Switch Judge Model
-
-```bash
-# Use GPT-5 Nano for LLM-as-judge tests
-LLM_JUDGE_MODEL=gpt-5-nano-2025-08-07 uv run python test_mention_agent.py --llm-only
-
-# Use all GPT-5 for testing
-LLM_FAST_MODEL=gpt-5-nano-2025-08-07 LLM_MEDIUM_MODEL=gpt-5-nano-2025-08-07 LLM_JUDGE_MODEL=gpt-5-nano-2025-08-07 uv run python test_mention_agent.py --llm-only
-```
-
-### Persistent Configuration
-
-Add to your shell profile (`.bashrc`, `.zshrc`, etc.):
-
-```bash
-export LLM_FAST_MODEL=gpt-6-luna
-export LLM_MEDIUM_MODEL=gpt-6-luna
-export LLM_JUDGE_MODEL=gpt-6-luna
-export CHAT_AGENT_MODEL=gpt-6-luna
-export CHAT_AGENT_COMPACT_MODEL=gpt-6-luna
-```
-
-Or create a `.env` file:
-
-```bash
-# .env
-LLM_FAST_MODEL=gpt-6-luna
-LLM_MEDIUM_MODEL=gpt-6-luna
-LLM_JUDGE_MODEL=gpt-6-luna
-CHAT_AGENT_MODEL=gpt-6-luna
-CHAT_AGENT_COMPACT_MODEL=gpt-6-luna
-VOICE_TTS_MODEL=gemini-2.5-flash-preview-tts
-VOICE_TTS_VOICE=Kore
-VOICE_WORDS_PER_MINUTE=150
-VOICE_MAX_DURATION_SECONDS=30
-GEMINI_API_KEY=your_gemini_key_here
-ANTHROPIC_API_KEY=your_anthropic_key_here
-```
-
-## Model Support
-
-### OpenAI Models
-- `gpt-5-nano-2025-08-07`
-- `gpt-4o`
-- `gpt-4o-mini`
-- Any other OpenAI model identifier
-
-### Google Gemini Models
-- `gemini/gemini-3.1-flash-lite-preview`
-- `gemini/gemini-2.5-flash`
-- `gemini/gemini-2.0-flash-lite`
-- `gemini/gemini-2.0-flash`
-
-### Anthropic Claude Models
-- `claude-haiku-4-5-20251001`
-- `claude-sonnet-4-20250514`
-- Any other Claude model identifier that accepts `temperature`
-
-Claude Haiku 5.5 (`claude-haiku-5-5`) does not work here: it rejects
-`temperature`, `top_p` and `top_k` with a 400, and DSPy sends
-`temperature=0.0` by default. It is served in Chat instead, from the model
-catalogue (`smarter_dev/shared/model_catalog.py`) as `claude-haiku-5-5`
-through OpenRouter (`anthropic/claude-haiku-5.5`), beside
-`claude-sonnet-5-5`.
-
-### Model Format
-Models should be specified using the DSPy format:
-- OpenAI: `gpt-model-name` or `openai/gpt-model-name`
-- Gemini: `gemini/model-name`
-- Claude: `claude-model-name`
-
-## Agent Model Usage
-
-| Agent | Model Type | Purpose |
-|-------|------------|---------|
-| HelpAgent | `fast` | Quick help responses |
-| TLDRAgent | `fast` | Channel summarization |
-| StreakAgent | `fast` | Streak celebration messages |
-| AoCThreadAgent | `fast` | Advent of Code thread messages |
-| ForumMonitorAgent | `medium` | Forum post analysis and response |
-| MentionAgent | `judge` | Mention handling with evaluation |
-
-## Configuration Validation
-
-The system automatically validates configuration and provides helpful error messages:
-
-```bash
-# Missing API key
-Missing ANTHROPIC_API_KEY in .env for model claude-haiku-4-5-20251001
-
-# Invalid model
-Configuration error: Unknown provider for model xyz-123
-```
-
-## Logging
-
-The bot logs which model it's using on startup:
-
-```
-ForumMonitorAgent using LLM model: claude-haiku-4-5-20251001 (provider: anthropic)
-HelpAgent using LLM model: gemini/gemini-3.1-flash-lite-preview (provider: gemini)
-```
-
-Test runs also display model information:
-
-```
-LLM Models:
-   Fast:   gpt-6-luna (env: LLM_FAST_MODEL)
-   Medium: gpt-6-luna (env: LLM_MEDIUM_MODEL)
-   Judge:  gpt-6-luna (env: LLM_JUDGE_MODEL)
-```
-
-## Implementation
-
-The configuration is centralized in `smarter_dev/llm_config.py`, which provides:
-
-- `get_llm_model(model_type)` - Get configured LLM instance ("fast", "medium", or "judge")
-- `get_model_info(model_type)` - Get model metadata
-- `validate_model_config(model_type)` - Validate configuration
-
-This ensures consistent model configuration across the entire project.

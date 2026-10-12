@@ -1,7 +1,6 @@
 """Tests for the Discord bot help agent system.
 
-This module provides comprehensive tests for the help agent, including LLM-based
-evaluation tests that use Gemini 2.5 Flash to assess response quality.
+The model call itself is covered in tests/bot/agents/test_utility_agents.py.
 """
 
 from __future__ import annotations
@@ -136,10 +135,6 @@ class TestHelpAgent:
         """Setup for each test."""
         self.agent = HelpAgent()
 
-    def test_agent_initialization(self):
-        """Test that help agent initializes correctly."""
-        assert self.agent._agent is not None
-
     def test_agent_is_help_agent(self):
         """Test that help agent is the correct instance type."""
         agent = HelpAgent()
@@ -158,150 +153,6 @@ class TestHelpAgent:
         validated = agent._validate_response_length(long_response)
         assert len(validated) <= 2000
         assert validated.endswith("...")
-
-
-# LLM-based evaluation tests (marked to be skipped in normal runs)
-@pytest.mark.llm
-class TestHelpAgentLLMEvaluation:
-    """LLM-based tests that evaluate help agent response quality using Gemini 2.5."""
-
-    def setup_method(self):
-        """Setup for LLM tests."""
-        self.agent = HelpAgent()
-        # Initialize evaluator LLM (Gemini 2.5 Flash)
-        import dspy
-        from smarter_dev.llm_config import get_llm_model
-
-        self.evaluator_lm = get_llm_model("judge")
-
-    def evaluate_response_quality(self, question: str, response: str, context: str = "") -> dict:
-        """Evaluate response quality using Gemini 2.5 Flash.
-
-        Args:
-            question: Original user question
-            response: Agent's response
-            context: Conversation context
-
-        Returns:
-            dict: Evaluation results with scores and feedback
-        """
-        evaluation_prompt = f"""
-        Evaluate the quality of this Discord bot help response on a scale of 1-10 for each criterion:
-
-        QUESTION: {question}
-        CONTEXT: {context}
-        RESPONSE: {response}
-
-        Rate the response on:
-        1. ACCURACY (1-10): Is the information correct and complete?
-        2. HELPFULNESS (1-10): Does it actually help the user?
-        3. CLARITY (1-10): Is it easy to understand?
-        4. DISCORD_APPROPRIATE (1-10): Is it suitable for Discord (plain text, good formatting)?
-        5. CONTEXT_AWARE (1-10): Does it use the conversation context appropriately?
-
-        Respond in this exact format:
-        ACCURACY: [score]
-        HELPFULNESS: [score]
-        CLARITY: [score]
-        DISCORD_APPROPRIATE: [score]
-        CONTEXT_AWARE: [score]
-        OVERALL: [average score]
-        FEEDBACK: [brief explanation of strengths and weaknesses]
-        """
-
-        # Use evaluator LLM
-        evaluation = self.evaluator_lm.generate(evaluation_prompt)
-
-        # Parse the evaluation
-        lines = evaluation.split('\n')
-        results = {}
-
-        for line in lines:
-            if ':' in line:
-                key, value = line.split(':', 1)
-                key = key.strip().lower()
-                value = value.strip()
-
-                if key in ['accuracy', 'helpfulness', 'clarity', 'discord_appropriate', 'context_aware', 'overall']:
-                    try:
-                        results[key] = float(value)
-                    except ValueError:
-                        results[key] = 0.0
-                elif key == 'feedback':
-                    results[key] = value
-
-        return results
-
-    @pytest.mark.skip(reason="LLM test - run only when needed")
-    def test_bytes_balance_question(self):
-        """Test response to bytes balance question."""
-        question = "How do I check my bytes balance?"
-        response, _ = self.agent.generate_response(question)  # Unpack tuple
-
-        evaluation = self.evaluate_response_quality(question, response)
-
-        # Assert minimum quality thresholds
-        assert evaluation.get('accuracy', 0) >= 7, f"Accuracy too low: {evaluation.get('feedback', '')}"
-        assert evaluation.get('helpfulness', 0) >= 7, f"Helpfulness too low: {evaluation.get('feedback', '')}"
-        assert evaluation.get('overall', 0) >= 7, f"Overall quality too low: {evaluation.get('feedback', '')}"
-
-    @pytest.mark.skip(reason="LLM test - run only when needed")
-    def test_squad_joining_question(self):
-        """Test response to squad joining question."""
-        question = "How do I join a squad? What does it cost?"
-        response, _ = self.agent.generate_response(question)
-
-        evaluation = self.evaluate_response_quality(question, response)
-
-        assert evaluation.get('accuracy', 0) >= 7, f"Accuracy too low: {evaluation.get('feedback', '')}"
-        assert evaluation.get('helpfulness', 0) >= 7, f"Helpfulness too low: {evaluation.get('feedback', '')}"
-
-    @pytest.mark.skip(reason="LLM test - run only when needed")
-    def test_context_aware_response(self):
-        """Test context-aware response generation."""
-        context_messages = [
-            DiscordMessage(
-                author="NewUser",
-                timestamp=datetime.now(timezone.utc),
-                content="I just joined this server"
-            ),
-            DiscordMessage(
-                author="Helper",
-                timestamp=datetime.now(timezone.utc),
-                content="Welcome! The bot here has some cool features"
-            )
-        ]
-
-        question = "What can the bot do?"
-        response, _ = self.agent.generate_response(question, context_messages)
-
-        context_str = "NewUser: I just joined this server\nHelper: Welcome! The bot here has some cool features"
-        evaluation = self.evaluate_response_quality(question, response, context_str)
-
-        assert evaluation.get('context_aware', 0) >= 6, f"Not context-aware enough: {evaluation.get('feedback', '')}"
-        assert evaluation.get('helpfulness', 0) >= 7, f"Not helpful enough: {evaluation.get('feedback', '')}"
-
-    @pytest.mark.skip(reason="LLM test - run only when needed")
-    def test_error_troubleshooting_response(self):
-        """Test response to error troubleshooting question."""
-        question = "I'm getting a cooldown error when trying to send bytes. What's wrong?"
-        response, _ = self.agent.generate_response(question)
-
-        evaluation = self.evaluate_response_quality(question, response)
-
-        assert evaluation.get('accuracy', 0) >= 7, f"Troubleshooting accuracy too low: {evaluation.get('feedback', '')}"
-        assert evaluation.get('helpfulness', 0) >= 8, f"Troubleshooting not helpful enough: {evaluation.get('feedback', '')}"
-
-    @pytest.mark.skip(reason="LLM test - run only when needed")
-    def test_multiple_command_question(self):
-        """Test response to question about multiple commands."""
-        question = "What's the difference between /bytes history and /bytes leaderboard?"
-        response, _ = self.agent.generate_response(question)
-
-        evaluation = self.evaluate_response_quality(question, response)
-
-        assert evaluation.get('accuracy', 0) >= 7, f"Comparison accuracy too low: {evaluation.get('feedback', '')}"
-        assert evaluation.get('clarity', 0) >= 7, f"Comparison not clear enough: {evaluation.get('feedback', '')}"
 
 
 # Integration tests for the complete help system

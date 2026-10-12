@@ -7,6 +7,7 @@ import base64
 import io
 import logging
 import math
+import os
 import re
 import struct
 import wave
@@ -15,6 +16,8 @@ from datetime import UTC
 from datetime import datetime
 
 import aiohttp
+import dotenv
+from google import genai
 from google.genai import types
 
 from smarter_dev.bot.services.base import APIClientProtocol
@@ -22,7 +25,6 @@ from smarter_dev.bot.services.base import BaseService
 from smarter_dev.bot.services.base import CacheManagerProtocol
 from smarter_dev.bot.services.media_client import MediaClient
 from smarter_dev.bot.services.models import ServiceHealth
-from smarter_dev.llm_config import get_gemini_client_for_tts
 from smarter_dev.shared.config import Settings
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.exception_logging import log_exception
@@ -191,6 +193,16 @@ class TTSResult:
 
     pcm: bytes
     usage: TTSUsage
+
+
+def get_gemini_client_for_tts(model_name: str | None = None):
+    """Return a Gemini client and the bare TTS model id."""
+    if model_name is None:
+        model_name = get_settings().voice_tts_model
+    api_key = os.getenv("GEMINI_API_KEY") or dotenv.get_key(".env", "GEMINI_API_KEY")
+    if model_name.startswith("gemini/"):
+        model_name = model_name.removeprefix("gemini/")
+    return genai.Client(api_key=api_key), model_name
 
 
 def generate_tts(

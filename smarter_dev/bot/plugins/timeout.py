@@ -8,8 +8,12 @@ from datetime import timedelta
 
 import hikari
 import lightbulb
+from pydantic import BaseModel
+from pydantic import Field
+from pydantic_ai import Agent
 
-from smarter_dev.bot.agents.base import strip_dspy_markers
+from smarter_dev.bot.agents.utility_model import build_utility_agent
+from smarter_dev.bot.agents.utility_model import render_inputs
 from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.crud import ModerationActionOperations
@@ -20,6 +24,75 @@ mod_action_ops = ModerationActionOperations()
 
 # Create the plugin
 plugin = lightbulb.Plugin("timeout")
+
+TIMEOUT_MESSAGE_INSTRUCTIONS = """You are a professional Discord moderation bot that creates polite, respectful timeout notifications.
+
+Your job is to take a moderator's raw timeout reason and convert it into a professional, community-appropriate message that:
+1. Is respectful and not inflammatory
+2. Briefly explains what happened without being accusatory
+3. Maintains community standards
+4. Uses a calm, professional tone
+5. Focuses on the behavior, not attacking the person
+
+The message will be posted publicly in the channel where the timeout command was used.
+Keep it concise (1-2 sentences) and professional.
+
+Examples:
+- Raw: "spamming like crazy" → "<@123456789> has been timed out for excessive messaging"
+- Raw: "being a total jerk to everyone" → "<@123456789> has been timed out for inappropriate behavior toward other members"
+- Raw: "won't stop arguing about politics" → "<@123456789> has been timed out for continuing off-topic discussions after warnings"
+
+## Inputs
+- user_mention: Discord mention of the timed out user
+- raw_reason: Raw reason provided by the moderator
+- duration: Human-readable duration (e.g., '10 minutes', '1 hour')
+"""
+
+
+class TimeoutMessage(BaseModel):
+    polite_message: str = Field(
+        description="Professional, polite timeout notification message for the channel"
+    )
+
+
+_timeout_message_agent: Agent[None, TimeoutMessage] | None = None
+
+
+def get_timeout_message_agent() -> Agent[None, TimeoutMessage]:
+    """Return the singleton timeout-announcement agent, building it on first use."""
+    global _timeout_message_agent
+    if _timeout_message_agent is None:
+        _timeout_message_agent = build_utility_agent(
+            TimeoutMessage, TIMEOUT_MESSAGE_INSTRUCTIONS
+        )
+    return _timeout_message_agent
+
+
+def format_duration(duration: timedelta) -> str:
+    """Render a timeout length as minutes, hours or days for the announcement."""
+    total_seconds = int(duration.total_seconds())
+    if total_seconds < 3600:  # Less than 1 hour
+        minutes = total_seconds // 60
+        return f"{minutes} minute{'s' if minutes != 1 else ''}"
+    if total_seconds < 86400:  # Less than 1 day
+        hours = total_seconds // 3600
+        return f"{hours} hour{'s' if hours != 1 else ''}"
+    days = total_seconds // 86400
+    return f"{days} day{'s' if days != 1 else ''}"
+
+
+async def generate_timeout_message(
+    user_mention: str, raw_reason: str, duration_display: str
+) -> str:
+    """Rewrite the moderator's reason as a polite public announcement."""
+    result = await get_timeout_message_agent().run(
+        render_inputs(
+            user_mention=user_mention,
+            raw_reason=raw_reason,
+            duration=duration_display,
+        )
+    )
+    return result.output.polite_message.strip()
 
 
 def parse_duration(duration_str: str) -> timedelta | None:
@@ -149,66 +222,19 @@ async def timeout_user(ctx: lightbulb.Context) -> None:
             reason=f"Timed out by {ctx.author.username}: {mod_reason}"
         )
 
+        duration_display = format_duration(timeout_duration)
+
         # Generate AI-processed public message
         try:
             logger.info(f"Starting AI message processing for timeout of {target_user.username}")
-            from smarter_dev.bot.agents.forum_agent import ForumMonitorAgent
-            ForumMonitorAgent()
-
-            # Create a signature for timeout message processing
-            import dspy
-
-            class TimeoutMessageSignature(dspy.Signature):
-                """You are a professional Discord moderation bot that creates polite, respectful timeout notifications.
-
-                Your job is to take a moderator's raw timeout reason and convert it into a professional, community-appropriate message that:
-                1. Is respectful and not inflammatory
-                2. Briefly explains what happened without being accusatory
-                3. Maintains community standards
-                4. Uses a calm, professional tone
-                5. Focuses on the behavior, not attacking the person
-
-                The message will be posted publicly in the channel where the timeout command was used.
-                Keep it concise (1-2 sentences) and professional.
-
-                Examples:
-                - Raw: "spamming like crazy" → "<@123456789> has been timed out for excessive messaging"
-                - Raw: "being a total jerk to everyone" → "<@123456789> has been timed out for inappropriate behavior toward other members"
-                - Raw: "won't stop arguing about politics" → "<@123456789> has been timed out for continuing off-topic discussions after warnings"
-                """
-
-                user_mention: str = dspy.InputField(description="Discord mention of the timed out user")
-                raw_reason: str = dspy.InputField(description="Raw reason provided by the moderator")
-                duration: str = dspy.InputField(description="Human-readable duration (e.g., '10 minutes', '1 hour')")
-                polite_message: str = dspy.OutputField(description="Professional, polite timeout notification message for the channel")
-
-            # Create the timeout message agent
-            timeout_agent = dspy.ChainOfThought(TimeoutMessageSignature)
-
-            # Format duration for display
-            total_seconds = int(timeout_duration.total_seconds())
-            if total_seconds < 3600:  # Less than 1 hour
-                duration_display = f"{total_seconds // 60} minute{'s' if total_seconds // 60 != 1 else ''}"
-            elif total_seconds < 86400:  # Less than 1 day
-                hours = total_seconds // 3600
-                duration_display = f"{hours} hour{'s' if hours != 1 else ''}"
-            else:  # Days
-                days = total_seconds // 86400
-                duration_display = f"{days} day{'s' if days != 1 else ''}"
-
-            # Generate the polite message
-            logger.info(f"Calling AI agent with mention={target_user.mention}, reason={mod_reason}, duration={duration_display}")
-            result = await dspy.asyncify(timeout_agent)(
-                user_mention=target_user.mention,
-                raw_reason=mod_reason,
-                duration=duration_display
+            public_message = await generate_timeout_message(
+                target_user.mention, mod_reason, duration_display
             )
-
-            public_message = strip_dspy_markers(result.polite_message)
             logger.info(f"AI generated message: {public_message}")
-
         except Exception as e:
             logger.error(f"Error generating AI message: {e}", exc_info=True)
+            public_message = ""
+        if not public_message:
             # Fallback to simple message
             public_message = f"{target_user.mention} has been timed out for {duration_display}."
 

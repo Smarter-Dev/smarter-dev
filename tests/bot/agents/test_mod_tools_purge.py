@@ -40,7 +40,7 @@ def _get_purge_tool(bot):
     tools, tracker = mod_tools.create_moderation_tools(
         bot, guild_id="111", channel_id="555", trigger_message_id=None
     )
-    purge = next(t for t in tools if t.__name__ == "purge_messages")
+    purge = next(t.function for t in tools if t.name == "purge_messages")
     return purge, tracker
 
 

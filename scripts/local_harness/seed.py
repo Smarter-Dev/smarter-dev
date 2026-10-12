@@ -39,8 +39,6 @@ from smarter_dev.shared.date_provider import get_date_provider
 
 import smarter_dev.web.roles  # noqa: F401 — registers the bot-service role for the sync below
 from smarter_dev.web.models import (
-    AdventOfCodeConfig,
-    AdventOfCodeThread,
     AttachmentFilterConfig,
     AuditLogConfig,
     BytesBalance,
@@ -226,18 +224,6 @@ def _adopted_bot_rows() -> list[object]:
             is_active=True,
         ),
         AuditLogConfig(guild_id=config.GUILD_ID),
-        AdventOfCodeConfig(
-            guild_id=config.GUILD_ID,
-            forum_channel_id=config.FORUM_CHANNEL_ID,
-            is_active=True,
-        ),
-        AdventOfCodeThread(
-            guild_id=config.GUILD_ID,
-            year=config.AOC_YEAR,
-            day=config.AOC_DAY,
-            thread_id=config.AOC_THREAD_ID,
-            thread_title=f"AoC {config.AOC_YEAR} Day {config.AOC_DAY}",
-        ),
         AttachmentFilterConfig(guild_id=config.GUILD_ID),
         SquadSaleEvent(
             guild_id=config.GUILD_ID,

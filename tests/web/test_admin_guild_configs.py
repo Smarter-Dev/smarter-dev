@@ -1,6 +1,6 @@
 """Tests for the Skrift admin per-guild feature-config controller.
 
-Covers the audit-log, Advent-of-Code and attachment-filter pages ported from
+Covers the audit-log and attachment-filter pages ported from
 the legacy ``smarter_dev.web.admin.views`` onto
 ``smarter_dev.web.bot_admin.guild_configs``.
 """
@@ -25,13 +25,11 @@ from smarter_dev.web.bot_admin.guild_configs import InvalidDomainError
 from smarter_dev.web.bot_admin.guild_configs import InvalidRoleError
 from smarter_dev.web.bot_admin.guild_configs import InvalidThresholdError
 from smarter_dev.web.bot_admin.guild_configs import ThresholdCeiling
-from smarter_dev.web.bot_admin.guild_configs import load_or_create_advent_config
 from smarter_dev.web.bot_admin.guild_configs import load_or_create_attachment_config
 from smarter_dev.web.bot_admin.guild_configs import load_or_create_audit_config
 from smarter_dev.web.bot_admin.guild_configs import (
     load_or_create_moderation_filter_config,
 )
-from smarter_dev.web.bot_admin.guild_configs import parse_advent_of_code_form
 from smarter_dev.web.bot_admin.guild_configs import parse_attachment_filter_form
 from smarter_dev.web.bot_admin.guild_configs import parse_audit_log_form
 from smarter_dev.web.bot_admin.guild_configs import parse_extensions
@@ -40,7 +38,6 @@ from smarter_dev.web.bot_admin.guild_configs import parse_positive_int
 from smarter_dev.web.bot_admin.guild_configs import parse_role_ids
 from smarter_dev.web.bot_admin.guild_configs import validate_channel_id
 from smarter_dev.web.bot_admin.guild_configs import validate_role_id
-from smarter_dev.web.crud import AdventOfCodeConfigOperations
 from smarter_dev.web.crud import AttachmentFilterConfigOperations
 from smarter_dev.web.crud import AuditLogConfigOperations
 from smarter_dev.web.crud import ModerationFilterConfigOperations
@@ -82,7 +79,7 @@ def _admin_client() -> SimpleNamespace:
         get_guild_channels=AsyncMock(
             return_value=[
                 DiscordChannel(id=_TEXT_CHANNEL, name="general", type=0, position=0),
-                DiscordChannel(id=_FORUM_CHANNEL, name="aoc", type=15, position=1),
+                DiscordChannel(id=_FORUM_CHANNEL, name="forum", type=15, position=1),
                 DiscordChannel(id="555", name="voice", type=2, position=2),
                 DiscordChannel(
                     id=_CATEGORY_CHANNEL, name="staff", type=4, position=3
@@ -194,26 +191,6 @@ def test_parse_audit_log_form_rejects_bad_channel():
         parse_audit_log_form({"audit_channel_id": "garbage"})
 
 
-# --- parse_advent_of_code_form (pure) ----------------------------------------
-
-
-def test_parse_advent_of_code_form_happy():
-    parsed = parse_advent_of_code_form(
-        {"forum_channel_id": _FORUM_CHANNEL, "is_active": "on"}
-    )
-    assert parsed == {"forum_channel_id": _FORUM_CHANNEL, "is_active": True}
-
-
-def test_parse_advent_of_code_form_defaults_inactive():
-    parsed = parse_advent_of_code_form({})
-    assert parsed == {"forum_channel_id": None, "is_active": False}
-
-
-def test_parse_advent_of_code_form_rejects_bad_channel():
-    with pytest.raises(InvalidChannelError):
-        parse_advent_of_code_form({"forum_channel_id": "nope"})
-
-
 # --- parse_attachment_filter_form (pure) -------------------------------------
 
 
@@ -245,14 +222,6 @@ async def test_load_or_create_audit_config_persists_default(db_session):
     assert persisted is not None
 
 
-async def test_load_or_create_advent_config_persists_default(db_session):
-    config = await load_or_create_advent_config(db_session, _GUILD)
-    assert config.guild_id == _GUILD
-    assert config.is_active is False
-    persisted = await AdventOfCodeConfigOperations().get_config(db_session, _GUILD)
-    assert persisted is not None
-
-
 async def test_load_or_create_attachment_config_persists_default(db_session):
     config = await load_or_create_attachment_config(db_session, _GUILD)
     assert config.guild_id == _GUILD
@@ -268,10 +237,6 @@ async def test_load_or_create_attachment_config_persists_default(db_session):
 
 def _audit_get():
     return GuildConfigsAdminController.audit_log_config.fn
-
-
-def _advent_get():
-    return GuildConfigsAdminController.advent_of_code_config.fn
 
 
 def _attachment_get():
@@ -290,19 +255,6 @@ async def test_audit_get_renders_form_with_text_channels(db_session):
     # Only text/news channels (types 0, 5) reach the picker.
     channel_ids = {c.id for c in response.context["channels"]}
     assert channel_ids == {_TEXT_CHANNEL}
-
-
-async def test_advent_get_renders_form_with_forum_channels(db_session):
-    with _patch_get(_admin_client()):
-        response = await _advent_get()(
-            None, request=object(), db_session=db_session, guild_id=_GUILD
-        )
-
-    assert response.template_name == "admin/bot/guild_configs/advent_of_code.html"
-    assert response.context["active_page"] == "advent_of_code"
-    channel_ids = {c.id for c in response.context["forum_channels"]}
-    assert channel_ids == {_FORUM_CHANNEL}
-    assert response.context["threads"] == []
 
 
 async def test_attachment_get_renders_form(db_session):
@@ -335,12 +287,12 @@ async def test_audit_get_guild_not_found_returns_404(db_session):
     assert response.template_name == "admin/bot/guilds/error.html"
 
 
-async def test_advent_get_discord_error_returns_503(db_session):
+async def test_audit_get_discord_error_returns_503(db_session):
     client = SimpleNamespace(
         get_guild=AsyncMock(side_effect=DiscordAdminError("upstream boom"))
     )
     with _patch_get(client):
-        response = await _advent_get()(
+        response = await _audit_get()(
             None, request=object(), db_session=db_session, guild_id=_GUILD
         )
 
@@ -410,49 +362,6 @@ async def test_audit_post_invalid_channel_flashes_error_and_does_not_save(
     assert response.url == f"/admin/bot/guilds/{_GUILD}/audit-logs"
     flash_error.assert_called_once()
     assert await AuditLogConfigOperations().get_config(db_session, _GUILD) is None
-
-
-# --- controller: POST advent of code ----------------------------------------
-
-
-def _advent_post():
-    return GuildConfigsAdminController.save_advent_of_code_config.fn
-
-
-async def test_advent_post_persists_and_redirects(db_session):
-    request = SimpleNamespace(
-        form=AsyncMock(
-            return_value={
-                "forum_channel_id": _FORUM_CHANNEL,
-                "is_active": "on",
-            }
-        )
-    )
-    with patch(f"{_MODULE}.flash_success", Mock()):
-        response = await _advent_post()(
-            None, request=request, db_session=db_session, guild_id=_GUILD
-        )
-
-    assert response.url == f"/admin/bot/guilds/{_GUILD}/advent-of-code"
-    saved = await AdventOfCodeConfigOperations().get_config(db_session, _GUILD)
-    assert saved.forum_channel_id == _FORUM_CHANNEL
-    assert saved.is_active is True
-
-
-async def test_advent_post_invalid_channel_flashes_error(db_session):
-    request = SimpleNamespace(
-        form=AsyncMock(return_value={"forum_channel_id": "nope"})
-    )
-    flash_error = Mock()
-    with patch(f"{_MODULE}.flash_error", flash_error):
-        await _advent_post()(
-            None, request=request, db_session=db_session, guild_id=_GUILD
-        )
-
-    flash_error.assert_called_once()
-    assert (
-        await AdventOfCodeConfigOperations().get_config(db_session, _GUILD) is None
-    )
 
 
 # --- controller: POST attachment filter -------------------------------------
@@ -1020,8 +929,6 @@ def test_sidebar_links_the_moderation_filter_page():
     [
         GuildConfigsAdminController.audit_log_config,
         GuildConfigsAdminController.save_audit_log_config,
-        GuildConfigsAdminController.advent_of_code_config,
-        GuildConfigsAdminController.save_advent_of_code_config,
         GuildConfigsAdminController.attachment_filter_config,
         GuildConfigsAdminController.save_attachment_filter_config,
         GuildConfigsAdminController.moderation_filter_config,
