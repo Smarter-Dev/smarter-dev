@@ -352,3 +352,48 @@ async def test_shared_checkout_preserves_legacy_payload_and_supports_back_button
         assert "return_url" not in payload
     else:
         assert payload["return_url"] == cancel_url
+
+
+@pytest.mark.parametrize("status", [401, 400, 404, 422, 503, 500])
+def test_billing_error_responses_are_private_no_store(client, status):
+    tc, key = client
+    if status == 401:
+        key.scoped_permission_list = ["site-memory"]
+        response = tc.get(ROOT + "/catalog")
+    elif status == 400:
+        response = tc.get(ROOT + "/users/invalid/membership")
+    elif status == 404:
+        response = tc.get(f"{ROOT}/users/{uuid4()}/membership")
+    elif status == 422:
+        response = tc.post(f"{ROOT}/users/{uuid4()}/checkout", json={})
+    elif status == 503:
+        site_billing.build_pricing_context.side_effect = RuntimeError(
+            "private provider diagnostic"
+        )
+        response = tc.get(ROOT + "/catalog")
+        assert response.json() == {"detail": "Billing unavailable"}
+    else:
+        site_billing.feature_flags.get_mode.side_effect = RuntimeError(
+            "private database diagnostic"
+        )
+        response = tc.get(ROOT + "/catalog")
+        assert response.json() == {
+            "status_code": 500,
+            "detail": "Internal Server Error",
+        }
+    assert response.status_code == status
+    assert response.headers["Cache-Control"] == "private, no-store"
+    if status == 401:
+        assert response.json() == {
+            "status_code": 401,
+            "detail": "Site service key required",
+        }
+    elif status == 400:
+        assert response.json() == {"detail": "Invalid account ID"}
+    elif status == 404:
+        assert response.json() == {"detail": "Account not found"}
+    elif status == 422:
+        assert response.json()["detail"] == "Request validation failed"
+        assert response.json()["type"] == "validation_error"
+        assert response.json()["errors"]
+    assert "diagnostic" not in response.text

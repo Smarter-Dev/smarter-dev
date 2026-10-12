@@ -9,8 +9,12 @@ from urllib.parse import urlsplit
 from uuid import UUID
 
 from litestar import Controller
+from litestar import Request
+from litestar import Response
 from litestar import get
 from litestar import post
+from litestar.exceptions import HTTPException
+from litestar.exceptions.responses import create_exception_response
 from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import Field
@@ -31,6 +35,26 @@ from smarter_dev.web.billing.portal import create_portal_session
 from smarter_dev.web.billing.pricing_context import build_pricing_context
 
 SITE_BILLING_GUARDS = [*SITE_API_GUARDS, Permission("site-billing")]
+
+
+def _billing_error_response(request: Request, exc: Exception) -> Response:
+    """Keep existing error shapes, adding cache protection on billing only.
+
+    Litestar bypasses controller response_headers for exception responses.
+    Resolve the existing API handler by exception MRO, just as Litestar does,
+    and use its standard sanitized response for HTTP/unexpected exceptions.
+    """
+    handler = next(
+        (
+            BOT_API_EXCEPTION_HANDLERS[cls]
+            for cls in type(exc).__mro__
+            if cls in BOT_API_EXCEPTION_HANDLERS
+        ),
+        create_exception_response,
+    )
+    response = handler(request, exc)
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
 
 
 class CheckoutRequest(BaseModel):
@@ -99,7 +123,11 @@ async def _launched(session: AsyncSession) -> bool:
 
 class SiteBillingController(Controller):
     path = "/api/site/billing"
-    exception_handlers = BOT_API_EXCEPTION_HANDLERS
+    exception_handlers = {
+        **dict.fromkeys(BOT_API_EXCEPTION_HANDLERS, _billing_error_response),
+        HTTPException: _billing_error_response,
+        Exception: _billing_error_response,
+    }
     response_headers = {"Cache-Control": "private, no-store"}
 
     @get("/catalog", guards=SITE_BILLING_GUARDS)
