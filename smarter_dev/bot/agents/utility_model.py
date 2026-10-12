@@ -1,8 +1,9 @@
 """The model behind the bot's small one-shot agents.
 
-The streak celebration, ``/tldr``, ``/help`` and the timeout announcement each
-make one request with one structured answer. They ran on DSPy until 2026-10,
-on the model named by ``LLM_FAST_MODEL`` (``gpt-6-luna`` in every environment).
+The streak celebration, ``/tldr``, ``/help``, the timeout announcement and the
+forum auto-responder each make one request with one structured answer. They ran
+on DSPy until 2026-10, on the models named by ``LLM_FAST_MODEL`` and (for the
+forum agent) ``LLM_MEDIUM_MODEL``, both ``gpt-6-luna`` in every environment.
 They now run on pydantic-ai through the shared model router, so the catalog
 entry carries the provider, key and reasoning default like every other agent.
 """
@@ -19,8 +20,9 @@ from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.shared.model_router import build_model_for
 from smarter_dev.shared.model_router import model_settings_for
 
-# Catalog key that replaced LLM_FAST_MODEL. Served by OpenAI directly at the
-# catalog's default reasoning (medium), which is what DSPy got by sending none.
+# Catalog key that replaced LLM_FAST_MODEL and LLM_MEDIUM_MODEL. Served by
+# OpenAI directly at the catalog's default reasoning (medium), which is what
+# DSPy got by sending none.
 UTILITY_MODEL_KEY = "gpt-6-luna"
 
 OutputT = TypeVar("OutputT")
