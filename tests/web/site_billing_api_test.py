@@ -23,6 +23,7 @@ import smarter_dev.web.roles  # noqa: F401
 from smarter_dev.shared.database import async_sessionmaker
 from smarter_dev.web.api_native import site_billing
 from smarter_dev.web.api_native import site_guards
+from smarter_dev.web.api_native.errors import BotApiException
 from smarter_dev.web.api_native.site_billing import SiteBillingController
 from smarter_dev.web.models import SudoMembership
 
@@ -57,7 +58,9 @@ async def client(test_engine, monkeypatch):
     monkeypatch.setattr(
         site_billing,
         "get_settings",
-        lambda: SimpleNamespace(site_base_url="https://site.test"),
+        lambda: SimpleNamespace(
+            site_base_url="https://site.test", site_billing_allowed_origins=None
+        ),
     )
     monkeypatch.setattr(
         site_billing.feature_flags, "get_mode", AsyncMock(return_value="enabled")
@@ -397,3 +400,179 @@ def test_billing_error_responses_are_private_no_store(client, status):
         assert response.json()["type"] == "validation_error"
         assert response.json()["errors"]
     assert "diagnostic" not in response.text
+
+
+@pytest.fixture
+def billing_origins(client, monkeypatch):
+    settings = SimpleNamespace(
+        site_base_url="https://smarter.dev",
+        site_billing_allowed_origins=[
+            "https://smarter.dev",
+            "https://next.smarter.dev",
+        ],
+    )
+    monkeypatch.setattr(site_billing, "get_settings", lambda: settings)
+    return settings
+
+
+@pytest.fixture
+async def billable_user(user, db_session):
+    db_session.add(
+        SudoMembership(
+            user_id=user.id,
+            role="hacker",
+            source="subscription",
+            customer_id="customer-one",
+            checkout_id=str(uuid4()),
+            price_id="price-hacker",
+            amount_paid_cents=800,
+            expires_at=datetime.now(UTC) + timedelta(days=30),
+            will_renew=True,
+        )
+    )
+    await db_session.commit()
+    return user
+
+
+@pytest.mark.parametrize(
+    "origin",
+    ["https://smarter.dev", "https://next.smarter.dev", "https://next.smarter.dev:443"],
+)
+async def test_explicit_origins_support_checkout_and_portal(
+    client, billing_origins, billable_user, origin
+):
+    tc, _ = client
+    path = f"{ROOT}/users/{billable_user.id}"
+    response = tc.post(
+        path + "/checkout",
+        json={
+            **BODY,
+            "success_url": origin + "/sudo/confirm",
+            "cancel_url": origin + "/sudo/cancel",
+        },
+    )
+    assert response.status_code == 200
+    assert (
+        site_billing.create_checkout_session.await_args.kwargs["success_url"]
+        == origin + "/sudo/confirm"
+    )
+    assert (
+        site_billing.create_checkout_session.await_args.kwargs["cancel_url"]
+        == origin + "/sudo/cancel"
+    )
+    response = tc.post(
+        path + "/portal", json={"return_url": origin + "/account/billing"}
+    )
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "private, no-store"
+    site_billing.create_portal_session.assert_awaited_once_with(
+        "customer-one", return_url=origin + "/account/billing"
+    )
+    assert billing_origins.site_base_url == "https://smarter.dev"
+
+
+@pytest.mark.parametrize("mode", ["disabled", "admin_only"])
+async def test_preview_allowlist_does_not_bypass_launch_gate(
+    client, billing_origins, user, mode
+):
+    tc, _ = client
+    site_billing.feature_flags.get_mode.return_value = mode
+    response = tc.post(
+        f"{ROOT}/users/{user.id}/checkout",
+        json={
+            **BODY,
+            "success_url": "https://next.smarter.dev/sudo/confirm",
+            "cancel_url": "https://next.smarter.dev/sudo/cancel",
+        },
+    )
+    assert response.status_code == 404
+    site_billing.create_checkout_session.assert_not_awaited()
+    assert tc.get(ROOT + "/catalog").json()["launched"] is False
+
+
+@pytest.mark.parametrize("body", [{}, {"return_url": None}])
+async def test_optional_portal_return_preserves_existing_default(
+    client, billing_origins, billable_user, body
+):
+    tc, _ = client
+    assert (
+        tc.post(f"{ROOT}/users/{billable_user.id}/portal", json=body).status_code == 200
+    )
+    site_billing.create_portal_session.assert_awaited_once_with("customer-one")
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://evil.test/x",
+        "http://next.smarter.dev/x",
+        "https://next.smarter.dev:444/x",
+        "https://next.smarter.dev.evil.test/x",
+        "https://next.smarter.dev@evil.test/x",
+        "https://user@next.smarter.dev/x",
+        "https://next.smarter.dev\\@evil.test/x",
+        "https://next.smarter.dev:bad/x",
+        "//next.smarter.dev/x",
+        "javascript:alert(1)",
+    ],
+)
+async def test_checkout_and_portal_deny_foreign_or_malformed_return(
+    client, billing_origins, billable_user, url
+):
+    tc, _ = client
+    path = f"{ROOT}/users/{billable_user.id}"
+    for field in ("success_url", "cancel_url"):
+        response = tc.post(
+            path + "/checkout",
+            json={
+                "plan_id": "hacker",
+                "success_url": "https://next.smarter.dev/sudo/confirm",
+                "cancel_url": "https://next.smarter.dev/sudo/cancel",
+                field: url,
+            },
+        )
+        assert response.status_code == 400
+        assert response.headers["Cache-Control"] == "private, no-store"
+    assert tc.post(path + "/portal", json={"return_url": url}).status_code == 400
+    site_billing.create_checkout_session.assert_not_awaited()
+    site_billing.create_portal_session.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "configured,status", [(None, 200), ([], 400), (["https://next.smarter.dev"], 400)]
+)
+def test_unset_defaults_to_production_but_explicit_list_is_authoritative(
+    client, billing_origins, configured, status
+):
+    billing_origins.site_billing_allowed_origins = configured
+    if status == 200:
+        assert (
+            site_billing._site_url("https://smarter.dev/sudo/confirm")
+            == "https://smarter.dev/sudo/confirm"
+        )
+    else:
+        with pytest.raises(BotApiException) as error:
+            site_billing._site_url("https://smarter.dev/sudo/confirm")
+        assert error.value.status_code == 400
+    if configured is None:
+        with pytest.raises(BotApiException) as error:
+            site_billing._site_url("https://next.smarter.dev/sudo/confirm")
+        assert error.value.status_code == 400
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"return_url": ""},
+        {"return_url": 42},
+        {"return_url": "https://next.smarter.dev/account/billing", "user_id": "forged"},
+    ],
+)
+async def test_portal_rejects_invalid_json_contract(
+    client, billing_origins, billable_user, body
+):
+    tc, _ = client
+    response = tc.post(f"{ROOT}/users/{billable_user.id}/portal", json=body)
+    assert response.status_code == 422
+    assert response.headers["Cache-Control"] == "private, no-store"
+    site_billing.create_portal_session.assert_not_awaited()

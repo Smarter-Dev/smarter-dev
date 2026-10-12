@@ -40,6 +40,8 @@ data:
 
   # Public pages keep their canonical, OG and policy links on the public host.
   SITE_BASE_URL: "https://smarter.dev"
+  # Explicit billing-only preview opt-in; does not change global/public links.
+  SITE_BILLING_ALLOWED_ORIGINS: '["https://smarter.dev", "https://next.smarter.dev"]'
   # Keep Python-owned links on the current host; flip to https://admin.smarter.dev at cutover (#123).
   ADMIN_BASE_URL: "https://smarter.dev"
 
