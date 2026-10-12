@@ -25,6 +25,7 @@ from smarter_dev.web import chat_agent_public
 from smarter_dev.web.api_native import auth
 from smarter_dev.web.api_native import rate_limiting
 from smarter_dev.web.api_native.site_memory import SiteMemoryController
+from smarter_dev.web.api_native.site_memory import SitePublicMemoryController
 from smarter_dev.web.chat_bot_opt_out import opt_out
 from smarter_dev.web.models import MAX_MEMORY_NOTE_CHARS
 from smarter_dev.web.models import MAX_NOTES_PER_GUILD_PER_DAY
@@ -36,6 +37,7 @@ GUILD = "123456789012345678"
 MEMBER = "111111111111111111"
 OTHER = "222222222222222222"
 URL = f"/api/site/guilds/{GUILD}/memory"
+PUBLIC_URL = "/api/site/memory/public"
 MEMBER_URL = f"{URL}/members/{MEMBER}"
 AT = datetime(2026, 10, 1, tzinfo=UTC)
 
@@ -85,7 +87,7 @@ async def site_client(db_session, monkeypatch):
         ),
     )
     app = Litestar(
-        route_handlers=[SiteMemoryController],
+        route_handlers=[SiteMemoryController, SitePublicMemoryController],
         plugins=[PydanticPlugin()],
         dependencies={"db_session": Provide(lambda: db_session, sync_to_thread=False)},
         state=State({"session_maker_class": session_factory}),
@@ -139,8 +141,10 @@ ROUTES = [
     ("GET", "/public"),
 ]
 
+ALL_ROUTES = [(method, URL + path) for method, path in ROUTES] + [("GET", PUBLIC_URL)]
 
-@pytest.mark.parametrize(("method", "path"), ROUTES)
+
+@pytest.mark.parametrize(("method", "path"), ALL_ROUTES)
 @pytest.mark.parametrize("kind", ["missing", "bot", "user", "privacy-only", "unscoped"])
 async def test_each_endpoint_rejects_non_site_memory_credentials(
     site_client, method, path, kind
@@ -159,7 +163,7 @@ async def test_each_endpoint_rejects_non_site_memory_credentials(
     elif kind == "unscoped":
         key.scoped_permission_list = []
     kwargs = {"json": {"content": "a note"}} if method == "POST" else {}
-    response = await client.request(method, URL + path, headers=headers, **kwargs)
+    response = await client.request(method, path, headers=headers, **kwargs)
     assert response.status_code == 401
 
 
@@ -366,7 +370,7 @@ async def test_note_bound_includes_generated_member_reference(site_client, conte
     ).status_code == 422
 
 
-@pytest.mark.parametrize(("method", "path"), ROUTES)
+@pytest.mark.parametrize(("method", "path"), ALL_ROUTES)
 async def test_all_routes_apply_rate_limit(site_client, monkeypatch, method, path):
     client, _ = site_client
     monkeypatch.setattr(
@@ -379,7 +383,7 @@ async def test_all_routes_apply_rate_limit(site_client, monkeypatch, method, pat
         ),
     )
     kwargs = {"json": {"content": "a note"}} if method == "POST" else {}
-    response = await client.request(method, URL + path, **kwargs)
+    response = await client.request(method, path, **kwargs)
     assert response.status_code == 429
     assert response.headers["retry-after"] == "1"
 
@@ -390,6 +394,10 @@ def test_controller_registered_in_both_apps():
         config = yaml.safe_load((root / name).read_text())
         assert (
             "smarter_dev.web.api_native.site_memory:SiteMemoryController"
+            in config["controllers"]
+        )
+        assert (
+            "smarter_dev.web.api_native.site_memory:SitePublicMemoryController"
             in config["controllers"]
         )
 
@@ -481,7 +489,7 @@ async def test_real_skrift_site_key_authorization_on_every_route(
         ),
     )
     app = Litestar(
-        route_handlers=[SiteMemoryController],
+        route_handlers=[SiteMemoryController, SitePublicMemoryController],
         plugins=[PydanticPlugin()],
         dependencies={"db_session": Provide(provide_db_session)},
         state=State({"session_maker_class": maker}),
@@ -490,7 +498,7 @@ async def test_real_skrift_site_key_authorization_on_every_route(
     try:
         async with AsyncTestClient(app=app) as client:
             for name, key in keys.items():
-                for method, path in ROUTES:
+                for method, path in ALL_ROUTES:
                     kwargs = (
                         {"json": {"content": "Real site key note"}}
                         if method == "POST"
@@ -498,7 +506,7 @@ async def test_real_skrift_site_key_authorization_on_every_route(
                     )
                     response = await client.request(
                         method,
-                        URL + path,
+                        path,
                         headers={"Authorization": f"Bearer {key}"},
                         **kwargs,
                     )
@@ -668,3 +676,38 @@ async def test_public_history_queries_are_shared_cached_and_viewer_independent(
         assert len(statements) == 6
     finally:
         event.remove(engine, "before_cursor_execute", record)
+
+
+@pytest.mark.parametrize("viewer", ["", MEMBER, OTHER, f"{MEMBER},{OTHER}"])
+async def test_public_alias_matches_guild_endpoint(site_client, db_session, viewer):
+    client, _ = site_client
+    await seed_memory(db_session)
+    params = {"viewer_discord_ids": viewer}
+    scoped = await client.get(URL + "/public", params=params)
+    alias = await client.get(PUBLIC_URL, params=params)
+    assert alias.status_code == scoped.status_code == 200
+    assert alias.json() == scoped.json()
+    assert alias.json()["guild_id"] == GUILD
+    assert alias.headers["cache-control"] == "private, no-store"
+
+
+async def test_public_alias_404_without_enabled_guild(site_client, db_session):
+    client, _ = site_client
+    response = await client.get(PUBLIC_URL)
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Public memory not found"
+    memory = await seed_memory(db_session, public_page_enabled=False)
+    assert (await client.get(PUBLIC_URL)).status_code == 404
+    memory.public_page_enabled = True
+    await db_session.commit()
+    assert (await client.get(PUBLIC_URL)).status_code == 200
+    memory.public_page_enabled = False
+    await db_session.commit()
+    assert (await client.get(PUBLIC_URL)).status_code == 404
+
+
+@pytest.mark.parametrize("viewer", ["invalid", "1" * 23, MEMBER + "," + "x" * 2300])
+async def test_public_alias_validates_viewer_ids(site_client, viewer):
+    client, _ = site_client
+    response = await client.get(PUBLIC_URL, params={"viewer_discord_ids": viewer})
+    assert response.status_code == 422

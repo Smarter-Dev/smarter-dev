@@ -13,7 +13,7 @@ forwarding requests. Member IDs and `viewer_discord_ids` are trusted assertions
 from that backend, not browser-controlled authorization. Successful memory responses use
 `Cache-Control: private, no-store`; never cache personalized responses at the CDN.
 
-All paths start with `/api/site/guilds/{guild_id}/memory`. Guild IDs are
+The guild-scoped paths start with `/api/site/guilds/{guild_id}/memory`. Guild IDs are
 strings of 15–20 ASCII decimal digits, matching the memory table column bound.
 Member and viewer IDs use the shared Snowflake range of 15–22 ASCII decimal
 digits. Times are ISO 8601, in UTC.
@@ -24,6 +24,8 @@ digits. Times are ISO 8601, in UTC.
 | `GET /members/{discord_user_id}?limit=25&before=…` | `{notes: [{id, created_at, channel_name, content, source}], next_before}`. Notes tagging that member only, newest first; legacy `name (id N)` tags and Discord mentions also match. Filters blocked-member lines. `source` is `site` or `discord`. Empty results are 200. |
 | `POST /members/{discord_user_id}/notes` | Body `{content}`; 200 `{saved, reason, id, created_at}`. A duplicate today or the existing guild daily cap returns `saved: false` and `reason: duplicate` or `daily_cap`. |
 | `GET /public?viewer_discord_ids=111111111111111111,222222222222222222` | `{guild_id, personality, behavior, memory, last_dream_at, revision}`. The same `public_guild_memory`, `check_public_blocks`, and `PublicBlock.shown` used by `/chat-agent`: opted-out lines omitted, other members masked, failing blocks empty, and the viewer's own tagged names restored. Omit IDs for the anonymous view. Returns 404 unless this is the guild currently switched on by the admin. |
+
+`GET /api/site/memory/public?viewer_discord_ids=…` returns the same public response without a guild ID in the path: `guild_id` identifies the enabled guild, or the endpoint returns 404 `Public memory not found` when none is public; authentication, rate limiting, masking, and cache headers are unchanged.
 
 `limit` is 1–100. `next_before` is an opaque cursor; pass it unchanged as
 `before` for the next page, and stop at null. Ordering is `(created_at, id)`

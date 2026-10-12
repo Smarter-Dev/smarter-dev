@@ -102,6 +102,7 @@ controllers:
   - smarter_dev.web.bot_admin.channel_config:ChannelConfigController
   - smarter_dev.web.api_native.chat_memory:ChatMemoryController
   - smarter_dev.web.api_native.site_memory:SiteMemoryController
+  - smarter_dev.web.api_native.site_memory:SitePublicMemoryController
   - smarter_dev.web.api_native.handlers:HandlerController
   - smarter_dev.web.api_native.admin_handlers:AdminHandlerController
   - smarter_dev.web.api_native.admin:AdminController

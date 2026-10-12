@@ -332,18 +332,39 @@ class SiteMemoryController(Controller):
         viewer_discord_ids: Annotated[str, Parameter(max_length=2300)] = "",
     ) -> SitePublicRead:
         _guild_id(guild_id)
-        viewer_ids = frozenset(
-            _discord_id(value.strip())
-            for value in viewer_discord_ids.split(",")
-            if value.strip()
-        )
-        memory = await public_guild_memory(db_session)
-        if memory is None or memory.guild_id != guild_id:
-            raise plain_error(404, "Public memory not found")
-        blocks = await cached_public_blocks(db_session, memory)
-        return SitePublicRead(
-            guild_id=guild_id,
-            revision=memory.revision,
-            last_dream_at=memory.last_dream_at,
-            **{name: block.shown(viewer_ids) for name, block in blocks.items()},
-        )
+        return await _public_memory(db_session, viewer_discord_ids, guild_id)
+
+
+async def _public_memory(
+    db_session: AsyncSession, viewer_discord_ids: str, guild_id: str | None = None
+) -> SitePublicRead:
+    viewer_ids = frozenset(
+        _discord_id(value.strip())
+        for value in viewer_discord_ids.split(",")
+        if value.strip()
+    )
+    memory = await public_guild_memory(db_session)
+    if memory is None or (guild_id is not None and memory.guild_id != guild_id):
+        raise plain_error(404, "Public memory not found")
+    blocks = await cached_public_blocks(db_session, memory)
+    return SitePublicRead(
+        guild_id=memory.guild_id,
+        revision=memory.revision,
+        last_dream_at=memory.last_dream_at,
+        **{name: block.shown(viewer_ids) for name, block in blocks.items()},
+    )
+
+
+class SitePublicMemoryController(Controller):
+    path = "/api/site/memory"
+    exception_handlers = BOT_API_EXCEPTION_HANDLERS
+    middleware = [DefineMiddleware(MultiTierRateLimitMiddleware)]
+    response_headers = {"Cache-Control": "private, no-store"}
+
+    @get("/public", guards=[*SITE_API_GUARDS, Permission("site-memory")])
+    async def public(
+        self,
+        db_session: AsyncSession,
+        viewer_discord_ids: Annotated[str, Parameter(max_length=2300)] = "",
+    ) -> SitePublicRead:
+        return await _public_memory(db_session, viewer_discord_ids)
