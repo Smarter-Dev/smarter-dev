@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Literal
 
@@ -27,6 +28,12 @@ from smarter_dev.web.models import ChatBotBlockedUser
 from smarter_dev.web.models import ChatBotPurgeRequest
 
 SITE_PRIVACY_GUARDS = [*SITE_API_GUARDS, Permission("site-privacy")]
+_DISCORD_USER_ID = re.compile(r"[0-9]{17,20}\Z")
+
+
+def _validate_discord_user_id(discord_user_id: str) -> None:
+    if _DISCORD_USER_ID.fullmatch(discord_user_id) is None:
+        raise plain_error(400, "Invalid Discord user ID")
 
 
 class SiteOptOutState(BaseModel):
@@ -72,6 +79,7 @@ class SitePrivacyController(Controller):
     async def read(
         self, db_session: AsyncSession, discord_user_id: Snowflake
     ) -> SiteOptOutState:
+        _validate_discord_user_id(discord_user_id)
         return await _state(db_session, discord_user_id)
 
     @post(
@@ -82,6 +90,7 @@ class SitePrivacyController(Controller):
     async def enable(
         self, db_session: AsyncSession, discord_user_id: Snowflake
     ) -> SiteOptOutState:
+        _validate_discord_user_id(discord_user_id)
         await _refuse_in_flight_purge(db_session, discord_user_id)
         await opt_out(db_session, discord_user_id)
         result = await _state(db_session, discord_user_id)
@@ -96,6 +105,7 @@ class SitePrivacyController(Controller):
     async def disable(
         self, db_session: AsyncSession, discord_user_id: Snowflake
     ) -> SiteOptOutState:
+        _validate_discord_user_id(discord_user_id)
         await _refuse_in_flight_purge(db_session, discord_user_id)
         await opt_in(db_session, discord_user_id)
         result = await _state(db_session, discord_user_id)

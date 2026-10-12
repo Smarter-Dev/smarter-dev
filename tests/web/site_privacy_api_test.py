@@ -4,18 +4,28 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
+from unittest.mock import patch
 from uuid import uuid4
 
 import pytest
 from litestar.di import Provide
 from litestar.plugins.pydantic import PydanticPlugin
 from litestar.testing import create_test_client
+from skrift.auth.services import assign_role_to_user
+from skrift.auth.services import invalidate_user_permissions_cache
+from skrift.auth.services import sync_roles_to_database
+from skrift.db.base import Base as SkriftBase
+from skrift.db.models.user import User as SkriftUser
+from skrift.db.services import api_key_service
+from sqlalchemy import select
 
+import smarter_dev.web.roles  # noqa: F401 — registers the site-service role
 from smarter_dev.shared.database import async_sessionmaker
 from smarter_dev.web.api_native import site_guards
 from smarter_dev.web.api_native.site_privacy import SitePrivacyController
 from smarter_dev.web.chat_bot_opt_out import read_opt_out
 from smarter_dev.web.chat_bot_purge import STATUS_QUEUED
+from smarter_dev.web.models import ChatBotBlockedUser
 from smarter_dev.web.models import ChatBotPurgeRequest
 
 _USER = "111111111111111111"
@@ -119,3 +129,84 @@ async def test_writes_refused_while_purge_is_in_flight(client, db_session):
         "source": None,
     }
     assert (await read_opt_out(db_session, _USER)).revision == 0
+
+
+@pytest.mark.parametrize("method", ["get", "post", "delete"])
+@pytest.mark.parametrize(
+    "bad_id",
+    ["not-a-snowflake", "1234567890123456", "１２３４５６７８９０１２３４５６７"],
+)
+async def test_invalid_path_id_is_rejected_without_mutation(
+    client, db_session, method, bad_id
+):
+    test_client, _ = client
+    response = getattr(test_client, method)(f"/api/site/privacy/opt-out/{bad_id}")
+    assert response.status_code == 400
+    assert (await db_session.scalars(select(ChatBotBlockedUser))).all() == []
+    assert (await read_opt_out(db_session, _USER)).revision == 0
+
+
+async def test_real_skrift_site_key_and_principal_boundary(test_engine):
+    """Exercise role, key verification, scope, and the production guard chain."""
+    async with test_engine.begin() as connection:
+        await connection.run_sync(SkriftBase.metadata.create_all)
+    maker = async_sessionmaker(test_engine, expire_on_commit=False)
+    async with maker() as session:
+        owner = SkriftUser(
+            email="site-opt-out@smarter.dev", name="site", is_active=True
+        )
+        session.add(owner)
+        await session.commit()
+        await sync_roles_to_database(session)
+        assert await assign_role_to_user(session, owner.id, "site-service")
+        await session.commit()
+
+        _, site_key, _ = await api_key_service.create_api_key(
+            session,
+            owner.id,
+            "site",
+            principal_type="service",
+            service_name="site",
+            scoped_permissions=["site-privacy"],
+        )
+        _, bot_key, _ = await api_key_service.create_api_key(
+            session,
+            owner.id,
+            "bot",
+            principal_type="service",
+            service_name="discord-bot",
+            scoped_permissions=["site-privacy"],
+        )
+        _, unscoped_key, _ = await api_key_service.create_api_key(
+            session,
+            owner.id,
+            "unscoped-site",
+            principal_type="service",
+            service_name="site",
+        )
+
+    async def provide_db_session():
+        async with maker() as session:
+            yield session
+
+    invalidate_user_permissions_cache()
+    with patch(
+        "smarter_dev.web.api_native.auth.get_db_session_context",
+        side_effect=lambda: maker(),
+    ):
+        with create_test_client(
+            route_handlers=[SitePrivacyController],
+            plugins=[PydanticPlugin()],
+            dependencies={"db_session": Provide(provide_db_session)},
+        ) as test_client:
+            test_client.app.state.session_maker_class = maker
+
+            def auth(key: str) -> dict[str, str]:
+                return {"Authorization": f"Bearer {key}"}
+
+            assert test_client.get(_PATH, headers=auth(site_key)).status_code == 200
+            assert test_client.post(_PATH, headers=auth(site_key)).status_code == 200
+            assert test_client.delete(_PATH, headers=auth(site_key)).status_code == 200
+            assert test_client.get(_PATH, headers=auth(bot_key)).status_code == 401
+            assert test_client.get(_PATH, headers=auth(unscoped_key)).status_code == 401
+    invalidate_user_permissions_cache()
