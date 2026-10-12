@@ -60,7 +60,9 @@ development. The answer view URL follows this setting as well.
 
 Public content literals intentionally stay on `smarter.dev`: canonical and
 Open Graph URLs in the resource controllers, the marketing link in the signup
-email, and the public URLs in the privacy notice and terms. These identify the
-public site after the Worker cutover. Email addresses ending `@smarter.dev`
-are contact or sender addresses and are unrelated to routing. Tests using a
+email, and public privacy, terms and chat-agent links. These identify the
+public site after the Worker cutover. The privacy notice's account-security
+link points to `admin.smarter.dev` because Python serves that page. Email
+addresses ending `@smarter.dev` are contact or sender addresses and are
+unrelated to routing. Tests using a
 `smarter.dev` base explicitly exercise public URLs or URL formatting.
