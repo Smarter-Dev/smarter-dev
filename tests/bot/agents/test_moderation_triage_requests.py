@@ -1,169 +1,224 @@
-"""Moderation triage against a local stand-in for OpenAI's chat completions API.
+"""Moderation triage on pydantic-ai, driven by a scripted model.
 
-The real path runs end to end: ``get_llm_model`` builds the ``dspy.LM``, DSPy
-ReAct drives it, litellm sends the HTTP request. Only the server is fake. Like
-OpenAI, it refuses ``max_tokens`` from a reasoning model with a 400, which is
-how triage failed on GPT-6 Luna on 2026-09-25.
+The real path runs end to end: ``run_moderation_agent`` builds the triage
+tools, the agent calls them, and the tracker and report come out the other
+side. Only the model is scripted.
 """
 
 from __future__ import annotations
 
 import json
-import threading
-from http.server import BaseHTTPRequestHandler
-from http.server import ThreadingHTTPServer
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic_ai.messages import ModelMessage
+from pydantic_ai.messages import ModelResponse
+from pydantic_ai.messages import ToolCallPart
+from pydantic_ai.messages import ToolReturnPart
+from pydantic_ai.messages import UserPromptPart
+from pydantic_ai.models.function import AgentInfo
+from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.models.openai import OpenAIResponsesModel
 
+from smarter_dev.bot.agents import mod_tools
 from smarter_dev.bot.agents import moderation_agent
 from smarter_dev.bot.agents.mod_tools import ActionTracker
 from smarter_dev.bot.agents.mod_tools import build_triage_report_embed
-from smarter_dev.llm_config import get_llm_model
-
-_MAX_TOKENS_ERROR = {
-    "error": {
-        "message": "Unsupported parameter: 'max_tokens' is not supported with this model."
-        " Use 'max_completion_tokens' instead.",
-        "type": "invalid_request_error",
-        "param": "max_tokens",
-        "code": "unsupported_parameter",
-    }
-}
-
-# ChatAdapter sections for a ReAct step, then the extract step.
-_FINISH = (
-    "[[ ## next_thought ## ]]\nNothing needs doing.\n\n"
-    "[[ ## next_tool_name ## ]]\nfinish\n\n"
-    "[[ ## next_tool_args ## ]]\n{}\n\n"
-    "[[ ## completed ## ]]"
-)
-_EXTRACT = (
-    "[[ ## reasoning ## ]]\nA friendly exchange.\n\n"
-    "[[ ## assessment ## ]]\nFriendly banter, nothing to act on.\n\n"
-    "[[ ## completed ## ]]"
-)
 
 
-class _FakeOpenAI:
-    """Replays ``replies`` in order; a ``None`` reply is a 500."""
-
-    def __init__(self, replies):
-        self.replies = list(replies)
-        self.bodies: list[dict] = []
-        fake = self
-
-        class Handler(BaseHTTPRequestHandler):
-            def log_message(self, *args):
-                pass
-
-            def do_POST(self):
-                body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                fake.bodies.append(body)
-                if "max_tokens" in body and body["model"].startswith(("gpt-5", "gpt-6", "o")):
-                    self._send(400, _MAX_TOKENS_ERROR)
-                    return
-                content = fake.replies.pop(0) if fake.replies else None
-                if content is None:
-                    self._send(500, {"error": {"message": "boom", "type": "server_error"}})
-                    return
-                self._send(200, {
-                    "id": "chatcmpl-test", "object": "chat.completion", "created": 0,
-                    "model": body["model"],
-                    "choices": [{"index": 0, "finish_reason": "stop",
-                                 "message": {"role": "assistant", "content": content}}],
-                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-                })
-
-            def _send(self, status, payload):
-                data = json.dumps(payload).encode()
-                self.send_response(status)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
-
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
-        self.url = f"http://127.0.0.1:{self.server.server_port}/v1"
-
-    def close(self):
-        self.server.shutdown()
-        self.server.server_close()
+@pytest.fixture(autouse=True)
+def _openai_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The real model is built before the test swaps in its FunctionModel.
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
 
 
-@pytest.fixture
-def openai_stub(monkeypatch):
-    servers = []
-
-    def start(model: str, replies):
-        server = _FakeOpenAI(replies)
-        servers.append(server)
-        monkeypatch.setenv("LLM_MEDIUM_MODEL", model)
-        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-        monkeypatch.setenv("OPENAI_API_BASE", server.url)
-        lm = get_llm_model("medium")
-        lm.cache = False  # every call must reach the stub
-        lm.num_retries = 0
-        monkeypatch.setattr(moderation_agent, "MODERATION_LM", lm)
-        return server
-
-    yield start
-    for server in servers:
-        server.close()
-
-
-async def _triage():
-    return await moderation_agent.run_moderation_agent(
-        bot=MagicMock(),
-        guild_id="1",
-        channel_id="2",
-        trigger_message_content="@mods can someone look at this?",
-        trigger_author="reporter",
-        context_messages=[],
-        guild_instructions="",
-        enabled_tools=[],
-        trigger_message_id="3",
+def _prompt(messages: list[ModelMessage]) -> str:
+    return "\n".join(
+        part.content
+        for message in messages
+        for part in message.parts
+        if isinstance(part, UserPromptPart) and isinstance(part.content, str)
     )
+
+
+def _tool_returns(messages: list[ModelMessage]) -> list[ToolReturnPart]:
+    return [
+        part
+        for message in messages
+        for part in message.parts
+        if isinstance(part, ToolReturnPart)
+    ]
+
+
+def _scripted(*steps: list[tuple[str, dict]], seen: list | None = None) -> FunctionModel:
+    """Each step is the tool calls for one model turn; the last turn is the output."""
+    turns = list(steps)
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        if seen is not None:
+            seen.append((messages, info))
+        calls = turns.pop(0)
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    info.output_tools[0].name if name == "final" else name, args
+                )
+                for name, args in calls
+            ]
+        )
+
+    return FunctionModel(respond)
+
+
+def _failing(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+    raise RuntimeError("boom: provider internals")
+
+
+async def _triage(model: FunctionModel, follow_up: FunctionModel | None = None, **kw):
+    kwargs = {
+        "bot": MagicMock(),
+        "guild_id": "1",
+        "channel_id": "2",
+        "trigger_message_content": "@mods can someone look at this?",
+        "trigger_author": "reporter",
+        "context_messages": [],
+        "guild_instructions": "",
+        "enabled_tools": [],
+        "trigger_message_id": "3",
+        **kw,
+    }
+    with (
+        moderation_agent.get_moderation_agent().override(model=model),
+        moderation_agent.get_follow_up_agent().override(
+            model=follow_up or FunctionModel(_failing)
+        ),
+    ):
+        return await moderation_agent.run_moderation_agent(**kwargs)
 
 
 def _field_names(embed) -> list[str]:
     return [f.name for f in embed.fields]
 
 
-@pytest.mark.parametrize("model", ["gpt-6-luna", "gpt-5.6-luna"])
-async def test_triage_sends_max_completion_tokens_to_openai_reasoning_models(openai_stub, model):
-    server = openai_stub(model, [_FINISH, _EXTRACT])
+# -- the run ---------------------------------------------------------------------
 
-    assessment, tracker = await _triage()
+
+async def test_triage_sends_its_inputs_and_offers_the_triage_tools() -> None:
+    seen: list = []
+    model = _scripted(
+        [("final", {"assessment": "Friendly banter, nothing to act on."})], seen=seen
+    )
+
+    assessment, tracker = await _triage(model)
 
     assert tracker.failure is None
     assert assessment == "Friendly banter, nothing to act on."
-    assert len(server.bodies) == 2
-    for body in server.bodies:
-        assert body["model"] == model
-        assert body["max_completion_tokens"] == 25000
-        assert "max_tokens" not in body
+    messages, info = seen[0]
+    prompt = _prompt(messages)
+    assert "## trigger_message\n@mods can someone look at this?" in prompt
+    assert "## trigger_author\nreporter" in prompt
+    assert "## guild_instructions\nUse your best judgment to moderate fairly." in prompt
+    # An empty enabled_tools means the defaults: timeout and purge, plus utilities.
+    assert {tool.name for tool in info.function_tools} == {
+        "timeout_user",
+        "purge_messages",
+        "flag_users",
+        "send_mod_message",
+        "get_user_info",
+        "get_user_history",
+    }
 
 
-def test_other_providers_keep_max_tokens(monkeypatch):
-    # OpenRouter accepts max_tokens for reasoning models; non-reasoning models
-    # keep DSPy's default limit. Neither is rewritten.
-    monkeypatch.setenv("OPENROUTER_API_KEY", "or-test")
-    monkeypatch.setenv("GEMINI_API_KEY", "g-test")
-    for model, limit in (("openrouter/openai/gpt-6-luna", 25000), ("gemini/gemini-3.8-flash", 4000)):
-        monkeypatch.setenv("LLM_MEDIUM_MODEL", model)
-        lm = get_llm_model("medium")
-        assert lm.kwargs["max_tokens"] == limit
-        assert "max_completion_tokens" not in lm.kwargs
+async def test_the_tool_schemas_carry_the_docstring_argument_descriptions() -> None:
+    seen: list = []
+
+    await _triage(
+        _scripted([("final", {"assessment": "ok"})], seen=seen),
+        enabled_tools=["timeout", "purge", "delete"],
+    )
+
+    tools = {tool.name: tool for tool in seen[0][1].function_tools}
+    assert set(tools) >= {"timeout_user", "purge_messages", "delete_message"}
+    duration = tools["timeout_user"].parameters_json_schema["properties"]["duration"]
+    assert duration["description"] == "Duration string like '10m', '30m', '1h'"
+    assert "Prefer short durations" in tools["timeout_user"].description
 
 
-async def test_a_failed_triage_reports_manual_review_not_no_action(openai_stub):
-    openai_stub("gpt-6-luna", [None])
+async def test_tool_calls_land_in_the_tracker() -> None:
+    seen: list = []
+    model = _scripted(
+        [
+            ("flag_users", {"user_ids": "42, 43"}),
+            ("send_mod_message", {"message": "Please keep it civil."}),
+        ],
+        [("final", {"assessment": "Heated; flagged both."})],
+        seen=seen,
+    )
 
-    assessment, tracker = await _triage()
+    assessment, tracker = await _triage(model)
 
-    assert tracker.failure == "InternalServerError"
+    assert assessment == "Heated; flagged both."
+    assert tracker.flags == ["42", "43"]
+    assert tracker.channel_message == "Please keep it civil."
+    returned = [part.content for part in _tool_returns(seen[1][0])]
+    assert {"success": True, "result": "Flagged 2 user(s) for moderator review."} in returned
+
+
+async def test_actions_without_a_channel_message_get_a_follow_up() -> None:
+    model = _scripted(
+        [("flag_users", {"user_ids": "42"})],
+        [("final", {"assessment": "Flagged one user."})],
+    )
+    follow_up_seen: list = []
+    follow_up = _scripted(
+        [("final", {"message": " Please stop; a moderator is on the way. "})],
+        seen=follow_up_seen,
+    )
+
+    _, tracker = await _triage(model, follow_up)
+
+    assert tracker.channel_message == "Please stop; a moderator is on the way."
+    prompt = _prompt(follow_up_seen[0][0])
+    assert "## actions_summary\nActions were taken." in prompt
+    assert "## assessment\nFlagged one user." in prompt
+
+
+async def test_a_failed_follow_up_posts_the_generic_notice() -> None:
+    model = _scripted(
+        [("flag_users", {"user_ids": "42"})],
+        [("final", {"assessment": "Flagged one user."})],
+    )
+
+    _, tracker = await _triage(model, FunctionModel(_failing))
+
+    assert tracker.channel_message == (
+        "Moderation action has been taken. A human moderator will review "
+        "the situation shortly."
+    )
+
+
+async def test_a_runaway_triage_stops_at_the_request_limit() -> None:
+    def forever(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        return ModelResponse(parts=[ToolCallPart("get_user_history", {"user_id": "42"})])
+
+    _, tracker = await _triage(FunctionModel(forever))
+
+    assert tracker.failure == "UsageLimitExceeded"
+
+
+def test_triage_runs_on_gpt_6_luna_through_the_router() -> None:
+    for agent in (moderation_agent.get_moderation_agent(), moderation_agent.get_follow_up_agent()):
+        assert isinstance(agent.model, OpenAIResponsesModel)
+        assert agent.model.model_name == "gpt-6-luna"
+
+
+# -- failure reporting -----------------------------------------------------------
+
+
+async def test_a_failed_triage_reports_manual_review_not_no_action() -> None:
+    assessment, tracker = await _triage(FunctionModel(_failing))
+
+    assert tracker.failure == "RuntimeError"
     assert not tracker.has_actions
     assert "boom" not in assessment
     embed = build_triage_report_embed(tracker, assessment, "reporter", "2", "3")
@@ -191,9 +246,7 @@ def test_a_triage_failing_after_an_action_keeps_the_action_in_the_report(notice)
     assert ("No notice was posted" in status.value) is (notice is None)
 
 
-async def test_a_failed_triage_returns_the_tracker_it_ran_with(openai_stub, monkeypatch):
-    from smarter_dev.bot.agents import mod_tools
-
+async def test_a_failed_triage_returns_the_tracker_it_ran_with(monkeypatch) -> None:
     created = []
     real = mod_tools.create_moderation_tools
 
@@ -204,13 +257,12 @@ async def test_a_failed_triage_returns_the_tracker_it_ran_with(openai_stub, monk
         return tools, tracker
 
     monkeypatch.setattr(moderation_agent, "create_moderation_tools", spy)
-    openai_stub("gpt-6-luna", [None])
 
-    _, tracker = await _triage()
+    _, tracker = await _triage(FunctionModel(_failing))
 
     assert tracker is created[0]
     assert tracker.flags == ["42"]
-    assert tracker.failure == "InternalServerError"
+    assert tracker.failure == "RuntimeError"
 
 
 def test_a_finished_triage_with_no_action_still_says_so():

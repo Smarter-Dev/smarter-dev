@@ -289,7 +289,7 @@ async def gather_message_context(
 
 
 class ConversationContextBuilder:
-    """Builds structured conversation context for DSPy agents."""
+    """Builds structured conversation context for the /help agent."""
 
     def __init__(self, bot: hikari.GatewayBot, guild_id: int | None = None):
         self.bot = bot

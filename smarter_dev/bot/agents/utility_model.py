@@ -1,9 +1,9 @@
 """The model behind the bot's small one-shot agents.
 
-The streak celebration, ``/tldr``, ``/help``, the timeout announcement and the
-forum auto-responder each make one request with one structured answer. They ran
-on DSPy until 2026-10, on the models named by ``LLM_FAST_MODEL`` and (for the
-forum agent) ``LLM_MEDIUM_MODEL``, both ``gpt-6-luna`` in every environment.
+The streak celebration, ``/tldr``, ``/help``, the timeout announcement, the
+forum auto-responder and moderation triage each produce one structured answer.
+They ran on DSPy until 2026-10, on the models named by ``LLM_FAST_MODEL`` and
+(forum, moderation) ``LLM_MEDIUM_MODEL``, both ``gpt-6-luna`` everywhere.
 They now run on pydantic-ai through the shared model router, so the catalog
 entry carries the provider, key and reasoning default like every other agent.
 """

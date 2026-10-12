@@ -48,11 +48,8 @@ data:
   MEDIA_REQUEST_TIMEOUT_SECONDS: "15"
 
   # LLM Model Configuration. GPT-6 Luna from OpenAI directly (2026-09-24);
-  # 5.6 Luna's OpenRouter hop (and its fee) went with it. The LLM_* vars feed
-  # litellm (dspy); the agent vars are catalog wire ids.
-  LLM_FAST_MODEL: "gpt-6-luna"
-  LLM_MEDIUM_MODEL: "gpt-6-luna"
-  LLM_JUDGE_MODEL: "gpt-6-luna"
+  # 5.6 Luna's OpenRouter hop (and its fee) went with it. The agent vars are
+  # catalog wire ids.
   CHAT_AGENT_MODEL: "gpt-6-luna"
   CHAT_AGENT_COMPACT_MODEL: "gpt-6-luna"
   HANDLER_AGENT_MODEL: "gpt-6-luna"
