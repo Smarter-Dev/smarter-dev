@@ -133,9 +133,9 @@ before discarding the one-time value.
 
 ## URL ownership
 
-Production `SITE_BASE_URL` points to `smarter.dev` for public privacy, terms
-and chat-agent URLs. `ADMIN_BASE_URL` points to `admin.smarter.dev` for
-Python-owned confirmation, account, billing, bot configuration, search and
+Production `SITE_BASE_URL` points to `smarter.dev` for public privacy, terms,
+chat-agent, signup confirmation and account billing URLs. `ADMIN_BASE_URL`
+points to `admin.smarter.dev` for Python-owned bot configuration, search and
 admin links, including the answer view. Both default to
 `http://localhost:8000` for local development.
 

@@ -105,7 +105,7 @@ def _build_confirmation_html(confirm_url: str) -> str:
 async def _send_confirmation(email: str, token: str) -> None:
     """Build and send the styled confirmation email."""
     settings = get_settings()
-    confirm_url = f"{settings.admin_base_url.rstrip('/')}/sudo/confirm?token={token}"
+    confirm_url = f"{settings.site_base_url.rstrip('/')}/sudo/confirm?token={token}"
     html = _build_confirmation_html(confirm_url)
     await send_email(email, "sudo: confirm your identity", html)
 
