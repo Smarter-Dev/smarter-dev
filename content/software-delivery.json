@@ -456,6 +456,1428 @@
       ]
     }
   ],
+  "category_resources": {
+    "cicd": [
+      {
+        "blurb": "Create your first workflow, trigger it on push, and explore the marketplace of pre-built actions.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:github-actions:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "GitHub docs",
+        "title": "GitHub Actions Quickstart",
+        "tool_slugs": [
+          "github-actions"
+        ],
+        "tools": [
+          "github-actions"
+        ],
+        "url": "https://docs.github.com/en/actions/quickstart"
+      },
+      {
+        "blurb": "Add a .gitlab-ci.yml, define your first job, and run it on shared or self-hosted runners.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:gitlab-ci:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "GitLab docs",
+        "title": "GitLab CI/CD Getting Started",
+        "tool_slugs": [
+          "gitlab-ci"
+        ],
+        "tools": [
+          "gitlab-ci"
+        ],
+        "url": "https://docs.gitlab.com/ee/ci/quick_start/"
+      },
+      {
+        "blurb": "Connect a repo, commit a config.yml, and watch your first CircleCI build run.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:circleci:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "CircleCI docs",
+        "title": "CircleCI Quickstart",
+        "tool_slugs": [
+          "circleci"
+        ],
+        "tools": [
+          "circleci"
+        ],
+        "url": "https://circleci.com/docs/guides/getting-started/getting-started/"
+      },
+      {
+        "blurb": "Hands-on tutorial creating a basic Buildkite pipeline from an example.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:buildkite:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Buildkite docs",
+        "title": "Getting Started with Buildkite Pipelines",
+        "tool_slugs": [
+          "buildkite"
+        ],
+        "tools": [
+          "buildkite"
+        ],
+        "url": "https://buildkite.com/docs/pipelines/getting-started"
+      },
+      {
+        "blurb": "Official guided tour: install Jenkins and create your first Pipeline.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:jenkins:guided-tour",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Jenkins docs",
+        "title": "Jenkins Guided Tour",
+        "tool_slugs": [
+          "jenkins"
+        ],
+        "tools": [
+          "jenkins"
+        ],
+        "url": "https://www.jenkins.io/doc/pipeline/tour/getting-started/"
+      },
+      {
+        "blurb": "Comprehensive reference for installing, configuring, and operating Jenkins in production.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:jenkins:handbook",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Jenkins docs",
+        "title": "Jenkins User Handbook",
+        "tool_slugs": [
+          "jenkins"
+        ],
+        "tools": [
+          "jenkins"
+        ],
+        "url": "https://www.jenkins.io/doc/book/"
+      },
+      {
+        "blurb": "Stand up a Drone server and run your first .drone.yml pipeline.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:drone:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Drone docs",
+        "title": "Drone Quick Start",
+        "tool_slugs": [
+          "drone"
+        ],
+        "tools": [
+          "drone"
+        ],
+        "url": "https://docs.drone.io/quickstart/"
+      },
+      {
+        "blurb": "Write pipelines in Go, Python, or TypeScript and run them anywhere with a container runtime.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:dagger:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Dagger docs",
+        "title": "Dagger Documentation",
+        "tool_slugs": [
+          "dagger"
+        ],
+        "tools": [
+          "dagger"
+        ],
+        "url": "https://docs.dagger.io/"
+      },
+      {
+        "blurb": "Earthfile syntax, caching, and the local-equals-remote build model.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:earthly:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Earthly docs",
+        "title": "Earthly Documentation",
+        "tool_slugs": [
+          "earthly"
+        ],
+        "tools": [
+          "earthly"
+        ],
+        "url": "https://docs.earthly.dev/"
+      },
+      {
+        "blurb": "Covers CI fundamentals, TeamCity concepts, and installing the server on Windows, Linux, or macOS.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:teamcity:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "JetBrains docs",
+        "title": "Getting Started with TeamCity",
+        "tool_slugs": [
+          "teamcity"
+        ],
+        "tools": [
+          "teamcity"
+        ],
+        "url": "https://www.jetbrains.com/help/teamcity/getting-started-with-teamcity.html"
+      },
+      {
+        "blurb": "Point TeamCity at a repo URL and let auto-detection scaffold your first build configuration.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:teamcity:first-build",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "JetBrains docs",
+        "title": "Run Your First TeamCity Build",
+        "tool_slugs": [
+          "teamcity"
+        ],
+        "tools": [
+          "teamcity"
+        ],
+        "url": "https://www.jetbrains.com/help/teamcity/configure-and-run-your-first-build.html"
+      }
+    ],
+    "container-builds": [
+      {
+        "blurb": "Project README covering frontends, caching, and modern Dockerfile features.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:buildkit:github",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "GitHub",
+        "title": "BuildKit on GitHub",
+        "tool_slugs": [
+          "buildkit"
+        ],
+        "tools": [
+          "buildkit"
+        ],
+        "url": "https://github.com/moby/buildkit"
+      },
+      {
+        "blurb": "Build OCI images from source with the pack CLI; no Dockerfile required.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:buildpacks:get-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Buildpacks docs",
+        "title": "Cloud Native Buildpacks: Get Started",
+        "tool_slugs": [
+          "buildpacks"
+        ],
+        "tools": [
+          "buildpacks"
+        ],
+        "url": "https://buildpacks.io/docs/for-app-developers/"
+      },
+      {
+        "blurb": "Official source-to-OCI-image builder docs. Note: the project is in maintenance mode; Railway directs new projects to Railpack.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:nixpacks:docs",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Nixpacks docs",
+        "title": "Nixpacks Documentation",
+        "tool_slugs": [
+          "nixpacks"
+        ],
+        "tools": [
+          "nixpacks"
+        ],
+        "url": "https://nixpacks.com/docs"
+      },
+      {
+        "blurb": "Install ko, authenticate to a registry, and build a Go app into a container without a Dockerfile.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:ko:get-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "ko docs",
+        "title": "Get Started with ko",
+        "tool_slugs": [
+          "ko"
+        ],
+        "tools": [
+          "ko"
+        ],
+        "url": "https://ko.build/get-started/"
+      },
+      {
+        "blurb": "Quickstart, configuration, and goals for containerizing Java apps without Docker.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:jib:maven",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "GitHub",
+        "title": "Jib Maven Plugin",
+        "tool_slugs": [
+          "jib"
+        ],
+        "tools": [
+          "jib"
+        ],
+        "url": "https://github.com/GoogleContainerTools/jib/blob/master/jib-maven-plugin/README.md"
+      },
+      {
+        "blurb": "Gradle plugin for building OCI images from Java projects directly from your build.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:jib:gradle",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "GitHub",
+        "title": "Jib Gradle Plugin",
+        "tool_slugs": [
+          "jib"
+        ],
+        "tools": [
+          "jib"
+        ],
+        "url": "https://github.com/GoogleContainerTools/jib/blob/master/jib-gradle-plugin/README.md"
+      },
+      {
+        "blurb": "Install Bazel and follow language-specific tutorials (C++, Java, Go, etc.) to set up your first workspace.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:bazel:start",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Bazel docs",
+        "title": "Bazel: Getting Started",
+        "tool_slugs": [
+          "bazel"
+        ],
+        "tools": [
+          "bazel"
+        ],
+        "url": "https://bazel.build/start"
+      },
+      {
+        "blurb": "Conceptual overview of how Bazel approaches builds, dependencies, and reproducibility.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:bazel:intro",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Bazel docs",
+        "title": "Intro to Bazel",
+        "tool_slugs": [
+          "bazel"
+        ],
+        "tools": [
+          "bazel"
+        ],
+        "url": "https://bazel.build/about/intro"
+      }
+    ],
+    "db-migrations": [
+      {
+        "blurb": "Declarative schema migrations: plan diffs, validate with linting, and ship via CI.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:atlas:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Atlas docs",
+        "title": "Atlas Documentation",
+        "tool_slugs": [
+          "atlas"
+        ],
+        "tools": [
+          "atlas"
+        ],
+        "url": "https://atlasgo.io/docs"
+      },
+      {
+        "blurb": "Canonical README for the Go migration tool: CLI usage, SQL and Go migration formats, embed examples.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:goose:github",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "GitHub",
+        "title": "pressly/goose",
+        "tool_slugs": [
+          "goose"
+        ],
+        "tools": [
+          "goose"
+        ],
+        "url": "https://github.com/pressly/goose"
+      },
+      {
+        "blurb": "Drivers, library usage, and recommended migration workflows.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:goose:docs",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Goose docs",
+        "title": "Goose Documentation",
+        "tool_slugs": [
+          "goose"
+        ],
+        "tools": [
+          "goose"
+        ],
+        "url": "https://pressly.github.io/goose/"
+      },
+      {
+        "blurb": "Create up/down migration files, run them with the CLI, and embed migrations into a Go program.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:golang-migrate:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "GitHub",
+        "title": "Getting Started with golang-migrate",
+        "tool_slugs": [
+          "golang-migrate"
+        ],
+        "tools": [
+          "golang-migrate"
+        ],
+        "url": "https://github.com/golang-migrate/migrate/blob/master/GETTING_STARTED.md"
+      },
+      {
+        "blurb": "Database-specific walkthrough for running golang-migrate against Postgres.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:golang-migrate:postgres-tutorial",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "GitHub",
+        "title": "golang-migrate Postgres Tutorial",
+        "tool_slugs": [
+          "golang-migrate"
+        ],
+        "tools": [
+          "golang-migrate"
+        ],
+        "url": "https://github.com/golang-migrate/migrate/blob/master/database/postgres/TUTORIAL.md"
+      },
+      {
+        "blurb": "Set up Alembic with SQLAlchemy, generate your first revision, and apply it to a database.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:alembic:tutorial",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Alembic docs",
+        "title": "Alembic Tutorial",
+        "tool_slugs": [
+          "alembic"
+        ],
+        "tools": [
+          "alembic"
+        ],
+        "url": "https://alembic.sqlalchemy.org/en/latest/tutorial.html"
+      },
+      {
+        "blurb": "Install Flyway and version-control your database schema with SQL-first migrations.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:flyway:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Redgate / Flyway",
+        "title": "Flyway Documentation",
+        "tool_slugs": [
+          "flyway"
+        ],
+        "tools": [
+          "flyway"
+        ],
+        "url": "https://documentation.red-gate.com/fd"
+      },
+      {
+        "blurb": "Install Liquibase and run your first changelog using the bundled H2 sandbox database.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:liquibase:start",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Liquibase docs",
+        "title": "Get Started with Liquibase",
+        "tool_slugs": [
+          "liquibase"
+        ],
+        "tools": [
+          "liquibase"
+        ],
+        "url": "https://docs.liquibase.com/start/home.html"
+      },
+      {
+        "blurb": "Authoritative reference covering changelogs, contexts, rollbacks, and CI/CD integration patterns.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:liquibase:docs",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Liquibase docs",
+        "title": "Liquibase Documentation",
+        "tool_slugs": [
+          "liquibase"
+        ],
+        "tools": [
+          "liquibase"
+        ],
+        "url": "https://docs.liquibase.com/"
+      },
+      {
+        "blurb": "Set up Prisma Migrate, create a baseline migration, and generate SQL from your Prisma schema.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:prisma-migrate:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Prisma docs",
+        "title": "Getting Started with Prisma Migrate",
+        "tool_slugs": [
+          "prisma-migrate"
+        ],
+        "tools": [
+          "prisma-migrate"
+        ],
+        "url": "https://www.prisma.io/docs/orm/prisma-migrate/getting-started"
+      },
+      {
+        "blurb": "From-scratch tutorial wiring Prisma Migrate to a TypeScript + Postgres project.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:prisma-migrate:typescript-postgres",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Prisma docs",
+        "title": "Prisma Migrate with TypeScript and PostgreSQL",
+        "tool_slugs": [
+          "prisma-migrate"
+        ],
+        "tools": [
+          "prisma-migrate"
+        ],
+        "url": "https://www.prisma.io/docs/getting-started/setup-prisma/start-from-scratch/relational-databases/using-prisma-migrate-typescript-postgresql"
+      },
+      {
+        "blurb": "Install sqlx-cli and use sqlx migrate add/run to manage SQLx migrations in Rust projects.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:sqlx-migrate:cli",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "crates.io",
+        "title": "sqlx-cli",
+        "tool_slugs": [
+          "sqlx-migrate"
+        ],
+        "tools": [
+          "sqlx-migrate"
+        ],
+        "url": "https://crates.io/crates/sqlx-cli"
+      },
+      {
+        "blurb": "API reference for embedding migrations into a Rust binary via the sqlx::migrate! macro.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:sqlx-migrate:api",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "docs.rs",
+        "title": "sqlx::migrate Migrator API",
+        "tool_slugs": [
+          "sqlx-migrate"
+        ],
+        "tools": [
+          "sqlx-migrate"
+        ],
+        "url": "https://docs.rs/sqlx/latest/sqlx/migrate/struct.Migrator.html"
+      }
+    ],
+    "deployment-gitops": [
+      {
+        "blurb": "Install ArgoCD, register a Git repo as a source of truth, and deploy your first application.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:argocd:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "ArgoCD docs",
+        "title": "ArgoCD Getting Started",
+        "tool_slugs": [
+          "argocd"
+        ],
+        "tools": [
+          "argocd"
+        ],
+        "url": "https://argo-cd.readthedocs.io/en/stable/getting_started/"
+      },
+      {
+        "blurb": "Bootstrap Flux into a cluster, point it at a Git repo, and reconcile your first deployment.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:flux:get-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Flux docs",
+        "title": "Flux Get Started",
+        "tool_slugs": [
+          "flux"
+        ],
+        "tools": [
+          "flux"
+        ],
+        "url": "https://fluxcd.io/flux/get-started/"
+      },
+      {
+        "blurb": "Install Helm, search the chart repository, and release your first chart into a cluster.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:helm:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Helm docs",
+        "title": "Helm Quickstart",
+        "tool_slugs": [
+          "helm"
+        ],
+        "tools": [
+          "helm"
+        ],
+        "url": "https://helm.sh/docs/intro/quickstart/"
+      },
+      {
+        "blurb": "Orientation for new Spinnaker users covering applications, pipelines, and deployment strategies.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:spinnaker:get-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Spinnaker docs",
+        "title": "Get Started Using Spinnaker",
+        "tool_slugs": [
+          "spinnaker"
+        ],
+        "tools": [
+          "spinnaker"
+        ],
+        "url": "https://spinnaker.io/docs/guides/user/get-started/"
+      },
+      {
+        "blurb": "Hands-on codelab introducing Spinnaker by deploying a simple service end to end.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:spinnaker:hello-deployment",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Spinnaker docs",
+        "title": "Spinnaker Hello Deployment Codelab",
+        "tool_slugs": [
+          "spinnaker"
+        ],
+        "tools": [
+          "spinnaker"
+        ],
+        "url": "https://spinnaker.io/docs/guides/tutorials/codelabs/hello-deployment/"
+      },
+      {
+        "blurb": "Build two Tasks, chain them into a Pipeline, and run them with a PipelineRun on minikube.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:tekton:pipelines",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Tekton docs",
+        "title": "Tekton: Getting Started with Pipelines",
+        "tool_slugs": [
+          "tekton"
+        ],
+        "tools": [
+          "tekton"
+        ],
+        "url": "https://tekton.dev/docs/getting-started/pipelines/"
+      },
+      {
+        "blurb": "Author and run your first standalone Tekton Task before moving up to full Pipelines.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:tekton:tasks",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Tekton docs",
+        "title": "Tekton: Getting Started with Tasks",
+        "tool_slugs": [
+          "tekton"
+        ],
+        "tools": [
+          "tekton"
+        ],
+        "url": "https://tekton.dev/docs/getting-started/tasks/"
+      },
+      {
+        "blurb": "Run skaffold dev against a sample Node app on minikube to see the build/deploy inner loop.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:skaffold:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Skaffold docs",
+        "title": "Skaffold Quickstart",
+        "tool_slugs": [
+          "skaffold"
+        ],
+        "tools": [
+          "skaffold"
+        ],
+        "url": "https://skaffold.dev/docs/quickstart/"
+      },
+      {
+        "blurb": "Use skaffold init to scaffold a skaffold.yaml for an existing application.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:skaffold:your-project",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Skaffold docs",
+        "title": "Skaffold: Getting Started With Your Project",
+        "tool_slugs": [
+          "skaffold"
+        ],
+        "tools": [
+          "skaffold"
+        ],
+        "url": "https://skaffold.dev/docs/workflows/getting-started-with-your-project/"
+      }
+    ],
+    "feature-flags": [
+      {
+        "blurb": "Create a project, add an SDK, and ship your first flag-gated release.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:launchdarkly:get-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "LaunchDarkly docs",
+        "title": "LaunchDarkly Get Started",
+        "tool_slugs": [
+          "launchdarkly"
+        ],
+        "tools": [
+          "launchdarkly"
+        ],
+        "url": "https://docs.launchdarkly.com/home/getting-started"
+      },
+      {
+        "blurb": "Install a Statsig SDK in your language of choice and start checking feature gates in a few lines.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:statsig:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Statsig docs",
+        "title": "Get Started with the Statsig SDK",
+        "tool_slugs": [
+          "statsig"
+        ],
+        "tools": [
+          "statsig"
+        ],
+        "url": "https://docs.statsig.com/sdks/quickstart"
+      },
+      {
+        "blurb": "Concept guide explaining feature gates, targeting, rollouts, and overrides in Statsig.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:statsig:overview",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Statsig docs",
+        "title": "Statsig Feature Flags Overview",
+        "tool_slugs": [
+          "statsig"
+        ],
+        "tools": [
+          "statsig"
+        ],
+        "url": "https://docs.statsig.com/feature-flags/overview"
+      },
+      {
+        "blurb": "Use PostHog's flags plus analytics plus experimentation in one stack.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:posthog:feature-flags",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "PostHog docs",
+        "title": "PostHog Feature Flags",
+        "tool_slugs": [
+          "posthog"
+        ],
+        "tools": [
+          "posthog"
+        ],
+        "url": "https://posthog.com/docs/feature-flags"
+      },
+      {
+        "blurb": "\"Get up and running with Unleash in less than 5 minutes\" with links to SDKs and tutorials.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:unleash:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Unleash docs",
+        "title": "Unleash Documentation",
+        "tool_slugs": [
+          "unleash"
+        ],
+        "tools": [
+          "unleash"
+        ],
+        "url": "https://docs.getunleash.io/"
+      },
+      {
+        "blurb": "Create a flag, define strategies, and refine with constraints, segments, and variants.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:unleash:create-flag",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Unleash docs",
+        "title": "Unleash: Create and Configure a Feature Flag",
+        "tool_slugs": [
+          "unleash"
+        ],
+        "tools": [
+          "unleash"
+        ],
+        "url": "https://docs.getunleash.io/guides/how-to-create-feature-flags"
+      },
+      {
+        "blurb": "Four-step tutorial: create a project and flag, import the JS SDK, fetch flags, and toggle behavior.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:flagsmith:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Flagsmith docs",
+        "title": "Flagsmith Quick Start",
+        "tool_slugs": [
+          "flagsmith"
+        ],
+        "tools": [
+          "flagsmith"
+        ],
+        "url": "https://docs.flagsmith.com/getting-started/quick-start"
+      },
+      {
+        "blurb": "End-to-end walkthrough for feature flagging and experimentation with GrowthBook Cloud or self-host.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:growthbook:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "GrowthBook docs",
+        "title": "GrowthBook Quick Start",
+        "tool_slugs": [
+          "growthbook"
+        ],
+        "tools": [
+          "growthbook"
+        ],
+        "url": "https://docs.growthbook.io/quick-start"
+      },
+      {
+        "blurb": "Wire a GrowthBook SDK into your app to start evaluating feature flags.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:growthbook:sdk-quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "GrowthBook docs",
+        "title": "GrowthBook SDK Quickstart",
+        "tool_slugs": [
+          "growthbook"
+        ],
+        "tools": [
+          "growthbook"
+        ],
+        "url": "https://docs.growthbook.io/lib/quickstart"
+      },
+      {
+        "blurb": "Add a flag in the ConfigCat dashboard and evaluate it from any of 20+ supported SDKs.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:configcat:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "ConfigCat docs",
+        "title": "ConfigCat Getting Started",
+        "tool_slugs": [
+          "configcat"
+        ],
+        "tools": [
+          "configcat"
+        ],
+        "url": "https://configcat.com/docs/getting-started/"
+      },
+      {
+        "blurb": "The CNCF-incubating spec for vendor-neutral feature-flag SDKs.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:openfeature:spec",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "OpenFeature docs",
+        "title": "OpenFeature Specification",
+        "tool_slugs": [
+          "openfeature"
+        ],
+        "tools": [
+          "openfeature"
+        ],
+        "url": "https://openfeature.dev/specification/"
+      }
+    ],
+    "iac": [
+      {
+        "blurb": "Hands-on tutorials covering AWS, Azure, GCP, Kubernetes, and Terraform Cloud workflows.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:terraform:tutorials",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "HashiCorp Developer",
+        "title": "Terraform Tutorials",
+        "tool_slugs": [
+          "terraform"
+        ],
+        "tools": [
+          "terraform"
+        ],
+        "url": "https://developer.hashicorp.com/terraform/tutorials"
+      },
+      {
+        "blurb": "Install OpenTofu and run your first plan/apply against any supported provider.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:opentofu:docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "OpenTofu docs",
+        "title": "OpenTofu Documentation",
+        "tool_slugs": [
+          "opentofu"
+        ],
+        "tools": [
+          "opentofu"
+        ],
+        "url": "https://opentofu.org/docs/"
+      },
+      {
+        "blurb": "Pick a language and cloud, stand up your first stack, and deploy it via the Pulumi CLI.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:pulumi:get-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Pulumi docs",
+        "title": "Pulumi Get Started",
+        "tool_slugs": [
+          "pulumi"
+        ],
+        "tools": [
+          "pulumi"
+        ],
+        "url": "https://www.pulumi.com/docs/get-started/"
+      },
+      {
+        "blurb": "Install the CDK CLI, bootstrap an environment, and deploy your first stack.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:aws-cdk:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "AWS docs",
+        "title": "Getting Started with AWS CDK",
+        "tool_slugs": [
+          "aws-cdk"
+        ],
+        "tools": [
+          "aws-cdk"
+        ],
+        "url": "https://docs.aws.amazon.com/cdk/v2/guide/getting-started.html"
+      },
+      {
+        "blurb": "End-to-end walkthrough scaffolding, synthing, and deploying a real CDK application.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:aws-cdk:hello-world",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "AWS docs",
+        "title": "AWS CDK Hello World Tutorial",
+        "tool_slugs": [
+          "aws-cdk"
+        ],
+        "tools": [
+          "aws-cdk"
+        ],
+        "url": "https://docs.aws.amazon.com/cdk/v2/guide/hello-world.html"
+      },
+      {
+        "blurb": "Install Crossplane, manage cloud resources, and build compositions from one entry point.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:crossplane:get-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Crossplane docs",
+        "title": "Get Started with Crossplane",
+        "tool_slugs": [
+          "crossplane"
+        ],
+        "tools": [
+          "crossplane"
+        ],
+        "url": "https://docs.crossplane.io/latest/get-started/"
+      },
+      {
+        "blurb": "Install Ansible, build an inventory, and write your first 'Hello World' playbook.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:ansible:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Ansible docs",
+        "title": "Getting Started with Ansible",
+        "tool_slugs": [
+          "ansible"
+        ],
+        "tools": [
+          "ansible"
+        ],
+        "url": "https://docs.ansible.com/projects/ansible/latest/getting_started/index.html"
+      }
+    ],
+    "local-dev": [
+      {
+        "blurb": "The devcontainer.json spec that VS Code, JetBrains, GitHub Codespaces, and others implement.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:dev-containers:spec",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "containers.dev",
+        "title": "Dev Containers Specification",
+        "tool_slugs": [
+          "dev-containers"
+        ],
+        "tools": [
+          "dev-containers"
+        ],
+        "url": "https://containers.dev/implementors/spec/"
+      },
+      {
+        "blurb": "Install mise and start managing runtime versions, env vars, and tasks per project.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:mise:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "mise docs",
+        "title": "mise Documentation",
+        "tool_slugs": [
+          "mise"
+        ],
+        "tools": [
+          "mise"
+        ],
+        "url": "https://mise.jdx.dev/getting-started.html"
+      },
+      {
+        "blurb": "Install asdf, configure your shell, and add plugins for the language runtimes you need.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:asdf:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "asdf docs",
+        "title": "asdf Getting Started",
+        "tool_slugs": [
+          "asdf"
+        ],
+        "tools": [
+          "asdf"
+        ],
+        "url": "https://asdf-vm.com/guide/getting-started.html"
+      },
+      {
+        "blurb": "Project landing page with the canonical .envrc walkthrough and shell hook setup.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:direnv:home",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "direnv docs",
+        "title": "direnv",
+        "tool_slugs": [
+          "direnv"
+        ],
+        "tools": [
+          "direnv"
+        ],
+        "url": "https://direnv.net/"
+      },
+      {
+        "blurb": "Install direnv and wire it into bash, zsh, fish, or your shell of choice.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:direnv:install",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "direnv docs",
+        "title": "direnv Installation",
+        "tool_slugs": [
+          "direnv"
+        ],
+        "tools": [
+          "direnv"
+        ],
+        "url": "https://direnv.net/docs/installation.html"
+      },
+      {
+        "blurb": "Official learning hub pointing to nix.dev tutorials and the Nix reference manual.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:nix:learn",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "NixOS.org",
+        "title": "Learn Nix",
+        "tool_slugs": [
+          "nix"
+        ],
+        "tools": [
+          "nix"
+        ],
+        "url": "https://nixos.org/learn/"
+      },
+      {
+        "blurb": "Initialize a devbox.json, add Nix-powered packages, and enter an isolated dev shell in minutes.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:devbox:quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Jetify docs",
+        "title": "Devbox Quickstart",
+        "tool_slugs": [
+          "devbox"
+        ],
+        "tools": [
+          "devbox"
+        ],
+        "url": "https://www.jetify.com/docs/devbox/quickstart"
+      },
+      {
+        "blurb": "Build a Kubernetes dev loop with live updates, smart rebuilds, and a status UI.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:tilt:tutorial",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Tilt docs",
+        "title": "Tilt Tutorial",
+        "tool_slugs": [
+          "tilt"
+        ],
+        "tools": [
+          "tilt"
+        ],
+        "url": "https://docs.tilt.dev/tutorial.html"
+      }
+    ],
+    "version-control": [
+      {
+        "blurb": "The free official Git book. The definitive learn-Git-from-scratch and Git-reference resource.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:git:pro-git",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "git-scm.com",
+        "title": "Pro Git Book",
+        "tool_slugs": [
+          "git"
+        ],
+        "tools": [
+          "git"
+        ],
+        "url": "https://git-scm.com/book/en/v2"
+      },
+      {
+        "blurb": "Documentation root for GitHub features: repos, Actions, packages, security, and Codespaces.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:github:docs",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "GitHub docs",
+        "title": "GitHub Docs",
+        "tool_slugs": [
+          "github"
+        ],
+        "tools": [
+          "github"
+        ],
+        "url": "https://docs.github.com/"
+      },
+      {
+        "blurb": "Reference for GitLab repos, CI/CD, registries, security, and self-managed installs.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:gitlab:docs",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "GitLab docs",
+        "title": "GitLab Documentation",
+        "tool_slugs": [
+          "gitlab"
+        ],
+        "tools": [
+          "gitlab"
+        ],
+        "url": "https://docs.gitlab.com/"
+      },
+      {
+        "blurb": "Walks new users through account setup, repos, and Codeberg's community-driven Forgejo-based platform.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:codeberg:getting-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Codeberg docs",
+        "title": "Getting Started with Codeberg",
+        "tool_slugs": [
+          "codeberg"
+        ],
+        "tools": [
+          "codeberg"
+        ],
+        "url": "https://docs.codeberg.org/getting-started/"
+      },
+      {
+        "blurb": "Create a repo, connect your local environment, and push your first commit.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:codeberg:first-repo",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Codeberg docs",
+        "title": "Your First Codeberg Repository",
+        "tool_slugs": [
+          "codeberg"
+        ],
+        "tools": [
+          "codeberg"
+        ],
+        "url": "https://docs.codeberg.org/getting-started/first-repository/"
+      },
+      {
+        "blurb": "Official user-facing docs for repositories, pull requests, issues, and collaboration on a Forgejo instance.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:forgejo:user-guide",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Forgejo docs",
+        "title": "Forgejo User Guide",
+        "tool_slugs": [
+          "forgejo"
+        ],
+        "tools": [
+          "forgejo"
+        ],
+        "url": "https://forgejo.org/docs/latest/user/"
+      },
+      {
+        "blurb": "Run your first CI workflow with Forgejo Actions.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:forgejo:actions-quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Forgejo docs",
+        "title": "Forgejo Actions Quick Start",
+        "tool_slugs": [
+          "forgejo"
+        ],
+        "tools": [
+          "forgejo"
+        ],
+        "url": "https://forgejo.org/docs/latest/user/actions/quick-start/"
+      },
+      {
+        "blurb": "Installation, usage, and administration of the self-hosted Git forge.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:gitea:docs",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Gitea docs",
+        "title": "Gitea Documentation",
+        "tool_slugs": [
+          "gitea"
+        ],
+        "tools": [
+          "gitea"
+        ],
+        "url": "https://docs.gitea.com/"
+      },
+      {
+        "blurb": "Pull the Gitea image, configure volumes, and complete the install wizard.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:gitea:docker-install",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Gitea docs",
+        "title": "Gitea Install with Docker",
+        "tool_slugs": [
+          "gitea"
+        ],
+        "tools": [
+          "gitea"
+        ],
+        "url": "https://docs.gitea.com/installation/install-with-docker"
+      },
+      {
+        "blurb": "Atlassian's onboarding for repos, push/pull, issues, and wikis in Bitbucket Cloud.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:bitbucket:get-started",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Atlassian docs",
+        "title": "Get Started with Bitbucket Cloud",
+        "tool_slugs": [
+          "bitbucket"
+        ],
+        "tools": [
+          "bitbucket"
+        ],
+        "url": "https://support.atlassian.com/bitbucket-cloud/docs/get-started-with-bitbucket-cloud/"
+      },
+      {
+        "blurb": "Bitbucket's built-in CI/CD with a first pipeline configured via bitbucket-pipelines.yml.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-12",
+        "key": "deliv:res:bitbucket:pipelines",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Atlassian docs",
+        "title": "Get Started with Bitbucket Pipelines",
+        "tool_slugs": [
+          "bitbucket"
+        ],
+        "tools": [
+          "bitbucket"
+        ],
+        "url": "https://support.atlassian.com/bitbucket-cloud/docs/get-started-with-bitbucket-pipelines/"
+      }
+    ]
+  },
   "faqs": [
     {
       "answer": "On-push: lint, test, build. On-merge-to-main: deploy to staging automatically. On-tag (or manual approval): deploy to production. Three pipelines, three triggers; that's the whole shape. Almost any platform (GitHub Actions, GitLab CI, CircleCI) can do this in well under a hundred lines of YAML. Resist the urge to add review apps, canaries, or environments-per-branch until the basic flow is reliable and fast for everyone on the team.",
@@ -507,6 +1929,22 @@
       "source_url": "https://dora.dev/research/"
     }
   ],
+  "last_updated": "2026-05-12",
+  "learning_types": [
+    "Tutorial",
+    "Course",
+    "Discussion",
+    "Best Practices",
+    "Talk"
+  ],
+  "og_meta": {
+    "description": "An index of writing, courses, and tutorials on shipping software: version control, CI/CD, infrastructure-as-code, deployment, container builds, local dev, database migrations, and feature flags.",
+    "image": "",
+    "site_name": "Smarter Dev",
+    "title": "Shipping Modern Systems: An Index",
+    "type": "article",
+    "url": "https://smarter.dev/resources/software-delivery"
+  },
   "people": [
     {
       "blurb": "Continuous Delivery co-author, DORA co-founder, and the canonical voice on modern release practices.",
@@ -589,1142 +2027,179 @@
       "url": "https://martinfowler.com/articles/exploring-gen-ai.html"
     }
   ],
+  "seo_meta": {
+    "canonical_url": "https://smarter.dev/resources/software-delivery",
+    "description": "An index of writing, courses, and tutorials on shipping software: version control, CI/CD, infrastructure-as-code, deployment, container builds, local dev, database migrations, and feature flags.",
+    "robots": "index,follow"
+  },
   "spine": [
     {
       "blurb": "The canonical text on building reliable, rapid, low-risk software releases through automation and discipline.",
+      "category": "Tutorial",
+      "category_slug": "tutorial",
       "first_indexed_at": "2026-05-12",
       "key": "deliv:spine:continuous-delivery",
       "learning_type": "Tutorial",
       "published_at": null,
       "source": "Jez Humble & David Farley",
       "title": "Continuous Delivery",
+      "tool_slugs": [],
+      "tools": [],
       "url": "https://continuousdelivery.com/"
     },
     {
       "blurb": "Data-driven follow-up to Continuous Delivery; the research foundation behind the DORA metrics.",
+      "category": "Tutorial",
+      "category_slug": "tutorial",
       "first_indexed_at": "2026-05-12",
       "key": "deliv:spine:accelerate",
       "learning_type": "Tutorial",
       "published_at": null,
       "source": "Forsgren, Humble, Kim · IT Revolution",
       "title": "Accelerate",
+      "tool_slugs": [],
+      "tools": [],
       "url": "https://itrevolution.com/product/accelerate/"
     },
     {
       "blurb": "Comprehensive practitioner's guide to applying DevOps principles across the value stream.",
+      "category": "Tutorial",
+      "category_slug": "tutorial",
       "first_indexed_at": "2026-05-12",
       "key": "deliv:spine:devops-handbook",
       "learning_type": "Tutorial",
       "published_at": null,
       "source": "Kim, Humble, Debois, Willis · IT Revolution",
       "title": "The DevOps Handbook",
+      "tool_slugs": [],
+      "tools": [],
       "url": "https://itrevolution.com/product/the-devops-handbook-second-edition/"
     },
     {
       "blurb": "The narrative DevOps text. A novel that introduced a generation of engineers to flow, feedback, and learning.",
+      "category": "Discussion",
+      "category_slug": "discussion",
       "first_indexed_at": "2026-05-12",
       "key": "deliv:spine:phoenix-project",
       "learning_type": "Discussion",
       "published_at": null,
       "source": "Kim, Behr, Spafford · IT Revolution",
       "title": "The Phoenix Project",
+      "tool_slugs": [],
+      "tools": [],
       "url": "https://itrevolution.com/product/the-phoenix-project/"
     },
     {
       "blurb": "Canonical reference on trunk-based development: short-lived branches, fast review, continuous integration.",
+      "category": "Best Practices",
+      "category_slug": "best-practices",
       "first_indexed_at": "2026-05-12",
       "key": "deliv:spine:trunk-based-dev",
       "learning_type": "Best Practices",
       "published_at": null,
       "source": "Paul Hammant",
       "title": "Trunk-Based Development",
+      "tool_slugs": [],
+      "tools": [],
       "url": "https://trunkbaseddevelopment.com/"
     },
     {
       "blurb": "The CNCF-backed spec defining what GitOps is and what it isn't. Four principles, vendor-neutral.",
+      "category": "Best Practices",
+      "category_slug": "best-practices",
       "first_indexed_at": "2026-05-12",
       "key": "deliv:spine:opengitops",
       "learning_type": "Best Practices",
       "published_at": null,
       "source": "OpenGitOps · CNCF",
       "title": "OpenGitOps Principles",
+      "tool_slugs": [],
+      "tools": [],
       "url": "https://opengitops.dev/"
     },
     {
       "blurb": "Lightweight convention for commit messages that machines can parse and humans can scan.",
+      "category": "Best Practices",
+      "category_slug": "best-practices",
       "first_indexed_at": "2026-05-12",
       "key": "deliv:spine:conventional-commits",
       "learning_type": "Best Practices",
       "published_at": null,
       "source": "Conventional Commits",
       "title": "Conventional Commits",
+      "tool_slugs": [],
+      "tools": [],
       "url": "https://www.conventionalcommits.org/"
     },
     {
       "blurb": "MAJOR.MINOR.PATCH and the contract a version number actually conveys. The default for shared libraries.",
+      "category": "Best Practices",
+      "category_slug": "best-practices",
       "first_indexed_at": "2026-05-12",
       "key": "deliv:spine:semver",
       "learning_type": "Best Practices",
       "published_at": null,
       "source": "Tom Preston-Werner",
       "title": "Semantic Versioning",
+      "tool_slugs": [],
+      "tools": [],
       "url": "https://semver.org/"
     },
     {
       "blurb": "Fowler's canonical 2006 essay defining CI: integrate often, automate the build, keep main releasable.",
+      "category": "Best Practices",
+      "category_slug": "best-practices",
       "first_indexed_at": "2026-05-12",
       "key": "deliv:spine:fowler-ci",
       "learning_type": "Best Practices",
       "published_at": null,
       "source": "Martin Fowler",
       "title": "Continuous Integration",
+      "tool_slugs": [],
+      "tools": [],
       "url": "https://martinfowler.com/articles/continuousIntegration.html"
     },
     {
       "blurb": "The case that deploy fear is technical debt; small, frequent, author-owned changes beat blanket freezes.",
+      "category": "Discussion",
+      "category_slug": "discussion",
       "first_indexed_at": "2026-05-12",
       "key": "deliv:spine:charity-friday-deploys",
       "learning_type": "Discussion",
       "published_at": null,
       "source": "Charity Majors",
       "title": "Deploys: It's Not Actually About Friday",
+      "tool_slugs": [],
+      "tools": [],
       "url": "https://charity.wtf/2019/05/01/friday-deploy-freezes-are-exactly-like-murdering-puppies/"
     },
     {
       "blurb": "Quarterly opinionated assessment of tools, techniques, platforms, and languages by Thoughtworks practitioners.",
+      "category": "Best Practices",
+      "category_slug": "best-practices",
       "first_indexed_at": "2026-05-12",
       "key": "deliv:spine:tw-radar",
       "learning_type": "Best Practices",
       "published_at": null,
       "source": "Thoughtworks",
       "title": "Technology Radar",
+      "tool_slugs": [],
+      "tools": [],
       "url": "https://www.thoughtworks.com/radar"
     },
     {
       "blurb": "Annual research linking delivery practices to org performance. The empirical backbone of modern delivery.",
+      "category": "Best Practices",
+      "category_slug": "best-practices",
       "first_indexed_at": "2026-05-12",
       "key": "deliv:spine:dora",
       "learning_type": "Best Practices",
       "published_at": null,
       "source": "DORA · Google Cloud",
       "title": "State of DevOps Report (DORA)",
+      "tool_slugs": [],
+      "tools": [],
       "url": "https://dora.dev/research/"
-    }
-  ],
-  "tool_resources": [
-    {
-      "blurb": "The free official Git book. The definitive learn-Git-from-scratch and Git-reference resource.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:git:pro-git",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "git-scm.com",
-      "title": "Pro Git Book",
-      "tool_slugs": [
-        "git"
-      ],
-      "url": "https://git-scm.com/book/en/v2"
-    },
-    {
-      "blurb": "Documentation root for GitHub features: repos, Actions, packages, security, and Codespaces.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:github:docs",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "GitHub docs",
-      "title": "GitHub Docs",
-      "tool_slugs": [
-        "github"
-      ],
-      "url": "https://docs.github.com/"
-    },
-    {
-      "blurb": "Reference for GitLab repos, CI/CD, registries, security, and self-managed installs.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:gitlab:docs",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "GitLab docs",
-      "title": "GitLab Documentation",
-      "tool_slugs": [
-        "gitlab"
-      ],
-      "url": "https://docs.gitlab.com/"
-    },
-    {
-      "blurb": "Walks new users through account setup, repos, and Codeberg's community-driven Forgejo-based platform.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:codeberg:getting-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Codeberg docs",
-      "title": "Getting Started with Codeberg",
-      "tool_slugs": [
-        "codeberg"
-      ],
-      "url": "https://docs.codeberg.org/getting-started/"
-    },
-    {
-      "blurb": "Create a repo, connect your local environment, and push your first commit.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:codeberg:first-repo",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Codeberg docs",
-      "title": "Your First Codeberg Repository",
-      "tool_slugs": [
-        "codeberg"
-      ],
-      "url": "https://docs.codeberg.org/getting-started/first-repository/"
-    },
-    {
-      "blurb": "Official user-facing docs for repositories, pull requests, issues, and collaboration on a Forgejo instance.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:forgejo:user-guide",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "Forgejo docs",
-      "title": "Forgejo User Guide",
-      "tool_slugs": [
-        "forgejo"
-      ],
-      "url": "https://forgejo.org/docs/latest/user/"
-    },
-    {
-      "blurb": "Run your first CI workflow with Forgejo Actions.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:forgejo:actions-quickstart",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Forgejo docs",
-      "title": "Forgejo Actions Quick Start",
-      "tool_slugs": [
-        "forgejo"
-      ],
-      "url": "https://forgejo.org/docs/latest/user/actions/quick-start/"
-    },
-    {
-      "blurb": "Installation, usage, and administration of the self-hosted Git forge.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:gitea:docs",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "Gitea docs",
-      "title": "Gitea Documentation",
-      "tool_slugs": [
-        "gitea"
-      ],
-      "url": "https://docs.gitea.com/"
-    },
-    {
-      "blurb": "Pull the Gitea image, configure volumes, and complete the install wizard.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:gitea:docker-install",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Gitea docs",
-      "title": "Gitea Install with Docker",
-      "tool_slugs": [
-        "gitea"
-      ],
-      "url": "https://docs.gitea.com/installation/install-with-docker"
-    },
-    {
-      "blurb": "Atlassian's onboarding for repos, push/pull, issues, and wikis in Bitbucket Cloud.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:bitbucket:get-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Atlassian docs",
-      "title": "Get Started with Bitbucket Cloud",
-      "tool_slugs": [
-        "bitbucket"
-      ],
-      "url": "https://support.atlassian.com/bitbucket-cloud/docs/get-started-with-bitbucket-cloud/"
-    },
-    {
-      "blurb": "Bitbucket's built-in CI/CD with a first pipeline configured via bitbucket-pipelines.yml.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:bitbucket:pipelines",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Atlassian docs",
-      "title": "Get Started with Bitbucket Pipelines",
-      "tool_slugs": [
-        "bitbucket"
-      ],
-      "url": "https://support.atlassian.com/bitbucket-cloud/docs/get-started-with-bitbucket-pipelines/"
-    },
-    {
-      "blurb": "Create your first workflow, trigger it on push, and explore the marketplace of pre-built actions.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:github-actions:quickstart",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "GitHub docs",
-      "title": "GitHub Actions Quickstart",
-      "tool_slugs": [
-        "github-actions"
-      ],
-      "url": "https://docs.github.com/en/actions/quickstart"
-    },
-    {
-      "blurb": "Add a .gitlab-ci.yml, define your first job, and run it on shared or self-hosted runners.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:gitlab-ci:quickstart",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "GitLab docs",
-      "title": "GitLab CI/CD Getting Started",
-      "tool_slugs": [
-        "gitlab-ci"
-      ],
-      "url": "https://docs.gitlab.com/ee/ci/quick_start/"
-    },
-    {
-      "blurb": "Connect a repo, commit a config.yml, and watch your first CircleCI build run.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:circleci:quickstart",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "CircleCI docs",
-      "title": "CircleCI Quickstart",
-      "tool_slugs": [
-        "circleci"
-      ],
-      "url": "https://circleci.com/docs/guides/getting-started/getting-started/"
-    },
-    {
-      "blurb": "Hands-on tutorial creating a basic Buildkite pipeline from an example.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:buildkite:getting-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Buildkite docs",
-      "title": "Getting Started with Buildkite Pipelines",
-      "tool_slugs": [
-        "buildkite"
-      ],
-      "url": "https://buildkite.com/docs/pipelines/getting-started"
-    },
-    {
-      "blurb": "Official guided tour: install Jenkins and create your first Pipeline.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:jenkins:guided-tour",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Jenkins docs",
-      "title": "Jenkins Guided Tour",
-      "tool_slugs": [
-        "jenkins"
-      ],
-      "url": "https://www.jenkins.io/doc/pipeline/tour/getting-started/"
-    },
-    {
-      "blurb": "Comprehensive reference for installing, configuring, and operating Jenkins in production.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:jenkins:handbook",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "Jenkins docs",
-      "title": "Jenkins User Handbook",
-      "tool_slugs": [
-        "jenkins"
-      ],
-      "url": "https://www.jenkins.io/doc/book/"
-    },
-    {
-      "blurb": "Stand up a Drone server and run your first .drone.yml pipeline.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:drone:quickstart",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Drone docs",
-      "title": "Drone Quick Start",
-      "tool_slugs": [
-        "drone"
-      ],
-      "url": "https://docs.drone.io/quickstart/"
-    },
-    {
-      "blurb": "Write pipelines in Go, Python, or TypeScript and run them anywhere with a container runtime.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:dagger:docs",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Dagger docs",
-      "title": "Dagger Documentation",
-      "tool_slugs": [
-        "dagger"
-      ],
-      "url": "https://docs.dagger.io/"
-    },
-    {
-      "blurb": "Earthfile syntax, caching, and the local-equals-remote build model.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:earthly:docs",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Earthly docs",
-      "title": "Earthly Documentation",
-      "tool_slugs": [
-        "earthly"
-      ],
-      "url": "https://docs.earthly.dev/"
-    },
-    {
-      "blurb": "Covers CI fundamentals, TeamCity concepts, and installing the server on Windows, Linux, or macOS.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:teamcity:getting-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "JetBrains docs",
-      "title": "Getting Started with TeamCity",
-      "tool_slugs": [
-        "teamcity"
-      ],
-      "url": "https://www.jetbrains.com/help/teamcity/getting-started-with-teamcity.html"
-    },
-    {
-      "blurb": "Point TeamCity at a repo URL and let auto-detection scaffold your first build configuration.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:teamcity:first-build",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "JetBrains docs",
-      "title": "Run Your First TeamCity Build",
-      "tool_slugs": [
-        "teamcity"
-      ],
-      "url": "https://www.jetbrains.com/help/teamcity/configure-and-run-your-first-build.html"
-    },
-    {
-      "blurb": "Hands-on tutorials covering AWS, Azure, GCP, Kubernetes, and Terraform Cloud workflows.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:terraform:tutorials",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "HashiCorp Developer",
-      "title": "Terraform Tutorials",
-      "tool_slugs": [
-        "terraform"
-      ],
-      "url": "https://developer.hashicorp.com/terraform/tutorials"
-    },
-    {
-      "blurb": "Install OpenTofu and run your first plan/apply against any supported provider.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:opentofu:docs",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "OpenTofu docs",
-      "title": "OpenTofu Documentation",
-      "tool_slugs": [
-        "opentofu"
-      ],
-      "url": "https://opentofu.org/docs/"
-    },
-    {
-      "blurb": "Pick a language and cloud, stand up your first stack, and deploy it via the Pulumi CLI.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:pulumi:get-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Pulumi docs",
-      "title": "Pulumi Get Started",
-      "tool_slugs": [
-        "pulumi"
-      ],
-      "url": "https://www.pulumi.com/docs/get-started/"
-    },
-    {
-      "blurb": "Install the CDK CLI, bootstrap an environment, and deploy your first stack.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:aws-cdk:getting-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "AWS docs",
-      "title": "Getting Started with AWS CDK",
-      "tool_slugs": [
-        "aws-cdk"
-      ],
-      "url": "https://docs.aws.amazon.com/cdk/v2/guide/getting-started.html"
-    },
-    {
-      "blurb": "End-to-end walkthrough scaffolding, synthing, and deploying a real CDK application.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:aws-cdk:hello-world",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "AWS docs",
-      "title": "AWS CDK Hello World Tutorial",
-      "tool_slugs": [
-        "aws-cdk"
-      ],
-      "url": "https://docs.aws.amazon.com/cdk/v2/guide/hello-world.html"
-    },
-    {
-      "blurb": "Install Crossplane, manage cloud resources, and build compositions from one entry point.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:crossplane:get-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Crossplane docs",
-      "title": "Get Started with Crossplane",
-      "tool_slugs": [
-        "crossplane"
-      ],
-      "url": "https://docs.crossplane.io/latest/get-started/"
-    },
-    {
-      "blurb": "Install Ansible, build an inventory, and write your first 'Hello World' playbook.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:ansible:getting-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Ansible docs",
-      "title": "Getting Started with Ansible",
-      "tool_slugs": [
-        "ansible"
-      ],
-      "url": "https://docs.ansible.com/projects/ansible/latest/getting_started/index.html"
-    },
-    {
-      "blurb": "Install ArgoCD, register a Git repo as a source of truth, and deploy your first application.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:argocd:getting-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "ArgoCD docs",
-      "title": "ArgoCD Getting Started",
-      "tool_slugs": [
-        "argocd"
-      ],
-      "url": "https://argo-cd.readthedocs.io/en/stable/getting_started/"
-    },
-    {
-      "blurb": "Bootstrap Flux into a cluster, point it at a Git repo, and reconcile your first deployment.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:flux:get-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Flux docs",
-      "title": "Flux Get Started",
-      "tool_slugs": [
-        "flux"
-      ],
-      "url": "https://fluxcd.io/flux/get-started/"
-    },
-    {
-      "blurb": "Install Helm, search the chart repository, and release your first chart into a cluster.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:helm:quickstart",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Helm docs",
-      "title": "Helm Quickstart",
-      "tool_slugs": [
-        "helm"
-      ],
-      "url": "https://helm.sh/docs/intro/quickstart/"
-    },
-    {
-      "blurb": "Orientation for new Spinnaker users covering applications, pipelines, and deployment strategies.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:spinnaker:get-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Spinnaker docs",
-      "title": "Get Started Using Spinnaker",
-      "tool_slugs": [
-        "spinnaker"
-      ],
-      "url": "https://spinnaker.io/docs/guides/user/get-started/"
-    },
-    {
-      "blurb": "Hands-on codelab introducing Spinnaker by deploying a simple service end to end.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:spinnaker:hello-deployment",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Spinnaker docs",
-      "title": "Spinnaker Hello Deployment Codelab",
-      "tool_slugs": [
-        "spinnaker"
-      ],
-      "url": "https://spinnaker.io/docs/guides/tutorials/codelabs/hello-deployment/"
-    },
-    {
-      "blurb": "Build two Tasks, chain them into a Pipeline, and run them with a PipelineRun on minikube.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:tekton:pipelines",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Tekton docs",
-      "title": "Tekton: Getting Started with Pipelines",
-      "tool_slugs": [
-        "tekton"
-      ],
-      "url": "https://tekton.dev/docs/getting-started/pipelines/"
-    },
-    {
-      "blurb": "Author and run your first standalone Tekton Task before moving up to full Pipelines.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:tekton:tasks",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Tekton docs",
-      "title": "Tekton: Getting Started with Tasks",
-      "tool_slugs": [
-        "tekton"
-      ],
-      "url": "https://tekton.dev/docs/getting-started/tasks/"
-    },
-    {
-      "blurb": "Run skaffold dev against a sample Node app on minikube to see the build/deploy inner loop.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:skaffold:quickstart",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Skaffold docs",
-      "title": "Skaffold Quickstart",
-      "tool_slugs": [
-        "skaffold"
-      ],
-      "url": "https://skaffold.dev/docs/quickstart/"
-    },
-    {
-      "blurb": "Use skaffold init to scaffold a skaffold.yaml for an existing application.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:skaffold:your-project",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Skaffold docs",
-      "title": "Skaffold: Getting Started With Your Project",
-      "tool_slugs": [
-        "skaffold"
-      ],
-      "url": "https://skaffold.dev/docs/workflows/getting-started-with-your-project/"
-    },
-    {
-      "blurb": "Project README covering frontends, caching, and modern Dockerfile features.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:buildkit:github",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "GitHub",
-      "title": "BuildKit on GitHub",
-      "tool_slugs": [
-        "buildkit"
-      ],
-      "url": "https://github.com/moby/buildkit"
-    },
-    {
-      "blurb": "Build OCI images from source with the pack CLI; no Dockerfile required.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:buildpacks:get-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Buildpacks docs",
-      "title": "Cloud Native Buildpacks: Get Started",
-      "tool_slugs": [
-        "buildpacks"
-      ],
-      "url": "https://buildpacks.io/docs/for-app-developers/"
-    },
-    {
-      "blurb": "Official source-to-OCI-image builder docs. Note: the project is in maintenance mode; Railway directs new projects to Railpack.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:nixpacks:docs",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "Nixpacks docs",
-      "title": "Nixpacks Documentation",
-      "tool_slugs": [
-        "nixpacks"
-      ],
-      "url": "https://nixpacks.com/docs"
-    },
-    {
-      "blurb": "Install ko, authenticate to a registry, and build a Go app into a container without a Dockerfile.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:ko:get-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "ko docs",
-      "title": "Get Started with ko",
-      "tool_slugs": [
-        "ko"
-      ],
-      "url": "https://ko.build/get-started/"
-    },
-    {
-      "blurb": "Quickstart, configuration, and goals for containerizing Java apps without Docker.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:jib:maven",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "GitHub",
-      "title": "Jib Maven Plugin",
-      "tool_slugs": [
-        "jib"
-      ],
-      "url": "https://github.com/GoogleContainerTools/jib/blob/master/jib-maven-plugin/README.md"
-    },
-    {
-      "blurb": "Gradle plugin for building OCI images from Java projects directly from your build.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:jib:gradle",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "GitHub",
-      "title": "Jib Gradle Plugin",
-      "tool_slugs": [
-        "jib"
-      ],
-      "url": "https://github.com/GoogleContainerTools/jib/blob/master/jib-gradle-plugin/README.md"
-    },
-    {
-      "blurb": "Install Bazel and follow language-specific tutorials (C++, Java, Go, etc.) to set up your first workspace.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:bazel:start",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Bazel docs",
-      "title": "Bazel: Getting Started",
-      "tool_slugs": [
-        "bazel"
-      ],
-      "url": "https://bazel.build/start"
-    },
-    {
-      "blurb": "Conceptual overview of how Bazel approaches builds, dependencies, and reproducibility.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:bazel:intro",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "Bazel docs",
-      "title": "Intro to Bazel",
-      "tool_slugs": [
-        "bazel"
-      ],
-      "url": "https://bazel.build/about/intro"
-    },
-    {
-      "blurb": "The devcontainer.json spec that VS Code, JetBrains, GitHub Codespaces, and others implement.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:dev-containers:spec",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "containers.dev",
-      "title": "Dev Containers Specification",
-      "tool_slugs": [
-        "dev-containers"
-      ],
-      "url": "https://containers.dev/implementors/spec/"
-    },
-    {
-      "blurb": "Install mise and start managing runtime versions, env vars, and tasks per project.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:mise:getting-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "mise docs",
-      "title": "mise Documentation",
-      "tool_slugs": [
-        "mise"
-      ],
-      "url": "https://mise.jdx.dev/getting-started.html"
-    },
-    {
-      "blurb": "Install asdf, configure your shell, and add plugins for the language runtimes you need.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:asdf:getting-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "asdf docs",
-      "title": "asdf Getting Started",
-      "tool_slugs": [
-        "asdf"
-      ],
-      "url": "https://asdf-vm.com/guide/getting-started.html"
-    },
-    {
-      "blurb": "Project landing page with the canonical .envrc walkthrough and shell hook setup.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:direnv:home",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "direnv docs",
-      "title": "direnv",
-      "tool_slugs": [
-        "direnv"
-      ],
-      "url": "https://direnv.net/"
-    },
-    {
-      "blurb": "Install direnv and wire it into bash, zsh, fish, or your shell of choice.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:direnv:install",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "direnv docs",
-      "title": "direnv Installation",
-      "tool_slugs": [
-        "direnv"
-      ],
-      "url": "https://direnv.net/docs/installation.html"
-    },
-    {
-      "blurb": "Official learning hub pointing to nix.dev tutorials and the Nix reference manual.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:nix:learn",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "NixOS.org",
-      "title": "Learn Nix",
-      "tool_slugs": [
-        "nix"
-      ],
-      "url": "https://nixos.org/learn/"
-    },
-    {
-      "blurb": "Initialize a devbox.json, add Nix-powered packages, and enter an isolated dev shell in minutes.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:devbox:quickstart",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Jetify docs",
-      "title": "Devbox Quickstart",
-      "tool_slugs": [
-        "devbox"
-      ],
-      "url": "https://www.jetify.com/docs/devbox/quickstart"
-    },
-    {
-      "blurb": "Build a Kubernetes dev loop with live updates, smart rebuilds, and a status UI.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:tilt:tutorial",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Tilt docs",
-      "title": "Tilt Tutorial",
-      "tool_slugs": [
-        "tilt"
-      ],
-      "url": "https://docs.tilt.dev/tutorial.html"
-    },
-    {
-      "blurb": "Declarative schema migrations: plan diffs, validate with linting, and ship via CI.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:atlas:docs",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Atlas docs",
-      "title": "Atlas Documentation",
-      "tool_slugs": [
-        "atlas"
-      ],
-      "url": "https://atlasgo.io/docs"
-    },
-    {
-      "blurb": "Canonical README for the Go migration tool: CLI usage, SQL and Go migration formats, embed examples.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:goose:github",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "GitHub",
-      "title": "pressly/goose",
-      "tool_slugs": [
-        "goose"
-      ],
-      "url": "https://github.com/pressly/goose"
-    },
-    {
-      "blurb": "Drivers, library usage, and recommended migration workflows.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:goose:docs",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "Goose docs",
-      "title": "Goose Documentation",
-      "tool_slugs": [
-        "goose"
-      ],
-      "url": "https://pressly.github.io/goose/"
-    },
-    {
-      "blurb": "Create up/down migration files, run them with the CLI, and embed migrations into a Go program.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:golang-migrate:getting-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "GitHub",
-      "title": "Getting Started with golang-migrate",
-      "tool_slugs": [
-        "golang-migrate"
-      ],
-      "url": "https://github.com/golang-migrate/migrate/blob/master/GETTING_STARTED.md"
-    },
-    {
-      "blurb": "Database-specific walkthrough for running golang-migrate against Postgres.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:golang-migrate:postgres-tutorial",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "GitHub",
-      "title": "golang-migrate Postgres Tutorial",
-      "tool_slugs": [
-        "golang-migrate"
-      ],
-      "url": "https://github.com/golang-migrate/migrate/blob/master/database/postgres/TUTORIAL.md"
-    },
-    {
-      "blurb": "Set up Alembic with SQLAlchemy, generate your first revision, and apply it to a database.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:alembic:tutorial",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Alembic docs",
-      "title": "Alembic Tutorial",
-      "tool_slugs": [
-        "alembic"
-      ],
-      "url": "https://alembic.sqlalchemy.org/en/latest/tutorial.html"
-    },
-    {
-      "blurb": "Install Flyway and version-control your database schema with SQL-first migrations.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:flyway:docs",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Redgate / Flyway",
-      "title": "Flyway Documentation",
-      "tool_slugs": [
-        "flyway"
-      ],
-      "url": "https://documentation.red-gate.com/fd"
-    },
-    {
-      "blurb": "Install Liquibase and run your first changelog using the bundled H2 sandbox database.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:liquibase:start",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Liquibase docs",
-      "title": "Get Started with Liquibase",
-      "tool_slugs": [
-        "liquibase"
-      ],
-      "url": "https://docs.liquibase.com/start/home.html"
-    },
-    {
-      "blurb": "Authoritative reference covering changelogs, contexts, rollbacks, and CI/CD integration patterns.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:liquibase:docs",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "Liquibase docs",
-      "title": "Liquibase Documentation",
-      "tool_slugs": [
-        "liquibase"
-      ],
-      "url": "https://docs.liquibase.com/"
-    },
-    {
-      "blurb": "Set up Prisma Migrate, create a baseline migration, and generate SQL from your Prisma schema.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:prisma-migrate:getting-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Prisma docs",
-      "title": "Getting Started with Prisma Migrate",
-      "tool_slugs": [
-        "prisma-migrate"
-      ],
-      "url": "https://www.prisma.io/docs/orm/prisma-migrate/getting-started"
-    },
-    {
-      "blurb": "From-scratch tutorial wiring Prisma Migrate to a TypeScript + Postgres project.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:prisma-migrate:typescript-postgres",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Prisma docs",
-      "title": "Prisma Migrate with TypeScript and PostgreSQL",
-      "tool_slugs": [
-        "prisma-migrate"
-      ],
-      "url": "https://www.prisma.io/docs/getting-started/setup-prisma/start-from-scratch/relational-databases/using-prisma-migrate-typescript-postgresql"
-    },
-    {
-      "blurb": "Install sqlx-cli and use sqlx migrate add/run to manage SQLx migrations in Rust projects.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:sqlx-migrate:cli",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "crates.io",
-      "title": "sqlx-cli",
-      "tool_slugs": [
-        "sqlx-migrate"
-      ],
-      "url": "https://crates.io/crates/sqlx-cli"
-    },
-    {
-      "blurb": "API reference for embedding migrations into a Rust binary via the sqlx::migrate! macro.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:sqlx-migrate:api",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "docs.rs",
-      "title": "sqlx::migrate Migrator API",
-      "tool_slugs": [
-        "sqlx-migrate"
-      ],
-      "url": "https://docs.rs/sqlx/latest/sqlx/migrate/struct.Migrator.html"
-    },
-    {
-      "blurb": "Create a project, add an SDK, and ship your first flag-gated release.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:launchdarkly:get-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "LaunchDarkly docs",
-      "title": "LaunchDarkly Get Started",
-      "tool_slugs": [
-        "launchdarkly"
-      ],
-      "url": "https://docs.launchdarkly.com/home/getting-started"
-    },
-    {
-      "blurb": "Install a Statsig SDK in your language of choice and start checking feature gates in a few lines.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:statsig:quickstart",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Statsig docs",
-      "title": "Get Started with the Statsig SDK",
-      "tool_slugs": [
-        "statsig"
-      ],
-      "url": "https://docs.statsig.com/sdks/quickstart"
-    },
-    {
-      "blurb": "Concept guide explaining feature gates, targeting, rollouts, and overrides in Statsig.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:statsig:overview",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "Statsig docs",
-      "title": "Statsig Feature Flags Overview",
-      "tool_slugs": [
-        "statsig"
-      ],
-      "url": "https://docs.statsig.com/feature-flags/overview"
-    },
-    {
-      "blurb": "Use PostHog's flags plus analytics plus experimentation in one stack.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:posthog:feature-flags",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "PostHog docs",
-      "title": "PostHog Feature Flags",
-      "tool_slugs": [
-        "posthog"
-      ],
-      "url": "https://posthog.com/docs/feature-flags"
-    },
-    {
-      "blurb": "\"Get up and running with Unleash in less than 5 minutes\" with links to SDKs and tutorials.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:unleash:docs",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Unleash docs",
-      "title": "Unleash Documentation",
-      "tool_slugs": [
-        "unleash"
-      ],
-      "url": "https://docs.getunleash.io/"
-    },
-    {
-      "blurb": "Create a flag, define strategies, and refine with constraints, segments, and variants.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:unleash:create-flag",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Unleash docs",
-      "title": "Unleash: Create and Configure a Feature Flag",
-      "tool_slugs": [
-        "unleash"
-      ],
-      "url": "https://docs.getunleash.io/guides/how-to-create-feature-flags"
-    },
-    {
-      "blurb": "Four-step tutorial: create a project and flag, import the JS SDK, fetch flags, and toggle behavior.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:flagsmith:quickstart",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Flagsmith docs",
-      "title": "Flagsmith Quick Start",
-      "tool_slugs": [
-        "flagsmith"
-      ],
-      "url": "https://docs.flagsmith.com/getting-started/quick-start"
-    },
-    {
-      "blurb": "End-to-end walkthrough for feature flagging and experimentation with GrowthBook Cloud or self-host.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:growthbook:quickstart",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "GrowthBook docs",
-      "title": "GrowthBook Quick Start",
-      "tool_slugs": [
-        "growthbook"
-      ],
-      "url": "https://docs.growthbook.io/quick-start"
-    },
-    {
-      "blurb": "Wire a GrowthBook SDK into your app to start evaluating feature flags.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:growthbook:sdk-quickstart",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "GrowthBook docs",
-      "title": "GrowthBook SDK Quickstart",
-      "tool_slugs": [
-        "growthbook"
-      ],
-      "url": "https://docs.growthbook.io/lib/quickstart"
-    },
-    {
-      "blurb": "Add a flag in the ConfigCat dashboard and evaluate it from any of 20+ supported SDKs.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:configcat:getting-started",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "ConfigCat docs",
-      "title": "ConfigCat Getting Started",
-      "tool_slugs": [
-        "configcat"
-      ],
-      "url": "https://configcat.com/docs/getting-started/"
-    },
-    {
-      "blurb": "The CNCF-incubating spec for vendor-neutral feature-flag SDKs.",
-      "first_indexed_at": "2026-05-12",
-      "key": "deliv:res:openfeature:spec",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "OpenFeature docs",
-      "title": "OpenFeature Specification",
-      "tool_slugs": [
-        "openfeature"
-      ],
-      "url": "https://openfeature.dev/specification/"
     }
   ]
 }

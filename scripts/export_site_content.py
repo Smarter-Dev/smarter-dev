@@ -20,15 +20,24 @@ from typing import get_origin
 from typing import get_type_hints
 
 from smarter_dev.web import _resources_seed
+from smarter_dev.web import agent_engineering_patterns_controller as agent_controller
 from smarter_dev.web import agent_engineering_patterns_data as agent
+from smarter_dev.web import infrastructure_hosting_controller as infra_controller
 from smarter_dev.web import infrastructure_hosting_data as infra
+from smarter_dev.web import patterns_of_practice_controller as patterns_controller
 from smarter_dev.web import patterns_of_practice_data as patterns
+from smarter_dev.web import production_operations_controller as ops_controller
 from smarter_dev.web import production_operations_data as ops
+from smarter_dev.web import software_delivery_controller as delivery_controller
 from smarter_dev.web import software_delivery_data as delivery
+from smarter_dev.web import system_architecture_controller as arch_controller
 from smarter_dev.web import system_architecture_data as arch
+from smarter_dev.web import vibe_courses_controller as vibe_controller
 from smarter_dev.web import vibe_courses_data as vibe
+from smarter_dev.web.resources_data import SourceView
+from smarter_dev.web.resources_data import build_seed_directory_payload
 
-PAGE_DATA = {
+SOURCE_PAGE_DATA = {
     "agentic-coding-courses": {
         "categories": vibe.CATEGORIES,
         "tools": vibe.TOOLS,
@@ -83,9 +92,41 @@ PAGE_DATA = {
     },
 }
 
+CONTEXT_BUILDERS = {
+    "agentic-coding-courses": vibe_controller.build_vibe_courses_context,
+    "system-architecture": arch_controller.build_system_architecture_context,
+    "infrastructure-hosting": infra_controller.build_infrastructure_hosting_context,
+    "software-delivery": delivery_controller.build_software_delivery_context,
+    "production-operations": ops_controller.build_production_operations_context,
+    "patterns-of-practice": patterns_controller.build_patterns_of_practice_context,
+    "agent-engineering-patterns": agent_controller.build_agent_engineering_patterns_context,
+}
+
+
+def build_page_context(slug: str) -> dict:
+    """Render a page's static template context through its controller builder."""
+    directory = next(
+        item for item in _resources_seed._DIRECTORIES if item["slug"] == slug
+    )
+    payload = build_seed_directory_payload(directory, SOURCE_PAGE_DATA[slug], {})
+    context = CONTEXT_BUILDERS[slug](payload)
+    context.pop("popularity_unlocked", None)
+    return context
+
 
 def to_json_value(value):
     """Preserve dataclass fields and sequence order; encode dates as ISO strings."""
+    if isinstance(value, SourceView):
+        return {
+            **{
+                field.name: to_json_value(getattr(value, field.name))
+                for field in fields(value)
+                if field.name != "click_count"
+            },
+            "category": value.category,
+            "tools": to_json_value(value.tools),
+            "category_slug": value.category_slug,
+        }
     if is_dataclass(value) and not isinstance(value, type):
         return {
             field.name: to_json_value(getattr(value, field.name))
@@ -119,6 +160,26 @@ def _schema_for_type(annotation):
         return {"type": "array", "items": _schema_for_type(args[0])}
     if origin is dict:
         return {"type": "object", "additionalProperties": _schema_for_type(args[1])}
+    if annotation is SourceView:
+        hints = get_type_hints(SourceView)
+        properties = {
+            field.name: _schema_for_type(hints[field.name])
+            for field in fields(SourceView)
+            if field.name != "click_count"
+        }
+        properties.update(
+            {
+                "category": {"type": "string"},
+                "tools": {"type": "array", "items": {"type": "string"}},
+                "category_slug": {"type": "string"},
+            }
+        )
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": list(properties),
+            "additionalProperties": False,
+        }
     if is_dataclass(annotation):
         hints = get_type_hints(annotation)
         return {
@@ -143,9 +204,16 @@ def _schema_for_value(value):
             "required": list(value),
             "additionalProperties": False,
         }
+    if isinstance(value, tuple) and len(value) == 2 and isinstance(value[1], list):
+        return {
+            "type": "array",
+            "prefixItems": [_schema_for_value(item) for item in value],
+            "minItems": 2,
+            "maxItems": 2,
+        }
     if isinstance(value, list | tuple):
         if not value:
-            raise ValueError("Cannot infer schema from an empty sequence")
+            return {"type": "array", "items": {}}
         if is_dataclass(value[0]) and all(
             type(item) is type(value[0]) for item in value
         ):
@@ -192,7 +260,7 @@ def build_catalog():
     sources_by_key = {}
     for directory in _resources_seed._DIRECTORIES:
         slug = directory["slug"]
-        page = PAGE_DATA[slug]
+        page = SOURCE_PAGE_DATA[slug]
         catalog["resource_directories"].append(directory.copy())
         categories = page["categories"]
         if slug == "agentic-coding-courses":
@@ -213,7 +281,9 @@ def build_catalog():
                     "slug": cat["slug"],
                     "name": cat["name"],
                     "intro_html": cat["intro"],
-                    "sort_order": cat_index * 10,
+                    "sort_order": 10
+                    if slug == "agentic-coding-courses"
+                    else cat_index * 10,
                 }
             )
             for tool_index, tool in enumerate(cat["tools"]):
@@ -305,7 +375,10 @@ def export_site_content(output: Path) -> None:
     output.mkdir(parents=True, exist_ok=True)
     schema_dir = output / "schema"
     schema_dir.mkdir(exist_ok=True)
-    documents = {**PAGE_DATA, "resources-catalog": build_catalog()}
+    documents = {
+        **{slug: build_page_context(slug) for slug in SOURCE_PAGE_DATA},
+        "resources-catalog": build_catalog(),
+    }
     for name, document in documents.items():
         schema = {
             "$schema": "https://json-schema.org/draft/2020-12/schema",

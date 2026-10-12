@@ -5,7 +5,7 @@
       "intro_html": null,
       "name": "Agentic Tools",
       "slug": "agentic-tools",
-      "sort_order": 0
+      "sort_order": 10
     },
     {
       "directory_slug": "system-architecture",

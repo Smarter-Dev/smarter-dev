@@ -127,6 +127,538 @@
       ]
     }
   ],
+  "category_resources": {
+    "human-loop": [
+      {
+        "blurb": "Anthropic's reference on agent design. Workflows vs. agents, tool design, evals, and where the autonomy band actually pays off.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:evals:anthropic-building-effective",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Anthropic",
+        "title": "Building effective agents",
+        "tool_slugs": [
+          "confidence-tiered-autonomy"
+        ],
+        "tools": [
+          "confidence-tiered-autonomy"
+        ],
+        "url": "https://www.anthropic.com/engineering/building-effective-agents"
+      },
+      {
+        "blurb": "Willison's essay on splitting agent runs into plan, propose, and apply phases. Where the human checkpoints actually sit.",
+        "category": "Discussion",
+        "category_slug": "discussion",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:stage-gates:willison-loops",
+        "learning_type": "Discussion",
+        "published_at": "2025-09-30",
+        "source": "Simon Willison",
+        "title": "Designing agentic loops",
+        "tool_slugs": [
+          "stage-gates"
+        ],
+        "tools": [
+          "stage-gates"
+        ],
+        "url": "https://simonwillison.net/2025/Sep/30/designing-agentic-loops/"
+      },
+      {
+        "blurb": "Sixteen agent sessions to ship one Ghostty feature, all transcripts published. A working example of stage gates as a real-world workflow.",
+        "category": "Discussion",
+        "category_slug": "discussion",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:stage-gates:hashimoto-vibing",
+        "learning_type": "Discussion",
+        "published_at": "2025-10-11",
+        "source": "Mitchell Hashimoto",
+        "title": "Vibing a Non-Trivial Ghostty Feature",
+        "tool_slugs": [
+          "stage-gates"
+        ],
+        "tools": [
+          "stage-gates"
+        ],
+        "url": "https://mitchellh.com/writing/non-trivial-vibing"
+      },
+      {
+        "blurb": "OpenAI's framework for tiering agent autonomy by risk class. The underpinnings of confidence-tiered policies.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:confidence-tiered-autonomy:openai-practices",
+        "learning_type": "Best Practices",
+        "published_at": "2023-12-14",
+        "source": "Shavit, Agarwal et al. · OpenAI",
+        "title": "Practices for Governing Agentic AI Systems",
+        "tool_slugs": [
+          "confidence-tiered-autonomy"
+        ],
+        "tools": [
+          "confidence-tiered-autonomy"
+        ],
+        "url": "https://openai.com/index/practices-for-governing-agentic-ai-systems/"
+      },
+      {
+        "blurb": "Karpathy on the autonomy slider. The Tesla Autopilot analogy for handing tasks to an agent gradually instead of full autonomy on day one.",
+        "category": "Talk",
+        "category_slug": "talk",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:confidence-tiered-autonomy:karpathy-software-3",
+        "learning_type": "Talk",
+        "published_at": "2025-06-17",
+        "source": "Andrej Karpathy · YC AI Startup School",
+        "title": "Software Is Changing (Again)",
+        "tool_slugs": [
+          "confidence-tiered-autonomy"
+        ],
+        "tools": [
+          "confidence-tiered-autonomy"
+        ],
+        "url": "https://www.youtube.com/watch?v=LCEmiRjPEtQ"
+      },
+      {
+        "blurb": "Google's public reviewer guide. The rules and SLAs that scale a review queue without sinking individual reviewers.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:review-queue:google-eng-practices",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Google Engineering Practices",
+        "title": "How to do a code review (Google)",
+        "tool_slugs": [
+          "review-queue"
+        ],
+        "tools": [
+          "review-queue"
+        ],
+        "url": "https://google.github.io/eng-practices/review/reviewer/"
+      },
+      {
+        "blurb": "GitHub's docs on letting Copilot review PRs. The cheap pass that catches the boring things humans miss.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:review-queue:copilot-review-docs",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "GitHub docs",
+        "title": "Pull Request Reviews with Copilot",
+        "tool_slugs": [
+          "review-queue",
+          "agent-as-reviewer"
+        ],
+        "tools": [
+          "review-queue",
+          "agent-as-reviewer"
+        ],
+        "url": "https://docs.github.com/en/copilot/using-github-copilot/code-review/using-copilot-code-review"
+      },
+      {
+        "blurb": "GitHub's announcement for Copilot Workspace. The working sketch of the agent-as-reviewer interaction.",
+        "category": "Discussion",
+        "category_slug": "discussion",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:agent-as-reviewer:copilot-workspace",
+        "learning_type": "Discussion",
+        "published_at": "2024-04-29",
+        "source": "GitHub blog",
+        "title": "GitHub Copilot Workspace",
+        "tool_slugs": [
+          "agent-as-reviewer"
+        ],
+        "tools": [
+          "agent-as-reviewer"
+        ],
+        "url": "https://github.blog/2024-04-29-github-copilot-workspace/"
+      },
+      {
+        "blurb": "Huntley's original Ralph loop post. A bash while-loop feeding the same prompt to a coding agent until it converges.",
+        "category": "Discussion",
+        "category_slug": "discussion",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:ralph-loop:huntley",
+        "learning_type": "Discussion",
+        "published_at": "2025-07-14",
+        "source": "Geoffrey Huntley",
+        "title": "Ralph Wiggum as a \"software engineer\"",
+        "tool_slugs": [
+          "ralph-loop"
+        ],
+        "tools": [
+          "ralph-loop"
+        ],
+        "url": "https://ghuntley.com/ralph/"
+      }
+    ],
+    "spec-first": [
+      {
+        "blurb": "Fowler's bliki entry on the joke that names half of every onboarding doc. Cache invalidation and naming things.",
+        "category": "Discussion",
+        "category_slug": "discussion",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:naming-discipline:fowler",
+        "learning_type": "Discussion",
+        "published_at": null,
+        "source": "Martin Fowler",
+        "title": "Two Hard Things",
+        "tool_slugs": [
+          "naming-discipline"
+        ],
+        "tools": [
+          "naming-discipline"
+        ],
+        "url": "https://martinfowler.com/bliki/TwoHardThings.html"
+      },
+      {
+        "blurb": "Belshee's seven-step ladder from \"nonsense\" to \"domain abstraction\". A working method for renaming legacy code one move at a time.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:naming-discipline:belshee",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Arlo Belshee",
+        "title": "Naming as a Process",
+        "tool_slugs": [
+          "naming-discipline"
+        ],
+        "tools": [
+          "naming-discipline"
+        ],
+        "url": "https://www.digdeeproots.com/articles/on/naming-as-a-process/"
+      },
+      {
+        "blurb": "Ten rules for keeping modules readable by humans and agents. Small functions, no surprises, bounded loops.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:module-boundaries:power-of-ten",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Gerard J. Holzmann · NASA JPL",
+        "title": "The Power of Ten: Rules for Developing Safety-Critical Code",
+        "tool_slugs": [
+          "module-boundaries"
+        ],
+        "tools": [
+          "module-boundaries"
+        ],
+        "url": "https://web.eecs.umich.edu/~imarkov/10rules.pdf"
+      },
+      {
+        "blurb": "How to draw hard module boundaries inside one deployable. The shape agents work best inside.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:module-boundaries:grzybek",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Kamil Grzybek",
+        "title": "Modular Monolith: A Primer",
+        "tool_slugs": [
+          "module-boundaries"
+        ],
+        "tools": [
+          "module-boundaries"
+        ],
+        "url": "https://www.kamilgrzybek.com/blog/posts/modular-monolith-primer"
+      },
+      {
+        "blurb": "Community spec for the AGENTS.md file. Conventions, commands, and tests an agent should respect when changing this repo.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:agents-md:home",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Agentic AI Foundation",
+        "title": "AGENTS.md spec",
+        "tool_slugs": [
+          "agents-md"
+        ],
+        "tools": [
+          "agents-md"
+        ],
+        "url": "https://agents.md/"
+      },
+      {
+        "blurb": "Amp's own AGENTS.md, published as a worked example. Build commands, code style, testing, and PR conventions in one file.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:agents-md:amp-example",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Amp · Sourcegraph",
+        "title": "How to write AGENTS.md",
+        "tool_slugs": [
+          "agents-md"
+        ],
+        "tools": [
+          "agents-md"
+        ],
+        "url": "https://ampcode.com/AGENTS.md"
+      },
+      {
+        "blurb": "Adzic's reference text. Living specs that double as tests, written in concrete examples humans and machines can read.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:specification-by-example:adzic",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Gojko Adzic · Manning",
+        "title": "Specification by Example",
+        "tool_slugs": [
+          "specification-by-example"
+        ],
+        "tools": [
+          "specification-by-example"
+        ],
+        "url": "https://gojko.net/books/specification-by-example/"
+      },
+      {
+        "blurb": "GitHub's introduction to Spec Kit. Spec, Plan, Tasks, Implement, each producing an artifact the next phase consumes.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:spec-driven-development:github-spec-kit-announce",
+        "learning_type": "Tutorial",
+        "published_at": "2025-09-02",
+        "source": "GitHub blog",
+        "title": "Spec-Driven Development with AI: Get Started with a New Open Source Toolkit",
+        "tool_slugs": [
+          "spec-driven-development"
+        ],
+        "tools": [
+          "spec-driven-development"
+        ],
+        "url": "https://github.blog/ai-and-ml/generative-ai/spec-driven-development-with-ai-get-started-with-a-new-open-source-toolkit/"
+      },
+      {
+        "blurb": "Grove makes the case that specifications, not prompts or code, are the durable artifact. The spec compiles. Prompts thrown away are wasted source.",
+        "category": "Talk",
+        "category_slug": "talk",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:spec-driven-development:grove-new-code",
+        "learning_type": "Talk",
+        "published_at": "2025-06-03",
+        "source": "Sean Grove · OpenAI",
+        "title": "The New Code",
+        "tool_slugs": [
+          "spec-driven-development"
+        ],
+        "tools": [
+          "spec-driven-development"
+        ],
+        "url": "https://www.youtube.com/watch?v=8rABwKRsec4"
+      }
+    ],
+    "verification": [
+      {
+        "blurb": "The Hypothesis project's intro essay. State invariants and let the runner generate inputs. The starting point for property testing on real code.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:property-tests-fence:hypothesis-intro",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Hypothesis",
+        "title": "What is Property Based Testing?",
+        "tool_slugs": [
+          "property-tests-fence"
+        ],
+        "tools": [
+          "property-tests-fence"
+        ],
+        "url": "https://hypothesis.works/articles/what-is-property-based-testing/"
+      },
+      {
+        "blurb": "Hands-on quickstart. From decorator to passing assertion, with strategies for generating realistic inputs.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:property-tests-fence:hypothesis-quickstart",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Hypothesis docs",
+        "title": "Property-Based Testing in Python",
+        "tool_slugs": [
+          "property-tests-fence"
+        ],
+        "tools": [
+          "property-tests-fence"
+        ],
+        "url": "https://hypothesis.readthedocs.io/en/latest/quickstart.html"
+      },
+      {
+        "blurb": "Jest's reference treatment. Record current output as truth, fail when it changes. Useful when the spec is \"whatever it does today.\"",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:snapshot-golden:jest",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Jest docs",
+        "title": "Snapshot Testing",
+        "tool_slugs": [
+          "snapshot-golden"
+        ],
+        "tools": [
+          "snapshot-golden"
+        ],
+        "url": "https://jestjs.io/docs/snapshot-testing"
+      },
+      {
+        "blurb": "Fowler's bliki entry on contract tests. Narrow fast tests that pin down the shape of an inter-service contract.",
+        "category": "Discussion",
+        "category_slug": "discussion",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:contract-tests:fowler-contract-test",
+        "learning_type": "Discussion",
+        "published_at": null,
+        "source": "Martin Fowler",
+        "title": "ContractTest",
+        "tool_slugs": [
+          "contract-tests"
+        ],
+        "tools": [
+          "contract-tests"
+        ],
+        "url": "https://martinfowler.com/bliki/ContractTest.html"
+      },
+      {
+        "blurb": "Brady's book on types-as-fences taken to its conclusion. The type checker as the first and cheapest verifier.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:contract-tests:brady",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "Edwin Brady · Manning",
+        "title": "Type-Driven Development with Idris",
+        "tool_slugs": [
+          "contract-tests"
+        ],
+        "tools": [
+          "contract-tests"
+        ],
+        "url": "https://www.manning.com/books/type-driven-development-with-idris"
+      },
+      {
+        "blurb": "GitHub's open-source library for differential testing. Run new code in shadow next to old, compare, switch over.",
+        "category": "Tutorial",
+        "category_slug": "tutorial",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:differential-testing:github-scientist",
+        "learning_type": "Tutorial",
+        "published_at": null,
+        "source": "GitHub",
+        "title": "Scientist",
+        "tool_slugs": [
+          "differential-testing"
+        ],
+        "tools": [
+          "differential-testing"
+        ],
+        "url": "https://github.com/github/scientist"
+      },
+      {
+        "blurb": "vinext at 94% of the Next.js API surface, scored against 1,700 Vitest plus 380 Playwright tests ported straight from Next.js. Differential testing at framework scale.",
+        "category": "Discussion",
+        "category_slug": "discussion",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:differential-testing:cloudflare-vinext",
+        "learning_type": "Discussion",
+        "published_at": null,
+        "source": "Cloudflare blog",
+        "title": "How we rebuilt Next.js with AI in one week",
+        "tool_slugs": [
+          "differential-testing"
+        ],
+        "tools": [
+          "differential-testing"
+        ],
+        "url": "https://blog.cloudflare.com/vinext/"
+      },
+      {
+        "blurb": "Hejlsberg on porting tsc to Go for semantic parity. The reason it's a port and not a rewrite is so the existing test suite stays the source of truth.",
+        "category": "Discussion",
+        "category_slug": "discussion",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:differential-testing:typescript-native-port",
+        "learning_type": "Discussion",
+        "published_at": null,
+        "source": "Anders Hejlsberg · Microsoft",
+        "title": "A 10x Faster TypeScript",
+        "tool_slugs": [
+          "differential-testing"
+        ],
+        "tools": [
+          "differential-testing"
+        ],
+        "url": "https://devblogs.microsoft.com/typescript/typescript-native-port/"
+      },
+      {
+        "blurb": "Bun's AI-assisted Zig-to-Rust port at 99.8% of the pre-existing test suite. The rewrite stays in shadow until disagreement hits zero, exactly the pattern.",
+        "category": "Discussion",
+        "category_slug": "discussion",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:differential-testing:bun-rust",
+        "learning_type": "Discussion",
+        "published_at": null,
+        "source": "The Register",
+        "title": "Anthropic's Bun team trials port from Zig to Rust",
+        "tool_slugs": [
+          "differential-testing"
+        ],
+        "tools": [
+          "differential-testing"
+        ],
+        "url": "https://www.theregister.com/2026/05/05/bun_rust_port/"
+      },
+      {
+        "blurb": "Anthropic's reference on agent design. Workflows vs. agents, tool design, evals, and where the autonomy band actually pays off.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:evals:anthropic-building-effective",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Anthropic",
+        "title": "Building effective agents",
+        "tool_slugs": [
+          "evals"
+        ],
+        "tools": [
+          "evals"
+        ],
+        "url": "https://www.anthropic.com/engineering/building-effective-agents"
+      },
+      {
+        "blurb": "Anthropic's working notes on building eval suites for agents. Treat the agent like untrusted input. Run a fixture set on every change.",
+        "category": "Best Practices",
+        "category_slug": "best-practices",
+        "first_indexed_at": "2026-05-14",
+        "key": "agent-patterns:res:evals:anthropic-demystifying",
+        "learning_type": "Best Practices",
+        "published_at": null,
+        "source": "Anthropic Engineering",
+        "title": "Demystifying evals for AI agents",
+        "tool_slugs": [
+          "evals"
+        ],
+        "tools": [
+          "evals"
+        ],
+        "url": "https://www.anthropic.com/engineering"
+      }
+    ]
+  },
   "faqs": [
     {
       "answer": "Give the agent the same on-ramp you would give a new hire. Add an AGENTS.md at the repo root with build, test, and convention notes. Keep modules small and well-named. Make sure the test suite runs cleanly from a fresh clone. Agents do their best work in codebases where humans already do their best work.",
@@ -178,6 +710,21 @@
       "source_url": "https://github.com/github/spec-kit"
     }
   ],
+  "last_updated": "2026-05-14",
+  "learning_types": [
+    "Tutorial",
+    "Discussion",
+    "Best Practices",
+    "Talk"
+  ],
+  "og_meta": {
+    "description": "Patterns for the Age of Agents. How a codebase is shaped so an agent can do useful work, how that work is verified at machine speed, and how humans stay in the decision path without becoming the bottleneck.",
+    "image": "",
+    "site_name": "Smarter Dev",
+    "title": "Patterns for the Age of Agents",
+    "type": "article",
+    "url": "https://smarter.dev/resources/agent-engineering-patterns"
+  },
   "people": [
     {
       "blurb": "Daily field notes on LLM tooling, agentic coding, and the practical limits of AI-assisted development.",
@@ -244,494 +791,179 @@
       "url": "https://huyenchip.com/"
     }
   ],
+  "seo_meta": {
+    "canonical_url": "https://smarter.dev/resources/agent-engineering-patterns",
+    "description": "Patterns for the Age of Agents. How a codebase is shaped so an agent can do useful work, how that work is verified at machine speed, and how humans stay in the decision path without becoming the bottleneck.",
+    "robots": "index,follow"
+  },
   "spine": [
     {
-      "blurb": "Willison frames agent skill as designing the loop itself. Pick the right tools, scope the goal, and run safely in YOLO mode.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:spine:designing-agentic-loops",
-      "learning_type": "Discussion",
-      "published_at": "2025-09-30",
-      "source": "Simon Willison",
-      "title": "Designing agentic loops",
-      "url": "https://simonwillison.net/2025/Sep/30/designing-agentic-loops/"
-    },
-    {
-      "blurb": "Karpathy lays out Software 3.0: LLMs as a new computer programmed in English, with humans verifying what models generate.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:spine:karpathy-software-3",
-      "learning_type": "Talk",
-      "published_at": "2025-06-17",
-      "source": "Andrej Karpathy · YC AI Startup School",
-      "title": "Software Is Changing (Again)",
-      "url": "https://www.youtube.com/watch?v=LCEmiRjPEtQ"
-    },
-    {
-      "blurb": "Baseline practices for keeping agentic systems aligned with operator intent: scoping, oversight, interruptibility, accountability.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:spine:governing-agentic-systems",
-      "learning_type": "Best Practices",
-      "published_at": "2023-12-14",
-      "source": "Shavit, Agarwal et al. · OpenAI",
-      "title": "Practices for Governing Agentic AI Systems",
-      "url": "https://openai.com/index/practices-for-governing-agentic-ai-systems/"
-    },
-    {
-      "blurb": "Adzic's case studies on turning concrete examples into shared specifications that drive delivery. The pre-agent root of spec-driven coding.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:spine:specification-by-example",
-      "learning_type": "Tutorial",
-      "published_at": "2011-05-01",
-      "source": "Gojko Adzic · Manning",
-      "title": "Specification by Example",
-      "url": "https://gojko.net/books/specification-by-example/"
-    },
-    {
       "blurb": "A README for agents. An open Markdown convention for build steps, conventions, and guardrails that coding agents actually read.",
+      "category": "Best Practices",
+      "category_slug": "best-practices",
       "first_indexed_at": "2026-05-14",
       "key": "agent-patterns:spine:agents-md",
       "learning_type": "Best Practices",
       "published_at": null,
       "source": "Agentic AI Foundation",
       "title": "AGENTS.md",
+      "tool_slugs": [],
+      "tools": [],
       "url": "https://agents.md/"
     },
     {
-      "blurb": "Sutton's argument that general methods leveraging compute beat human-engineered cleverness. The intellectual backdrop for letting agents search.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:spine:bitter-lesson",
-      "learning_type": "Discussion",
-      "published_at": "2019-03-13",
-      "source": "Rich Sutton",
-      "title": "The Bitter Lesson",
-      "url": "http://www.incompleteideas.net/IncIdeas/BitterLesson.html"
-    },
-    {
-      "blurb": "GitHub's open toolkit for Spec-Driven Development. Spec, Plan, Tasks, Implement, with each phase producing an artifact the next phase consumes.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:spine:spec-kit",
-      "learning_type": "Tutorial",
-      "published_at": "2025-09-02",
-      "source": "GitHub",
-      "title": "Spec Kit",
-      "url": "https://github.com/github/spec-kit"
-    },
-    {
-      "blurb": "Grove argues specifications, not code, are the durable artifact. The spec compiles to implementations. Prompts thrown away are wasted source.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:spine:new-code-specifications",
-      "learning_type": "Talk",
-      "published_at": "2025-06-03",
-      "source": "Sean Grove · OpenAI (AI Engineer World's Fair 2025)",
-      "title": "The New Code",
-      "url": "https://www.youtube.com/watch?v=8rABwKRsec4"
-    },
-    {
-      "blurb": "Huntley's Ralph loop. A bash while-loop feeding the same prompt to a coding agent until it converges. Brute-force agentic engineering, working.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:spine:ralph-loop",
-      "learning_type": "Discussion",
-      "published_at": "2025-07-14",
-      "source": "Geoffrey Huntley",
-      "title": "Ralph Wiggum as a \"software engineer\"",
-      "url": "https://ghuntley.com/ralph/"
-    },
-    {
       "blurb": "Hashimoto ships a real Ghostty feature across 16 agent sessions for $15.98 and publishes the full transcripts. A concrete look at staying the architect.",
+      "category": "Discussion",
+      "category_slug": "discussion",
       "first_indexed_at": "2026-05-14",
       "key": "agent-patterns:spine:hashimoto-non-trivial-vibing",
       "learning_type": "Discussion",
       "published_at": "2025-10-11",
       "source": "Mitchell Hashimoto",
       "title": "Vibing a Non-Trivial Ghostty Feature",
+      "tool_slugs": [],
+      "tools": [],
       "url": "https://mitchellh.com/writing/non-trivial-vibing"
     },
     {
+      "blurb": "Willison frames agent skill as designing the loop itself. Pick the right tools, scope the goal, and run safely in YOLO mode.",
+      "category": "Discussion",
+      "category_slug": "discussion",
+      "first_indexed_at": "2026-05-14",
+      "key": "agent-patterns:spine:designing-agentic-loops",
+      "learning_type": "Discussion",
+      "published_at": "2025-09-30",
+      "source": "Simon Willison",
+      "title": "Designing agentic loops",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://simonwillison.net/2025/Sep/30/designing-agentic-loops/"
+    },
+    {
+      "blurb": "GitHub's open toolkit for Spec-Driven Development. Spec, Plan, Tasks, Implement, with each phase producing an artifact the next phase consumes.",
+      "category": "Tutorial",
+      "category_slug": "tutorial",
+      "first_indexed_at": "2026-05-14",
+      "key": "agent-patterns:spine:spec-kit",
+      "learning_type": "Tutorial",
+      "published_at": "2025-09-02",
+      "source": "GitHub",
+      "title": "Spec Kit",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://github.com/github/spec-kit"
+    },
+    {
+      "blurb": "Huntley's Ralph loop. A bash while-loop feeding the same prompt to a coding agent until it converges. Brute-force agentic engineering, working.",
+      "category": "Discussion",
+      "category_slug": "discussion",
+      "first_indexed_at": "2026-05-14",
+      "key": "agent-patterns:spine:ralph-loop",
+      "learning_type": "Discussion",
+      "published_at": "2025-07-14",
+      "source": "Geoffrey Huntley",
+      "title": "Ralph Wiggum as a \"software engineer\"",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://ghuntley.com/ralph/"
+    },
+    {
+      "blurb": "Karpathy lays out Software 3.0: LLMs as a new computer programmed in English, with humans verifying what models generate.",
+      "category": "Talk",
+      "category_slug": "talk",
+      "first_indexed_at": "2026-05-14",
+      "key": "agent-patterns:spine:karpathy-software-3",
+      "learning_type": "Talk",
+      "published_at": "2025-06-17",
+      "source": "Andrej Karpathy · YC AI Startup School",
+      "title": "Software Is Changing (Again)",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://www.youtube.com/watch?v=LCEmiRjPEtQ"
+    },
+    {
+      "blurb": "Grove argues specifications, not code, are the durable artifact. The spec compiles to implementations. Prompts thrown away are wasted source.",
+      "category": "Talk",
+      "category_slug": "talk",
+      "first_indexed_at": "2026-05-14",
+      "key": "agent-patterns:spine:new-code-specifications",
+      "learning_type": "Talk",
+      "published_at": "2025-06-03",
+      "source": "Sean Grove · OpenAI (AI Engineer World's Fair 2025)",
+      "title": "The New Code",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://www.youtube.com/watch?v=8rABwKRsec4"
+    },
+    {
+      "blurb": "Baseline practices for keeping agentic systems aligned with operator intent: scoping, oversight, interruptibility, accountability.",
+      "category": "Best Practices",
+      "category_slug": "best-practices",
+      "first_indexed_at": "2026-05-14",
+      "key": "agent-patterns:spine:governing-agentic-systems",
+      "learning_type": "Best Practices",
+      "published_at": "2023-12-14",
+      "source": "Shavit, Agarwal et al. · OpenAI",
+      "title": "Practices for Governing Agentic AI Systems",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "https://openai.com/index/practices-for-governing-agentic-ai-systems/"
+    },
+    {
       "blurb": "A running Thoughtworks memo series on AI-assisted delivery. Context engineering, harness design, spec-driven coding, what holds up in practice.",
+      "category": "Discussion",
+      "category_slug": "discussion",
       "first_indexed_at": "2026-05-14",
       "key": "agent-patterns:spine:exploring-gen-ai",
       "learning_type": "Discussion",
       "published_at": "2023-07-26",
       "source": "Birgitta Boeckeler et al. · Thoughtworks (martinfowler.com)",
       "title": "Exploring Generative AI",
+      "tool_slugs": [],
+      "tools": [],
       "url": "https://martinfowler.com/articles/exploring-gen-ai.html"
     },
     {
       "blurb": "Yegge's early call that LLM-augmented coding is a step change, not a parlor trick. The polemic that primed many engineers to take agents seriously.",
+      "category": "Discussion",
+      "category_slug": "discussion",
       "first_indexed_at": "2026-05-14",
       "key": "agent-patterns:spine:cheating-is-all-you-need",
       "learning_type": "Discussion",
       "published_at": "2023-03-23",
       "source": "Steve Yegge · Sourcegraph",
       "title": "Cheating is all you need",
+      "tool_slugs": [],
+      "tools": [],
       "url": "https://sourcegraph.com/blog/cheating-is-all-you-need"
-    }
-  ],
-  "tool_resources": [
+    },
     {
-      "blurb": "Fowler's bliki entry on the joke that names half of every onboarding doc. Cache invalidation and naming things.",
+      "blurb": "Sutton's argument that general methods leveraging compute beat human-engineered cleverness. The intellectual backdrop for letting agents search.",
+      "category": "Discussion",
+      "category_slug": "discussion",
       "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:naming-discipline:fowler",
+      "key": "agent-patterns:spine:bitter-lesson",
       "learning_type": "Discussion",
-      "published_at": null,
-      "source": "Martin Fowler",
-      "title": "Two Hard Things",
-      "tool_slugs": [
-        "naming-discipline"
-      ],
-      "url": "https://martinfowler.com/bliki/TwoHardThings.html"
+      "published_at": "2019-03-13",
+      "source": "Rich Sutton",
+      "title": "The Bitter Lesson",
+      "tool_slugs": [],
+      "tools": [],
+      "url": "http://www.incompleteideas.net/IncIdeas/BitterLesson.html"
     },
     {
-      "blurb": "Belshee's seven-step ladder from \"nonsense\" to \"domain abstraction\". A working method for renaming legacy code one move at a time.",
+      "blurb": "Adzic's case studies on turning concrete examples into shared specifications that drive delivery. The pre-agent root of spec-driven coding.",
+      "category": "Tutorial",
+      "category_slug": "tutorial",
       "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:naming-discipline:belshee",
+      "key": "agent-patterns:spine:specification-by-example",
       "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Arlo Belshee",
-      "title": "Naming as a Process",
-      "tool_slugs": [
-        "naming-discipline"
-      ],
-      "url": "https://www.digdeeproots.com/articles/on/naming-as-a-process/"
-    },
-    {
-      "blurb": "Ten rules for keeping modules readable by humans and agents. Small functions, no surprises, bounded loops.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:module-boundaries:power-of-ten",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "Gerard J. Holzmann · NASA JPL",
-      "title": "The Power of Ten: Rules for Developing Safety-Critical Code",
-      "tool_slugs": [
-        "module-boundaries"
-      ],
-      "url": "https://web.eecs.umich.edu/~imarkov/10rules.pdf"
-    },
-    {
-      "blurb": "How to draw hard module boundaries inside one deployable. The shape agents work best inside.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:module-boundaries:grzybek",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Kamil Grzybek",
-      "title": "Modular Monolith: A Primer",
-      "tool_slugs": [
-        "module-boundaries"
-      ],
-      "url": "https://www.kamilgrzybek.com/blog/posts/modular-monolith-primer"
-    },
-    {
-      "blurb": "Community spec for the AGENTS.md file. Conventions, commands, and tests an agent should respect when changing this repo.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:agents-md:home",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "Agentic AI Foundation",
-      "title": "AGENTS.md spec",
-      "tool_slugs": [
-        "agents-md"
-      ],
-      "url": "https://agents.md/"
-    },
-    {
-      "blurb": "Amp's own AGENTS.md, published as a worked example. Build commands, code style, testing, and PR conventions in one file.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:agents-md:amp-example",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Amp · Sourcegraph",
-      "title": "How to write AGENTS.md",
-      "tool_slugs": [
-        "agents-md"
-      ],
-      "url": "https://ampcode.com/AGENTS.md"
-    },
-    {
-      "blurb": "Adzic's reference text. Living specs that double as tests, written in concrete examples humans and machines can read.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:specification-by-example:adzic",
-      "learning_type": "Tutorial",
-      "published_at": null,
+      "published_at": "2011-05-01",
       "source": "Gojko Adzic · Manning",
       "title": "Specification by Example",
-      "tool_slugs": [
-        "specification-by-example"
-      ],
+      "tool_slugs": [],
+      "tools": [],
       "url": "https://gojko.net/books/specification-by-example/"
-    },
-    {
-      "blurb": "GitHub's introduction to Spec Kit. Spec, Plan, Tasks, Implement, each producing an artifact the next phase consumes.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:spec-driven-development:github-spec-kit-announce",
-      "learning_type": "Tutorial",
-      "published_at": "2025-09-02",
-      "source": "GitHub blog",
-      "title": "Spec-Driven Development with AI: Get Started with a New Open Source Toolkit",
-      "tool_slugs": [
-        "spec-driven-development"
-      ],
-      "url": "https://github.blog/ai-and-ml/generative-ai/spec-driven-development-with-ai-get-started-with-a-new-open-source-toolkit/"
-    },
-    {
-      "blurb": "Grove makes the case that specifications, not prompts or code, are the durable artifact. The spec compiles. Prompts thrown away are wasted source.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:spec-driven-development:grove-new-code",
-      "learning_type": "Talk",
-      "published_at": "2025-06-03",
-      "source": "Sean Grove · OpenAI",
-      "title": "The New Code",
-      "tool_slugs": [
-        "spec-driven-development"
-      ],
-      "url": "https://www.youtube.com/watch?v=8rABwKRsec4"
-    },
-    {
-      "blurb": "The Hypothesis project's intro essay. State invariants and let the runner generate inputs. The starting point for property testing on real code.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:property-tests-fence:hypothesis-intro",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Hypothesis",
-      "title": "What is Property Based Testing?",
-      "tool_slugs": [
-        "property-tests-fence"
-      ],
-      "url": "https://hypothesis.works/articles/what-is-property-based-testing/"
-    },
-    {
-      "blurb": "Hands-on quickstart. From decorator to passing assertion, with strategies for generating realistic inputs.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:property-tests-fence:hypothesis-quickstart",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Hypothesis docs",
-      "title": "Property-Based Testing in Python",
-      "tool_slugs": [
-        "property-tests-fence"
-      ],
-      "url": "https://hypothesis.readthedocs.io/en/latest/quickstart.html"
-    },
-    {
-      "blurb": "Jest's reference treatment. Record current output as truth, fail when it changes. Useful when the spec is \"whatever it does today.\"",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:snapshot-golden:jest",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Jest docs",
-      "title": "Snapshot Testing",
-      "tool_slugs": [
-        "snapshot-golden"
-      ],
-      "url": "https://jestjs.io/docs/snapshot-testing"
-    },
-    {
-      "blurb": "Fowler's bliki entry on contract tests. Narrow fast tests that pin down the shape of an inter-service contract.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:contract-tests:fowler-contract-test",
-      "learning_type": "Discussion",
-      "published_at": null,
-      "source": "Martin Fowler",
-      "title": "ContractTest",
-      "tool_slugs": [
-        "contract-tests"
-      ],
-      "url": "https://martinfowler.com/bliki/ContractTest.html"
-    },
-    {
-      "blurb": "Brady's book on types-as-fences taken to its conclusion. The type checker as the first and cheapest verifier.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:contract-tests:brady",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "Edwin Brady · Manning",
-      "title": "Type-Driven Development with Idris",
-      "tool_slugs": [
-        "contract-tests"
-      ],
-      "url": "https://www.manning.com/books/type-driven-development-with-idris"
-    },
-    {
-      "blurb": "GitHub's open-source library for differential testing. Run new code in shadow next to old, compare, switch over.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:differential-testing:github-scientist",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "GitHub",
-      "title": "Scientist",
-      "tool_slugs": [
-        "differential-testing"
-      ],
-      "url": "https://github.com/github/scientist"
-    },
-    {
-      "blurb": "vinext at 94% of the Next.js API surface, scored against 1,700 Vitest plus 380 Playwright tests ported straight from Next.js. Differential testing at framework scale.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:differential-testing:cloudflare-vinext",
-      "learning_type": "Discussion",
-      "published_at": null,
-      "source": "Cloudflare blog",
-      "title": "How we rebuilt Next.js with AI in one week",
-      "tool_slugs": [
-        "differential-testing"
-      ],
-      "url": "https://blog.cloudflare.com/vinext/"
-    },
-    {
-      "blurb": "Hejlsberg on porting tsc to Go for semantic parity. The reason it's a port and not a rewrite is so the existing test suite stays the source of truth.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:differential-testing:typescript-native-port",
-      "learning_type": "Discussion",
-      "published_at": null,
-      "source": "Anders Hejlsberg · Microsoft",
-      "title": "A 10x Faster TypeScript",
-      "tool_slugs": [
-        "differential-testing"
-      ],
-      "url": "https://devblogs.microsoft.com/typescript/typescript-native-port/"
-    },
-    {
-      "blurb": "Bun's AI-assisted Zig-to-Rust port at 99.8% of the pre-existing test suite. The rewrite stays in shadow until disagreement hits zero, exactly the pattern.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:differential-testing:bun-rust",
-      "learning_type": "Discussion",
-      "published_at": null,
-      "source": "The Register",
-      "title": "Anthropic's Bun team trials port from Zig to Rust",
-      "tool_slugs": [
-        "differential-testing"
-      ],
-      "url": "https://www.theregister.com/2026/05/05/bun_rust_port/"
-    },
-    {
-      "blurb": "Anthropic's reference on agent design. Workflows vs. agents, tool design, evals, and where the autonomy band actually pays off.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:evals:anthropic-building-effective",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "Anthropic",
-      "title": "Building effective agents",
-      "tool_slugs": [
-        "evals",
-        "confidence-tiered-autonomy"
-      ],
-      "url": "https://www.anthropic.com/engineering/building-effective-agents"
-    },
-    {
-      "blurb": "Anthropic's working notes on building eval suites for agents. Treat the agent like untrusted input. Run a fixture set on every change.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:evals:anthropic-demystifying",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "Anthropic Engineering",
-      "title": "Demystifying evals for AI agents",
-      "tool_slugs": [
-        "evals"
-      ],
-      "url": "https://www.anthropic.com/engineering"
-    },
-    {
-      "blurb": "Willison's essay on splitting agent runs into plan, propose, and apply phases. Where the human checkpoints actually sit.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:stage-gates:willison-loops",
-      "learning_type": "Discussion",
-      "published_at": "2025-09-30",
-      "source": "Simon Willison",
-      "title": "Designing agentic loops",
-      "tool_slugs": [
-        "stage-gates"
-      ],
-      "url": "https://simonwillison.net/2025/Sep/30/designing-agentic-loops/"
-    },
-    {
-      "blurb": "Sixteen agent sessions to ship one Ghostty feature, all transcripts published. A working example of stage gates as a real-world workflow.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:stage-gates:hashimoto-vibing",
-      "learning_type": "Discussion",
-      "published_at": "2025-10-11",
-      "source": "Mitchell Hashimoto",
-      "title": "Vibing a Non-Trivial Ghostty Feature",
-      "tool_slugs": [
-        "stage-gates"
-      ],
-      "url": "https://mitchellh.com/writing/non-trivial-vibing"
-    },
-    {
-      "blurb": "OpenAI's framework for tiering agent autonomy by risk class. The underpinnings of confidence-tiered policies.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:confidence-tiered-autonomy:openai-practices",
-      "learning_type": "Best Practices",
-      "published_at": "2023-12-14",
-      "source": "Shavit, Agarwal et al. · OpenAI",
-      "title": "Practices for Governing Agentic AI Systems",
-      "tool_slugs": [
-        "confidence-tiered-autonomy"
-      ],
-      "url": "https://openai.com/index/practices-for-governing-agentic-ai-systems/"
-    },
-    {
-      "blurb": "Karpathy on the autonomy slider. The Tesla Autopilot analogy for handing tasks to an agent gradually instead of full autonomy on day one.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:confidence-tiered-autonomy:karpathy-software-3",
-      "learning_type": "Talk",
-      "published_at": "2025-06-17",
-      "source": "Andrej Karpathy · YC AI Startup School",
-      "title": "Software Is Changing (Again)",
-      "tool_slugs": [
-        "confidence-tiered-autonomy"
-      ],
-      "url": "https://www.youtube.com/watch?v=LCEmiRjPEtQ"
-    },
-    {
-      "blurb": "Google's public reviewer guide. The rules and SLAs that scale a review queue without sinking individual reviewers.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:review-queue:google-eng-practices",
-      "learning_type": "Best Practices",
-      "published_at": null,
-      "source": "Google Engineering Practices",
-      "title": "How to do a code review (Google)",
-      "tool_slugs": [
-        "review-queue"
-      ],
-      "url": "https://google.github.io/eng-practices/review/reviewer/"
-    },
-    {
-      "blurb": "GitHub's docs on letting Copilot review PRs. The cheap pass that catches the boring things humans miss.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:review-queue:copilot-review-docs",
-      "learning_type": "Tutorial",
-      "published_at": null,
-      "source": "GitHub docs",
-      "title": "Pull Request Reviews with Copilot",
-      "tool_slugs": [
-        "review-queue",
-        "agent-as-reviewer"
-      ],
-      "url": "https://docs.github.com/en/copilot/using-github-copilot/code-review/using-copilot-code-review"
-    },
-    {
-      "blurb": "GitHub's announcement for Copilot Workspace. The working sketch of the agent-as-reviewer interaction.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:agent-as-reviewer:copilot-workspace",
-      "learning_type": "Discussion",
-      "published_at": "2024-04-29",
-      "source": "GitHub blog",
-      "title": "GitHub Copilot Workspace",
-      "tool_slugs": [
-        "agent-as-reviewer"
-      ],
-      "url": "https://github.blog/2024-04-29-github-copilot-workspace/"
-    },
-    {
-      "blurb": "Huntley's original Ralph loop post. A bash while-loop feeding the same prompt to a coding agent until it converges.",
-      "first_indexed_at": "2026-05-14",
-      "key": "agent-patterns:res:ralph-loop:huntley",
-      "learning_type": "Discussion",
-      "published_at": "2025-07-14",
-      "source": "Geoffrey Huntley",
-      "title": "Ralph Wiggum as a \"software engineer\"",
-      "tool_slugs": [
-        "ralph-loop"
-      ],
-      "url": "https://ghuntley.com/ralph/"
     }
   ]
 }
