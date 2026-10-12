@@ -12,9 +12,8 @@ The webhook handler is the source of truth for role grants and lifecycle.
 
 from __future__ import annotations
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from skrift.db.models.user import User
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.billing import catalog
 from smarter_dev.web.billing.client import get_polar
@@ -34,13 +33,14 @@ async def create_checkout_session(
     *,
     role: str,
     success_url: str,
+    cancel_url: str | None = None,
 ) -> str:
     """Create a Polar Checkout for the given offering role.
 
     Role and product all come from the Polar catalog (source of truth). Whether
     it's a subscription or a one-time payment is determined by the product, not
-    here. Returns the hosted Checkout URL. Polar's hosted page handles the
-    cancel/back path itself, so there is no separate cancel URL.
+    here. Returns the hosted Checkout URL. An optional cancel URL supplies
+    Polar's back button; callers that omit it retain the existing behavior.
     """
     offerings = await catalog.get_offerings()
     offering = catalog.get_offering(offerings, role)
@@ -59,6 +59,7 @@ async def create_checkout_session(
                 "customer_email": user.email,
                 "success_url": success_url,
                 "allow_discount_codes": False,
+                **({"return_url": cancel_url} if cancel_url is not None else {}),
             }
         )
     return checkout.url
