@@ -168,7 +168,7 @@ class Cluster:
         }
         self.pods = {name: [] for name in control.WRITERS}
         self.calls = []
-        self.fail_exec = False
+        self.version = "generation-A"
 
     def command(self, *args):
         self.calls.append(args)
@@ -176,21 +176,60 @@ class Cluster:
             kind, name = args[1:3]
             if kind == "configmap":
                 return json.dumps({"data": self.data})
+            if kind == "secret":
+                assert args == (
+                    "get",
+                    "secret",
+                    "smarter-dev-secrets",
+                    "-o",
+                    "jsonpath={.metadata.resourceVersion}",
+                )
+                return self.version
             if kind == "deployment":
                 return json.dumps(self.deployments[name])
             return json.dumps({"items": self.pods[args[3].removeprefix("app=")]})
-        if args[0] == "exec" and self.fail_exec:
-            raise RuntimeError("mismatch")
+        assert args[0] != "exec", "No serving-pod exec is permitted"
         return ""
 
     def ready(self):
-        for name in control.WRITERS:
+        for name, filename in zip(
+            control.WRITERS, ("deploy.yaml", "deploy-worker.yaml"), strict=True
+        ):
             self.deployments[name]["spec"]["replicas"] = 1
+            template = yaml.safe_load((ROOT / "k8s" / filename).read_text())["spec"][
+                "template"
+            ]
+            template["metadata"]["annotations"][control.KEY_VERSION] = self.version
+            template["spec"]["containers"][0]["image"] = "approved"
+            self.deployments[name]["spec"]["template"] = copy.deepcopy(template)
             self.pods[name] = [
                 {
-                    "metadata": {"name": name + "-new"},
-                    "spec": {"containers": [{"image": "approved"}]},
-                    "status": {"containerStatuses": [{"ready": True}]},
+                    "metadata": {
+                        "name": name + "-new",
+                        "uid": name + "-uid",
+                        "annotations": {control.KEY_VERSION: self.version},
+                    },
+                    "spec": template["spec"],
+                    "status": {
+                        "conditions": [
+                            {
+                                "type": "Ready",
+                                "status": "True",
+                                "lastTransitionTime": "2026-10-12T20:01:00Z",
+                            }
+                        ],
+                        "containerStatuses": [
+                            {
+                                "ready": True,
+                                "started": True,
+                                "containerID": "container://" + name,
+                                "restartCount": 0,
+                                "state": {
+                                    "running": {"startedAt": "2026-10-12T20:00:00Z"}
+                                },
+                            }
+                        ],
+                    },
                 }
             ]
 
@@ -217,7 +256,7 @@ def test_release_checks_every_writer_before_mutating(monkeypatch, failure):
     cluster.ready()
     monkeypatch.setattr(control, "kubectl", cluster.command)
     if failure == "key":
-        cluster.fail_exec = True
+        cluster.version = "generation-B"
     elif failure == "old-pod":
         cluster.pods[control.WRITERS[1]].append(
             copy.deepcopy(cluster.pods[control.WRITERS[1]][0])
@@ -238,7 +277,7 @@ def test_release_checks_every_writer_before_mutating(monkeypatch, failure):
         assert not any(c[0] == "patch" for c in cluster.calls)
     else:
         control.release("approved")
-        assert sum(c[0] == "exec" for c in cluster.calls) == 2
+        assert not any(c[0] == "exec" for c in cluster.calls)
         assert cluster.calls[-1][0] == "patch"
 
 
@@ -370,7 +409,7 @@ def test_control_change_during_checks_never_releases(monkeypatch):
 
     def command(*args):
         result = cluster.command(*args)
-        if args[0] == "exec":
+        if args[:2] == ("get", "pods"):
             cluster.data["reconciliation-verified"] = "false"
         return result
 
@@ -453,3 +492,169 @@ def test_effective_worker_readiness_requires_verified_key_marker():
         "exec": {"command": ["test", "-f", "/tmp/site-identity-key-ready"]},
         "periodSeconds": 5,
     }
+
+
+def test_release_never_spawns_a_process_in_serving_pods(monkeypatch):
+    cluster = Cluster()
+    cluster.ready()
+
+    def command(*args):
+        assert args[0] != "exec", "release must not add memory load to serving pods"
+        return cluster.command(*args)
+
+    monkeypatch.setattr(control, "kubectl", command)
+    control.release("approved")
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "stale-ready",
+        "missing-id",
+        "missing-start",
+        "restarting",
+        "pod-key",
+        "template-key",
+        "wrapper",
+        "probe",
+        "key-source",
+    ],
+)
+def test_release_rejects_stale_or_unbound_startup_evidence(monkeypatch, failure):
+    cluster = Cluster()
+    cluster.ready()
+    monkeypatch.setattr(control, "kubectl", cluster.command)
+    pod = cluster.pods[control.WRITERS[1]][0]
+    state = pod["status"]["containerStatuses"][0]
+    container = pod["spec"]["containers"][0]
+    if failure == "stale-ready":
+        state["state"]["running"]["startedAt"] = "2026-10-12T20:02:00Z"
+    elif failure == "missing-id":
+        state.pop("containerID")
+    elif failure == "missing-start":
+        state["state"] = {}
+    elif failure == "restarting":
+        state["started"] = False
+    elif failure == "pod-key":
+        pod["metadata"]["annotations"][control.KEY_VERSION] = "stale"
+    elif failure == "template-key":
+        cluster.deployments[control.WRITERS[1]]["spec"]["template"]["metadata"][
+            "annotations"
+        ][control.KEY_VERSION] = "stale"
+    elif failure == "wrapper":
+        container["command"] = ["skrift", "workers", "run"]
+    elif failure == "probe":
+        container["readinessProbe"] = {"exec": {"command": ["true"]}}
+    elif failure == "key-source":
+        container["env"] = []
+    with pytest.raises((RuntimeError, KeyError)):
+        control.release("approved")
+    assert not any(call[0] in {"exec", "patch"} for call in cluster.calls)
+
+
+@pytest.mark.parametrize("change", ["secret", "container", "pod", "restart"])
+def test_release_rechecks_secret_and_current_container_identity(monkeypatch, change):
+    cluster = Cluster()
+    cluster.ready()
+    reads = 0
+
+    def command(*args):
+        nonlocal reads
+        if args[:2] == ("get", "pods"):
+            reads += 1
+            if reads == 3:  # before second pass through writer evidence
+                pod = cluster.pods[control.WRITERS[1]][0]
+                if change == "secret":
+                    cluster.version = "changed-after-start"
+                elif change == "pod":
+                    pod["metadata"]["uid"] = "new-uid"
+                elif change == "container":
+                    pod["status"]["containerStatuses"][0]["containerID"] = "replacement"
+                else:
+                    pod["status"]["containerStatuses"][0]["restartCount"] += 1
+        return cluster.command(*args)
+
+    monkeypatch.setattr(control, "kubectl", command)
+    with pytest.raises(RuntimeError):
+        control.release("approved")
+    assert not any(call[0] in {"exec", "patch"} for call in cluster.calls)
+
+
+def test_stamp_binds_all_templates_to_metadata_before_container_creation(
+    monkeypatch, tmp_path
+):
+    cluster = Cluster()
+    monkeypatch.setattr(control, "kubectl", cluster.command)
+    for filename in ("deploy.yaml", "deploy-worker.yaml", "migrate-job.yaml"):
+        (tmp_path / filename).write_text((ROOT / "k8s" / filename).read_text())
+    control.stamp(tmp_path)
+    for filename in ("deploy.yaml", "deploy-worker.yaml", "migrate-job.yaml"):
+        spec = yaml.load((tmp_path / filename).read_text(), Loader=UniqueKeyLoader)
+        assert (
+            spec["spec"]["template"]["metadata"]["annotations"][control.KEY_VERSION]
+            == cluster.version
+        )
+    assert cluster.calls == [
+        (
+            "get",
+            "secret",
+            "smarter-dev-secrets",
+            "-o",
+            "jsonpath={.metadata.resourceVersion}",
+        )
+    ]
+    steps = yaml.safe_load((ROOT / ".github/workflows/deploy.yaml").read_text())[
+        "jobs"
+    ]["build-and-deploy"]["steps"]
+    names = [step["name"] for step in steps]
+    assert (
+        names.index("Bind writer rollout to Secret generation")
+        < names.index("Run database migrations and trusted identity key pin/check")
+        < names.index("Deploy and verify workers")
+    )
+
+
+def test_worker_clears_previous_ready_before_rechecking_key(monkeypatch, tmp_path):
+    ready = tmp_path / "ready"
+    ready.touch()
+    monkeypatch.setattr(worker, "READY", ready)
+
+    async def fail_check():
+        assert not ready.exists()
+        raise RuntimeError("changed key")
+
+    monkeypatch.setattr(worker, "pin_identity_key", fail_check)
+    monkeypatch.setattr(os, "execv", lambda *args: pytest.fail("stale marker reused"))
+    assert worker.main() == 1
+    assert not ready.exists()
+
+
+def test_release_rejects_new_template_not_yet_used_by_ready_pods(monkeypatch):
+    cluster = Cluster()
+    cluster.ready()
+    cluster.deployments[control.WRITERS[0]]["spec"]["template"]["spec"]["containers"][
+        0
+    ]["command"] = ["hypercorn", "main:app"]
+    monkeypatch.setattr(control, "kubectl", cluster.command)
+    with pytest.raises(RuntimeError, match="differs"):
+        control.release("approved")
+    assert not any(call[0] == "patch" for call in cluster.calls)
+
+
+def test_metadata_unavailable_cannot_stamp_or_release(monkeypatch, tmp_path):
+    monkeypatch.setattr(control, "kubectl", lambda *args: "")
+    with pytest.raises(RuntimeError, match="unavailable"):
+        control.stamp(tmp_path)
+
+
+def test_release_accepts_defaulted_http_probe(monkeypatch):
+    cluster = Cluster()
+    cluster.ready()
+    for pod in cluster.pods[control.WRITERS[0]]:
+        pod["spec"]["containers"][0]["readinessProbe"]["httpGet"]["scheme"] = "HTTP"
+    cluster.deployments[control.WRITERS[0]]["spec"]["template"]["spec"]["containers"][
+        0
+    ]["readinessProbe"]["httpGet"]["scheme"] = "HTTP"
+    monkeypatch.setattr(control, "kubectl", cluster.command)
+    control.release("approved")
+    assert any(call[0] == "patch" for call in cluster.calls)

@@ -19,6 +19,8 @@ spec:
     replicas: 2  # Fixed; the site has no HPA
     template:
         metadata:
+            annotations:
+                smarter.dev/identity-key-version: <IDENTITY_KEY_VERSION>
             labels:
                 app: smarter-dev-website
                 tier: frontend

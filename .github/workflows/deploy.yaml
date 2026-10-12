@@ -152,6 +152,9 @@ jobs:
     - name: Verify identity transition prerequisite
       run: python scripts/identity_rollout_control.py preflight
 
+    - name: Bind writer rollout to Secret generation
+      run: python scripts/identity_rollout_control.py stamp
+
     - name: Run database migrations and trusted identity key pin/check
       run: |
         kubectl delete job smarter-dev-migrate -n smarter-dev --ignore-not-found

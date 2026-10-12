@@ -53,7 +53,9 @@ claims. Never manually acknowledge, delete or clear their tokens.
    enough surge capacity, database connectivity, operator access, and a tested
    restoration plan. Record original replicas (normally web=2, agents=1), pod
    UIDs/images, Deployment generations, queue/DLQ counts and in-flight claims.
-   Prevent concurrent deployments/scalers/operators from undoing the hold.
+   Freeze concurrent deployments, scalers, pod-template edits and Secret updates
+   through release. Kubernetes reads across different objects are not an atomic
+   transaction; the release checks require this exclusive operator window.
 2. Provision one independent high-entropy 32+ character fence key in the existing
    restricted secret manager as `smarter-dev-secrets/site-identity-fence-key`.
    The web, agents worker and migration Job reference this **same required field**.
@@ -162,7 +164,16 @@ list. Do not use placeholder assertions to get past the gate. Preflight verifies
 agents replicas0 and no pods; worker-first intentionally allows old web to remain
 up. A pre-existing ConfigMap must be inspected rather than blindly overwritten.
 
-The workflow runs preflight, then the trusted Job independently rejects unexpired
+The workflow runs preflight and then `identity_rollout_control.py stamp` reads
+only the Secret's `metadata.resourceVersion` via a kubectl JSONPath projection.
+It treats that as an **opaque equality token**, never a sortable number or a
+timestamp. It renders `smarter.dev/identity-key-version` into all three pod
+templates (migration Job, web, agents) **before any of their containers are
+created**. This binds each startup pin check to that staged key generation. The
+annotation is not a key or verifier digest. Do not patch existing pod annotations
+to manufacture freshness; a new generation requires a reviewed fresh rollout.
+
+The trusted Job independently rejects unexpired
 or invalid agents claims using the database clock before **core migration → app
 migration → key pin/check**. Any failed command, missing/short key, invalid phase
 or mismatched verifier fails the Job and stops all subsequent writer deployment.
@@ -268,9 +279,27 @@ python scripts/identity_rollout_control.py release \
 ```
 
 Release checks desired replicas, observed generations, exactly the expected
-number of non-terminating Ready pods, exact image, and independently checks the
-pin in **every** web/agents pod. It rechecks the control and uses JSON Patch test
-before changing phase to complete; failure leaves it held. Projected ConfigMaps
+number of non-terminating Ready pods, exact image/startup wrapper/effective
+readiness probe/key secretRef and matching observed pod template. It requires
+current running containerID, startedAt and restartCount, with the Ready transition
+at or after that container start. The worker clears its marker before every
+startup check; web cannot serve its health endpoint until its startup check has
+passed. Stale readiness from an earlier container cannot count as current proof.
+
+Release compares each template/pod's staged Secret-version token with the current
+metadata-only Secret projection, then reads pod/container evidence and the token
+again before conditional release. A restarted/replaced/unready/mismatched writer
+or any changed token fails closed. Even an unrelated field update on the shared
+Secret conservatively requires review and a new stamped rollout; the operator
+detects it by **inequality**, without reading the key or comparing timestamps.
+The migration Job supplies separate database pin proof; release launches **no
+kubectl exec, Python interpreter or DB session in serving web/agents pods**. There
+is no live-pod memory/headroom experiment. If more DB proof is needed, prepare a
+separately bounded verifier Job, not an in-pod process.
+
+It rechecks the control and uses JSON Patch test before changing phase to
+complete; failure leaves it held. Maintain the exclusive deployment/scaler/Secret
+freeze through this last step; a resourceVersion is not a cross-object lock. Projected ConfigMaps
 propagate asynchronously: verify every pod sees complete and the consumer starts
 before declaring restored. Check queue recovery/DLQ and original replica counts.
 Do not force success by editing readiness markers or invoking worker CLI directly.

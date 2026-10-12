@@ -15,6 +15,8 @@ spec:
   ttlSecondsAfterFinished: 600
   template:
     metadata:
+      annotations:
+        smarter.dev/identity-key-version: <IDENTITY_KEY_VERSION>
       labels:
         app: smarter-dev-migrate
     spec:
