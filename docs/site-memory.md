@@ -105,12 +105,14 @@ No Polar credentials belong in the Worker.
   selection. Comp memberships have no portal. No customer IDs leave Python.
 - `POST /users/{user_id}/checkout`: JSON `{plan_id, success_url, cancel_url}`.
   `plan_id` is the catalog offering ID or its active price ID, never an arbitrary
-  Polar product. Both URLs must be absolute and use exactly `SITE_BASE_URL`'s
-  origin (scheme, host and port), without credentials or fragments. The launch
+  Polar product. Both URLs must be absolute and match an exact allowed billing
+  origin (scheme, host and effective port), without credentials or fragments. The launch
   gate is rechecked. The existing checkout helper forwards `cancel_url` as
   Polar's `return_url` back button, and returns `{url}`.
-- `POST /users/{user_id}/portal`: returns `{url}` from the existing portal helper;
-  return location is `SITE_BASE_URL/account/billing`. Available for expired
+- `POST /users/{user_id}/portal`: accepts optional JSON `{return_url}` and returns
+  `{url}` from the existing portal helper. Supplied URLs use the same validation
+  as checkout. An absent body, empty object or null return URL preserves the
+  existing `SITE_BASE_URL/account/billing` default. Available for expired
   memberships too, independently of the launch flag.
 
 User IDs are shared Skrift account UUIDs, resolved to an active Python user;
@@ -122,8 +124,21 @@ sanitized 503. All API responses are private/no-store. Only the anonymous Worker
 and role-convergence behavior is unchanged. Opening the success page does not
 grant membership; webhooks remain authoritative.
 
-Preview checkout requires its configured origin to match Python `SITE_BASE_URL`;
-this API deliberately does not widen the redirect allowlist to arbitrary preview
-hosts. Rotate the preview service key to include `site-billing` after deploying
-the Python API (see `admin-host.md`). No key rotation or production rollout is
-part of this change.
+`SITE_BILLING_ALLOWED_ORIGINS` is an optional JSON array of exact HTTP(S)
+origins. When unset, only `SITE_BASE_URL`'s origin is allowed. An explicit list
+replaces that fallback; `[]` rejects all supplied return URLs. Entries must be
+bare origins (an optional trailing slash is accepted), without wildcards,
+credentials, query strings or fragments. Default ports compare equivalently;
+other ports, schemes and subdomains must be individually listed.
+
+The reviewed `k8s/configmap.yaml` opts in both `https://smarter.dev` and
+`https://next.smarter.dev`. Apply it only with the updated API image: old images
+ignore this setting. Keep global `SITE_BASE_URL=https://smarter.dev` unchanged.
+This setting affects only site API checkout and explicit portal returns;
+legacy Python routes and the omitted portal-return default stay unchanged.
+
+After deploying the API/config, rotate the preview service key to include
+`site-billing` (see `admin-host.md`) and configure the Worker with its matching
+`SITE_PUBLIC_ORIGIN`. Verify with mocked provider calls before a separately
+authorized live payment. Account UUIDs must already exist in Python. No key
+rotation, deployment or payment was performed as part of this change.

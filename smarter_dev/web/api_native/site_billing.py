@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import UTC
 from datetime import datetime
 from typing import Any
-from urllib.parse import urlsplit
 from uuid import UUID
 
 from litestar import Controller
@@ -23,6 +22,7 @@ from skrift.db.models.user import User
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.shared.billing_urls import billing_url_origin
 from smarter_dev.shared.config import get_settings
 from smarter_dev.web import feature_flags
 from smarter_dev.web.account_controller import _get_active_membership
@@ -64,39 +64,29 @@ class CheckoutRequest(BaseModel):
     cancel_url: str = Field(min_length=1, max_length=2083)
 
 
+class PortalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    return_url: str | None = Field(default=None, min_length=1, max_length=2083)
+
+
 def _site_url(value: str) -> str:
-    """Accept absolute URLs at exactly the configured site origin."""
+    """Accept only an exact configured billing origin, never a suffix match."""
     try:
-        parsed = urlsplit(value)
-        site = urlsplit(get_settings().site_base_url)
-        if (
-            parsed.scheme not in {"https", "http"}
-            or not parsed.hostname
-            or parsed.username is not None
-            or parsed.password is not None
-            or parsed.fragment
-            or "\\" in value
-            or any(ord(c) <= 32 or ord(c) == 127 for c in value)
-            or (
-                parsed.scheme,
-                parsed.hostname,
-                parsed.port
-                if parsed.port is not None
-                else (443 if parsed.scheme == "https" else 80),
-            )
-            != (
-                site.scheme,
-                site.hostname,
-                site.port
-                if site.port is not None
-                else (443 if site.scheme == "https" else 80),
-            )
-        ):
-            raise ValueError
+        origin = billing_url_origin(value)
     except ValueError:
-        raise plain_error(
-            400, "Return URLs must use the configured site origin"
-        ) from None
+        raise plain_error(400, "Invalid billing return URL") from None
+    settings = get_settings()
+    try:
+        configured = settings.site_billing_allowed_origins
+        allowed = (
+            {billing_url_origin(settings.site_base_url)}
+            if configured is None
+            else {billing_url_origin(url, origin_only=True) for url in configured}
+        )
+    except ValueError:
+        raise plain_error(503, "Billing unavailable") from None
+    if origin not in allowed:
+        raise plain_error(400, "Return URLs must use an allowed billing origin")
     return value
 
 
@@ -210,8 +200,13 @@ class SiteBillingController(Controller):
         return {"url": url}
 
     @post("/users/{user_id:str}/portal", guards=SITE_BILLING_GUARDS, status_code=200)
-    async def portal(self, db_session: AsyncSession, user_id: str) -> dict[str, str]:
+    async def portal(
+        self, db_session: AsyncSession, user_id: str, data: PortalRequest | None = None
+    ) -> dict[str, str]:
         user = await _user(db_session, user_id)
+        return_url = (
+            _site_url(data.return_url) if data and data.return_url is not None else None
+        )
         membership = await _get_active_membership(db_session, user.id)
         if (
             membership is None
@@ -220,7 +215,10 @@ class SiteBillingController(Controller):
         ):
             raise plain_error(404, "No billing portal available")
         try:
-            url = await create_portal_session(membership.customer_id)
+            url = await create_portal_session(
+                membership.customer_id,
+                **({"return_url": return_url} if return_url is not None else {}),
+            )
         except Exception:
             raise plain_error(503, "Billing unavailable") from None
         return {"url": url}

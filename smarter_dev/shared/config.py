@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from dotenv import load_dotenv
 from pydantic import Field
 from pydantic import field_validator
 from pydantic_settings import BaseSettings
 from pydantic_settings import SettingsConfigDict
+
+from smarter_dev.shared.billing_urls import billing_url_origin
 
 # ``Settings`` reads ``.env`` into *itself*, but plenty of code reads provider
 # credentials straight off the environment instead — ``model_router.build_model_for``
@@ -165,7 +165,7 @@ class Settings(BaseSettings):
         default="http://localhost:8000/api",
         description="Base URL for API endpoints",
     )
-    
+
     # Bot API Authentication
     bot_api_key: str = Field(
         default="",
@@ -205,11 +205,11 @@ class Settings(BaseSettings):
     )
 
     # Testing
-    test_database_url: Optional[str] = Field(
+    test_database_url: str | None = Field(
         default=None,
         description="Test database connection URL",
     )
-    test_redis_url: Optional[str] = Field(
+    test_redis_url: str | None = Field(
         default=None,
         description="Test Redis connection URL",
     )
@@ -217,33 +217,33 @@ class Settings(BaseSettings):
     # Admin Interface (Discord OAuth only)
 
     # Discord OAuth (for admin interface)
-    discord_client_id: Optional[str] = Field(
+    discord_client_id: str | None = Field(
         default=None,
         alias="discord_application_id",
         description="Discord OAuth client ID (same as application ID)",
     )
-    discord_client_secret: Optional[str] = Field(
+    discord_client_secret: str | None = Field(
         default=None,
         alias="discord_application_secret",
         description="Discord OAuth client secret",
     )
-    discord_redirect_uri: Optional[str] = Field(
+    discord_redirect_uri: str | None = Field(
         default=None,
         description="Discord OAuth redirect URI",
     )
 
     # Monitoring and Logging
-    sentry_dsn: Optional[str] = Field(
+    sentry_dsn: str | None = Field(
         default=None,
         description="Sentry DSN for error tracking",
     )
-    log_file: Optional[str] = Field(
+    log_file: str | None = Field(
         default=None,
         description="Log file path",
     )
-    
+
     # Email (Resend)
-    resend_api_key: Optional[str] = Field(
+    resend_api_key: str | None = Field(
         default=None,
         description="Resend API key for transactional email",
     )
@@ -251,13 +251,31 @@ class Settings(BaseSettings):
         default="http://localhost:8000",
         description="Public base URL for canonical, OG and policy links",
     )
+    site_billing_allowed_origins: list[str] | None = Field(
+        default=None,
+        description=(
+            "Exact HTTP(S) origins accepted by the site billing API for return URLs. "
+            "Unset uses SITE_BASE_URL's origin; an explicit empty list denies all returns."
+        ),
+    )
+
+    @field_validator("site_billing_allowed_origins")
+    @classmethod
+    def validate_site_billing_allowed_origins(
+        cls, values: list[str] | None
+    ) -> list[str] | None:
+        if values is not None:
+            for value in values:
+                billing_url_origin(value, origin_only=True)
+        return values
+
     admin_base_url: str = Field(
         default="http://localhost:8000",
         description="Base URL for Python-owned auth, account and admin routes",
     )
 
     # Analytics
-    google_analytics_id: Optional[str] = Field(
+    google_analytics_id: str | None = Field(
         default=None,
         description="Google Analytics Measurement ID (G-XXXXXXXXXX)",
     )
@@ -267,11 +285,11 @@ class Settings(BaseSettings):
     # smarter_dev.web.billing.catalog. Only the access token, webhook signing
     # secret, and environment are configured here; product IDs are discovered
     # from the API.
-    polar_access_token: Optional[str] = Field(
+    polar_access_token: str | None = Field(
         default=None,
         description="Polar organization access token (polar_oat_xxx)",
     )
-    polar_webhook_secret: Optional[str] = Field(
+    polar_webhook_secret: str | None = Field(
         default=None,
         description="Polar webhook signing secret (standard-webhooks base64 secret)",
     )
@@ -279,7 +297,7 @@ class Settings(BaseSettings):
         default="production",
         description="Polar API environment: 'production' or 'sandbox'",
     )
-    polar_organization_id: Optional[str] = Field(
+    polar_organization_id: str | None = Field(
         default=None,
         description=(
             "Polar organization id. Optional — an organization access token is "
@@ -402,7 +420,7 @@ class Settings(BaseSettings):
         """Get the effective Discord OAuth redirect URI based on environment."""
         if self.discord_redirect_uri:
             return self.discord_redirect_uri
-        
+
         if self.is_development:
             return "http://localhost:8000/bot-admin/auth/discord/callback"
         return "https://smarter.dev/bot-admin/auth/discord/callback"
