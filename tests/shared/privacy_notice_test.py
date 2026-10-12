@@ -237,7 +237,7 @@ def test_the_opt_out_the_policy_offers_is_on_privacy():
 
 def test_self_deletion_names_where(notice):
     deleting = _section(notice, "Deleting your data")
-    assert "You can delete your website chats, questions, searches, email sign-ups and your whole account from [Account → Security & Accounts](https://admin.smarter.dev/account/security#your-data)." in deleting
+    assert "You can delete your website chats, questions, searches, email sign-ups and your whole account from [Account → Security & Accounts](https://smarter.dev/account/security#your-data)." in deleting
 
 
 @pytest.mark.parametrize(
@@ -260,7 +260,7 @@ def test_what_a_deletion_keeps_is_listed_with_its_reason(notice, kept, says):
 
 def test_the_account_page_is_linked_on_the_web_and_in_the_channel():
     """The anchor and the sign-in-then-return redirect arrive with Build task 91."""
-    link = "[Account → Security & Accounts](https://admin.smarter.dev/account/security#your-data)"
+    link = "[Account → Security & Accounts](https://smarter.dev/account/security#your-data)"
     assert link in notice_markdown()
     assert link in discord_markdown()
 
