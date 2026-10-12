@@ -30,6 +30,7 @@ from sqlalchemy.types import TypeDecorator
 
 from smarter_dev.shared.database import Base
 from smarter_dev.shared.model_catalog import successor_key
+from smarter_dev.web.site_identity_models import SiteIdentityFence, SiteIdentityState, SiteIdentityKey  # noqa: F401
 
 # Re-exported so the sweep and the schema keep importing it from here; the bot
 # tier must not import web models.

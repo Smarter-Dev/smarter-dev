@@ -30,6 +30,9 @@ from smarter_dev.shared.database import Base
 # tests/test_migration_ownership.py.
 MAIN_TABLES: frozenset[str] = frozenset({
     "account_deletion_requests",
+    "site_identity_fences",
+    "site_identity_key",
+    "site_identity_states",
     "admin_handlers",
     "advent_of_code_configs",
     "advent_of_code_threads",

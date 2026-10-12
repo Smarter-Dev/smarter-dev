@@ -236,7 +236,7 @@ async def converge(session: AsyncSession, user_id: UUID) -> dict[str, list[str]]
             return {"added": added, "removed": removed}
 
 
-async def strip_discord_roles(discord_user_id: str) -> dict[str, list[str]]:
+async def strip_discord_roles(discord_user_id: str, *, strict: bool = False) -> dict[str, list[str]]:
     """Strip every managed sudo role from a Discord member.
 
     Used by the unlink flow: when a user disconnects their Discord
@@ -246,7 +246,11 @@ async def strip_discord_roles(discord_user_id: str) -> dict[str, list[str]]:
     """
     cfg = await catalog.get_discord_config()
     token = _bot_token()
-    if cfg is None or not token:
+    if cfg is None:
+        return {"removed": []}
+    if not token:
+        if strict:
+            raise RuntimeError("Discord projection unavailable")
         return {"removed": []}
 
     guild_id = cfg["guild_id"]
@@ -264,6 +268,8 @@ async def strip_discord_roles(discord_user_id: str) -> dict[str, list[str]]:
             try:
                 current = await _fetch_member_roles(client, guild_id, discord_user_id)
             except httpx.HTTPError as exc:
+                if strict:
+                    raise
                 logger.warning(
                     "strip_discord_roles: failed to fetch member %s: %s",
                     discord_user_id, exc,
@@ -278,6 +284,8 @@ async def strip_discord_roles(discord_user_id: str) -> dict[str, list[str]]:
                     await _remove_role(client, guild_id, discord_user_id, role_id, reason)
                     removed.append(role_id)
                 except httpx.HTTPError as exc:
+                    if strict:
+                        raise
                     logger.warning(
                         "strip_discord_roles: remove %s from %s failed: %s",
                         role_id, discord_user_id, exc,

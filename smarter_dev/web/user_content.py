@@ -347,6 +347,10 @@ async def delete_account_leftovers(session: AsyncSession, user_id: UUID) -> None
     through its name and linked logins, so they go before the logins cascade
     away with the user row.
     """
+    # Also covers purge jobs queued before the identity API rollout.
+    from smarter_dev.web.site_identity import fence_account_deletion
+
+    await fence_account_deletion(session, user_id)
     await delete_account_signups(session, user_id)
     await forget_admin_identifiers(session, user_id)
     turn_ids = list(
