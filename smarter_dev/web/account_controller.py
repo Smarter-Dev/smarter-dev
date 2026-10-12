@@ -43,6 +43,7 @@ from smarter_dev.web.models import SudoMembership
 from smarter_dev.web.models import UserProfile
 from smarter_dev.web.models import WebChatConversation
 from smarter_dev.web.models import WebSearchRun
+from smarter_dev.web.site_identity import fence_account_deletion
 from smarter_dev.web.user_content import delete_all_chats
 from smarter_dev.web.user_content import delete_all_resources_conversations
 from smarter_dev.web.user_content import delete_all_searches
@@ -269,6 +270,7 @@ class AccountController(Controller):
         if str(form.get("confirmation") or "").strip() != "DELETE":
             flash_error(request, "Type DELETE to confirm account deletion.")
             return Redirect(path="/account/security")
+        await fence_account_deletion(db_session, user.id)
         # Serialize deactivation with attachment uploads, which lock this same
         # row through their object-store commit.
         user = await db_session.scalar(

@@ -251,6 +251,11 @@ class Settings(BaseSettings):
         default="http://localhost:8000",
         description="Public base URL for canonical, OG and policy links",
     )
+    site_identity_fence_key: str | None = Field(
+        default=None,
+        min_length=32,
+        description="Stable secret key for irreversible account deletion UUID fences",
+    )
     site_billing_allowed_origins: list[str] | None = Field(
         default=None,
         description=(

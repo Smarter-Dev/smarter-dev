@@ -15,6 +15,8 @@ spec:
   ttlSecondsAfterFinished: 600
   template:
     metadata:
+      annotations:
+        smarter.dev/identity-key-version: <IDENTITY_KEY_VERSION>
       labels:
         app: smarter-dev-migrate
     spec:
@@ -30,11 +32,22 @@ spec:
           # pod starts (0.2.1a1 adds worker_queue.claim_generation). The core
           # step loads Skrift's app.yaml, so every variable it interpolates is
           # set below.
-          command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/migrate.py --only skrift-main --only main"]
+          command: ["sh", "-c", "PYTHONPATH=/app uv run --no-sync python scripts/migrate_and_pin_identity.py"]
           envFrom:
             - configMapRef:
                 name: smarter-dev-config
           env:
+            - name: SITE_IDENTITY_ROLLOUT_PHASE
+              valueFrom:
+                configMapKeyRef:
+                  name: site-identity-rollout
+                  key: phase
+            # Trusted post-migration pin uses the SAME key as every deletion writer.
+            - name: SITE_IDENTITY_FENCE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: smarter-dev-secrets
+                  key: site-identity-fence-key
             # The DB URL uses the admin (doadmin) direct connection — DDL needs it.
             - name: DATABASE_URL
               valueFrom:

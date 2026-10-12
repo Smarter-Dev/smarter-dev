@@ -34,6 +34,7 @@ from smarter_dev.web.chat_bot_purge import STATUS_CLOSED
 from smarter_dev.web.models import AccountDeletionRequest
 from smarter_dev.web.models import ChatBotBlockedUser
 from smarter_dev.web.models import ChatBotPurgeRequest
+from smarter_dev.web.site_identity import fence_account_deletion
 
 SITE_PRIVACY_GUARDS = [*SITE_API_GUARDS, Permission("site-privacy")]
 _DISCORD_USER_ID = re.compile(SNOWFLAKE_PATTERN)
@@ -101,6 +102,7 @@ class SitePrivacyController(Controller):
 
         # Match the account page's row lock: attachment uploads also lock the
         # user before committing an object-store write.
+        await fence_account_deletion(db_session, account_id)
         existing_id = await db_session.scalar(
             select(User.id).where(User.id == account_id).with_for_update()
         )
@@ -110,6 +112,7 @@ class SitePrivacyController(Controller):
             )
         )
         if existing_id is None:
+            await db_session.commit()
             raise plain_error(404, "Account not found")
         await db_session.execute(
             update(User).where(User.id == account_id).values(is_active=False)
