@@ -13,8 +13,10 @@ forwarding requests. Member IDs and `viewer_discord_ids` are trusted assertions
 from that backend, not browser-controlled authorization. Successful memory responses use
 `Cache-Control: private, no-store`; never cache personalized responses at the CDN.
 
-All paths start with `/api/site/guilds/{guild_id}/memory`. Discord IDs are
-strings of 15–22 decimal digits. Times are ISO 8601, in UTC.
+All paths start with `/api/site/guilds/{guild_id}/memory`. Guild IDs are
+strings of 15–20 ASCII decimal digits, matching the memory table column bound.
+Member and viewer IDs use the shared Snowflake range of 15–22 ASCII decimal
+digits. Times are ISO 8601, in UTC.
 
 | Method and suffix | Response |
 | --- | --- |
@@ -26,7 +28,10 @@ strings of 15–22 decimal digits. Times are ISO 8601, in UTC.
 `limit` is 1–100. `next_before` is an opaque cursor; pass it unchanged as
 `before` for the next page, and stop at null. Ordering is `(created_at, id)`
 descending, so tied timestamps neither skip nor repeat notes. Cursors still
-work if the dream deletes the anchor note. Invalid cursors/limits return 422.
+work if the dream deletes the anchor note. The `before` cursor is at most 200
+characters. Invalid cursors/limits, including
+timestamps that cannot be represented in UTC, return 422. The comma-separated
+`viewer_discord_ids` query is at most 2300 characters.
 Notes are temporary: the dream consumes them, so this is not an audit archive.
 
 Member read and write return 404 for an opted-out member or any open purge

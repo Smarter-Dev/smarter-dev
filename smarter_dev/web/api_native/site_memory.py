@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.member_tags import referenced_members
+from smarter_dev.shared.privacy_purge import SNOWFLAKE_PATTERN
 from smarter_dev.web.api_native.chat_memory import utc_day_start
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.api_native.errors import plain_error
@@ -46,6 +47,7 @@ from smarter_dev.web.privacy_gate import OptOutGate
 from smarter_dev.web.privacy_gate import load_gate
 
 SITE_CHANNEL_ID = "site"
+_MAX_GUILD_ID_CHARS = ChatAgentMemoryNote.__table__.c.guild_id.type.length
 _SCAN_PAGE = 200
 
 
@@ -87,8 +89,15 @@ class SitePublicRead(BaseAPIModel):
 
 
 def _discord_id(value: str) -> str:
-    if not re.fullmatch(r"[0-9]{15,22}", value):
+    if not re.fullmatch(SNOWFLAKE_PATTERN, value):
         raise plain_error(422, "Invalid Discord ID")
+    return value
+
+
+def _guild_id(value: str) -> str:
+    _discord_id(value)
+    if len(value) > _MAX_GUILD_ID_CHARS:
+        raise plain_error(422, "Invalid guild ID")
     return value
 
 
@@ -107,8 +116,14 @@ def _parse_cursor(before: str) -> tuple[datetime, UUID]:
         moment = datetime.fromisoformat(at)
         if moment.tzinfo is None:
             raise ValueError("Timezone required")
+        if not (
+            datetime.min.replace(tzinfo=UTC)
+            <= moment
+            <= datetime.max.replace(tzinfo=UTC)
+        ):
+            raise ValueError("Cursor is outside the UTC datetime range")
         return moment.astimezone(UTC), UUID(note_id)
-    except (ValueError, UnicodeError, binascii.Error) as error:
+    except (ValueError, UnicodeError, binascii.Error, OverflowError) as error:
         raise plain_error(422, "Invalid before cursor") from error
 
 
@@ -156,7 +171,7 @@ class SiteMemoryController(Controller):
 
     @get("/blocks", guards=[*SITE_API_GUARDS, Permission("site-memory")])
     async def blocks(self, db_session: AsyncSession, guild_id: str) -> SiteBlocksRead:
-        _discord_id(guild_id)
+        _guild_id(guild_id)
         memory = await get_guild_memory_blob(db_session, guild_id)
         if memory is None:
             return SiteBlocksRead(guild_id=guild_id)
@@ -189,7 +204,7 @@ class SiteMemoryController(Controller):
         limit: Annotated[int, Parameter(ge=1, le=100)] = 25,
         before: Annotated[str | None, Parameter(max_length=200)] = None,
     ) -> SiteMemberRead:
-        _discord_id(guild_id)
+        _guild_id(guild_id)
         gate = await _member_gate(db_session, discord_user_id)
         position = _parse_cursor(before) if before is not None else None
         found: list[tuple[ChatAgentMemoryNote, str]] = []
@@ -255,7 +270,7 @@ class SiteMemoryController(Controller):
         discord_user_id: str,
         data: SiteNoteCreate,
     ) -> ChatMemoryNoteSaveResult:
-        _discord_id(guild_id)
+        _guild_id(guild_id)
         await lock_guild_memory(db_session, guild_id)
         gate = await _member_gate(db_session, discord_user_id)
         content = data.content
@@ -304,7 +319,7 @@ class SiteMemoryController(Controller):
         guild_id: str,
         viewer_discord_ids: Annotated[str, Parameter(max_length=2300)] = "",
     ) -> SitePublicRead:
-        _discord_id(guild_id)
+        _guild_id(guild_id)
         viewer_ids = frozenset(
             _discord_id(value.strip())
             for value in viewer_discord_ids.split(",")

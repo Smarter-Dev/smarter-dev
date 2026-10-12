@@ -384,3 +384,121 @@ def test_controller_registered_in_both_apps():
             "smarter_dev.web.api_native.site_memory:SiteMemoryController"
             in config["controllers"]
         )
+
+
+@pytest.mark.parametrize(
+    "moment", ["0001-01-01T00:00:00+01:00", "9999-12-31T23:59:59-01:00"]
+)
+async def test_cursor_utc_overflow_is_422(site_client, moment):
+    import base64
+
+    client, _ = site_client
+    before = base64.urlsafe_b64encode(f"{moment}|{note_uuid(1)}".encode()).decode()
+    response = await client.get(MEMBER_URL, params={"before": before})
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("length", [21, 22])
+@pytest.mark.parametrize(("method", "path"), ROUTES)
+async def test_guild_id_cannot_exceed_storage_bound(
+    site_client, db_session, length, method, path
+):
+    client, _ = site_client
+    kwargs = {"json": {"content": "a note"}} if method == "POST" else {}
+    response = await client.request(
+        method, URL.replace(GUILD, "1" * length) + path, **kwargs
+    )
+    assert response.status_code == 422
+    assert not (await db_session.scalars(select(ChatAgentMemoryNote))).all()
+
+
+async def test_real_skrift_site_key_authorization_on_every_route(
+    test_engine, monkeypatch
+):
+    """Real role sync, key storage/verification and permission resolution."""
+    from skrift.auth.services import assign_role_to_user
+    from skrift.auth.services import invalidate_user_permissions_cache
+    from skrift.auth.services import sync_roles_to_database
+    from skrift.db.base import Base as SkriftBase
+    from skrift.db.models.user import User
+
+    import smarter_dev.web.roles  # noqa: F401 — sync the actual site-service role
+    from smarter_dev.shared.database import async_sessionmaker
+
+    async with test_engine.begin() as connection:
+        await connection.run_sync(SkriftBase.metadata.create_all)
+    maker = async_sessionmaker(test_engine, expire_on_commit=False)
+    async with maker() as session:
+        owner = User(email="site-memory@example.test", name="Site", is_active=True)
+        denied_owner = User(
+            email="no-memory@example.test", name="No memory", is_active=True
+        )
+        session.add_all([owner, denied_owner])
+        await session.commit()
+        await sync_roles_to_database(session)
+        assert await assign_role_to_user(session, owner.id, "site-service")
+        await seed_memory(session)
+        keys = {}
+        variants = {
+            "site": {},
+            "bot": {"service_name": "discord-bot"},
+            "user": {"principal_type": "user"},
+            "missing-scope": {"scoped_permissions": ["site-privacy"]},
+            "unscoped": {"scoped_permissions": None},
+            "role-only": {"scoped_permissions": None, "scoped_roles": ["site-service"]},
+            "owner-denied": {"user_id": denied_owner.id},
+        }
+        for name, overrides in variants.items():
+            options = {
+                "user_id": owner.id,
+                "display_name": name,
+                "principal_type": "service",
+                "service_name": "site",
+                "scoped_permissions": ["site-memory"],
+            }
+            options.update(overrides)
+            _, keys[name], _ = await api_key_service.create_api_key(session, **options)
+
+    async def provide_db_session():
+        async with maker() as session:
+            yield session
+
+    monkeypatch.setattr(auth, "get_db_session_context", maker)
+    monkeypatch.setattr(rate_limiting, "get_db_session_context", maker)
+    monkeypatch.setattr(
+        rate_limiting,
+        "check_rate_limits",
+        AsyncMock(
+            return_value=rate_limiting.RateLimitDecision(allowed=True, headers={})
+        ),
+    )
+    app = Litestar(
+        route_handlers=[SiteMemoryController],
+        plugins=[PydanticPlugin()],
+        dependencies={"db_session": Provide(provide_db_session)},
+        state=State({"session_maker_class": maker}),
+    )
+    invalidate_user_permissions_cache()
+    try:
+        async with AsyncTestClient(app=app) as client:
+            for name, key in keys.items():
+                for method, path in ROUTES:
+                    kwargs = (
+                        {"json": {"content": "Real site key note"}}
+                        if method == "POST"
+                        else {}
+                    )
+                    response = await client.request(
+                        method,
+                        URL + path,
+                        headers={"Authorization": f"Bearer {key}"},
+                        **kwargs,
+                    )
+                    assert response.status_code == (200 if name == "site" else 401), (
+                        name,
+                        method,
+                        path,
+                        response.text,
+                    )
+    finally:
+        invalidate_user_permissions_cache()
