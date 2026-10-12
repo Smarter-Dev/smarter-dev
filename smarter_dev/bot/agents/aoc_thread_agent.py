@@ -8,6 +8,7 @@ from datetime import datetime
 import dspy
 
 from smarter_dev.bot.agents.base import BaseAgent
+from smarter_dev.bot.agents.base import strip_dspy_markers
 from smarter_dev.llm_config import get_llm_model
 from smarter_dev.llm_config import get_model_info
 
@@ -129,7 +130,7 @@ class AoCThreadAgent(BaseAgent):
                 tokens_used = output_chars // 4
                 logger.debug(f"AOC DEBUG: Fallback estimation - {tokens_used} tokens")
 
-            return result.response, tokens_used
+            return strip_dspy_markers(result.response), tokens_used
 
         except Exception as e:
             logger.error(f"Error generating AoC thread message: {e}")

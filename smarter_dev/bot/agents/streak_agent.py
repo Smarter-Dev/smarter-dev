@@ -7,6 +7,7 @@ import logging
 import dspy
 
 from smarter_dev.bot.agents.base import BaseAgent
+from smarter_dev.bot.agents.base import strip_dspy_markers
 from smarter_dev.llm_config import get_llm_model
 from smarter_dev.llm_config import get_model_info
 
@@ -28,6 +29,7 @@ class StreakCelebrationSignature(dspy.Signature):
     - Takes inspiration from the user's message and creates fun and celebratory!
     - Mentions BYTES reward and the multiplier bonus somewhere in the message
     - Incorporates the streak days naturally
+    - Does not greet by time of day (no "good morning/afternoon/evening"); you don't know the user's local time
 
     ## On Being Appropriate
     - Be appropriate and respectful
@@ -89,17 +91,21 @@ class StreakCelebrationAgent(BaseAgent):
                     user_message=user_message
                 )
 
+            celebration = strip_dspy_markers(result.response)
+            if not celebration:
+                return "", 0
+
             # Get token usage
             tokens_used = self._extract_token_usage(result)
 
             # Final fallback: estimate tokens from text length if all methods fail
             if tokens_used == 0:
                 input_chars = len(f"{bytes_earned}{streak_multiplier}{streak_days}")
-                output_chars = len(result.response)
+                output_chars = len(celebration)
                 tokens_used = (input_chars + output_chars) // 4
                 logger.debug(f"STREAK DEBUG: Fallback estimation - {tokens_used} tokens from text length")
 
-            return f"-# {user_mention} {result.response}", tokens_used
+            return f"-# {user_mention} {celebration}", tokens_used
 
         except Exception as e:
             logger.error(

@@ -14,9 +14,12 @@ import logging
 
 import dspy
 
-from smarter_dev.bot.agents.mod_tools import ActionTracker, create_moderation_tools
+from smarter_dev.bot.agents.base import strip_dspy_markers
+from smarter_dev.bot.agents.mod_tools import ActionTracker
+from smarter_dev.bot.agents.mod_tools import create_moderation_tools
 from smarter_dev.bot.agents.models import DiscordMessage
-from smarter_dev.llm_config import get_llm_model, get_model_info
+from smarter_dev.llm_config import get_llm_model
+from smarter_dev.llm_config import get_model_info
 from smarter_dev.shared.exception_logging import log_exception
 
 logger = logging.getLogger(__name__)
@@ -137,7 +140,7 @@ async def _enforce_channel_message(
                 actions_summary=actions_summary,
                 assessment=assessment,
             )
-        tracker.channel_message = result.message
+        tracker.channel_message = strip_dspy_markers(result.message)
     except Exception:
         log_exception(logger, "Failed to generate follow-up channel message")
         # Fallback: generic message

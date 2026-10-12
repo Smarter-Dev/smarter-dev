@@ -8,6 +8,7 @@ import logging
 import dspy
 
 from smarter_dev.bot.agents.base import BaseAgent
+from smarter_dev.bot.agents.base import strip_dspy_markers
 from smarter_dev.bot.agents.models import DiscordMessage
 from smarter_dev.llm_config import get_llm_model
 from smarter_dev.llm_config import get_model_info
@@ -250,7 +251,7 @@ class TLDRAgent(BaseAgent):
                 logger.warning(f"TLDR DEBUG: Fallback estimation - {tokens_used} tokens from text length")
 
             # Inject the actual message count into the summary
-            summary_with_count = f"{result.summary}\n\n*(Summarized {messages_used} messages)*"
+            summary_with_count = f"{strip_dspy_markers(result.summary)}\n\n*(Summarized {messages_used} messages)*"
 
             return summary_with_count, tokens_used, messages_used
 
@@ -297,7 +298,7 @@ class TLDRAgent(BaseAgent):
                 logger.warning(f"TLDR DEBUG: Fallback estimation - {tokens_used} tokens from text length")
 
             # Inject the actual message count into the summary
-            summary_with_count = f"{result.summary}\n\n*(Summarized {messages_used} messages)*"
+            summary_with_count = f"{strip_dspy_markers(result.summary)}\n\n*(Summarized {messages_used} messages)*"
 
             return summary_with_count, tokens_used, messages_used
 

@@ -1,8 +1,25 @@
 """Base agent class with shared functionality."""
 
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+# DSPy's ChatAdapter wraps output fields in ``[[ ## name ## ]]`` headers and ends
+# with ``[[ ## completed ## ]]``. Models sometimes write them loosely (missing
+# spaces), so the parser leaves them in the field text.
+_DSPY_MARKER = re.compile(r"\s*\[\[\s*##\s*\w+\s*##\s*\]\]\s*", re.IGNORECASE)
+
+
+def strip_dspy_markers(text: str) -> str:
+    """Remove loosely formatted DSPy field markers from an output string.
+
+    A marker mid-text is replaced by a single newline when text sits on both
+    sides, so words are never glued together. The result is stripped.
+    """
+    return _DSPY_MARKER.sub(
+        lambda m: "\n" if m.start() > 0 and m.end() < len(text) else "", text
+    ).strip()
 
 
 class BaseAgent:
