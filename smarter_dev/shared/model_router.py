@@ -12,7 +12,7 @@ Routing by :class:`~smarter_dev.shared.model_catalog.ModelProvider`:
   not the responses model — is used, with a ``base_url`` override.
 
 API keys are read from the environment (matching the existing convention in
-``chat_agent.py`` and ``llm_config.py``), not from the settings class. The DO
+``chat_agent.py``), not from the settings class. The DO
 base URL *is* configurable via ``Settings.digitalocean_inference_base_url`` so
 the endpoint can be overridden without a code change.
 """
