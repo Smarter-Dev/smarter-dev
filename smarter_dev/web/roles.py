@@ -95,3 +95,11 @@ register_role(
     display_name="Bot Service",
     description="Discord bot service account — full native bot API access",
 )
+
+register_role(
+    "site-service",
+    "site-memory",
+    "site-privacy",
+    display_name="Site Service",
+    description="Site backend service account — memory and privacy API access",
+)
