@@ -32,9 +32,14 @@ So the ad is the trigger and the conversation around it is the sweep:
    report; it never stops the steps after it.
 4. **Follow-up.** For ``spam_ring_followup_minutes`` afterwards, a message in
    that channel from a new member who joined within :data:`JOIN_PROXIMITY` of
-   one of the sweep's participants is part of the ring: deleted, author timed
-   out, and one line added to the existing report. Follow-up accounts never
-   widen that set, so the net cannot creep a day at a time.
+   one of the sweep's participants is a possible ring message. Unless its
+   author was already timed out, Jev is asked the sweep's participant question
+   about them (one candidate, the same CONTEXT and AD, counted against the
+   guild cap). Only a confident yes is actioned: deleted, author timed out,
+   and one line added to the existing report. A no, a weak yes, a failed check
+   or a spent cap spares the author and adds a "review" line instead.
+   Follow-up accounts never widen the participant set, so the net cannot
+   creep a day at a time.
 
 It lives in bot core rather than in an admin handler for the same reasons as
 the spam engine: handler memory is loaded and saved per fire, so concurrent ring
@@ -616,6 +621,10 @@ class ChannelIncident:
     #: not take back that decision, so their later messages get the normal
     #: trigger instead.
     spared_user_ids: set[str] = field(default_factory=set)
+    #: The ad and the conversation Jev saw, so a follow-up author who was not
+    #: swept is asked the same participant question with the same material.
+    ad_text: str = ""
+    context_lines: list[str] = field(default_factory=list)
 
     def render_report(self) -> str:
         return format_report(
@@ -660,6 +669,13 @@ class ClassifierBudget:
         self._trim(author_calls, now - self.author_window)
         if len(author_calls) >= self.per_author:
             return "author"
+        refused = self.try_spend_guild(guild_id, now)
+        if refused is None:
+            author_calls.append(now)
+        return refused
+
+    def try_spend_guild(self, guild_id: str, now: float) -> str | None:
+        """Record one call against the guild cap only (follow-up checks)."""
         guild_calls = self._guilds.setdefault(guild_id, deque())
         self._trim(guild_calls, now - 60)
         if len(guild_calls) >= self.per_guild_minute:
@@ -673,7 +689,6 @@ class ClassifierBudget:
                     guild_id,
                 )
             return "guild"
-        author_calls.append(now)
         guild_calls.append(now)
         return None
 
@@ -1085,7 +1100,9 @@ async def check_spam_ring(
             and str(event.author.id) not in incident.spared_user_ids
             and joined_near_participant(joined_at, incident.participant_joins)
         ):
-            await _handle_followup(bot, event, settings, incident, joined_at, now_dt)
+            await _handle_followup(
+                bot, event, incident, joined_at, now_dt, registry.budget, timestamp
+            )
             return SpamRingResult(action="followup", incident=incident)
         if not passes_prefilter(content):
             return None
@@ -1267,6 +1284,11 @@ def _mention_list(user_ids: Sequence[str], limit: int = 20) -> str:
     return shown
 
 
+def _context_line(username: str, content: str) -> str:
+    """One message as Jev's CONTEXT shows it."""
+    return f"[{username}] {content or '(no text)'}"
+
+
 async def _choose_participants(
     messages: Sequence[TranscriptMessage],
     authors: Mapping[str, AuthorFacts],
@@ -1274,6 +1296,7 @@ async def _choose_participants(
     *,
     ad_author_id: str,
     ad_content: str,
+    context: Sequence[str],
 ) -> tuple[list[str], set[str], dict[str, str], str | None]:
     """Ask Jev which candidates took part; the ad's author always did.
 
@@ -1300,10 +1323,6 @@ async def _choose_participants(
             ),
         )
         for user_id in others
-    ]
-    context = [
-        f"[{name(message.author_id)}] {message.content or '(no text)'}"
-        for message in messages
     ]
     try:
         verdicts = await select_participants(context, ad_content, jev_candidates)
@@ -1395,12 +1414,22 @@ async def _sweep(
         now=now,
         new_member_window=settings.new_member_window,
     )
+    context = [
+        _context_line(
+            authors[message.author_id].username
+            if message.author_id in authors
+            else message.author_id,
+            message.content,
+        )
+        for message in messages
+    ]
     participants, spared, checks, check_note = await _choose_participants(
         messages,
         authors,
         candidates,
         ad_author_id=ad_author_id,
         ad_content=event.content or "",
+        context=context,
     )
     if check_note:
         notes.append(check_note)
@@ -1480,6 +1509,8 @@ async def _sweep(
         notes=notes,
         handled_message_ids={message.message_id for message in doomed},
         spared_user_ids=spared,
+        ad_text=event.content or "",
+        context_lines=context,
     )
     # 4. One report with the transcript attached.
     await _post_report(bot, incident, transcript, now)
@@ -1785,15 +1816,66 @@ async def _record_account_action(
         )
 
 
+def format_unactioned_followup_line(
+    *, user_id: str, username: str, at: datetime, check: str
+) -> str:
+    return (
+        f"- <t:{int(at.timestamp())}:T> <@{user_id}> {username}: new account posted "
+        f"during follow-up; not actioned (Jev: {check}), review"
+    )
+
+
+async def _judge_followup_author(
+    incident: ChannelIncident,
+    *,
+    user_id: str,
+    username: str,
+    content: str,
+    budget: ClassifierBudget,
+    timestamp: float,
+) -> tuple[bool, str]:
+    """The sweep's participant question, for one follow-up author.
+
+    Returns whether to act and the verdict text. Fails closed: a spent guild
+    budget or a Jev error means not actioned.
+    """
+    if budget.try_spend_guild(incident.guild_id, timestamp) is not None:
+        return False, "check skipped, classifier cap reached"
+    candidate = ParticipantCandidate(
+        user_id=user_id, username=username, messages=(content or "(no text)",)
+    )
+    try:
+        verdicts = await select_participants(
+            incident.context_lines, incident.ad_text, [candidate]
+        )
+        verdict = verdicts[user_id]
+    except Exception:  # noqa: BLE001 — fail closed: not actioned
+        log_exception(
+            logger,
+            "Spam ring follow-up check failed for %s; not actioned",
+            user_id,
+            level=logging.WARNING,
+        )
+        return False, "check failed"
+    return verdict.acted_on(PARTICIPANT_MIN_CONFIDENCE), verdict.describe()
+
+
 async def _handle_followup(
     bot: BotApp,
     event: hikari.GuildMessageCreateEvent,
-    settings: SpamRingSettings,
     incident: ChannelIncident,
     joined_at: datetime | None,
     now: datetime,
+    budget: ClassifierBudget,
+    timestamp: float,
 ) -> None:
-    """A ring member kept talking: save, time out, delete, audit, report line.
+    """A newcomer posted during the follow-up window.
+
+    A participant who was already timed out (their timeout can lag) is
+    actioned again without a model. Anyone else is a newcomer the sweep did not
+    judge, so Jev is asked the sweep's participant question about them first;
+    only a confident yes is actioned. Otherwise they are spared, their message
+    is kept in the transcript and the report gets a "review" line.
 
     The author's join time is NOT added to ``participant_joins``: proximity is
     measured against the original sweep only, so the net cannot widen.
@@ -1811,13 +1893,51 @@ async def _handle_followup(
     )
     message = _to_transcript_message(event.message)
     incident.handled_message_ids.add(message.message_id)
+    already_timed_out = user_id in incident.timed_out_ids
+
+    check = None
+    if not already_timed_out:
+        act, check = await _judge_followup_author(
+            incident,
+            user_id=user_id,
+            username=username,
+            content=message.content,
+            budget=budget,
+            timestamp=timestamp,
+        )
+        if not act:
+            incident.spared_user_ids.add(user_id)
+            incident.context_lines.append(_context_line(username, message.content))
+            await _update_incident(
+                incident,
+                append=(
+                    f"\nFollow-up, not actioned (participant check: {check}):\n"
+                    + format_transcript_message(message, facts)
+                    + "\n"
+                ),
+            )
+            incident.followup_lines.append(
+                format_unactioned_followup_line(
+                    user_id=user_id, username=username, at=now, check=check
+                )
+            )
+            await _edit_report(bot, incident)
+            return
+
+    incident.context_lines.append(_context_line(username, message.content))
     saved = await _update_incident(
         incident,
-        append="\nFollow-up:\n" + format_transcript_message(message, facts) + "\n",
+        append=(
+            "\nFollow-up"
+            + (f" (participant check: {check})" if check else "")
+            + ":\n"
+            + format_transcript_message(message, facts)
+            + "\n"
+        ),
         participant=user_id,
     )
 
-    if user_id in incident.timed_out_ids:
+    if already_timed_out:
         timeout_outcome = TIMEOUT_ALREADY_APPLIED
     else:
         timeout_outcome = await _apply_timeout(

@@ -1375,3 +1375,137 @@ async def test_followup_proximity_does_not_widen_with_followup_accounts(harness)
 
     assert str(eve.id) not in {t["user"] for t in harness.rest.timeouts}
     assert eve_msg.id not in harness.rest.deleted
+
+
+# ---------------------------------------------------------------------------
+# Follow-up authors who were not swept go through Jev
+# ---------------------------------------------------------------------------
+
+
+async def _sweep_then_newcomer(harness, text: str = "is this legit?"):
+    *_, ad = stage_ring(harness)
+    await harness.check(ad)
+    dave = _user("dave_late", created=NOW_DT - timedelta(days=2), salt=7)
+    harness.join(dave, RING_JOIN + timedelta(hours=2))
+    late = harness.post(dave, text, NOW_DT + timedelta(minutes=5))
+    harness.log.clear()
+    return dave, late
+
+
+def _untouched(harness, user, message) -> None:
+    assert str(user.id) not in {t["user"] for t in harness.rest.timeouts}
+    assert message.id not in harness.rest.deleted
+    assert str(user.id) not in {a["target_user_id"] for a in harness.actions}
+
+
+async def test_a_followup_newcomer_jev_says_no_to_is_untouched_and_listed(harness):
+    dave, late = await _sweep_then_newcomer(harness)
+    harness.participant_verdicts = {
+        str(dave.id): spam_ring.JevVerdict(yes=False, confidence=0.42)
+    }
+
+    result = await harness.check(late)
+
+    assert result.action == "followup"
+    _untouched(harness, dave, late)
+    # Asked alone, with the swept conversation and the ad as material.
+    context, ad_text, candidates = harness.jev_inputs[-1]
+    assert candidates == [str(dave.id)]
+    assert ad_text == AD_TEXT
+    assert any("good hackathons" in line for line in context)
+    assert (
+        "dave_late: new account posted during follow-up; not actioned "
+        "(Jev: no, confidence 0.42), review" in harness.rest.edited[-1]["content"]
+    )
+    assert late.content in harness.incidents[-1].transcript
+    assert str(dave.id) not in harness.incidents[-1].participant_user_ids
+    assert str(dave.id) in result.incident.spared_user_ids
+
+
+async def test_a_spared_followup_author_is_not_asked_again(harness):
+    dave, late = await _sweep_then_newcomer(harness)
+    harness.participant_verdicts = {
+        str(dave.id): spam_ring.JevVerdict(yes=False, confidence=0.9)
+    }
+    await harness.check(late)
+    asked = len(harness.jev_inputs)
+    again = harness.post(dave, "anyone?", NOW_DT + timedelta(minutes=6))
+
+    assert await harness.check(again) is None
+    assert len(harness.jev_inputs) == asked
+    _untouched(harness, dave, again)
+
+
+async def test_a_jev_error_during_followup_actions_no_one(harness):
+    dave, late = await _sweep_then_newcomer(harness)
+    harness.participant_error = TimeoutError()
+
+    await harness.check(late)
+
+    _untouched(harness, dave, late)
+    assert (
+        "not actioned (Jev: check failed), review"
+        in (harness.rest.edited[-1]["content"])
+    )
+
+
+async def test_a_low_confidence_followup_yes_is_not_actioned(harness):
+    dave, late = await _sweep_then_newcomer(harness)
+    harness.participant_verdicts = {
+        str(dave.id): spam_ring.JevVerdict(yes=True, confidence=0.69)
+    }
+
+    await harness.check(late)
+
+    _untouched(harness, dave, late)
+    assert "(Jev: yes, confidence 0.69), review" in harness.rest.edited[-1]["content"]
+
+
+async def test_a_confident_followup_yes_is_actioned(harness):
+    dave, late = await _sweep_then_newcomer(harness, "wow I signed up too")
+    harness.participant_verdicts = {
+        str(dave.id): spam_ring.JevVerdict(yes=True, confidence=0.7)
+    }
+
+    await harness.check(late)
+
+    assert [c for *_, c in harness.jev_inputs][-1] == [str(dave.id)]
+    assert str(dave.id) in {t["user"] for t in harness.rest.timeouts}
+    assert late.id in harness.rest.deleted
+    assert (
+        "dave_late: 1 message deleted, timed out for 7 days"
+        in (harness.rest.edited[-1]["content"])
+    )
+    assert str(dave.id) in harness.incidents[-1].participant_user_ids
+
+
+async def test_a_spent_guild_cap_during_followup_means_no_action(harness):
+    dave, late = await _sweep_then_newcomer(harness)
+    for second in range(spam_ring.CLASSIFIER_CALLS_PER_GUILD_MINUTE):
+        harness.registry.budget.try_spend_guild(str(GUILD_ID), NOW + 290 + second / 100)
+    asked = len(harness.jev_inputs)
+
+    await harness.check(late)
+
+    assert len(harness.jev_inputs) == asked
+    _untouched(harness, dave, late)
+    assert (
+        "check skipped, classifier cap reached" in (harness.rest.edited[-1]["content"])
+    )
+
+
+async def test_a_followup_check_sees_earlier_followups_in_its_context(harness):
+    dave, late = await _sweep_then_newcomer(harness, "first follow-up text")
+    harness.participant_verdicts = {
+        str(dave.id): spam_ring.JevVerdict(yes=False, confidence=0.9)
+    }
+    await harness.check(late)
+    fay = _user("fay_late", created=NOW_DT - timedelta(days=2), salt=9)
+    harness.join(fay, RING_JOIN + timedelta(hours=3))
+    second = harness.post(fay, "nice", NOW_DT + timedelta(minutes=7))
+
+    await harness.check(second)
+
+    context, _, candidates = harness.jev_inputs[-1]
+    assert candidates == [str(fay.id)]
+    assert "[dave_late] first follow-up text" in context
