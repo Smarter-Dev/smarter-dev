@@ -129,8 +129,10 @@ def listeners_for_event(
 
 
 @pytest.fixture
-def moderation_listener(recording_bot: ListenerRecordingBot):
+def moderation_listener(recording_bot: ListenerRecordingBot, monkeypatch):
     """The single registered guild-message moderation listener."""
+    # The ring detector is the third stage; tests that care replace it again.
+    monkeypatch.setattr(client, "check_spam_ring", AsyncMock(return_value=None))
     client.register_message_moderation_listeners(recording_bot)
     message_listeners = listeners_for_event(
         recording_bot, hikari.GuildMessageCreateEvent
@@ -241,6 +243,23 @@ class TestModerationListenerOrdering:
         await moderation_listener(make_guild_message_event())
 
         assert call_order == ["content_filter", "spam_engine"]
+
+    async def test_spam_ring_runs_third_even_after_a_delete(
+        self, monkeypatch: pytest.MonkeyPatch, moderation_listener
+    ) -> None:
+        call_order: list[str] = []
+
+        async def record(name):
+            call_order.append(name)
+            return Mock(message_deleted=True)
+
+        monkeypatch.setattr(client, "check_content_filters", lambda bot, event: record("content_filter"))
+        monkeypatch.setattr(client, "check_spam_engine", lambda bot, event: record("spam_engine"))
+        monkeypatch.setattr(client, "check_spam_ring", lambda bot, event: record("spam_ring"))
+
+        await moderation_listener(make_guild_message_event())
+
+        assert call_order == ["content_filter", "spam_engine", "spam_ring"]
 
     async def test_spam_engine_still_runs_when_content_filter_deleted_message(
         self, monkeypatch: pytest.MonkeyPatch, moderation_listener

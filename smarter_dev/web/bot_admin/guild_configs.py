@@ -82,6 +82,7 @@ _MODERATION_TOGGLE_FIELDS: tuple[str, ...] = (
     "invite_filter_enabled",
     "webhook_killer_enabled",
     "spam_engine_enabled",
+    "spam_ring_enabled",
 )
 
 # The nullable channel pickers on the moderation-filter form.
@@ -89,6 +90,7 @@ _MODERATION_CHANNEL_FIELDS: tuple[str, ...] = (
     "mod_log_channel_id",
     "mod_alert_channel_id",
     "scam_log_channel_id",
+    "spam_ring_report_channel_id",
 )
 
 # The positive-integer thresholds on the moderation-filter form.
@@ -102,6 +104,10 @@ _MODERATION_THRESHOLD_FIELDS: tuple[str, ...] = (
     "mass_mention_window_seconds",
     "warning_reoffense_window_seconds",
     "mute_duration_seconds",
+    "spam_ring_new_member_days",
+    "spam_ring_timeout_seconds",
+    "spam_ring_lookback_minutes",
+    "spam_ring_followup_minutes",
 )
 
 # Guild id used only to build the throwaway instance the threshold defaults are
@@ -139,6 +145,18 @@ _MODERATION_THRESHOLD_CEILINGS: dict[str, ThresholdCeiling] = {
     "mute_duration_seconds": ThresholdCeiling(
         limit=DISCORD_MAX_TIMEOUT_SECONDS,
         reason="Discord's hard limit on a member timeout is 28 days",
+    ),
+    "spam_ring_timeout_seconds": ThresholdCeiling(
+        limit=DISCORD_MAX_TIMEOUT_SECONDS,
+        reason="Discord's hard limit on a member timeout is 28 days",
+    ),
+    "spam_ring_new_member_days": ThresholdCeiling(
+        limit=90,
+        reason="The spam ring detector never looks at members who joined more than 90 days ago",
+    ),
+    "spam_ring_lookback_minutes": ThresholdCeiling(
+        limit=1440,
+        reason="The sweep reads at most the channel's last 100 messages",
     ),
 }
 

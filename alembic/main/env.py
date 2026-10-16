@@ -104,6 +104,7 @@ MAIN_TABLES: frozenset[str] = frozenset({
     "scan_user_profiles",
     "scheduled_messages",
     "search_result_previews",
+    "spam_ring_incidents",
     "squad_memberships",
     "squad_sale_events",
     "squads",

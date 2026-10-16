@@ -63,6 +63,13 @@ well under a day by construction and never reach a retention cutoff. Adding a
 scrubber for any of the three needs the same explicit sign-off the exemption
 got, plus a matching row in ``docs/data-retention.md``.
 
+One table is deleted rather than scrubbed: ``spam_ring_incidents`` holds the
+transcript the spam ring detector saves before it deletes a staged
+conversation. The transcript is the whole point of the row, so there is
+nothing to keep once it goes; each row is deleted
+:data:`~smarter_dev.shared.retention_policy.MODERATION_TRANSCRIPT_MAX` (90
+days) after it was written.
+
 Every scrubber is idempotent: rows already stamped ``content_purged_at`` are
 skipped, so re-running the sweep costs one indexed lookup per table.
 """
@@ -74,11 +81,12 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import case, exists, or_, select, update
+from sqlalchemy import case, delete, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 from smarter_dev.shared.message_content import redact_trigger_context
+from smarter_dev.shared.retention_policy import MODERATION_TRANSCRIPT_MAX
 from smarter_dev.web.models import (
     CONTENT_RETENTION_WINDOW,
     ChatAgentCompactionEvent,
@@ -89,6 +97,7 @@ from smarter_dev.web.models import (
     HandlerRun,
     HelpConversation,
     ModerationAction,
+    SpamRingIncident,
 )
 from smarter_dev.shared.message_content import redact_model_message_parts
 from smarter_dev.shared.message_content import redact_turn_decision
@@ -331,6 +340,22 @@ async def scrub_moderation_actions(
     )
 
 
+async def delete_spam_ring_incidents(
+    session: AsyncSession, cutoff: datetime, now: datetime
+) -> int:
+    """Delete spam ring transcripts older than ``MODERATION_TRANSCRIPT_MAX``.
+
+    Ignores the in-flight ``cutoff``: a transcript is moderation evidence with
+    its own, longer horizon. The per-account ``moderation_actions`` rows stay.
+    """
+    result = await session.execute(
+        delete(SpamRingIncident).where(
+            SpamRingIncident.created_at <= now - MODERATION_TRANSCRIPT_MAX
+        )
+    )
+    return result.rowcount or 0
+
+
 _SCRIPT_AUTHORED_ERROR_OUTCOMES = ("error", "cap_exceeded")
 
 
@@ -520,6 +545,7 @@ SCRUBBERS: dict[str, Any] = {
     "chat_agent_errors": scrub_chat_agent_errors,
     "forum_agent_responses": scrub_forum_agent_responses,
     "moderation_actions": scrub_moderation_actions,
+    "spam_ring_incidents": delete_spam_ring_incidents,
     "handler_runs": scrub_handler_runs,
 }
 

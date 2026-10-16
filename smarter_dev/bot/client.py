@@ -33,6 +33,7 @@ from smarter_dev.bot.services.latex_renderer import LatexRenderer
 from smarter_dev.bot.services.media_client import MediaClient
 from smarter_dev.bot.spam_engine import check_spam_engine
 from smarter_dev.bot.spam_engine import release_guild_spam_state
+from smarter_dev.bot.spam_ring import check_spam_ring
 from smarter_dev.bot.utils.embeds import create_error_embed
 from smarter_dev.bot.utils.image_embeds import close_generator
 from smarter_dev.shared.config import Settings
@@ -1245,6 +1246,10 @@ def register_message_moderation_listeners(bot: lightbulb.BotApp) -> None:
        metrics to exactly the messages a raid consists of. A message that both
        stages want deleted is deleted twice at worst, and both modules treat a
        404 on delete as success.
+    3. The spam ring detector runs last, also unconditionally. It sweeps a
+       whole staged conversation rather than one author, so it must see the ad
+       even when an earlier stage already removed it. It holds a per-channel
+       lock while it sweeps; that only delays this one message's task.
 
     Failure handling distinguishes the two things that can go wrong in a stage:
 
@@ -1279,6 +1284,7 @@ def register_message_moderation_listeners(bot: lightbulb.BotApp) -> None:
         moderation_stages = (
             ("content filter", check_content_filters),
             ("spam engine", check_spam_engine),
+            ("spam ring", check_spam_ring),
         )
         message_context = (
             f"guild {event.guild_id}, channel {event.channel_id}, "
