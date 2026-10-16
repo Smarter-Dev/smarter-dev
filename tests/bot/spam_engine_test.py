@@ -9,6 +9,7 @@ rather than sleep-dependent.
 from __future__ import annotations
 
 import contextlib
+import logging
 from types import SimpleNamespace
 
 import hikari
@@ -1616,3 +1617,62 @@ def test_leaving_a_guild_releases_its_state():
     assert spam_engine.release_guild_spam_state("departed") is True
     assert spam_engine.tracked_guild_count() == 0
     assert spam_engine.release_guild_spam_state("departed") is False
+
+
+# ---------------------------------------------------------------------------
+# Skip logging (#168): an unconfigured guild says so once, not per message
+# ---------------------------------------------------------------------------
+
+
+def _skip_lines(caplog) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "smarter_dev.bot.moderation_config_skips"
+        and record.getMessage().startswith("Spam engine:")
+    ]
+
+
+async def test_missing_config_is_logged_once_per_guild_at_info(
+    engine_harness, monkeypatch, caplog
+):
+    async def no_config(session, guild_id):
+        return None
+
+    monkeypatch.setattr(
+        spam_engine.moderation_filter_config_ops, "get_config", no_config
+    )
+    caplog.set_level(logging.INFO, logger="smarter_dev.bot.moderation_config_skips")
+
+    await _flood(engine_harness, 10)
+
+    assert _skip_lines(caplog) == [
+        f"Spam engine: skipping guild {GUILD_ID}, "
+        "which has no moderation_filter_configs row."
+    ]
+    assert all(
+        record.levelno == logging.INFO
+        for record in caplog.records
+        if record.name == "smarter_dev.bot.moderation_config_skips"
+    )
+
+
+async def test_disabled_engine_is_logged_once_and_again_after_it_ran(
+    engine_harness, caplog
+):
+    caplog.set_level(logging.INFO, logger="smarter_dev.bot.moderation_config_skips")
+    disabled_line = (
+        f"Spam engine: skipping guild {GUILD_ID}, "
+        "which has spam_engine_enabled switched off."
+    )
+
+    engine_harness.config.spam_engine_enabled = False
+    await _flood(engine_harness, 5)
+    assert _skip_lines(caplog) == [disabled_line]
+
+    engine_harness.config.spam_engine_enabled = True
+    await _flood(engine_harness, 1, start=NOW + 1000)
+    engine_harness.config.spam_engine_enabled = False
+    await _flood(engine_harness, 5, start=NOW + 2000)
+
+    assert _skip_lines(caplog) == [disabled_line, disabled_line]
