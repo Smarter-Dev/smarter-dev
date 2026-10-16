@@ -249,5 +249,5 @@ def test_spam_ring_migration_turns_existing_rows_on():
             "alembic/main/versions/*_spam_ring_detector.py"
         )
     ).read_text()
-    enabled_column = migration.split('"spam_ring_enabled"', 1)[1].split("),", 1)[0]
+    enabled_column = migration.split('"spam_ring_enabled"', 1)[1].split("op.add_column", 1)[0]
     assert 'server_default=sa.text("true")' in enabled_column
