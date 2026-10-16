@@ -227,3 +227,27 @@ def test_repr_identifies_guild_and_toggles():
     config = ModerationFilterConfig.get_defaults("G1")
 
     assert "G1" in repr(config)
+
+
+async def test_spam_ring_detector_ships_on_with_its_defaults(db_session):
+    db_session.add(ModerationFilterConfig(guild_id="G-ring"))
+    await db_session.commit()
+
+    stored = (await db_session.execute(select(ModerationFilterConfig))).scalar_one()
+
+    assert stored.spam_ring_enabled is True
+    assert stored.spam_ring_new_member_days == 7
+    assert stored.spam_ring_timeout_seconds == 7 * 86400
+    assert stored.spam_ring_lookback_minutes == 60
+    assert stored.spam_ring_followup_minutes == 15
+    assert stored.spam_ring_report_channel_id is None
+
+
+def test_spam_ring_migration_turns_existing_rows_on():
+    migration = next(
+        Path(__file__).resolve().parents[3].glob(
+            "alembic/main/versions/*_spam_ring_detector.py"
+        )
+    ).read_text()
+    enabled_column = migration.split('"spam_ring_enabled"', 1)[1].split("op.add_column", 1)[0]
+    assert 'server_default=sa.text("true")' in enabled_column

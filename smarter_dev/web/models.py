@@ -3390,6 +3390,57 @@ class ModerationFilterConfig(Base):
         doc="Channel snowflake ID where sanitized scam links are archived"
     )
 
+    # --- Spam ring detector (smarter_dev/bot/spam_ring.py) ---
+    spam_ring_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+        doc=(
+            "Master toggle for the spam ring detector. Unlike the other "
+            "subsystems it ships ON: it only acts on new members posting an "
+            "event ad, and every timeout it applies can be lifted."
+        )
+    )
+    spam_ring_new_member_days: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=7,
+        server_default=text("7"),
+        doc="A member who joined within this many days counts as new"
+    )
+    spam_ring_timeout_seconds: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=604800,
+        server_default=text("604800"),
+        doc="How long each ring participant is timed out (Discord caps a timeout at 28 days)"
+    )
+    spam_ring_lookback_minutes: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=60,
+        server_default=text("60"),
+        doc="How far back from the ad the channel is swept for ring participants"
+    )
+    spam_ring_followup_minutes: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=15,
+        server_default=text("15"),
+        doc="How long after a sweep further ring messages in that channel are removed"
+    )
+    spam_ring_report_channel_id: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+        default=None,
+        doc=(
+            "Channel snowflake ID for spam ring reports. Blank falls back to "
+            "the mod alert channel, then the mod log channel, then the AI "
+            "moderation response channel"
+        )
+    )
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -3434,6 +3485,12 @@ class ModerationFilterConfig(Base):
         kwargs.setdefault("mass_mention_window_seconds", 15)
         kwargs.setdefault("warning_reoffense_window_seconds", 120)
         kwargs.setdefault("mute_duration_seconds", 86400)
+
+        kwargs.setdefault("spam_ring_enabled", True)
+        kwargs.setdefault("spam_ring_new_member_days", 7)
+        kwargs.setdefault("spam_ring_timeout_seconds", 604800)
+        kwargs.setdefault("spam_ring_lookback_minutes", 60)
+        kwargs.setdefault("spam_ring_followup_minutes", 15)
 
         super().__init__(**kwargs)
 
@@ -3673,6 +3730,55 @@ class ScanServiceUsage(Base):
 
     def __repr__(self) -> str:
         return f"<ScanServiceUsage(task='{self.task_type}', cost={self.cost_usd})>"
+
+
+class SpamRingIncident(Base):
+    """One spam ring the bot swept, with the transcript saved before deletion.
+
+    Written by ``smarter_dev/bot/spam_ring.py`` and committed BEFORE any message
+    is deleted, so the evidence survives even if the rest of the sweep fails.
+    The transcript is member content: the hourly retention sweep deletes the
+    whole row once it is ``MODERATION_TRANSCRIPT_MAX`` (90 days) old. The
+    per-account ``moderation_actions`` rows stay, as every moderation record does.
+    """
+
+    __tablename__ = "spam_ring_incidents"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    guild_id: Mapped[str] = mapped_column(String, nullable=False)
+    channel_id: Mapped[str] = mapped_column(String, nullable=False)
+    trigger_message_id: Mapped[str] = mapped_column(
+        String, nullable=False, doc="The ad that confirmed the ring"
+    )
+    participant_user_ids: Mapped[list] = mapped_column(
+        JSON, nullable=False, default=list, doc="Every account the sweep actioned"
+    )
+    transcript: Mapped[str] = mapped_column(
+        Text, nullable=False, doc="Plain-text transcript, follow-up lines appended"
+    )
+    report_channel_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    report_message_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        Index("ix_spam_ring_incidents_created_at", "created_at"),
+        Index("ix_spam_ring_incidents_guild_channel", "guild_id", "channel_id"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<SpamRingIncident(guild='{self.guild_id}', channel='{self.channel_id}', "
+            f"participants={len(self.participant_user_ids or [])})>"
+        )
 
 
 class ModerationConfig(Base):

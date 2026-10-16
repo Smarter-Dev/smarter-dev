@@ -176,6 +176,33 @@
                 </div>
             </div>
 
+            <div class="sk-panel" style="margin-top:1rem;">
+                <div class="sk-panel-head">Spam Ring Detector</div>
+                <div class="sk-panel-body">
+                    <p class="sk-text-muted">Catches staged hackathon ads: when a new member posts an event ad, every new member in that conversation is timed out, their messages are deleted, and one report with the transcript goes to the moderators. On by default; every timeout can be lifted.</p>
+                    <label>
+                        <input type="checkbox" name="spam_ring_enabled" {% if config.spam_ring_enabled %}checked{% endif %}>
+                        Enable the spam ring detector
+                    </label>
+
+                    <div style="margin-top:1rem;">
+                        {{ threshold_field("spam_ring_new_member_days", "New Member Window (days)", config.spam_ring_new_member_days, "Members who joined within this many days count as new. At most 90.", max_value=90) }}
+                    </div>
+                    <div style="margin-top:1rem;">
+                        {{ threshold_field("spam_ring_timeout_seconds", "Timeout Duration (seconds)", config.spam_ring_timeout_seconds, "How long each ring account is timed out. Discord's limit is 28 days (2419200 seconds).", max_value=2419200) }}
+                    </div>
+                    <div style="margin-top:1rem;">
+                        {{ threshold_field("spam_ring_lookback_minutes", "Look-back Window (minutes)", config.spam_ring_lookback_minutes, "How far back from the ad the channel is swept, up to its last 100 messages.", max_value=1440) }}
+                    </div>
+                    <div style="margin-top:1rem;">
+                        {{ threshold_field("spam_ring_followup_minutes", "Follow-up Window (minutes)", config.spam_ring_followup_minutes, "After a sweep, further messages in that channel from new accounts that joined alongside the ring are removed for this long.") }}
+                    </div>
+                    <div style="margin-top:1rem;">
+                        {{ channel_picker("spam_ring_report_channel_id", "Report Channel", config.spam_ring_report_channel_id, text_channels, "Where reports go. Blank uses the Mod Alert Channel, then the Mod Log Channel, then the AI moderation response channel.") }}
+                    </div>
+                </div>
+            </div>
+
             <div style="margin-top:1rem;">
                 <button type="submit" class="sk-btn">Save Configuration</button>
             </div>

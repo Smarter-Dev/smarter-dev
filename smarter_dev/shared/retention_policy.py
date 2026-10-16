@@ -35,3 +35,10 @@ AGENT_VERBATIM_IDLE_WINDOW: timedelta = timedelta(hours=2)
 # How often the bot looks for proactive histories past the idle window. The
 # bound is the window plus one tick.
 PROACTIVE_IDLE_SWEEP_TICK: timedelta = timedelta(minutes=1)
+
+# Moderation transcripts: the spam ring detector's saved copy of a swept
+# conversation (``spam_ring_incidents``). Member content kept as evidence for
+# the moderators; the hourly sweep deletes each row this long after it was
+# written. The ``moderation_actions`` rows themselves stay, as all moderation
+# records do.
+MODERATION_TRANSCRIPT_MAX: timedelta = timedelta(days=90)

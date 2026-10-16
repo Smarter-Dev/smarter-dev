@@ -953,3 +953,51 @@ async def test_administrator_permission_denies_non_admin_and_allows_admin():
 
     assert await guard.check(non_admin) is False
     assert await guard.check(admin) is True
+
+
+# --- moderation filter: spam ring detector fields ----------------------------
+
+
+def test_parse_moderation_filter_form_reads_the_spam_ring_fields():
+    parsed = parse_moderation_filter_form(
+        _moderation_form(
+            spam_ring_enabled="on",
+            spam_ring_new_member_days="14",
+            spam_ring_timeout_seconds="86400",
+            spam_ring_lookback_minutes="30",
+            spam_ring_followup_minutes="20",
+            spam_ring_report_channel_id=_TEXT_CHANNEL,
+        )
+    )
+
+    assert parsed["spam_ring_enabled"] is True
+    assert parsed["spam_ring_new_member_days"] == 14
+    assert parsed["spam_ring_timeout_seconds"] == 86400
+    assert parsed["spam_ring_lookback_minutes"] == 30
+    assert parsed["spam_ring_followup_minutes"] == 20
+    assert parsed["spam_ring_report_channel_id"] == _TEXT_CHANNEL
+
+
+def test_parse_moderation_filter_form_blank_spam_ring_fields_use_model_defaults():
+    parsed = parse_moderation_filter_form({})
+
+    # An unchecked box is how an admin turns the detector off.
+    assert parsed["spam_ring_enabled"] is False
+    assert parsed["spam_ring_new_member_days"] == 7
+    assert parsed["spam_ring_timeout_seconds"] == 7 * 86400
+    assert parsed["spam_ring_lookback_minutes"] == 60
+    assert parsed["spam_ring_followup_minutes"] == 15
+    assert parsed["spam_ring_report_channel_id"] is None
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("spam_ring_timeout_seconds", str(28 * 86400 + 1)),
+        ("spam_ring_new_member_days", "91"),
+        ("spam_ring_lookback_minutes", "1441"),
+    ],
+)
+def test_parse_moderation_filter_form_caps_the_spam_ring_fields(field, value):
+    with pytest.raises(InvalidThresholdError):
+        parse_moderation_filter_form(_moderation_form(**{field: value}))

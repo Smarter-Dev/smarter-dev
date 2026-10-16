@@ -46,7 +46,7 @@ hold, and a database dump taken one second after a message was sent contains
 the placeholder, not the message. Text that was empty stays empty: a
 placeholder is never invented where nobody wrote anything.
 
-Two things are deliberately excluded from the rule:
+Three things are deliberately excluded from the rule:
 
 - **What a member deliberately submitted to us** — typed into one of our
   modals, or passed as a slash-command argument — is a normal user submission
@@ -55,6 +55,11 @@ Two things are deliberately excluded from the rule:
 - **The AI agents' own working history**, which cannot answer a conversation it
   cannot see. It lives in Redis, apart from one crash-recovery copy of the
   proactive agent's history in `proactive_agent_histories`.
+- **A spam ring the bot removed.** Before the spam ring detector
+  (`smarter_dev/bot/spam_ring.py`) deletes a staged conversation, it saves the
+  transcript to `spam_ring_incidents` as evidence for the moderators, the same
+  kind of moderation record as the earlier text of an edited or deleted
+  message. The row is deleted 90 days after it was written.
 
 The next section is the one list of every place verbatim text survives — the
 two histories, the Redis hand-offs that feed the proactive agent and the
@@ -111,6 +116,7 @@ was posted to the channel, where the guild's own audit log keeps it.
 | Member holds, one hash per member per guild (Redis, `hhold:*`, `smarter_dev/web/handler_holds.py`) | Operational | Which review holds are on a member's timeout: for each live hold, the handler id, the key the script named it by (a recent-message content hash or a message id) and when it runs out; each key released in the last 5 minutes, with when; the expiry of the timeout a hold last placed; and the expiry of the timeout that was in place before the holds extended it. The key is whatever the script passes, up to 128 characters, so a script that names a hold by message text keeps that text until the hold settles; the bundled scam-banner script (`scripts/handler_scripts/scam-banner.monty`) passes a content hash or a message id. Admin handler scripts use it so several fires can share one member's timeout without undoing each other. A short-lived lock key sits beside it (`hhold:lock:*`, at most 2 minutes). | Every write drops the holds that have run out, the releases older than 5 minutes and either recorded expiry once it has passed, so the hash only ever lists live holds. It expires 5 minutes after its latest hold runs out (about 10 minutes for a review hold, a day for a confirmed repeat), and a member who keeps getting held keeps only their current holds. Discord allows a timeout of at most 28 days, so no entry lives longer than 28 days and 5 minutes. |
 | Handler timer payloads in the Skrift worker tables (`worker_queue`, `worker_state`) | User content | What a handler script chose to carry to its own later fire. A script can copy the message it was reacting to into it. | Until the timer fires, however far ahead the script set it. The fire's job state is emptied as the fire finishes; a fire that fails for good keeps the payload in its dead letter, which the hourly retention job deletes 7 days later. Only a script that copies message text into a timer payload puts any there; the `handler_runs` audit row empties the payload whatever it holds. |
 | Handler script memory (`channel_handlers.memory` and `admin_handlers.memory`, one JSON blob per handler; `guild_handler_memory`, one row per key shared by a guild's admin handlers) | User content | Whatever a handler script chose to keep between fires. A script can copy text from the message it reacted to into it. | No age bound. A handler's own memory lasts as long as the handler. Guild memory is tied to no handler: uninstalling an extension or deleting a handler leaves it, and a key stays until a script deletes it. Each store is capped at 16 KB (`smarter_dev/web/handler_memory.py`, `handler_guild_memory.py`). Only a script that copies message text puts any there; the bot's own handlers keep counters, ids and timestamps. |
+| Spam ring transcripts (`spam_ring_incidents`) | Permanent (moderation) | The swept conversation, saved before the spam ring detector deletes it: each author's id, name, account age and join time, and each message's time, text, attachment URLs and links. Follow-up messages the detector removes are appended. | 90 days (`MODERATION_TRANSCRIPT_MAX` in `smarter_dev/shared/retention_policy.py`): the hourly retention job deletes the row once it is that old, so at most 90 days and one hour. The same transcript is attached to the report the bot posts to the moderators' channel, which is the guild's own record. |
 | Moderation's `ai_context_summary` (`moderation_actions`) | In-flight | A free-text field the AI moderation tools may fill. Today only the purge tool writes it, with a count (`Purged 3 message(s)`); no code reads it. | 5 hours, cleared by the hourly sweep: at most 6 hours. |
 
 The two agent histories are the "chat bot history" the policy carves out: they
@@ -188,6 +194,10 @@ write-time redaction landed, and the 5-hour bound on `ai_context_summary`.
 | `forum_agent_responses` | the already-redacted reasoning, reply, title and body | confidence, tokens, responded flag |
 | `moderation_actions` | `ai_context_summary` | action, target, moderator, reason, duration, timestamp |
 | `handler_runs` | the script's error on `error` and `cap_exceeded` rows (back-fill only; written redacted) | trigger type, ids, flags, outcome, all counters |
+
+The sweep also deletes every `spam_ring_incidents` row 90 days after it was
+written (`MODERATION_TRANSCRIPT_MAX`). That table is a transcript and nothing
+else, so the whole row goes rather than a column.
 
 The `outcome` column still says a fire failed, so an old failure stays visible
 as a failure. The explanations on `skipped` and `rearmed` rows are written by
@@ -471,7 +481,7 @@ pins each class's figure.
 | Messages being handled: at most 6 hours | In-flight | proactive wake and shadow streams, claimed batches, pending lists; `handler-fire:context:*`; `mediaread:*`, the AI's reading of a posted file; `help_conversations.user_question` typed as a slash-command argument; `search_result_previews` | Deleted when the work finishes where there is a finish: a proactive wake's stream entries and claimed batch, a handler fire's hand-off. The rest age out. The streams, pending lists, `/help` questions, previews and `ai_context_summary` use the 5-hour `CONTENT_RETENTION_WINDOW` (`smarter_dev/shared/message_content.py`): the bot trims every 15 minutes, the sweep runs hourly, so at most 6 hours. A claimed batch's backstop is 6 hours from its oldest envelope (`IN_FLIGHT_MAX`). `handler-fire:context:*` and `mediaread:*` (`CACHE_TTL_SECONDS` in `smarter_dev/web/media_read.py`) are 1-hour keys. Pending lists can outlast this only while the bot's passive tick is stopped |
 | Server automations: until a deletion request | User content | handler script memory and guild memory (16 KB each), handler timer payloads | No age bound (above); runbook steps 7 and 8 clear the person's entries |
 | Records of what the AI did: until a deletion request | Usage, cost and audit | `chat_agent_turns`, `chat_agent_engagements`, `chat_agent_compaction_events`, `chat_agent_errors`, `forum_agent_responses`, `handler_runs`, `help_conversations` rows, usage cost rows | No age bound on the rows; text is written as the placeholder or cleared by the sweep. The runbook anonymises or deletes the person's rows; an anonymised row still holds message IDs, channel and tag IDs (including the DM channel ID), times, role details and a permission flag, reaction emoji, and moderation action details. The notice sums these up as "which messages and channels were involved" |
-| Moderation: permanent | Permanent | `moderation_actions`; the bot's posts to the moderation and audit log channels | No bound; not part of a deletion request |
+| Moderation: permanent | Permanent | `moderation_actions`; `spam_ring_incidents` (90 days); the bot's posts to the moderation and audit log channels | No bound; not part of a deletion request |
 | Games and community features: until a deletion request | User content | bytes balances and transactions, squad memberships, quest and challenge submissions and progress, member activity, forum subscriptions, `/help` and `/tldr` records, legacy `/scan` rows | No bound; member leave removes that guild's bytes balance and squad membership |
 | Rate limits and caches: 30 days | Operational | `chatlimit:*` (4-hour window, `user_message_limit.py`), `hcap:dmuser:*` (1 hour), `hdm:chan:*` (7 days, `handler_emitter.py`), `hclaim:*` (a script's claim, at most 30 days, `CLAIM_TTL_MAX_SECONDS` in `handler_caps.py`), `hrecent:*` (where a member posted, ids and a content hash, at most 4 minutes, `handler_recent_messages.py`), `hhold:*` (a member's live review holds, pruned at every write, at most 28 days and 5 minutes, `handler_holds.py`) | Longest is `hclaim:*` |
 | Your account: until the account is deleted; signed in 30 days after the last visit | User content; sign-in sessions operational | the site account, profile, linked Discord, GitHub and Google logins with the profile and tokens each provider gave (`oauth_accounts`), push subscriptions | Session `max_age` 30 days, rolling (`app.yaml`) |
