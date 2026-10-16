@@ -11,6 +11,7 @@ remaining filters.
 from __future__ import annotations
 
 import contextlib
+import logging
 from types import SimpleNamespace
 
 import hikari
@@ -959,3 +960,58 @@ async def test_database_failure_recording_the_action_is_not_swallowed(filter_env
 
     # The user-visible enforcement still happened before the write failed.
     assert rest.deleted_messages == [(CHANNEL_ID, MESSAGE_ID)]
+
+
+# --------------------------------------------------------------------------
+# Skip logging (#168): an unconfigured guild says so once, not per message
+# --------------------------------------------------------------------------
+
+
+def _skip_lines(caplog) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.name == "smarter_dev.bot.moderation_config_skips"
+        and record.getMessage().startswith("Content filters:")
+    ]
+
+
+async def test_missing_config_is_logged_once_per_guild_at_info(filter_env, caplog):
+    content_filter.config_skip_log.reset()
+    caplog.set_level(logging.INFO, logger="smarter_dev.bot.moderation_config_skips")
+    filter_env.config = None
+    bot = SimpleNamespace(rest=_FakeRest())
+
+    for _ in range(5):
+        await check_content_filters(bot, _make_event("https://evil.gay/free"))
+
+    assert _skip_lines(caplog) == [
+        f"Content filters: skipping guild {GUILD_ID}, "
+        "which has no moderation_filter_configs row."
+    ]
+
+
+async def test_skip_reason_change_and_rerun_are_logged_again(filter_env, caplog):
+    content_filter.config_skip_log.reset()
+    caplog.set_level(logging.INFO, logger="smarter_dev.bot.moderation_config_skips")
+    bot = SimpleNamespace(rest=_FakeRest())
+    missing_line = (
+        f"Content filters: skipping guild {GUILD_ID}, "
+        "which has no moderation_filter_configs row."
+    )
+    disabled_line = (
+        f"Content filters: skipping guild {GUILD_ID}, "
+        "which has content_filter_enabled switched off."
+    )
+
+    filter_env.config = None
+    await check_content_filters(bot, _make_event("hello there"))
+    filter_env.config = _config(content_filter_enabled=False)
+    await check_content_filters(bot, _make_event("hello there"))
+    await check_content_filters(bot, _make_event("hello again"))
+    filter_env.config = _config()
+    await check_content_filters(bot, _make_event("hello there"))
+    filter_env.config = _config(content_filter_enabled=False)
+    await check_content_filters(bot, _make_event("hello there"))
+
+    assert _skip_lines(caplog) == [missing_line, disabled_line, disabled_line]

@@ -50,6 +50,9 @@ import hikari
 
 from smarter_dev.bot.guild_event_recorder import record_guild_event
 from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
+from smarter_dev.bot.moderation_config_skips import SKIP_REASON_NO_CONFIG
+from smarter_dev.bot.moderation_config_skips import ModerationConfigSkipLog
+from smarter_dev.bot.moderation_config_skips import skip_reason_disabled
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.guild_event_log import GuildEvent
 from smarter_dev.shared.guild_event_log import mod_action_event
@@ -64,6 +67,7 @@ logger = logging.getLogger(__name__)
 
 moderation_filter_config_ops = ModerationFilterConfigOperations()
 mod_action_ops = ModerationActionOperations()
+config_skip_log = ModerationConfigSkipLog("Spam engine")
 
 AUTO_MODERATION_REASON = "Auto-moderation violation"
 MOD_ACTION_SOURCE = "handler"
@@ -965,6 +969,7 @@ def tracked_guild_count() -> int:
 def reset_spam_states() -> None:
     """Drop every guild's state — for tests and for a clean reconnect."""
     _guild_spam_states.clear()
+    config_skip_log.reset()
 
 
 # ---------------------------------------------------------------------------
@@ -1036,8 +1041,15 @@ async def check_spam_engine(
         return NO_SPAM_ACTION
 
     settings = await load_spam_engine_settings(str(guild_id))
-    if settings is None or not settings.enabled:
+    if settings is None:
+        config_skip_log.skipped(str(guild_id), SKIP_REASON_NO_CONFIG)
         return NO_SPAM_ACTION
+    if not settings.enabled:
+        config_skip_log.skipped(
+            str(guild_id), skip_reason_disabled("spam_engine_enabled")
+        )
+        return NO_SPAM_ACTION
+    config_skip_log.running(str(guild_id))
 
     member = getattr(event, "member", None)
     author_role_ids = tuple(str(role_id) for role_id in member.role_ids) if member else ()

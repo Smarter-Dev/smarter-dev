@@ -36,6 +36,9 @@ from typing import TYPE_CHECKING
 import hikari
 
 from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
+from smarter_dev.bot.moderation_config_skips import SKIP_REASON_NO_CONFIG
+from smarter_dev.bot.moderation_config_skips import ModerationConfigSkipLog
+from smarter_dev.bot.moderation_config_skips import skip_reason_disabled
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.web.crud import ModerationActionOperations
@@ -53,6 +56,7 @@ logger = logging.getLogger(__name__)
 
 moderation_filter_config_ops = ModerationFilterConfigOperations()
 mod_action_ops = ModerationActionOperations()
+config_skip_log = ModerationConfigSkipLog("Content filters")
 
 # How much of the offending message the mod-log line reproduces (legacy: ~800).
 MOD_LOG_CONTENT_LIMIT = 800
@@ -478,9 +482,17 @@ async def check_content_filters(
     if not content.strip():
         return ContentFilterResult()
 
-    config = await _load_config(str(event.guild_id))
-    if config is None or not config.content_filter_enabled:
+    guild_id = str(event.guild_id)
+    config = await _load_config(guild_id)
+    if config is None:
+        config_skip_log.skipped(guild_id, SKIP_REASON_NO_CONFIG)
         return ContentFilterResult()
+    if not config.content_filter_enabled:
+        config_skip_log.skipped(
+            guild_id, skip_reason_disabled("content_filter_enabled")
+        )
+        return ContentFilterResult()
+    config_skip_log.running(guild_id)
 
     if _author_is_exempt(event, config):
         return ContentFilterResult()
