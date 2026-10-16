@@ -104,6 +104,16 @@ def test_digitalocean_uses_configured_base_url():
     assert kwargs["base_url"] == custom
 
 
+def test_gemini_4_argon_never_sends_minimal_thinking():
+    # Argon answers thinking_level MINIMAL with a 400, so a stored "minimal"
+    # pick goes out as LOW.
+    argon = get_model("gemini-4-argon")
+    settings = model_settings_for(argon, ReasoningLevel.MINIMAL)
+    assert settings["google_thinking_config"] == {"thinking_level": "LOW"}
+    settings = model_settings_for(argon, None)
+    assert settings["google_thinking_config"] == {"thinking_level": "MEDIUM"}
+
+
 def test_google_model_reads_gemini_key(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "gem-secret")
     monkeypatch.delenv("GOOGLE_API_KEY", raising=False)

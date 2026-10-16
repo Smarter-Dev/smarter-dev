@@ -1016,6 +1016,115 @@ async def test_haiku_5_5_is_selectable_once_admitted(db_session):
     assert key == "claude-haiku-5-5"
 
 
+# a3f6c9e2d4b8 admits Gemini 4 Argon as a new key and changes nothing else.
+
+
+def _argon_statements(direction: str = "upgrade"):
+    module = _load_migration("a3f6c9e2d4b8")
+    executed: list = []
+
+    class _Op:
+        @staticmethod
+        def execute(statement):
+            executed.append(statement)
+
+    module.op = _Op
+    getattr(module, direction)()
+    return executed
+
+
+def test_argon_admission_follows_the_site_identity_revision():
+    from smarter_dev.shared.model_catalog import RETIRED_SUCCESSORS
+    from smarter_dev.shared.model_catalog import get_model
+
+    module = _load_migration("a3f6c9e2d4b8")
+    assert module.down_revision == "d8e3f0a5b2c7"
+    assert get_model(module._KEY).model_id == "gemini-4-argon"
+    # The cost-tier peer bills the same $2/$10.
+    assert get_model(module._PRICE_PEER) is not None
+    assert module._KEY not in RETIRED_SUCCESSORS.values()
+
+
+async def test_argon_admission_is_enabled_at_sol_tier_and_sorts_last(db_session):
+    from smarter_dev.web.chat.settings import ensure_settings
+    from smarter_dev.web.models import ChatCatalogModel
+
+    await ensure_settings(db_session)
+    seeded = await db_session.get(ChatCatalogModel, "gemini-4-argon")
+    await db_session.delete(seeded)
+    sol = await db_session.get(ChatCatalogModel, "gpt-6-1-sol")
+    sol.cost_tier = "high"
+    sol.enabled = False
+    await db_session.commit()
+    before = await _catalog_rows(db_session)
+    settings_before = (
+        await db_session.execute(text("SELECT * FROM chat_settings"))
+    ).all()
+
+    [statement] = _argon_statements()
+    for _ in range(2):  # idempotent
+        await db_session.execute(statement)
+    await db_session.commit()
+
+    after = await _catalog_rows(db_session)
+    max_order = max(order for _, _, order in before.values())
+    # Enabled regardless of Sol, at Sol's tier, after every existing row.
+    assert after.pop("gemini-4-argon") == (True, "high", max_order + 1)
+    assert after == before
+    assert (
+        await db_session.execute(text("SELECT * FROM chat_settings"))
+    ).all() == settings_before
+
+
+async def test_argon_admission_defaults_to_medium_without_sol(db_session):
+    [statement] = _argon_statements()
+    await db_session.execute(statement)
+    await db_session.commit()
+    assert await _catalog_rows(db_session) == {"gemini-4-argon": (True, "medium", 0)}
+
+
+async def test_argon_admission_leaves_an_existing_row_alone(db_session):
+    from smarter_dev.web.models import ChatCatalogModel
+
+    db_session.add(
+        ChatCatalogModel(
+            model_key="gemini-4-argon", enabled=False, cost_tier="ultra", sort_order=3
+        )
+    )
+    await db_session.commit()
+    [statement] = _argon_statements()
+    await db_session.execute(statement)
+    await db_session.commit()
+    assert await _catalog_rows(db_session) == {"gemini-4-argon": (False, "ultra", 3)}
+
+
+def test_argon_downgrade_deletes_only_its_row():
+    [statement] = _argon_statements("downgrade")
+    assert " ".join(str(statement).split()) == (
+        "DELETE FROM chat_catalog_models WHERE model_key = :key"
+    )
+    assert statement.compile().params == {"key": "gemini-4-argon"}
+
+
+async def test_argon_is_selectable_once_admitted(db_session):
+    from smarter_dev.web.chat.api import resolved_conversation_settings
+    from smarter_dev.web.chat.settings import ensure_settings
+    from smarter_dev.web.models import ChatCatalogModel
+
+    await ensure_settings(db_session)
+    seeded = await db_session.get(ChatCatalogModel, "gemini-4-argon")
+    await db_session.delete(seeded)
+    await db_session.commit()
+    [statement] = _argon_statements()
+    await db_session.execute(statement)
+    await db_session.commit()
+
+    _, key, _ = await resolved_conversation_settings(
+        db_session, permissions=frozenset(), model_key="gemini-4-argon"
+    )
+    assert key == "gemini-4-argon"
+
+
 async def test_an_unknown_claude_key_is_refused_even_with_an_enabled_row(db_session):
     # Negative control: a catalog row alone does not admit a key. Only keys the
     # build's catalog knows are selectable, so a neighbouring Claude name is
