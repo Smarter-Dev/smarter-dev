@@ -236,7 +236,7 @@ async def test_spam_ring_detector_ships_on_with_its_defaults(db_session):
     stored = (await db_session.execute(select(ModerationFilterConfig))).scalar_one()
 
     assert stored.spam_ring_enabled is True
-    assert stored.spam_ring_new_member_days == 7
+    assert stored.spam_ring_new_member_days == 2
     assert stored.spam_ring_timeout_seconds == 7 * 86400
     assert stored.spam_ring_lookback_minutes == 60
     assert stored.spam_ring_followup_minutes == 15
@@ -251,3 +251,29 @@ def test_spam_ring_migration_turns_existing_rows_on():
     ).read_text()
     enabled_column = migration.split('"spam_ring_enabled"', 1)[1].split("op.add_column", 1)[0]
     assert 'server_default=sa.text("true")' in enabled_column
+
+
+def test_new_member_days_default_migration_changes_only_the_server_default():
+    import importlib.util
+    from pathlib import Path
+
+    path = next(Path("alembic/main/versions").glob("*_c5e1a8d3f7b2_*.py"))
+    spec = importlib.util.spec_from_file_location("c5e1a8d3f7b2", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    calls: list = []
+
+    class _Op:
+        @staticmethod
+        def alter_column(table, column, **kwargs):
+            calls.append((table, column, str(kwargs["server_default"])))
+
+    module.op = _Op
+    module.upgrade()
+    module.downgrade()
+
+    assert module.down_revision == "f2b7d4e9c1a6"
+    assert calls == [
+        ("moderation_filter_configs", "spam_ring_new_member_days", "2"),
+        ("moderation_filter_configs", "spam_ring_new_member_days", "7"),
+    ]

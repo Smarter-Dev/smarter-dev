@@ -3405,8 +3405,8 @@ class ModerationFilterConfig(Base):
     spam_ring_new_member_days: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
-        default=7,
-        server_default=text("7"),
+        default=2,
+        server_default=text("2"),
         doc="A member who joined within this many days counts as new"
     )
     spam_ring_timeout_seconds: Mapped[int] = mapped_column(
@@ -3487,7 +3487,7 @@ class ModerationFilterConfig(Base):
         kwargs.setdefault("mute_duration_seconds", 86400)
 
         kwargs.setdefault("spam_ring_enabled", True)
-        kwargs.setdefault("spam_ring_new_member_days", 7)
+        kwargs.setdefault("spam_ring_new_member_days", 2)
         kwargs.setdefault("spam_ring_timeout_seconds", 604800)
         kwargs.setdefault("spam_ring_lookback_minutes", 60)
         kwargs.setdefault("spam_ring_followup_minutes", 15)
