@@ -444,6 +444,32 @@ class TestGooglePricing:
             "14.00"
         )
 
+    def test_gemini_4_argon_promotional_rates(self):
+        # $2/M in + $10/M out through 2026-11-30.
+        assert calc_cost(1_000_000, 1_000_000, "gemini-4-argon") == Decimal("12.00")
+
+    def test_gemini_4_argon_cache_rate(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=500_000,
+            cache_write_tokens=0,
+            model_name="gemini-4-argon",
+        )
+        # 500K uncached at $2/M + 500K cached reads at $0.10/M.
+        assert cost == Decimal("1.05")
+
+    def test_gemini_4_argon_has_no_long_context_tier(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="smarter_dev.web.llm_pricing"):
+            cost = calc_cost(500_000, 0, "gemini-4-argon", per_request=True)
+        assert cost == Decimal("1.00")
+        assert "priced at the base rate" not in caplog.text
+
+    def test_gemini_4_argon_prices_its_catalog_entry(self):
+        rates = price_rates_for_model(get_model("gemini-4-argon"))
+        assert rates.input_mtok == Decimal("2.00")
+        assert rates.output_mtok == Decimal("10.00")
+
 
 class TestOpenAIPricing:
     """Retired GPT-5.x ids are priced by genai-prices' own entries (#5).

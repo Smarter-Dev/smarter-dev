@@ -139,6 +139,25 @@ _patch_provider(
     ),
 )
 
+# Gemini 4 Argon — not yet in genai-prices. Admitted 2026-10-16. Promotional
+# rate through 2026-11-30: $2/M input, $10/M output (thinking included),
+# $0.10/M cached reads. On 2026-12-01 every rate doubles to $4/$20/$0.20; this
+# table has no effective date, so the patch must change that day. No
+# prompt-length tier, and only implicit caching, so there is no cache write.
+# https://ai.google.dev/gemini-api/docs/pricing
+_patch_provider(
+    "google",
+    types.ModelInfo(
+        id="gemini-4-argon",
+        match=types.ClauseStartsWith(starts_with="gemini-4-argon"),
+        prices=types.ModelPrice(
+            input_mtok=Decimal("2.00"),
+            output_mtok=Decimal("10.00"),
+            cache_read_mtok=Decimal("0.10"),
+        ),
+    ),
+)
+
 # GPT-5.4 Nano
 # genai-prices prices the id itself; this patch prices only other ids under
 # its prefix (see _LIBRARY_PRICES_OWN_ID).

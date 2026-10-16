@@ -300,6 +300,16 @@ _GEMINI_THINKING = (
     ReasoningLevel.MEDIUM,
     ReasoningLevel.HIGH,
 )
+# Gemini 4 Argon thinks on every request: the API answers thinkingLevel
+# "minimal" with a 400 ("Thinking level MINIMAL is not supported for this
+# model"), so its ladder starts at "low". A stored "minimal" pick clamps to
+# "low" through resolve_reasoning_level. Same levels as _OPEN_EFFORT today, but
+# named for Gemini so a change to the open-weights ladder cannot reach it.
+_GEMINI_4_THINKING = (
+    ReasoningLevel.LOW,
+    ReasoningLevel.MEDIUM,
+    ReasoningLevel.HIGH,
+)
 _OPEN_EFFORT = (ReasoningLevel.LOW, ReasoningLevel.MEDIUM, ReasoningLevel.HIGH)
 # Claude Sonnet 5.5 on OpenRouter: reasoning is mandatory (no "none") and its
 # supported efforts run low → max.
@@ -536,6 +546,28 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
         model_id="gemini-3.5-flash-lite",
         supports_vision=True,
         reasoning_levels=_GEMINI_THINKING,
+        default_reasoning=ReasoningLevel.MEDIUM,
+    ),
+    # Gemini 4 Argon joined on 2026-10-16 at the user's request, admitted only:
+    # no default or agent pin moved onto it. Verified against the Gemini models
+    # API and live generateContent calls with the production key (2026-10-16):
+    # wire id ``gemini-4-argon``, stable rather than preview, 1M context, image
+    # input, and thinking at low/medium/high only (see _GEMINI_4_THINKING).
+    # $2/$10/$0.10 per M is a promotional rate that doubles on 2026-12-01; the
+    # rate lives in llm_pricing.
+    CatalogModel(
+        key="gemini-4-argon",
+        label="Gemini 4 Argon",
+        family="Gemini",
+        provider=ModelProvider.GOOGLE,
+        model_id="gemini-4-argon",
+        supports_vision=True,
+        context_window=1_048_576,
+        # The models API reports outputTokenLimit 32,768 for our key; Google's
+        # model page says 65,536 by default (1M with long decode). The API
+        # figure is the one verified, so it is the one recorded.
+        max_output_tokens=32_768,
+        reasoning_levels=_GEMINI_4_THINKING,
         default_reasoning=ReasoningLevel.MEDIUM,
     ),
     # --- GPT via OpenAI ---

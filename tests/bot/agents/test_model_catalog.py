@@ -117,6 +117,44 @@ def test_gemini_lineup_reflects_current_releases():
     assert get_model("gemini-3-1-pro") is not None
 
 
+def test_gemini_4_argon_is_admitted_with_verified_capabilities():
+    # Verified against the Gemini models API and live generateContent calls with
+    # the production key (2026-10-16).
+    model = get_model("gemini-4-argon")
+    assert model is not None
+    assert model.label == "Gemini 4 Argon"
+    assert model.model_id == "gemini-4-argon"
+    assert model.family == "Gemini"
+    assert model.provider is ModelProvider.GOOGLE
+    assert model.supports_vision is True
+    assert model.context_window == 1_048_576
+    # The API's outputTokenLimit, not the 65,536 Google's model page quotes.
+    assert model.max_output_tokens == 32_768
+    assert model.needs_prompted_output is False
+    # Admission only: no retired key is read as Argon.
+    assert "gemini-4-argon" not in RETIRED_SUCCESSORS.values()
+
+
+def test_gemini_4_argon_thinks_at_low_medium_high_only():
+    # The API rejects thinkingLevel "minimal" with a 400 for Argon.
+    model = get_model("gemini-4-argon")
+    assert model.reasoning_levels == (
+        ReasoningLevel.LOW,
+        ReasoningLevel.MEDIUM,
+        ReasoningLevel.HIGH,
+    )
+    assert model.default_reasoning is ReasoningLevel.MEDIUM
+    assert ReasoningLevel.MINIMAL in get_model("gemini-3-8-flash").reasoning_levels
+
+
+def test_gemini_4_argon_clamps_a_stored_minimal_to_low():
+    model = get_model("gemini-4-argon")
+    assert resolve_reasoning_level(model, ReasoningLevel.MINIMAL) is ReasoningLevel.LOW
+    assert resolve_reasoning_level(model, ReasoningLevel.NONE) is ReasoningLevel.LOW
+    assert resolve_reasoning_level(model, ReasoningLevel.MAX) is ReasoningLevel.HIGH
+    assert resolve_reasoning_level(model, None) is ReasoningLevel.MEDIUM
+
+
 def test_retired_gemini_flash_keys_read_as_3_8_flash():
     assert successor_key("gemini-3-6-flash") == "gemini-3-8-flash"
     assert successor_key("gemini-3-7-flash") == "gemini-3-8-flash"
