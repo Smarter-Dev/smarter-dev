@@ -947,7 +947,7 @@ def test_defaults_turn_the_detector_on():
         ModerationFilterConfig.get_defaults("1")
     )
     assert settings.enabled
-    assert settings.new_member_window == timedelta(days=7)
+    assert settings.new_member_window == timedelta(days=2)
     assert settings.timeout_seconds == 7 * 86400
     assert settings.lookback == timedelta(minutes=60)
     assert settings.followup == timedelta(minutes=15)

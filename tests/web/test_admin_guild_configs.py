@@ -983,7 +983,7 @@ def test_parse_moderation_filter_form_blank_spam_ring_fields_use_model_defaults(
 
     # An unchecked box is how an admin turns the detector off.
     assert parsed["spam_ring_enabled"] is False
-    assert parsed["spam_ring_new_member_days"] == 7
+    assert parsed["spam_ring_new_member_days"] == 2
     assert parsed["spam_ring_timeout_seconds"] == 7 * 86400
     assert parsed["spam_ring_lookback_minutes"] == 60
     assert parsed["spam_ring_followup_minutes"] == 15
