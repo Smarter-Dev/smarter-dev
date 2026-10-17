@@ -213,3 +213,37 @@ async def test_inactive_members_cannot_search(client, member, db_session):
     member.is_active = False
     await db_session.commit()
     assert _start(tc, member.id).status_code == 404
+
+
+async def test_overlapping_starts_for_one_turn_return_the_same_run(
+    client, member, test_engine, monkeypatch
+):
+    """Two starts with one key: the second passes the "already started?"
+    check, then the first saves its run on another connection before the
+    second inserts. The second must answer as an idempotent repeat."""
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    tc, _ = client
+    key = uuid4().hex
+    other = create_async_engine(test_engine.url, poolclass=NullPool)
+    real_limits = dashboard_controller._enforce_limits
+
+    async def the_other_start_wins(session, user_id):
+        await real_limits(session, user_id)
+        async with async_sessionmaker(other, expire_on_commit=False)() as rival:
+            await dashboard_controller.create_search(
+                rival, user_id, "latest Python release notes", key
+            )
+
+    monkeypatch.setattr(dashboard_controller, "_enforce_limits", the_other_start_wins)
+    try:
+        response = _start(tc, member.id, key=key)
+    finally:
+        await other.dispose()
+    assert response.status_code == 201
+    body = response.json()
+    assert body["idempotent"] is True
+    monkeypatch.setattr(dashboard_controller, "_enforce_limits", real_limits)
+    repeat = _start(tc, member.id, key=key)
+    assert repeat.json() == body

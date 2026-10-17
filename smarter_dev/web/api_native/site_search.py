@@ -28,6 +28,7 @@ from pydantic import Field
 from skrift.auth.guards import Permission
 from skrift.db.models.user import User
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web import dashboard_controller as dashboard
@@ -184,7 +185,23 @@ class SiteSearchController(Controller):
             await dashboard._enforce_limits(db_session, user.id)
         except HTTPException as exc:
             raise plain_error(exc.status_code, _detail(exc)) from None
-        run = await dashboard.create_search(db_session, user.id, text, key)
+        owner_id = user.id
+        try:
+            run = await dashboard.create_search(db_session, owner_id, text, key)
+        except IntegrityError:
+            # Two starts for the same turn raced and the other one saved its
+            # run first (unique owner + key). Answer as an idempotent repeat.
+            # The rollback expires ``user``; the lookup uses the saved id.
+            await db_session.rollback()
+            existing = await db_session.scalar(
+                select(WebSearchRun).where(
+                    WebSearchRun.owner_user_id == owner_id,
+                    WebSearchRun.submission_key == key,
+                )
+            )
+            if existing is None:
+                raise
+            return {"search": site_snapshot(existing), "idempotent": True}
         return {"search": site_snapshot(run)}
 
     @get("/users/{user_id:str}/runs/{run_id:str}", guards=SITE_SEARCH_GUARDS)
