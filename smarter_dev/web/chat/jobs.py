@@ -832,7 +832,10 @@ async def _run_text_agent(
         metered,
         output_type=str,
         system_prompt=system_prompt,
-        model_settings=model_settings_for(model, reasoning),
+        # Auxiliary work (compaction, summaries) is one request, so a Claude
+        # model skips the message cache breakpoint: a compaction's transcript
+        # would otherwise be written at the 1-hour rate and never read.
+        model_settings=model_settings_for(model, reasoning, cache_messages=False),
     )
     result = await run_cancellable(
         agent.run(

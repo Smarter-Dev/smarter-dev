@@ -27,6 +27,12 @@ from smarter_dev.web.models import ChatSpendLimit
 # GPT-6 Luna is both the better default and the cheaper one: $0.10/$0.50 per M
 # from OpenAI directly against the $0.30/$2.50 Gemini 3.5 Flash Lite charged.
 DEFAULT_MODEL = "gpt-6-luna"
+# Folds a long conversation into a summary (in the modes that compact on a
+# configured model). Claude Haiku 5.5 since 2026-10-17 (#199), when every
+# non-chat use of Luna moved to it; migration d8a3f1c6e9b2 moved the live row.
+# Haiku bills 5x on a prompt over 100,000 tokens; each compaction request is
+# priced on its own (record_settled_chat_usage), so that tier is charged.
+DEFAULT_COMPACTION_MODEL = "claude-haiku-5-5"
 # Where auxiliary work goes when the model configured for it fails. Deliberately
 # a DIFFERENT vendor from DEFAULT_MODEL — a fallback that shares an upstream
 # with the thing it is backstopping is not a fallback. 3.8 Flash took the slot
@@ -144,7 +150,7 @@ async def ensure_settings(session: AsyncSession) -> ChatSettings:
             default_intelligence_mode=IntelligenceMode.EFFICIENT.value,
             summarizer_model_key=DEFAULT_SUMMARIZER,
             summarizer_fallback_model_key=DEFAULT_FALLBACK_MODEL,
-            compaction_model_key=DEFAULT_MODEL,
+            compaction_model_key=DEFAULT_COMPACTION_MODEL,
             compaction_fallback_model_key=DEFAULT_FALLBACK_MODEL,
             thread_evaluator_model_key=DEFAULT_THREAD_EVALUATOR,
             thread_evaluator_fallback_model_key=None,

@@ -128,9 +128,10 @@ SMALL = "hello"
 # ---------------------------------------------------------------------------
 
 
-def test_default_chat_and_compaction_models_are_gpt_6_luna_direct():
+def test_chat_stays_on_luna_and_compaction_moves_to_haiku():
+    # #199: every non-chat use of Luna moved to Claude Haiku 5.5.
     assert DEFAULT_CHAT_MODEL == "gpt-6-luna"
-    assert DEFAULT_COMPACT_MODEL == "gpt-6-luna"
+    assert DEFAULT_COMPACT_MODEL == "claude-haiku-5-5"
 
 
 def test_should_fold_luna_default_cold_threshold(monkeypatch):

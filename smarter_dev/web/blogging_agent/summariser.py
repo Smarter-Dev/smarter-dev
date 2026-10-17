@@ -1,4 +1,4 @@
-"""Two thin GPT-6 Luna agents used inside the pipeline's read tools.
+"""Two thin Claude Haiku 5.5 agents used inside the pipeline's read tools.
 
 - ``summarise_news_page(text, url, title)`` — Scout's news read helper. Returns
   a full-document summary in 3-6 sentences. Cached per-URL by Scout's read
@@ -26,11 +26,33 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# GPT-6 Luna since 2026-09-24, replacing Gemini 3.1 Flash Lite. OpenAI
-# Responses API via OPENAI_API_KEY.
-_LUNA_MODEL = "gpt-6-luna"
+# Claude Haiku 5.5 since 2026-10-17 (#199), replacing GPT-6 Luna (which had
+# replaced Gemini 3.1 Flash Lite on 2026-09-24). Built by the shared model
+# router, imported lazily like pydantic-ai: this module loads on the web tier.
+_MODEL = "claude-haiku-5-5"
 
-_MODEL_SETTINGS = {"openai_reasoning_effort": "low"}
+
+def _agent(system_prompt: str, output_type):
+    """A one-request agent on ``_MODEL`` at low effort."""
+    from pydantic_ai import Agent
+
+    from smarter_dev.shared.model_catalog import ReasoningLevel
+    from smarter_dev.shared.model_catalog import catalog_model_for_id
+    from smarter_dev.shared.model_router import agent_retries_for
+    from smarter_dev.shared.model_router import build_model_for
+    from smarter_dev.shared.model_router import model_settings_for
+
+    model = catalog_model_for_id(_MODEL)
+    return Agent(
+        build_model_for(model),
+        system_prompt=system_prompt,
+        output_type=output_type,
+        # Each page is read once, so only the system prompt is worth caching.
+        model_settings=model_settings_for(
+            model, ReasoningLevel.LOW, cache_messages=False
+        ),
+        retries=agent_retries_for(model),
+    )
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 
@@ -44,15 +66,8 @@ _news_summariser_agent: "Agent[None, str] | None" = None
 def _news_summariser() -> "Agent[None, str]":
     global _news_summariser_agent
     if _news_summariser_agent is None:
-        from pydantic_ai import Agent
-
-        _news_summariser_agent = Agent(
-            f"openai-responses:{_LUNA_MODEL}",
-            system_prompt=(_PROMPTS_DIR / "news_summariser.md").read_text(
-                encoding="utf-8"
-            ),
-            output_type=str,
-            model_settings=_MODEL_SETTINGS,
+        _news_summariser_agent = _agent(
+            (_PROMPTS_DIR / "news_summariser.md").read_text(encoding="utf-8"), str
         )
     return _news_summariser_agent
 
@@ -94,15 +109,9 @@ _excerpt_extractor_agent: "Agent[None, ExcerptOutput] | None" = None
 def _excerpt_extractor() -> "Agent[None, ExcerptOutput]":
     global _excerpt_extractor_agent
     if _excerpt_extractor_agent is None:
-        from pydantic_ai import Agent
-
-        _excerpt_extractor_agent = Agent(
-            f"openai-responses:{_LUNA_MODEL}",
-            system_prompt=(_PROMPTS_DIR / "excerpt_extractor.md").read_text(
-                encoding="utf-8"
-            ),
-            output_type=ExcerptOutput,
-            model_settings=_MODEL_SETTINGS,
+        _excerpt_extractor_agent = _agent(
+            (_PROMPTS_DIR / "excerpt_extractor.md").read_text(encoding="utf-8"),
+            ExcerptOutput,
         )
     return _excerpt_extractor_agent
 

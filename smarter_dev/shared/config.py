@@ -112,12 +112,13 @@ class Settings(BaseSettings):
         description="Master kill switch for the agentic handler system",
     )
     handler_author_model: str = Field(
-        default="gpt-6-luna",
-        description="Model that writes handler scripts from a description (GPT-6 Luna)",
+        default="claude-haiku-5-5",
+        description="Model that writes handler scripts from a description "
+        "(Claude Haiku 5.5)",
     )
     handler_judge_model: str = Field(
-        default="gpt-6-luna",
-        description="Model that reviews candidate handler scripts (GPT-6 Luna)",
+        default="claude-haiku-5-5",
+        description="Model that reviews candidate handler scripts (Claude Haiku 5.5)",
     )
     handler_admin_author_model: str = Field(
         default="gpt-6.1-sol",

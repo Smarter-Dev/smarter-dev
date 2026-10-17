@@ -469,7 +469,7 @@
 
 /* ── Answer ───────────────────────────────────────────── */
 
-/* Luna's answer sits above the results: the pages it reads appear as chips,
+/* Haiku's answer sits above the results: the pages it reads appear as chips,
    then the text streams in under a caret until it is done. */
 .ud-answer:not([hidden]) {
   display: block;

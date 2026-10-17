@@ -116,8 +116,10 @@ def get_moderation_agent() -> Agent[None, ModerationAssessment]:
     """Return the singleton triage agent; each run brings its own tools."""
     global _moderation_agent
     if _moderation_agent is None:
+        # Triage loops over its moderation tools, so its requests share the
+        # growing history: keep the message cache breakpoint.
         _moderation_agent = build_utility_agent(
-            ModerationAssessment, MODERATION_INSTRUCTIONS
+            ModerationAssessment, MODERATION_INSTRUCTIONS, cache_messages=True
         )
     return _moderation_agent
 

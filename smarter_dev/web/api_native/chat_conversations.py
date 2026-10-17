@@ -246,6 +246,9 @@ class _BilledModel(NamedTuple):
     output_tokens: int
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    # True when the counts are one provider request's, so a long-context tier
+    # (Claude Haiku 5.5's 5x over 100,000 tokens) is priced in.
+    per_request: bool = False
 
     @property
     def cost_usd(self) -> Decimal:
@@ -256,6 +259,7 @@ class _BilledModel(NamedTuple):
             self.model_name,
             cache_read_tokens=self.cache_read_tokens,
             cache_write_tokens=self.cache_write_tokens,
+            per_request=self.per_request,
         )
 
 
@@ -298,6 +302,8 @@ def _billed_summarizer(event: ChatAgentCompactionEventCreate) -> _BilledModel | 
         output_tokens=event.summarizer_tokens_output,
         cache_read_tokens=event.summarizer_cache_read_tokens or 0,
         cache_write_tokens=event.summarizer_cache_write_tokens or 0,
+        # A fold is one summarizer request (plain-text output, no tools).
+        per_request=True,
     )
 
 

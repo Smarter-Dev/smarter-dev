@@ -1,7 +1,8 @@
-"""Shape image bytes into what the OpenAI image reader accepts.
+"""Shape image bytes into what the image reader's model accepts.
 
-Images go to GPT-6 Luna (OpenAI Responses), which takes PNG, JPEG, WebP and
-GIF. Checked against the live API on 2026-09-24:
+Images go to Claude Haiku 5.5 (GPT-6 Luna until 2026-10-17, #199). Both take
+PNG, JPEG, WebP and GIF, and neither takes BMP. Checked against Luna's live API
+on 2026-09-24, and against Anthropic's documented formats for Claude:
 
 - BMP is refused outright (400 "does not represent a valid image"), so it is
   re-encoded as PNG.
@@ -70,7 +71,8 @@ MAX_DECODE_PIXELS = 1_000_000
 MAX_GIF_BYTES = 8 * 1024 * 1024
 MAX_GIF_COUNT = 500
 MAX_GIF_DECODE_PIXELS = 50_000_000
-# OpenAI first scales an image to fit 2048 x 2048; larger adds only bytes.
+# OpenAI first scaled an image to fit 2048 x 2048, and Claude scales anything
+# with a long edge over about 1568 px down itself; larger adds only bytes.
 MAX_SIDE = 2048
 # A JPEG over the send cap is decoded at 1/2 to 1/8 scale (``draft``), so its
 # header may be this large and still decode near 2048 px.

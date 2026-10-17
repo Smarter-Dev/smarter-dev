@@ -30,7 +30,8 @@ from smarter_dev.shared.observability import record_llm_failover
 
 logger = logging.getLogger(__name__)
 
-PRIMARY_MODEL_KEY = "gpt-6-luna"
+# Claude Haiku 5.5 since 2026-10-17 (#199), replacing GPT-6 Luna.
+PRIMARY_MODEL_KEY = "claude-haiku-5-5"
 # 3.8 Flash since 2026-09-24, when 3.5 Flash Lite left the catalog. Still a
 # different vendor from the primary, which is the point of a fallback.
 FALLBACK_MODEL_KEY = "gemini-3-8-flash"
@@ -85,7 +86,8 @@ def _build_agent(
         build_model_for(model),
         output_type=str,
         system_prompt=SYSTEM_PROMPT,
-        model_settings=model_settings_for(model, reasoning_level),
+        # One request per page: only the system prompt is worth caching.
+        model_settings=model_settings_for(model, reasoning_level, cache_messages=False),
     )
 
 
@@ -110,7 +112,7 @@ def get_web_summarizer_fallback_agent() -> Agent[None, str]:
 async def summarize_web_content(
     *, instruction: str, content: str, title: str, url: str
 ) -> str:
-    """Summarize with GPT-6 Luna, failing over loudly to Gemini 3.8 Flash."""
+    """Summarize with Claude Haiku 5.5, failing over loudly to Gemini 3.8 Flash."""
     agent = get_web_summarizer_agent()
     prompt = (
         f"URL: {url}\n"
@@ -123,7 +125,7 @@ async def summarize_web_content(
     except Exception as exc:
         log_exception(
             logger,
-            "WEB SUMMARIZER FAILOVER: GPT-6 Luna failed; using Gemini 3.8 "
+            "WEB SUMMARIZER FAILOVER: Claude Haiku 5.5 failed; using Gemini 3.8 "
             "Flash for url=%s title=%r",
             url_for_log(url),
             title,

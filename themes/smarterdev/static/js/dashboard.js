@@ -465,10 +465,10 @@
     const relevant = results.filter(function (r) { return r.relevant; }).length;
     if (step === 'planning') {
       if (state === 'waiting') return 'Waiting for a worker…';
-      if (state === 'active') return 'Luna is writing five searches…';
-      if (state === 'failed') return 'Luna couldn’t write the searches.';
-      if (state === 'done') return 'Luna wrote ' + plural(queries.length, 'search', 'searches');
-      return 'Luna writes five searches';
+      if (state === 'active') return 'Haiku is writing five searches…';
+      if (state === 'failed') return 'Haiku couldn’t write the searches.';
+      if (state === 'done') return 'Haiku wrote ' + plural(queries.length, 'search', 'searches');
+      return 'Haiku writes five searches';
     }
     if (step === 'searching') {
       const finished = queries.filter(function (q) { return q.status === 'done' || q.status === 'failed'; }).length;
@@ -481,13 +481,13 @@
     if (step === 'answering') {
       const reads = (search.answer && search.answer.reads) || [];
       const read = reads.filter(function (r) { return r.status === 'done'; }).length;
-      if (state === 'failed') return 'Luna couldn’t write an answer.';
-      if (state === 'done') return 'Luna read ' + plural(read, 'page') + ' and wrote an answer';
+      if (state === 'failed') return 'Haiku couldn’t write an answer.';
+      if (state === 'done') return 'Haiku read ' + plural(read, 'page') + ' and wrote an answer';
       if (state === 'active') {
-        if (search.answer && search.answer.status === 'writing') return 'Luna is writing the answer…';
-        return reads.length ? 'Luna is reading ' + plural(reads.length, 'page') + '…' : 'Luna is choosing pages to read…';
+        if (search.answer && search.answer.status === 'writing') return 'Haiku is writing the answer…';
+        return reads.length ? 'Haiku is reading ' + plural(reads.length, 'page') + '…' : 'Haiku is choosing pages to read…';
       }
-      return 'Luna reads the best pages and answers';
+      return 'Haiku reads the best pages and answers';
     }
     if (state === 'active') return 'Jev is ranking ' + plural(results.length, 'result') + '…';
     if (state === 'done') {
@@ -586,7 +586,7 @@
 
   // ── Answer ────────────────────────────────────────────
 
-  /** The answer panel: the pages Luna reads, then the answer as it streams.
+  /** The answer panel: the pages Haiku reads, then the answer as it streams.
       The HTML is rendered and sanitized by the worker. */
   function renderAnswer(node, search) {
     const panel = node.querySelector('[data-answer]');

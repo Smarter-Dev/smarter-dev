@@ -1,4 +1,4 @@
-"""Approve (or reject) an image prompt before it's generated (GPT-6 Luna).
+"""Approve (or reject) an image prompt before it's generated (Claude Haiku 5.5).
 
 The chat agent is told images are for technical explanation only, but the model
 that decides to call ``generate_image`` is the same one holding the whole
@@ -15,15 +15,21 @@ import os
 
 from pydantic import BaseModel, Field
 from pydantic_ai import Agent
-from pydantic_ai.models.openai import OpenAIResponsesModel
-from pydantic_ai.models.openai import OpenAIResponsesModelSettings
-from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.models import Model
+
+from smarter_dev.shared.model_catalog import CatalogModel
+from smarter_dev.shared.model_catalog import ReasoningLevel
+from smarter_dev.shared.model_router import agent_retries_for
+from smarter_dev.shared.model_router import build_model_for
+from smarter_dev.shared.model_catalog import catalog_model_for_id
+from smarter_dev.shared.model_router import model_settings_for
 
 logger = logging.getLogger(__name__)
 
-# GPT-6 Luna since 2026-09-24, replacing Gemini 3.1 Flash Lite. An OpenAI wire
-# id, served by OpenAI directly.
-DEFAULT_MODEL = "gpt-6-luna"
+# Claude Haiku 5.5 since 2026-10-17 (#199), replacing GPT-6 Luna (which had
+# replaced Gemini 3.1 Flash Lite on 2026-09-24). A catalog wire id, routed by
+# the model router; the verdict comes back as native structured output.
+DEFAULT_MODEL = "claude-haiku-5-5"
 MODEL_ENV_VAR = "IMAGE_REVIEWER_MODEL"
 
 SYSTEM_PROMPT = """\
@@ -94,22 +100,28 @@ class ImagePromptDecision(BaseModel):
 _reviewer_agent: Agent[None, ImagePromptDecision] | None = None
 
 
-def _build_model() -> OpenAIResponsesModel:
-    model_id = os.getenv(MODEL_ENV_VAR, DEFAULT_MODEL)
-    return OpenAIResponsesModel(
-        model_id, provider=OpenAIProvider(api_key=os.getenv("OPENAI_API_KEY") or "")
-    )
+def _reviewer_model() -> CatalogModel:
+    return catalog_model_for_id(os.getenv(MODEL_ENV_VAR, DEFAULT_MODEL))
+
+
+def _build_model() -> Model:
+    return build_model_for(_reviewer_model())
 
 
 def get_image_prompt_reviewer() -> Agent[None, ImagePromptDecision]:
     """Return the singleton image-prompt reviewer agent, building it on first use."""
     global _reviewer_agent
     if _reviewer_agent is None:
+        model = _reviewer_model()
         _reviewer_agent = Agent(
             _build_model(),
             output_type=ImagePromptDecision,
             system_prompt=SYSTEM_PROMPT,
-            model_settings=OpenAIResponsesModelSettings(openai_reasoning_effort="low"),
+            # One request per prompt: the policy above is the cached prefix.
+            model_settings=model_settings_for(
+                model, ReasoningLevel.LOW, cache_messages=False
+            ),
+            retries=agent_retries_for(model),
         )
     return _reviewer_agent
 

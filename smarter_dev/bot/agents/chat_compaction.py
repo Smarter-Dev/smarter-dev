@@ -4,7 +4,7 @@ Registered on the ``ChatAgent`` as a ``history_processor``. Pydantic AI
 invokes this before every model call. When folding the oldest turns into
 a summary is *economically* worth it (see below), they're rendered to a
 transcript and summarised into a single running-summary message by
-GPT-6 Luna; the most recent ~``KEEP_RECENT_CHARS`` of turns stay verbatim.
+Claude Haiku 5.5; the most recent ~``KEEP_RECENT_CHARS`` of turns stay verbatim.
 
 The fold decision is a cost model, not a fixed threshold. Providers cache
 prompt prefixes for a few minutes; re-reading a cached prefix costs ~10%
@@ -106,7 +106,10 @@ TRANSCRIPT_TOOL_CLAMP = 1_500
 
 COMPACTED_PREFIX = "[compacted history]"
 
-DEFAULT_COMPACT_MODEL = "gpt-6-luna"
+# Claude Haiku 5.5 since 2026-10-17 (#199); chat itself stays on GPT-6 Luna.
+# Haiku bills 5x on a prompt over 100,000 tokens, but a fold triggers by
+# HARD_FOLD_TOKENS at the latest, so its prompt normally stays far below that.
+DEFAULT_COMPACT_MODEL = "claude-haiku-5-5"
 COMPACT_MODEL_ENV_VAR = "CHAT_AGENT_COMPACT_MODEL"
 # The summarizer runs at fixed low reasoning; persisted with each compaction
 # event so the dashboard can attribute its spend.
@@ -118,8 +121,9 @@ DEFAULT_CHAT_MODEL = "gpt-6-luna"
 
 # $/Mtok (input, cached_input, output), matched by id prefix. Cached rate
 # defaults to 10% of input when the provider hasn't published one.
-# "gpt-6-luna" (direct OpenAI) is the default. The GPT-5.6 rows stay for an
-# env pin of a retired id: "openai/gpt-5.6-luna" is 5.6 Luna on the OpenRouter
+# "gpt-6-luna" (direct OpenAI) is the chat default and "claude-haiku-5-5"
+# (direct Anthropic, below its 100K tier) the compactor's. The GPT-5.6 rows
+# stay for an env pin of a retired id: "openai/gpt-5.6-luna" is 5.6 Luna on the OpenRouter
 # route, "gpt-5.6-luna" the direct-OpenAI id at OpenAI's own rates.
 _PRICES: dict[str, tuple[float, float, float]] = {
     "gemini-3.1-flash-lite": (0.25, 0.025, 1.50),
@@ -131,6 +135,7 @@ _PRICES: dict[str, tuple[float, float, float]] = {
     "gpt-6-sol": (2.00, 0.20, 10.00),
     "gpt-6.1-sol": (2.00, 0.10, 10.00),
     "gpt-5.4-nano": (0.20, 0.02, 1.25),
+    "claude-haiku-5-5": (0.10, 0.01, 0.50),
 }
 _DEFAULT_PRICES = (0.50, 0.05, 2.00)
 
@@ -289,8 +294,9 @@ def get_summarizer_agent() -> Agent[None, str]:
             build_model_for(catalog_model),
             output_type=str,
             system_prompt=_SUMMARIZER_PROMPT.format(max_chars=MAX_SUMMARY_CHARS),
+            # One request per fold, and the transcript is never sent twice.
             model_settings=model_settings_for(
-                catalog_model, SUMMARIZER_REASONING_LEVEL
+                catalog_model, SUMMARIZER_REASONING_LEVEL, cache_messages=False
             ),
         )
     return _summarizer_agent

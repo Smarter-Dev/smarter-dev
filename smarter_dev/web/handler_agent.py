@@ -9,7 +9,8 @@ and decides what (if anything) to emit. Two shapes:
   agent that reads two pages leaves the script one read.
 - ``has_tools=False`` — a pure text transform: prompt in, plaintext out, no tools.
 
-Model: GPT-6 Luna by default. A budget cap raised inside a tool propagates
+Model: Claude Haiku 5.5 by default (GPT-6 Luna until 2026-10-17, #199),
+overridable with ``HANDLER_AGENT_MODEL``. A budget cap raised inside a tool propagates
 out of ``agent.run`` and stops the fire loud.
 """
 
@@ -24,10 +25,11 @@ from typing import Any
 import httpx
 from pydantic_ai import Agent
 from pydantic_ai import RunContext
-from pydantic_ai.models import Model
 
-from smarter_dev.shared.model_catalog import MODEL_CATALOG
+from smarter_dev.shared.model_catalog import CatalogModel
+from smarter_dev.shared.model_catalog import catalog_model_for_id
 from smarter_dev.shared.model_router import build_model_for
+from smarter_dev.shared.model_router import model_settings_for
 from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.handler_budget import HandlerBudget
 from smarter_dev.web.media_read import read_url
@@ -35,7 +37,7 @@ from smarter_dev.web.research_tools import brave_search
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "gpt-6-luna"
+DEFAULT_MODEL = "claude-haiku-5-5"
 MODEL_ENV_VAR = "HANDLER_AGENT_MODEL"
 
 _GATHER_PROMPT = (
@@ -62,14 +64,14 @@ class _GatherDeps:
         self.budget = budget
 
 
-def _build_model() -> Model:
+def _catalog_model() -> CatalogModel:
     model_id = os.getenv(MODEL_ENV_VAR, DEFAULT_MODEL)
-    catalog_model = next(
-        (model for model in MODEL_CATALOG if model.model_id == model_id), None
-    )
-    if catalog_model is None:
-        raise RuntimeError(f"Handler agent model is not in the catalog: {model_id}")
-    return build_model_for(catalog_model)
+    try:
+        return catalog_model_for_id(model_id)
+    except ValueError:
+        raise RuntimeError(
+            f"Handler agent model is not in the catalog: {model_id}"
+        ) from None
 
 
 async def _web_search(ctx: RunContext[_GatherDeps], query: str) -> list[dict[str, str]]:
@@ -100,11 +102,15 @@ _agents: dict[bool, Agent] = {}
 
 def _get_agent(has_tools: bool) -> Agent:
     if has_tools not in _agents:
+        catalog_model = _catalog_model()
         _agents[has_tools] = Agent(
-            _build_model(),
+            build_model_for(catalog_model),
             deps_type=_GatherDeps,
             system_prompt=_GATHER_PROMPT if has_tools else _TRANSFORM_PROMPT,
             tools=[_web_search, _web_read] if has_tools else [],
+            # The model's default reasoning. A transform is one request, so
+            # only the tool-using agent keeps the message cache breakpoint.
+            model_settings=model_settings_for(catalog_model, cache_messages=has_tools),
         )
     return _agents[has_tools]
 

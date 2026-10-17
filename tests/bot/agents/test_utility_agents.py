@@ -18,9 +18,9 @@ from pydantic_ai.messages import ModelMessage
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.messages import UserPromptPart
+from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.function import AgentInfo
 from pydantic_ai.models.function import FunctionModel
-from pydantic_ai.models.openai import OpenAIResponsesModel
 
 from smarter_dev.bot.agents import help_agent
 from smarter_dev.bot.agents import tldr_agent
@@ -30,9 +30,9 @@ from smarter_dev.bot.plugins import timeout
 
 
 @pytest.fixture(autouse=True)
-def _openai_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def _model_key(monkeypatch: pytest.MonkeyPatch) -> None:
     # The real model is built before the test swaps in its FunctionModel.
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 
 
 def _prompt(messages: list[ModelMessage]) -> str:
@@ -59,11 +59,19 @@ def _failing(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
 # -- the routed model ----------------------------------------------------------
 
 
-def test_the_utility_model_is_gpt_6_luna_through_the_router() -> None:
+def test_the_utility_model_is_claude_haiku_5_5_through_the_router() -> None:
     agent = utility_model.build_utility_agent(str, "be brief")
 
-    assert isinstance(agent.model, OpenAIResponsesModel)
-    assert agent.model.model_name == "gpt-6-luna"
+    assert isinstance(agent.model, AnthropicModel)
+    assert agent.model.model_name == "claude-haiku-5-5"
+    # The catalog's medium effort, as Luna ran at; one request, so no message
+    # cache breakpoint; and the output tool is never forced.
+    assert agent.model_settings == {
+        "anthropic_thinking": {"type": "adaptive"},
+        "anthropic_effort": "medium",
+        "anthropic_cache_messages": False,
+    }
+    assert agent.model.profile["supports_forced_tool_choice"] is False
 
 
 def test_render_inputs_labels_each_field() -> None:

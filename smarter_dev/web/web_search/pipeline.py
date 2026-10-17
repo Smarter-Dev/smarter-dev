@@ -1,8 +1,8 @@
 """Run one dashboard web search, saving and announcing every stage.
 
-Luna writes five queries, Brave runs each one, and Jev ranks the unique
-results. When Luna judged that the request needs a written answer, the ranked
-results go out first and Luna then reads pages and writes the answer. After each step the row is committed and then the owner is notified
+Claude Haiku 5.5 writes five queries, Brave runs each one, and Jev ranks the
+unique results. When the model judged that the request needs a written answer,
+the ranked results go out first and the model then reads pages and writes the answer. After each step the row is committed and then the owner is notified
 with the whole snapshot, so the browser can render any event on its own and a
 reload paints from the row.
 """
@@ -129,13 +129,15 @@ async def search(run) -> str:
     await run.update(start)
 
     try:
-        planned, needs_answer, luna_usage = await plan_queries(request)
+        planned, needs_answer, query_usage = await plan_queries(request)
     except Exception as error:  # noqa: BLE001 - shown to the user as a failed search
         # Type only, here and below: error text can echo the request or the
         # Brave URL, which carries the query.
-        logger.error("Web search %s: Luna failed (%s)", run_id, type(error).__name__)
+        logger.error(
+            "Web search %s: the query model failed (%s)", run_id, type(error).__name__
+        )
         return await _fail(run, f"Couldn't plan the searches ({type(error).__name__}).")
-    await run.record(lambda row: [metering.luna_row(row, luna_usage)])
+    await run.record(lambda row: [metering.model_row(row, query_usage)])
 
     def searching(row: WebSearchRun) -> None:
         row.status = "searching"
@@ -144,7 +146,7 @@ async def search(run) -> str:
             for item in planned
         ]
         row.needs_answer = needs_answer
-        row.usage = {**row.usage, "queries": luna_usage}
+        row.usage = {**row.usage, "queries": query_usage}
 
     await run.update(searching)
 

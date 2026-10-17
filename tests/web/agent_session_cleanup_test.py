@@ -76,9 +76,9 @@ async def skrift_runtime(test_engine, db_session, monkeypatch):
         agents=AgentsConfig(default_subagent_dispatch="inline"), workers=WorkersConfig()
     )
     monkeypatch.setattr("skrift.config.get_settings", lambda: settings)
-    # Building an agent's configured OpenAI model needs a key; TestModel
+    # Building an agent's configured Claude model needs a key; TestModel
     # replaces that model for every run, so the key is never used.
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-never-sent")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-never-sent")
 
     @asynccontextmanager
     async def session_context():
@@ -231,7 +231,9 @@ async def test_a_title_leaves_nothing_of_the_question_in_the_worker_tables(
     cost = await db_session.scalar(select(UsageCostRow))
     assert (cost.product_mode, cost.operation_type) == ("resources", "resource_title")
     assert (cost.user_id, cost.conversation_id) == (asker, conversation)
-    assert cost.model_id == "gpt-6-luna"
+    # Skrift records the model *name* ("anthropic:claude-haiku-5-5"), which the
+    # ledger matches back to the catalog's direct Anthropic entry.
+    assert (cost.provider_key, cost.model_id) == ("anthropic", "claude-haiku-5-5")
     assert cost.input_tokens > 0 and cost.output_tokens > 0
     assert _QUESTION not in str(cost.details)
 

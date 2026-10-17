@@ -1,6 +1,6 @@
-"""GPT-6 Luna title generator for `agent_conversations`.
+"""Claude Haiku 5.5 title generator for `agent_conversations`.
 
-Cheap, one-shot Skrift agent (GPT-6 Luna by default) that turns a
+Cheap, one-shot Skrift agent (Claude Haiku 5.5 by default) that turns a
 user's first question into a short, topic-style title. Used by the
 ``/v2/api/resources/ask`` endpoint via a fire-and-forget background task — it
 patches ``agent_conversations.title`` and notifies the owner via Skrift's
@@ -21,14 +21,18 @@ from uuid import uuid4
 
 import skrift
 
+from smarter_dev.shared.model_catalog import ReasoningLevel
+from smarter_dev.shared.model_catalog import catalog_model_for_id
+from smarter_dev.shared.skrift_models import agent_model_name
+from smarter_dev.shared.skrift_models import agent_model_settings
 from smarter_dev.web.agent_session_cleanup import UsageOwner
 from smarter_dev.web.agent_session_cleanup import forget_agent_sessions
 
 logger = logging.getLogger(__name__)
 
-# GPT-6 Luna since 2026-09-24, replacing Gemini 3.1 Flash Lite. An OpenAI wire
-# id, served by OpenAI directly.
-TITLE_MODEL = os.getenv("TITLE_AGENT_MODEL", "gpt-6-luna")
+# Claude Haiku 5.5 since 2026-10-17 (#199), replacing GPT-6 Luna (which had
+# replaced Gemini 3.1 Flash Lite on 2026-09-24). A catalog wire id.
+TITLE_MODEL = os.getenv("TITLE_AGENT_MODEL", "claude-haiku-5-5")
 AGENT_NAME = "smarter.dev.title.generator"
 
 _SYSTEM_PROMPT = """\
@@ -48,16 +52,19 @@ Reply with the title alone. No labels, no explanation.
 _TITLE_MAX_LEN = 80
 
 
-# Model is a plain pydantic-ai model id string ("openai-responses:" = the OpenAI
-# Responses API via OPENAI_API_KEY from the env). Passing a string (not a
-# Model object) keeps this module import free of pydantic-ai; Skrift
-# materializes the real model lazily in the worker that runs the agent. A title
-# needs no deliberation, so reasoning runs low.
+# Model is a plain pydantic-ai model name ("anthropic:claude-haiku-5-5"), see
+# shared.skrift_models. Passing a string (not a Model object) keeps this module
+# import free of pydantic-ai; Skrift materializes the real model lazily in the
+# worker that runs the agent. A title needs no deliberation, so effort runs
+# low, and it is one request, so the message cache breakpoint is skipped.
+_title_model = catalog_model_for_id(TITLE_MODEL)
 title_agent = skrift.Agent(
-    f"openai-responses:{TITLE_MODEL}",
+    agent_model_name(_title_model),
     name=AGENT_NAME,
     system_prompt=_SYSTEM_PROMPT,
-    model_settings={"openai_reasoning_effort": "low"},
+    model_settings=agent_model_settings(
+        _title_model, ReasoningLevel.LOW, cache_messages=False
+    ),
 )
 
 
@@ -91,7 +98,7 @@ def _sanitize(raw: str) -> str:
 async def generate_title(
     question: str, *, actor: str | None = None, conversation_id: UUID | None = None
 ) -> str | None:
-    """Generate a title for ``question`` via GPT-6 Luna. ``None`` on failure.
+    """Generate a title for ``question`` via Claude Haiku 5.5. ``None`` on failure.
 
     ``actor`` is the user id this run should be attributed to. Pass the
     asker's UUID as a string: the run's tokens are recorded in

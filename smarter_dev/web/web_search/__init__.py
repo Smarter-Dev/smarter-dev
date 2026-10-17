@@ -1,4 +1,4 @@
-"""The dashboard's web search: Luna writes queries, Brave runs them, Jev ranks.
+"""The dashboard's web search: Haiku writes queries, Brave runs them, Jev ranks.
 
 ``snapshot`` is the only module the web pod imports; it has no model
 dependencies. ``pipeline`` and the modules it uses run in the agent-worker

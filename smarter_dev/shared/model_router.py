@@ -47,6 +47,7 @@ from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ModelProvider
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import resolve_reasoning_level
+from smarter_dev.shared.skrift_models import ANTHROPIC_CACHE_TTL
 
 ANTHROPIC_API_KEY_ENV_VAR = "ANTHROPIC_API_KEY"
 # The name the key was handed over under in ``.env``; ANTHROPIC_API_KEY wins.
@@ -72,36 +73,25 @@ UNFORCED_OUTPUT_RETRIES = 3
 # history would be written again. One TTL everywhere also means every cache
 # write is a 1-hour write, which is the rate llm_pricing charges direct Claude
 # writes at; add a 5-minute breakpoint here and that pricing has to split.
-ANTHROPIC_CACHE_TTL = "1h"
+# ANTHROPIC_CACHE_TTL is defined in skrift_models, which the Skrift agents'
+# settings share without importing pydantic-ai.
 ANTHROPIC_CACHE_SETTINGS = AnthropicModelSettings(
     anthropic_cache_tool_definitions=ANTHROPIC_CACHE_TTL,
     anthropic_cache_instructions=ANTHROPIC_CACHE_TTL,
     anthropic_cache_messages=ANTHROPIC_CACHE_TTL,
 )
+# A single-request call (a title, an image read, a summary, a compaction) never
+# reads its own messages back, so a message breakpoint would only bill its whole
+# prompt at the 1-hour write rate, twice the input rate. Such agents pass
+# ``cache_messages=False`` to model_settings_for; the tool and system-prompt
+# breakpoints stay, since that prefix is shared by every call of the agent.
+ANTHROPIC_NO_MESSAGE_CACHE = AnthropicModelSettings(anthropic_cache_messages=False)
 
 
 def anthropic_api_key() -> str:
     """The direct Claude API key: ANTHROPIC_API_KEY, else CLAUDE_API_KEY."""
     return (
         os.getenv(ANTHROPIC_API_KEY_ENV_VAR) or os.getenv(CLAUDE_API_KEY_ENV_VAR) or ""
-    )
-
-
-def direct_claude_model(model_id: str) -> CatalogModel:
-    """An ad-hoc catalog entry for a Claude id the catalog does not list.
-
-    Config can name any Claude id (``PROACTIVE_AGENT_MODEL=claude-opus-5-5``);
-    this routes it through the same direct-Anthropic branch as the catalog's
-    Claude models, keys, caching and all. Forced tool choice stays off: every
-    current Claude generation either rejects it or does not need it.
-    """
-    return CatalogModel(
-        key=model_id,
-        label=model_id,
-        family="Claude",
-        provider=ModelProvider.ANTHROPIC,
-        model_id=model_id,
-        supports_forced_tool_choice=False,
     )
 
 
@@ -209,7 +199,10 @@ def agent_retries_for(model: CatalogModel | None) -> AgentRetries | None:
 
 
 def model_settings_for(
-    model: CatalogModel, reasoning_level: ReasoningLevel | None = None
+    model: CatalogModel,
+    reasoning_level: ReasoningLevel | None = None,
+    *,
+    cache_messages: bool = True,
 ) -> ModelSettings | None:
     """Return per-provider model settings for ``model`` at ``reasoning_level``.
 
@@ -223,11 +216,17 @@ def model_settings_for(
     constraints (see :class:`OpenRouterRouting`) have to ride on every request
     whether or not a reasoning level applies, because dropping them means
     OpenRouter silently picks by price and price tracks quantization.
+
+    ``cache_messages=False`` is for single-request agents: on a direct Claude
+    model it drops the message cache breakpoint (ANTHROPIC_NO_MESSAGE_CACHE).
+    Other providers ignore it.
     """
     effective = resolve_reasoning_level(model, reasoning_level)
     if model.provider is ModelProvider.OPENROUTER:
         return _openrouter_settings(model, effective)
     if effective is None:
+        if model.provider is ModelProvider.ANTHROPIC and not cache_messages:
+            return AnthropicModelSettings(**ANTHROPIC_NO_MESSAGE_CACHE)
         return None
     if model.provider is ModelProvider.GOOGLE:
         # Gemini's thinking_level enum is upper-cased on the wire.
@@ -242,10 +241,13 @@ def model_settings_for(
         # effort), and no catalog Claude ladder offers NONE to map onto it.
         # The cache breakpoints ride on the model itself (build_model_for), so
         # these settings merge over them rather than replacing them.
-        return AnthropicModelSettings(
+        settings = AnthropicModelSettings(
             anthropic_thinking={"type": "adaptive"},
             anthropic_effort=effective.value,
         )
+        if not cache_messages:
+            settings.update(ANTHROPIC_NO_MESSAGE_CACHE)
+        return settings
     return OpenAIChatModelSettings(openai_reasoning_effort=effective.value)
 
 

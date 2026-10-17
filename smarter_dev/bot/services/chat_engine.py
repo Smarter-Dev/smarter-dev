@@ -1039,11 +1039,11 @@ class ChannelEngine:
             # A reply too long to send in two messages gets rewritten before
             # dispatch, otherwise ``split_for_discord`` would silently drop its
             # tail. Single-stage first asks the agent to shorten its own draft
-            # (context-aware), falling back to a Luna summary, then truncation;
+            # (context-aware), falling back to a Haiku summary, then truncation;
             # the shorten re-run spends chat-model tokens, so they're folded into
             # this turn's metering and persisted totals. Two-stage's tool-less
             # primary WRITER has no ``response``-shaped agent to re-run, so it goes
-            # straight to the Luna summarizer (then truncation) — Luna's spend is
+            # straight to the summarizer (then truncation) — its spend is
             # logged but not metered, so it adds no extra tokens.
             fit_extra_input = 0
             fit_extra_output = 0

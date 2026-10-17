@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
+import pytest
+
 from smarter_dev.shared.model_catalog import ALL_REASONING_LEVELS
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import MODEL_FAMILIES
+from smarter_dev.shared.model_catalog import RETIRED_SUCCESSORS
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ModelProvider
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import catalog_by_key
+from smarter_dev.shared.model_catalog import catalog_model_for_id
 from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.shared.model_catalog import is_valid_model_key
 from smarter_dev.shared.model_catalog import model_vendor
 from smarter_dev.shared.model_catalog import models_by_family
 from smarter_dev.shared.model_catalog import parse_reasoning_level
 from smarter_dev.shared.model_catalog import resolve_reasoning_level
-from smarter_dev.shared.model_catalog import RETIRED_SUCCESSORS
 from smarter_dev.shared.model_catalog import successor_key
 
 # Open-weights families. These no longer map to a single provider: the same
@@ -179,18 +182,31 @@ def test_retired_keys_resolve_to_a_live_model_in_one_step():
         assert get_model(successor_key(retired)) is not None, retired
 
 
-def test_proactive_agent_model_resolves_through_the_catalog():
-    """The reason 3.8 Flash is in the catalog at all.
+def test_proactive_agent_model_is_attributed_to_anthropic():
+    """Opus 5.5 is not in the catalog, but its spend still files under Anthropic.
 
-    ``_normalized_model_identity`` walks MODEL_CATALOG to attribute a wire id to
-    a provider when writing usage rows. Without an entry the proactive agent's
-    whole spend files under provider "unknown" in the invoice breakdown.
+    ``_normalized_model_identity`` attributes a wire id to a provider when
+    writing usage rows; a bare ``claude-*`` id is the direct Anthropic API.
+    Without that the proactive agent's whole spend would file under provider
+    "unknown" in the invoice breakdown.
     """
     from smarter_dev.bot.plugins.proactive import DEFAULT_AGENT_MODEL
+    from smarter_dev.web.api_native.chat_conversations import _normalized_model_identity
 
-    matches = [m for m in MODEL_CATALOG if m.model_id == DEFAULT_AGENT_MODEL]
-    assert len(matches) == 1
-    assert matches[0].provider is ModelProvider.GOOGLE
+    assert DEFAULT_AGENT_MODEL == "claude-opus-5-5"
+    assert not [m for m in MODEL_CATALOG if m.model_id == DEFAULT_AGENT_MODEL]
+    assert catalog_model_for_id(DEFAULT_AGENT_MODEL).provider is ModelProvider.ANTHROPIC
+    assert _normalized_model_identity(DEFAULT_AGENT_MODEL) == (
+        "anthropic",
+        "claude-opus-5-5",
+        "claude-opus-5-5",
+    )
+
+
+def test_catalog_model_for_id_refuses_an_unknown_non_claude_id():
+    assert catalog_model_for_id("claude-haiku-5-5") is get_model("claude-haiku-5-5")
+    with pytest.raises(ValueError):
+        catalog_model_for_id("gpt-6-lunar")
 
 
 def test_gpt_6_lineup_is_selectable():

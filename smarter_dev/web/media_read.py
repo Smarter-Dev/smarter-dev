@@ -1,9 +1,9 @@
 """Worker-tier URL reader for handlers — any URL: image, audio, PDF, or web page.
 
 Mirrors the chat agent's ``web_read`` capability but kept self-contained in the
-web/worker tier (no bot-package imports): images are described by GPT-6 Luna
+web/worker tier (no bot-package imports): images are described by Claude Haiku 5.5
 (BMP re-encoded and animated GIFs sampled by ``shared.media_images``, as in the
-bot) and audio by Gemini 3.8 Flash (the OpenAI Responses API takes no audio input), PDFs
+bot) and audio by Gemini 3.8 Flash (Claude takes no audio input), PDFs
 are extracted with pdfplumber in a bounded child process, everything else is read as page text via Jina.
 
 Media describes (the expensive part — a model call) are cached in Redis keyed on
@@ -140,26 +140,30 @@ async def _fetch_bytes(
         return None
 
 
-# Images moved from Gemini 3.1 Flash Lite to GPT-6 Luna on 2026-09-24; audio
-# went to Gemini 3.8 Flash instead, since Luna cannot take it. Same env vars and
-# defaults as the bot's ``media_reader``.
+# Images moved from Gemini 3.1 Flash Lite to GPT-6 Luna on 2026-09-24 and to
+# Claude Haiku 5.5 on 2026-10-17 (#199); audio went to Gemini 3.8 Flash, since
+# neither takes it. Same env vars and defaults as the bot's ``media_reader``.
 def _get_media_agent():
     global _media_agent
     if _media_agent is None:
         from pydantic_ai import Agent
-        from pydantic_ai.models.openai import OpenAIResponsesModel
-        from pydantic_ai.models.openai import OpenAIResponsesModelSettings
-        from pydantic_ai.providers.openai import OpenAIProvider
 
-        model_id = os.getenv("MEDIA_READER_MODEL", "gpt-6-luna")
+        from smarter_dev.shared.model_catalog import ReasoningLevel
+        from smarter_dev.shared.model_catalog import catalog_model_for_id
+        from smarter_dev.shared.model_router import build_model_for
+        from smarter_dev.shared.model_router import model_settings_for
+
+        model = catalog_model_for_id(
+            os.getenv("MEDIA_READER_MODEL", "claude-haiku-5-5")
+        )
         _media_agent = Agent(
-            OpenAIResponsesModel(
-                model_id,
-                provider=OpenAIProvider(api_key=os.getenv("OPENAI_API_KEY") or ""),
-            ),
+            build_model_for(model),
             output_type=str,
             system_prompt=_MEDIA_SYSTEM_PROMPT,
-            model_settings=OpenAIResponsesModelSettings(openai_reasoning_effort="low"),
+            # One request per image; the image itself is never re-read.
+            model_settings=model_settings_for(
+                model, ReasoningLevel.LOW, cache_messages=False
+            ),
         )
     return _media_agent
 

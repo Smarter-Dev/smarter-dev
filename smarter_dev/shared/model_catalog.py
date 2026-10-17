@@ -810,6 +810,40 @@ def get_model(key: str) -> CatalogModel | None:
     return _MODEL_BY_KEY.get(key)
 
 
+def direct_claude_model(model_id: str) -> CatalogModel:
+    """An ad-hoc catalog entry for a Claude id the catalog does not list.
+
+    Config can name any Claude id (``PROACTIVE_AGENT_MODEL=claude-opus-5-5``);
+    this routes it through the same direct-Anthropic branch as the catalog's
+    Claude models, keys, caching and all. Forced tool choice stays off: every
+    current Claude generation either rejects it or does not need it.
+    """
+    return CatalogModel(
+        key=model_id,
+        label=model_id,
+        family="Claude",
+        provider=ModelProvider.ANTHROPIC,
+        model_id=model_id,
+        supports_forced_tool_choice=False,
+    )
+
+
+def catalog_model_for_id(model_id: str) -> CatalogModel:
+    """The catalog model a configured wire id (or key) names.
+
+    For agents whose model is set by an env var or setting. A Claude id the
+    catalog does not list gets :func:`direct_claude_model`. Anything else
+    raises ``ValueError``, so a mistyped override fails on first use rather
+    than reaching some provider by guesswork.
+    """
+    for model in MODEL_CATALOG:
+        if model_id in (model.model_id, model.key):
+            return model
+    if model_id.startswith("claude-"):
+        return direct_claude_model(model_id)
+    raise ValueError(f"Model is not in the catalog: {model_id!r}")
+
+
 def is_valid_model_key(key: str) -> bool:
     """Return whether ``key`` names a catalog model."""
     return key in _MODEL_BY_KEY
