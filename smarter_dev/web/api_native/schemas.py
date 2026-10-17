@@ -1056,6 +1056,9 @@ class ProactiveUsageEntry(BaseAPIModel):
     input_tokens: int = Field(0, ge=0)
     output_tokens: int = Field(0, ge=0)
     cache_read_tokens: int = Field(0, ge=0)
+    # Like cache_read_tokens, a subset of input_tokens. Workers from before
+    # #188 never send it; Claude's prompt-cache writes are the only ones.
+    cache_write_tokens: int = Field(0, ge=0)
 
 
 class ProactiveWakeUsageWrite(BaseAPIModel):

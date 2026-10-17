@@ -114,6 +114,13 @@ _PROVIDER_BY_FLAT_MODEL_ID.setdefault("laguna-s-2.1-free", "opencode_zen")
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("claude-opus-5", "anthropic")
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("claude-sonnet-5", "anthropic")
 _PROVIDER_BY_FLAT_MODEL_ID.setdefault("claude-haiku-4-5", "anthropic")
+# Sonnet and Haiku 5.5 moved from OpenRouter to the direct Anthropic API on
+# 2026-10-17 (#188); the catalog now maps their direct ids, and rows written
+# before the move still carry the OpenRouter ids.
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("anthropic/claude-sonnet-5.5", "openrouter")
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("anthropic/claude-haiku-5.5", "openrouter")
+# Not in the chat catalog, but the proactive agent can run it from config.
+_PROVIDER_BY_FLAT_MODEL_ID.setdefault("claude-opus-5-5", "anthropic")
 
 # Provider key -> human display label.
 PROVIDER_LABELS: dict[str, str] = {

@@ -212,6 +212,49 @@ class TestPostProactiveWakeUsage:
 
         session_mock.commit.assert_awaited_once()
 
+    def test_claude_cache_writes_are_stored_and_priced(
+        self, proactive_settings_client: TestClient, session_mock: AsyncMock
+    ):
+        # The proactive agent on Opus 5.5 (#188): writes ride in the entry
+        # and are priced at the 1-hour rate, inside input_tokens.
+        session_mock.scalar.return_value = None
+        payload = _usage_payload(
+            entries=[
+                {
+                    "model_id": "claude-opus-5-5",
+                    "operation": "agent",
+                    "input_tokens": 1_000_000,
+                    "output_tokens": 100_000,
+                    "cache_read_tokens": 500_000,
+                    "cache_write_tokens": 200_000,
+                }
+            ]
+        )
+
+        response = proactive_settings_client.post(_url() + "/usage", json=payload)
+
+        assert response.status_code == 200
+        (row,) = [call.args[0] for call in session_mock.add.call_args_list]
+        assert row.provider_key == "anthropic"
+        assert row.model_id == "claude-opus-5-5"
+        assert row.cache_read_tokens == 500_000
+        assert row.cache_write_tokens == 200_000
+        # 300K at $4 + 500K reads at $0.20 + 200K writes at $8 + 100K out at $20.
+        assert row.cost_usd == Decimal("4.90")
+
+    def test_workers_without_cache_writes_still_record(
+        self, proactive_settings_client: TestClient, session_mock: AsyncMock
+    ):
+        session_mock.scalar.return_value = None
+
+        response = proactive_settings_client.post(
+            _url() + "/usage", json=_usage_payload()
+        )
+
+        assert response.status_code == 200
+        rows = [call.args[0] for call in session_mock.add.call_args_list]
+        assert {row.cache_write_tokens for row in rows} == {0}
+
     def test_replayed_wake_records_nothing(
         self, proactive_settings_client: TestClient, session_mock: AsyncMock
     ):

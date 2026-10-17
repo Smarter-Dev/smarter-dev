@@ -645,6 +645,36 @@ def test_claude_haiku_5_5_bills_under_openrouter():
     assert provider_key_from_model_name("claude-haiku-4-5") == "anthropic"
 
 
+def test_direct_claude_bills_under_anthropic():
+    # Sonnet and Haiku 5.5 moved to the direct API on 2026-10-17 (#188); rows
+    # written before keep the OpenRouter line (tests above). The proactive
+    # agent's Opus 5.5 is not in the catalog but is a direct Claude id too.
+    from smarter_dev.web.api_native.chat_conversations import _normalized_model_identity
+
+    for wire, key in (
+        ("claude-sonnet-5-5", "claude-sonnet-5-5"),
+        ("claude-haiku-5-5", "claude-haiku-5-5"),
+    ):
+        assert provider_key_from_model_name(wire) == "anthropic"
+        assert _normalized_model_identity(f"anthropic:{wire}") == (
+            "anthropic",
+            key,
+            wire,
+        )
+    assert provider_key_from_model_name("claude-opus-5-5") == "anthropic"
+    assert _normalized_model_identity("claude-opus-5-5") == (
+        "anthropic",
+        "claude-opus-5-5",
+        "claude-opus-5-5",
+    )
+    # A flat OpenRouter id from before the move, as reconcile sees it.
+    assert _normalized_model_identity("anthropic/claude-haiku-5.5") == (
+        "openrouter",
+        "claude-haiku-5-5",
+        "anthropic/claude-haiku-5.5",
+    )
+
+
 def test_mistral_large_4_bills_under_openrouter():
     from smarter_dev.web.api_native.chat_conversations import _normalized_model_identity
 

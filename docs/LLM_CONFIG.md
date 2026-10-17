@@ -46,9 +46,22 @@ Discord voice messages use Gemini TTS directly:
 ```bash
 OPENAI_API_KEY=your_openai_api_key        # OpenAI catalogue models
 GEMINI_API_KEY=your_gemini_api_key        # Gemini models and voice TTS
-ANTHROPIC_API_KEY=your_anthropic_api_key  # Anthropic models
+ANTHROPIC_API_KEY=your_anthropic_api_key  # Claude models (CLAUDE_API_KEY also read)
 OPENROUTER_API_KEY=your_openrouter_key    # OpenRouter models
 ```
+
+### Claude
+
+Every Claude model calls Anthropic's API directly: the catalogue's Sonnet 5.5
+and Haiku 5.5, and any other `claude-*` id named in config (for example a
+`PROACTIVE_AGENT_MODEL` of `claude-opus-5-5`). The key is `ANTHROPIC_API_KEY`,
+with `CLAUDE_API_KEY` as a fallback name; in Kubernetes it comes from
+`smarter-dev-secrets` key `anthropic-api-key`.
+
+Requests cache the tool definitions, the system prompt and the newest message
+with 1-hour breakpoints (`ANTHROPIC_CACHE_SETTINGS` in
+`smarter_dev/shared/model_router.py`). Because every breakpoint is 1-hour,
+`llm_pricing` prices every direct Claude cache write at the 1-hour rate.
 
 ## Comparing models for moderation
 

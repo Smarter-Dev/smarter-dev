@@ -24,6 +24,8 @@ from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.messages import ToolReturnPart
 from pydantic_ai.messages import UserPromptPart
 
+from smarter_dev.shared.claude_thinking import strip_claude_thinking
+
 T = TypeVar("T")
 KEEP_RECENT_CHARS = 20_000
 TRANSCRIPT_TOOL_CLAMP = 1_500
@@ -247,7 +249,9 @@ async def compact_model_history(
         marker = ModelRequest(
             parts=[UserPromptPart(content=f"[compacted history]\n{summary}")]
         )
-        compacted: list[ModelMessage] = [marker, *kept]
+        # The kept turns' Claude thinking was signed with the folded turns in
+        # its prefix; behind the marker it would no longer match.
+        compacted: list[ModelMessage] = [marker, *strip_claude_thinking(kept)]
         # Require provider-message serialization to round-trip before replacing
         # canonical history.
         payload = ModelMessagesTypeAdapter.dump_json(compacted)

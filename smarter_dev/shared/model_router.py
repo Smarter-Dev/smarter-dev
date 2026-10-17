@@ -4,7 +4,9 @@ Routing by :class:`~smarter_dev.shared.model_catalog.ModelProvider`:
 
 - ``GOOGLE``       -> ``GoogleModel`` + ``GoogleProvider`` (Gemini keys).
 - ``OPENAI``       -> ``OpenAIResponsesModel`` + ``OpenAIProvider`` (OpenAI key).
-- ``ANTHROPIC``    -> ``AnthropicModel`` + ``AnthropicProvider`` (Anthropic key).
+- ``ANTHROPIC``    -> ``AnthropicModel`` + ``AnthropicProvider`` (Anthropic key,
+  ``ANTHROPIC_API_KEY`` or ``CLAUDE_API_KEY``), with 1-hour prompt caching on
+  the tool definitions, the system prompt and the newest message.
 - ``OPENROUTER``   -> ``OpenAIChatModel`` + ``OpenRouterProvider``.
 - ``DIGITALOCEAN`` -> ``OpenAIChatModel`` pointed at DO's OpenAI-compatible
   serverless-inference Chat Completions endpoint. DO exposes
@@ -31,6 +33,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.openai import OpenAIChatModelSettings
 from pydantic_ai.models.openai import OpenAIResponsesModel
 from pydantic_ai.models.openai import OpenAIResponsesModelSettings
+from pydantic_ai.profiles import ModelProfile
 from pydantic_ai.profiles import merge_profile
 from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.anthropic import AnthropicProvider
@@ -45,6 +48,9 @@ from smarter_dev.shared.model_catalog import ModelProvider
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import resolve_reasoning_level
 
+ANTHROPIC_API_KEY_ENV_VAR = "ANTHROPIC_API_KEY"
+# The name the key was handed over under in ``.env``; ANTHROPIC_API_KEY wins.
+CLAUDE_API_KEY_ENV_VAR = "CLAUDE_API_KEY"
 DIGITALOCEAN_API_KEY_ENV_VAR = "DIGITALOCEAN_INFERENCE_API_KEY"
 OPENROUTER_API_KEY_ENV_VAR = "OPENROUTER_API_KEY"
 OPENROUTER_API_KEY_LEGACY_ENV_VAR = "OPEN_ROUTER"
@@ -55,6 +61,48 @@ OPENCODE_ZEN_API_KEY_ENV_VAR = "OPENCODE_ZEN_API_KEY"
 # plain text; pydantic-ai spends one output retry re-prompting it for the tool
 # call. The default budget is one, so a second slip would fail the turn.
 UNFORCED_OUTPUT_RETRIES = 3
+
+# Prompt caching for every direct Claude request: three of Anthropic's four
+# breakpoints, all on the 1-hour TTL. The tool definitions and the system
+# prompt are the stable prefix. The third breakpoint sits on the newest message,
+# so the next request in a tool loop, and the next turn of an append-only
+# conversation, reads the whole history back at the cache-read rate. Chat
+# replies and proactive wakes routinely come more than five minutes apart, so
+# a 5-minute message entry would usually expire before it is read and the
+# history would be written again. One TTL everywhere also means every cache
+# write is a 1-hour write, which is the rate llm_pricing charges direct Claude
+# writes at; add a 5-minute breakpoint here and that pricing has to split.
+ANTHROPIC_CACHE_TTL = "1h"
+ANTHROPIC_CACHE_SETTINGS = AnthropicModelSettings(
+    anthropic_cache_tool_definitions=ANTHROPIC_CACHE_TTL,
+    anthropic_cache_instructions=ANTHROPIC_CACHE_TTL,
+    anthropic_cache_messages=ANTHROPIC_CACHE_TTL,
+)
+
+
+def anthropic_api_key() -> str:
+    """The direct Claude API key: ANTHROPIC_API_KEY, else CLAUDE_API_KEY."""
+    return (
+        os.getenv(ANTHROPIC_API_KEY_ENV_VAR) or os.getenv(CLAUDE_API_KEY_ENV_VAR) or ""
+    )
+
+
+def direct_claude_model(model_id: str) -> CatalogModel:
+    """An ad-hoc catalog entry for a Claude id the catalog does not list.
+
+    Config can name any Claude id (``PROACTIVE_AGENT_MODEL=claude-opus-5-5``);
+    this routes it through the same direct-Anthropic branch as the catalog's
+    Claude models, keys, caching and all. Forced tool choice stays off: every
+    current Claude generation either rejects it or does not need it.
+    """
+    return CatalogModel(
+        key=model_id,
+        label=model_id,
+        family="Claude",
+        provider=ModelProvider.ANTHROPIC,
+        model_id=model_id,
+        supports_forced_tool_choice=False,
+    )
 
 
 def build_model_for(model: CatalogModel) -> Model:
@@ -68,9 +116,20 @@ def build_model_for(model: CatalogModel) -> Model:
             provider=OpenAIProvider(api_key=os.getenv("OPENAI_API_KEY") or ""),
         )
     if model.provider is ModelProvider.ANTHROPIC:
+        provider = AnthropicProvider(api_key=anthropic_api_key())
+        profile = provider.model_profile(model.model_id)
+        if not model.supports_forced_tool_choice:
+            # The 5.5 generation answers tool_choice "any"/"tool" with a 400.
+            # pydantic-ai's own profile knows this for Opus and Sonnet 5.5;
+            # the catalog flag makes it hold for every model that sets it.
+            profile = merge_profile(
+                profile, ModelProfile(supports_forced_tool_choice=False)
+            )
         return AnthropicModel(
             model.model_id,
-            provider=AnthropicProvider(api_key=os.getenv("ANTHROPIC_API_KEY") or ""),
+            provider=provider,
+            profile=profile,
+            settings=ANTHROPIC_CACHE_SETTINGS,
         )
     if model.provider is ModelProvider.OPENROUTER:
         api_key = os.getenv(OPENROUTER_API_KEY_ENV_VAR) or os.getenv(
@@ -178,7 +237,11 @@ def model_settings_for(
     if model.provider is ModelProvider.OPENAI:
         return OpenAIResponsesModelSettings(openai_reasoning_effort=effective.value)
     if model.provider is ModelProvider.ANTHROPIC:
-        # Claude 4.6+ thinking is adaptive; effort tunes its depth.
+        # Claude 4.6+ thinking is adaptive; effort tunes its depth. Never send
+        # {"type": "disabled"}: the 5.5 generation rejects it (Opus 5.5 at any
+        # effort), and no catalog Claude ladder offers NONE to map onto it.
+        # The cache breakpoints ride on the model itself (build_model_for), so
+        # these settings merge over them rather than replacing them.
         return AnthropicModelSettings(
             anthropic_thinking={"type": "adaptive"},
             anthropic_effort=effective.value,

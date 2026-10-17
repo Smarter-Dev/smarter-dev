@@ -25,11 +25,9 @@ _DO_MODEL = get_model("qwen3-5-397b")
 _DO_REASONING_MODEL = get_model("qwen3-5-397b")
 _GOOGLE_MODEL = get_model("gemini-3-8-flash")
 _OPENAI_MODEL = get_model("gpt-6-1-sol")
-# Claude left the catalog on 2026-09-03, but ``build_model_for`` and
-# ``model_settings_for`` still carry an Anthropic branch — the provider stays
-# part of the routing vocabulary, and a future Claude entry must not have to
-# rediscover it. Built here rather than looked up so the branch keeps its
-# coverage without a catalog entry to back it.
+# A forced-tool-choice Claude entry, so the Anthropic branch's flag handling is
+# covered on both sides; the catalog's own Claude models (Sonnet and Haiku 5.5)
+# both opt out.
 _ANTHROPIC_MODEL = CatalogModel(
     key="claude-sonnet-5",
     label="Claude Sonnet 5",
@@ -154,15 +152,74 @@ def test_openai_model_reads_openai_key(monkeypatch):
 
 def test_anthropic_model_reads_anthropic_key(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "ant-secret")
+    monkeypatch.setenv("CLAUDE_API_KEY", "claude-secret")
     with (
         patch.object(model_router, "AnthropicModel") as anthropic_model,
         patch.object(model_router, "AnthropicProvider") as provider,
     ):
+        provider.return_value.model_profile.return_value = {"x": 1}
         build_model_for(_ANTHROPIC_MODEL)
     provider.assert_called_once_with(api_key="ant-secret")
     anthropic_model.assert_called_once_with(
-        _ANTHROPIC_MODEL.model_id, provider=provider.return_value
+        _ANTHROPIC_MODEL.model_id,
+        provider=provider.return_value,
+        profile={"x": 1},
+        settings=model_router.ANTHROPIC_CACHE_SETTINGS,
     )
+
+
+def test_anthropic_key_falls_back_to_claude_api_key(monkeypatch):
+    # The key was handed over in .env as CLAUDE_API_KEY.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("CLAUDE_API_KEY", "claude-secret")
+    with (
+        patch.object(model_router, "AnthropicModel"),
+        patch.object(model_router, "AnthropicProvider") as provider,
+    ):
+        build_model_for(_ANTHROPIC_MODEL)
+    provider.assert_called_once_with(api_key="claude-secret")
+
+
+def test_claude_cache_breakpoints_are_all_one_hour():
+    # llm_pricing prices every direct Claude cache write at the 1-hour rate,
+    # which is only right while every breakpoint sent is a 1-hour one.
+    assert model_router.ANTHROPIC_CACHE_SETTINGS == {
+        "anthropic_cache_tool_definitions": "1h",
+        "anthropic_cache_instructions": "1h",
+        "anthropic_cache_messages": "1h",
+    }
+
+
+@pytest.mark.parametrize("key", ["claude-sonnet-5-5", "claude-haiku-5-5"])
+def test_catalog_claude_models_never_force_a_tool(monkeypatch, key):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ant-secret")
+    model = build_model_for(get_model(key))
+    assert model.model_name == key
+    assert model.profile["supports_forced_tool_choice"] is False
+    # pydantic-ai's own 5.5 profile stays underneath the override.
+    assert model.profile["anthropic_binds_thinking_blocks"] is True
+    assert model.profile["anthropic_disallows_sampling_settings"] is True
+    assert model.settings == model_router.ANTHROPIC_CACHE_SETTINGS
+
+
+def test_a_forced_claude_entry_keeps_the_library_profile(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ant-secret")
+    model = build_model_for(_ANTHROPIC_MODEL)
+    assert model.profile.get("supports_forced_tool_choice", True) is True
+
+
+def test_claude_ids_outside_the_catalog_route_direct(monkeypatch):
+    # e.g. PROACTIVE_AGENT_MODEL=claude-opus-5-5 in the embedded bot.
+    from pydantic_ai.models.anthropic import AnthropicModel
+
+    from smarter_dev.bot.agents.chat_agent import build_agent_model
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ant-secret")
+    model = build_agent_model("claude-opus-5-5")
+    assert isinstance(model, AnthropicModel)
+    assert model.model_name == "claude-opus-5-5"
+    assert model.profile["supports_forced_tool_choice"] is False
+    assert model.settings == model_router.ANTHROPIC_CACHE_SETTINGS
 
 
 def test_opencode_zen_threads_base_url_and_key(monkeypatch):
@@ -231,17 +288,25 @@ def test_only_the_claude_5_5_models_opt_out_of_forced_tool_choice():
 
 
 def test_unforced_openrouter_model_offers_the_output_tool_on_auto(monkeypatch):
-    # OpenRouter's Sonnet 5.5 endpoints reject tool_choice "required", so the
-    # output tool is offered on "auto". Everything else OpenRouter's own
-    # profile sets for Claude stays.
+    # An OpenRouter model whose endpoints reject tool_choice "required" is
+    # offered its output tool on "auto"; the rest of OpenRouter's profile for
+    # the id stays.
     monkeypatch.setenv("OPENROUTER_API_KEY", "or-secret")
-    claude = build_model_for(get_model("claude-sonnet-5-5"))
-    assert claude.profile["openai_supports_tool_choice_required"] is False
+    unforced = CatalogModel(
+        key="claude-unforced",
+        label="Claude Unforced",
+        family="Claude",
+        provider=ModelProvider.OPENROUTER,
+        model_id="anthropic/claude-sonnet-5.5",
+        supports_forced_tool_choice=False,
+    )
+    claude = build_model_for(unforced)
+    assert claude.profile["supports_forced_tool_choice"] is False
     assert claude.profile["openai_chat_thinking_field"] == "reasoning"
     assert claude.profile["openrouter_supports_cache_control"] is True
     # Grok keeps OpenRouter's default profile.
     grok = build_model_for(_OPENROUTER_REASONING_MODEL)
-    assert "openai_supports_tool_choice_required" not in grok.profile
+    assert grok.profile.get("supports_forced_tool_choice", True) is True
 
 
 def test_forced_tool_choice_follows_the_flag_not_the_vendor(monkeypatch):
@@ -269,230 +334,67 @@ def test_agent_retries_only_widen_for_unforced_models():
     assert model_router.agent_retries_for(None) is None
 
 
-async def test_openrouter_claude_request_on_the_wire(monkeypatch):
-    """One structured-output request to Sonnet 5.5, as OpenRouter receives it.
+@pytest.mark.parametrize(
+    ("key", "effort"), [("claude-sonnet-5-5", "high"), ("claude-haiku-5-5", "medium")]
+)
+async def test_claude_request_on_the_wire(monkeypatch, key, effort):
+    """One structured-output request to a catalog Claude, as Anthropic gets it.
 
     Unmocked below the HTTP transport, so the router, the catalog settings and
     pydantic-ai's request building are all real.
     """
-    import json
-
-    import httpx
     from pydantic import BaseModel
     from pydantic_ai import Agent
+
+    from tests.claude_wire import cache_controls
+    from tests.claude_wire import serve
+    from tests.claude_wire import text_reply
 
     class Reply(BaseModel):
         text: str
 
-    sent: list[dict] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        sent.append(json.loads(request.content))
-        return httpx.Response(
-            200,
-            json={
-                "id": "gen-1",
-                "object": "chat.completion",
-                "created": 1790618686,
-                "model": "anthropic/claude-sonnet-5.5",
-                "choices": [
-                    {
-                        "index": 0,
-                        "finish_reason": "tool_calls",
-                        "message": {
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": [
-                                {
-                                    "id": "call_1",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "final_result",
-                                        "arguments": '{"text": "hi"}',
-                                    },
-                                }
-                            ],
-                        },
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": 10,
-                    "completion_tokens": 5,
-                    "total_tokens": 15,
-                },
-            },
-        )
-
-    real_provider = model_router.OpenRouterProvider
-
-    def provider_with_transport(**kwargs):
-        return real_provider(
-            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
-            **kwargs,
-        )
-
-    monkeypatch.setenv("OPENROUTER_API_KEY", "or-secret")
-    monkeypatch.setattr(model_router, "OpenRouterProvider", provider_with_transport)
-    model = get_model("claude-sonnet-5-5")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "ant-secret")
+    server = serve(
+        monkeypatch,
+        text_reply('{"text": "hi"}', cache_read=900, cache_write_1h=2_100),
+    )
+    model = get_model(key)
     agent = Agent(
         build_model_for(model),
         output_type=Reply,
+        system_prompt="You are terse.",
         model_settings=model_settings_for(model),
     )
+
+    @agent.tool_plain
+    def lookup(term: str) -> str:
+        """Look a term up."""
+        return term
+
     result = await agent.run("hello")
 
     assert result.output == Reply(text="hi")
-    (body,) = sent
-    assert body["model"] == "anthropic/claude-sonnet-5.5"
-    assert body["tool_choice"] == "auto"
-    assert body["reasoning_effort"] == "high"
-    assert body["provider"] == {"max_price": {"prompt": 2.0, "completion": 10.0}}
-
-
-async def test_openrouter_claude_haiku_5_5_request_on_the_wire(monkeypatch):
-    """One structured-output request to Haiku 5.5, as OpenRouter receives it.
-
-    Same shape as Sonnet 5.5: the output tool on "auto", medium effort by
-    default, a ceiling at the $0.10/$0.50 base tier, and no sampling
-    parameters (Haiku 5.5 rejects temperature, top_p and top_k).
-    """
-    import json
-
-    import httpx
-    from pydantic import BaseModel
-    from pydantic_ai import Agent
-
-    class Reply(BaseModel):
-        text: str
-
-    sent: list[dict] = []
-
-    def handler(request: httpx.Request) -> httpx.Response:
-        sent.append(json.loads(request.content))
-        return httpx.Response(
-            200,
-            json={
-                "id": "gen-1",
-                "object": "chat.completion",
-                "created": 1791403200,
-                "model": "anthropic/claude-haiku-5.5",
-                "choices": [
-                    {
-                        "index": 0,
-                        "finish_reason": "tool_calls",
-                        "message": {
-                            "role": "assistant",
-                            "content": None,
-                            "tool_calls": [
-                                {
-                                    "id": "call_1",
-                                    "type": "function",
-                                    "function": {
-                                        "name": "final_result",
-                                        "arguments": '{"text": "hi"}',
-                                    },
-                                }
-                            ],
-                        },
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": 10,
-                    "completion_tokens": 5,
-                    "total_tokens": 15,
-                },
-            },
-        )
-
-    real_provider = model_router.OpenRouterProvider
-
-    def provider_with_transport(**kwargs):
-        return real_provider(
-            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
-            **kwargs,
-        )
-
-    monkeypatch.setenv("OPENROUTER_API_KEY", "or-secret")
-    monkeypatch.setattr(model_router, "OpenRouterProvider", provider_with_transport)
-    model = get_model("claude-haiku-5-5")
-    agent = Agent(
-        build_model_for(model),
-        output_type=Reply,
-        model_settings=model_settings_for(model),
-    )
-    result = await agent.run("hello")
-
-    assert result.output == Reply(text="hi")
-    (body,) = sent
-    assert body["model"] == "anthropic/claude-haiku-5.5"
-    assert body["tool_choice"] == "auto"
-    assert body["reasoning_effort"] == "medium"
-    assert body["provider"] == {"max_price": {"prompt": 0.1, "completion": 0.5}}
+    assert server.keys == ["ant-secret"]
+    (body,) = server.requests
+    assert body["model"] == key
+    # The 5.5 generation answers "any"/"tool" with a 400. With thinking on,
+    # pydantic-ai asks for the structured output natively instead of through
+    # an output tool, so no tool is ever forced.
+    assert body.get("tool_choice", {"type": "auto"})["type"] == "auto"
+    assert body["output_config"]["format"]["type"] == "json_schema"
+    assert body["thinking"] == {"type": "adaptive"}
+    assert body["output_config"]["effort"] == effort
     for sampling in ("temperature", "top_p", "top_k"):
         assert sampling not in body
-
-
-def test_openrouter_lists_claude_haiku_5_5_as_catalogued():
-    """The live OpenRouter listing agrees with the Haiku 5.5 entry.
-
-    Reads the public endpoints API (no key). Every endpoint the catalog's
-    ceiling admits must match the entry, the price row and the long-context
-    tier, and at least one must be admitted.
-    """
-    from decimal import Decimal
-
-    import httpx
-
-    from smarter_dev.web.llm_pricing import _LONG_CONTEXT_TIERS
-    from smarter_dev.web.llm_pricing import _OPENROUTER_PRICES
-
-    model = get_model("claude-haiku-5-5")
-    url = f"https://openrouter.ai/api/v1/models/{model.model_id}/endpoints"
-    response = httpx.get(url, timeout=10)
-    response.raise_for_status()
-
-    per_mtok = Decimal(1_000_000)
-    price = _OPENROUTER_PRICES[model.model_id]
-    ceiling = model.openrouter_routing
-    admitted = [
-        endpoint
-        for endpoint in response.json()["data"]["endpoints"]
-        if Decimal(endpoint["pricing"]["prompt"]) * per_mtok
-        <= Decimal(str(ceiling.max_price_input_mtok))
-        and Decimal(endpoint["pricing"]["completion"]) * per_mtok
-        <= Decimal(str(ceiling.max_price_output_mtok))
-    ]
-    assert admitted, f"no {model.model_id} endpoint is within the ceiling"
-    for endpoint in admitted:
-        name = endpoint["name"]
-        pricing = endpoint["pricing"]
-        assert endpoint["model_id"] == model.model_id, name
-        assert endpoint["context_length"] == model.context_window, name
-        assert endpoint["max_completion_tokens"] == model.max_output_tokens, name
-        assert endpoint["supports_tool_choice"]["required"] is False, name
-        assert "reasoning_effort" in endpoint["supported_parameters"], name
-        assert Decimal(pricing["prompt"]) * per_mtok == price.input_mtok, name
-        assert Decimal(pricing["completion"]) * per_mtok == price.output_mtok, name
-        assert (
-            Decimal(pricing["input_cache_read"]) * per_mtok == price.cache_read_mtok
-        ), name
-        assert (
-            Decimal(pricing["input_cache_write"]) * per_mtok == price.cache_write_mtok
-        ), name
-        (override,) = pricing["overrides"]
-        tier = _LONG_CONTEXT_TIERS[model.model_id]
-        assert override["min_prompt_tokens"] == tier.min_input_tokens, name
-        for key, base in (
-            ("prompt", price.input_mtok),
-            ("input_cache_read", price.cache_read_mtok),
-            ("input_cache_write", price.cache_write_mtok),
-        ):
-            expected = base * tier.input_multiplier
-            assert Decimal(override[key]) * per_mtok == expected, (name, key)
-        assert (
-            Decimal(override["completion"]) * per_mtok
-            == price.output_mtok * tier.output_multiplier
-        ), name
+    one_hour = {"type": "ephemeral", "ttl": "1h"}
+    assert body["tools"][-1]["cache_control"] == one_hour
+    assert body["system"][-1]["cache_control"] == one_hour
+    assert body["messages"][-1]["content"][-1]["cache_control"] == one_hour
+    assert cache_controls(body) == [one_hour] * 3
+    # Cache tokens are a subset of input_tokens, as llm_pricing expects.
+    assert result.usage.input_tokens == 10 + 900 + 2_100
+    assert result.usage.cache_read_tokens == 900
+    assert result.usage.cache_write_tokens == 2_100
 
 
 async def test_openrouter_mistral_large_4_request_on_the_wire(monkeypatch):

@@ -111,6 +111,15 @@ BOT_API_ADMIN_GUARDS = [
 ]
 
 
+# Wire ids a catalog model served under before it moved provider, so a row
+# reconciled or ingested late keeps the provider that actually billed it.
+_MOVED_WIRE_IDS: dict[str, tuple[str, str]] = {
+    # Sonnet and Haiku 5.5 left OpenRouter for the direct API on 2026-10-17.
+    "anthropic/claude-sonnet-5.5": ("openrouter", "claude-sonnet-5-5"),
+    "anthropic/claude-haiku-5.5": ("openrouter", "claude-haiku-5-5"),
+}
+
+
 def _normalized_model_identity(model_name: str | None) -> tuple[str, str, str]:
     """Best-effort provider/catalog identity for normalized Discord usage."""
     if not model_name:
@@ -119,9 +128,16 @@ def _normalized_model_identity(model_name: str | None) -> tuple[str, str, str]:
     if not wire:
         wire = model_name
         provider_hint = ""
+    if wire in _MOVED_WIRE_IDS:
+        provider, catalog_key = _MOVED_WIRE_IDS[wire]
+        return provider, catalog_key, wire
     for model in MODEL_CATALOG:
         if wire == model.model_id or wire.startswith(model.model_id):
             return model.provider.value, model.key, model.model_id
+    if not provider_hint and wire.startswith("claude-"):
+        # A Claude id outside the catalog, e.g. the proactive agent on Opus
+        # 5.5: every bare claude-* id is served by the direct Anthropic API.
+        provider_hint = "anthropic"
     provider = {
         "google-gla": "google",
         "openai": "openai",

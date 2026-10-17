@@ -713,3 +713,63 @@ async def test_leading_orphan_return_is_stripped(patched_summarise):
         for message in result
         for part in message.parts
     )
+
+
+def _claude(reply: str, *parts) -> ModelResponse:
+    from pydantic_ai.messages import ThinkingPart
+
+    return ModelResponse(
+        parts=[
+            ThinkingPart(content="t", signature="sig", provider_name="anthropic"),
+            *parts,
+            TextPart(content=reply),
+        ],
+        model_name="claude-sonnet-5-5",
+        provider_name="anthropic",
+    )
+
+
+def _thinking_count(messages) -> int:
+    from pydantic_ai.messages import ThinkingPart
+
+    return sum(isinstance(p, ThinkingPart) for m in messages for p in m.parts)
+
+
+@pytest.mark.asyncio
+async def test_kept_turns_lose_claude_thinking(patched_summarise):
+    """Claude thinking is signed against the prefix the fold just replaced."""
+    messages = [
+        _claude("ok") if isinstance(m, ModelResponse) else m for m in _long_history(6)
+    ] + _current_turn()
+
+    out = await compact_history(messages)
+
+    kept = out[1:-1]
+    assert kept, "the fold kept no prior turn"
+    assert _thinking_count(kept) == 0
+    assert all(m.parts for m in kept if isinstance(m, ModelResponse))
+    assert out[-1] is messages[-1]
+
+
+@pytest.mark.asyncio
+async def test_a_tool_round_in_flight_keeps_its_thinking(patched_summarise):
+    """Mid tool loop, the turn being answered goes back with its reasoning."""
+    history = [
+        _claude("ok") if isinstance(m, ModelResponse) else m for m in _long_history(6)
+    ]
+    in_flight = [
+        ModelRequest(parts=[UserPromptPart(content="search for it")]),
+        _claude("", ToolCallPart(tool_name="web_search", args="{}", tool_call_id="c1")),
+    ]
+    tool_result = [
+        ModelRequest(
+            parts=[
+                ToolReturnPart(tool_name="web_search", content="r", tool_call_id="c1")
+            ]
+        )
+    ]
+
+    out = await compact_history(history + in_flight + tool_result)
+
+    assert out[-3:] == in_flight + tool_result
+    assert _thinking_count(out[1:-3]) == 0

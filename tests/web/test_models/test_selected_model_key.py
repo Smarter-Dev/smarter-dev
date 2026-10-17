@@ -936,7 +936,8 @@ def test_haiku_5_5_admission_follows_the_chat_bot_opt_ins_revision():
 
     module = _load_migration("e7b3c5a9d2f1")
     assert module.down_revision == "9d2e6f4a8b17"
-    assert get_model(module._KEY).model_id == "anthropic/claude-haiku-5.5"
+    # Served direct by Anthropic since 2026-10-17 (#188), under the same key.
+    assert get_model(module._KEY).model_id == "claude-haiku-5-5"
     # The cost-tier peer bills the same $0.10/$0.50.
     assert get_model(module._PRICE_PEER) is not None
     assert module._KEY not in RETIRED_SUCCESSORS.values()

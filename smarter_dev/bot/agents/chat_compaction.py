@@ -73,6 +73,7 @@ from smarter_dev.bot.agents.model_router import build_model_for
 from smarter_dev.bot.agents.model_router import model_settings_for
 from smarter_dev.bot.privacy.attribution import ATTRIBUTION_MARK
 from smarter_dev.bot.privacy.attribution import chat_history_attributed
+from smarter_dev.shared.claude_thinking import strip_claude_thinking
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
@@ -606,4 +607,25 @@ async def compact_history(messages: list[ModelMessage]) -> list[ModelMessage]:
             UserPromptPart(content=summary.text),
         ]
     )
-    return [summary_request, *kept, *current]
+    return [summary_request, *_without_settled_claude_thinking(kept, current), *current]
+
+
+def _without_settled_claude_thinking(
+    kept: list[ModelMessage], current: list[ModelMessage]
+) -> list[ModelMessage]:
+    """Kept turns minus the Claude thinking the fold just invalidated.
+
+    Their blocks were signed with the folded turns in the prefix. A turn still
+    in flight (the current request carries tool results, not a new prompt)
+    keeps its thinking: Claude expects a tool round back with its reasoning,
+    and pydantic-ai's drop_block retry covers the changed prefix.
+    """
+    if any(_is_user_turn_start(message) for message in current):
+        return strip_claude_thinking(kept)
+    starts = [
+        index for index, message in enumerate(kept) if _is_user_turn_start(message)
+    ]
+    if not starts:
+        return kept
+    in_flight = starts[-1]
+    return [*strip_claude_thinking(kept[:in_flight]), *kept[in_flight:]]

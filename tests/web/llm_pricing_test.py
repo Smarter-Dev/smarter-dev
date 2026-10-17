@@ -424,18 +424,124 @@ class TestTypeSafePricing:
         assert ranking.INPUT_PRICE_PER_MILLION_USD == rate == 0.042
         assert address.INPUT_PRICE_PER_MILLION_USD == rate
 
-    def test_table_is_still_needed(self):
-        # genai-prices has no TypeSafe provider, so _patch_provider would drop
-        # these silently. If the library ever prices Jev, this fails so the
-        # local entry is checked against it rather than left to drift.
-        assert find_provider_by_id(llm_pricing._snapshot.providers, "typesafe") is None
-        known = {
-            model.id
-            for provider in llm_pricing._snapshot.providers
-            for model in provider.models
-            if model.id in llm_pricing._TYPESAFE_PRICES
-        }
-        assert known == set()
+    def test_table_agrees_with_the_library(self):
+        # genai-prices has priced Jev itself since 0.1.13. The local table
+        # stays because the search modules read the rate from it; this keeps
+        # the two from drifting apart.
+        library = find_provider_by_id(llm_pricing._snapshot.providers, "typesafe")
+        for model_id, price in llm_pricing._TYPESAFE_PRICES.items():
+            entry = library.find_model(model_id)
+            assert entry is not None, model_id
+            assert entry.prices.input_mtok == price.input_mtok, model_id
+            assert not entry.prices.output_mtok, model_id
+
+
+class TestAnthropicDirectPricing:
+    """The 5.5 generation on our own Claude key (#188).
+
+    Rates from https://platform.claude.com/docs/en/about-claude/pricing.
+    Cache tokens are a subset of input_tokens, and every write is priced at
+    the 1-hour rate because every breakpoint model_router sends is 1-hour.
+    """
+
+    def test_opus_5_5_is_4_and_20(self):
+        # genai-prices 0.1.7 fell through to Opus 5's $5/$25: $30 here.
+        assert calc_cost(1_000_000, 1_000_000, "claude-opus-5-5") == Decimal("24.00")
+        assert calc_cost(
+            1_000_000, 1_000_000, "anthropic:claude-opus-5-5"
+        ) == Decimal("24.00")
+
+    def test_opus_5_5_cache_rates(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=0,
+            cache_read_tokens=500_000,
+            cache_write_tokens=200_000,
+            model_name="claude-opus-5-5",
+        )
+        # 300K uncached at $4 + 500K reads at $0.20 + 200K 1-hour writes at $8.
+        assert cost == Decimal("2.90")
+
+    def test_sonnet_5_5_cache_rates(self):
+        cost = calc_session_cost(
+            input_tokens=1_000_000,
+            output_tokens=1_000_000,
+            cache_read_tokens=500_000,
+            cache_write_tokens=200_000,
+            model_name="anthropic:claude-sonnet-5-5",
+        )
+        # 300K at $2 + 500K reads at $0.10 + 200K writes at $4 + 1M out at $10.
+        assert cost == Decimal("11.45")
+
+    def test_haiku_5_5_cache_rates(self):
+        cost = calc_session_cost(
+            input_tokens=90_000,
+            output_tokens=10_000,
+            cache_read_tokens=50_000,
+            cache_write_tokens=20_000,
+            model_name="anthropic:claude-haiku-5-5",
+        )
+        # 20K at $0.10 + 50K reads at $0.01 + 20K writes at $0.20 + 10K out
+        # at $0.50.
+        assert cost == Decimal("0.0115")
+
+    def test_haiku_5_5_prompt_over_100k_is_5x_everything(self):
+        cost = calc_session_cost(
+            input_tokens=300_000,
+            output_tokens=1_000,
+            cache_read_tokens=100_000,
+            cache_write_tokens=100_000,
+            model_name="anthropic:claude-haiku-5-5",
+            per_request=True,
+        )
+        # 100K @ $0.50 + 100K reads @ $0.05 + 100K writes @ $1 + 1K out @ $2.50.
+        assert cost == Decimal("0.1575")
+
+    def test_haiku_5_5_tier_starts_over_100000_tokens(self):
+        # "over 100,000 tokens", where OpenRouter's override began at 100000.
+        assert long_context_tier("claude-haiku-5-5", 100_000) is None
+        assert long_context_tier("anthropic:claude-haiku-5-5", 100_001) is not None
+        assert long_context_tier("claude-sonnet-5-5", 900_000) is None
+        assert long_context_tier("claude-opus-5-5", 900_000) is None
+
+    def test_catalog_entries_price_direct(self):
+        sonnet = price_rates_for_model(get_model("claude-sonnet-5-5"))
+        assert (sonnet.input_mtok, sonnet.cache_read_mtok, sonnet.cache_write_mtok) == (
+            Decimal("2.00"),
+            Decimal("0.10"),
+            Decimal("4.00"),
+        )
+        haiku = price_rates_for_model(get_model("claude-haiku-5-5"))
+        assert haiku.cache_write_mtok == Decimal("0.20")
+
+    def test_rows_from_before_the_move_keep_openrouter_rates(self):
+        assert calc_cost(
+            0, 0, "anthropic/claude-sonnet-5.5", cache_read_tokens=0
+        ) == Decimal("0")
+        assert calc_session_cost(
+            1_000_000, 0, 1_000_000, 0, "anthropic/claude-sonnet-5.5"
+        ) == Decimal("0.20")
+
+    def test_cache_write_rate_matches_the_router_ttl(self):
+        from smarter_dev.shared.model_router import ANTHROPIC_CACHE_SETTINGS
+
+        assert set(ANTHROPIC_CACHE_SETTINGS.values()) == {"1h"}
+        for model_id, price in llm_pricing._ANTHROPIC_PRICES.items():
+            assert price.cache_write_mtok == 2 * price.input_mtok, model_id
+
+
+class TestGpt6StaysAheadOfTheLibrary:
+    """genai-prices prices GPT-6 Luna/Sol itself, tier built in, since 0.1.9."""
+
+    def test_turn_totals_stay_at_the_base_rate(self):
+        # A turn's total over 272K is not one request over 272K.
+        assert calc_cost(300_000, 0, "openai:gpt-6-luna") == Decimal("0.030")
+        assert calc_cost(300_000, 0, "gpt-6.1-sol") == Decimal("0.600")
+
+    def test_one_long_request_takes_the_tier_once(self):
+        assert calc_cost(
+            300_000, 0, "openai:gpt-6-luna", per_request=True
+        ) == Decimal("0.0600")
 
 
 class TestGooglePricing:
