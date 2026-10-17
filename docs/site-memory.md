@@ -86,6 +86,11 @@ account holding `site-service`: principal **service**, service name **site**,
 explicit scopes **site-memory** and, if needed, **site-privacy**. Store the raw
 key only in the site backend's secret store. See the [key runbook](v2/legacy-sunset/runbooks/01-rotate-bot-key.md#site-service-key).
 
+## Site search API
+
+See [site-search.md](site-search.md). It needs the **site-search** scope; keys
+minted before it receive 401 from those routes only.
+
 ## Site billing API
 
 All `/api/site/billing` routes require the same site service principal boundary

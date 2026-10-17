@@ -229,6 +229,8 @@ async def _answer(run, request: str, results: list[dict]) -> None:
                 for read in reads
             ],
             "html": answering.render(text, results) if text else "",
+            # The site renders the answer itself from Markdown as it streams.
+            "markdown": text,
         }
 
     async def progress(reads, text: str) -> None:
