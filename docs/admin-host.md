@@ -18,7 +18,7 @@ until the **At cutover** section runs.
 
 After the site memory API and privacy routes land, create a dedicated Skrift
 service user (for example `site@smarter.dev`) and assign it a role granting
-`site-memory`, `site-privacy` and `site-billing`. The owner's role and key scopes must both
+`site-memory`, `site-privacy`, `site-billing` and `site-search`. The owner's role and key scopes must both
 include these permissions, because Skrift intersects them when authorizing a
 request. The API also requires `service_name="site"` exactly. Skrift's
 `/admin/api-keys` **New Key** form cannot set the principal type or service
@@ -71,7 +71,7 @@ spec:
                           )
                           if owner is None:
                               raise RuntimeError("site key owner is missing")
-                          required = {"site-memory", "site-privacy", "site-billing"}
+                          required = {"site-memory", "site-privacy", "site-billing", "site-search"}
                           permissions = await get_user_permissions(session, str(owner.id))
                           if not required <= permissions.permissions:
                               raise RuntimeError("site key owner lacks required permissions")

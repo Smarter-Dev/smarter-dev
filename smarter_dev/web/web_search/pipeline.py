@@ -56,7 +56,9 @@ class _Run:
     async def update(self, change: Callable[[WebSearchRun], None]) -> dict:
         async with get_db_session_context() as session:
             run = await session.scalar(
-                select(WebSearchRun).where(WebSearchRun.id == self.run_id).with_for_update()
+                select(WebSearchRun)
+                .where(WebSearchRun.id == self.run_id)
+                .with_for_update()
             )
             change(run)
             run.version += 1
@@ -154,7 +156,10 @@ async def search(run) -> str:
                 hits = await brave.search(client, item["query"])
             except Exception as error:  # noqa: BLE001 - one failed query is not fatal
                 logger.warning(
-                    "Web search %s: Brave failed on query %d (%s)", run_id, index, _brave_failure(error)
+                    "Web search %s: Brave failed on query %d (%s)",
+                    run_id,
+                    index,
+                    _brave_failure(error),
                 )
                 await run.update(_set_query(index, status="failed", count=0))
                 continue
@@ -190,9 +195,18 @@ async def search(run) -> str:
 
     if judgments is not None:
         await run.record(lambda row: [metering.jev_row(row, jev_usage)])
-        ranked = [{**result, **judged} for result, judged in zip(results, judgments, strict=True)]
+        ranked = [
+            {**result, **judged}
+            for result, judged in zip(results, judgments, strict=True)
+        ]
         # The top pick leads, then the rest by score.
-        ranked.sort(key=lambda item: (not item["best"], -item["score"], -item["best_probability"]))
+        ranked.sort(
+            key=lambda item: (
+                not item["best"],
+                -item["score"],
+                -item["best_probability"],
+            )
+        )
     else:
         ranked = results
 
@@ -229,6 +243,8 @@ async def _answer(run, request: str, results: list[dict]) -> None:
                 for read in reads
             ],
             "html": answering.render(text, results) if text else "",
+            # The site renders the answer itself from Markdown as it streams.
+            "markdown": text,
         }
 
     async def progress(reads, text: str) -> None:
@@ -254,7 +270,9 @@ async def _answer(run, request: str, results: list[dict]) -> None:
             timeout=ANSWER_TIMEOUT_SECONDS,
         )
     except Exception as error:  # noqa: BLE001 - the results still stand without it
-        logger.error("Web search %s: answer failed (%s)", run.run_id, type(error).__name__)
+        logger.error(
+            "Web search %s: answer failed (%s)", run.run_id, type(error).__name__
+        )
 
         def failed(row: WebSearchRun) -> None:
             row.status = "complete"
