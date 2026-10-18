@@ -34,7 +34,9 @@ data:
   PROACTIVE_AGENT_SHADOW_GUILD_IDS: ""
   PROACTIVE_AGENT_EXTERNAL_GUILD_IDS: "733364234141827073,644299523686006834"
   PROACTIVE_AGENT_EMBEDDED_GUILD_IDS: ""
-  PROACTIVE_AGENT_MODEL: "gemini-3.8-flash"
+  # Claude Opus 5.5 on the direct Anthropic key since 2026-10-17 (#199); read by
+  # the bot's embedded guilds and the proactive-agent deployment alike.
+  PROACTIVE_AGENT_MODEL: "claude-opus-5-5"
   PROACTIVE_WATCHER_MODEL: "typesafe:jev-1.13.0"
   PROACTIVE_SKIM_MODEL: "z-ai/glm-5.3-flash"
 
@@ -51,12 +53,13 @@ data:
   MEDIA_SERVICE_URL: "http://smarter-dev-media:8080"
   MEDIA_REQUEST_TIMEOUT_SECONDS: "15"
 
-  # LLM Model Configuration. GPT-6 Luna from OpenAI directly (2026-09-24);
-  # 5.6 Luna's OpenRouter hop (and its fee) went with it. The agent vars are
-  # catalog wire ids.
+  # LLM Model Configuration. The agent vars are catalog wire ids. Chat runs on
+  # GPT-6 Luna from OpenAI directly (2026-09-24); everything else that ran on
+  # Luna, compaction included, moved to Claude Haiku 5.5 on the direct
+  # Anthropic key on 2026-10-17 (#199).
   CHAT_AGENT_MODEL: "gpt-6-luna"
-  CHAT_AGENT_COMPACT_MODEL: "gpt-6-luna"
-  HANDLER_AGENT_MODEL: "gpt-6-luna"
+  CHAT_AGENT_COMPACT_MODEL: "claude-haiku-5-5"
+  HANDLER_AGENT_MODEL: "claude-haiku-5-5"
 
   # Discord voice message configuration
   VOICE_TTS_MODEL: "gemini-2.5-flash-preview-tts"

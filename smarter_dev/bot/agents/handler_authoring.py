@@ -5,11 +5,11 @@ in the live user-interaction context — so a *triggered* execution, which runs 
 the worker, structurally has no path to this code. That is the "triggered
 executions can't author" invariant, enforced by where the code lives.
 
-Pipeline: the Author (member tier GPT-6 Luna; admin tier GPT-6.1 Sol at
+Pipeline: the Author (member tier Claude Haiku 5.5; admin tier GPT-6.1 Sol at
 high reasoning) sees the existing named handlers and returns a structured plan
 — edit one of them or create a new, named one — or marks the request
 infeasible; the host-side :mod:`~smarter_dev.web.handler_lint` rejects opaque
-blobs / dynamic execution; the Judge (member tier GPT-6 Luna; admin tier
+blobs / dynamic execution; the Judge (member tier Claude Haiku 5.5; admin tier
 GPT-6.1 Sol, with an optional second judge, any-reject-wins) reviews the script as inert
 data and APPROVEs or REJECTs. The author and judge callables are injectable so
 the orchestration is unit-testable without any model calls.
@@ -31,6 +31,7 @@ from pathlib import Path
 from pydantic import BaseModel
 from pydantic import Field
 from pydantic_ai import Agent
+from pydantic_ai import AgentRetries
 from pydantic_ai import RunContext
 from pydantic_ai.models import Model
 from pydantic_ai.models.google import GoogleModel
@@ -40,7 +41,10 @@ from pydantic_ai.settings import ModelSettings
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
+from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ReasoningLevel
+from smarter_dev.shared.model_catalog import direct_claude_model
+from smarter_dev.shared.model_router import agent_retries_for
 from smarter_dev.shared.model_router import build_model_for
 from smarter_dev.shared.model_router import model_settings_for
 from smarter_dev.web.handler_lint import lint_script
@@ -581,30 +585,45 @@ def _build_configured_model(model_id: str) -> Model:
     """Build a configured author/judge model, honoring the catalog's routing.
 
     These models are configured by wire id. A catalog id routes through the
-    shared model router (GPT-6.1 Sol, the admin author and judge default, is
-    served via OpenAI); anything else is assumed to be a Gemini id, matching the
-    member-tier author/judge defaults.
+    shared model router (Claude Haiku 5.5, the member author and judge default,
+    is served by Anthropic; GPT-6.1 Sol, the admin default, by OpenAI), as does
+    any other Claude id; anything else is assumed to be a Gemini id.
     """
-    catalog_model = next(
-        (model for model in MODEL_CATALOG if model.model_id == model_id), None
-    )
+    catalog_model = _handler_catalog_model(model_id)
     if catalog_model is not None:
         return build_model_for(catalog_model)
     return _build_google_model(model_id)
 
 
-def _handler_model_settings(
-    model_id: str, reasoning_level: ReasoningLevel
-) -> ModelSettings:
-    """Reasoning settings at ``reasoning_level`` in the model's own dialect."""
+def _handler_catalog_model(model_id: str) -> CatalogModel | None:
     catalog_model = next(
         (model for model in MODEL_CATALOG if model.model_id == model_id), None
     )
+    if catalog_model is None and model_id.startswith("claude-"):
+        return direct_claude_model(model_id)
+    return catalog_model
+
+
+def _handler_model_settings(
+    model_id: str, reasoning_level: ReasoningLevel, *, cache_messages: bool = True
+) -> ModelSettings:
+    """Reasoning settings at ``reasoning_level`` in the model's own dialect.
+
+    ``cache_messages=False`` for the judges, which answer in one request; the
+    authors keep the message breakpoint because their emoji tool can loop.
+    """
+    catalog_model = _handler_catalog_model(model_id)
     if catalog_model is not None:
-        settings = model_settings_for(catalog_model, reasoning_level)
+        settings = model_settings_for(
+            catalog_model, reasoning_level, cache_messages=cache_messages
+        )
         if settings is not None:
             return settings
     return _HANDLER_THINKING
+
+
+def _handler_retries(model_id: str) -> AgentRetries | None:
+    return agent_retries_for(_handler_catalog_model(model_id))
 
 
 # Member-tier author and judge both think at MEDIUM: writing a sandbox-correct
@@ -632,6 +651,7 @@ def _get_author_agent() -> Agent[_AuthorDeps, HandlerPlan]:
             model_settings=_handler_model_settings(
                 get_settings().handler_author_model, ReasoningLevel.MEDIUM
             ),
+            retries=_handler_retries(get_settings().handler_author_model),
         )
     return _author_agent
 
@@ -644,8 +664,11 @@ def _get_judge_agent() -> Agent[None, JudgeVerdict]:
             output_type=JudgeVerdict,
             system_prompt=JUDGE_PROMPT,
             model_settings=_handler_model_settings(
-                get_settings().handler_judge_model, ReasoningLevel.MEDIUM
+                get_settings().handler_judge_model,
+                ReasoningLevel.MEDIUM,
+                cache_messages=False,
             ),
+            retries=_handler_retries(get_settings().handler_judge_model),
         )
     return _judge_agent
 
@@ -866,6 +889,7 @@ def _get_admin_author_agent() -> Agent[_AdminAuthorDeps, AdminHandlerPlan]:
             model_settings=_handler_model_settings(
                 admin_author_model, ReasoningLevel.HIGH
             ),
+            retries=_handler_retries(admin_author_model),
         )
     return _admin_author_agent
 
@@ -876,7 +900,10 @@ def _get_admin_judge_agent(model_id: str) -> Agent[None, JudgeVerdict]:
             _build_configured_model(model_id),
             output_type=JudgeVerdict,
             system_prompt=ADMIN_JUDGE_PROMPT,
-            model_settings=_handler_model_settings(model_id, ReasoningLevel.MEDIUM),
+            model_settings=_handler_model_settings(
+                model_id, ReasoningLevel.MEDIUM, cache_messages=False
+            ),
+            retries=_handler_retries(model_id),
         )
     return _admin_judge_agents[model_id]
 

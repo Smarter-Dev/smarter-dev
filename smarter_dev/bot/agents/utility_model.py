@@ -6,6 +6,7 @@ They ran on DSPy until 2026-10, on the models named by ``LLM_FAST_MODEL`` and
 (forum, moderation) ``LLM_MEDIUM_MODEL``, both ``gpt-6-luna`` everywhere.
 They now run on pydantic-ai through the shared model router, so the catalog
 entry carries the provider, key and reasoning default like every other agent.
+Claude Haiku 5.5 since 2026-10-17 (#199).
 """
 
 from __future__ import annotations
@@ -17,13 +18,15 @@ from pydantic_ai.agent import AgentRunResult
 
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import get_model
+from smarter_dev.shared.model_router import agent_retries_for
 from smarter_dev.shared.model_router import build_model_for
 from smarter_dev.shared.model_router import model_settings_for
 
 # Catalog key that replaced LLM_FAST_MODEL and LLM_MEDIUM_MODEL. Served by
-# OpenAI directly at the catalog's default reasoning (medium), which is what
-# DSPy got by sending none.
-UTILITY_MODEL_KEY = "gpt-6-luna"
+# Anthropic directly at the catalog's default effort (medium), the level GPT-6
+# Luna ran these at before 2026-10-17. The output tool is never forced (the
+# catalog entry's supports_forced_tool_choice=False).
+UTILITY_MODEL_KEY = "claude-haiku-5-5"
 
 OutputT = TypeVar("OutputT")
 
@@ -36,15 +39,21 @@ def utility_catalog_model() -> CatalogModel:
 
 
 def build_utility_agent(
-    output_type: type[OutputT], instructions: str
+    output_type: type[OutputT], instructions: str, *, cache_messages: bool = False
 ) -> Agent[None, OutputT]:
-    """Return an agent on the utility model with typed ``output_type``."""
+    """Return an agent on the utility model with typed ``output_type``.
+
+    Most of these answer in one request, so the instructions are the only
+    cached prefix. ``cache_messages=True`` is for one that loops over tools
+    (moderation triage), where each request reads the last one's back.
+    """
     model = utility_catalog_model()
     return Agent(
         build_model_for(model),
         output_type=output_type,
         instructions=instructions,
-        model_settings=model_settings_for(model),
+        model_settings=model_settings_for(model, cache_messages=cache_messages),
+        retries=agent_retries_for(model),
     )
 
 

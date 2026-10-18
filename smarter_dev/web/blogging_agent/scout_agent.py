@@ -2,7 +2,7 @@
 
 Searches the web for current tech news, reads candidate pages via Jina,
 returns 2-3 ScoutTopic suggestions. Scout never sees raw page text — only
-GPT-6 Luna summaries (see ``summariser``).
+Claude Haiku 5.5 summaries (see ``summariser``).
 """
 
 from __future__ import annotations
@@ -17,6 +17,10 @@ from pydantic import BaseModel, Field
 from pydantic_ai import RunContext
 from skrift.agents.models import ResumeContext
 
+from smarter_dev.shared.model_catalog import ReasoningLevel
+from smarter_dev.shared.model_catalog import catalog_model_for_id
+from smarter_dev.shared.skrift_models import agent_model_name
+from smarter_dev.shared.skrift_models import agent_model_settings
 from smarter_dev.web.blogging_agent.cache import get_cache
 from smarter_dev.web.blogging_agent.summariser import summarise_news_page
 from smarter_dev.web.research_tools import brave_search, jina_read
@@ -25,9 +29,10 @@ from smarter_dev.web.research_tools import brave_search, jina_read
 # annotations via get_type_hints at materialization on the worker, so it must
 # be a real module global (pydantic-ai core only; providers stay worker-side).
 
-# GPT-6 Luna since 2026-09-24, replacing the Gemini 3 Flash preview (Zech:
-# "significantly cheaper"). OpenAI Responses API via OPENAI_API_KEY.
-SCOUT_MODEL = os.getenv("BLOGGING_SCOUT_MODEL", "gpt-6-luna")
+# Claude Haiku 5.5 since 2026-10-17 (#199), replacing GPT-6 Luna (which had
+# replaced the Gemini 3 Flash preview on 2026-09-24). A catalog wire id;
+# shared.skrift_models turns it into the model name and settings.
+SCOUT_MODEL = os.getenv("BLOGGING_SCOUT_MODEL", "claude-haiku-5-5")
 SCOUT_AGENT_NAME = "blogging.scout"
 _PROMPT = (Path(__file__).parent / "prompts" / "scout.md").read_text(
     encoding="utf-8"
@@ -85,11 +90,15 @@ def _build_deps(ctx: ResumeContext) -> ScoutDeps:
 
 
 scout_agent = skrift.Agent(
-    f"openai-responses:{SCOUT_MODEL}",
+    agent_model_name(catalog_model_for_id(SCOUT_MODEL)),
     name=SCOUT_AGENT_NAME,
     system_prompt=_PROMPT,
     output_type=ScoutOutput,
-    model_settings={"openai_reasoning_effort": "medium"},
+    model_settings=agent_model_settings(
+        catalog_model_for_id(SCOUT_MODEL),
+        ReasoningLevel.MEDIUM,
+        cache_messages=True,
+    ),
     deps_type=ScoutDeps,
     deps_factory=_build_deps,
 )
@@ -115,7 +124,7 @@ async def search_news(
 
 @scout_agent.tool
 async def read_news(ctx: RunContext[ScoutDeps], url: str) -> dict:
-    """Read a news page and return a 3-6 sentence GPT-6 Luna summary.
+    """Read a news page and return a 3-6 sentence Claude Haiku 5.5 summary.
 
     The raw page is cached per-URL for the duration of this run, so a
     repeat call returns the same summary without a network round-trip.

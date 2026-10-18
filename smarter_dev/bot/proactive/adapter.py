@@ -157,6 +157,13 @@ catching — call set_watch_instruction now with a TTL. Then finish with a
 one-sentence note on what you did and why."""
 
 
+# Token counts totaled across models. Cache writes come only from the agent's
+# Claude usage. A watcher entry never gets the key, not even as 0: watcher usage
+# crosses to the proactive-agent worker as a TokenUsage, which forbids extra
+# fields. Hence entry.get in the totals.
+_TOTALED = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
+
+
 def _merge_usage(usage_by_model: dict, model_id: str, usage: dict) -> None:
     entry = usage_by_model.setdefault(
         model_id,
@@ -341,14 +348,15 @@ class AgentConsumer:
         }
 
         totals = {
-            key: sum(entry[key] for entry in usage_by_model.values())
-            for key in ("input_tokens", "output_tokens", "cache_read_tokens")
+            key: sum(entry.get(key, 0) for entry in usage_by_model.values())
+            for key in _TOTALED
         }
         return ActivationResult(
             responses=list(actions.sent),
             input_tokens=totals["input_tokens"],
             output_tokens=totals["output_tokens"],
             cache_read_tokens=totals["cache_read_tokens"],
+            cache_write_tokens=totals["cache_write_tokens"],
             model_id=self.agent_model_id,
             reactions=tuple(actions.reactions),
             usage_by_model=usage_by_model,
@@ -392,18 +400,15 @@ class TwoPassAdapter:
         usage_by_model = await producer.produce(context)
         if not producer.wake_produced:
             totals = {
-                key: sum(entry[key] for entry in usage_by_model.values())
-                for key in (
-                    "input_tokens",
-                    "output_tokens",
-                    "cache_read_tokens",
-                )
+                key: sum(entry.get(key, 0) for entry in usage_by_model.values())
+                for key in _TOTALED
             }
             return ActivationResult(
                 responses=[],
                 input_tokens=totals["input_tokens"],
                 output_tokens=totals["output_tokens"],
                 cache_read_tokens=totals["cache_read_tokens"],
+                cache_write_tokens=totals["cache_write_tokens"],
                 model_id=self.agent_model_id,
                 usage_by_model=usage_by_model,
                 details=producer.details,
@@ -435,18 +440,15 @@ class TwoPassAdapter:
         for model_id, usage in (agent_result.usage_by_model or {}).items():
             _merge_usage(usage_by_model, model_id, usage)
         totals = {
-            key: sum(entry[key] for entry in usage_by_model.values())
-            for key in (
-                "input_tokens",
-                "output_tokens",
-                "cache_read_tokens",
-            )
+            key: sum(entry.get(key, 0) for entry in usage_by_model.values())
+            for key in _TOTALED
         }
         return ActivationResult(
             responses=agent_result.responses,
             input_tokens=totals["input_tokens"],
             output_tokens=totals["output_tokens"],
             cache_read_tokens=totals["cache_read_tokens"],
+            cache_write_tokens=totals["cache_write_tokens"],
             model_id=self.agent_model_id,
             reactions=agent_result.reactions,
             usage_by_model=usage_by_model,

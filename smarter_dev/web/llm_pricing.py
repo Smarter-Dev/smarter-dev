@@ -11,6 +11,7 @@ ingested usage only; it does not retroactively reprice existing invoice rows.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -18,6 +19,8 @@ from genai_prices import calc_price
 from genai_prices import types
 from genai_prices.data_snapshot import find_provider_by_id
 from genai_prices.data_snapshot import get_snapshot
+
+from smarter_dev.shared.request_usage import RequestTokens
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +35,15 @@ _snapshot = get_snapshot()
 _PATCHES: list[tuple[str, types.ModelInfo]] = []
 
 
-def _patch_provider(provider_id: str, model: types.ModelInfo) -> None:
+def _patch_provider(
+    provider_id: str, model: types.ModelInfo, *, ahead_of_library: bool = False
+) -> None:
     provider = find_provider_by_id(_snapshot.providers, provider_id)
     if provider is not None:
-        provider.models.append(model)
+        if ahead_of_library:
+            provider.models.insert(0, model)
+        else:
+            provider.models.append(model)
         _PATCHES.append((provider_id, model))
 
 
@@ -51,6 +59,7 @@ _LIBRARY_PRICES_OWN_ID = frozenset(
     {
         "gemini-3-flash-preview",
         "gemini-3.1-flash-lite",
+        "gemini-4-argon",
         "gemini-3.5-flash",
         "gemini-2.5-flash-preview-tts",
         "gpt-5.4-nano",
@@ -139,12 +148,15 @@ _patch_provider(
     ),
 )
 
-# Gemini 4 Argon — not yet in genai-prices. Admitted 2026-10-16. Promotional
-# rate through 2026-11-30: $2/M input, $10/M output (thinking included),
-# $0.10/M cached reads. On 2026-12-01 every rate doubles to $4/$20/$0.20; this
-# table has no effective date, so the patch must change that day. No
-# prompt-length tier, and only implicit caching, so there is no cache write.
+# Gemini 4 Argon — admitted 2026-10-16. Promotional rate through 2026-11-30:
+# $2/M input, $10/M output (thinking included), $0.10/M cached reads. On
+# 2026-12-01 every rate doubles to $4/$20/$0.20. No prompt-length tier, and
+# only implicit caching, so there is no cache write.
 # https://ai.google.dev/gemini-api/docs/pricing
+# genai-prices prices the id itself since 0.1.10 (#188's upgrade), at these
+# rates and with the 2026-12-01 doubling dated in, so the library's entry is
+# the one that applies; this patch prices only other ids under its prefix
+# (see _LIBRARY_PRICES_OWN_ID).
 _patch_provider(
     "google",
     types.ModelInfo(
@@ -273,8 +285,16 @@ _patch_provider(
     ),
 )
 
+# GPT-6 Luna, GPT-6 Sol and GPT-6.1 Sol are ahead of genai-prices, which has
+# priced all three since 0.1.9 at the same base rates but with the >272K tier
+# built in. The library applies its tier to whatever count it is handed, and
+# most callers hand it a turn's total across several requests, the surcharge
+# _LONG_CONTEXT_TIERS exists to avoid; a per-request price would also take the
+# tier twice. These base-rate patches therefore go ahead of the library's
+# entries, and _LONG_CONTEXT_TIERS stays the one place the tier is applied.
+#
 # GPT-6 Sol — retired for GPT-6.1 Sol on 2026-09-29; kept for the usage rows
-# it wrote. Not yet in genai-prices. Cache writes are 1.25x uncached input
+# it wrote. Cache writes are 1.25x uncached input
 # and cache reads are 10% of uncached input. Prompts above 272K input tokens
 # are billed at 2x input/cache and 1.5x output for the whole request; this is
 # the base rate, and _LONG_CONTEXT_TIERS carries the tier.
@@ -291,9 +311,10 @@ _patch_provider(
             cache_write_mtok=Decimal("2.50"),
         ),
     ),
+    ahead_of_library=True,
 )
 
-# GPT-6.1 Sol — not yet in genai-prices. Replaced GPT-6 Sol on 2026-09-29
+# GPT-6.1 Sol — replaced GPT-6 Sol on 2026-09-29
 # (#37). Same input, output and cache-write rates as 6 Sol, but cached input is
 # $0.10 (5% of input) where 6 Sol's is $0.20. Same >272K long-context tier,
 # carried by _LONG_CONTEXT_TIERS. Its own prefix: "gpt-6-sol" does not match
@@ -311,9 +332,10 @@ _patch_provider(
             cache_write_mtok=Decimal("2.50"),
         ),
     ),
+    ahead_of_library=True,
 )
 
-# GPT-6 Luna — not yet in genai-prices. Served by OpenAI directly, the
+# GPT-6 Luna — served by OpenAI directly, the
 # server-default chat model since 2026-09-24. Same cache ratios and same
 # >272K-input long-context multiplier as GPT-6 Sol, carried by
 # _LONG_CONTEXT_TIERS.
@@ -330,6 +352,7 @@ _patch_provider(
             cache_write_mtok=Decimal("0.125"),
         ),
     ),
+    ahead_of_library=True,
 )
 
 # GPT-5.4 Mini — keep this more-specific prefix ahead of standard GPT-5.4.
@@ -372,6 +395,45 @@ _patch_provider(
 # this module used to patch in ($5/$25 and Sonnet's $2/$10 introductory rate,
 # 1.25x cache writes, 10% cache reads). Their patches never applied and were
 # removed in #5; settled rows keep the cost persisted at ingest.
+
+
+# ---------------------------------------------------------------------------
+# Claude, direct from Anthropic
+# ---------------------------------------------------------------------------
+# The 5.5 generation on our own Claude key (#188). USD per million tokens from
+# https://platform.claude.com/docs/en/about-claude/pricing (2026-10-17).
+#
+# Cache writes are priced at the 1-HOUR rate (2x input), not the 5-minute one
+# (1.25x). Every breakpoint model_router sends to these models is a 1-hour
+# breakpoint (ANTHROPIC_CACHE_TTL), so every write is a 1-hour write, and the
+# usage ledger keeps one cache-write count with no TTL split. If a 5-minute
+# breakpoint is ever added, that ledger needs the split first.
+#
+# Cache reads on Opus and Sonnet 5.5 are 0.05x input ($0.20 and $0.10);
+# Haiku 5.5 keeps 0.1x. genai-prices also knows these ids but prices writes at
+# the 5-minute rate, so this table is consulted first.
+_ANTHROPIC_PRICES: dict[str, types.ModelPrice] = {
+    "claude-opus-5-5": types.ModelPrice(
+        input_mtok=Decimal("4.00"),
+        output_mtok=Decimal("20.00"),
+        cache_read_mtok=Decimal("0.20"),
+        cache_write_mtok=Decimal("8.00"),
+    ),
+    "claude-sonnet-5-5": types.ModelPrice(
+        input_mtok=Decimal("2.00"),
+        output_mtok=Decimal("10.00"),
+        cache_read_mtok=Decimal("0.10"),
+        cache_write_mtok=Decimal("4.00"),
+    ),
+    # Base tier, prompts up to 100,000 tokens; above that every rate is 5x
+    # (_LONG_CONTEXT_TIERS).
+    "claude-haiku-5-5": types.ModelPrice(
+        input_mtok=Decimal("0.10"),
+        output_mtok=Decimal("0.50"),
+        cache_read_mtok=Decimal("0.01"),
+        cache_write_mtok=Decimal("0.20"),
+    ),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -471,7 +533,9 @@ _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
         output_mtok=Decimal("4.80"),
         cache_read_mtok=Decimal("0.40"),
     ),
-    # Claude Sonnet 5.5, added 2026-09-28. Read from GET
+    # Claude Sonnet 5.5, added 2026-09-28; moved to the direct Anthropic API
+    # on 2026-10-17 (_ANTHROPIC_PRICES) and kept for the rows written before.
+    # Read from GET
     # https://openrouter.ai/api/v1/models and its /endpoints on 2026-09-28:
     # every endpoint (anthropic, claude-on-aws, amazon-bedrock) quotes
     # $2/$10, $0.20 cache reads and $2.50 five-minute cache writes — the same
@@ -484,7 +548,9 @@ _OPENROUTER_PRICES: dict[str, types.ModelPrice] = {
         cache_read_mtok=Decimal("0.20"),
         cache_write_mtok=Decimal("2.50"),
     ),
-    # Claude Haiku 5.5, added 2026-10-07. Read from GET
+    # Claude Haiku 5.5, added 2026-10-07; moved to the direct Anthropic API
+    # on 2026-10-17 (_ANTHROPIC_PRICES) and kept for the rows written before.
+    # Read from GET
     # https://openrouter.ai/api/v1/models and its /endpoints on 2026-10-07:
     # Anthropic's only endpoint quotes $0.10/$0.50, $0.01 cache reads and
     # $0.125 five-minute cache writes — Anthropic's own price list — with an
@@ -703,12 +769,13 @@ class LongContextTier:
 # Models whose price rises for the whole request once a single prompt reaches a
 # token count. The patches and tables above carry the base rate; the tier is
 # applied only when the tokens priced are ONE provider request's
-# (``per_request=True``: web chat settles each request on its own). Everywhere
-# else the counts are a turn's or session's total across several requests, and
-# a tier keyed on that total would surcharge turns whose requests were each
-# well under the threshold. Those totals stay at the base rate, which
-# undercharges a request that really did reach the tier, so a total over the
-# threshold is logged rather than priced silently.
+# (``per_request=True``: web chat settles each request on its own). A turn's or
+# session's total across several requests cannot decide it: a tier keyed on the
+# total would surcharge turns whose requests were each well under the
+# threshold. Callers metering several requests keep each response's counts and
+# price through ``calc_cost_by_request``; a total with no per-request counts
+# stays at the base rate, which undercharges a request that really did reach
+# the tier, so a total over the threshold is logged rather than priced silently.
 _LONG_CONTEXT_TIERS: dict[str, LongContextTier] = {
     # OpenAI: prompts above 272K bill 2x input/cache and 1.5x output.
     "gpt-6-sol": LongContextTier(272_001, Decimal("2"), Decimal("1.5")),
@@ -723,6 +790,10 @@ _LONG_CONTEXT_TIERS: dict[str, LongContextTier] = {
     # $0.625 writes). Read from GET
     # /api/v1/models/anthropic/claude-haiku-5.5/endpoints on 2026-10-07.
     "anthropic/claude-haiku-5.5": LongContextTier(100_000, Decimal("5"), Decimal("5")),
+    # Anthropic's own price list for Haiku 5.5: a prompt over 100,000 tokens,
+    # cache reads and writes included, bills 5x every rate ($0.50/$2.50,
+    # $0.05 reads, $1 one-hour writes).
+    "claude-haiku-5-5": LongContextTier(100_001, Decimal("5"), Decimal("5")),
 }
 
 
@@ -832,6 +903,17 @@ def _base_cost(
                 cache_read_tokens=cache_read_tokens,
                 cache_write_tokens=cache_write_tokens,
                 price=digitalocean_price,
+            )
+
+    if provider_id in (None, "anthropic"):
+        anthropic_price = _ANTHROPIC_PRICES.get(model_ref)
+        if anthropic_price is not None:
+            return _direct_model_cost(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_write_tokens,
+                price=anthropic_price,
             )
 
     if provider_id in (None, "openrouter"):
@@ -957,3 +1039,88 @@ def calc_cost(
             model_name,
         )
         return Decimal("0")
+
+
+def calc_cost_by_request(
+    model_name: str,
+    total: RequestTokens,
+    requests: Iterable[RequestTokens] = (),
+) -> Decimal:
+    """Price *total*, with each of its known *requests* priced on its own.
+
+    A long-context tier is decided per provider request, so each request in
+    *requests* is priced with ``per_request=True``. Whatever *total* holds
+    beyond them (requests whose counts were not kept, a fallback model's) is
+    priced at the base rate, as the total alone would be. Requests that add up
+    to more than *total* are not its parts; they are ignored and the total is
+    priced at the base rate.
+    """
+    requests = list(requests)
+    known = [sum(column) for column in zip(*requests)] or [0] * len(total)
+    rest = RequestTokens(*(whole - part for whole, part in zip(total, known)))
+    if any(value < 0 for value in rest):
+        logger.warning(
+            "%s: %d request counts add up to more than their total %s; "
+            "pricing the total at the base rate",
+            model_name,
+            len(requests),
+            tuple(total),
+        )
+        requests, rest = [], total
+
+    def priced(tokens: RequestTokens, *, per_request: bool) -> Decimal:
+        return calc_cost(
+            tokens.input_tokens,
+            tokens.output_tokens,
+            model_name,
+            tokens.cache_read_tokens,
+            tokens.cache_write_tokens,
+            per_request=per_request,
+        )
+
+    cost = sum(
+        (priced(request, per_request=True) for request in requests), Decimal("0")
+    )
+    if any(rest):
+        cost += priced(rest, per_request=False)
+    return cost
+
+
+def calc_cost_by_stage(
+    model_name: str,
+    total: RequestTokens,
+    stages: Iterable[tuple[str, RequestTokens, Iterable[RequestTokens]]],
+) -> Decimal:
+    """Price *total*, made of model runs that may each be on another model.
+
+    Each stage is ``(model, its total, its requests)`` and is priced by
+    :func:`calc_cost_by_request` at its own model's rates, so a cheap drafter's
+    requests are not billed as the writer's and every request gets its own
+    tier. What the stages leave of *total* is priced on *model_name* at the
+    base rate. Stages that add up to more than *total* are not its parts; they
+    are ignored and the total is priced on *model_name* at the base rate.
+    """
+    stages = [(model, tokens, list(requests)) for model, tokens, requests in stages]
+    known = [sum(column) for column in zip(*(tokens for _, tokens, _ in stages))]
+    rest = RequestTokens(
+        *(whole - part for whole, part in zip(total, known or [0] * len(total)))
+    )
+    if any(value < 0 for value in rest):
+        logger.warning(
+            "%s: %d stage totals add up to more than the turn's %s; pricing the "
+            "total at the base rate",
+            model_name,
+            len(stages),
+            tuple(total),
+        )
+        return calc_cost_by_request(model_name, total)
+    cost = sum(
+        (
+            calc_cost_by_request(model, tokens, requests)
+            for model, tokens, requests in stages
+        ),
+        Decimal("0"),
+    )
+    if any(rest):
+        cost += calc_cost_by_request(model_name, rest)
+    return cost

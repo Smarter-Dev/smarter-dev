@@ -149,7 +149,9 @@ async def stream_document_body(
     a file. Reasoning parts, if the model produces any, are ignored rather than
     written into the document.
     """
-    settings = dict(model_settings_for(model, reasoning) or {})
+    # One request: a message breakpoint would only bill the branch at the
+    # 1-hour write rate.
+    settings = dict(model_settings_for(model, reasoning, cache_messages=False) or {})
     settings["max_tokens"] = min(model.max_output_tokens, DOCUMENT_OUTPUT_TOKEN_CAP)
     # There is no agent between us and the provider here, so do what one would:
     # merge the model's own settings, resolve the thinking knob, customize the

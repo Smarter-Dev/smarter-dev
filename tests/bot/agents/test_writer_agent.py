@@ -196,3 +196,25 @@ def test_writer_identity_falls_back_to_model_id_for_adhoc():
     _reset_cache()
     agent = get_writer_agent("some-unlisted-model")
     assert "some-unlisted-model" in agent._system_prompts[0]
+
+
+async def test_a_claude_writer_caches_its_prompt_but_not_its_one_off_brief(
+    monkeypatch,
+):
+    """The writer answers its brief in one request: only the system prompt
+    carries a 1-hour breakpoint, not the brief at the 2x write rate."""
+    from tests.claude_wire import cache_controls
+    from tests.claude_wire import serve
+    from tests.claude_wire import text_reply
+
+    _reset_cache()
+    server = serve(
+        monkeypatch, text_reply('{"message": "Tail calls are not optimized."}')
+    )
+
+    result = await get_writer_agent("claude-sonnet-5-5").run("BRIEF")
+
+    assert result.output.message == "Tail calls are not optimized."
+    (body,) = server.requests
+    assert cache_controls(body) == [{"type": "ephemeral", "ttl": "1h"}]
+    assert body["system"][-1]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}

@@ -333,7 +333,7 @@ class TestForumAgentServiceLogs:
             service, "record_response", new=AsyncMock(return_value="recorded-id")
         ), patch.object(
             service, "get_notification_topics", new=AsyncMock(return_value=["topic"])
-        ), patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}), (
+        ), patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-ant-test"}), (
             get_forum_combined_agent().override(model=model)
         ):
             responses, _ = await service.process_forum_post_with_tagging(

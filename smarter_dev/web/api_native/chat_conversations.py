@@ -72,6 +72,8 @@ from smarter_dev.shared.message_content import redact_text
 from smarter_dev.shared.message_content import redact_turn_decision
 from smarter_dev.shared.message_content import stored_error_type
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
+from smarter_dev.shared.request_usage import RequestTokens
+from smarter_dev.shared.request_usage import response_request_tokens
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.api_native.errors import plain_error
@@ -86,6 +88,8 @@ from smarter_dev.web.api_native.schemas import ChatAgentTurnCreateResponse
 from smarter_dev.web.api_native.schemas import ChatUsageLeaderboardEntry
 from smarter_dev.web.api_native.schemas import ChatUsageLeaderboardResponse
 from smarter_dev.web.llm_pricing import calc_cost
+from smarter_dev.web.llm_pricing import calc_cost_by_request
+from smarter_dev.web.llm_pricing import calc_cost_by_stage
 from smarter_dev.web.models import ChatAgentCompactionEvent
 from smarter_dev.web.models import ChatAgentEngagement
 from smarter_dev.web.models import ChatAgentError
@@ -111,6 +115,15 @@ BOT_API_ADMIN_GUARDS = [
 ]
 
 
+# Wire ids a catalog model served under before it moved provider, so a row
+# reconciled or ingested late keeps the provider that actually billed it.
+_MOVED_WIRE_IDS: dict[str, tuple[str, str]] = {
+    # Sonnet and Haiku 5.5 left OpenRouter for the direct API on 2026-10-17.
+    "anthropic/claude-sonnet-5.5": ("openrouter", "claude-sonnet-5-5"),
+    "anthropic/claude-haiku-5.5": ("openrouter", "claude-haiku-5-5"),
+}
+
+
 def _normalized_model_identity(model_name: str | None) -> tuple[str, str, str]:
     """Best-effort provider/catalog identity for normalized Discord usage."""
     if not model_name:
@@ -119,9 +132,16 @@ def _normalized_model_identity(model_name: str | None) -> tuple[str, str, str]:
     if not wire:
         wire = model_name
         provider_hint = ""
+    if wire in _MOVED_WIRE_IDS:
+        provider, catalog_key = _MOVED_WIRE_IDS[wire]
+        return provider, catalog_key, wire
     for model in MODEL_CATALOG:
         if wire == model.model_id or wire.startswith(model.model_id):
             return model.provider.value, model.key, model.model_id
+    if not provider_hint and wire.startswith("claude-"):
+        # A Claude id outside the catalog, e.g. the proactive agent on Opus
+        # 5.5: every bare claude-* id is served by the direct Anthropic API.
+        provider_hint = "anthropic"
     provider = {
         "google-gla": "google",
         "openai": "openai",
@@ -230,16 +250,50 @@ class _BilledModel(NamedTuple):
     output_tokens: int
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    # True when the counts are one provider request's, so a long-context tier
+    # (Claude Haiku 5.5's 5x over 100,000 tokens) is priced in.
+    per_request: bool = False
+    # The requests these counts add up, each priced on its own for the same
+    # reason; whatever they leave of the total is priced at the base rate.
+    requests: tuple[RequestTokens, ...] | None = None
+    # The model runs these counts add up, ``(model, totals, requests)`` each,
+    # priced at their own model's rates: a two-stage turn's drafter and writer.
+    stages: tuple[tuple[str, RequestTokens, tuple[RequestTokens, ...]], ...] | None = (
+        None
+    )
 
     @property
     def cost_usd(self) -> Decimal:
         """What this model charged; zero (logged) for models without a price."""
+        if self.stages is not None:
+            return calc_cost_by_stage(
+                self.model_name,
+                RequestTokens(
+                    self.input_tokens,
+                    self.output_tokens,
+                    self.cache_read_tokens,
+                    self.cache_write_tokens,
+                ),
+                self.stages,
+            )
+        if self.requests is not None:
+            return calc_cost_by_request(
+                self.model_name,
+                RequestTokens(
+                    self.input_tokens,
+                    self.output_tokens,
+                    self.cache_read_tokens,
+                    self.cache_write_tokens,
+                ),
+                self.requests,
+            )
         return calc_cost(
             self.input_tokens,
             self.output_tokens,
             self.model_name,
             cache_read_tokens=self.cache_read_tokens,
             cache_write_tokens=self.cache_write_tokens,
+            per_request=self.per_request,
         )
 
 
@@ -258,6 +312,34 @@ def _billed_chat_model(data: ChatAgentTurnCreate) -> _BilledModel | None:
         output_tokens=data.chat_tokens_output,
         cache_read_tokens=data.chat_cache_read_tokens or 0,
         cache_write_tokens=data.chat_cache_write_tokens or 0,
+        # The turn's own responses carry each request's counts; a fallback
+        # model's are left out, and priced in the rest at the base rate.
+        requests=(
+            tuple(
+                response_request_tokens(
+                    data.model_messages_delta or [], data.chat_model_name
+                )
+            )
+            if data.chat_stages is None
+            else None
+        ),
+        stages=(
+            None
+            if data.chat_stages is None
+            else tuple(
+                (
+                    stage.model_name,
+                    RequestTokens(
+                        **stage.model_dump(include=set(RequestTokens._fields))
+                    ),
+                    tuple(
+                        RequestTokens(**tokens.model_dump())
+                        for tokens in stage.requests
+                    ),
+                )
+                for stage in data.chat_stages
+            )
+        ),
     )
 
 
@@ -282,6 +364,17 @@ def _billed_summarizer(event: ChatAgentCompactionEventCreate) -> _BilledModel | 
         output_tokens=event.summarizer_tokens_output,
         cache_read_tokens=event.summarizer_cache_read_tokens or 0,
         cache_write_tokens=event.summarizer_cache_write_tokens or 0,
+        # A fold is one summarizer request (plain-text output, no tools) unless
+        # the model had to be asked again; the bot sends each request's counts.
+        per_request=True,
+        requests=(
+            None
+            if event.summarizer_request_tokens is None
+            else tuple(
+                RequestTokens(**tokens.model_dump())
+                for tokens in event.summarizer_request_tokens
+            )
+        ),
     )
 
 

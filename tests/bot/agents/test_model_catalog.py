@@ -2,20 +2,23 @@
 
 from __future__ import annotations
 
+import pytest
+
 from smarter_dev.shared.model_catalog import ALL_REASONING_LEVELS
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import MODEL_FAMILIES
+from smarter_dev.shared.model_catalog import RETIRED_SUCCESSORS
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ModelProvider
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import catalog_by_key
+from smarter_dev.shared.model_catalog import catalog_model_for_id
 from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.shared.model_catalog import is_valid_model_key
 from smarter_dev.shared.model_catalog import model_vendor
 from smarter_dev.shared.model_catalog import models_by_family
 from smarter_dev.shared.model_catalog import parse_reasoning_level
 from smarter_dev.shared.model_catalog import resolve_reasoning_level
-from smarter_dev.shared.model_catalog import RETIRED_SUCCESSORS
 from smarter_dev.shared.model_catalog import successor_key
 
 # Open-weights families. These no longer map to a single provider: the same
@@ -179,18 +182,31 @@ def test_retired_keys_resolve_to_a_live_model_in_one_step():
         assert get_model(successor_key(retired)) is not None, retired
 
 
-def test_proactive_agent_model_resolves_through_the_catalog():
-    """The reason 3.8 Flash is in the catalog at all.
+def test_proactive_agent_model_is_attributed_to_anthropic():
+    """Opus 5.5 is not in the catalog, but its spend still files under Anthropic.
 
-    ``_normalized_model_identity`` walks MODEL_CATALOG to attribute a wire id to
-    a provider when writing usage rows. Without an entry the proactive agent's
-    whole spend files under provider "unknown" in the invoice breakdown.
+    ``_normalized_model_identity`` attributes a wire id to a provider when
+    writing usage rows; a bare ``claude-*`` id is the direct Anthropic API.
+    Without that the proactive agent's whole spend would file under provider
+    "unknown" in the invoice breakdown.
     """
     from smarter_dev.bot.plugins.proactive import DEFAULT_AGENT_MODEL
+    from smarter_dev.web.api_native.chat_conversations import _normalized_model_identity
 
-    matches = [m for m in MODEL_CATALOG if m.model_id == DEFAULT_AGENT_MODEL]
-    assert len(matches) == 1
-    assert matches[0].provider is ModelProvider.GOOGLE
+    assert DEFAULT_AGENT_MODEL == "claude-opus-5-5"
+    assert not [m for m in MODEL_CATALOG if m.model_id == DEFAULT_AGENT_MODEL]
+    assert catalog_model_for_id(DEFAULT_AGENT_MODEL).provider is ModelProvider.ANTHROPIC
+    assert _normalized_model_identity(DEFAULT_AGENT_MODEL) == (
+        "anthropic",
+        "claude-opus-5-5",
+        "claude-opus-5-5",
+    )
+
+
+def test_catalog_model_for_id_refuses_an_unknown_non_claude_id():
+    assert catalog_model_for_id("claude-haiku-5-5") is get_model("claude-haiku-5-5")
+    with pytest.raises(ValueError):
+        catalog_model_for_id("gpt-6-lunar")
 
 
 def test_gpt_6_lineup_is_selectable():
@@ -256,27 +272,27 @@ def test_claude_left_the_catalog():
     # The whole Claude family was retired on 2026-09-03 for lack of traffic,
     # freeing three select slots. Its pricing stays in llm_pricing and its
     # provider mapping in usage_invoice, both for settled usage rows. Sonnet
-    # 5.5 came back on 2026-09-28 as a new key through OpenRouter; the retired
-    # keys stay retired and nothing reads them as 5.5.
+    # and Haiku 5.5 came back later as new keys; the retired keys stay retired
+    # and nothing reads them as 5.5.
     assert get_model("claude-opus-5") is None
     assert get_model("claude-sonnet-5") is None
     assert get_model("claude-haiku-4-5") is None
     for key in ("claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"):
         assert successor_key(key) == key
-    assert all(m.provider is not ModelProvider.ANTHROPIC for m in MODEL_CATALOG)
 
 
-def test_claude_sonnet_5_5_routes_through_openrouter_with_verified_capabilities():
-    # Verified against OpenRouter's models and endpoints APIs (2026-09-28):
-    # 1M context, 128K output, image input, tools, mandatory reasoning with
-    # efforts low → max defaulting to high, and $2/$10 on every endpoint.
+def test_claude_sonnet_5_5_is_served_direct_by_anthropic():
+    # Moved off OpenRouter to the direct API on 2026-10-17 (#188) under the
+    # same key: 1M context, 128K output, image input, tools, thinking that
+    # cannot be disabled with efforts low → max defaulting to high.
     model = get_model("claude-sonnet-5-5")
     assert model is not None
     assert model.label == "Claude Sonnet 5.5"
-    assert model.model_id == "anthropic/claude-sonnet-5.5"
+    assert model.model_id == "claude-sonnet-5-5"
     assert model.family == "Claude"
     assert model_vendor(model) == "Anthropic"
-    assert model.provider is ModelProvider.OPENROUTER
+    assert model.provider is ModelProvider.ANTHROPIC
+    assert model.supports_forced_tool_choice is False
     assert model.supports_vision is True
     assert model.supports_tools is True
     assert model.context_window == 1_000_000
@@ -293,9 +309,7 @@ def test_claude_sonnet_5_5_routes_through_openrouter_with_verified_capabilities(
     assert resolve_reasoning_level(model, ReasoningLevel.NONE) is ReasoningLevel.LOW
     # Proprietary: structured output stays on tool calls, not prompted JSON.
     assert model.needs_prompted_output is False
-    assert model.openrouter_routing.as_provider_block() == {
-        "max_price": {"prompt": 2.00, "completion": 10.00}
-    }
+    assert model.openrouter_routing is None
     assert [m.key for m in MODEL_CATALOG if m.family == "Claude"] == [
         "claude-sonnet-5-5",
         "claude-haiku-5-5",
@@ -304,18 +318,17 @@ def test_claude_sonnet_5_5_routes_through_openrouter_with_verified_capabilities(
     assert "claude-sonnet-5-5" not in RETIRED_SUCCESSORS.values()
 
 
-def test_claude_haiku_5_5_routes_through_openrouter_like_sonnet_5_5():
+def test_claude_haiku_5_5_is_served_direct_like_sonnet_5_5():
     # Anthropic's published capabilities (2026-10-07): 1M context, 128K
     # output, image input, adaptive thinking with efforts low → max defaulting
-    # to medium. Routed and constrained like Sonnet 5.5, at the $0.10/$0.50
-    # base tier.
+    # to medium. Direct from Anthropic like Sonnet 5.5 since 2026-10-17.
     model = get_model("claude-haiku-5-5")
     assert model is not None
     assert model.label == "Claude Haiku 5.5"
-    assert model.model_id == "anthropic/claude-haiku-5.5"
+    assert model.model_id == "claude-haiku-5-5"
     assert model.family == "Claude"
     assert model_vendor(model) == "Anthropic"
-    assert model.provider is ModelProvider.OPENROUTER
+    assert model.provider is ModelProvider.ANTHROPIC
     assert model.supports_vision is True
     assert model.supports_tools is True
     assert model.supports_forced_tool_choice is False
@@ -325,9 +338,7 @@ def test_claude_haiku_5_5_routes_through_openrouter_like_sonnet_5_5():
     assert model.default_reasoning is ReasoningLevel.MEDIUM
     assert resolve_reasoning_level(model, ReasoningLevel.NONE) is ReasoningLevel.LOW
     assert model.needs_prompted_output is False
-    assert model.openrouter_routing.as_provider_block() == {
-        "max_price": {"prompt": 0.10, "completion": 0.50}
-    }
+    assert model.openrouter_routing is None
     # Additive: Haiku 4.5 stays retired and nothing is read as Haiku 5.5.
     assert "claude-haiku-5-5" not in RETIRED_SUCCESSORS.values()
     assert successor_key("claude-haiku-4-5") == "claude-haiku-4-5"
@@ -515,7 +526,10 @@ def test_provider_routing_by_family():
                 ModelProvider.OPENAI,
                 ModelProvider.OPENROUTER,
             )
-        elif model.family in ("Grok", "Claude", "Mistral"):
+        elif model.family == "Claude":
+            # Direct on our own Claude key since 2026-10-17 (#188).
+            assert model.provider is ModelProvider.ANTHROPIC
+        elif model.family in ("Grok", "Mistral"):
             assert model.provider is ModelProvider.OPENROUTER
         elif model.family in _OPEN_WEIGHTS_FAMILIES:
             # Open weights normally ride DO or Zen, but Qwen3.8 2.4T A95B is on

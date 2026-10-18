@@ -16,12 +16,17 @@ import skrift
 from pydantic import BaseModel, Field
 from skrift.agents.models import ResumeContext
 
+from smarter_dev.shared.model_catalog import ReasoningLevel
+from smarter_dev.shared.model_catalog import catalog_model_for_id
+from smarter_dev.shared.skrift_models import agent_model_name
+from smarter_dev.shared.skrift_models import agent_model_settings
 from smarter_dev.web.blogging_agent.research_agent import Citation
 
-# GPT-6 Luna since 2026-09-24, replacing the Gemini 3 Flash preview (Zech:
-# "significantly cheaper"). OpenAI Responses API via OPENAI_API_KEY.
+# Claude Haiku 5.5 since 2026-10-17 (#199), replacing GPT-6 Luna (which had
+# replaced the Gemini 3 Flash preview on 2026-09-24). A catalog wire id;
+# shared.skrift_models turns it into the model name and settings.
 SYNTHESIS_MODEL = os.getenv(
-    "BLOGGING_SYNTHESIS_MODEL", "gpt-6-luna"
+    "BLOGGING_SYNTHESIS_MODEL", "claude-haiku-5-5"
 )
 SYNTHESIS_AGENT_NAME = "blogging.synthesis"
 _PROMPT = (Path(__file__).parent / "prompts" / "synthesis.md").read_text(
@@ -79,11 +84,16 @@ def _build_deps(ctx: ResumeContext) -> SynthesisDeps:
 
 
 synthesis_agent = skrift.Agent(
-    f"openai-responses:{SYNTHESIS_MODEL}",
+    agent_model_name(catalog_model_for_id(SYNTHESIS_MODEL)),
     name=SYNTHESIS_AGENT_NAME,
     system_prompt=_PROMPT,
     output_type=SynthesisOutput,
-    model_settings={"openai_reasoning_effort": "medium"},
+    # One request (no tools): the prompt is the cached prefix.
+    model_settings=agent_model_settings(
+        catalog_model_for_id(SYNTHESIS_MODEL),
+        ReasoningLevel.MEDIUM,
+        cache_messages=False,
+    ),
     deps_type=SynthesisDeps,
     deps_factory=_build_deps,
 )

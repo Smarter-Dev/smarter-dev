@@ -105,12 +105,16 @@ from smarter_dev.bot.utils.stop_detection import set_channel_cooldown
 from smarter_dev.bot.views.model_override_views import (
     MODEL_BUDGET_FALLBACK_CUSTOM_ID_PREFIX,
 )
+from smarter_dev.shared.claude_thinking import drop_other_models_claude_thinking
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.guild_event_log import read_since
 from smarter_dev.shared.guild_event_log import read_window
 from smarter_dev.shared.message_content import exception_trace
 from smarter_dev.shared.message_content import exception_type_name
 from smarter_dev.shared.model_catalog import get_model
+from smarter_dev.shared.request_usage import RequestTokens
+from smarter_dev.shared.request_usage import billing_stage
+from smarter_dev.shared.request_usage import usage_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -944,8 +948,14 @@ class ChannelEngine:
             # alongside the DRAFTER's, and — in two-stage mode — it is the ONLY
             # spend metered against the channel token budget (both zero in
             # single-stage).
-            writer_extra_input = 0
-            writer_extra_output = 0
+            # A channel whose model was switched (an override, Sonnet to Haiku
+            # or Luna) sends each model only its own Claude thinking; the
+            # stored history is this, so it stays consistent from then on.
+            message_history = drop_other_models_claude_thinking(
+                message_history, getattr(agent.model, "model_name", None)
+            )
+            writer_usage = RequestTokens()
+            writer_messages: list = []
             two_stage_output: TurnDecision | None = None
             try:
                 result = await agent.run(
@@ -957,8 +967,8 @@ class ChannelEngine:
                 if two_stage:
                     (
                         two_stage_output,
-                        writer_extra_input,
-                        writer_extra_output,
+                        writer_usage,
+                        writer_messages,
                     ) = await self._run_writer_stage(
                         result.output,
                         override_model_id,
@@ -1033,20 +1043,22 @@ class ChannelEngine:
             # per-turn on the dashboard via persist_turn). Single-stage meters its
             # one model's full spend.
             if two_stage:
-                tokens = writer_extra_input + writer_extra_output
+                tokens = writer_usage.input_tokens + writer_usage.output_tokens
             else:
                 tokens = _extract_tokens(result.usage)
             # A reply too long to send in two messages gets rewritten before
             # dispatch, otherwise ``split_for_discord`` would silently drop its
             # tail. Single-stage first asks the agent to shorten its own draft
-            # (context-aware), falling back to a Luna summary, then truncation;
+            # (context-aware), falling back to a Haiku summary, then truncation;
             # the shorten re-run spends chat-model tokens, so they're folded into
             # this turn's metering and persisted totals. Two-stage's tool-less
             # primary WRITER has no ``response``-shaped agent to re-run, so it goes
-            # straight to the Luna summarizer (then truncation) — Luna's spend is
+            # straight to the summarizer (then truncation) — its spend is
             # logged but not metered, so it adds no extra tokens.
             fit_extra_input = 0
             fit_extra_output = 0
+            fit_extra_cache_read = 0
+            fit_extra_cache_write = 0
             # The shorten re-run is a second agent.run, so its messages are not
             # in ``result.new_messages()``. They are appended to the persisted
             # history below — without them the turn record simply omits a run
@@ -1083,6 +1095,8 @@ class ChannelEngine:
                 )
                 fit_extra_input = fit.extra_input_tokens
                 fit_extra_output = fit.extra_output_tokens
+                fit_extra_cache_read = fit.extra_cache_read_tokens
+                fit_extra_cache_write = fit.extra_cache_write_tokens
                 fit_extra_messages = list(fit.extra_messages)
                 tokens += fit_extra_input + fit_extra_output
             # Meter this turn's chat tokens against the channel's usage windows.
@@ -1160,19 +1174,53 @@ class ChannelEngine:
                 chat_in = (
                     int(getattr(chat_usage, "input_tokens", 0) or 0)
                     + fit_extra_input
-                    + writer_extra_input
+                    + writer_usage.input_tokens
                 )
                 chat_out = (
                     int(getattr(chat_usage, "output_tokens", 0) or 0)
                     + fit_extra_output
-                    + writer_extra_output
+                    + writer_usage.output_tokens
                 )
-                chat_cache_read = int(
-                    getattr(chat_usage, "cache_read_tokens", 0) or 0
+                # Every run's cache counts, like its input: the ledger prices
+                # each request from the turn's messages, and drops that
+                # breakdown when the requests hold more cache than the total.
+                chat_cache_read = (
+                    int(getattr(chat_usage, "cache_read_tokens", 0) or 0)
+                    + fit_extra_cache_read
+                    + writer_usage.cache_read_tokens
                 )
-                chat_cache_write = int(
-                    getattr(chat_usage, "cache_write_tokens", 0) or 0
+                chat_cache_write = (
+                    int(getattr(chat_usage, "cache_write_tokens", 0) or 0)
+                    + fit_extra_cache_write
+                    + writer_usage.cache_write_tokens
                 )
+                # The model runs those totals add up, each with its requests'
+                # own counts, so the ledger prices every request at its own
+                # model's rates and tier. The writer's requests ride only here:
+                # they are no part of the drafter's history.
+                main_usage = usage_tokens(chat_usage)
+                if two_stage:
+                    chat_stages = [
+                        billing_stage(
+                            drafter_model_id, main_usage, result.new_messages()
+                        ),
+                        billing_stage(
+                            resolved_model_name, writer_usage, writer_messages
+                        ),
+                    ]
+                else:
+                    chat_stages = [
+                        billing_stage(
+                            resolved_model_name,
+                            RequestTokens(
+                                main_usage.input_tokens + fit_extra_input,
+                                main_usage.output_tokens + fit_extra_output,
+                                main_usage.cache_read_tokens + fit_extra_cache_read,
+                                main_usage.cache_write_tokens + fit_extra_cache_write,
+                            ),
+                            [*result.new_messages(), *fit_extra_messages],
+                        )
+                    ]
 
                 voice = dispatch.voice
                 duration_ms = int(
@@ -1201,6 +1249,7 @@ class ChannelEngine:
                         chat_reasoning_level=resolved_reasoning_wire,
                         chat_cache_read_tokens=chat_cache_read,
                         chat_cache_write_tokens=chat_cache_write,
+                        chat_stages=chat_stages,
                         voice_tokens_input=(
                             voice.tokens_input if voice else 0
                         ),
@@ -1798,7 +1847,7 @@ class ChannelEngine:
         long_term_memory: str | None = None,
         behavior: str | None = None,
         personality: str | None = None,
-    ) -> tuple[TurnDecision, int, int]:
+    ) -> tuple[TurnDecision, RequestTokens, list]:
         """Assemble a two-stage turn's output: run the tool-less primary WRITER on
         the DRAFTER's brief and fold its message into a ``TurnDecision`` the
         existing send/persist path consumes.
@@ -1810,9 +1859,12 @@ class ChannelEngine:
         drafter is a cheap model, and letting it paraphrase the persona would
         rewrite who the bot is on every single turn. ``behavior`` and
         ``personality`` travel the same verbatim route for the same reason. Returns
-        ``(decision, writer_input_tokens, writer_output_tokens)``. When the drafter
-        stayed silent (``briefing.brief`` is None) the writer is never called, the
-        decision carries ``response=None``, and both token counts are zero. The
+        ``(decision, writer_usage, writer_messages)``: the writer run's tokens,
+        cache counts included, and its messages, whose responses carry each
+        request's own counts (a structured-output retry is another request).
+        When the drafter stayed silent (``briefing.brief`` is None) the
+        writer is never called, the decision carries ``response=None``, and every
+        token count is zero. The
         decision is assembled from already-validated parts via ``model_construct``:
         ``TurnDecision``'s cross-field validators encode the single-agent
         English-redirect policy, which the DRAFTER already enforced on the
@@ -1821,8 +1873,8 @@ class ChannelEngine:
         """
         brief = briefing.brief
         response: ResponseBody | None = None
-        writer_input = 0
-        writer_output = 0
+        writer_usage = RequestTokens()
+        writer_messages: list = []
         response_language = "english"
         if brief is not None:
             response_language = brief.response_language
@@ -1836,9 +1888,8 @@ class ChannelEngine:
                 )
             )
             writer_output_body = writer_result.output
-            writer_usage = writer_result.usage
-            writer_input = int(getattr(writer_usage, "input_tokens", 0) or 0)
-            writer_output = int(getattr(writer_usage, "output_tokens", 0) or 0)
+            writer_usage = usage_tokens(writer_result.usage)
+            writer_messages = list(writer_result.new_messages())
             top_ranked = max(briefing.rankings, key=lambda ranking: ranking.score)
             response = ResponseBody(
                 target_message_id=top_ranked.message_id,
@@ -1856,7 +1907,7 @@ class ChannelEngine:
             topic=briefing.topic,
             notes=briefing.notes,
         )
-        return decision, writer_input, writer_output
+        return decision, writer_usage, writer_messages
 
     async def _resolve_temporary_default(
         self, redis: Any

@@ -3,8 +3,9 @@
 ``chat_agent.build_agent_model`` falls back to a direct-provider client when
 an id is not in the catalog, so a default that drifts out of the catalog is a
 silent misroute rather than an error. These tests pin every flat default to a
-catalog entry and pin the Luna defaults to GPT-6 Luna on OpenAI directly (the
-OpenRouter hop was dropped on 2026-09-24).
+catalog entry: chat on GPT-6 Luna from OpenAI directly (the OpenRouter hop was
+dropped on 2026-09-24), and the handler agent on Claude Haiku 5.5 from
+Anthropic directly (#199, 2026-10-17).
 """
 
 from __future__ import annotations
@@ -30,11 +31,11 @@ def test_chat_agent_default_is_catalog_gpt_6_luna_on_openai():
     assert model.provider is ModelProvider.OPENAI
 
 
-def test_handler_agent_default_is_catalog_gpt_6_luna_on_openai():
+def test_handler_agent_default_is_catalog_claude_haiku_on_anthropic():
     model = _catalog_model_for(handler_agent.DEFAULT_MODEL)
     assert model is not None
-    assert model.key == "gpt-6-luna"
-    assert model.provider is ModelProvider.OPENAI
+    assert model.key == "claude-haiku-5-5"
+    assert model.provider is ModelProvider.ANTHROPIC
 
 
 def test_compaction_defaults_resolve_to_catalog_models():

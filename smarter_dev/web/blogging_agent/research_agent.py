@@ -1,7 +1,7 @@
 """Stage 3 of the blogging pipeline — Research.
 
-The outer Research stage is a GPT-6 Luna agent whose only tool is
-``dig_into``. Each call dispatches a GPT-6 Luna sub-agent that runs its
+The outer Research stage is a Claude Haiku 5.5 agent whose only tool is
+``dig_into``. Each call dispatches a Claude Haiku 5.5 sub-agent that runs its
 own multi-turn search/read loop and returns 4-8 verbatim citations.
 
 Sub-agent dispatches are auto-tracked by Skrift's event log
@@ -21,6 +21,10 @@ from pydantic import BaseModel, Field
 from pydantic_ai import RunContext
 from skrift.agents.models import ResumeContext
 
+from smarter_dev.shared.model_catalog import ReasoningLevel
+from smarter_dev.shared.model_catalog import catalog_model_for_id
+from smarter_dev.shared.skrift_models import agent_model_name
+from smarter_dev.shared.skrift_models import agent_model_settings
 from smarter_dev.web.blogging_agent.cache import get_cache
 from smarter_dev.web.blogging_agent.summariser import extract_excerpts
 from smarter_dev.web.research_tools import brave_search, jina_read
@@ -29,14 +33,15 @@ from smarter_dev.web.research_tools import brave_search, jina_read
 # annotations via get_type_hints at materialization on the worker, so it must
 # be a real module global (pydantic-ai core only; providers stay worker-side).
 
-# GPT-6 Luna since 2026-09-24, replacing the Gemini 3 Flash preview (Zech:
-# "significantly cheaper"). OpenAI Responses API via OPENAI_API_KEY.
+# Claude Haiku 5.5 since 2026-10-17 (#199), replacing GPT-6 Luna (which had
+# replaced the Gemini 3 Flash preview on 2026-09-24). A catalog wire id;
+# shared.skrift_models turns it into the model name and settings.
 RESEARCH_MODEL = os.getenv(
-    "BLOGGING_RESEARCH_MODEL", "gpt-6-luna"
+    "BLOGGING_RESEARCH_MODEL", "claude-haiku-5-5"
 )
 RESEARCH_AGENT_NAME = "blogging.research"
 RESEARCHER_SUBAGENT_MODEL = os.getenv(
-    "BLOGGING_RESEARCHER_SUBAGENT_MODEL", "gpt-6-luna"
+    "BLOGGING_RESEARCHER_SUBAGENT_MODEL", "claude-haiku-5-5"
 )
 RESEARCHER_SUBAGENT_NAME = "blogging.researcher_subagent"
 
@@ -121,7 +126,7 @@ class ResearchInput(BaseModel):
     open_questions: list[str]
 
 
-# ── Sub-agent (GPT-6 Luna) ───────────────────────────────────────────
+# ── Sub-agent (Claude Haiku 5.5) ─────────────────────────────────────
 
 
 @dataclass
@@ -134,11 +139,15 @@ def _build_subagent_deps(ctx: ResumeContext) -> ResearcherSubagentDeps:
 
 
 researcher_subagent = skrift.Agent(
-    f"openai-responses:{RESEARCHER_SUBAGENT_MODEL}",
+    agent_model_name(catalog_model_for_id(RESEARCHER_SUBAGENT_MODEL)),
     name=RESEARCHER_SUBAGENT_NAME,
     system_prompt=_SUBAGENT_PROMPT,
     output_type=ResearchOutput,
-    model_settings={"openai_reasoning_effort": "medium"},
+    model_settings=agent_model_settings(
+        catalog_model_for_id(RESEARCHER_SUBAGENT_MODEL),
+        ReasoningLevel.MEDIUM,
+        cache_messages=True,
+    ),
     deps_type=ResearcherSubagentDeps,
     deps_factory=_build_subagent_deps,
 )
@@ -204,7 +213,7 @@ async def read_page_for_excerpts(
     return {"url": url, "title": title, "excerpts": excerpts}
 
 
-# ── Outer Research stage (GPT-6 Luna) ────────────────────────────────
+# ── Outer Research stage (Claude Haiku 5.5) ──────────────────────────
 
 
 @dataclass
@@ -217,11 +226,15 @@ def _build_research_deps(ctx: ResumeContext) -> ResearchDeps:
 
 
 research_agent = skrift.Agent(
-    f"openai-responses:{RESEARCH_MODEL}",
+    agent_model_name(catalog_model_for_id(RESEARCH_MODEL)),
     name=RESEARCH_AGENT_NAME,
     system_prompt=_PROMPT,
     output_type=ResearchOutput,
-    model_settings={"openai_reasoning_effort": "medium"},
+    model_settings=agent_model_settings(
+        catalog_model_for_id(RESEARCH_MODEL),
+        ReasoningLevel.MEDIUM,
+        cache_messages=True,
+    ),
     deps_type=ResearchDeps,
     deps_factory=_build_research_deps,
 )

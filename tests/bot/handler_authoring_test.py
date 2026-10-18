@@ -1251,23 +1251,28 @@ def test_admin_model_defaults_are_gpt_6_1_sol():
     )
 
 
-def test_standard_tier_model_defaults_are_gpt_6_luna():
-    # Moved off the Gemini 3 Flash preview onto cheaper GPT-6 Luna on 2026-09-24.
-    assert Settings.model_fields["handler_author_model"].default == "gpt-6-luna"
-    assert Settings.model_fields["handler_judge_model"].default == "gpt-6-luna"
+def test_standard_tier_model_defaults_are_claude_haiku():
+    # Gemini 3 Flash preview, then GPT-6 Luna (2026-09-24), then Claude Haiku
+    # 5.5 (2026-10-17, #199).
+    assert Settings.model_fields["handler_author_model"].default == "claude-haiku-5-5"
+    assert Settings.model_fields["handler_judge_model"].default == "claude-haiku-5-5"
 
 
-def test_standard_tier_agents_run_gpt_6_luna_at_medium(monkeypatch):
+def test_standard_tier_agents_run_claude_haiku_at_medium(monkeypatch):
     monkeypatch.setattr(handler_authoring, "_author_agent", None)
     monkeypatch.setattr(handler_authoring, "_judge_agent", None)
-    monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     monkeypatch.setattr(handler_authoring, "get_settings", _settings_with)
-    for agent in (
-        handler_authoring._get_author_agent(),
-        handler_authoring._get_judge_agent(),
-    ):
-        assert agent.model.model_name == "gpt-6-luna"
-        assert agent.model_settings["openai_reasoning_effort"] == "medium"
+    author = handler_authoring._get_author_agent()
+    judge = handler_authoring._get_judge_agent()
+    for agent in (author, judge):
+        assert agent.model.model_name == "claude-haiku-5-5"
+        assert agent.model_settings["anthropic_effort"] == "medium"
+        assert "openai_reasoning_effort" not in agent.model_settings
+        assert agent.model.profile["supports_forced_tool_choice"] is False
+    # The author can loop over its emoji tool; the judge answers once.
+    assert "anthropic_cache_messages" not in author.model_settings
+    assert judge.model_settings["anthropic_cache_messages"] is False
     monkeypatch.setattr(handler_authoring, "_author_agent", None)
     monkeypatch.setattr(handler_authoring, "_judge_agent", None)
 

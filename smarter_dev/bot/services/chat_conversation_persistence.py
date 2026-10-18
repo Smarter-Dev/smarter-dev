@@ -191,6 +191,7 @@ async def persist_turn(
     chat_reasoning_level: str | None = None,
     chat_cache_read_tokens: int | None = None,
     chat_cache_write_tokens: int | None = None,
+    chat_stages: list[dict] | None = None,
     voice_tokens_input: int = 0,
     voice_tokens_output: int = 0,
     voice_model_name: str | None = None,
@@ -225,6 +226,7 @@ async def persist_turn(
             "summarizer_reasoning_level": ev.summarizer_reasoning_level,
             "summarizer_cache_read_tokens": ev.summarizer_cache_read_tokens,
             "summarizer_cache_write_tokens": ev.summarizer_cache_write_tokens,
+            "summarizer_request_tokens": ev.summarizer_request_tokens,
         }
         for ev in (compaction_events or [])
     ]
@@ -244,6 +246,7 @@ async def persist_turn(
         "chat_reasoning_level": chat_reasoning_level,
         "chat_cache_read_tokens": chat_cache_read_tokens,
         "chat_cache_write_tokens": chat_cache_write_tokens,
+        "chat_stages": chat_stages,
         "voice_tokens_input": voice_tokens_input,
         "voice_tokens_output": voice_tokens_output,
         "voice_model_name": voice_model_name,

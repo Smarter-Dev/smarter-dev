@@ -949,7 +949,11 @@ def get_dream_agent() -> Agent[DreamContext, DreamOutput]:
             deps_type=DreamContext,
             system_prompt=DREAM_SYSTEM_PROMPT,
             retries=DREAM_OUTPUT_RETRIES,
-            model_settings=model_settings_for(catalog_model, DREAM_REASONING_LEVEL),
+            # One request unless the output is sent back; caching the messages
+            # would bill every night's prompt at the 1-hour write rate for that.
+            model_settings=model_settings_for(
+                catalog_model, DREAM_REASONING_LEVEL, cache_messages=False
+            ),
         )
 
         @agent.output_validator

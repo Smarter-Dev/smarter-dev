@@ -24,8 +24,8 @@ from smarter_dev.bot.agents.response_fitting import split_for_discord
 # --------------------------------------------------------------------------- #
 
 
-def test_length_summarizer_uses_luna():
-    assert LENGTH_SUMMARIZER_MODEL_KEY == "gpt-6-luna"
+def test_length_summarizer_uses_haiku():
+    assert LENGTH_SUMMARIZER_MODEL_KEY == "claude-haiku-5-5"
 
 
 def test_split_short_text_passes_through():
@@ -158,7 +158,7 @@ async def test_fit_uses_agent_rewrite_when_it_fits(monkeypatch):
         AsyncMock(return_value=_outcome("rewritten", 11, 7, ["m1", "m2"])),
     )
     summarize = AsyncMock()
-    monkeypatch.setattr(response_fitting, "_summarize_with_luna", summarize)
+    monkeypatch.setattr(response_fitting, "_summarize_reply", summarize)
 
     fit = await fit_overlong_response(LONG, agent=None, deps=None, message_history=[])
 
@@ -178,7 +178,7 @@ async def test_fit_falls_back_to_summarizer_when_rewrite_still_long(monkeypatch)
         ),
     )
     summarize = AsyncMock(return_value="a tidy summary")
-    monkeypatch.setattr(response_fitting, "_summarize_with_luna", summarize)
+    monkeypatch.setattr(response_fitting, "_summarize_reply", summarize)
 
     fit = await fit_overlong_response(LONG, agent=None, deps=None, message_history=[])
 
@@ -197,7 +197,7 @@ async def test_fit_truncates_when_everything_fails(monkeypatch):
         AsyncMock(return_value=_outcome(None, 0, 0, [])),
     )
     monkeypatch.setattr(
-        response_fitting, "_summarize_with_luna", AsyncMock(return_value=None)
+        response_fitting, "_summarize_reply", AsyncMock(return_value=None)
     )
 
     fit = await fit_overlong_response(LONG, agent=None, deps=None, message_history=[])
@@ -215,13 +215,13 @@ async def test_fit_truncates_when_everything_fails(monkeypatch):
 @pytest.mark.asyncio
 async def test_fit_writer_message_uses_summarizer_when_it_fits(monkeypatch):
     summarize = AsyncMock(return_value="a tidy summary")
-    monkeypatch.setattr(response_fitting, "_summarize_with_luna", summarize)
+    monkeypatch.setattr(response_fitting, "_summarize_reply", summarize)
 
     fit = await fit_writer_message(LONG)
 
     assert fit.text == "a tidy summary"
     assert fit.method == "summarized"
-    # Luna's spend is not metered against the channel budget.
+    # The summarizer's spend is not metered against the channel budget.
     assert (fit.extra_input_tokens, fit.extra_output_tokens) == (0, 0)
     summarize.assert_awaited_once_with(LONG)
 
@@ -229,7 +229,7 @@ async def test_fit_writer_message_uses_summarizer_when_it_fits(monkeypatch):
 @pytest.mark.asyncio
 async def test_fit_writer_message_truncates_when_summarizer_fails(monkeypatch):
     monkeypatch.setattr(
-        response_fitting, "_summarize_with_luna", AsyncMock(return_value=None)
+        response_fitting, "_summarize_reply", AsyncMock(return_value=None)
     )
 
     fit = await fit_writer_message(LONG)
@@ -244,7 +244,7 @@ async def test_fit_writer_message_truncates_when_summarizer_fails(monkeypatch):
 async def test_fit_writer_message_truncates_when_summary_still_too_long(monkeypatch):
     monkeypatch.setattr(
         response_fitting,
-        "_summarize_with_luna",
+        "_summarize_reply",
         AsyncMock(return_value="q" * (SUMMARIZE_THRESHOLD + 1)),
     )
 
@@ -280,7 +280,7 @@ async def test_shorten_messages_survive_into_the_fit_result(monkeypatch):
         "_shorten_with_agent",
         AsyncMock(return_value=_outcome("rewritten", 11, 7, ["m1", "m2"])),
     )
-    monkeypatch.setattr(response_fitting, "_summarize_with_luna", AsyncMock())
+    monkeypatch.setattr(response_fitting, "_summarize_reply", AsyncMock())
 
     fit = await fit_overlong_response(LONG, agent=None, deps=None, message_history=[])
 
@@ -299,7 +299,7 @@ async def test_rerun_messages_kept_even_when_the_rewrite_is_discarded(monkeypatc
         ),
     )
     monkeypatch.setattr(
-        response_fitting, "_summarize_with_luna", AsyncMock(return_value="tidy")
+        response_fitting, "_summarize_reply", AsyncMock(return_value="tidy")
     )
 
     fit = await fit_overlong_response(LONG, agent=None, deps=None, message_history=[])
@@ -316,7 +316,7 @@ async def test_failed_rerun_contributes_no_messages(monkeypatch):
         AsyncMock(return_value=_outcome(None, 0, 0, [])),
     )
     monkeypatch.setattr(
-        response_fitting, "_summarize_with_luna", AsyncMock(return_value=None)
+        response_fitting, "_summarize_reply", AsyncMock(return_value=None)
     )
 
     fit = await fit_overlong_response(LONG, agent=None, deps=None, message_history=[])

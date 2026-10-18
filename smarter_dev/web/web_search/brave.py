@@ -18,7 +18,7 @@ BRAVE_HOST = urlparse(BRAVE_URL).hostname
 
 class _HideBraveRequests(logging.Filter):
     """Drop httpx's request lines for Brave: their URL carries the query,
-    which Luna wrote from the user's request. The worker keeps httpx at INFO
+    which the query model wrote from the user's request. The worker keeps httpx at INFO
     for everything else."""
 
     def filter(self, record: logging.LogRecord) -> bool:

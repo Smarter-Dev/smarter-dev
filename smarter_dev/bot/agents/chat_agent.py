@@ -42,6 +42,7 @@ from smarter_dev.bot.agents.model_router import build_model_for
 from smarter_dev.bot.agents.model_router import model_settings_for
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
+from smarter_dev.shared.model_catalog import direct_claude_model
 from smarter_dev.shared.model_catalog import parse_reasoning_level
 from smarter_dev.shared.model_catalog import resolve_reasoning_level
 from smarter_dev.shared.model_router import agent_retries_for
@@ -85,6 +86,8 @@ def build_agent_model(model_id: str) -> Model:
     catalog_model = _catalog_model_for_id(model_id)
     if catalog_model is not None:
         return build_model_for(catalog_model)
+    if model_id.startswith("claude-"):
+        return build_model_for(direct_claude_model(model_id))
     if model_id.startswith(("gpt-", "openai/")):
         from pydantic_ai.models.openai import OpenAIResponsesModel
         from pydantic_ai.providers.openai import OpenAIProvider
@@ -136,6 +139,9 @@ def _model_settings_for(
     catalog_model = _catalog_model_for_id(model_id)
     if catalog_model is not None:
         return model_settings_for(catalog_model, parse_reasoning_level(reasoning_level))
+    if model_id.startswith("claude-"):
+        # Anthropic's default effort; the cache breakpoints ride on the model.
+        return None
     if model_id.startswith(("gpt-", "openai/")):
         from pydantic_ai.models.openai import OpenAIResponsesModelSettings
 

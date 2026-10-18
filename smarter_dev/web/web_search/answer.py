@@ -1,4 +1,4 @@
-"""Luna writes an answer to the request from the ranked results.
+"""Claude Haiku 5.5 writes an answer to the request from the ranked results.
 
 It sees every result with Jev's ranking and may read the full page of up to
 ``MAX_READS`` of them through Jina Reader. Only result pages can be read: the
@@ -22,7 +22,10 @@ import httpx
 from pydantic_ai import Agent
 from pydantic_ai import RunContext
 
-ANSWER_MODEL = os.getenv("WEB_SEARCH_ANSWER_MODEL", "gpt-6-luna")
+from smarter_dev.shared.request_usage import response_request_tokens
+
+# Claude Haiku 5.5 since 2026-10-17 (#199), replacing GPT-6 Luna.
+ANSWER_MODEL = os.getenv("WEB_SEARCH_ANSWER_MODEL", "claude-haiku-5-5")
 REASONING_EFFORT = "medium"
 MAX_READS = 5
 # About 3,000 tokens of page per read.
@@ -147,9 +150,8 @@ async def read_result(ctx: RunContext[AnswerDeps], number: int) -> str:
 
 
 def build_answer_agent() -> Agent[AnswerDeps, str]:
-    from pydantic_ai.models.openai import OpenAIResponsesModelSettings
-
     from smarter_dev.web.web_search.queries import model_for
+    from smarter_dev.web.web_search.queries import settings_for
 
     prompt = SYSTEM_PROMPT.format(
         today=datetime.now(UTC).date().isoformat(), max_reads=MAX_READS
@@ -159,8 +161,10 @@ def build_answer_agent() -> Agent[AnswerDeps, str]:
         deps_type=AnswerDeps,
         output_type=str,
         system_prompt=prompt,
-        model_settings=OpenAIResponsesModelSettings(
-            openai_reasoning_effort=REASONING_EFFORT
+        # Each page read is another request over the same history, so the
+        # message breakpoint pays for itself after the first read.
+        model_settings=settings_for(
+            ANSWER_MODEL, REASONING_EFFORT, cache_messages=True
         ),
     )
     agent.tool(read_result, retries=2)
@@ -249,5 +253,11 @@ async def write_answer(
         "input_tokens": usage.input_tokens or 0,
         "output_tokens": usage.output_tokens or 0,
         "cache_read_tokens": usage.cache_read_tokens or 0,
+        "cache_write_tokens": usage.cache_write_tokens or 0,
+        # Each response's own counts: a long-context tier is per request.
+        "request_tokens": [
+            tokens.as_dict()
+            for tokens in response_request_tokens(run.all_messages())
+        ],
         "reader_tokens": sum(read.tokens for read in deps.reads),
     }

@@ -1,14 +1,16 @@
-"""Instruction-guided image/audio reader (GPT-6 Luna for images, Gemini for audio).
+"""Instruction-guided image/audio reader (Claude Haiku 5.5 for images, Gemini for audio).
 
 Sibling to ``web_summarizer`` (which handles text): when ``web_read`` is given
 an image or audio URL, it downloads the bytes and hands them here for an
 instruction-shaped description. The chat agent never receives the raw bytes —
 only the description — and the same refuse-if-not-meaningful contract applies.
 
-Images moved from Gemini 3.1 Flash Lite to GPT-6 Luna on 2026-09-24. Audio could
-not follow: the OpenAI Responses API takes no audio input, so audio goes to
-Gemini 3.8 Flash, the one Gemini Flash still in use. Luna refuses BMP and reads
-only an animated GIF's first frame, so ``shared.media_images`` converts those.
+Images moved from Gemini 3.1 Flash Lite to GPT-6 Luna on 2026-09-24, and on to
+Claude Haiku 5.5 on 2026-10-17 (#199). Audio could follow neither, since
+neither API takes audio input, so audio goes to Gemini 3.8 Flash, the one
+Gemini Flash still in use. Claude, like Luna, takes PNG, JPEG, WebP and GIF
+but not BMP, and reads only an animated GIF's first frame, so
+``shared.media_images`` converts those.
 """
 
 from __future__ import annotations
@@ -17,22 +19,25 @@ import logging
 import os
 
 from pydantic_ai import Agent, BinaryContent
+from pydantic_ai.models import Model
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
-from pydantic_ai.models.openai import OpenAIResponsesModel
-from pydantic_ai.models.openai import OpenAIResponsesModelSettings
 from pydantic_ai.providers.google import GoogleProvider
-from pydantic_ai.providers.openai import OpenAIProvider
 
+from smarter_dev.shared.model_catalog import CatalogModel
+from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.media_images import ImageTooLarge
 from smarter_dev.shared.media_images import prepare_image_bounded
 from smarter_dev.shared.media_reads import MAX_SEND_BYTES
 from smarter_dev.shared.media_reads import SpooledImage
 from smarter_dev.shared.media_reads import too_large_to_send
+from smarter_dev.shared.model_router import build_model_for
+from smarter_dev.shared.model_catalog import catalog_model_for_id
+from smarter_dev.shared.model_router import model_settings_for
 
 logger = logging.getLogger(__name__)
 
-# Images: an OpenAI wire id, served by OpenAI directly.
-DEFAULT_MODEL = "gpt-6-luna"
+# Images: a catalog wire id (or any Claude id), routed by the model router.
+DEFAULT_MODEL = "claude-haiku-5-5"
 MODEL_ENV_VAR = "MEDIA_READER_MODEL"
 # Audio: a Gemini wire id.
 DEFAULT_AUDIO_MODEL = "gemini-3.8-flash"
@@ -67,11 +72,12 @@ _media_reader_agent: Agent[None, str] | None = None
 _audio_reader_agent: Agent[None, str] | None = None
 
 
-def _build_model() -> OpenAIResponsesModel:
-    model_id = os.getenv(MODEL_ENV_VAR, DEFAULT_MODEL)
-    return OpenAIResponsesModel(
-        model_id, provider=OpenAIProvider(api_key=os.getenv("OPENAI_API_KEY") or "")
-    )
+def _image_model() -> CatalogModel:
+    return catalog_model_for_id(os.getenv(MODEL_ENV_VAR, DEFAULT_MODEL))
+
+
+def _build_model() -> Model:
+    return build_model_for(_image_model())
 
 
 def _build_audio_model() -> GoogleModel:
@@ -84,11 +90,15 @@ def get_media_reader_agent() -> Agent[None, str]:
     """Return the singleton image reader agent, building it on first use."""
     global _media_reader_agent
     if _media_reader_agent is None:
+        model = _image_model()
         _media_reader_agent = Agent(
             _build_model(),
             output_type=str,
             system_prompt=SYSTEM_PROMPT,
-            model_settings=OpenAIResponsesModelSettings(openai_reasoning_effort="low"),
+            # One request per image; the image itself is never re-read.
+            model_settings=model_settings_for(
+                model, ReasoningLevel.LOW, cache_messages=False
+            ),
         )
     return _media_reader_agent
 
@@ -116,7 +126,7 @@ async def describe_media(
     url: str,
     kind: str,
 ) -> str:
-    """Describe an image (GPT-6 Luna) or audio clip (Gemini) per ``instruction``.
+    """Describe an image (Claude Haiku 5.5) or audio clip (Gemini) per ``instruction``.
 
     An image may come as a ``SpooledImage`` (over MAX_DOWNLOAD_BYTES, on disk),
     downsampled in a bounded child and deleted by ``prepare_image_bounded``.

@@ -2,7 +2,7 @@
 
 Four-stage pipeline, presented to the user as a single agent:
 
-0. **Reframer** (gpt-6-luna · effort=medium) — interrogates the
+0. **Reframer** (claude-haiku-5-5 · effort=medium) — interrogates the
    user's raw prompt (is it reasonable, is there a more normal question
    underneath, does it fit the shape of the catalog?) and emits a short
    user-visible message restating what they asked plus structured
@@ -10,16 +10,16 @@ Four-stage pipeline, presented to the user as a single agent:
    ``corpus_topics`` (researcher's search list), ``web_search_topics``
    (extra targets for the gap-filler), and ``reframing_instructions``
    (angle/emphasis notes for the author).
-1. **Researcher** (gpt-6-luna · think=medium) — searches the curated
+1. **Researcher** (claude-haiku-5-5 · effort=medium) — searches the curated
    catalog (``search_resources``) for the reframer's corpus topics,
    opens promising sources (``read_source``), and produces a typed
    ``ResearchOutput`` listing distilled excerpts, further-reading, and
    gaps the catalog didn't cover.
-2. **Gap-filler** (gpt-6-luna · effort=low) — runs when the
+2. **Gap-filler** (claude-haiku-5-5 · effort=low) — runs when the
    researcher reported gaps OR the reframer asked for extra web topics.
    For each item, runs ``web_search`` over the open web and ``read_url``
    on the single best result. Returns one ``GapCitation`` per input.
-3. **Author** (gpt-6-luna · effort=low) — gets the merged
+3. **Author** (claude-haiku-5-5 · effort=low) — gets the merged
    research bundle (curated excerpts + web citations) plus the
    reframer's instructions and the original prompt, and writes the
    final markdown answer using the production system prompt.
@@ -70,18 +70,24 @@ from skrift.agents.models import ResumeContext
 # worker when the string model ids below materialize, never on the web tier.
 from skrift.notifications import notify_user
 
+from smarter_dev.shared.model_catalog import ReasoningLevel
+from smarter_dev.shared.model_catalog import catalog_model_for_id
+from smarter_dev.shared.skrift_models import agent_model_name
+from smarter_dev.shared.skrift_models import agent_model_settings
 from smarter_dev.web.agent_session_cleanup import forget_agent_sessions
+from smarter_dev.web.agent_session_cleanup import session_cost
 from smarter_dev.web.research_tools import brave_search
 from smarter_dev.web.research_tools import jina_read
 
 logger = logging.getLogger(__name__)
 
-# GPT-6 Luna since 2026-09-24, replacing the Gemini 3 Flash preview (Zech:
-# "significantly cheaper"). OpenAI Responses API via OPENAI_API_KEY.
-REFRAMER_MODEL = os.getenv("RESOURCE_REFRAMER_MODEL", "gpt-6-luna")
-RESEARCHER_MODEL = os.getenv("RESOURCE_RESEARCHER_MODEL", "gpt-6-luna")
-GAP_FILLER_MODEL = os.getenv("RESOURCE_GAP_FILLER_MODEL", "gpt-6-luna")
-AUTHOR_MODEL = os.getenv("RESOURCE_AUTHOR_MODEL", "gpt-6-luna")
+# Claude Haiku 5.5 since 2026-10-17 (#199), replacing GPT-6 Luna (which had
+# replaced the Gemini 3 Flash preview on 2026-09-24). Catalog wire ids; any
+# other Claude id works too (shared.skrift_models).
+REFRAMER_MODEL = os.getenv("RESOURCE_REFRAMER_MODEL", "claude-haiku-5-5")
+RESEARCHER_MODEL = os.getenv("RESOURCE_RESEARCHER_MODEL", "claude-haiku-5-5")
+GAP_FILLER_MODEL = os.getenv("RESOURCE_GAP_FILLER_MODEL", "claude-haiku-5-5")
+AUTHOR_MODEL = os.getenv("RESOURCE_AUTHOR_MODEL", "claude-haiku-5-5")
 
 # Per-stage Agent names — four separate Skrift agents (one per stage),
 # all transparent to the end user via the shared tool-event stream.
@@ -803,34 +809,36 @@ def _record_hit(hit: dict) -> None:
 # ---------------------------------------------------------------------------
 
 
-# Models are pydantic-ai model-id STRINGS (not Model objects), so this module
+# Models are pydantic-ai model-name STRINGS (not Model objects), so this module
 # imports no pydantic-ai. Skrift materializes the real model lazily in the
-# worker. "google-gla:" = Gemini API (GEMINI_API_KEY/GOOGLE_API_KEY from env);
-# "openai-responses:" = the OpenAI Responses API, which the gpt-5 family needs
-# for reasoning_effort + function tools. model_settings are plain dicts (the
-# pydantic-ai settings types are TypedDicts, so these are identical at runtime).
-def _build_google_model(model_id: str) -> str:
-    return f"google-gla:{model_id}"
+# worker; shared.skrift_models turns a catalog id into the name and plain-dict
+# settings. The reframer and the author answer in one request, so they skip
+# the message cache breakpoint; the researcher and gap-filler loop over tools,
+# where it pays.
+def _model_name(model_id: str) -> str:
+    return agent_model_name(catalog_model_for_id(model_id))
 
 
-def _build_openai_model(model_id: str) -> str:
-    return f"openai-responses:{model_id}"
+def _settings(model_id: str, level: ReasoningLevel, *, cache_messages: bool) -> dict:
+    return agent_model_settings(
+        catalog_model_for_id(model_id), level, cache_messages=cache_messages
+    )
 
 
 def _reframer_model_settings() -> dict:
-    return {"openai_reasoning_effort": "medium"}
+    return _settings(REFRAMER_MODEL, ReasoningLevel.MEDIUM, cache_messages=False)
 
 
 def _researcher_model_settings() -> dict:
-    return {"openai_reasoning_effort": "medium"}
+    return _settings(RESEARCHER_MODEL, ReasoningLevel.MEDIUM, cache_messages=True)
 
 
 def _gap_filler_model_settings() -> dict:
-    return {"openai_reasoning_effort": "low"}
+    return _settings(GAP_FILLER_MODEL, ReasoningLevel.LOW, cache_messages=True)
 
 
 def _author_model_settings() -> dict:
-    return {"openai_reasoning_effort": "low"}
+    return _settings(AUTHOR_MODEL, ReasoningLevel.LOW, cache_messages=False)
 
 
 @dataclass
@@ -861,7 +869,7 @@ def _build_deps(ctx: ResumeContext) -> RunDeps:
 
 
 reframer_agent = skrift.Agent(
-    _build_openai_model(REFRAMER_MODEL),
+    _model_name(REFRAMER_MODEL),
     name=REFRAMER_AGENT_NAME,
     system_prompt=_REFRAMER_PROMPT,
     output_type=ReframerOutput,
@@ -871,7 +879,7 @@ reframer_agent = skrift.Agent(
 )
 
 researcher_agent = skrift.Agent(
-    _build_openai_model(RESEARCHER_MODEL),
+    _model_name(RESEARCHER_MODEL),
     name=RESEARCHER_AGENT_NAME,
     system_prompt=_RESEARCHER_PROMPT,
     output_type=ResearchOutput,
@@ -881,7 +889,7 @@ researcher_agent = skrift.Agent(
 )
 
 gap_filler_agent = skrift.Agent(
-    _build_openai_model(GAP_FILLER_MODEL),
+    _model_name(GAP_FILLER_MODEL),
     name=GAP_FILLER_AGENT_NAME,
     system_prompt=_GAP_FILLER_PROMPT,
     output_type=GapFillerOutput,
@@ -891,7 +899,7 @@ gap_filler_agent = skrift.Agent(
 )
 
 author_agent = skrift.Agent(
-    _build_openai_model(AUTHOR_MODEL),
+    _model_name(AUTHOR_MODEL),
     name=AUTHOR_AGENT_NAME,
     system_prompt=_SYSTEM_PROMPT,
     model_settings=_author_model_settings(),
@@ -1579,6 +1587,11 @@ async def _capture_stage_usage(
         "cache_read_tokens": totals.cache_read_tokens,
         "cache_write_tokens": totals.cache_write_tokens,
     }
+    # Priced here, from the session's own responses, while it still has them:
+    # a long-context tier is decided per request, not on the stage's total.
+    cost = session_cost(state)
+    if cost is not None:
+        record["cost_usd"] = str(cost)
     sink.append(record)
     if callback is not None:
         await callback(record, len(sink) - 1)

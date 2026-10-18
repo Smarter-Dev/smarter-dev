@@ -77,7 +77,11 @@ def _writer_settings_for(
     catalog_model = _catalog_model_for_id(model_id)
     if catalog_model is None:
         return None
-    return model_settings_for(catalog_model, parse_reasoning_level(reasoning_level))
+    # The tool-less writer answers its brief in one request, so a message
+    # breakpoint would only pay the 1-hour write rate for a prefix nothing reads.
+    return model_settings_for(
+        catalog_model, parse_reasoning_level(reasoning_level), cache_messages=False
+    )
 
 
 def _identity_directive(model_id: str) -> str:

@@ -24,6 +24,9 @@ last write.
 A session's run state is also the only record of its token usage. A caller
 that does not record usage itself passes ``usage`` so each model turn becomes a
 ``usage_cost_rows`` row, in the same transaction, before the session goes.
+Skrift sums a turn's usage across its requests, so a turn is priced from its
+stored responses, each on its own (``turn_cost``): a long-context tier is
+decided per request.
 """
 
 from __future__ import annotations
@@ -31,8 +34,10 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable
 from dataclasses import dataclass
+from decimal import Decimal
 from uuid import UUID
 
+from skrift.agents.models import AgentUsageRecord
 from skrift.agents.models import RunState
 from skrift.db.models.worker import WorkerArchiveEventRecord
 from skrift.db.models.worker import WorkerArchiveSnapshotRecord
@@ -43,6 +48,9 @@ from sqlalchemy import select
 
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
+from smarter_dev.shared.model_catalog import CatalogModel
+from smarter_dev.shared.request_usage import RequestTokens
+from smarter_dev.shared.request_usage import response_request_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +82,60 @@ def _catalog_model(configured: str | None):
     )
 
 
+def turn_responses(state: RunState) -> dict[str, list[dict]]:
+    """Each turn's stored model responses (JSON), by turn id.
+
+    A turn's messages follow the user message carrying its ``turn_id`` up to
+    the next one's; a steer (a user message with no turn id) stays in its turn.
+    """
+    by_turn: dict[str, list[dict]] = {}
+    turn_id = None
+    for message in state.messages:
+        if message.get("role") == "user":
+            turn_id = message.get("turn_id") or turn_id
+        elif message.get("role") == "model" and turn_id is not None:
+            content = message.get("content")
+            if isinstance(content, dict) and content.get("kind") == "response":
+                by_turn.setdefault(turn_id, []).append(content)
+    return by_turn
+
+
+def turn_cost(
+    model: CatalogModel, usage: AgentUsageRecord, responses: list[dict]
+) -> Decimal:
+    """A turn's cost, each of its stored responses priced on its own.
+
+    Skrift's record is the turn's total; tokens the stored responses do not
+    account for are priced at the base rate (``calc_cost_by_request``). A Skrift
+    agent runs one model, so every response is that model's.
+    """
+    from smarter_dev.web.chat.usage import usage_cost_by_request
+
+    return usage_cost_by_request(
+        model,
+        RequestTokens(
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cache_read_tokens,
+            usage.cache_write_tokens,
+        ),
+        response_request_tokens(responses),
+    )
+
+
+def session_cost(state: RunState) -> Decimal | None:
+    """Every turn's ``turn_cost`` added up, or None when a turn's model has no
+    catalog price."""
+    responses = turn_responses(state)
+    total = Decimal("0")
+    for turn_id, usage in state.turn_usage.items():
+        model = _catalog_model(usage.configured_model or usage.model_name)
+        if model is None:
+            return None
+        total += turn_cost(model, usage, responses.get(turn_id, []))
+    return total
+
+
 async def _record_usage(session, state_keys: list[str], owner: UsageOwner) -> None:
     """One cost row per model turn, keyed by session and turn so a re-run adds none."""
     from smarter_dev.web.chat.usage import record_usage
@@ -85,6 +147,7 @@ async def _record_usage(session, state_keys: list[str], owner: UsageOwner) -> No
     ).all()
     for value in values:
         state = RunState.model_validate(value.get("value", value))
+        responses = turn_responses(state)
         for turn_id, usage in state.turn_usage.items():
             model = _catalog_model(usage.configured_model or usage.model_name)
             if model is None:
@@ -104,6 +167,7 @@ async def _record_usage(session, state_keys: list[str], owner: UsageOwner) -> No
                 output_tokens=usage.output_tokens,
                 cache_read_tokens=usage.cache_read_tokens,
                 cache_write_tokens=usage.cache_write_tokens,
+                cost_usd=turn_cost(model, usage, responses.get(turn_id, [])),
                 user_id=owner.user_id,
                 conversation_id=owner.conversation_id,
                 details={"agent": state.agent_name},

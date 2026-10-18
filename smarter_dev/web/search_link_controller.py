@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 OPENSEARCH = """<?xml version="1.0" encoding="UTF-8"?>
 <OpenSearchDescription xmlns="http://a9.com/-/spec/opensearch/1.1/">
   <ShortName>Smarter Dev</ShortName>
-  <Description>Search the web with Luna and Jev</Description>
+  <Description>Search the web with Claude Haiku and Jev</Description>
   <InputEncoding>UTF-8</InputEncoding>
   <Image width="1000" height="1000" type="image/png">{base}/static/site/favicon.png</Image>
   <Url type="text/html" method="get" template="{base}/s/{token}?q={{searchTerms}}"/>

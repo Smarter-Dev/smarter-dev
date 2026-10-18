@@ -10,13 +10,13 @@ Three tiers, cheapest first:
 3. ``len > 3000`` — :func:`fit_overlong_response` first asks the chat agent
    itself to rewrite the reply shorter (it has the full conversation context);
    if the rewrite is still over 3000 characters (or the run fails), a cheap
-   GPT-6 Luna summarizer condenses the original; if even that overruns, the
+   Claude Haiku 5.5 summarizer condenses the original; if even that overruns, the
    text is hard-truncated as a last resort. The result then flows through tier
    1/2 for sending.
 
 The shorten re-run uses the turn's own agent + history, so its tokens are the
 chat model's and are folded into the turn's metering/pricing by the engine.
-The Luna summarizer runs its own model; like chat compaction, its spend is
+The summarizer runs its own model; like chat compaction, its spend is
 logged but not metered against the channel budget.
 """
 
@@ -47,8 +47,9 @@ SPLIT_TARGET = 1500
 # Above this, splitting in two can't stay under the cap — rewrite instead.
 SUMMARIZE_THRESHOLD = 3000
 
-# Catalog key of the model that summarizes as the second resort.
-LENGTH_SUMMARIZER_MODEL_KEY = "gpt-6-luna"
+# Catalog key of the model that summarizes as the second resort. Claude Haiku
+# 5.5 since 2026-10-17 (#199), replacing GPT-6 Luna.
+LENGTH_SUMMARIZER_MODEL_KEY = "claude-haiku-5-5"
 
 _SHORTEN_PROMPT_TEMPLATE = (
     "<length-notice>Your drafted reply could not be sent: it is {length} "
@@ -73,8 +74,11 @@ class FitResult:
     ``text`` is guaranteed to be at most :data:`SUMMARIZE_THRESHOLD` characters
     (so :func:`split_for_discord` can always send it in at most two messages).
     ``extra_input_tokens`` / ``extra_output_tokens`` are the shorten re-run's
-    chat-model spend for the engine to meter; ``method`` records which tier
-    produced the text ("shortened" / "summarized" / "truncated").
+    chat-model spend for the engine to meter, and ``extra_cache_read_tokens`` /
+    ``extra_cache_write_tokens`` the part of its input the provider cache
+    served or stored (the turn's priced totals must hold every request's
+    counts, or its per-request pricing is discarded); ``method`` records which
+    tier produced the text ("shortened" / "summarized" / "truncated").
 
     ``extra_messages`` are the shorten re-run's own ``ModelMessage``s, for the
     engine to append to the turn's persisted history. Without them the re-run
@@ -88,6 +92,8 @@ class FitResult:
     extra_output_tokens: int
     method: str
     extra_messages: list = field(default_factory=list)
+    extra_cache_read_tokens: int = 0
+    extra_cache_write_tokens: int = 0
 
 
 def split_for_discord(text: str) -> list[str]:
@@ -123,7 +129,7 @@ _length_summarizer: Agent | None = None
 
 
 def get_length_summarizer() -> Agent:
-    """The cached Luna summarizer agent (plain-text output)."""
+    """The cached summarizer agent (plain-text output)."""
     global _length_summarizer
     if _length_summarizer is None:
         catalog_model = get_model(LENGTH_SUMMARIZER_MODEL_KEY)
@@ -131,7 +137,9 @@ def get_length_summarizer() -> Agent:
             build_agent_model(catalog_model.model_id),
             output_type=str,
             system_prompt=_SUMMARIZER_SYSTEM_PROMPT,
-            model_settings=model_settings_for(catalog_model, ReasoningLevel.LOW),
+            model_settings=model_settings_for(
+                catalog_model, ReasoningLevel.LOW, cache_messages=False
+            ),
         )
     return _length_summarizer
 
@@ -144,6 +152,8 @@ class _ShortenOutcome:
     input_tokens: int
     output_tokens: int
     messages: list
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 async def _shorten_with_agent(
@@ -182,12 +192,17 @@ async def _shorten_with_agent(
     response = result.output.response
     text = response.message.strip() if response and response.message else None
     return _ShortenOutcome(
-        text or None, input_tokens, output_tokens, list(result.new_messages())
+        text or None,
+        input_tokens,
+        output_tokens,
+        list(result.new_messages()),
+        int(getattr(usage, "cache_read_tokens", 0) or 0),
+        int(getattr(usage, "cache_write_tokens", 0) or 0),
     )
 
 
-async def _summarize_with_luna(message: str) -> str | None:
-    """Condense ``message`` with the Luna summarizer (fail-soft)."""
+async def _summarize_reply(message: str) -> str | None:
+    """Condense ``message`` with the summarizer (fail-soft)."""
     try:
         result = await get_length_summarizer().run(user_prompt=message)
     except Exception:
@@ -230,9 +245,11 @@ async def fit_overlong_response(
             outcome.output_tokens,
             "shortened",
             outcome.messages,
+            outcome.cache_read_tokens,
+            outcome.cache_write_tokens,
         )
 
-    summary = await _summarize_with_luna(message)
+    summary = await _summarize_reply(message)
     if summary is not None and len(summary) <= SUMMARIZE_THRESHOLD:
         return FitResult(
             summary,
@@ -240,6 +257,8 @@ async def fit_overlong_response(
             outcome.output_tokens,
             "summarized",
             outcome.messages,
+            outcome.cache_read_tokens,
+            outcome.cache_write_tokens,
         )
 
     return FitResult(
@@ -248,6 +267,8 @@ async def fit_overlong_response(
         outcome.output_tokens,
         "truncated",
         outcome.messages,
+        outcome.cache_read_tokens,
+        outcome.cache_write_tokens,
     )
 
 
@@ -256,12 +277,12 @@ async def fit_writer_message(message: str) -> FitResult:
 
     The tool-less WRITER has no context-aware ``response``-shaped agent to
     re-run, so this skips the agent-shorten tier: it condenses the reply with
-    the Luna summarizer, then hard-truncates as a last resort so a reply is
-    always delivered. Like single-stage's summarizer tier, Luna's spend is
+    the summarizer, then hard-truncates as a last resort so a reply is
+    always delivered. Like single-stage's summarizer tier, its spend is
     logged but not metered against the channel budget, so the returned
     extra-token counts are always zero.
     """
-    summary = await _summarize_with_luna(message)
+    summary = await _summarize_reply(message)
     if summary is not None and len(summary) <= SUMMARIZE_THRESHOLD:
         return FitResult(summary, 0, 0, "summarized")
 

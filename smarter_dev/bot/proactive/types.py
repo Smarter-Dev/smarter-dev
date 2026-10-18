@@ -185,6 +185,8 @@ class ActivationResult:
     output_tokens: int
     cache_read_tokens: int
     model_id: str
+    # Claude's cache writes (a subset of input_tokens, like reads).
+    cache_write_tokens: int = 0
     # Reactions are recorded in eval run records but not scored.
     reactions: tuple[ProposedReaction, ...] = ()
     # Multi-model adapters break usage down per model id here; cost

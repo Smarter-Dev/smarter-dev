@@ -311,14 +311,14 @@ _GEMINI_4_THINKING = (
     ReasoningLevel.HIGH,
 )
 _OPEN_EFFORT = (ReasoningLevel.LOW, ReasoningLevel.MEDIUM, ReasoningLevel.HIGH)
-# Claude Sonnet 5.5 on OpenRouter: reasoning is mandatory (no "none") and its
-# supported efforts run low → max.
+# Claude Sonnet and Haiku 5.5: thinking is adaptive and never sent disabled
+# (no "none"), and the supported efforts run low → max.
 _CLAUDE_EFFORT = _OPEN_EFFORT + (ReasoningLevel.XHIGH, ReasoningLevel.MAX)
 
 
 # Curated catalog. Kept <= 24 entries so the whole set fits in one Discord
 # string-select (25-option limit, leaving room for a "server default" sentinel).
-# Gemini -> Google, GPT -> OpenAI, Claude, Grok and Mistral -> OpenRouter, and the open weights ->
+# Gemini -> Google, GPT -> OpenAI, Claude -> Anthropic, Grok and Mistral -> OpenRouter, and the open weights ->
 # Digital Ocean / OpenCode Zen / OpenRouter, all OpenAI-compatible. Model ids reflect the latest releases as of mid-2026
 # (verified against provider model listings); they are wire ids and can be
 # re-verified without a migration.
@@ -612,67 +612,51 @@ MODEL_CATALOG: tuple[CatalogModel, ...] = (
     ),
     # The whole Claude family left on 2026-09-03: nobody on the server talked
     # to it, and three of the 24 select slots were being held for models with no
-    # traffic. ``ModelProvider.ANTHROPIC`` and the router's Anthropic branch
-    # stay — they remain the vocabulary for the provider key on settled usage
-    # rows — as do the Claude price patches in llm_pricing, which those rows
-    # price against.
+    # traffic. Their price patches stay in llm_pricing for the settled usage
+    # rows that carry their wire ids.
     #
-    # --- Claude via OpenRouter ---
-    # Sonnet 5.5 joined on 2026-09-28, through OpenRouter at the user's
-    # request rather than the direct Anthropic branch the retired Claude models
-    # used. Only this key was added: Sonnet 5 stays retired, and no selection
-    # moves onto 5.5 — people choose it themselves. Capabilities from GET
-    # /api/v1/models and /api/v1/models/anthropic/claude-sonnet-5.5/endpoints
-    # (2026-09-28): 1M context, 128K output, text+image+file input, tools, and
-    # mandatory reasoning with efforts low → max, default high. All three
-    # endpoints (anthropic, claude-on-aws, amazon-bedrock) serve Anthropic's
-    # own build at the same $2/$10, so the only constraint is a ceiling at
-    # that rate. None of them accepts tool_choice "required", hence
-    # ``supports_forced_tool_choice=False``.
+    # --- Claude, direct from Anthropic ---
+    # Sonnet 5.5 joined on 2026-09-28 and Haiku 5.5 on 2026-10-07, both
+    # through OpenRouter. On 2026-10-17 (#188) both moved to Anthropic's own
+    # API on our Claude key, for prompt caching we control (1-hour breakpoints,
+    # see model_router) and Anthropic's list price without OpenRouter's fee.
+    # Keys are unchanged, so saved selections keep working; the OpenRouter ids
+    # stay priced in llm_pricing for the rows written before the move.
+    #
+    # Sonnet 5.5: 1M context, 128K output, text+image input, tools, adaptive
+    # thinking that cannot be disabled, efforts low → max (Anthropic's default
+    # is high). The 5.5 generation answers a forced tool_choice ("any"/"tool")
+    # with a 400, hence ``supports_forced_tool_choice=False``.
     CatalogModel(
         key="claude-sonnet-5-5",
         label="Claude Sonnet 5.5",
         family="Claude",
-        provider=ModelProvider.OPENROUTER,
-        model_id="anthropic/claude-sonnet-5.5",
+        provider=ModelProvider.ANTHROPIC,
+        model_id="claude-sonnet-5-5",
         supports_vision=True,
         context_window=1_000_000,
         max_output_tokens=128_000,
         supports_forced_tool_choice=False,
         reasoning_levels=_CLAUDE_EFFORT,
         default_reasoning=ReasoningLevel.HIGH,
-        openrouter_routing=OpenRouterRouting(
-            max_price_input_mtok=2.00,
-            max_price_output_mtok=10.00,
-        ),
     ),
-    # Haiku 5.5 joined on 2026-10-07, the day Anthropic released it, at the
-    # user's request. Admitted beside Sonnet 5.5 on the same terms: nothing
-    # retires and no selection moves. Capabilities from GET /api/v1/models and
-    # /api/v1/models/anthropic/claude-haiku-5.5/endpoints (2026-10-07): 1M
-    # context, 128K output, text+image input, tools, and reasoning with
-    # efforts low → max (Anthropic's default is medium). Anthropic's own
-    # endpoint is the only one, and like Sonnet 5.5's it refuses tool_choice
-    # "required". The ceiling is the $0.10/$0.50 base tier; from 100K prompt
-    # tokens every rate is 5x (llm_pricing's _LONG_CONTEXT_TIERS).
-    # test_openrouter_lists_claude_haiku_5_5_as_catalogued holds this entry to
-    # the live listing.
+    # Haiku 5.5: 1M context, 128K output, text+image input, tools, efforts
+    # low → max (Anthropic's default is medium). Every rate is 5x once a
+    # single prompt passes 100,000 tokens (llm_pricing's _LONG_CONTEXT_TIERS).
+    # Its OpenRouter endpoint refused tool_choice "required"; it keeps the
+    # unforced output tool on the direct API too.
     CatalogModel(
         key="claude-haiku-5-5",
         label="Claude Haiku 5.5",
         family="Claude",
-        provider=ModelProvider.OPENROUTER,
-        model_id="anthropic/claude-haiku-5.5",
+        provider=ModelProvider.ANTHROPIC,
+        model_id="claude-haiku-5-5",
         supports_vision=True,
         context_window=1_000_000,
         max_output_tokens=128_000,
         supports_forced_tool_choice=False,
         reasoning_levels=_CLAUDE_EFFORT,
         default_reasoning=ReasoningLevel.MEDIUM,
-        openrouter_routing=OpenRouterRouting(
-            max_price_input_mtok=0.10,
-            max_price_output_mtok=0.50,
-        ),
     ),
     # --- Qwen3.8 via OpenRouter ---
     # The 2.4T A95B weights are NOT on our Digital Ocean account — GET
@@ -824,6 +808,40 @@ def catalog_by_key() -> dict[str, CatalogModel]:
 def get_model(key: str) -> CatalogModel | None:
     """Return the catalog model for ``key``, or ``None`` if unknown."""
     return _MODEL_BY_KEY.get(key)
+
+
+def direct_claude_model(model_id: str) -> CatalogModel:
+    """An ad-hoc catalog entry for a Claude id the catalog does not list.
+
+    Config can name any Claude id (``PROACTIVE_AGENT_MODEL=claude-opus-5-5``);
+    this routes it through the same direct-Anthropic branch as the catalog's
+    Claude models, keys, caching and all. Forced tool choice stays off: every
+    current Claude generation either rejects it or does not need it.
+    """
+    return CatalogModel(
+        key=model_id,
+        label=model_id,
+        family="Claude",
+        provider=ModelProvider.ANTHROPIC,
+        model_id=model_id,
+        supports_forced_tool_choice=False,
+    )
+
+
+def catalog_model_for_id(model_id: str) -> CatalogModel:
+    """The catalog model a configured wire id (or key) names.
+
+    For agents whose model is set by an env var or setting. A Claude id the
+    catalog does not list gets :func:`direct_claude_model`. Anything else
+    raises ``ValueError``, so a mistyped override fails on first use rather
+    than reaching some provider by guesswork.
+    """
+    for model in MODEL_CATALOG:
+        if model_id in (model.model_id, model.key):
+            return model
+    if model_id.startswith("claude-"):
+        return direct_claude_model(model_id)
+    raise ValueError(f"Model is not in the catalog: {model_id!r}")
 
 
 def is_valid_model_key(key: str) -> bool:

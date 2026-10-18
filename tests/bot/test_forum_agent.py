@@ -13,18 +13,18 @@ from pydantic_ai.messages import ModelMessage
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.messages import UserPromptPart
+from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.function import AgentInfo
 from pydantic_ai.models.function import FunctionModel
-from pydantic_ai.models.openai import OpenAIResponsesModel
 
 from smarter_dev.bot.agents import forum_agent
 from smarter_dev.bot.agents.forum_agent import ForumMonitorAgent
 
 
 @pytest.fixture(autouse=True)
-def _openai_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def _model_key(monkeypatch: pytest.MonkeyPatch) -> None:
     # The real model is built before the test swaps in its FunctionModel.
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 
 
 def _prompt(messages: list[ModelMessage]) -> str:
@@ -167,14 +167,14 @@ async def test_combined_returns_all_five_fields() -> None:
 # -- prompts and model -------------------------------------------------------------
 
 
-def test_each_agent_runs_on_gpt_6_luna_through_the_router() -> None:
+def test_each_agent_runs_on_claude_haiku_through_the_router() -> None:
     for agent in (
         forum_agent.get_forum_monitor_agent(),
         forum_agent.get_forum_topic_classifier_agent(),
         forum_agent.get_forum_combined_agent(),
     ):
-        assert isinstance(agent.model, OpenAIResponsesModel)
-        assert agent.model.model_name == "gpt-6-luna"
+        assert isinstance(agent.model, AnthropicModel)
+        assert agent.model.model_name == "claude-haiku-5-5"
 
 
 def test_the_instructions_keep_the_confidence_definition() -> None:

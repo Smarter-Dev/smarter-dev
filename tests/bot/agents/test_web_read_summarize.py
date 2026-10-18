@@ -41,7 +41,7 @@ def test_web_summarizer_prompt_favors_quotes_for_extraction():
     assert "explicitly asks for a summary" in web_summarizer.SYSTEM_PROMPT
 
 
-def test_web_summarizer_uses_luna_primary_and_low_thinking_gemini_fallback():
+def test_web_summarizer_uses_haiku_primary_and_low_thinking_gemini_fallback():
     primary = MagicMock()
     fallback = MagicMock()
     with (
@@ -58,9 +58,14 @@ def test_web_summarizer_uses_luna_primary_and_low_thinking_gemini_fallback():
 
     assert primary is not fallback
     primary_call, fallback_call = agent_class.call_args_list
-    assert web_summarizer.PRIMARY_MODEL_KEY == "gpt-6-luna"
+    assert web_summarizer.PRIMARY_MODEL_KEY == "claude-haiku-5-5"
     assert primary_call.args == (primary,)
-    assert primary_call.kwargs["model_settings"]["openai_reasoning_effort"] == "medium"
+    # Luna's OpenAI effort became Claude's, and a page is read in one request.
+    assert primary_call.kwargs["model_settings"] == {
+        "anthropic_thinking": {"type": "adaptive"},
+        "anthropic_effort": "medium",
+        "anthropic_cache_messages": False,
+    }
     assert fallback_call.args == (fallback,)
     assert fallback_call.kwargs["model_settings"]["google_thinking_config"] == {
         "thinking_level": "LOW"
@@ -418,7 +423,7 @@ async def test_summarize_web_content_fails_over_to_gemini_and_logs_critical(capl
     assert result == "FALLBACK"
     fallback_agent.run.assert_awaited_once_with(primary_agent.run.call_args.args[0])
     assert "WEB SUMMARIZER FAILOVER" in caplog.text
-    assert "GPT-6 Luna failed" in caplog.text
+    assert "Claude Haiku 5.5 failed" in caplog.text
     assert "using Gemini 3.8 Flash" in caplog.text
     assert "https://e.test" in caplog.text
     # Logged by type and frames; the error text can quote the page or prompt.
@@ -427,7 +432,7 @@ async def test_summarize_web_content_fails_over_to_gemini_and_logs_critical(capl
     record_failover.assert_called_once()
     assert record_failover.call_args.kwargs == {
         "operation": "web_summarizer",
-        "primary_model": "gpt-6-luna",
+        "primary_model": "claude-haiku-5-5",
         "fallback_model": "gemini-3.8-flash",
         "error": primary_agent.run.side_effect,
     }

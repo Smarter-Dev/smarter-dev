@@ -1,8 +1,8 @@
 """The web search's spend in the usage ledger, which the admin invoices read.
 
-Each attempt writes one row per paid step: Luna's queries, the Brave requests
-that were answered, Jev's ranking and, when the search writes one, Luna's
-answer and the Jina Reader pages it read. Rows are keyed by search and attempt,
+Each attempt writes one row per paid step: the model's queries, the Brave
+requests that were answered, Jev's ranking and, when the search writes one, the
+model's answer and the Jina Reader pages it read. Rows are keyed by search and attempt,
 so a retried job records what the retry spent and a repeated write records
 nothing."""
 
@@ -48,8 +48,10 @@ def _row(run: WebSearchRun, step: str, **fields) -> UsageCostRow:
     )
 
 
-def luna_row(run: WebSearchRun, usage: dict, step: str = "queries") -> UsageCostRow | None:
-    from smarter_dev.web.chat.usage import usage_cost
+def model_row(run: WebSearchRun, usage: dict, step: str = "queries") -> UsageCostRow | None:
+    from smarter_dev.shared.request_usage import RequestTokens
+    from smarter_dev.shared.request_usage import request_tokens_from_dicts
+    from smarter_dev.web.chat.usage import usage_cost_by_request
 
     wire = usage.get("model", "")
     model = next((m for m in MODEL_CATALOG if wire == m.model_id), None)
@@ -60,7 +62,7 @@ def luna_row(run: WebSearchRun, usage: dict, step: str = "queries") -> UsageCost
         "input_tokens": int(usage.get("input_tokens") or 0),
         "output_tokens": int(usage.get("output_tokens") or 0),
         "cache_read_tokens": int(usage.get("cache_read_tokens") or 0),
-        "cache_write_tokens": 0,
+        "cache_write_tokens": int(usage.get("cache_write_tokens") or 0),
     }
     return _row(
         run,
@@ -69,7 +71,13 @@ def luna_row(run: WebSearchRun, usage: dict, step: str = "queries") -> UsageCost
         catalog_model_key=model.key,
         model_id=model.model_id,
         reasoning_level="medium",
-        cost_usd=usage_cost(model, *tokens.values()),
+        # Priced per request (a long-context tier is decided per request);
+        # a run recorded without its requests' counts is priced on its totals.
+        cost_usd=usage_cost_by_request(
+            model,
+            RequestTokens(**tokens),
+            request_tokens_from_dicts(usage.get("request_tokens")),
+        ),
         **tokens,
     )
 
@@ -90,7 +98,7 @@ def brave_row(run: WebSearchRun, requests: int) -> UsageCostRow:
 def answer_rows(run: WebSearchRun, usage: dict) -> list[UsageCostRow | None]:
     from smarter_dev.web.web_search import answer
 
-    rows = [luna_row(run, usage, step="answer")]
+    rows = [model_row(run, usage, step="answer")]
     tokens = int(usage.get("reader_tokens") or 0)
     if tokens:
         rows.append(

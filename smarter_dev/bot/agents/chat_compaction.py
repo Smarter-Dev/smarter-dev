@@ -4,7 +4,7 @@ Registered on the ``ChatAgent`` as a ``history_processor``. Pydantic AI
 invokes this before every model call. When folding the oldest turns into
 a summary is *economically* worth it (see below), they're rendered to a
 transcript and summarised into a single running-summary message by
-GPT-6 Luna; the most recent ~``KEEP_RECENT_CHARS`` of turns stay verbatim.
+Claude Haiku 5.5; the most recent ~``KEEP_RECENT_CHARS`` of turns stay verbatim.
 
 The fold decision is a cost model, not a fixed threshold. Providers cache
 prompt prefixes for a few minutes; re-reading a cached prefix costs ~10%
@@ -73,10 +73,12 @@ from smarter_dev.bot.agents.model_router import build_model_for
 from smarter_dev.bot.agents.model_router import model_settings_for
 from smarter_dev.bot.privacy.attribution import ATTRIBUTION_MARK
 from smarter_dev.bot.privacy.attribution import chat_history_attributed
+from smarter_dev.shared.claude_thinking import strip_claude_thinking
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ReasoningLevel
+from smarter_dev.shared.request_usage import response_request_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +107,10 @@ TRANSCRIPT_TOOL_CLAMP = 1_500
 
 COMPACTED_PREFIX = "[compacted history]"
 
-DEFAULT_COMPACT_MODEL = "gpt-6-luna"
+# Claude Haiku 5.5 since 2026-10-17 (#199); chat itself stays on GPT-6 Luna.
+# Haiku bills 5x on a prompt over 100,000 tokens, but a fold triggers by
+# HARD_FOLD_TOKENS at the latest, so its prompt normally stays far below that.
+DEFAULT_COMPACT_MODEL = "claude-haiku-5-5"
 COMPACT_MODEL_ENV_VAR = "CHAT_AGENT_COMPACT_MODEL"
 # The summarizer runs at fixed low reasoning; persisted with each compaction
 # event so the dashboard can attribute its spend.
@@ -117,8 +122,9 @@ DEFAULT_CHAT_MODEL = "gpt-6-luna"
 
 # $/Mtok (input, cached_input, output), matched by id prefix. Cached rate
 # defaults to 10% of input when the provider hasn't published one.
-# "gpt-6-luna" (direct OpenAI) is the default. The GPT-5.6 rows stay for an
-# env pin of a retired id: "openai/gpt-5.6-luna" is 5.6 Luna on the OpenRouter
+# "gpt-6-luna" (direct OpenAI) is the chat default and "claude-haiku-5-5"
+# (direct Anthropic, below its 100K tier) the compactor's. The GPT-5.6 rows
+# stay for an env pin of a retired id: "openai/gpt-5.6-luna" is 5.6 Luna on the OpenRouter
 # route, "gpt-5.6-luna" the direct-OpenAI id at OpenAI's own rates.
 _PRICES: dict[str, tuple[float, float, float]] = {
     "gemini-3.1-flash-lite": (0.25, 0.025, 1.50),
@@ -130,6 +136,7 @@ _PRICES: dict[str, tuple[float, float, float]] = {
     "gpt-6-sol": (2.00, 0.20, 10.00),
     "gpt-6.1-sol": (2.00, 0.10, 10.00),
     "gpt-5.4-nano": (0.20, 0.02, 1.25),
+    "claude-haiku-5-5": (0.10, 0.01, 0.50),
 }
 _DEFAULT_PRICES = (0.50, 0.05, 2.00)
 
@@ -202,6 +209,9 @@ class CompactionEvent:
     # summarizer_tokens_input. None when not captured.
     summarizer_cache_read_tokens: int | None = None
     summarizer_cache_write_tokens: int | None = None
+    # Each summarizer request's own counts (RequestTokens dicts), so a
+    # long-context tier is priced per request. None when not captured.
+    summarizer_request_tokens: list[dict] | None = None
 
 
 _collected: ContextVar[list[CompactionEvent] | None] = ContextVar(
@@ -288,8 +298,9 @@ def get_summarizer_agent() -> Agent[None, str]:
             build_model_for(catalog_model),
             output_type=str,
             system_prompt=_SUMMARIZER_PROMPT.format(max_chars=MAX_SUMMARY_CHARS),
+            # One request per fold, and the transcript is never sent twice.
             model_settings=model_settings_for(
-                catalog_model, SUMMARIZER_REASONING_LEVEL
+                catalog_model, SUMMARIZER_REASONING_LEVEL, cache_messages=False
             ),
         )
     return _summarizer_agent
@@ -303,6 +314,7 @@ class _SummariseResult:
     model_name: str
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    request_tokens: list[dict] | None = None
 
 
 async def _summarise_conversation(
@@ -317,6 +329,7 @@ async def _summarise_conversation(
     tokens_output = 0
     cache_read_tokens = 0
     cache_write_tokens = 0
+    request_tokens = None
     model_name = os.getenv(COMPACT_MODEL_ENV_VAR, DEFAULT_COMPACT_MODEL)
     try:
         result = await get_summarizer_agent().run(user_prompt=transcript)
@@ -334,6 +347,10 @@ async def _summarise_conversation(
             tokens_output = int(usage.output_tokens or 0)
             cache_read_tokens = int(getattr(usage, "cache_read_tokens", 0) or 0)
             cache_write_tokens = int(getattr(usage, "cache_write_tokens", 0) or 0)
+        request_tokens = [
+            tokens.as_dict()
+            for tokens in response_request_tokens(result.all_messages())
+        ]
     except Exception:
         pass
     if len(summary) > MAX_SUMMARY_CHARS:
@@ -351,6 +368,7 @@ async def _summarise_conversation(
         model_name=model_name,
         cache_read_tokens=cache_read_tokens,
         cache_write_tokens=cache_write_tokens,
+        request_tokens=request_tokens,
     )
 
 
@@ -595,6 +613,7 @@ async def compact_history(messages: list[ModelMessage]) -> list[ModelMessage]:
             summarizer_reasoning_level=SUMMARIZER_REASONING_LEVEL.value,
             summarizer_cache_read_tokens=summary.cache_read_tokens,
             summarizer_cache_write_tokens=summary.cache_write_tokens,
+            summarizer_request_tokens=summary.request_tokens,
         )
     )
 
@@ -606,4 +625,25 @@ async def compact_history(messages: list[ModelMessage]) -> list[ModelMessage]:
             UserPromptPart(content=summary.text),
         ]
     )
-    return [summary_request, *kept, *current]
+    return [summary_request, *_without_settled_claude_thinking(kept, current), *current]
+
+
+def _without_settled_claude_thinking(
+    kept: list[ModelMessage], current: list[ModelMessage]
+) -> list[ModelMessage]:
+    """Kept turns minus the Claude thinking the fold just invalidated.
+
+    Their blocks were signed with the folded turns in the prefix. A turn still
+    in flight (the current request carries tool results, not a new prompt)
+    keeps its thinking: Claude expects a tool round back with its reasoning,
+    and pydantic-ai's drop_block retry covers the changed prefix.
+    """
+    if any(_is_user_turn_start(message) for message in current):
+        return strip_claude_thinking(kept)
+    starts = [
+        index for index, message in enumerate(kept) if _is_user_turn_start(message)
+    ]
+    if not starts:
+        return kept
+    in_flight = starts[-1]
+    return [*strip_claude_thinking(kept[:in_flight]), *kept[in_flight:]]

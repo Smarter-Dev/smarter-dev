@@ -127,7 +127,9 @@ CATCHUP_MAX_MESSAGES = 50
 AGENT_MODEL_ENV_VAR = "PROACTIVE_AGENT_MODEL"
 WATCHER_MODEL_ENV_VAR = "PROACTIVE_WATCHER_MODEL"
 SKIM_MODEL_ENV_VAR = "PROACTIVE_SKIM_MODEL"
-DEFAULT_AGENT_MODEL = "gemini-3.8-flash"
+# Claude Opus 5.5 on the direct Anthropic key since 2026-10-17 (#199), as the
+# ConfigMap sets it; build_agent_model routes any claude-* id there.
+DEFAULT_AGENT_MODEL = "claude-opus-5-5"
 DEFAULT_WATCHER_MODEL = "typesafe:jev-1.13.0"
 # The agent's skim tool still needs a separate text model.
 DEFAULT_SKIM_MODEL = "z-ai/glm-5.3-flash"
@@ -820,6 +822,7 @@ async def _record_usage(
             "input_tokens": usage.get("input_tokens", 0),
             "output_tokens": usage.get("output_tokens", 0),
             "cache_read_tokens": usage.get("cache_read_tokens", 0),
+            "cache_write_tokens": usage.get("cache_write_tokens", 0),
         }
         for model_id, usage in (usage_by_model or {}).items()
     ]

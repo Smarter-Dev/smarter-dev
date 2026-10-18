@@ -76,9 +76,9 @@ async def skrift_runtime(test_engine, db_session, monkeypatch):
         agents=AgentsConfig(default_subagent_dispatch="inline"), workers=WorkersConfig()
     )
     monkeypatch.setattr("skrift.config.get_settings", lambda: settings)
-    # Building an agent's configured OpenAI model needs a key; TestModel
+    # Building an agent's configured Claude model needs a key; TestModel
     # replaces that model for every run, so the key is never used.
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-never-sent")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-never-sent")
 
     @asynccontextmanager
     async def session_context():
@@ -231,9 +231,42 @@ async def test_a_title_leaves_nothing_of_the_question_in_the_worker_tables(
     cost = await db_session.scalar(select(UsageCostRow))
     assert (cost.product_mode, cost.operation_type) == ("resources", "resource_title")
     assert (cost.user_id, cost.conversation_id) == (asker, conversation)
-    assert cost.model_id == "gpt-6-luna"
+    # Skrift records the model *name* ("anthropic:claude-haiku-5-5"), which the
+    # ledger matches back to the catalog's direct Anthropic entry.
+    assert (cost.provider_key, cost.model_id) == ("anthropic", "claude-haiku-5-5")
     assert cost.input_tokens > 0 and cost.output_tokens > 0
     assert _QUESTION not in str(cost.details)
+
+
+async def test_a_titles_cost_prices_its_long_request_at_haikus_tier(
+    skrift_runtime, db_session
+):
+    """The ledger row is priced from the session's own response, not Skrift's
+    turn total: one 100,001-token request bills Haiku's 5x tier."""
+    from decimal import Decimal
+
+    from pydantic_ai.messages import ModelResponse
+    from pydantic_ai.messages import TextPart
+    from pydantic_ai.models.function import FunctionModel
+    from pydantic_ai.usage import RequestUsage
+
+    def long_reply(messages, info):
+        return ModelResponse(
+            parts=[TextPart("Webhook Burst Pool Sizing")],
+            usage=RequestUsage(input_tokens=100_001, output_tokens=1_000),
+            model_name="claude-haiku-5-5",
+        )
+
+    with title_agent.title_agent.materialized.override(model=FunctionModel(long_reply)):
+        await title_agent.generate_title(
+            _QUESTION, actor=str(uuid4()), conversation_id=uuid4()
+        )
+
+    db_session.expire_all()
+    cost = await db_session.scalar(select(UsageCostRow))
+    assert (cost.input_tokens, cost.output_tokens) == (100_001, 1_000)
+    # $0.50 in and $2.50 out per million; the base rate would be $0.0105001.
+    assert cost.cost_usd == Decimal("0.0525005")
 
 
 async def _streams(db_session) -> set[str]:

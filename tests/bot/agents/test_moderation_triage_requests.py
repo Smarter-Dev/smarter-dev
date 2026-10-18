@@ -16,9 +16,9 @@ from pydantic_ai.messages import ModelResponse
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.messages import ToolReturnPart
 from pydantic_ai.messages import UserPromptPart
+from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.function import AgentInfo
 from pydantic_ai.models.function import FunctionModel
-from pydantic_ai.models.openai import OpenAIResponsesModel
 
 from smarter_dev.bot.agents import mod_tools
 from smarter_dev.bot.agents import moderation_agent
@@ -27,9 +27,9 @@ from smarter_dev.bot.agents.mod_tools import build_triage_report_embed
 
 
 @pytest.fixture(autouse=True)
-def _openai_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def _model_key(monkeypatch: pytest.MonkeyPatch) -> None:
     # The real model is built before the test swaps in its FunctionModel.
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 
 
 def _prompt(messages: list[ModelMessage]) -> str:
@@ -206,10 +206,16 @@ async def test_a_runaway_triage_stops_at_the_request_limit() -> None:
     assert tracker.failure == "UsageLimitExceeded"
 
 
-def test_triage_runs_on_gpt_6_luna_through_the_router() -> None:
-    for agent in (moderation_agent.get_moderation_agent(), moderation_agent.get_follow_up_agent()):
-        assert isinstance(agent.model, OpenAIResponsesModel)
-        assert agent.model.model_name == "gpt-6-luna"
+def test_triage_runs_on_claude_haiku_5_5_through_the_router() -> None:
+    triage = moderation_agent.get_moderation_agent()
+    follow_up = moderation_agent.get_follow_up_agent()
+    for agent in (triage, follow_up):
+        assert isinstance(agent.model, AnthropicModel)
+        assert agent.model.model_name == "claude-haiku-5-5"
+    # Triage loops over its tools, so its requests read the last one's history
+    # back; the follow-up is a single request and skips the message breakpoint.
+    assert triage.model_settings.get("anthropic_cache_messages") is None
+    assert follow_up.model_settings["anthropic_cache_messages"] is False
 
 
 # -- failure reporting -----------------------------------------------------------

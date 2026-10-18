@@ -20,9 +20,9 @@ from smarter_dev.bot.agents import streak_agent
 
 
 @pytest.fixture(autouse=True)
-def _openai_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def _model_key(monkeypatch: pytest.MonkeyPatch) -> None:
     # The real model is built before the test swaps in its FunctionModel.
-    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
 
 
 def _prompt(messages: list[ModelMessage]) -> str:

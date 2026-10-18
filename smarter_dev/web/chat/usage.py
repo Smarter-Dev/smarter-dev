@@ -17,8 +17,10 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.model_catalog import CatalogModel
+from smarter_dev.shared.request_usage import RequestTokens
 from smarter_dev.web.chat.limits import settle_reservation_actual
 from smarter_dev.web.llm_pricing import calc_cost
+from smarter_dev.web.llm_pricing import calc_cost_by_request
 from smarter_dev.web.models import UsageCostRow
 from smarter_dev.web.models import WebChatConversation
 from smarter_dev.web.models import WebChatTurn
@@ -50,6 +52,20 @@ def usage_cost(
         max(cache_read_tokens, 0),
         max(cache_write_tokens, 0),
         per_request=per_request,
+    )
+
+
+def usage_cost_by_request(
+    model: CatalogModel,
+    total: RequestTokens,
+    requests: list[RequestTokens],
+) -> Decimal:
+    """``usage_cost`` for a total of several requests, each priced on its own."""
+    model_name = f"{_PROVIDER_PREFIX[model.provider.value]}:{model.model_id}"
+    return calc_cost_by_request(
+        model_name,
+        RequestTokens(*(max(value, 0) for value in total)),
+        requests,
     )
 
 

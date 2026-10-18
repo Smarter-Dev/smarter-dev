@@ -82,10 +82,14 @@ def _briefing(*, brief: WriterBrief | None, max_score: int = 10) -> BriefingDeci
     )
 
 
-def _worker_result(output, *, input_tokens=0, output_tokens=0):
+def _worker_result(
+    output, *, input_tokens=0, output_tokens=0, cache_read_tokens=0, cache_write_tokens=0
+):
     usage = SimpleNamespace(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
         requests=1,
         model="worker-model",
     )
@@ -97,10 +101,14 @@ def _worker_result(output, *, input_tokens=0, output_tokens=0):
     )
 
 
-def _writer_result(output, *, input_tokens=0, output_tokens=0):
+def _writer_result(
+    output, *, input_tokens=0, output_tokens=0, cache_read_tokens=0, cache_write_tokens=0
+):
     usage = SimpleNamespace(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
         requests=1,
         model="writer-model",
     )
@@ -370,17 +378,26 @@ async def test_two_stage_advertises_primary_answerer_not_drafter(
 
 @pytest.mark.asyncio
 async def test_two_stage_persists_combined_token_totals(fake_memory, fake_redis):
-    """The persisted turn folds the writer's spend into the chat token totals."""
+    """The persisted turn folds the writer's spend into the chat token totals,
+    its cache counts included."""
     worker_agent = MagicMock()
     worker_agent.run = AsyncMock(
         return_value=_worker_result(
-            _briefing(brief=_brief()), input_tokens=100, output_tokens=50
+            _briefing(brief=_brief()),
+            input_tokens=100,
+            output_tokens=50,
+            cache_read_tokens=40,
+            cache_write_tokens=10,
         )
     )
     writer_agent = MagicMock()
     writer_agent.run = AsyncMock(
         return_value=_writer_result(
-            WriterOutput(message="hello"), input_tokens=200, output_tokens=80
+            WriterOutput(message="hello"),
+            input_tokens=200,
+            output_tokens=80,
+            cache_read_tokens=150,
+            cache_write_tokens=30,
         )
     )
     engine, _ = _make_engine(
@@ -410,6 +427,8 @@ async def test_two_stage_persists_combined_token_totals(fake_memory, fake_redis)
     kwargs = persist_turn.await_args.kwargs
     assert kwargs["chat_tokens_input"] == 300  # 100 worker + 200 writer
     assert kwargs["chat_tokens_output"] == 130  # 50 worker + 80 writer
+    assert kwargs["chat_cache_read_tokens"] == 190  # 40 worker + 150 writer
+    assert kwargs["chat_cache_write_tokens"] == 40  # 10 worker + 30 writer
     assert kwargs["output_kind"] == "send_response"
 
 
@@ -677,3 +696,206 @@ async def test_stale_drafter_model_falls_back_to_single_stage(
 
 async def _versioned(memory, channel_id):
     return await memory.read_history(channel_id), b"loaded"
+
+
+# --------------------------------------------------------------------------- #
+# Two-stage pricing: every request at its own model's rates and tier
+# --------------------------------------------------------------------------- #
+
+
+async def _ledger_cost_of_a_two_stage_turn(
+    fake_memory, fake_redis, *, drafter_key, drafter_model, drafter, writer
+):
+    """Run one two-stage turn on Haiku through the real engine and the real
+    ``persist_turn``, and price the payload it posts as the ledger does."""
+    from contextlib import ExitStack
+
+    from pydantic_ai.messages import ModelResponse
+    from pydantic_ai.messages import TextPart
+
+    from smarter_dev.web.api_native.chat_conversations import _billed_chat_model
+    from smarter_dev.web.api_native.schemas import ChatAgentTurnCreate
+
+    def responses(model, usages):
+        return [
+            ModelResponse(parts=[TextPart("ok")], model_name=model, usage=usage)
+            for usage in usages
+        ]
+
+    def result(output, model, usages):
+        messages = responses(model, usages)
+        run = SimpleNamespace(
+            output=output,
+            usage=SimpleNamespace(
+                **{
+                    name: sum(getattr(usage, name) for usage in usages)
+                    for name in (
+                        "input_tokens",
+                        "output_tokens",
+                        "cache_read_tokens",
+                        "cache_write_tokens",
+                    )
+                }
+            ),
+            all_messages=lambda: messages,
+            new_messages=lambda: messages,
+        )
+        return run
+
+    worker_agent = MagicMock()
+    worker_agent.run = AsyncMock(
+        return_value=result(_briefing(brief=_brief()), drafter_model, drafter)
+    )
+    writer_agent = MagicMock()
+    writer_agent.run = AsyncMock(
+        return_value=result(WriterOutput(message="hello"), "claude-haiku-5-5", writer)
+    )
+    engine, _ = _make_engine(
+        _override("claude-haiku-5-5", drafter_model=drafter_key), fake_redis
+    )
+    posted: list[dict] = []
+
+    async def post(path, json_data):
+        posted.append(json_data)
+        return SimpleNamespace(status_code=201)
+
+    engine.bot.d["api_client"] = SimpleNamespace(post=post)
+    with ExitStack() as stack:
+        for each in _common_patches(fake_memory=fake_memory):
+            stack.enter_context(each)
+        stack.enter_context(
+            patch(
+                "smarter_dev.bot.services.chat_engine.get_worker_agent",
+                return_value=worker_agent,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "smarter_dev.bot.services.chat_engine.get_writer_agent",
+                return_value=writer_agent,
+            )
+        )
+        stack.enter_context(
+            patch(
+                "smarter_dev.bot.services.chat_engine.start_engagement",
+                new=AsyncMock(return_value="00000000-0000-0000-0000-000000000001"),
+            )
+        )
+        await engine._run_once(first_activation=True)
+
+    (payload,) = posted
+    turn = ChatAgentTurnCreate.model_validate(payload)
+    # The drafter's responses are the turn's history; the writer's are not.
+    assert len(turn.model_messages_delta) == len(drafter)
+    return _billed_chat_model(turn).cost_usd
+
+
+def _requests_priced(model, usages):
+    from decimal import Decimal
+
+    from smarter_dev.web.llm_pricing import calc_cost
+
+    return sum(
+        (
+            calc_cost(
+                usage.input_tokens,
+                usage.output_tokens,
+                model,
+                cache_read_tokens=usage.cache_read_tokens,
+                cache_write_tokens=usage.cache_write_tokens,
+                per_request=True,
+            )
+            for usage in usages
+        ),
+        Decimal("0"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_long_writer_request_bills_haikus_tier(fake_memory, fake_redis):
+    from decimal import Decimal
+
+    from pydantic_ai.usage import RequestUsage
+
+    drafter = [
+        RequestUsage(
+            input_tokens=1_000,
+            output_tokens=100,
+            cache_read_tokens=100,
+            cache_write_tokens=50,
+        )
+    ]
+    writer = [
+        RequestUsage(
+            input_tokens=100_001,
+            output_tokens=1_000,
+            cache_read_tokens=50_000,
+            cache_write_tokens=10_000,
+        )
+    ]
+
+    cost = await _ledger_cost_of_a_two_stage_turn(
+        fake_memory,
+        fake_redis,
+        drafter_key="claude-haiku-5-5",
+        drafter_model="claude-haiku-5-5",
+        drafter=drafter,
+        writer=writer,
+    )
+
+    assert cost == _requests_priced("claude-haiku-5-5", drafter + writer)
+    assert cost == Decimal("0.0351465")
+
+
+@pytest.mark.asyncio
+async def test_short_writer_retries_over_100k_together_stay_at_the_base_rate(
+    fake_memory, fake_redis
+):
+    """A structured-output retry is another request: three 40K writer requests
+    are 120K together, but none of them is over the tier."""
+    from decimal import Decimal
+
+    from pydantic_ai.usage import RequestUsage
+
+    from smarter_dev.web.llm_pricing import calc_cost
+
+    drafter = [RequestUsage(input_tokens=1_000, output_tokens=100)]
+    writer = [RequestUsage(input_tokens=40_000, output_tokens=100)] * 3
+
+    cost = await _ledger_cost_of_a_two_stage_turn(
+        fake_memory,
+        fake_redis,
+        drafter_key="claude-haiku-5-5",
+        drafter_model="claude-haiku-5-5",
+        drafter=drafter,
+        writer=writer,
+    )
+
+    assert cost == calc_cost(121_000, 400, "claude-haiku-5-5")
+    assert cost == Decimal("0.0123")
+
+
+@pytest.mark.asyncio
+async def test_a_drafter_on_another_model_bills_at_its_own_rates(
+    fake_memory, fake_redis
+):
+    from pydantic_ai.usage import RequestUsage
+
+    drafter = [
+        RequestUsage(input_tokens=30_000, output_tokens=500),
+        RequestUsage(input_tokens=35_000, output_tokens=700),
+    ]
+    writer = [RequestUsage(input_tokens=100_001, output_tokens=1_000)]
+
+    cost = await _ledger_cost_of_a_two_stage_turn(
+        fake_memory,
+        fake_redis,
+        drafter_key="gpt-6-1-sol",
+        drafter_model="gpt-6.1-sol",
+        drafter=drafter,
+        writer=writer,
+    )
+
+    drafter_cost = _requests_priced("gpt-6.1-sol", drafter)
+    assert drafter_cost != _requests_priced("claude-haiku-5-5", drafter)
+    assert cost == drafter_cost + _requests_priced("claude-haiku-5-5", writer)

@@ -40,6 +40,9 @@ from smarter_dev.bot.proactive.timestamps import utc_timestamp
 from smarter_dev.bot.proactive.types import ProposedReaction
 from smarter_dev.bot.proactive.types import ProposedResponse
 from smarter_dev.bot.proactive.watcher import usage_dict
+from smarter_dev.shared.claude_thinking import drop_other_models_claude_thinking
+from smarter_dev.shared.claude_thinking import strip_claude_thinking
+from smarter_dev.shared.claude_thinking import without_thinking
 from smarter_dev.shared.exception_logging import log_exception
 
 TOOL_CALL_LIMIT = 8
@@ -632,6 +635,21 @@ names, channel ids and message ids you may need again. This note is for you
 alone."""
 
 
+def agent_usage_dict(usage) -> dict:
+    """:func:`usage_dict` plus cache writes, which only Claude reports.
+
+    Kept apart from the watcher's ``usage_dict``: watcher usage crosses to the
+    proactive-agent worker as a ``TokenUsage``, which forbids extra fields.
+    Cache reads and writes are both subsets of ``input_tokens``.
+    """
+    if callable(usage):
+        usage = usage()
+    return {
+        **usage_dict(usage),
+        "cache_write_tokens": usage.cache_write_tokens or 0,
+    }
+
+
 async def self_compaction_summary(
     model: Model | str, messages: list[ModelMessage]
 ) -> tuple[str, dict]:
@@ -641,10 +659,17 @@ async def self_compaction_summary(
     decides what its future self most needs to keep.
     """
     compaction_agent = Agent(model, output_type=str)
+    # This request has no tools, so no thinking block signed with the agent's
+    # tool set would match it: none is sent, from any provider, and a turn
+    # that held only thinking goes with it. It is also one request whose
+    # prefix no later request shares, so a message cache breakpoint would only
+    # bill the folded transcript at Claude's 1-hour write rate.
     result = await compaction_agent.run(
-        COMPACTION_PROMPT, message_history=messages
+        COMPACTION_PROMPT,
+        message_history=without_thinking(messages),
+        model_settings={"anthropic_cache_messages": False},
     )
-    return result.output, usage_dict(result.usage)
+    return result.output, agent_usage_dict(result.usage)
 
 
 async def compact_agent_history(
@@ -671,7 +696,12 @@ async def compact_agent_history(
     # A note written from attributed input is attributed too; one written
     # from pre-attribution lines (or an unmarked note) never is.
     attributed = proactive_history_attributed(old)
-    return [*memory_note_pair(summary, attributed=attributed), *tail]
+    # The kept tail's Claude thinking was signed with the folded turns in its
+    # prefix; behind the note it would no longer match.
+    return [
+        *memory_note_pair(summary, attributed=attributed),
+        *strip_claude_thinking(tail),
+    ]
 
 
 async def fold_whole_history(
@@ -768,8 +798,12 @@ class KimiAgentRunner:
             self.history = compacted
             if self.on_compacted is not None:
                 await self.on_compacted(compacted)
-        result = await self.agent.run(
-            brief, deps=deps, message_history=self.history or None
+        # The model is sent its own Claude thinking only; the stored history
+        # keeps every block, so a model the agent moves back to finds its own.
+        model = getattr(self.agent, "model", None)
+        sent = drop_other_models_claude_thinking(
+            self.history, getattr(model, "model_name", None)
         )
-        self.history = result.all_messages()
-        return result.output, usage_dict(result.usage)
+        result = await self.agent.run(brief, deps=deps, message_history=sent or None)
+        self.history = [*self.history, *result.new_messages()]
+        return result.output, agent_usage_dict(result.usage)

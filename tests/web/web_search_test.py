@@ -1,8 +1,8 @@
 """The dashboard's web search: query checks, the pipeline's stages and events,
 and the request validation the controller applies.
 
-The pipeline runs against the sqlite test session with Luna, Brave and Jev
-replaced, so these tests pin what is saved and announced at each step, not
+The pipeline runs against the sqlite test session with the query model, Brave
+and Jev replaced, so these tests pin what is saved and announced at each step, not
 what the models say."""
 
 from __future__ import annotations
@@ -117,10 +117,12 @@ def search_env(db_session, monkeypatch):
 
     async def plan(request):
         return [{"query": f"query {n}", "angle": f"angle {n}"} for n in range(5)], False, {
-            "model": "gpt-6-luna",
+            "model": "claude-haiku-5-5",
+            # Cache reads and writes are both inside input_tokens.
             "input_tokens": 1_000_000,
             "output_tokens": 1_000_000,
-            "cache_read_tokens": 0,
+            "cache_read_tokens": 200_000,
+            "cache_write_tokens": 100_000,
         }
 
     hits = {
@@ -260,7 +262,7 @@ async def test_no_results_ends_the_search_with_an_error(search_env, monkeypatch)
     assert {q["status"] for q in final["queries"]} == {"failed"}
 
 
-async def test_a_luna_failure_ends_the_search_with_an_error(search_env, monkeypatch):
+async def test_a_query_model_failure_ends_the_search_with_an_error(search_env, monkeypatch):
     async def broken(request):
         raise RuntimeError("proxy down")
 
@@ -294,8 +296,16 @@ async def test_each_paid_step_reaches_the_invoice(search_env):
     assert set(ledger) == {"web_search_queries", "web_search_brave", "web_search_ranking"}
     assert {row.product_mode for row in ledger.values()} == {"search"}
     assert {row.user_id for row in ledger.values()} == {run.owner_user_id}
-    # GPT-6 Luna: $0.10 in and $0.50 out per million tokens.
-    assert ledger["web_search_queries"].cost_usd == Decimal("0.6")
+    # Claude Haiku 5.5 per million: $0.10 in, $0.01 cache reads, $0.20 1-hour
+    # cache writes, $0.50 out. 0.07 + 0.002 + 0.02 + 0.5.
+    queries_row = ledger["web_search_queries"]
+    assert queries_row.provider_key == "anthropic"
+    assert queries_row.model_id == "claude-haiku-5-5"
+    assert (queries_row.cache_read_tokens, queries_row.cache_write_tokens) == (
+        200_000,
+        100_000,
+    )
+    assert queries_row.cost_usd == Decimal("0.592")
     # Every query was answered, including query 2, which found nothing.
     assert ledger["web_search_brave"].details["requests"] == 5
     assert ledger["web_search_brave"].cost_usd == 5 * Decimal(brave.PRICE_PER_REQUEST_USD)
@@ -306,7 +316,7 @@ async def test_each_paid_step_reaches_the_invoice(search_env):
     by_source = {line.source: line for line in lines}
     assert by_source["search:web_search_brave"].provider_label == "Brave"
     assert by_source["search:web_search_ranking"].provider_label == "TypeSafe"
-    assert by_source["search:web_search_queries"].provider_label == "OpenAI"
+    assert by_source["search:web_search_queries"].provider_label == "Anthropic"
 
 
 async def test_a_retry_bills_again_but_a_repeat_write_does_not(search_env):

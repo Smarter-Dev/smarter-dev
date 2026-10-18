@@ -6178,7 +6178,7 @@ class ProactiveAgentHistory(Base):
 
 
 class WebSearchRun(Base):
-    """One dashboard web search: Luna's queries, Brave's results, Jev's ranking.
+    """One dashboard web search: the model's queries, Brave's results, Jev's ranking.
 
     The agent-worker writes each stage here before it notifies the browser, so
     a page that reloads or reconnects mid-search paints from this row."""
@@ -6195,12 +6195,12 @@ class WebSearchRun(Base):
     request: Mapped[str] = mapped_column(Text, nullable=False)
     # queued → planning → searching → ranking → [answering →] complete, or error.
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
-    # [{query, angle, status, count, domains}] once Luna has written them.
+    # [{query, angle, status, count, domains}] once the model has written them.
     queries: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     # Unique results, best first once Jev has ranked them.
     results: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     ranked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    # Luna decides while planning whether the request needs a written answer.
+    # The query model decides while planning whether the request needs a written answer.
     needs_answer: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )

@@ -15,10 +15,16 @@ import skrift
 from pydantic import BaseModel, Field
 from skrift.agents.models import ResumeContext
 
-# GPT-6 Luna since 2026-09-24, replacing the Gemini 3 Flash preview (Zech:
-# "significantly cheaper"). OpenAI Responses API via OPENAI_API_KEY.
+from smarter_dev.shared.model_catalog import ReasoningLevel
+from smarter_dev.shared.model_catalog import catalog_model_for_id
+from smarter_dev.shared.skrift_models import agent_model_name
+from smarter_dev.shared.skrift_models import agent_model_settings
+
+# Claude Haiku 5.5 since 2026-10-17 (#199), replacing GPT-6 Luna (which had
+# replaced the Gemini 3 Flash preview on 2026-09-24). A catalog wire id;
+# shared.skrift_models turns it into the model name and settings.
 BRAINSTORM_MODEL = os.getenv(
-    "BLOGGING_BRAINSTORM_MODEL", "gpt-6-luna"
+    "BLOGGING_BRAINSTORM_MODEL", "claude-haiku-5-5"
 )
 BRAINSTORM_AGENT_NAME = "blogging.brainstorm"
 _PROMPT = (Path(__file__).parent / "prompts" / "brainstorm.md").read_text(
@@ -95,11 +101,16 @@ def _build_deps(ctx: ResumeContext) -> BrainstormDeps:
 
 
 brainstorm_agent = skrift.Agent(
-    f"openai-responses:{BRAINSTORM_MODEL}",
+    agent_model_name(catalog_model_for_id(BRAINSTORM_MODEL)),
     name=BRAINSTORM_AGENT_NAME,
     system_prompt=_PROMPT,
     output_type=BrainstormOutput,
-    model_settings={"openai_reasoning_effort": "medium"},
+    # One request (no tools): the prompt is the cached prefix.
+    model_settings=agent_model_settings(
+        catalog_model_for_id(BRAINSTORM_MODEL),
+        ReasoningLevel.MEDIUM,
+        cache_messages=False,
+    ),
     deps_type=BrainstormDeps,
     deps_factory=_build_deps,
 )

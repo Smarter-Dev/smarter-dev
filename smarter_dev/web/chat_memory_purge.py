@@ -404,7 +404,10 @@ def get_purge_agent() -> Agent[PurgeContext, PurgeOutput]:
         catalog_model = _dream_catalog_model()
         _purge_agent = build_purge_agent(
             build_model_for(catalog_model),
-            model_settings=model_settings_for(catalog_model, DREAM_REASONING_LEVEL),
+            # One pass, like the dream: no message breakpoint.
+            model_settings=model_settings_for(
+                catalog_model, DREAM_REASONING_LEVEL, cache_messages=False
+            ),
         )
     return _purge_agent
 
