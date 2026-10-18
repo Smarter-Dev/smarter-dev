@@ -26,6 +26,7 @@ from collections.abc import Awaitable
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 import httpx
 from pydantic_ai import Agent
@@ -154,8 +155,11 @@ async def run_gathering_agent(
         result = await agent.run(prompt, deps=_GatherDeps(budget=budget))
         return str(result.output)
     meter, media = UsageMeter(), UsageMeter()
-    # The fire's nth agent call: a fire job enters its script at most once.
+    # The fire's nth agent call, for the details. The key also carries this
+    # run's own id: a retried fire job (or two calls a script runs at once)
+    # is new spend, never a replay of another run's row.
     call = budget.agent_calls
+    run_id = uuid4().hex
     try:
         result = await agent.run(
             prompt,
@@ -179,7 +183,7 @@ async def run_gathering_agent(
             await record_meter_now(
                 used,
                 session_factory=usage.session_factory,
-                operation_key=f"{operation_type}:{usage.job_id}:{call}",
+                operation_key=f"{operation_type}:{usage.job_id}:{call}:{run_id}",
                 product_mode="discord",
                 operation_type=operation_type,
                 details=details,

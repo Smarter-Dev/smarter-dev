@@ -53,7 +53,9 @@ def tokens(usage: RequestUsage) -> dict:
     ).as_dict()
 
 
-def agent_model(*, fail_second: bool = False) -> FunctionModel:
+def agent_model(
+    *, fail_second: bool = False, tool=("list_channels", {})
+) -> FunctionModel:
     """The guild agent: its compaction note, then a tool call and a reply."""
 
     def respond(messages, info: AgentInfo) -> ModelResponse:
@@ -72,7 +74,7 @@ def agent_model(*, fail_second: bool = False) -> FunctionModel:
                 for part in messages[-1].parts
             )
         ):
-            return ModelResponse(parts=[ToolCallPart("list_channels", {})], usage=FIRST)
+            return ModelResponse(parts=[ToolCallPart(*tool)], usage=FIRST)
         if fail_second:
             raise ModelHTTPError(500, AGENT)
         return ModelResponse(parts=[TextPart("stayed quiet")], usage=SECOND)
@@ -334,3 +336,22 @@ def test_watcher_usage_with_requests_crosses_to_the_worker():
     assert TokenUsage(input_tokens=1).requests is None
     with pytest.raises(ValueError):
         TokenUsage(input_tokens=1, cache_write_tokens=2)
+
+
+async def test_a_wake_whose_reply_fails_to_send_still_bills(wake, monkeypatch):
+    start, service = wake
+    state = start(
+        agent_model(tool=("send_channel_message", {"channel_id": "1", "content": "hi"}))
+    )
+
+    async def discord_down(*args, **kwargs):
+        raise RuntimeError("discord down")
+
+    monkeypatch.setattr(proactive, "dispatch_response", discord_down)
+    with pytest.raises(RuntimeError, match="discord down"):
+        await proactive._consume_guild_once(state)
+
+    [report] = [r for r in service.recorded_usage if r["entries"]]
+    [entry] = report["entries"]
+    assert len(entry["requests"]) == 3  # the note and both agent requests
+    assert report["responses"] == 0

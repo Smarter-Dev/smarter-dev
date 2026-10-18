@@ -203,6 +203,16 @@ def test_proactive_agent_model_is_attributed_to_anthropic():
     )
 
 
+def test_a_gemini_id_outside_the_catalog_is_attributed_to_google():
+    """The proactive worker reports its media reader, image review and
+    handler author by their bare Gemini ids (#211)."""
+    from smarter_dev.web.api_native.chat_conversations import _normalized_model_identity
+
+    for wire in ("gemini-3.1-flash-lite", "gemini-3-flash-preview"):
+        assert not [m for m in MODEL_CATALOG if wire.startswith(m.model_id)]
+        assert _normalized_model_identity(wire) == ("google", wire, wire)
+
+
 def test_catalog_model_for_id_refuses_an_unknown_non_claude_id():
     assert catalog_model_for_id("claude-haiku-5-5") is get_model("claude-haiku-5-5")
     with pytest.raises(ValueError):

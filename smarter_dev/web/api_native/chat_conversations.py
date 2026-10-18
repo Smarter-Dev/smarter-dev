@@ -142,6 +142,10 @@ def _normalized_model_identity(model_name: str | None) -> tuple[str, str, str]:
         # A Claude id outside the catalog, e.g. the proactive agent on Opus
         # 5.5: every bare claude-* id is served by the direct Anthropic API.
         provider_hint = "anthropic"
+    elif not provider_hint and wire.startswith("gemini-"):
+        # Likewise a Gemini id outside the catalog (the proactive worker's
+        # media reader, image review and handler author): served by Google.
+        provider_hint = "google-gla"
     provider = {
         "google-gla": "google",
         "openai": "openai",

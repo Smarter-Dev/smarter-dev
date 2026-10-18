@@ -1271,109 +1271,112 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
 
     dispatched_responses = 0
     sent_message_parts = 0
-    for response in result.responses:
-        if response.channel_id not in enabled_channels:
-            logger.warning(
-                "proactive response rejected for disabled channel=%s",
-                response.channel_id,
-            )
-            continue
-        response_message_parts = await dispatch_response(
-            run.bot,
-            guild_id=state.guild_id,
-            channel_id=int(response.channel_id),
-            content=response.content,
-            reply_to_id=response.reply_to_id,
-        )
-        sent_message_parts += response_message_parts
-        if response_message_parts:
-            dispatched_responses += 1
-    for reaction in result.reactions:
-        if (
-            reaction.channel_id not in enabled_channels
-            or not reaction.message_id.isdigit()
-        ):
-            continue
-        try:
-            await run.bot.rest.add_reaction(
-                int(reaction.channel_id),
-                int(reaction.message_id),
-                reaction.emoji,
-            )
-        except Exception:  # noqa: BLE001
-            log_exception(logger, "proactive reaction failed")
-
-    images_by_channel: dict[str, list] = {}
-    for deps in wake_deps:
-        for pending_image in deps.pending_images:
-            if pending_image.channel_id in enabled_channels:
-                images_by_channel.setdefault(pending_image.channel_id, []).append(
-                    pending_image
+    try:
+        for response in result.responses:
+            if response.channel_id not in enabled_channels:
+                logger.warning(
+                    "proactive response rejected for disabled channel=%s",
+                    response.channel_id,
                 )
-    for channel_id, pending_images in images_by_channel.items():
-        reply_target = next(
-            (
-                int(response.reply_to_id)
-                for response in result.responses
-                if response.channel_id == channel_id
-                and response.reply_to_id
-                and response.reply_to_id.isdigit()
-            ),
-            None,
-        )
-        image_kwargs = {
-            "attachments": [
-                hikari.Bytes(image.data, image.filename, image.mime_type)
-                for image in pending_images
-            ]
-        }
-        if reply_target is not None:
-            image_kwargs["reply"] = reply_target
-        try:
-            await run.bot.rest.create_message(int(channel_id), **image_kwargs)
-        except Exception:  # noqa: BLE001 — images are best-effort extras
-            log_exception(logger, "proactive image post failed")
-
-    if history_store is not None:
-        if state.history_loaded:
-            try:
-                await history_store.write_guild(int(state.guild_id), runner.history)
-            except Exception:  # noqa: BLE001 — persistence is best-effort
-                log_exception(logger, "failed to persist proactive guild history")
-        for producer_state in run.channel_states.values():
+                continue
+            response_message_parts = await dispatch_response(
+                run.bot,
+                guild_id=state.guild_id,
+                channel_id=int(response.channel_id),
+                content=response.content,
+                reply_to_id=response.reply_to_id,
+            )
+            sent_message_parts += response_message_parts
+            if response_message_parts:
+                dispatched_responses += 1
+        for reaction in result.reactions:
             if (
-                producer_state.guild_id != state.guild_id
-                or producer_state.last_reviewed_message_id is None
-                or not producer_state.last_reviewed_message_id.isdigit()
+                reaction.channel_id not in enabled_channels
+                or not reaction.message_id.isdigit()
             ):
                 continue
             try:
-                await history_store.write_cursor(
-                    int(producer_state.channel_id),
-                    guild_id=producer_state.guild_id,
-                    last_message_id=producer_state.last_reviewed_message_id,
+                await run.bot.rest.add_reaction(
+                    int(reaction.channel_id),
+                    int(reaction.message_id),
+                    reaction.emoji,
+                )
+            except Exception:  # noqa: BLE001
+                log_exception(logger, "proactive reaction failed")
+
+        images_by_channel: dict[str, list] = {}
+        for deps in wake_deps:
+            for pending_image in deps.pending_images:
+                if pending_image.channel_id in enabled_channels:
+                    images_by_channel.setdefault(pending_image.channel_id, []).append(
+                        pending_image
+                    )
+        for channel_id, pending_images in images_by_channel.items():
+            reply_target = next(
+                (
+                    int(response.reply_to_id)
+                    for response in result.responses
+                    if response.channel_id == channel_id
+                    and response.reply_to_id
+                    and response.reply_to_id.isdigit()
+                ),
+                None,
+            )
+            image_kwargs = {
+                "attachments": [
+                    hikari.Bytes(image.data, image.filename, image.mime_type)
+                    for image in pending_images
+                ]
+            }
+            if reply_target is not None:
+                image_kwargs["reply"] = reply_target
+            try:
+                await run.bot.rest.create_message(int(channel_id), **image_kwargs)
+            except Exception:  # noqa: BLE001 — images are best-effort extras
+                log_exception(logger, "proactive image post failed")
+
+        if history_store is not None:
+            if state.history_loaded:
+                try:
+                    await history_store.write_guild(int(state.guild_id), runner.history)
+                except Exception:  # noqa: BLE001 — persistence is best-effort
+                    log_exception(logger, "failed to persist proactive guild history")
+            for producer_state in run.channel_states.values():
+                if (
+                    producer_state.guild_id != state.guild_id
+                    or producer_state.last_reviewed_message_id is None
+                    or not producer_state.last_reviewed_message_id.isdigit()
+                ):
+                    continue
+                try:
+                    await history_store.write_cursor(
+                        int(producer_state.channel_id),
+                        guild_id=producer_state.guild_id,
+                        last_message_id=producer_state.last_reviewed_message_id,
+                    )
+                except Exception:  # noqa: BLE001 — persistence is best-effort
+                    log_exception(logger, "failed to persist proactive cursor")
+        for channel_id, instruction_store in instruction_stores.items():
+            if instruction_store.updates == persisted_updates[channel_id]:
+                continue
+            try:
+                await service.set_watch_addendum(
+                    state.guild_id, channel_id, instruction_store.to_stored()
                 )
             except Exception:  # noqa: BLE001 — persistence is best-effort
-                log_exception(logger, "failed to persist proactive cursor")
-    for channel_id, instruction_store in instruction_stores.items():
-        if instruction_store.updates == persisted_updates[channel_id]:
-            continue
-        try:
-            await service.set_watch_addendum(
-                state.guild_id, channel_id, instruction_store.to_stored()
-            )
-        except Exception:  # noqa: BLE001 — persistence is best-effort
-            log_exception(logger, "failed to persist watch instructions")
-    await _record_usage(
-        service,
-        guild_id=state.guild_id,
-        channel_id="guild-wide",
-        metered_at=activated_at,
-        passive=passive,
-        responses=dispatched_responses,
-        operation="agent",
-        usage_by_model=result.usage_by_model,
-    )
+                log_exception(logger, "failed to persist watch instructions")
+    finally:
+        # Reported even when sending or saving fails: the model was billed.
+        await _record_usage(
+            service,
+            guild_id=state.guild_id,
+            channel_id="guild-wide",
+            metered_at=activated_at,
+            passive=passive,
+            responses=dispatched_responses,
+            operation="agent",
+            usage_by_model=result.usage_by_model,
+        )
     logger.info(
         "proactive guild agent guild=%s responses=%d message_parts=%d reactions=%d "
         "tokens_in=%d tokens_out=%d",

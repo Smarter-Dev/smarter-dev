@@ -32,6 +32,7 @@ from smarter_dev.bot.services.guild_chat_memory_service import GuildChatMemorySe
 from smarter_dev.bot.services.latex_renderer import LatexRenderer
 from smarter_dev.bot.services.media_client import MediaClient
 from smarter_dev.bot.services.usage_reporter import configure_usage_reporter
+from smarter_dev.bot.services.usage_reporter import drain_usage_reports
 from smarter_dev.bot.spam_engine import check_spam_engine
 from smarter_dev.bot.spam_engine import release_guild_spam_state
 from smarter_dev.bot.spam_ring import check_spam_ring
@@ -1221,6 +1222,12 @@ async def cleanup_bot_services(bot: lightbulb.BotApp) -> None:
             await bot.d["media_client"].aclose()
 
         await close_generator()
+
+        # Usage reports still in flight go out before their client closes.
+        try:
+            await asyncio.wait_for(drain_usage_reports(), timeout=10)
+        except TimeoutError:
+            logger.warning("Usage reports still in flight at shutdown were dropped")
 
         # Clean up API client
         if hasattr(bot, "d") and "api_client" in bot.d:

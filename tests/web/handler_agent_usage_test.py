@@ -171,7 +171,8 @@ async def test_an_agent_call_and_its_media_read_land_as_two_rows(
         assert (row.provider_key, row.model_id) == ("anthropic", HAIKU)
         assert row.user_id is None and row.discord_user_id is None
         assert row.conversation_id is None
-        assert row.operation_key == f"{operation_type}:job-7:1:{HAIKU}"
+        assert row.operation_key.startswith(f"{operation_type}:job-7:1:")
+        assert row.operation_key.endswith(f":{HAIKU}")
         assert row.details["job_id"] == "job-7"
         assert row.details["handler_id"] == "handler-3"
         assert (row.details["guild_id"], row.details["channel_id"]) == ("G1", "C1")
@@ -221,4 +222,5 @@ async def test_a_fires_second_agent_call_is_its_own_row(
 
     db_session.expire_all()
     keys = sorted((await db_session.scalars(select(UsageCostRow.operation_key))).all())
-    assert keys == [f"handler_agent:job-7:1:{HAIKU}", f"handler_agent:job-7:2:{HAIKU}"]
+    assert [key.split(":")[2] for key in keys] == ["1", "2"]
+    assert all(key.startswith("handler_agent:job-7:") for key in keys)
