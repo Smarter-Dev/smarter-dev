@@ -122,6 +122,7 @@ async def _run_admin_handler_fire(payload: AdminHandlerFirePayload, context: Wor
     channel_id = payload.channel_id or (channel_ids[0] if channel_ids else "")
 
     from smarter_dev.web.admin_actions import AdminActor
+    from smarter_dev.web.handler_agent import GatherUsage
     from smarter_dev.web.handler_agent import gathering_agent_for
     from smarter_dev.web.handler_runtime import run_handler_script
 
@@ -225,7 +226,18 @@ async def _run_admin_handler_fire(payload: AdminHandlerFirePayload, context: Wor
         allowed_role_ids=list(handler_settings.get("allowed_role_ids") or []),
         emitter=emitter,
         limiter=limiter,
-        agent_runner=gathering_agent_for(trigger_context, get_db_session_context),
+        agent_runner=gathering_agent_for(
+            trigger_context,
+            get_db_session_context,
+            usage=GatherUsage(
+                session_factory=get_db_session_context,
+                job_id=str(context.job.id),
+                handler_id=str(handler_id),
+                handler_kind=HANDLER_KIND,
+                guild_id=guild_id,
+                channel_id=channel_id,
+            ),
+        ),
         mod_action_reader=services.read_mod_actions,
         mod_action_recorder=services.record_warn,
         rules_reader=services.read_rules,

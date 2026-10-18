@@ -83,6 +83,7 @@ from smarter_dev.shared.member_tags import names_outside_tags
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ReasoningLevel
+from smarter_dev.shared.usage_meter import UsageMeter
 from smarter_dev.web.chat_agent_public import blocked_member_names
 from smarter_dev.web.chat_agent_public import known_member_names
 from smarter_dev.web.chat_agent_public import member_names
@@ -100,6 +101,7 @@ from smarter_dev.web.models import MAX_PERSONALITY_CHARS
 from smarter_dev.web.models import ChatAgentMemoryNote
 from smarter_dev.web.privacy_gate import OptOutGate
 from smarter_dev.web.privacy_gate import load_gate
+from smarter_dev.web.usage_metering import record_meter_now
 
 logger = logging.getLogger(__name__)
 
@@ -981,6 +983,7 @@ async def run_guild_dream(
     cutoff: datetime,
     dreamed_at: datetime,
     agent: DreamAgent | None = None,
+    meter: UsageMeter | None = None,
 ) -> GuildDreamResult:
     """Dream one guild's night inside one transaction, in this exact order.
 
@@ -992,6 +995,9 @@ async def run_guild_dream(
     The delete is last and by explicit id, and the commit is the only thing
     that makes any of it real: anything raised on the way through leaves the
     blob and every note exactly as they were.
+
+    ``meter`` keeps every response the model sent, whatever the night's
+    outcome: a kept-previous night or a failed one was billed all the same.
     """
     # Shared with the admin purge: neither may write over the other's blocks.
     await lock_guild_memory(session, guild_id)
@@ -1075,7 +1081,10 @@ async def run_guild_dream(
         personality_limit=room_for(MAX_PERSONALITY_CHARS, withheld_personality),
         member_names=names,
     )
-    result = await dream_agent.run(user_prompt=user_message, deps=context)
+    run_options = {}
+    if meter is not None and isinstance(dream_agent, Agent):
+        run_options["model"] = meter.wrap(dream_agent.model)
+    result = await dream_agent.run(user_prompt=user_message, deps=context, **run_options)
     # Validate again at the persistence boundary, including injected agents.
     blocks = compose_blocks(result.output, context, retries_left=0)
     if names_a_blocked_id(blocks, gate):
@@ -1215,22 +1224,42 @@ async def _dream_one_guild_in_isolation(
     lock timeout or a bad row in one guild must not cost every guild after it
     its night. The rollback undoes that guild's half-written transaction, and
     its notes survive to be re-read tomorrow.
+
+    The model's usage is written after the guild's transaction is over, in a
+    session of its own, so a night that kept the previous blocks or rolled back
+    is still on the ledger. It is keyed by the guild, the night and this
+    session's start: a second run of the CronJob that night (after a failure)
+    is new spend, and gets new rows.
     """
-    async with session_factory() as session:
-        try:
-            return await run_guild_dream(
-                session,
-                guild_id=guild_id,
-                cutoff=cutoff,
-                dreamed_at=dreamed_at,
-                agent=agent,
-            )
-        except Exception:
-            logger.exception(
-                "Dream failed for guild %s; its notes survive for tomorrow", guild_id
-            )
-            await session.rollback()
-            return None
+    meter = UsageMeter()
+    try:
+        async with session_factory() as session:
+            try:
+                return await run_guild_dream(
+                    session,
+                    guild_id=guild_id,
+                    cutoff=cutoff,
+                    dreamed_at=dreamed_at,
+                    agent=agent,
+                    meter=meter,
+                )
+            except Exception:
+                logger.exception(
+                    "Dream failed for guild %s; its notes survive for tomorrow", guild_id
+                )
+                await session.rollback()
+                return None
+    finally:
+        day = dream_day(cutoff).isoformat()
+        await record_meter_now(
+            meter,
+            session_factory=session_factory,
+            operation_key=f"memory_dream:{guild_id}:{day}:{dreamed_at.isoformat()}",
+            product_mode="discord",
+            operation_type="memory_dream",
+            reasoning_level=DREAM_REASONING_LEVEL.value,
+            details={"guild_id": guild_id, "dream_day": day},
+        )
 
 
 def _as_utc(moment: datetime) -> datetime:

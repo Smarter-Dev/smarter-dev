@@ -16,8 +16,9 @@ Three tiers, cheapest first:
 
 The shorten re-run uses the turn's own agent + history, so its tokens are the
 chat model's and are folded into the turn's metering/pricing by the engine.
-The summarizer runs its own model; like chat compaction, its spend is
-logged but not metered against the channel budget.
+The summarizer runs its own model; like chat compaction, its spend is not
+metered against the channel budget, but every request it makes goes to the
+usage ledger as the bot's own ``length_summarizer`` spend.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from pydantic_ai.messages import ModelMessage
 
 from smarter_dev.bot.agents.chat_agent import build_agent_model
 from smarter_dev.bot.agents.model_router import model_settings_for
+from smarter_dev.bot.services.usage_reporter import metered
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import get_model
@@ -201,10 +203,18 @@ async def _shorten_with_agent(
     )
 
 
-async def _summarize_reply(message: str) -> str | None:
-    """Condense ``message`` with the summarizer (fail-soft)."""
+async def _summarize_reply(
+    message: str, *, usage_fields: dict | None = None
+) -> str | None:
+    """Condense ``message`` with the summarizer (fail-soft).
+
+    ``usage_fields`` attribute its spend on the usage ledger (``metered``'s
+    discord_user_id / guild_id / channel_id / engagement_id).
+    """
+    agent = get_length_summarizer()
     try:
-        result = await get_length_summarizer().run(user_prompt=message)
+        async with metered("length_summarizer", **(usage_fields or {})) as meter:
+            result = await agent.run(user_prompt=message, model=meter.wrap(agent.model))
     except Exception:
         log_exception(logger, "Length summarizer failed — falling back to truncation")
         return None
@@ -226,6 +236,7 @@ async def fit_overlong_response(
     agent: Agent,
     deps: Any,
     message_history: list[ModelMessage],
+    usage_fields: dict | None = None,
 ) -> FitResult:
     """Bring a > :data:`SUMMARIZE_THRESHOLD` reply down to a sendable size.
 
@@ -249,7 +260,7 @@ async def fit_overlong_response(
             outcome.cache_write_tokens,
         )
 
-    summary = await _summarize_reply(message)
+    summary = await _summarize_reply(message, usage_fields=usage_fields)
     if summary is not None and len(summary) <= SUMMARIZE_THRESHOLD:
         return FitResult(
             summary,
@@ -272,17 +283,19 @@ async def fit_overlong_response(
     )
 
 
-async def fit_writer_message(message: str) -> FitResult:
+async def fit_writer_message(
+    message: str, *, usage_fields: dict | None = None
+) -> FitResult:
     """Bring an overlong two-stage WRITER reply down to a sendable size.
 
     The tool-less WRITER has no context-aware ``response``-shaped agent to
     re-run, so this skips the agent-shorten tier: it condenses the reply with
     the summarizer, then hard-truncates as a last resort so a reply is
     always delivered. Like single-stage's summarizer tier, its spend is
-    logged but not metered against the channel budget, so the returned
-    extra-token counts are always zero.
+    not metered against the channel budget (it goes to the usage ledger as
+    ``length_summarizer``), so the returned extra-token counts are always zero.
     """
-    summary = await _summarize_reply(message)
+    summary = await _summarize_reply(message, usage_fields=usage_fields)
     if summary is not None and len(summary) <= SUMMARIZE_THRESHOLD:
         return FitResult(summary, 0, 0, "summarized")
 

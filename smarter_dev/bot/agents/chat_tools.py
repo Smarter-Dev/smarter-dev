@@ -12,6 +12,7 @@ import logging
 import mimetypes
 import re
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
@@ -154,6 +155,20 @@ class ChatDeps:
     source_user_ids: frozenset[str] = frozenset()
 
 
+def tool_usage_fields(deps: ChatDeps) -> dict:
+    """Where a tool's sub-agent run happened, for the usage ledger."""
+    return {
+        "guild_id": deps.guild_id,
+        "channel_id": deps.channel_id,
+        "engagement_id": deps.engagement_id,
+    }
+
+
+# The running ``web_read``'s ``tool_usage_fields``, for the summarizer and
+# media reader it reaches through the read helpers below.
+_tool_usage: ContextVar[dict | None] = ContextVar("chat_tool_usage", default=None)
+
+
 # -- web search / read ---------------------------------------------------
 
 
@@ -247,6 +262,16 @@ async def web_read(
     ctx: RunContext[ChatDeps], url: str, instruction: str
 ) -> dict[str, str]:
     """Read a URL — web page, PDF, YouTube, image/audio, or an attachment's url — and get a summary guided by `instruction`; say what to look for."""
+    token = _tool_usage.set(tool_usage_fields(ctx.deps))
+    try:
+        return await _web_read(ctx, url, instruction)
+    finally:
+        _tool_usage.reset(token)
+
+
+async def _web_read(
+    ctx: RunContext[ChatDeps], url: str, instruction: str
+) -> dict[str, str]:
     # Attachment URLs are rendered into XML attributes (``&`` -> ``&amp;``), and
     # the model copies them back escaped. Resolve only URLs we actually escaped
     # back to their exact original — URLs from search/users pass through
@@ -358,6 +383,7 @@ async def _read_media(
             media_type=media_type,
             url=url,
             kind=kind,
+            usage_fields=_tool_usage.get(),
         )
     except Exception as e:
         logger.warning(
@@ -387,7 +413,11 @@ async def _summarize_text(
         content = content[:MAX_READ_CHARS]
 
     summary = await summarize_web_content(
-        instruction=instruction, content=content, title=title, url=url
+        instruction=instruction,
+        content=content,
+        title=title,
+        url=url,
+        usage_fields=_tool_usage.get(),
     )
     return {"url": url, "title": title, "summary": summary}
 
@@ -798,7 +828,9 @@ async def generate_image(ctx: RunContext[ChatDeps], prompt: str) -> str:
 
         # 2. Independent policy review — a rejection here costs no quota.
         try:
-            decision = await review_image_prompt(prompt)
+            decision = await review_image_prompt(
+                prompt, usage_fields=tool_usage_fields(ctx.deps)
+            )
         except Exception as e:  # noqa: BLE001
             logger.warning("generate_image: prompt review failed: %s", type(e).__name__)
             return "Couldn't review the image prompt just now — try again shortly."

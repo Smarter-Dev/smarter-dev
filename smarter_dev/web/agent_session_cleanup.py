@@ -25,8 +25,9 @@ A session's run state is also the only record of its token usage. A caller
 that does not record usage itself passes ``usage`` so each model turn becomes a
 ``usage_cost_rows`` row, in the same transaction, before the session goes.
 Skrift sums a turn's usage across its requests, so a turn is priced from its
-stored responses, each on its own (``turn_cost``): a long-context tier is
-decided per request.
+stored responses, each on its own (``turn_billing``): a long-context tier is
+decided per request. A failed run's responses, which Skrift keeps for a turn
+that dies but never adds to its usage, were billed too and are added.
 """
 
 from __future__ import annotations
@@ -100,40 +101,122 @@ def turn_responses(state: RunState) -> dict[str, list[dict]]:
     return by_turn
 
 
-def turn_cost(
-    model: CatalogModel, usage: AgentUsageRecord, responses: list[dict]
-) -> Decimal:
-    """A turn's cost, each of its stored responses priced on its own.
+@dataclass(frozen=True)
+class TurnBilling:
+    """What a turn was billed: its tokens and their cost."""
 
-    Skrift's record is the turn's total; tokens the stored responses do not
-    account for are priced at the base rate (``calc_cost_by_request``). A Skrift
-    agent runs one model, so every response is that model's.
+    tokens: RequestTokens
+    cost: Decimal
+    # The model the session ran, from a usage record or else its responses.
+    model_name: str | None = None
+
+
+def _recorded_prefix(total: RequestTokens, requests: list[RequestTokens]) -> int | None:
+    """How many of *requests*, from the first, add up to exactly *total*;
+    None when no run of them does."""
+    running = RequestTokens()
+    if running == total:
+        return 0
+    for index, request in enumerate(requests, 1):
+        running = RequestTokens(*(a + b for a, b in zip(running, request)))
+        if running == total:
+            return index
+    return None
+
+
+def turn_billing(
+    model: CatalogModel, usage: AgentUsageRecord | None, responses: list[dict]
+) -> TurnBilling:
+    """A turn's tokens and cost, each of its stored responses priced on its own.
+
+    Skrift's record is the total of the turn's runs that reached a pause or
+    the end. A run that failed is not in it, yet a turn that then dies keeps
+    that run's responses after the recorded ones, and the provider billed
+    them: they are added, priced on their own too. Tokens the stored
+    responses do not account for are priced at the base rate
+    (``calc_cost_by_request``); when the record is not the sum of the first
+    responses, the record alone is priced, as before. A Skrift agent runs one
+    model, so every response is that model's.
     """
     from smarter_dev.web.chat.usage import usage_cost_by_request
 
-    return usage_cost_by_request(
-        model,
+    total = (
         RequestTokens(
             usage.input_tokens,
             usage.output_tokens,
             usage.cache_read_tokens,
             usage.cache_write_tokens,
-        ),
-        response_request_tokens(responses),
+        )
+        if usage is not None
+        else RequestTokens()
+    )
+    requests = response_request_tokens(responses)
+    recorded = _recorded_prefix(total, requests)
+    if recorded is None:
+        return TurnBilling(total, usage_cost_by_request(model, total, requests))
+    unrecorded = requests[recorded:]
+    if not unrecorded:
+        return TurnBilling(total, usage_cost_by_request(model, total, requests))
+    extra = RequestTokens(*(sum(column) for column in zip(*unrecorded)))
+    return TurnBilling(
+        RequestTokens(*(a + b for a, b in zip(total, extra))),
+        usage_cost_by_request(model, total, requests[:recorded])
+        + usage_cost_by_request(model, extra, unrecorded),
     )
 
 
-def session_cost(state: RunState) -> Decimal | None:
-    """Every turn's ``turn_cost`` added up, or None when a turn's model has no
-    catalog price."""
+def turn_cost(
+    model: CatalogModel, usage: AgentUsageRecord | None, responses: list[dict]
+) -> Decimal:
+    """``turn_billing``'s cost."""
+    return turn_billing(model, usage, responses).cost
+
+
+def _billed_turns(state: RunState):
+    """``(turn id, its record or None, its model or None, its responses)`` for
+    every turn with a usage record or stored responses: a turn whose only run
+    failed has no record, but its responses were billed."""
     responses = turn_responses(state)
-    total = Decimal("0")
-    for turn_id, usage in state.turn_usage.items():
-        model = _catalog_model(usage.configured_model or usage.model_name)
+    configured = next(
+        (
+            usage.configured_model or usage.model_name
+            for usage in state.turn_usage.values()
+            if usage.configured_model or usage.model_name
+        ),
+        None,
+    )
+    for turn_id in [*state.turn_usage, *(t for t in responses if t not in state.turn_usage)]:
+        usage = state.turn_usage.get(turn_id)
+        turn = responses.get(turn_id, [])
+        if usage is not None:
+            name = usage.configured_model or usage.model_name
+        else:
+            name = next(
+                (r.get("model_name") for r in turn if r.get("model_name")), configured
+            )
+        yield turn_id, usage, name, turn
+
+
+def session_billing(state: RunState) -> TurnBilling | None:
+    """Every turn's ``turn_billing`` added up, or None when a turn's model has
+    no catalog price."""
+    tokens, cost = RequestTokens(), Decimal("0")
+    billed_model = None
+    for _turn_id, usage, name, responses in _billed_turns(state):
+        model = _catalog_model(name)
         if model is None:
             return None
-        total += turn_cost(model, usage, responses.get(turn_id, []))
-    return total
+        billed = turn_billing(model, usage, responses)
+        tokens = RequestTokens(*(a + b for a, b in zip(tokens, billed.tokens)))
+        cost += billed.cost
+        billed_model = billed_model or name
+    return TurnBilling(tokens, cost, billed_model)
+
+
+def session_cost(state: RunState) -> Decimal | None:
+    """``session_billing``'s cost."""
+    billed = session_billing(state)
+    return billed.cost if billed is not None else None
 
 
 async def _record_usage(session, state_keys: list[str], owner: UsageOwner) -> None:
@@ -147,15 +230,17 @@ async def _record_usage(session, state_keys: list[str], owner: UsageOwner) -> No
     ).all()
     for value in values:
         state = RunState.model_validate(value.get("value", value))
-        responses = turn_responses(state)
-        for turn_id, usage in state.turn_usage.items():
-            model = _catalog_model(usage.configured_model or usage.model_name)
+        for turn_id, usage, name, responses in _billed_turns(state):
+            model = _catalog_model(name)
             if model is None:
                 logger.warning(
                     "Agent session %s: no catalog price for %r; its usage is not recorded",
                     state.session_id,
-                    usage.configured_model or usage.model_name,
+                    name,
                 )
+                continue
+            billed = turn_billing(model, usage, responses)
+            if not any(billed.tokens):
                 continue
             await record_usage(
                 session,
@@ -163,14 +248,15 @@ async def _record_usage(session, state_keys: list[str], owner: UsageOwner) -> No
                 product_mode=owner.product_mode,
                 operation_type=owner.operation_type,
                 model=model,
-                input_tokens=usage.input_tokens,
-                output_tokens=usage.output_tokens,
-                cache_read_tokens=usage.cache_read_tokens,
-                cache_write_tokens=usage.cache_write_tokens,
-                cost_usd=turn_cost(model, usage, responses.get(turn_id, [])),
+                input_tokens=billed.tokens.input_tokens,
+                output_tokens=billed.tokens.output_tokens,
+                cache_read_tokens=billed.tokens.cache_read_tokens,
+                cache_write_tokens=billed.tokens.cache_write_tokens,
+                cost_usd=billed.cost,
                 user_id=owner.user_id,
                 conversation_id=owner.conversation_id,
-                details={"agent": state.agent_name},
+                details={"agent": state.agent_name}
+                | ({} if usage is not None else {"failed": True}),
             )
 
 

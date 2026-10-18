@@ -160,7 +160,9 @@ async def read_news(ctx: RunContext[ScoutDeps], url: str) -> dict:
     else:
         title = _title_from_raw_cache(raw)
 
-    summary = await summarise_news_page(text=raw, url=url, title=title)
+    summary = await summarise_news_page(
+        text=raw, url=url, title=title, meter=cache.summariser_usage
+    )
     cache.news_summaries[url] = summary
     return {"url": url, "title": title, "summary": summary}
 

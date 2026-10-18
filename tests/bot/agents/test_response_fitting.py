@@ -186,7 +186,7 @@ async def test_fit_falls_back_to_summarizer_when_rewrite_still_long(monkeypatch)
     assert fit.method == "summarized"
     # The failed rewrite still spent chat-model tokens — they must be metered.
     assert (fit.extra_input_tokens, fit.extra_output_tokens) == (11, 7)
-    summarize.assert_awaited_once_with(LONG)
+    summarize.assert_awaited_once_with(LONG, usage_fields=None)
 
 
 @pytest.mark.asyncio
@@ -223,7 +223,7 @@ async def test_fit_writer_message_uses_summarizer_when_it_fits(monkeypatch):
     assert fit.method == "summarized"
     # The summarizer's spend is not metered against the channel budget.
     assert (fit.extra_input_tokens, fit.extra_output_tokens) == (0, 0)
-    summarize.assert_awaited_once_with(LONG)
+    summarize.assert_awaited_once_with(LONG, usage_fields=None)
 
 
 @pytest.mark.asyncio

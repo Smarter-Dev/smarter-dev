@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import dataclasses
 import logging
 import os
@@ -92,6 +93,7 @@ from smarter_dev.bot.proactive.types import blocked_channel_message
 from smarter_dev.bot.proactive.watcher import JevWatcherRunner
 from smarter_dev.bot.proactive.watcher import SkimRunner
 from smarter_dev.bot.proactive.watcher import WatcherRunner
+from smarter_dev.bot.proactive.watcher import merge_usage
 from smarter_dev.bot.proactive.windows import JEV_BATCH_SIZE
 from smarter_dev.bot.proactive.windows import JEV_MAX_WAIT_SECONDS
 from smarter_dev.bot.proactive.windows import JEV_QUIET_SECONDS
@@ -226,7 +228,12 @@ def event_engages_bot(message, bot_user_id: str) -> bool:
 
 
 async def dispatch_response(
-    bot, *, channel_id: int, content: str, reply_to_id: str | None
+    bot,
+    *,
+    channel_id: int,
+    content: str,
+    reply_to_id: str | None,
+    guild_id: str | None = None,
 ) -> int:
     """Send one agent response, honoring Discord's length cap.
 
@@ -237,7 +244,10 @@ async def dispatch_response(
     only. Returns how many messages were actually sent.
     """
     if len(content) > SUMMARIZE_THRESHOLD:
-        fit = await fit_writer_message(content)
+        # The summarizer's spend is the bot's, attributed to where it posts.
+        fit = await fit_writer_message(
+            content, usage_fields={"guild_id": guild_id, "channel_id": channel_id}
+        )
         logger.info(
             "proactive overlong reply (%d chars) fitted via %s to %d chars",
             len(content),
@@ -700,7 +710,9 @@ class ProactiveRuntime:
         bounded — an unbounded ~100k-token summarize once stalled the whole
         consumer loop (2026-09-01) — and failure degrades to a watcher-model
         skim, then truncation, so neither a wake nor the idle sweep can
-        block on summarization."""
+        block on summarization. What each model spent is added, by model, to
+        the caller's ``_compaction_spent`` for its usage report."""
+        spent = _compaction_spent.get()
         try:
             summary, usage = await asyncio.wait_for(
                 self_compaction_summary(
@@ -708,7 +720,9 @@ class ProactiveRuntime:
                 ),
                 timeout=COMPACTION_TIMEOUT_SECONDS,
             )
-            logger.info("proactive self-compaction: %s", usage)
+            logger.info("proactive self-compaction: %s", _usage_totals(usage))
+            if spent is not None:
+                merge_usage(spent, self.agent_model_id, usage)
             return summary
         except Exception:  # noqa: BLE001 — fall back, never hang a wake
             log_exception(
@@ -722,8 +736,13 @@ class ProactiveRuntime:
                 timeout=COMPACTION_TIMEOUT_SECONDS,
             )
             logger.info(
-                "proactive history compaction (skim fallback): %s", usage
+                "proactive history compaction (skim fallback): %s",
+                _usage_totals(usage),
             )
+            if spent is not None:
+                merge_usage(
+                    spent, self.skim_model_id or self.watcher_model_id, usage
+                )
             return summary
         except Exception:  # noqa: BLE001 — truncation beats a hung agent
             log_exception(
@@ -756,7 +775,7 @@ class ProactiveRuntime:
                         logger, "failed to persist compacted proactive history"
                     )
 
-            state.agent_runner = KimiAgentRunner(
+            runner = KimiAgentRunner(
                 agent=build_proactive_agent(
                     build_twopass_model(self.agent_model_id),
                     system_prompt=build_guild_agent_system_prompt(
@@ -767,7 +786,18 @@ class ProactiveRuntime:
                 ),
                 summarize=self.compaction_summarize,
                 on_compacted=persist_compacted,
+                model_id=self.agent_model_id,
             )
+            async def summarize(messages) -> str:
+                # A wake's compaction is billed with the wake that ran it.
+                token = _compaction_spent.set(runner.unreported_usage)
+                try:
+                    return await self.compaction_summarize(messages)
+                finally:
+                    _compaction_spent.reset(token)
+
+            runner.summarize = summarize
+            state.agent_runner = runner
         return state.agent_runner
 
 
@@ -804,6 +834,18 @@ def _message_is_after_cursor(message: ChannelMessage, cursor: str | None) -> boo
     return message.id != cursor
 
 
+# Where ``ProactiveRuntime.compaction_summarize`` adds what it spent: the
+# wake's runner, or the idle fold's report.
+_compaction_spent: contextvars.ContextVar[dict[str, dict] | None] = (
+    contextvars.ContextVar("proactive_compaction_spent", default=None)
+)
+
+
+def _usage_totals(usage: dict) -> dict:
+    """A usage dict for the log: its totals, not every request's counts."""
+    return {key: value for key, value in usage.items() if key != "requests"}
+
+
 async def _record_usage(
     service,
     *,
@@ -823,6 +865,13 @@ async def _record_usage(
             "output_tokens": usage.get("output_tokens", 0),
             "cache_read_tokens": usage.get("cache_read_tokens", 0),
             "cache_write_tokens": usage.get("cache_write_tokens", 0),
+            # Each request's own counts, so the ledger prices each on its
+            # own (a long-context tier is decided per request).
+            **(
+                {"requests": usage["requests"]}
+                if usage.get("requests") is not None
+                else {}
+            ),
         }
         for model_id, usage in (usage_by_model or {}).items()
     ]
@@ -1200,7 +1249,25 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
     )
     passive = state.pending_passive_wake
     state.pending_passive_wake = False
-    result = await consumer.consume(context)
+    try:
+        result = await consumer.consume(context)
+    except BaseException:
+        # The provider billed what the wake got before it failed (and any
+        # compaction it ran); that is reported before the error goes on.
+        unreported = getattr(runner, "unreported_usage", None) or {}
+        failed_usage = dict(unreported)
+        unreported.clear()
+        await _record_usage(
+            service,
+            guild_id=state.guild_id,
+            channel_id="guild-wide",
+            metered_at=activated_at,
+            passive=passive,
+            responses=0,
+            operation="agent",
+            usage_by_model=failed_usage,
+        )
+        raise
 
     dispatched_responses = 0
     sent_message_parts = 0
@@ -1213,6 +1280,7 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
             continue
         response_message_parts = await dispatch_response(
             run.bot,
+            guild_id=state.guild_id,
             channel_id=int(response.channel_id),
             content=response.content,
             reply_to_id=response.reply_to_id,
@@ -1701,9 +1769,27 @@ async def _compact_idle_guild(
             compacted = note_pair
             outcome = "tail dropped"
         else:
-            compacted = await fold_whole_history(
-                history, summarize=run.compaction_summarize
-            )
+            spent: dict[str, dict] = {}
+            token = _compaction_spent.set(spent)
+            try:
+                compacted = await fold_whole_history(
+                    history, summarize=run.compaction_summarize
+                )
+            finally:
+                _compaction_spent.reset(token)
+                # Billed like a wake's: one report under the agent operation.
+                service = run.settings_service()
+                if service is not None:
+                    await _record_usage(
+                        service,
+                        guild_id=str(guild_id),
+                        channel_id="guild-wide",
+                        metered_at=datetime.now(UTC),
+                        passive=True,
+                        responses=0,
+                        operation="agent",
+                        usage_by_model=spent,
+                    )
             outcome = "folded"
         if await store.read_guild_raw(guild_id) != raw:
             return "written since"

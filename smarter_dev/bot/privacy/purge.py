@@ -443,6 +443,8 @@ async def _purge_chat_channel(
     deps: PurgeDeps,
     scope: _CommandScope,
     report: _Report,
+    *,
+    guild_id: str | None = None,
 ) -> None:
     done_field = f"chat_agent:{channel_id}"
     already, force = await _skip(scope, done_field)
@@ -457,7 +459,7 @@ async def _purge_chat_channel(
     async with lock:
         for _attempt in range(CHAT_WRITE_ATTEMPTS):
             folded = await _fold_chat_channel(
-                channel_id, deps, scope, report, force=force
+                channel_id, deps, scope, report, force=force, guild_id=guild_id
             )
             if folded is not _CHANGED_UNDERNEATH:
                 return
@@ -484,6 +486,7 @@ async def _fold_chat_channel(
     report: _Report,
     *,
     force: bool,
+    guild_id: str | None = None,
 ) -> object | None:
     """One read-fold-write pass; ``_CHANGED_UNDERNEATH`` when the history
     changed between the read and the write (nothing written then)."""
@@ -530,7 +533,13 @@ async def _fold_chat_channel(
         return None
     try:
         result = await purge_chat_memory(
-            history, topic, notes, scope.target, model=deps.chat_model()
+            history,
+            topic,
+            notes,
+            scope.target,
+            model=deps.chat_model(),
+            guild_id=guild_id,
+            channel_id=channel_id,
         )
     except PrivacyCompactionFailed:
         logger.warning(
@@ -585,7 +594,9 @@ async def _purge_chat(
         for channel_id in sorted(candidates):
             if not _belongs(channel_id, guild_id, "chat", deps, scope, known):
                 continue
-            await _purge_chat_channel(channel_id, deps, scope, report)
+            await _purge_chat_channel(
+                channel_id, deps, scope, report, guild_id=guild_id
+            )
         # Engines hold the guild memory blocks they read at activation (before
         # the guild memory was purged): drop them, re-read on the next turn.
         for engine in await deps.chat_engines():
@@ -617,6 +628,8 @@ async def _fold_proactive_history(
     scope: _CommandScope,
     report: _Report,
     on_unreadable: Callable[[], None] | None = None,
+    guild_id: str | None = None,
+    channel_id: int | None = None,
 ) -> list[ModelMessage] | None:
     """Fold one proactive history; returns the new history when written."""
     already, force = await _skip(scope, done_field)
@@ -647,7 +660,11 @@ async def _fold_proactive_history(
         return None
     try:
         new_history, name_hits = await purge_proactive_history(
-            history, scope.target, model=deps.proactive_model()
+            history,
+            scope.target,
+            model=deps.proactive_model(),
+            guild_id=guild_id,
+            channel_id=channel_id,
         )
     except PrivacyCompactionFailed:
         logger.warning("privacy purge: %s left untouched (no valid rewrite)", area)
@@ -693,6 +710,7 @@ async def _purge_proactive_guild_history(
         in_memory=None,
         write=write,
         on_unreadable=unreadable,
+        guild_id=guild_id,
         deps=deps,
         scope=scope,
         report=report,
@@ -742,6 +760,8 @@ async def _purge_legacy_channel_histories(
             read_raw=lambda channel_id=channel_id: store.read_raw(channel_id),
             in_memory=None,
             write=write,
+            guild_id=guild_id,
+            channel_id=channel_id,
             deps=deps,
             scope=scope,
             report=report,
@@ -776,7 +796,11 @@ async def _purge_watch_instructions(
             continue
         try:
             result = await purge_watch_instructions(
-                store, scope.target, model=deps.proactive_model()
+                store,
+                scope.target,
+                model=deps.proactive_model(),
+                guild_id=guild_id,
+                channel_id=row.channel_id,
             )
         except PrivacyCompactionFailed:
             logger.warning(

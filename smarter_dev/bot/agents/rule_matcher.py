@@ -28,6 +28,7 @@ from pydantic_ai import Agent
 
 from smarter_dev.bot.agents.model_router import build_model_for
 from smarter_dev.bot.agents.model_router import model_settings_for
+from smarter_dev.bot.services.usage_reporter import metered
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.web.guild_rules import GuildRule
@@ -288,6 +289,7 @@ async def match_rule_violation(
     messages: Sequence[RuleMatchMessage],
     target_author_id: str | None = None,
     excluded_author_id: str | None = None,
+    usage_fields: dict | None = None,
 ) -> RuleCitation:
     """Ask the model which message the moderator means and which rules it breaks.
 
@@ -297,7 +299,9 @@ async def match_rule_violation(
     anything publicly. Pass the same ``target_author_id`` and
     ``excluded_author_id`` to both, so the model is never offered an id its
     answer would be rejected for using. Model failures propagate — a moderator
-    gets an error, not an invented citation.
+    gets an error, not an invented citation. The run goes to the usage ledger
+    as ``rule_matcher``, attributed by ``usage_fields`` (``metered``'s
+    discord_user_id / guild_id / channel_id).
 
     Raises:
         ValueError: If ``rules`` or ``messages`` is empty.
@@ -305,7 +309,9 @@ async def match_rule_violation(
     prompt = build_rule_match_prompt(
         moderator_description, rules, messages, target_author_id, excluded_author_id
     )
-    result = await get_rule_matcher_agent().run(prompt)
+    agent = get_rule_matcher_agent()
+    async with metered("rule_matcher", **(usage_fields or {})) as meter:
+        result = await agent.run(prompt, model=meter.wrap(agent.model))
     logger.info(
         "match_rule_violation: rules=%s target_message_id=%r description=%r",
         result.output.matched_rule_indices,

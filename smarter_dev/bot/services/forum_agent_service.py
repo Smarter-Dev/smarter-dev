@@ -108,7 +108,9 @@ class ForumAgentService(BaseService):
                 post_content=content,
                 author_display_name=author,
                 post_tags=tags,
-                attachment_names=attachments
+                attachment_names=attachments,
+                guild_id=agent.get("guild_id") or getattr(post, "guild_id", None),
+                channel_id=getattr(post, "channel_id", None),
             )
 
             # Update statistics
@@ -467,7 +469,9 @@ class ForumAgentService(BaseService):
                             post_content=getattr(post, "content", ""),
                             author_display_name=getattr(post, "author_display_name", "Unknown"),
                             post_tags=getattr(post, "tags", []),
-                            attachment_names=getattr(post, "attachments", [])
+                            attachment_names=getattr(post, "attachments", []),
+                            guild_id=guild_id,
+                            channel_id=channel_id,
                         )
 
                         decision = f"Topic classification only: {len(matching_topics)} topics matched"
@@ -487,7 +491,9 @@ class ForumAgentService(BaseService):
                             post_content=getattr(post, "content", ""),
                             author_display_name=getattr(post, "author_display_name", "Unknown"),
                             post_tags=getattr(post, "tags", []),
-                            attachment_names=getattr(post, "attachments", [])
+                            attachment_names=getattr(post, "attachments", []),
+                            guild_id=guild_id,
+                            channel_id=channel_id,
                         )
 
                         threshold = agent_data.get("response_threshold", 0.7)

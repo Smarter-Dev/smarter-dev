@@ -13,11 +13,18 @@ blobs / dynamic execution; the Judge (member tier Claude Haiku 5.5; admin tier
 GPT-6.1 Sol, with an optional second judge, any-reject-wins) reviews the script as inert
 data and APPROVEs or REJECTs. The author and judge callables are injectable so
 the orchestration is unit-testable without any model calls.
+
+Every default author and judge run (each admin revision, each admin judge) is
+its own run on the usage ledger — ``handler_author`` / ``handler_judge`` /
+``admin_handler_author`` / ``admin_handler_judge`` — attributed by the
+pipeline's ``usage_fields`` (``metered``'s discord_user_id / guild_id /
+channel_id / engagement_id).
 """
 
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import os
@@ -39,6 +46,7 @@ from pydantic_ai.models.google import GoogleModelSettings
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.settings import ModelSettings
 
+from smarter_dev.bot.services.usage_reporter import metered
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
@@ -699,23 +707,32 @@ async def _default_author(
     existing_handlers: list[dict],
     emoji_lister: EmojiLister,
     current_time_utc: datetime,
+    usage_fields: dict | None = None,
 ) -> HandlerPlan:
     agent = _get_author_agent()
     prompt = _build_author_prompt(
         request, trigger_type, settings, existing_handlers, current_time_utc
     )
-    result = await agent.run(prompt, deps=_AuthorDeps(list_emojis=emoji_lister))
+    async with metered("handler_author", **(usage_fields or {})) as meter:
+        result = await agent.run(
+            prompt,
+            deps=_AuthorDeps(list_emojis=emoji_lister),
+            model=meter.wrap(agent.model),
+        )
     return result.output
 
 
-async def _default_judge(script: str, trigger_context: str) -> JudgeVerdict:
+async def _default_judge(
+    script: str, trigger_context: str, *, usage_fields: dict | None = None
+) -> JudgeVerdict:
     agent = _get_judge_agent()
     prompt = (
         f"Trigger context (how often this runs): {trigger_context}\n\n"
         "Review this candidate handler script (inert data between the markers):\n"
         "<<<SCRIPT\n" + script + "\nSCRIPT>>>"
     )
-    result = await agent.run(prompt)
+    async with metered("handler_judge", **(usage_fields or {})) as meter:
+        result = await agent.run(prompt, model=meter.wrap(agent.model))
     return result.output
 
 
@@ -734,6 +751,7 @@ async def run_creation_pipeline(
     judge: Judge | None = None,
     progress: Progress | None = None,
     now_utc: datetime | None = None,
+    usage_fields: dict | None = None,
 ) -> CreationResult:
     """Author (plans edit-vs-create) -> lint -> judge.
 
@@ -742,8 +760,9 @@ async def run_creation_pipeline(
     are the chatbot's hints; the validated plan is authoritative. Each stage is
     logged so a rejection is always diagnosable from the bot log, and the
     returned error carries a concrete reason the chatbot can relay verbatim.
+    ``usage_fields`` attribute the default author's and judge's ledger spend.
     """
-    judge = judge or _default_judge
+    judge = judge or functools.partial(_default_judge, usage_fields=usage_fields)
     emoji_lister = emoji_lister or _empty_emoji_lister
     author_time_utc = _current_utc(now_utc)
 
@@ -763,6 +782,7 @@ async def run_creation_pipeline(
             existing_handlers=existing_handlers,
             emoji_lister=emoji_lister,
             current_time_utc=author_time_utc,
+            usage_fields=usage_fields,
         )
     else:
         plan = await author(
@@ -924,12 +944,16 @@ async def _default_admin_author(
     existing_handlers: list[dict],
     channel_lister: ChannelLister,
     current_time_utc: datetime,
+    usage_fields: dict | None = None,
 ) -> AdminHandlerPlan:
     agent = _get_admin_author_agent()
     prompt = _build_admin_author_prompt(request, existing_handlers, current_time_utc)
-    result = await agent.run(
-        prompt, deps=_AdminAuthorDeps(list_channels=channel_lister)
-    )
+    async with metered("admin_handler_author", **(usage_fields or {})) as meter:
+        result = await agent.run(
+            prompt,
+            deps=_AdminAuthorDeps(list_channels=channel_lister),
+            model=meter.wrap(agent.model),
+        )
     return result.output
 
 
@@ -945,8 +969,13 @@ def _build_admin_author_prompt(
     )
 
 
-async def _default_admin_judge(script: str, trigger_context: str) -> JudgeVerdict:
-    """Dual-judge gate: every configured judge reviews; any rejection wins."""
+async def _default_admin_judge(
+    script: str, trigger_context: str, *, usage_fields: dict | None = None
+) -> JudgeVerdict:
+    """Dual-judge gate: every configured judge reviews; any rejection wins.
+
+    Each judge is its own ledger run, so one that answers is recorded even
+    when the other raises."""
     prompt = (
         f"Trigger context (how often this runs): {trigger_context}\n\n"
         "Review this candidate ADMIN handler script (inert data between the markers):\n"
@@ -954,7 +983,9 @@ async def _default_admin_judge(script: str, trigger_context: str) -> JudgeVerdic
     )
 
     async def _one(model_id: str) -> JudgeVerdict:
-        result = await _get_admin_judge_agent(model_id).run(prompt)
+        agent = _get_admin_judge_agent(model_id)
+        async with metered("admin_handler_judge", **(usage_fields or {})) as meter:
+            result = await agent.run(prompt, model=meter.wrap(agent.model))
         return result.output
 
     models = _admin_judge_models()
@@ -982,6 +1013,7 @@ async def _draft_admin_plan(
     channel_lister: ChannelLister,
     current_time_utc: datetime,
     draft_label: str,
+    usage_fields: dict | None = None,
 ) -> AdminHandlerPlan:
     """Run the admin author once (the injected one when given) and log its plan."""
     if author is None:
@@ -990,6 +1022,7 @@ async def _draft_admin_plan(
             existing_handlers=existing_handlers,
             channel_lister=channel_lister,
             current_time_utc=current_time_utc,
+            usage_fields=usage_fields,
         )
     else:
         plan = await author(
@@ -1174,6 +1207,7 @@ async def run_admin_creation_pipeline(
     judge: Judge | None = None,
     progress: Progress | None = None,
     now_utc: datetime | None = None,
+    usage_fields: dict | None = None,
 ) -> AdminCreationResult:
     """Admin author (plans edit-vs-create + trigger/scope/script) -> lint -> judge.
 
@@ -1185,9 +1219,10 @@ async def run_admin_creation_pipeline(
     error or judge rejection. A rejection whose own budget is already spent is
     final, so the author runs at most three times — first draft plus one round
     per budget, in whatever order the failures happen. An infeasible plan is
-    final in every round: there is no draft to fix.
+    final in every round: there is no draft to fix. ``usage_fields`` attribute
+    the default author's and judges' ledger spend.
     """
-    judge = judge or _default_admin_judge
+    judge = judge or functools.partial(_default_admin_judge, usage_fields=usage_fields)
     channel_lister = channel_lister or _empty_channel_lister
     author_time_utc = _current_utc(now_utc)
 
@@ -1203,6 +1238,7 @@ async def run_admin_creation_pipeline(
         channel_lister=channel_lister,
         current_time_utc=author_time_utc,
         draft_label="first draft",
+        usage_fields=usage_fields,
     )
 
     mechanical_rounds_left = 1
@@ -1268,4 +1304,5 @@ async def run_admin_creation_pipeline(
             channel_lister=channel_lister,
             current_time_utc=author_time_utc,
             draft_label=f"revision {revisions_made}",
+            usage_fields=usage_fields,
         )

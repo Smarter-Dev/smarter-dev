@@ -14,6 +14,12 @@ A model error or an output that does not fit its shape is an invalid attempt
 on the same budget. Matching is the shared ``PurgeTarget`` (whole-number id, whole-word names).
 Nothing here logs the id, the names or any memory text; never log a
 ``PurgeTarget`` (its repr carries both).
+
+Each step's model calls, every attempt and a failed step's included, are one
+usage-ledger operation (``privacy_purge_*``), attributed to the guild and
+channel whose store was folded and never to the person removed. Its id is a
+fresh one per step run (the reporter's), not the purge run id: a redelivered
+run folds again and that is new spend.
 """
 
 from __future__ import annotations
@@ -44,6 +50,7 @@ from smarter_dev.bot.privacy.attribution import ATTRIBUTION_MARK
 from smarter_dev.bot.proactive.agent import memory_note_pair
 from smarter_dev.bot.proactive.environment import InstructionStore
 from smarter_dev.bot.proactive.environment import WatchInstruction
+from smarter_dev.bot.services.usage_reporter import metered
 from smarter_dev.shared.privacy_purge import PurgeTarget
 
 logger = logging.getLogger(__name__)
@@ -239,12 +246,30 @@ async def purge_chat_memory(
     target: PurgeTarget,
     *,
     model: Model | str,
+    guild_id: int | str | None = None,
+    channel_id: int | str | None = None,
 ) -> ChatPurgeResult:
     """Fold one channel's whole chat memory into a summary without ``target``.
 
     Raises ``PrivacyCompactionFailed`` when the model cannot produce valid
     output; the caller then writes nothing.
     """
+    async with metered(
+        "privacy_purge_chat_memory", guild_id=guild_id, channel_id=channel_id
+    ) as meter:
+        return await _purge_chat_memory(
+            history, topic, notes, target, model=meter.wrap(model)
+        )
+
+
+async def _purge_chat_memory(
+    history: list[ModelMessage],
+    topic: str | None,
+    notes: str | None,
+    target: PurgeTarget,
+    *,
+    model: Model,
+) -> ChatPurgeResult:
     agent = Agent(
         model,
         output_type=ChatPurgeOutput,
@@ -333,12 +358,23 @@ async def purge_proactive_history(
     target: PurgeTarget,
     *,
     model: Model | str,
+    guild_id: int | str | None = None,
+    channel_id: int | str | None = None,
 ) -> tuple[list[ModelMessage], int]:
     """Fold a proactive agent history into one memory note without ``target``.
 
     Returns the new history (the standard 2-message memory-note pair) and the
     remaining name-hit count. Raises ``PrivacyCompactionFailed``.
     """
+    async with metered(
+        "privacy_purge_proactive", guild_id=guild_id, channel_id=channel_id
+    ) as meter:
+        return await _purge_proactive_history(history, target, model=meter.wrap(model))
+
+
+async def _purge_proactive_history(
+    history: list[ModelMessage], target: PurgeTarget, *, model: Model
+) -> tuple[list[ModelMessage], int]:
     agent = Agent(model, output_type=str)
     prompt = PROACTIVE_PURGE_PROMPT.format(target=private_brief(target))
 
@@ -406,11 +442,22 @@ async def purge_watch_instructions(
     target: PurgeTarget,
     *,
     model: Model | str,
+    guild_id: int | str | None = None,
+    channel_id: int | str | None = None,
 ) -> WatchPurgeResult:
     """Have the model keep, rewrite or drop each watch instruction.
 
     Raises ``PrivacyCompactionFailed``; the caller then persists nothing.
     """
+    async with metered(
+        "privacy_purge_watch", guild_id=guild_id, channel_id=channel_id
+    ) as meter:
+        return await _purge_watch_instructions(store, target, model=meter.wrap(model))
+
+
+async def _purge_watch_instructions(
+    store: InstructionStore, target: PurgeTarget, *, model: Model
+) -> WatchPurgeResult:
     entries = list(store.entries)
     by_id = {entry.instruction_id: entry for entry in entries}
     agent = Agent(model, output_type=InstructionDecisions)

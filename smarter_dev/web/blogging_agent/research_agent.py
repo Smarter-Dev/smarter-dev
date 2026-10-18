@@ -208,7 +208,11 @@ async def read_page_for_excerpts(
         title = result.get("title")
         cache.raw_reads[url] = raw
     excerpts = await extract_excerpts(
-        text=raw, url=url, title=title, questions=questions
+        text=raw,
+        url=url,
+        title=title,
+        questions=questions,
+        meter=cache.summariser_usage,
     )
     return {"url": url, "title": title, "excerpts": excerpts}
 

@@ -82,6 +82,23 @@ def model_row(run: WebSearchRun, usage: dict, step: str = "queries") -> UsageCos
     )
 
 
+def failed_usage(meter, model: str) -> dict:
+    """A failed model step's usage, from what its meter saw: the requests the
+    provider answered, and billed, before the step raised."""
+    requests = [request for _, _, stage in meter.stages() for request in stage]
+    totals = [sum(column) for column in zip(*requests)] or [0, 0, 0, 0]
+    return {
+        "model": model,
+        "requests": len(requests),
+        "input_tokens": totals[0],
+        "output_tokens": totals[1],
+        "cache_read_tokens": totals[2],
+        "cache_write_tokens": totals[3],
+        "request_tokens": [request.as_dict() for request in requests],
+        "failed": True,
+    }
+
+
 def brave_row(run: WebSearchRun, requests: int) -> UsageCostRow:
     row = _row(
         run,

@@ -31,6 +31,7 @@ from smarter_dev.bot.services.exceptions import ServiceError
 from smarter_dev.bot.services.guild_chat_memory_service import GuildChatMemoryService
 from smarter_dev.bot.services.latex_renderer import LatexRenderer
 from smarter_dev.bot.services.media_client import MediaClient
+from smarter_dev.bot.services.usage_reporter import configure_usage_reporter
 from smarter_dev.bot.spam_engine import check_spam_engine
 from smarter_dev.bot.spam_engine import release_guild_spam_state
 from smarter_dev.bot.spam_ring import check_spam_ring
@@ -805,6 +806,8 @@ async def setup_bot_services(bot: lightbulb.BotApp) -> None:
             bot.d = {}
 
         bot.d["api_client"] = api_client
+        # Side agents report their model spend to the usage ledger on it.
+        configure_usage_reporter(api_client)
         bot.d["cache_manager"] = cache_manager
         bot.d["bytes_service"] = bytes_service
         bot.d["squads_service"] = squads_service
@@ -1737,6 +1740,8 @@ async def run_bot() -> None:
                                 streak_days=result.streak or 0,
                                 user_id=event.author.id,
                                 user_message=event.message.content or "",
+                                guild_id=event.guild_id,
+                                channel_id=event.channel_id,
                             )
                         )
 

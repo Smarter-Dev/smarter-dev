@@ -25,6 +25,7 @@ from unittest.mock import patch
 import pytest
 from PIL import Image
 from pydantic_ai import BinaryContent
+from pydantic_ai.models.test import TestModel
 
 from smarter_dev.bot.agents import chat_tools
 from smarter_dev.bot.agents import media_reader
@@ -408,6 +409,8 @@ def test_reproduced_inputs_are_not_decoded(tmp_path):
 
 def _recording_agent(output: str = "described") -> MagicMock:
     agent = MagicMock()
+    # A real model for the usage meter to wrap; ``run`` itself is the mock.
+    agent.model = TestModel()
     agent.run = AsyncMock(return_value=MagicMock(output=output))
     return agent
 

@@ -159,6 +159,11 @@ async def _run_create_admin_handler(ctx: lightbulb.Context, request: str) -> Non
             existing_handlers=existing_handlers,
             channel_lister=lambda: _list_guild_channels(ctx),
             progress=_relay_progress,
+            usage_fields={
+                "discord_user_id": ctx.author.id,
+                "guild_id": ctx.guild_id,
+                "channel_id": ctx.channel_id,
+            },
         )
         if not result.ok:
             await ctx.edit_last_response(f"Couldn't do it — {result.error}")

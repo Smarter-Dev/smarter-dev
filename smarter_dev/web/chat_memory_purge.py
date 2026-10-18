@@ -69,6 +69,7 @@ from smarter_dev.shared.privacy_segment_edit import apply_edits
 from smarter_dev.shared.privacy_segment_edit import editable_segments
 from smarter_dev.shared.privacy_segment_edit import rebuild  # noqa: F401 — re-exported
 from smarter_dev.shared.privacy_segment_edit import segments  # noqa: F401 — re-exported
+from smarter_dev.shared.usage_meter import UsageMeter
 from smarter_dev.web.chat_memory_dream import DEFAULT_DREAM_MODEL
 from smarter_dev.web.chat_memory_dream import DREAM_MODEL_ENV_VAR
 from smarter_dev.web.chat_memory_dream import DREAM_REASONING_LEVEL
@@ -412,6 +413,25 @@ def get_purge_agent() -> Agent[PurgeContext, PurgeOutput]:
     return _purge_agent
 
 
+@dataclass(frozen=True)
+class _MeteredPurgeAgent:
+    """The purge agent, every response it gets kept in ``meter``."""
+
+    agent: Agent[PurgeContext, PurgeOutput]
+    meter: UsageMeter
+
+    async def run(self, user_prompt: str, *, deps: PurgeContext) -> PurgeRunResult:
+        return await self.agent.run(
+            user_prompt, deps=deps, model=self.meter.wrap(self.agent.model)
+        )
+
+
+def _metered(agent: PurgeAgent | None, meter: UsageMeter | None) -> PurgeAgent | None:
+    if meter is None or not isinstance(agent, Agent):
+        return agent
+    return _MeteredPurgeAgent(agent, meter)
+
+
 async def _purge_once(agent: PurgeAgent, context: PurgeContext) -> tuple[PurgedBlocks, int]:
     """One pass; returns the result and how many model calls it took (0 or 1)."""
     if not context.needs_model:
@@ -559,6 +579,7 @@ async def purge_guild_memory(
     now: datetime,
     agent: PurgeAgent | None = None,
     still_current: StillCurrent | None = None,
+    meter: UsageMeter | None = None,
 ) -> GuildPurgeResult:
     """Have the agent remove ``target`` from one guild's memory.
 
@@ -569,8 +590,11 @@ async def purge_guild_memory(
     transaction: lock the guild, ``still_current``, compare with the snapshot,
     write, commit. A changed guild is done again from a fresh snapshot.
     Anything raised leaves every row as it was.
+
+    ``meter`` keeps every response of every pass, a pass whose snapshot went
+    stale or that raised included: each was billed.
     """
-    purge_agent = agent
+    purge_agent = _metered(agent, meter)
     total_calls = 0
     for _attempt in range(PURGE_SNAPSHOT_ATTEMPTS):
         async with session_factory() as session:
@@ -587,7 +611,7 @@ async def purge_guild_memory(
             return GuildPurgeResult(guild_id=guild_id, outcome="empty")
 
         if purge_agent is None:
-            purge_agent = get_purge_agent()
+            purge_agent = _metered(get_purge_agent(), meter)
         plan = _Plan()
         live = PurgeContext(
             target=target,
@@ -715,15 +739,17 @@ async def purge_guild_notes(
     since: datetime | None,
     agent: PurgeAgent | None = None,
     still_current: StillCurrent | None = None,
+    meter: UsageMeter | None = None,
 ) -> GuildPurgeResult:
     """The final notes pass, after the runtimes purged their histories.
 
     The bot may have written a note about the person from a history it had
     not folded yet. Every note created at or after ``since`` (the memory
     step) and every note that mentions the target goes through the agent,
-    in batches; blocks and revisions are not touched here.
+    in batches; blocks and revisions are not touched here. ``meter`` as in
+    :func:`purge_guild_memory`.
     """
-    purge_agent = agent
+    purge_agent = _metered(agent, meter)
     total_calls = 0
     for _attempt in range(PURGE_SNAPSHOT_ATTEMPTS):
         async with session_factory() as session:
@@ -737,7 +763,7 @@ async def purge_guild_notes(
         if not notes:
             return GuildPurgeResult(guild_id=guild_id, outcome="empty", model_calls=total_calls)
         if purge_agent is None:
-            purge_agent = get_purge_agent()
+            purge_agent = _metered(get_purge_agent(), meter)
         plan = _Plan()
         await _plan_notes(purge_agent, target, notes, plan)
         total_calls += plan.model_calls

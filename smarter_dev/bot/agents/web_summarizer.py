@@ -21,6 +21,7 @@ from pydantic_ai import Agent
 
 from smarter_dev.bot.agents.model_router import build_model_for
 from smarter_dev.bot.agents.model_router import model_settings_for
+from smarter_dev.bot.services.usage_reporter import metered
 from smarter_dev.bot.utils.web_fetch import url_for_log
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.model_catalog import CatalogModel
@@ -110,9 +111,19 @@ def get_web_summarizer_fallback_agent() -> Agent[None, str]:
 
 
 async def summarize_web_content(
-    *, instruction: str, content: str, title: str, url: str
+    *,
+    instruction: str,
+    content: str,
+    title: str,
+    url: str,
+    usage_fields: dict | None = None,
 ) -> str:
-    """Summarize with Claude Haiku 5.5, failing over loudly to Gemini 3.8 Flash."""
+    """Summarize with Claude Haiku 5.5, failing over loudly to Gemini 3.8 Flash.
+
+    Both models' requests go to the usage ledger as one ``chat_web_summarizer``
+    run (a primary that failed after answering was still billed), attributed
+    by ``usage_fields`` (``metered``'s guild_id / channel_id / engagement_id).
+    """
     agent = get_web_summarizer_agent()
     prompt = (
         f"URL: {url}\n"
@@ -120,22 +131,24 @@ async def summarize_web_content(
         f"INSTRUCTION:\n{instruction}\n\n"
         f"CONTENT:\n{content}"
     )
-    try:
-        result = await agent.run(prompt)
-    except Exception as exc:
-        log_exception(
-            logger,
-            "WEB SUMMARIZER FAILOVER: Claude Haiku 5.5 failed; using Gemini 3.8 "
-            "Flash for url=%s title=%r",
-            url_for_log(url),
-            title,
-            level=logging.CRITICAL,
-        )
-        record_llm_failover(
-            operation="web_summarizer",
-            primary_model=get_model(PRIMARY_MODEL_KEY).model_id,
-            fallback_model=get_model(FALLBACK_MODEL_KEY).model_id,
-            error=exc,
-        )
-        result = await get_web_summarizer_fallback_agent().run(prompt)
-    return result.output
+    async with metered("chat_web_summarizer", **(usage_fields or {})) as meter:
+        try:
+            result = await agent.run(prompt, model=meter.wrap(agent.model))
+        except Exception as exc:
+            log_exception(
+                logger,
+                "WEB SUMMARIZER FAILOVER: Claude Haiku 5.5 failed; using Gemini 3.8 "
+                "Flash for url=%s title=%r",
+                url_for_log(url),
+                title,
+                level=logging.CRITICAL,
+            )
+            record_llm_failover(
+                operation="web_summarizer",
+                primary_model=get_model(PRIMARY_MODEL_KEY).model_id,
+                fallback_model=get_model(FALLBACK_MODEL_KEY).model_id,
+                error=exc,
+            )
+            fallback = get_web_summarizer_fallback_agent()
+            result = await fallback.run(prompt, model=meter.wrap(fallback.model))
+        return result.output

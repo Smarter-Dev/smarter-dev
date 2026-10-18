@@ -676,6 +676,41 @@ def _still_current(request_id: UUID, run_id: UUID, token: str):
     return check
 
 
+async def _record_purge_usage(
+    meter,
+    session_factory: SessionFactory,
+    *,
+    request_id: UUID,
+    run_id: UUID,
+    token: str,
+    guild_id: str,
+    pass_name: str,
+) -> None:
+    """One guild pass's model usage on the ledger, written win or lose.
+
+    The bot's own spend, never the forgotten person's: no user on the row.
+    Keyed by the run, this execution's lease token, the guild and the pass, so
+    a re-claimed job that purges the guild again is new spend with new rows.
+    """
+    from smarter_dev.web.chat_memory_dream import DREAM_REASONING_LEVEL
+    from smarter_dev.web.usage_metering import record_meter_now
+
+    await record_meter_now(
+        meter,
+        session_factory=session_factory,
+        operation_key=f"memory_purge:{run_id}:{token}:{guild_id}:{pass_name}",
+        product_mode="discord",
+        operation_type="memory_purge",
+        reasoning_level=DREAM_REASONING_LEVEL.value,
+        details={
+            "request_id": str(request_id),
+            "run_id": str(run_id),
+            "guild_id": guild_id,
+            "pass": pass_name,
+        },
+    )
+
+
 async def run_purge(
     request_id: UUID,
     run_id: UUID,
@@ -695,6 +730,7 @@ async def run_purge(
     writing and deletes its own command if it sent one. A second execution of
     a run that is still going returns ``"already_running"``.
     """
+    from smarter_dev.shared.usage_meter import UsageMeter
     from smarter_dev.web.chat_memory_purge import PurgeStopped
     from smarter_dev.web.chat_memory_purge import purge_guild_memory
 
@@ -830,6 +866,7 @@ async def run_purge(
             step = {**done["step"], "earlier_run": True}
             new_done = None
         else:
+            meter = UsageMeter()
             try:
                 result = await purge_guild_memory(
                     session_factory,
@@ -838,6 +875,7 @@ async def run_purge(
                     now=now(),
                     agent=agent,
                     still_current=still_current,
+                    meter=meter,
                 )
                 step = result.as_step()
                 # The original time is kept across re-runs: the final notes
@@ -856,6 +894,16 @@ async def run_purge(
                 )
                 step = {"outcome": "failed", "error": type(error).__name__}
                 new_done = None
+            finally:
+                await _record_purge_usage(
+                    meter,
+                    session_factory,
+                    request_id=request_id,
+                    run_id=run_id,
+                    token=token,
+                    guild_id=guild_id,
+                    pass_name="memory",
+                )
 
         def record_guild(r: ChatBotPurgeRequest, guild_id=guild_id, step=step, new_done=new_done):
             r.steps.setdefault("memory", {})[guild_id] = step
@@ -1344,6 +1392,7 @@ async def _final_notes_pass(
     agent=None,
 ) -> bool:
     """Review new and still-mentioning notes in every guild; False if stopped."""
+    from smarter_dev.shared.usage_meter import UsageMeter
     from smarter_dev.web.chat_memory_purge import PurgeStopped
     from smarter_dev.web.chat_memory_purge import purge_guild_notes
 
@@ -1354,6 +1403,7 @@ async def _final_notes_pass(
             session_factory, request_id, run_id, _take_lease(token, now())
         ):
             return False
+        meter = UsageMeter()
         try:
             result = await purge_guild_notes(
                 session_factory,
@@ -1363,6 +1413,7 @@ async def _final_notes_pass(
                 since=since,
                 agent=agent,
                 still_current=still_current,
+                meter=meter,
             )
             step = result.as_step()
         except PurgeStopped:
@@ -1375,6 +1426,16 @@ async def _final_notes_pass(
                 type(error).__name__,
             )
             step = {"outcome": "failed", "error": type(error).__name__}
+        finally:
+            await _record_purge_usage(
+                meter,
+                session_factory,
+                request_id=request_id,
+                run_id=run_id,
+                token=token,
+                guild_id=guild_id,
+                pass_name="final_notes",
+            )
 
         def record(r: ChatBotPurgeRequest, guild_id=guild_id, step=step):
             r.steps.setdefault("final_notes", {})[guild_id] = step

@@ -710,6 +710,61 @@ class RequestTokenUsage(BaseAPIModel):
     cache_write_tokens: int = Field(0, ge=0)
 
 
+# A bound on the per-request counts one payload carries: far above any run
+# (a proactive wake's tool loop is a few dozen requests), so a report is
+# never refused for its size.
+MAX_METERED_REQUESTS = 1000
+
+
+class MeteredStageUsage(BaseAPIModel):
+    """One model's share of a metered run: its totals and each request's."""
+
+    model_name: str = Field(min_length=1, max_length=200)
+    input_tokens: int = Field(0, ge=0)
+    output_tokens: int = Field(0, ge=0)
+    cache_read_tokens: int = Field(0, ge=0)
+    cache_write_tokens: int = Field(0, ge=0)
+    requests: List[RequestTokenUsage] = Field(
+        default_factory=list, max_length=MAX_METERED_REQUESTS
+    )
+
+
+class BotUsageOperationWrite(BaseAPIModel):
+    """One of the bot's own model runs (a side agent, not a chat turn), for
+    the usage ledger. Rows are keyed by ``operation_type`` and the bot's
+    ``operation_id``, so a retried report writes nothing the second time."""
+
+    operation_id: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9_.:-]+$",
+        description="Bot-generated id of this run; replays are no-ops",
+    )
+    operation_type: str = Field(
+        min_length=1,
+        max_length=40,
+        pattern=r"^[a-z0-9_-]+$",
+        description="What the run was, e.g. length_summarizer",
+    )
+    metered_at: datetime
+    discord_user_id: Optional[str] = Field(None, max_length=32)
+    guild_id: Optional[str] = Field(None, max_length=32)
+    channel_id: Optional[str] = Field(None, max_length=32)
+    # The Discord chat engagement the run served, when it served one.
+    engagement_id: Optional[UUID] = None
+    reasoning_level: Optional[str] = Field(None, max_length=16)
+    failed: bool = Field(
+        False, description="The run raised; its billed requests still count"
+    )
+    stages: List[MeteredStageUsage] = Field(min_length=1, max_length=8)
+
+
+class BotUsageOperationRead(BaseAPIModel):
+    """How many ledger rows a bot usage report created."""
+
+    recorded: int = Field(description="Rows written; 0 for a replayed report")
+
+
 class ChatStageUsage(BaseAPIModel):
     """One model run's share of a turn's chat tokens: a two-stage turn's
     drafter and writer are two, possibly on different models. Each request is
@@ -1088,6 +1143,13 @@ class ProactiveUsageEntry(BaseAPIModel):
     # Like cache_read_tokens, a subset of input_tokens. Workers from before
     # #188 never send it; Claude's prompt-cache writes are the only ones.
     cache_write_tokens: int = Field(0, ge=0)
+    # Each provider request's own counts, which these totals add up. A
+    # long-context tier is decided per request, so the server prices each one
+    # on its own when they are sent; workers from before #211 never send them,
+    # and their totals are priced at the base rate as before.
+    requests: Optional[List[RequestTokenUsage]] = Field(
+        None, max_length=MAX_METERED_REQUESTS
+    )
 
 
 class ProactiveWakeUsageWrite(BaseAPIModel):
@@ -1102,7 +1164,7 @@ class ProactiveWakeUsageWrite(BaseAPIModel):
     passive: bool = Field(description="Whether this was a passive sweep")
     responses: int = Field(ge=0, description="Channel messages the wake sent")
     entries: list[ProactiveUsageEntry] = Field(
-        max_length=8, description="Per-model token usage for the wake"
+        max_length=16, description="Per-model token usage for the wake"
     )
 
 

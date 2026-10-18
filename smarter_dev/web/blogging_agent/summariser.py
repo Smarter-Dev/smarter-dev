@@ -24,6 +24,8 @@ from pydantic import BaseModel, Field
 if TYPE_CHECKING:
     from pydantic_ai import Agent
 
+    from smarter_dev.shared.usage_meter import UsageMeter
+
 logger = logging.getLogger(__name__)
 
 # Claude Haiku 5.5 since 2026-10-17 (#199), replacing GPT-6 Luna (which had
@@ -72,12 +74,22 @@ def _news_summariser() -> "Agent[None, str]":
     return _news_summariser_agent
 
 
-async def summarise_news_page(*, text: str, url: str, title: str | None) -> str:
-    """Return a 3-6 sentence full-document summary of a news page."""
+def _run_options(agent, meter: UsageMeter | None) -> dict:
+    """``model=`` keeping every response in ``meter``, when there is one."""
+    return {"model": meter.wrap(agent.model)} if meter is not None else {}
+
+
+async def summarise_news_page(
+    *, text: str, url: str, title: str | None, meter: UsageMeter | None = None
+) -> str:
+    """Return a 3-6 sentence full-document summary of a news page.
+
+    ``meter`` keeps the run's usage (the pipeline's), failed runs included.
+    """
     agent = _news_summariser()
     prompt = f"# Title\n{title or '(unknown)'}\n\n# URL\n{url}\n\n# Body\n{text[:60_000]}"
     try:
-        result = await agent.run(user_prompt=prompt)
+        result = await agent.run(user_prompt=prompt, **_run_options(agent, meter))
         out = result.output if hasattr(result, "output") else str(result)
         return (out or "").strip() or "(empty summary)"
     except Exception:  # noqa: BLE001
@@ -117,9 +129,15 @@ def _excerpt_extractor() -> "Agent[None, ExcerptOutput]":
 
 
 async def extract_excerpts(
-    *, text: str, url: str, title: str | None, questions: list[str]
+    *,
+    text: str,
+    url: str,
+    title: str | None,
+    questions: list[str],
+    meter: UsageMeter | None = None,
 ) -> list[str]:
-    """Pull verbatim excerpts answering ``questions`` from a page."""
+    """Pull verbatim excerpts answering ``questions`` from a page; ``meter`` as
+    in :func:`summarise_news_page`."""
     if not questions:
         return []
     agent = _excerpt_extractor()
@@ -131,7 +149,7 @@ async def extract_excerpts(
         f"# Page body\n{text[:80_000]}"
     )
     try:
-        result = await agent.run(user_prompt=prompt)
+        result = await agent.run(user_prompt=prompt, **_run_options(agent, meter))
         out = result.output if hasattr(result, "output") else None
         if isinstance(out, ExcerptOutput):
             return [e.strip() for e in out.excerpts if e and e.strip()]

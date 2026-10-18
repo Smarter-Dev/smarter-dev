@@ -19,6 +19,8 @@ from pydantic_ai import ModelRetry
 from pydantic_ai import RunContext
 
 from smarter_dev.shared.request_usage import response_request_tokens
+from smarter_dev.shared.usage_meter import UsageMeter
+from smarter_dev.shared.usage_meter import run_through
 
 # Claude Haiku 5.5 since 2026-10-17 (#199), replacing GPT-6 Luna.
 QUERY_MODEL = os.getenv("WEB_SEARCH_QUERY_MODEL", "claude-haiku-5-5")
@@ -190,10 +192,14 @@ def build_query_agent() -> Agent[None, SearchQueries]:
     return agent
 
 
-async def plan_queries(request: str) -> tuple[list[dict], bool, dict]:
+async def plan_queries(
+    request: str, meter: UsageMeter | None = None
+) -> tuple[list[dict], bool, dict]:
     """Five ``{"query", "angle"}`` dicts for ``request``, whether it needs a
-    written answer, and the run's usage."""
-    result = await build_query_agent().run(request)
+    written answer, and the run's usage. *meter* keeps each response's counts
+    as it arrives, for the caller to bill if the run raises."""
+    agent = build_query_agent()
+    result = await agent.run(request, **run_through(meter, agent))
     usage = result.usage() if callable(result.usage) else result.usage
     return [q.model_dump() for q in result.output.queries], result.output.needs_answer, {
         "model": QUERY_MODEL,

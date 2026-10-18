@@ -12,6 +12,7 @@ from smarter_dev.bot.agents.base import BaseAgent
 from smarter_dev.bot.agents.utility_model import build_utility_agent
 from smarter_dev.bot.agents.utility_model import render_inputs
 from smarter_dev.bot.agents.utility_model import tokens_used
+from smarter_dev.bot.agents.utility_model import utility_metered
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,10 @@ class StreakCelebrationAgent(BaseAgent):
         streak_multiplier: int,
         streak_days: int,
         user_id: int,
-        user_message: str
+        user_message: str,
+        *,
+        guild_id: int | str | None = None,
+        channel_id: int | str | None = None,
     ) -> tuple[str, int]:
         """Generate a celebratory message for streak bonuses.
 
@@ -73,6 +77,7 @@ class StreakCelebrationAgent(BaseAgent):
             streak_days: Number of days in the user's streak
             user_id: Discord user ID for mentioning
             user_message: Content of the user's message that triggered the reward
+            guild_id, channel_id: Where the reward was earned, for the usage ledger
 
         Returns:
             Tuple[str, int]: Generated celebratory message and token usage
@@ -85,14 +90,22 @@ class StreakCelebrationAgent(BaseAgent):
             # Create user mention string
             user_mention = f"<@{user_id}>"
 
-            result = await get_streak_celebration_agent().run(
-                render_inputs(
-                    bytes_earned=bytes_earned,
-                    streak_multiplier=streak_multiplier,
-                    streak_days=streak_days,
-                    user_message=user_message,
+            agent = get_streak_celebration_agent()
+            async with utility_metered(
+                "streak_celebration",
+                discord_user_id=user_id,
+                guild_id=guild_id,
+                channel_id=channel_id,
+            ) as meter:
+                result = await agent.run(
+                    render_inputs(
+                        bytes_earned=bytes_earned,
+                        streak_multiplier=streak_multiplier,
+                        streak_days=streak_days,
+                        user_message=user_message,
+                    ),
+                    model=meter.wrap(agent.model),
                 )
-            )
 
             celebration = result.output.response.strip()
             if not celebration:

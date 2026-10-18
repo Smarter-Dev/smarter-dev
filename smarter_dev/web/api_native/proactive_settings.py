@@ -27,6 +27,7 @@ from skrift.auth.guards import Permission
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.shared.request_usage import RequestTokens
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.chat_conversations import _normalized_model_identity
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
@@ -36,6 +37,7 @@ from smarter_dev.web.api_native.schemas import ProactiveAgentHistoryRead
 from smarter_dev.web.api_native.schemas import ProactiveAgentHistoryWrite
 from smarter_dev.web.api_native.schemas import ProactiveChannelSettingsRead
 from smarter_dev.web.api_native.schemas import ProactiveChannelSettingsWrite
+from smarter_dev.web.api_native.schemas import ProactiveUsageEntry
 from smarter_dev.web.api_native.schemas import ProactiveWakeUsageRead
 from smarter_dev.web.api_native.schemas import ProactiveWakeUsageWrite
 from smarter_dev.web.crud import get_proactive_agent_history
@@ -44,9 +46,32 @@ from smarter_dev.web.crud import list_enabled_proactive_channel_settings
 from smarter_dev.web.crud import upsert_proactive_agent_history
 from smarter_dev.web.crud import upsert_proactive_channel_settings
 from smarter_dev.web.llm_pricing import calc_cost
+from smarter_dev.web.llm_pricing import calc_cost_by_request
 from smarter_dev.web.models import UsageCostRow
 
 BOT_API_PERMISSION = "bot-api"
+
+
+def _entry_cost(entry: ProactiveUsageEntry) -> Decimal:
+    total = RequestTokens(
+        entry.input_tokens,
+        entry.output_tokens,
+        entry.cache_read_tokens,
+        entry.cache_write_tokens,
+    )
+    if entry.requests is None:
+        return calc_cost(
+            total.input_tokens,
+            total.output_tokens,
+            entry.model_id,
+            total.cache_read_tokens,
+            total.cache_write_tokens,
+        )
+    return calc_cost_by_request(
+        entry.model_id,
+        total,
+        [RequestTokens(**request.model_dump()) for request in entry.requests],
+    )
 
 # Guards are declared PER ROUTE — Skrift's auth_guard inspects
 # route_handler.guards for the APIKeyOnly marker (see model_overrides.py).
@@ -170,7 +195,10 @@ class ProactiveChannelSettingsController(Controller):
 
         Rows are keyed by the bot-generated wake id, so a retried report
         writes nothing the second time. Cost is priced server-side at each
-        model's list price, mirroring the chat-turn ledger writes.
+        model's list price, mirroring the chat-turn ledger writes: each
+        request on its own when the entry carries its requests' counts (a
+        long-context tier is decided per request), the totals at the base rate
+        when it does not (a worker from before #211).
         """
         recorded = 0
         for entry in data.entries:
@@ -199,13 +227,7 @@ class ProactiveChannelSettingsController(Controller):
                     output_tokens=entry.output_tokens,
                     cache_read_tokens=entry.cache_read_tokens,
                     cache_write_tokens=entry.cache_write_tokens,
-                    cost_usd=calc_cost(
-                        entry.input_tokens,
-                        entry.output_tokens,
-                        entry.model_id,
-                        entry.cache_read_tokens,
-                        entry.cache_write_tokens,
-                    ),
+                    cost_usd=_entry_cost(entry),
                     overage_cost_usd=Decimal("0"),
                     metered_at=data.metered_at,
                     details={
@@ -213,6 +235,11 @@ class ProactiveChannelSettingsController(Controller):
                         "channel_id": channel_id,
                         "passive": data.passive,
                         "responses": data.responses,
+                        **(
+                            {"requests": len(entry.requests)}
+                            if entry.requests is not None
+                            else {}
+                        ),
                     },
                 )
             )

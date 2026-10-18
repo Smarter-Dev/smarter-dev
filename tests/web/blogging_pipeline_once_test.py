@@ -11,6 +11,7 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from smarter_dev.web.agent_session_cleanup import UsageOwner
 from smarter_dev.web.blogging_agent import pipeline
 from smarter_dev.web.models import AuthoringPipelineRun
 
@@ -151,6 +152,13 @@ async def test_an_ended_attempt_deletes_only_its_own_stage_sessions(sessions, mo
     assert forgotten == [
         (
             ["scout-session", "brainstorm-session"],
-            {"with_sub_agents": True, "keep_events": True},
+            {
+                "with_sub_agents": True,
+                "keep_events": True,
+                # The site's own spend: no conversation, so no Resources question.
+                "usage": UsageOwner(
+                    product_mode="resources", operation_type="blog_pipeline"
+                ),
+            },
         )
     ]

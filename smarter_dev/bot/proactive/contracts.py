@@ -33,12 +33,28 @@ NotificationKind = Literal[
 ]
 
 
+class RequestTokenUsage(BaseModel):
+    """One provider request's tokens; cache reads and writes are a subset of
+    input."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    input_tokens: int = Field(0, ge=0)
+    output_tokens: int = Field(0, ge=0)
+    cache_read_tokens: int = Field(0, ge=0)
+    cache_write_tokens: int = Field(0, ge=0)
+
+
 class TokenUsage(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     input_tokens: int = Field(0, ge=0)
     output_tokens: int = Field(0, ge=0)
     cache_read_tokens: int = Field(0, ge=0)
+    # Each provider request's own counts, which the ledger prices one by one
+    # (a long-context tier is decided per request). Optional: bots from
+    # before #211 never send it.
+    requests: list[RequestTokenUsage] | None = Field(None, max_length=1000)
 
 
 class NotificationEnvelope(BaseModel):

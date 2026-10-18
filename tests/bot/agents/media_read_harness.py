@@ -178,7 +178,9 @@ def main(path: str, name: str, concurrency: int) -> dict:
         pass
 
     url = f"https://cdn.discordapp.com/attachments/1/2/{name}?ex=1&is=2&hm=3"
-    ctx = SimpleNamespace(deps=SimpleNamespace(channel_id=1, bot=None))
+    ctx = SimpleNamespace(
+        deps=SimpleNamespace(channel_id=1, guild_id=2, engagement_id=None, bot=None)
+    )
     audio = Agent(model(), output_type=str)
 
     async def run() -> dict:

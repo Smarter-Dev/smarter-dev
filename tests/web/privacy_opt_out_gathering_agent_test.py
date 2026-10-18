@@ -26,7 +26,7 @@ async def test_the_gathering_agent_refuses_a_fire_from_an_opted_out_member(
     await opt_out(db_session, str(KAI))
     prompts: list[str] = []
 
-    async def model(prompt, has_tools, budget):
+    async def model(prompt, has_tools, budget, **kwargs):
         prompts.append(prompt)
         return "gathered"
 
@@ -69,7 +69,7 @@ async def test_a_join_reaction_or_command_from_an_opted_out_member_gets_no_agent
     await opt_out(db_session, str(KAI))
     prompts: list[str] = []
 
-    async def model(prompt, has_tools, budget):
+    async def model(prompt, has_tools, budget, **kwargs):
         prompts.append(prompt)
         return "gathered"
 
@@ -132,9 +132,11 @@ async def test_both_fire_jobs_hand_the_script_the_gated_agent(monkeypatch, admin
 
     monkeypatch.setattr(job, "claim_fire_attempt", granted)
     built: list[dict] = []
+    usages: list = []
 
-    def spy(trigger_context, session_factory):
+    def spy(trigger_context, session_factory, **kwargs):
         built.append(trigger_context)
+        usages.append(kwargs.get("usage"))
         return "gated-agent"
 
     monkeypatch.setattr(handler_agent, "gathering_agent_for", spy)
@@ -147,17 +149,27 @@ async def test_both_fire_jobs_hand_the_script_the_gated_agent(monkeypatch, admin
     monkeypatch.setattr(handler_runtime, "run_handler_script", run)
     context = {"author_id": str(KAI), "message_content": "hi"}
 
+    handler_id = str(uuid4())
     if admin:
         await admin_handlers_jobs.run_admin_handler_fire(
             AdminHandlerFirePayload(
-                admin_handler_id=str(uuid4()), channel_id="C1", trigger_context=context
+                admin_handler_id=handler_id, channel_id="C1", trigger_context=context
             ),
-            _ctx(),
+            _ctx("job-1"),
         )
     else:
         await handlers_jobs.run_handler_fire(
-            HandlerFirePayload(handler_id=str(uuid4()), trigger_context=context), _ctx()
+            HandlerFirePayload(handler_id=handler_id, trigger_context=context), _ctx("job-1")
         )
 
     assert handed == ["gated-agent"]
     assert built[0]["author_id"] == str(KAI)
+    # Each agent call's usage is keyed by this fire's job and goes on the ledger.
+    [usage] = usages
+    assert (usage.job_id, usage.handler_id, usage.guild_id, usage.channel_id) == (
+        "job-1",
+        handler_id,
+        "G1",
+        "C1",
+    )
+    assert usage.handler_kind == ("admin" if admin else "standard")

@@ -660,7 +660,9 @@ async def test_a_spool_is_deleted_when_closing_the_stream_fails(
 
 
 def _ctx() -> SimpleNamespace:
-    return SimpleNamespace(deps=SimpleNamespace(channel_id=1, bot=None))
+    return SimpleNamespace(
+        deps=SimpleNamespace(channel_id=1, guild_id=2, engagement_id=None, bot=None)
+    )
 
 
 async def test_reads_run_one_at_a_time_and_release_memory(monkeypatch):

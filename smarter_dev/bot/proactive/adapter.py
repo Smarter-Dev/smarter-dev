@@ -23,6 +23,7 @@ from smarter_dev.bot.proactive.watcher import JevWatcherRunner
 from smarter_dev.bot.proactive.watcher import SkimRunner
 from smarter_dev.bot.proactive.watcher import WatcherDecision
 from smarter_dev.bot.proactive.watcher import WatcherRunner
+from smarter_dev.bot.proactive.watcher import merge_usage
 
 WATCHER_CONTEXT_SIZE = 30
 JEV_WATCHER_CONTEXT_SIZE = 15
@@ -160,22 +161,12 @@ one-sentence note on what you did and why."""
 # Token counts totaled across models. Cache writes come only from the agent's
 # Claude usage. A watcher entry never gets the key, not even as 0: watcher usage
 # crosses to the proactive-agent worker as a TokenUsage, which forbids extra
-# fields. Hence entry.get in the totals.
+# fields (its per-request ``requests`` list is the one it allows, since #211).
+# Hence entry.get in the totals.
 _TOTALED = ("input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens")
 
 
-def _merge_usage(usage_by_model: dict, model_id: str, usage: dict) -> None:
-    entry = usage_by_model.setdefault(
-        model_id,
-        {
-            "input_tokens": 0,
-            "output_tokens": 0,
-            "cache_read_tokens": 0,
-        },
-    )
-    for key, value in usage.items():
-        if key != "usage_by_model":
-            entry[key] = entry.get(key, 0) + value
+_merge_usage = merge_usage
 
 
 @dataclass
@@ -335,8 +326,23 @@ class AgentConsumer:
         )
         if self.brief_preamble:
             brief = f"{self.brief_preamble}\n\n{brief}"
-        note, agent_usage = await self.agent_runner.wake(brief, deps)
+        # What the runner spent outside its wake's own turn (its compaction
+        # summarize, a wake that raised) waits in unreported_usage. A wake
+        # that raises leaves this wake's skims there too, for the owner to
+        # report; one that returns takes all of it into its own usage.
+        unreported = getattr(self.agent_runner, "unreported_usage", None)
+        try:
+            note, agent_usage = await self.agent_runner.wake(brief, deps)
+        except BaseException:
+            if unreported is not None:
+                for model_id, usage in usage_by_model.items():
+                    _merge_usage(unreported, model_id, usage)
+            raise
         _merge_usage(usage_by_model, self.agent_model_id, agent_usage)
+        if unreported:
+            for model_id, usage in unreported.items():
+                _merge_usage(usage_by_model, model_id, usage)
+            unreported.clear()
         details = {
             "agent": {
                 "tool_calls": deps.budget.used,

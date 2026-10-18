@@ -22,6 +22,10 @@ from pydantic_ai import Agent
 from pydantic_ai import PromptedOutput
 from pydantic_ai.models import Model
 
+from smarter_dev.shared.request_usage import RequestTokens
+from smarter_dev.shared.request_usage import response_request_tokens
+from smarter_dev.shared.usage_meter import UsageMeter
+
 
 class WatcherDecision(BaseModel):
     wake: bool
@@ -139,13 +143,69 @@ Explicit wake criteria:
 {instructions}"""
 
 
-def usage_dict(usage) -> dict:
+def usage_dict(usage, messages=None) -> dict:
+    """A run's token totals; with the run's new *messages*, each of its
+    provider requests' own counts as well (``requests``), which the ledger
+    prices one by one: a long-context tier is decided per request."""
     if callable(usage):
         usage = usage()
-    return {
+    tokens = {
         "input_tokens": usage.input_tokens or 0,
         "output_tokens": usage.output_tokens or 0,
         "cache_read_tokens": usage.cache_read_tokens or 0,
+    }
+    requests = [
+        request.as_dict()
+        for request in response_request_tokens(messages or ())
+        if any(request)
+    ]
+    if requests:
+        tokens["requests"] = requests
+    return tokens
+
+
+def new_messages(result) -> list | None:
+    """A run result's new messages, or None from a stand-in without them."""
+    get = getattr(result, "new_messages", None)
+    return get() if callable(get) else None
+
+
+def meter_model(meter: UsageMeter, agent) -> dict:
+    """``agent.run`` keywords that run *agent*'s model through *meter*; none
+    for a stand-in agent with no pydantic-ai model."""
+    model = getattr(agent, "model", None)
+    return {"model": meter.wrap(model)} if isinstance(model, Model) else {}
+
+
+def merge_usage(usage_by_model: dict, model_id: str, usage: dict) -> None:
+    """Add *usage* to *model_id*'s entry: totals summed, requests listed."""
+    entry = usage_by_model.setdefault(
+        model_id,
+        {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+        },
+    )
+    for key, value in usage.items():
+        if key == "requests":
+            entry.setdefault("requests", []).extend(value)
+        elif key != "usage_by_model":
+            entry[key] = entry.get(key, 0) + value
+
+
+def meter_usage_dict(meter: UsageMeter) -> dict:
+    """``usage_dict`` for what a meter saw of a run that raised: the requests
+    the provider answered, and billed, before it did."""
+    stages = meter.stages()
+    total = RequestTokens(*(sum(column) for column in zip(*(t for _, t, _ in stages))))
+    return {
+        "input_tokens": total.input_tokens,
+        "output_tokens": total.output_tokens,
+        "cache_read_tokens": total.cache_read_tokens,
+        "requests": [
+            request.as_dict() for _, _, requests in stages for request in requests
+        ],
     }
 
 
@@ -198,7 +258,7 @@ class WatcherRunner:
                 "abstained": False,
             }
         )
-        return decision, usage_dict(run_usage)
+        return decision, usage_dict(run_usage, new_messages(result))
 
 
 def _minimum_confidence(
@@ -301,6 +361,7 @@ class JevWatcherRunner:
         self,
         *,
         cause: str,
+        meter: UsageMeter | None = None,
     ) -> tuple[WatcherDecision, dict]:
         decision = WatcherDecision(
             wake=False,
@@ -313,6 +374,8 @@ class JevWatcherRunner:
                 "failure": cause,
             }
         )
+        if meter:
+            return decision, meter_usage_dict(meter)
         return decision, {
             "input_tokens": 0,
             "output_tokens": 0,
@@ -330,6 +393,9 @@ class JevWatcherRunner:
         new_message_ids: list[str] | None = None,
     ) -> tuple[WatcherDecision, dict]:
         message_ids = list(new_message_ids or [])
+        # A judgment the provider answered and billed, then failed to parse,
+        # is still owed: the abstention reports what the meter saw.
+        meter = UsageMeter()
         try:
             async with asyncio.timeout(self.timeout_seconds):
                 result = await self._agent.run(
@@ -346,15 +412,12 @@ class JevWatcherRunner:
                         "timeout": self.timeout_seconds,
                         "typesafe_boolean_threshold": self.boolean_threshold,
                     },
+                    **meter_model(meter, self._agent),
                 )
         except TimeoutError:
-            return self._abstain(
-                cause="timeout",
-            )
+            return self._abstain(cause="timeout", meter=meter)
         except Exception as error:  # noqa: BLE001 - expose provider failure
-            return self._abstain(
-                cause=f"{type(error).__name__}",
-            )
+            return self._abstain(cause=f"{type(error).__name__}", meter=meter)
 
         provider_details = result.response.provider_details or {}
         decision = decision_from_jev(
@@ -364,7 +427,7 @@ class JevWatcherRunner:
             resolved_model_name=result.response.model_name,
             minimum_confidence=self.minimum_confidence,
         )
-        jev_usage = usage_dict(result.usage)
+        jev_usage = usage_dict(result.usage, new_messages(result))
         run_usage = result.usage() if callable(result.usage) else result.usage
         decision._classifier_metadata["requests"] = (
             getattr(run_usage, "requests", 0) or 0
@@ -391,4 +454,4 @@ class SkimRunner:
 
     async def skim(self, transcript: str) -> tuple[str, dict]:
         result = await self._agent.run(transcript)
-        return result.output, usage_dict(result.usage)
+        return result.output, usage_dict(result.usage, new_messages(result))
