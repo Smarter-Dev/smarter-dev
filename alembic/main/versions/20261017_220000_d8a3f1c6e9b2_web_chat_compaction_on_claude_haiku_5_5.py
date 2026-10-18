@@ -10,7 +10,9 @@ database. This moves the live row.
 Only a row still naming ``gpt-6-luna`` moves: any other choice an administrator
 made stands. The rows it moves are recorded in ``_MOVED`` (a marker table no
 model maps, so autogenerate never sees it), and the downgrade sends back to
-Luna only those rows, and only while they still name Haiku: a database that had
+Luna only those rows, and only while they still name Haiku. The ids recorded
+are the ones the UPDATE itself returns, so a row changed by an admin save
+between a read and the write is never recorded as moved: a database that had
 chosen Haiku itself before the upgrade keeps it, and so does one an
 administrator has changed since. The fallback (Gemini 3.8 Flash) is left alone, and so are the
 modes that compact on the conversation's own model (``configured_compaction``
@@ -40,19 +42,23 @@ _MOVED = "migration_d8a3f1c6e9b2_moved_settings"
 
 
 def upgrade() -> None:
-    op.create_table(_MOVED, sa.Column("id", sa.Integer(), primary_key=True))
-    op.execute(
-        sa.text(
-            "INSERT INTO migration_d8a3f1c6e9b2_moved_settings (id)"
-            " SELECT id FROM chat_settings WHERE compaction_model_key = :old"
-        ).bindparams(old=_LUNA)
+    moved = op.create_table(_MOVED, sa.Column("id", sa.Integer(), primary_key=True))
+    # RETURNING (Postgres, and SQLite 3.35+) names exactly the rows this
+    # statement changed. SQLite cannot feed it to an INSERT the way a Postgres
+    # CTE can, so the ids pass through here.
+    ids = (
+        op.get_bind()
+        .execute(
+            sa.text(
+                "UPDATE chat_settings SET compaction_model_key = :new"
+                " WHERE compaction_model_key = :old RETURNING id"
+            ).bindparams(new=_HAIKU, old=_LUNA)
+        )
+        .scalars()
+        .all()
     )
-    op.execute(
-        sa.text(
-            "UPDATE chat_settings SET compaction_model_key = :new"
-            " WHERE id IN (SELECT id FROM migration_d8a3f1c6e9b2_moved_settings)"
-        ).bindparams(new=_HAIKU)
-    )
+    if ids:
+        op.bulk_insert(moved, [{"id": row_id} for row_id in ids])
 
 
 def downgrade() -> None:

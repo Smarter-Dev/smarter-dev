@@ -821,16 +821,17 @@ async def test_a_conversation_moved_to_haiku_sends_none_of_sonnets_thinking(
 
 
 @pytest.mark.parametrize(
-    ("earlier_turns", "kept_thoughts"),
+    "earlier_turns",
     [
         # Cut to the last four messages: every kept block's prefix changed.
-        (3, []),
-        # Short enough to send whole: the model's own block stays.
-        (1, ["haiku"]),
+        3,
+        # Sent whole, but the system prompt and tools changed: the model's own
+        # block is no longer valid either.
+        1,
     ],
 )
-async def test_the_final_response_sends_no_thinking_from_a_cut_history(
-    db_session, jobs_session, monkeypatch, earlier_turns, kept_thoughts
+async def test_the_final_response_sends_no_thinking_from_any_history(
+    db_session, jobs_session, monkeypatch, earlier_turns
 ):
     from pydantic_ai.messages import ThinkingPart
     from pydantic_ai.models.function import FunctionModel
@@ -886,6 +887,6 @@ async def test_the_final_response_sends_no_thinking_from_a_cut_history(
         for message in seen[0]
         for part in message.parts
         if isinstance(part, ThinkingPart)
-    ] == kept_thoughts
+    ] == []
     # One request: no message breakpoint at the 1-hour write rate.
     assert settings[0]["anthropic_cache_messages"] is False

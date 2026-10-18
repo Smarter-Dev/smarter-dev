@@ -996,6 +996,119 @@ async def test_shorten_rerun_messages_are_persisted_with_the_turn(
 
 
 @pytest.mark.asyncio
+async def test_a_cached_shorten_rerun_keeps_both_requests_at_haikus_long_tier(
+    fake_bot, fake_memory, monkeypatch
+):
+    """Engine to ledger: the shorten re-run's cache counts reach the turn's
+    totals, so the ledger prices each request over 100K at Haiku's long tier.
+
+    Without them the requests held more cache than the totals, the calculator
+    discarded the breakdown, and the turn was priced at the base rate.
+    """
+    from decimal import Decimal
+
+    from pydantic_ai.messages import ModelMessagesTypeAdapter
+    from pydantic_ai.messages import ModelResponse
+    from pydantic_ai.messages import TextPart
+    from pydantic_ai.usage import RequestUsage
+
+    from smarter_dev.web.api_native.chat_conversations import _billed_chat_model
+    from smarter_dev.web.api_native.schemas import ChatAgentTurnCreate
+    from smarter_dev.web.llm_pricing import calc_cost
+
+    monkeypatch.setenv("CHAT_AGENT_MODEL", "claude-haiku-5-5")
+    usages = [
+        RequestUsage(
+            input_tokens=100_001,
+            output_tokens=1_000,
+            cache_read_tokens=50_000,
+            cache_write_tokens=10_000,
+        ),
+        RequestUsage(
+            input_tokens=100_001,
+            output_tokens=1_000,
+            cache_read_tokens=80_000,
+            cache_write_tokens=5_000,
+        ),
+    ]
+    replies = ["x" * 5000, "short reply"]
+    calls = 0
+
+    async def fake_run(**kwargs):
+        # The turn's run, then the real fit_overlong_response's shorten re-run.
+        nonlocal calls
+        usage, reply = usages[calls], replies[calls]
+        calls += 1
+        response = ModelResponse(
+            parts=[TextPart(reply)], model_name="claude-haiku-5-5", usage=usage
+        )
+        result = _result(
+            _send(reply), all_messages=[response], new_messages=[response]
+        )
+        result.usage = usage
+        return result
+
+    captured: dict = {}
+    persisted = asyncio.Event()
+
+    async def fake_persist(**kwargs):
+        captured.update(kwargs)
+        persisted.set()
+
+    patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
+    with patches[0], patches[1], patches[2], patches[3], patch(
+        "smarter_dev.bot.services.chat_engine.persist_turn", new=fake_persist
+    ):
+        engine, _ = await _build_engine(fake_bot)
+        engine.engagement_id = "eng-1"
+        engine.start()
+        engine.trigger_initial(_fake_trigger_message())
+        try:
+            await asyncio.wait_for(persisted.wait(), 5)
+        finally:
+            await engine.shutdown()
+
+    assert calls == 2
+    assert captured["chat_model_name"] == "claude-haiku-5-5"
+    assert captured["chat_cache_read_tokens"] == 130_000
+    assert captured["chat_cache_write_tokens"] == 15_000
+    payload = ChatAgentTurnCreate(
+        engagement_id="00000000-0000-0000-0000-000000000001",
+        request_id="r",
+        turn_kind="initial",
+        output_kind="send_response",
+        triggering_messages=[],
+        agent_output={},
+        model_messages_delta=ModelMessagesTypeAdapter.dump_python(
+            captured["new_model_messages"], mode="json"
+        ),
+        **{
+            key: captured[key]
+            for key in (
+                "chat_model_name",
+                "chat_tokens_input",
+                "chat_tokens_output",
+                "chat_cache_read_tokens",
+                "chat_cache_write_tokens",
+            )
+        },
+    )
+    each_at_the_long_tier = sum(
+        calc_cost(
+            usage.input_tokens,
+            usage.output_tokens,
+            "claude-haiku-5-5",
+            cache_read_tokens=usage.cache_read_tokens,
+            cache_write_tokens=usage.cache_write_tokens,
+            per_request=True,
+        )
+        for usage in usages
+    )
+    assert _billed_chat_model(payload).cost_usd == each_at_the_long_tier
+    assert each_at_the_long_tier == Decimal("0.0540010")
+
+
+@pytest.mark.asyncio
 async def test_rate_limited_model_says_so(fake_bot, fake_memory):
     """A 429 reads as "busy, try shortly" — not as a generic failure.
 

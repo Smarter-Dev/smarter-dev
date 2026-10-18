@@ -2601,14 +2601,10 @@ async def _final_response(
         bounded_prompt = (
             f"{bounded_prompt}\n\nVERIFIED TOOL RESULTS ALREADY GATHERED:\n{gathered}"
         )[-48_000:]
-    # Cutting the history changes the prefix every kept Claude thinking block
-    # was signed with, so a cut tail sends none; an uncut one sends the
-    # model's own.
-    tail = (
-        strip_claude_thinking(history[-4:])
-        if len(history) > 4
-        else drop_other_models_claude_thinking(history, model.model_id)
-    )
+    # No Claude thinking block's signed prefix holds here: this agent has its
+    # own system prompt and no tools, and a long history is cut as well. So
+    # the tail sends none, however short.
+    tail = strip_claude_thinking(history[-4:])
     result = await run_cancellable(
         agent.run(bounded_prompt, message_history=tail),
         turn_id=turn.id,

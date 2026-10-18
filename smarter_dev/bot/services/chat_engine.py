@@ -112,6 +112,7 @@ from smarter_dev.shared.guild_event_log import read_window
 from smarter_dev.shared.message_content import exception_trace
 from smarter_dev.shared.message_content import exception_type_name
 from smarter_dev.shared.model_catalog import get_model
+from smarter_dev.shared.request_usage import RequestTokens
 
 logger = logging.getLogger(__name__)
 
@@ -951,8 +952,7 @@ class ChannelEngine:
             message_history = drop_other_models_claude_thinking(
                 message_history, getattr(agent.model, "model_name", None)
             )
-            writer_extra_input = 0
-            writer_extra_output = 0
+            writer_usage = RequestTokens()
             two_stage_output: TurnDecision | None = None
             try:
                 result = await agent.run(
@@ -962,11 +962,7 @@ class ChannelEngine:
                     usage_limits=TURN_USAGE_LIMITS,
                 )
                 if two_stage:
-                    (
-                        two_stage_output,
-                        writer_extra_input,
-                        writer_extra_output,
-                    ) = await self._run_writer_stage(
+                    two_stage_output, writer_usage = await self._run_writer_stage(
                         result.output,
                         override_model_id,
                         override_reasoning,
@@ -1040,7 +1036,7 @@ class ChannelEngine:
             # per-turn on the dashboard via persist_turn). Single-stage meters its
             # one model's full spend.
             if two_stage:
-                tokens = writer_extra_input + writer_extra_output
+                tokens = writer_usage.input_tokens + writer_usage.output_tokens
             else:
                 tokens = _extract_tokens(result.usage)
             # A reply too long to send in two messages gets rewritten before
@@ -1054,6 +1050,8 @@ class ChannelEngine:
             # logged but not metered, so it adds no extra tokens.
             fit_extra_input = 0
             fit_extra_output = 0
+            fit_extra_cache_read = 0
+            fit_extra_cache_write = 0
             # The shorten re-run is a second agent.run, so its messages are not
             # in ``result.new_messages()``. They are appended to the persisted
             # history below — without them the turn record simply omits a run
@@ -1090,6 +1088,8 @@ class ChannelEngine:
                 )
                 fit_extra_input = fit.extra_input_tokens
                 fit_extra_output = fit.extra_output_tokens
+                fit_extra_cache_read = fit.extra_cache_read_tokens
+                fit_extra_cache_write = fit.extra_cache_write_tokens
                 fit_extra_messages = list(fit.extra_messages)
                 tokens += fit_extra_input + fit_extra_output
             # Meter this turn's chat tokens against the channel's usage windows.
@@ -1167,18 +1167,25 @@ class ChannelEngine:
                 chat_in = (
                     int(getattr(chat_usage, "input_tokens", 0) or 0)
                     + fit_extra_input
-                    + writer_extra_input
+                    + writer_usage.input_tokens
                 )
                 chat_out = (
                     int(getattr(chat_usage, "output_tokens", 0) or 0)
                     + fit_extra_output
-                    + writer_extra_output
+                    + writer_usage.output_tokens
                 )
-                chat_cache_read = int(
-                    getattr(chat_usage, "cache_read_tokens", 0) or 0
+                # Every run's cache counts, like its input: the ledger prices
+                # each request from the turn's messages, and drops that
+                # breakdown when the requests hold more cache than the total.
+                chat_cache_read = (
+                    int(getattr(chat_usage, "cache_read_tokens", 0) or 0)
+                    + fit_extra_cache_read
+                    + writer_usage.cache_read_tokens
                 )
-                chat_cache_write = int(
-                    getattr(chat_usage, "cache_write_tokens", 0) or 0
+                chat_cache_write = (
+                    int(getattr(chat_usage, "cache_write_tokens", 0) or 0)
+                    + fit_extra_cache_write
+                    + writer_usage.cache_write_tokens
                 )
 
                 voice = dispatch.voice
@@ -1805,7 +1812,7 @@ class ChannelEngine:
         long_term_memory: str | None = None,
         behavior: str | None = None,
         personality: str | None = None,
-    ) -> tuple[TurnDecision, int, int]:
+    ) -> tuple[TurnDecision, RequestTokens]:
         """Assemble a two-stage turn's output: run the tool-less primary WRITER on
         the DRAFTER's brief and fold its message into a ``TurnDecision`` the
         existing send/persist path consumes.
@@ -1817,9 +1824,10 @@ class ChannelEngine:
         drafter is a cheap model, and letting it paraphrase the persona would
         rewrite who the bot is on every single turn. ``behavior`` and
         ``personality`` travel the same verbatim route for the same reason. Returns
-        ``(decision, writer_input_tokens, writer_output_tokens)``. When the drafter
-        stayed silent (``briefing.brief`` is None) the writer is never called, the
-        decision carries ``response=None``, and both token counts are zero. The
+        ``(decision, writer_usage)``: the writer run's tokens, cache counts
+        included. When the drafter stayed silent (``briefing.brief`` is None) the
+        writer is never called, the decision carries ``response=None``, and every
+        token count is zero. The
         decision is assembled from already-validated parts via ``model_construct``:
         ``TurnDecision``'s cross-field validators encode the single-agent
         English-redirect policy, which the DRAFTER already enforced on the
@@ -1828,8 +1836,7 @@ class ChannelEngine:
         """
         brief = briefing.brief
         response: ResponseBody | None = None
-        writer_input = 0
-        writer_output = 0
+        writer_usage = RequestTokens()
         response_language = "english"
         if brief is not None:
             response_language = brief.response_language
@@ -1843,9 +1850,12 @@ class ChannelEngine:
                 )
             )
             writer_output_body = writer_result.output
-            writer_usage = writer_result.usage
-            writer_input = int(getattr(writer_usage, "input_tokens", 0) or 0)
-            writer_output = int(getattr(writer_usage, "output_tokens", 0) or 0)
+            writer_usage = RequestTokens(
+                *(
+                    int(getattr(writer_result.usage, name, 0) or 0)
+                    for name in RequestTokens._fields
+                )
+            )
             top_ranked = max(briefing.rankings, key=lambda ranking: ranking.score)
             response = ResponseBody(
                 target_message_id=top_ranked.message_id,
@@ -1863,7 +1873,7 @@ class ChannelEngine:
             topic=briefing.topic,
             notes=briefing.notes,
         )
-        return decision, writer_input, writer_output
+        return decision, writer_usage
 
     async def _resolve_temporary_default(
         self, redis: Any

@@ -387,6 +387,49 @@ def test_a_downgrade_keeps_a_choice_made_after_the_upgrade(tmp_path):
         )
 
 
+def test_an_admin_save_during_the_upgrade_is_neither_moved_nor_reverted(tmp_path):
+    """The rows recorded are the rows the UPDATE changed: an admin choosing
+    DeepSeek just before the migration's write keeps it through both steps."""
+    from sqlalchemy import create_engine
+    from sqlalchemy import event
+    from sqlalchemy import text
+
+    from alembic.migration import MigrationContext
+    from alembic.operations import Operations
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'migration.db'}")
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def admin_saves_first(conn, cursor, statement, parameters, context, many):
+        if statement.startswith("UPDATE chat_settings") and not conn.info.get("saved"):
+            conn.info["saved"] = True
+            cursor.execute(
+                "UPDATE chat_settings SET compaction_model_key = 'deepseek-v4'"
+            )
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE chat_settings (id INTEGER PRIMARY KEY, "
+                "compaction_model_key VARCHAR(100) NOT NULL)"
+            )
+        )
+        connection.execute(text("INSERT INTO chat_settings VALUES (1, 'gpt-6-luna')"))
+        migration = _migration()
+        migration.op = Operations(MigrationContext.configure(connection))
+
+        def setting():
+            return connection.execute(
+                text("SELECT compaction_model_key FROM chat_settings")
+            ).scalar_one()
+
+        migration.upgrade()
+        assert connection.info["saved"]
+        assert setting() == "deepseek-v4"
+        migration.downgrade()
+        assert setting() == "deepseek-v4"
+
+
 def test_new_databases_compact_web_chat_on_haiku():
     from smarter_dev.web.chat import settings
 

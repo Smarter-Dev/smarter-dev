@@ -74,8 +74,11 @@ class FitResult:
     ``text`` is guaranteed to be at most :data:`SUMMARIZE_THRESHOLD` characters
     (so :func:`split_for_discord` can always send it in at most two messages).
     ``extra_input_tokens`` / ``extra_output_tokens`` are the shorten re-run's
-    chat-model spend for the engine to meter; ``method`` records which tier
-    produced the text ("shortened" / "summarized" / "truncated").
+    chat-model spend for the engine to meter, and ``extra_cache_read_tokens`` /
+    ``extra_cache_write_tokens`` the part of its input the provider cache
+    served or stored (the turn's priced totals must hold every request's
+    counts, or its per-request pricing is discarded); ``method`` records which
+    tier produced the text ("shortened" / "summarized" / "truncated").
 
     ``extra_messages`` are the shorten re-run's own ``ModelMessage``s, for the
     engine to append to the turn's persisted history. Without them the re-run
@@ -89,6 +92,8 @@ class FitResult:
     extra_output_tokens: int
     method: str
     extra_messages: list = field(default_factory=list)
+    extra_cache_read_tokens: int = 0
+    extra_cache_write_tokens: int = 0
 
 
 def split_for_discord(text: str) -> list[str]:
@@ -147,6 +152,8 @@ class _ShortenOutcome:
     input_tokens: int
     output_tokens: int
     messages: list
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 async def _shorten_with_agent(
@@ -185,7 +192,12 @@ async def _shorten_with_agent(
     response = result.output.response
     text = response.message.strip() if response and response.message else None
     return _ShortenOutcome(
-        text or None, input_tokens, output_tokens, list(result.new_messages())
+        text or None,
+        input_tokens,
+        output_tokens,
+        list(result.new_messages()),
+        int(getattr(usage, "cache_read_tokens", 0) or 0),
+        int(getattr(usage, "cache_write_tokens", 0) or 0),
     )
 
 
@@ -233,6 +245,8 @@ async def fit_overlong_response(
             outcome.output_tokens,
             "shortened",
             outcome.messages,
+            outcome.cache_read_tokens,
+            outcome.cache_write_tokens,
         )
 
     summary = await _summarize_reply(message)
@@ -243,6 +257,8 @@ async def fit_overlong_response(
             outcome.output_tokens,
             "summarized",
             outcome.messages,
+            outcome.cache_read_tokens,
+            outcome.cache_write_tokens,
         )
 
     return FitResult(
@@ -251,6 +267,8 @@ async def fit_overlong_response(
         outcome.output_tokens,
         "truncated",
         outcome.messages,
+        outcome.cache_read_tokens,
+        outcome.cache_write_tokens,
     )
 
 

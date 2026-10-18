@@ -82,10 +82,14 @@ def _briefing(*, brief: WriterBrief | None, max_score: int = 10) -> BriefingDeci
     )
 
 
-def _worker_result(output, *, input_tokens=0, output_tokens=0):
+def _worker_result(
+    output, *, input_tokens=0, output_tokens=0, cache_read_tokens=0, cache_write_tokens=0
+):
     usage = SimpleNamespace(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
         requests=1,
         model="worker-model",
     )
@@ -97,10 +101,14 @@ def _worker_result(output, *, input_tokens=0, output_tokens=0):
     )
 
 
-def _writer_result(output, *, input_tokens=0, output_tokens=0):
+def _writer_result(
+    output, *, input_tokens=0, output_tokens=0, cache_read_tokens=0, cache_write_tokens=0
+):
     usage = SimpleNamespace(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        cache_read_tokens=cache_read_tokens,
+        cache_write_tokens=cache_write_tokens,
         requests=1,
         model="writer-model",
     )
@@ -370,17 +378,26 @@ async def test_two_stage_advertises_primary_answerer_not_drafter(
 
 @pytest.mark.asyncio
 async def test_two_stage_persists_combined_token_totals(fake_memory, fake_redis):
-    """The persisted turn folds the writer's spend into the chat token totals."""
+    """The persisted turn folds the writer's spend into the chat token totals,
+    its cache counts included."""
     worker_agent = MagicMock()
     worker_agent.run = AsyncMock(
         return_value=_worker_result(
-            _briefing(brief=_brief()), input_tokens=100, output_tokens=50
+            _briefing(brief=_brief()),
+            input_tokens=100,
+            output_tokens=50,
+            cache_read_tokens=40,
+            cache_write_tokens=10,
         )
     )
     writer_agent = MagicMock()
     writer_agent.run = AsyncMock(
         return_value=_writer_result(
-            WriterOutput(message="hello"), input_tokens=200, output_tokens=80
+            WriterOutput(message="hello"),
+            input_tokens=200,
+            output_tokens=80,
+            cache_read_tokens=150,
+            cache_write_tokens=30,
         )
     )
     engine, _ = _make_engine(
@@ -410,6 +427,8 @@ async def test_two_stage_persists_combined_token_totals(fake_memory, fake_redis)
     kwargs = persist_turn.await_args.kwargs
     assert kwargs["chat_tokens_input"] == 300  # 100 worker + 200 writer
     assert kwargs["chat_tokens_output"] == 130  # 50 worker + 80 writer
+    assert kwargs["chat_cache_read_tokens"] == 190  # 40 worker + 150 writer
+    assert kwargs["chat_cache_write_tokens"] == 40  # 10 worker + 30 writer
     assert kwargs["output_kind"] == "send_response"
 
 
