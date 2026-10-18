@@ -710,6 +710,19 @@ class RequestTokenUsage(BaseAPIModel):
     cache_write_tokens: int = Field(0, ge=0)
 
 
+class ChatStageUsage(BaseAPIModel):
+    """One model run's share of a turn's chat tokens: a two-stage turn's
+    drafter and writer are two, possibly on different models. Each request is
+    priced at its own model's rates and tier."""
+
+    model_name: str
+    input_tokens: int = Field(0, ge=0)
+    output_tokens: int = Field(0, ge=0)
+    cache_read_tokens: int = Field(0, ge=0)
+    cache_write_tokens: int = Field(0, ge=0)
+    requests: List[RequestTokenUsage] = Field(default_factory=list)
+
+
 class ChatAgentCompactionEventCreate(BaseAPIModel):
     event_kind: str
     tool_name: Optional[str] = None
@@ -743,6 +756,9 @@ class ChatAgentTurnCreate(BaseAPIModel):
     chat_reasoning_level: Optional[str] = None
     chat_cache_read_tokens: Optional[int] = None
     chat_cache_write_tokens: Optional[int] = None
+    # The model runs the chat totals add up. Bots from before #199's second
+    # review send none, and the turn's priced from its model messages.
+    chat_stages: Optional[List[ChatStageUsage]] = None
     voice_tokens_input: int = 0
     voice_tokens_output: int = 0
     voice_model_name: Optional[str] = None

@@ -1084,3 +1084,43 @@ def calc_cost_by_request(
     if any(rest):
         cost += priced(rest, per_request=False)
     return cost
+
+
+def calc_cost_by_stage(
+    model_name: str,
+    total: RequestTokens,
+    stages: Iterable[tuple[str, RequestTokens, Iterable[RequestTokens]]],
+) -> Decimal:
+    """Price *total*, made of model runs that may each be on another model.
+
+    Each stage is ``(model, its total, its requests)`` and is priced by
+    :func:`calc_cost_by_request` at its own model's rates, so a cheap drafter's
+    requests are not billed as the writer's and every request gets its own
+    tier. What the stages leave of *total* is priced on *model_name* at the
+    base rate. Stages that add up to more than *total* are not its parts; they
+    are ignored and the total is priced on *model_name* at the base rate.
+    """
+    stages = [(model, tokens, list(requests)) for model, tokens, requests in stages]
+    known = [sum(column) for column in zip(*(tokens for _, tokens, _ in stages))]
+    rest = RequestTokens(
+        *(whole - part for whole, part in zip(total, known or [0] * len(total)))
+    )
+    if any(value < 0 for value in rest):
+        logger.warning(
+            "%s: %d stage totals add up to more than the turn's %s; pricing the "
+            "total at the base rate",
+            model_name,
+            len(stages),
+            tuple(total),
+        )
+        return calc_cost_by_request(model_name, total)
+    cost = sum(
+        (
+            calc_cost_by_request(model, tokens, requests)
+            for model, tokens, requests in stages
+        ),
+        Decimal("0"),
+    )
+    if any(rest):
+        cost += calc_cost_by_request(model_name, rest)
+    return cost

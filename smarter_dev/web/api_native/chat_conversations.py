@@ -89,6 +89,7 @@ from smarter_dev.web.api_native.schemas import ChatUsageLeaderboardEntry
 from smarter_dev.web.api_native.schemas import ChatUsageLeaderboardResponse
 from smarter_dev.web.llm_pricing import calc_cost
 from smarter_dev.web.llm_pricing import calc_cost_by_request
+from smarter_dev.web.llm_pricing import calc_cost_by_stage
 from smarter_dev.web.models import ChatAgentCompactionEvent
 from smarter_dev.web.models import ChatAgentEngagement
 from smarter_dev.web.models import ChatAgentError
@@ -255,10 +256,26 @@ class _BilledModel(NamedTuple):
     # The requests these counts add up, each priced on its own for the same
     # reason; whatever they leave of the total is priced at the base rate.
     requests: tuple[RequestTokens, ...] | None = None
+    # The model runs these counts add up, ``(model, totals, requests)`` each,
+    # priced at their own model's rates: a two-stage turn's drafter and writer.
+    stages: tuple[tuple[str, RequestTokens, tuple[RequestTokens, ...]], ...] | None = (
+        None
+    )
 
     @property
     def cost_usd(self) -> Decimal:
         """What this model charged; zero (logged) for models without a price."""
+        if self.stages is not None:
+            return calc_cost_by_stage(
+                self.model_name,
+                RequestTokens(
+                    self.input_tokens,
+                    self.output_tokens,
+                    self.cache_read_tokens,
+                    self.cache_write_tokens,
+                ),
+                self.stages,
+            )
         if self.requests is not None:
             return calc_cost_by_request(
                 self.model_name,
@@ -297,9 +314,30 @@ def _billed_chat_model(data: ChatAgentTurnCreate) -> _BilledModel | None:
         cache_write_tokens=data.chat_cache_write_tokens or 0,
         # The turn's own responses carry each request's counts; a fallback
         # model's are left out, and priced in the rest at the base rate.
-        requests=tuple(
-            response_request_tokens(
-                data.model_messages_delta or [], data.chat_model_name
+        requests=(
+            tuple(
+                response_request_tokens(
+                    data.model_messages_delta or [], data.chat_model_name
+                )
+            )
+            if data.chat_stages is None
+            else None
+        ),
+        stages=(
+            None
+            if data.chat_stages is None
+            else tuple(
+                (
+                    stage.model_name,
+                    RequestTokens(
+                        **stage.model_dump(include=set(RequestTokens._fields))
+                    ),
+                    tuple(
+                        RequestTokens(**tokens.model_dump())
+                        for tokens in stage.requests
+                    ),
+                )
+                for stage in data.chat_stages
             )
         ),
     )

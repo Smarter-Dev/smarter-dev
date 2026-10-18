@@ -113,6 +113,8 @@ from smarter_dev.shared.message_content import exception_trace
 from smarter_dev.shared.message_content import exception_type_name
 from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.shared.request_usage import RequestTokens
+from smarter_dev.shared.request_usage import billing_stage
+from smarter_dev.shared.request_usage import usage_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -953,6 +955,7 @@ class ChannelEngine:
                 message_history, getattr(agent.model, "model_name", None)
             )
             writer_usage = RequestTokens()
+            writer_messages: list = []
             two_stage_output: TurnDecision | None = None
             try:
                 result = await agent.run(
@@ -962,7 +965,11 @@ class ChannelEngine:
                     usage_limits=TURN_USAGE_LIMITS,
                 )
                 if two_stage:
-                    two_stage_output, writer_usage = await self._run_writer_stage(
+                    (
+                        two_stage_output,
+                        writer_usage,
+                        writer_messages,
+                    ) = await self._run_writer_stage(
                         result.output,
                         override_model_id,
                         override_reasoning,
@@ -1187,6 +1194,33 @@ class ChannelEngine:
                     + fit_extra_cache_write
                     + writer_usage.cache_write_tokens
                 )
+                # The model runs those totals add up, each with its requests'
+                # own counts, so the ledger prices every request at its own
+                # model's rates and tier. The writer's requests ride only here:
+                # they are no part of the drafter's history.
+                main_usage = usage_tokens(chat_usage)
+                if two_stage:
+                    chat_stages = [
+                        billing_stage(
+                            drafter_model_id, main_usage, result.new_messages()
+                        ),
+                        billing_stage(
+                            resolved_model_name, writer_usage, writer_messages
+                        ),
+                    ]
+                else:
+                    chat_stages = [
+                        billing_stage(
+                            resolved_model_name,
+                            RequestTokens(
+                                main_usage.input_tokens + fit_extra_input,
+                                main_usage.output_tokens + fit_extra_output,
+                                main_usage.cache_read_tokens + fit_extra_cache_read,
+                                main_usage.cache_write_tokens + fit_extra_cache_write,
+                            ),
+                            [*result.new_messages(), *fit_extra_messages],
+                        )
+                    ]
 
                 voice = dispatch.voice
                 duration_ms = int(
@@ -1215,6 +1249,7 @@ class ChannelEngine:
                         chat_reasoning_level=resolved_reasoning_wire,
                         chat_cache_read_tokens=chat_cache_read,
                         chat_cache_write_tokens=chat_cache_write,
+                        chat_stages=chat_stages,
                         voice_tokens_input=(
                             voice.tokens_input if voice else 0
                         ),
@@ -1812,7 +1847,7 @@ class ChannelEngine:
         long_term_memory: str | None = None,
         behavior: str | None = None,
         personality: str | None = None,
-    ) -> tuple[TurnDecision, RequestTokens]:
+    ) -> tuple[TurnDecision, RequestTokens, list]:
         """Assemble a two-stage turn's output: run the tool-less primary WRITER on
         the DRAFTER's brief and fold its message into a ``TurnDecision`` the
         existing send/persist path consumes.
@@ -1824,8 +1859,10 @@ class ChannelEngine:
         drafter is a cheap model, and letting it paraphrase the persona would
         rewrite who the bot is on every single turn. ``behavior`` and
         ``personality`` travel the same verbatim route for the same reason. Returns
-        ``(decision, writer_usage)``: the writer run's tokens, cache counts
-        included. When the drafter stayed silent (``briefing.brief`` is None) the
+        ``(decision, writer_usage, writer_messages)``: the writer run's tokens,
+        cache counts included, and its messages, whose responses carry each
+        request's own counts (a structured-output retry is another request).
+        When the drafter stayed silent (``briefing.brief`` is None) the
         writer is never called, the decision carries ``response=None``, and every
         token count is zero. The
         decision is assembled from already-validated parts via ``model_construct``:
@@ -1837,6 +1874,7 @@ class ChannelEngine:
         brief = briefing.brief
         response: ResponseBody | None = None
         writer_usage = RequestTokens()
+        writer_messages: list = []
         response_language = "english"
         if brief is not None:
             response_language = brief.response_language
@@ -1850,12 +1888,8 @@ class ChannelEngine:
                 )
             )
             writer_output_body = writer_result.output
-            writer_usage = RequestTokens(
-                *(
-                    int(getattr(writer_result.usage, name, 0) or 0)
-                    for name in RequestTokens._fields
-                )
-            )
+            writer_usage = usage_tokens(writer_result.usage)
+            writer_messages = list(writer_result.new_messages())
             top_ranked = max(briefing.rankings, key=lambda ranking: ranking.score)
             response = ResponseBody(
                 target_message_id=top_ranked.message_id,
@@ -1873,7 +1907,7 @@ class ChannelEngine:
             topic=briefing.topic,
             notes=briefing.notes,
         )
-        return decision, writer_usage
+        return decision, writer_usage, writer_messages
 
     async def _resolve_temporary_default(
         self, redis: Any

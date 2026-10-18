@@ -82,6 +82,30 @@ def test_requests_that_outgrow_their_total_are_not_trusted():
     assert calc_cost_by_request(HAIKU, SHORT, [LONG]) == Decimal("0.00425")
 
 
+def test_stages_are_priced_at_their_own_models_and_untrusted_ones_dropped():
+    from smarter_dev.web.llm_pricing import calc_cost_by_stage
+
+    sol = "gpt-6.1-sol"
+    total = _total(LONG, SHORT, SHORT)
+    staged = calc_cost_by_stage(
+        HAIKU,
+        total,
+        [(sol, _total(SHORT, SHORT), [SHORT, SHORT]), (HAIKU, LONG, [LONG])],
+    )
+    assert (
+        staged
+        == calc_cost_by_request(sol, _total(SHORT, SHORT), [SHORT, SHORT]) + LONG_COST
+    )
+    # What the stages leave of the total is the turn model's, at the base rate.
+    assert calc_cost_by_stage(HAIKU, total, [(HAIKU, LONG, [LONG])]) == (
+        LONG_COST + calc_cost_by_request(HAIKU, _total(SHORT, SHORT))
+    )
+    # Stages over the total are not its parts.
+    assert calc_cost_by_stage(HAIKU, SHORT, [(HAIKU, LONG, [LONG])]) == Decimal(
+        "0.00425"
+    )
+
+
 def test_only_the_named_models_responses_count():
     messages = [
         ModelRequest(parts=[UserPromptPart("q")]),

@@ -1090,9 +1090,11 @@ async def test_a_cached_shorten_rerun_keeps_both_requests_at_haikus_long_tier(
                 "chat_tokens_output",
                 "chat_cache_read_tokens",
                 "chat_cache_write_tokens",
+                "chat_stages",
             )
         },
     )
+    assert payload.chat_stages is not None
     each_at_the_long_tier = sum(
         calc_cost(
             usage.input_tokens,

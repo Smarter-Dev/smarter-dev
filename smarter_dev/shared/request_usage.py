@@ -29,6 +29,14 @@ class RequestTokens(NamedTuple):
         return self._asdict()
 
 
+def usage_tokens(usage: Any) -> RequestTokens:
+    """A run's or a request's usage (pydantic-ai, or anything with its
+    attributes) as RequestTokens; missing counts are zero."""
+    return RequestTokens(
+        *(int(getattr(usage, name, 0) or 0) for name in RequestTokens._fields)
+    )
+
+
 def _field(source: Any, name: str) -> Any:
     if isinstance(source, dict):
         return source.get(name)
@@ -65,6 +73,20 @@ def response_request_tokens(
             )
         )
     return found
+
+
+def billing_stage(
+    model_name: str, total: RequestTokens, messages: Iterable[Any]
+) -> dict:
+    """One model run's share of a turn, as a payload dict: the model, the run's
+    totals, and each of its responses' own counts from that model."""
+    return {
+        "model_name": model_name,
+        **total.as_dict(),
+        "requests": [
+            tokens.as_dict() for tokens in response_request_tokens(messages, model_name)
+        ],
+    }
 
 
 def request_tokens_from_dicts(rows: Iterable[dict] | None) -> list[RequestTokens]:

@@ -11,11 +11,11 @@ Only a row still naming ``gpt-6-luna`` moves: any other choice an administrator
 made stands. The rows it moves are recorded in ``_MOVED`` (a marker table no
 model maps, so autogenerate never sees it), and the downgrade sends back to
 Luna only those rows, and only while they still name Haiku. The ids recorded
-are the ones the UPDATE itself returns, so a row changed by an admin save
-between a read and the write is never recorded as moved: a database that had
-chosen Haiku itself before the upgrade keeps it, and so does one an
-administrator has changed since. The fallback (Gemini 3.8 Flash) is left alone, and so are the
-modes that compact on the conversation's own model (``configured_compaction``
+are the ones the UPDATE itself returns (through a CTE on Postgres), so a row
+changed by an admin save between a read and the write is never recorded as
+moved: a database that had chosen Haiku itself before the upgrade keeps it,
+and so does one an administrator has changed since. The fallback (Gemini 3.8
+Flash) is left alone, and so are the modes that compact on the conversation's own model (``configured_compaction``
 false). Haiku 5.5 needs no ``chat_catalog_models`` row to serve as an auxiliary
 model; ``validate_settings_input`` asks only that it be priced.
 
@@ -43,9 +43,21 @@ _MOVED = "migration_d8a3f1c6e9b2_moved_settings"
 
 def upgrade() -> None:
     moved = op.create_table(_MOVED, sa.Column("id", sa.Integer(), primary_key=True))
-    # RETURNING (Postgres, and SQLite 3.35+) names exactly the rows this
-    # statement changed. SQLite cannot feed it to an INSERT the way a Postgres
-    # CTE can, so the ids pass through here.
+    # RETURNING names exactly the rows this UPDATE changed. On Postgres a
+    # data-modifying CTE feeds them straight to the marker, one statement that
+    # offline ``--sql`` generation can also write out. SQLite (the tests) has
+    # no such CTE, so there the ids pass through here (RETURNING: 3.35+).
+    if op.get_context().dialect.name == "postgresql":
+        op.execute(
+            sa.text(
+                "WITH moved AS ("
+                "UPDATE chat_settings SET compaction_model_key = :new"
+                " WHERE compaction_model_key = :old RETURNING id"
+                ") INSERT INTO migration_d8a3f1c6e9b2_moved_settings (id)"
+                " SELECT id FROM moved"
+            ).bindparams(new=_HAIKU, old=_LUNA)
+        )
+        return
     ids = (
         op.get_bind()
         .execute(

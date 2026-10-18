@@ -430,6 +430,46 @@ def test_an_admin_save_during_the_upgrade_is_neither_moved_nor_reverted(tmp_path
         assert setting() == "deepseek-v4"
 
 
+def test_the_migration_writes_offline_sql_for_postgres(tmp_path):
+    """``alembic upgrade --sql`` has no rows to read: on Postgres the moved ids
+    go to the marker inside one statement, so the script can be written out.
+    Run through the real alembic CLI and env.py, against no database."""
+    import os
+    import subprocess
+    import sys
+
+    def offline(*args):
+        completed = subprocess.run(
+            [sys.executable, "-m", "alembic", "-c", "alembic/main/alembic.ini", *args],
+            env={
+                "PATH": os.environ.get("PATH", ""),
+                "HOME": str(tmp_path),
+                "TMPDIR": str(tmp_path),
+                "DATABASE_URL": "postgresql+asyncpg://nobody:none@127.0.0.1:9/none",
+            },
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert completed.returncode == 0, completed.stderr[-2000:]
+        return " ".join(completed.stdout.split())
+
+    upgrade = offline("upgrade", "c5e1a8d3f7b2:d8a3f1c6e9b2", "--sql")
+    downgrade = offline("downgrade", "d8a3f1c6e9b2:c5e1a8d3f7b2", "--sql")
+
+    assert (
+        "WITH moved AS (UPDATE chat_settings SET compaction_model_key = "
+        "'claude-haiku-5-5' WHERE compaction_model_key = 'gpt-6-luna' RETURNING id)"
+        " INSERT INTO migration_d8a3f1c6e9b2_moved_settings (id) SELECT id FROM moved"
+    ) in upgrade
+    assert (
+        "UPDATE chat_settings SET compaction_model_key = 'gpt-6-luna' WHERE "
+        "compaction_model_key = 'claude-haiku-5-5' AND id IN (SELECT id FROM "
+        "migration_d8a3f1c6e9b2_moved_settings)"
+    ) in downgrade
+    assert "DROP TABLE migration_d8a3f1c6e9b2_moved_settings" in downgrade
+
+
 def test_new_databases_compact_web_chat_on_haiku():
     from smarter_dev.web.chat import settings
 
