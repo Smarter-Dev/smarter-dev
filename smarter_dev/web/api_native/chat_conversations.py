@@ -72,6 +72,8 @@ from smarter_dev.shared.message_content import redact_text
 from smarter_dev.shared.message_content import redact_turn_decision
 from smarter_dev.shared.message_content import stored_error_type
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
+from smarter_dev.shared.request_usage import RequestTokens
+from smarter_dev.shared.request_usage import response_request_tokens
 from smarter_dev.web.api_native.auth import bot_api_auth_guard
 from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.api_native.errors import plain_error
@@ -86,6 +88,7 @@ from smarter_dev.web.api_native.schemas import ChatAgentTurnCreateResponse
 from smarter_dev.web.api_native.schemas import ChatUsageLeaderboardEntry
 from smarter_dev.web.api_native.schemas import ChatUsageLeaderboardResponse
 from smarter_dev.web.llm_pricing import calc_cost
+from smarter_dev.web.llm_pricing import calc_cost_by_request
 from smarter_dev.web.models import ChatAgentCompactionEvent
 from smarter_dev.web.models import ChatAgentEngagement
 from smarter_dev.web.models import ChatAgentError
@@ -249,10 +252,24 @@ class _BilledModel(NamedTuple):
     # True when the counts are one provider request's, so a long-context tier
     # (Claude Haiku 5.5's 5x over 100,000 tokens) is priced in.
     per_request: bool = False
+    # The requests these counts add up, each priced on its own for the same
+    # reason; whatever they leave of the total is priced at the base rate.
+    requests: tuple[RequestTokens, ...] | None = None
 
     @property
     def cost_usd(self) -> Decimal:
         """What this model charged; zero (logged) for models without a price."""
+        if self.requests is not None:
+            return calc_cost_by_request(
+                self.model_name,
+                RequestTokens(
+                    self.input_tokens,
+                    self.output_tokens,
+                    self.cache_read_tokens,
+                    self.cache_write_tokens,
+                ),
+                self.requests,
+            )
         return calc_cost(
             self.input_tokens,
             self.output_tokens,
@@ -278,6 +295,13 @@ def _billed_chat_model(data: ChatAgentTurnCreate) -> _BilledModel | None:
         output_tokens=data.chat_tokens_output,
         cache_read_tokens=data.chat_cache_read_tokens or 0,
         cache_write_tokens=data.chat_cache_write_tokens or 0,
+        # The turn's own responses carry each request's counts; a fallback
+        # model's are left out, and priced in the rest at the base rate.
+        requests=tuple(
+            response_request_tokens(
+                data.model_messages_delta or [], data.chat_model_name
+            )
+        ),
     )
 
 
@@ -302,8 +326,17 @@ def _billed_summarizer(event: ChatAgentCompactionEventCreate) -> _BilledModel | 
         output_tokens=event.summarizer_tokens_output,
         cache_read_tokens=event.summarizer_cache_read_tokens or 0,
         cache_write_tokens=event.summarizer_cache_write_tokens or 0,
-        # A fold is one summarizer request (plain-text output, no tools).
+        # A fold is one summarizer request (plain-text output, no tools) unless
+        # the model had to be asked again; the bot sends each request's counts.
         per_request=True,
+        requests=(
+            None
+            if event.summarizer_request_tokens is None
+            else tuple(
+                RequestTokens(**tokens.model_dump())
+                for tokens in event.summarizer_request_tokens
+            )
+        ),
     )
 
 

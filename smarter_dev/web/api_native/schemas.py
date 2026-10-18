@@ -700,6 +700,16 @@ class ChatAgentErrorCreateResponse(BaseAPIModel):
     admin_url: str
 
 
+class RequestTokenUsage(BaseAPIModel):
+    """One provider request's tokens; cache reads and writes are a subset of
+    input. A long-context tier is decided per request, so these price it."""
+
+    input_tokens: int = Field(0, ge=0)
+    output_tokens: int = Field(0, ge=0)
+    cache_read_tokens: int = Field(0, ge=0)
+    cache_write_tokens: int = Field(0, ge=0)
+
+
 class ChatAgentCompactionEventCreate(BaseAPIModel):
     event_kind: str
     tool_name: Optional[str] = None
@@ -713,6 +723,9 @@ class ChatAgentCompactionEventCreate(BaseAPIModel):
     summarizer_reasoning_level: Optional[str] = None
     summarizer_cache_read_tokens: Optional[int] = None
     summarizer_cache_write_tokens: Optional[int] = None
+    # Each summarizer request's own counts. Bots from before #199 send none,
+    # and their fold is priced as the one request it almost always is.
+    summarizer_request_tokens: Optional[List[RequestTokenUsage]] = None
 
 
 class ChatAgentTurnCreate(BaseAPIModel):

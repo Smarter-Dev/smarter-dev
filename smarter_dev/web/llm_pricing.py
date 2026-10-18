@@ -11,6 +11,7 @@ ingested usage only; it does not retroactively reprice existing invoice rows.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -18,6 +19,8 @@ from genai_prices import calc_price
 from genai_prices import types
 from genai_prices.data_snapshot import find_provider_by_id
 from genai_prices.data_snapshot import get_snapshot
+
+from smarter_dev.shared.request_usage import RequestTokens
 
 logger = logging.getLogger(__name__)
 
@@ -766,12 +769,13 @@ class LongContextTier:
 # Models whose price rises for the whole request once a single prompt reaches a
 # token count. The patches and tables above carry the base rate; the tier is
 # applied only when the tokens priced are ONE provider request's
-# (``per_request=True``: web chat settles each request on its own). Everywhere
-# else the counts are a turn's or session's total across several requests, and
-# a tier keyed on that total would surcharge turns whose requests were each
-# well under the threshold. Those totals stay at the base rate, which
-# undercharges a request that really did reach the tier, so a total over the
-# threshold is logged rather than priced silently.
+# (``per_request=True``: web chat settles each request on its own). A turn's or
+# session's total across several requests cannot decide it: a tier keyed on the
+# total would surcharge turns whose requests were each well under the
+# threshold. Callers metering several requests keep each response's counts and
+# price through ``calc_cost_by_request``; a total with no per-request counts
+# stays at the base rate, which undercharges a request that really did reach
+# the tier, so a total over the threshold is logged rather than priced silently.
 _LONG_CONTEXT_TIERS: dict[str, LongContextTier] = {
     # OpenAI: prompts above 272K bill 2x input/cache and 1.5x output.
     "gpt-6-sol": LongContextTier(272_001, Decimal("2"), Decimal("1.5")),
@@ -1035,3 +1039,48 @@ def calc_cost(
             model_name,
         )
         return Decimal("0")
+
+
+def calc_cost_by_request(
+    model_name: str,
+    total: RequestTokens,
+    requests: Iterable[RequestTokens] = (),
+) -> Decimal:
+    """Price *total*, with each of its known *requests* priced on its own.
+
+    A long-context tier is decided per provider request, so each request in
+    *requests* is priced with ``per_request=True``. Whatever *total* holds
+    beyond them (requests whose counts were not kept, a fallback model's) is
+    priced at the base rate, as the total alone would be. Requests that add up
+    to more than *total* are not its parts; they are ignored and the total is
+    priced at the base rate.
+    """
+    requests = list(requests)
+    known = [sum(column) for column in zip(*requests)] or [0] * len(total)
+    rest = RequestTokens(*(whole - part for whole, part in zip(total, known)))
+    if any(value < 0 for value in rest):
+        logger.warning(
+            "%s: %d request counts add up to more than their total %s; "
+            "pricing the total at the base rate",
+            model_name,
+            len(requests),
+            tuple(total),
+        )
+        requests, rest = [], total
+
+    def priced(tokens: RequestTokens, *, per_request: bool) -> Decimal:
+        return calc_cost(
+            tokens.input_tokens,
+            tokens.output_tokens,
+            model_name,
+            tokens.cache_read_tokens,
+            tokens.cache_write_tokens,
+            per_request=per_request,
+        )
+
+    cost = sum(
+        (priced(request, per_request=True) for request in requests), Decimal("0")
+    )
+    if any(rest):
+        cost += priced(rest, per_request=False)
+    return cost

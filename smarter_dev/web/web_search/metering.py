@@ -49,7 +49,9 @@ def _row(run: WebSearchRun, step: str, **fields) -> UsageCostRow:
 
 
 def model_row(run: WebSearchRun, usage: dict, step: str = "queries") -> UsageCostRow | None:
-    from smarter_dev.web.chat.usage import usage_cost
+    from smarter_dev.shared.request_usage import RequestTokens
+    from smarter_dev.shared.request_usage import request_tokens_from_dicts
+    from smarter_dev.web.chat.usage import usage_cost_by_request
 
     wire = usage.get("model", "")
     model = next((m for m in MODEL_CATALOG if wire == m.model_id), None)
@@ -69,7 +71,13 @@ def model_row(run: WebSearchRun, usage: dict, step: str = "queries") -> UsageCos
         catalog_model_key=model.key,
         model_id=model.model_id,
         reasoning_level="medium",
-        cost_usd=usage_cost(model, *tokens.values()),
+        # Priced per request (a long-context tier is decided per request);
+        # a run recorded without its requests' counts is priced on its totals.
+        cost_usd=usage_cost_by_request(
+            model,
+            RequestTokens(**tokens),
+            request_tokens_from_dicts(usage.get("request_tokens")),
+        ),
         **tokens,
     )
 

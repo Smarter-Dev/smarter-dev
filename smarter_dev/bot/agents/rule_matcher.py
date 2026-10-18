@@ -151,7 +151,10 @@ def get_rule_matcher_agent() -> Agent[None, RuleCitation]:
             build_model_for(catalog_model),
             output_type=RuleCitation,
             system_prompt=SYSTEM_PROMPT,
-            model_settings=model_settings_for(catalog_model, ReasoningLevel.LOW),
+            # One request: nothing reads a message breakpoint back.
+            model_settings=model_settings_for(
+                catalog_model, ReasoningLevel.LOW, cache_messages=False
+            ),
         )
     return _rule_matcher_agent
 

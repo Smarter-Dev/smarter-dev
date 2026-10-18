@@ -251,7 +251,10 @@ class _FakeAgent:
             input_tokens=0, output_tokens=0, cache_read_tokens=0, cache_write_tokens=0
         )
         return SimpleNamespace(
-            output="done", all_messages=lambda: messages, usage=usage
+            output="done",
+            all_messages=lambda: messages,
+            new_messages=lambda: messages[len(self.started_from) :],
+            usage=usage,
         )
 
 

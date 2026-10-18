@@ -22,6 +22,8 @@ import httpx
 from pydantic_ai import Agent
 from pydantic_ai import RunContext
 
+from smarter_dev.shared.request_usage import response_request_tokens
+
 # Claude Haiku 5.5 since 2026-10-17 (#199), replacing GPT-6 Luna.
 ANSWER_MODEL = os.getenv("WEB_SEARCH_ANSWER_MODEL", "claude-haiku-5-5")
 REASONING_EFFORT = "medium"
@@ -252,5 +254,10 @@ async def write_answer(
         "output_tokens": usage.output_tokens or 0,
         "cache_read_tokens": usage.cache_read_tokens or 0,
         "cache_write_tokens": usage.cache_write_tokens or 0,
+        # Each response's own counts: a long-context tier is per request.
+        "request_tokens": [
+            tokens.as_dict()
+            for tokens in response_request_tokens(run.all_messages())
+        ],
         "reader_tokens": sum(read.tokens for read in deps.reads),
     }

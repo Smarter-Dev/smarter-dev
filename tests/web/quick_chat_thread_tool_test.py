@@ -741,3 +741,151 @@ class TestLiveDivider:
         assert "`" not in code
         assert "let " not in code
         assert "const " not in code
+
+
+async def test_a_conversation_moved_to_haiku_sends_none_of_sonnets_thinking(
+    db_session, jobs_session, published, spend_allows, monkeypatch
+):
+    """The root agent's model is sent its own Claude thinking only: a
+    conversation that ran on Sonnet and moved to Haiku sends Haiku none of
+    Sonnet's signed blocks (#199 review)."""
+    from pydantic_ai.messages import ThinkingPart
+    from pydantic_ai.models.function import FunctionModel
+
+    user = await _seed_user(db_session)
+    conversation = await _seed_conversation(db_session, user, chat_mode="standard")
+    turn = await _seed_running_turn(db_session, conversation, ordinal=1)
+    seen: list = []
+
+    def answer(messages, info):
+        seen.append(messages)
+        return ModelResponse(parts=[TextPart("ok")])
+
+    async def stream_answer(messages, info):
+        seen.append(messages)
+        yield "ok"
+
+    async def run_it(coroutine, **_kwargs):
+        return await coroutine
+
+    monkeypatch.setattr(jobs, "SpendMeteredModel", lambda inner, _metering: inner)
+    monkeypatch.setattr(
+        jobs,
+        "build_model_for",
+        lambda _model: FunctionModel(answer, stream_function=stream_answer),
+    )
+    monkeypatch.setattr(jobs, "run_cancellable", run_it)
+    history = [
+        ModelRequest(parts=[UserPromptPart(content="earlier")]),
+        ModelResponse(
+            parts=[
+                ThinkingPart(content="s", signature="sig", provider_name="anthropic"),
+                TextPart(content="earlier answer"),
+            ],
+            model_name="claude-sonnet-5-5",
+            provider_name="anthropic",
+        ),
+    ]
+
+    from contextlib import suppress
+
+    from smarter_dev.web.chat.runtime import RunSuperseded
+
+    # No draft row is seeded, so the first streamed flush stops the run; the
+    # request it answered has already been sent, which is all this reads.
+    with suppress(RunSuperseded):
+        await jobs._build_root_agent(
+            model=get_model("claude-haiku-5-5"),
+            reasoning=None,
+            prompt="And now?",
+            history=history,
+            policy=policy_for(conversation.intelligence_mode),
+            counters=ExecutionCounters(),
+            turn=turn,
+            conversation=conversation,
+            owner_id=conversation.owner_user_id,
+            tier="standard",
+            settings=SimpleNamespace(
+                summarizer_model_key=MODEL_KEY,
+                summarizer_fallback_model_key=MODEL_KEY,
+            ),
+            draft_message_id=uuid4(),
+            user_message_content="And now?",
+        )
+
+    sent = seen[0]
+    assert sent[1].parts == [TextPart(content="earlier answer")]
+    assert not any(
+        isinstance(part, ThinkingPart) for message in sent for part in message.parts
+    )
+
+
+@pytest.mark.parametrize(
+    ("earlier_turns", "kept_thoughts"),
+    [
+        # Cut to the last four messages: every kept block's prefix changed.
+        (3, []),
+        # Short enough to send whole: the model's own block stays.
+        (1, ["haiku"]),
+    ],
+)
+async def test_the_final_response_sends_no_thinking_from_a_cut_history(
+    db_session, jobs_session, monkeypatch, earlier_turns, kept_thoughts
+):
+    from pydantic_ai.messages import ThinkingPart
+    from pydantic_ai.models.function import FunctionModel
+
+    user = await _seed_user(db_session)
+    conversation = await _seed_conversation(db_session, user, chat_mode="standard")
+    turn = await _seed_running_turn(db_session, conversation, ordinal=1)
+    turn.worker_lease_token = "lease"
+    await db_session.commit()
+    seen: list = []
+    settings: list = []
+
+    def answer(messages, info):
+        seen.append(messages)
+        settings.append(info.model_settings)
+        return ModelResponse(parts=[TextPart("final")])
+
+    async def run_it(coroutine, **_kwargs):
+        return await coroutine
+
+    monkeypatch.setattr(jobs, "SpendMeteredModel", lambda inner, _metering: inner)
+    monkeypatch.setattr(jobs, "build_model_for", lambda _model: FunctionModel(answer))
+    monkeypatch.setattr(jobs, "run_cancellable", run_it)
+    history = []
+    for index in range(earlier_turns):
+        history += [
+            ModelRequest(parts=[UserPromptPart(content=f"q{index}")]),
+            ModelResponse(
+                parts=[
+                    ThinkingPart(
+                        content="haiku", signature="sig", provider_name="anthropic"
+                    ),
+                    TextPart(content=f"a{index}"),
+                ],
+                model_name="claude-haiku-5-5",
+                provider_name="anthropic",
+            ),
+        ]
+
+    await jobs._final_response(
+        model=get_model("claude-haiku-5-5"),
+        reasoning=None,
+        prompt="Wrap up.",
+        history=history,
+        turn=turn,
+        conversation=conversation,
+        owner_id=conversation.owner_user_id,
+        tier="standard",
+    )
+
+    assert [
+        part.content
+        for message in seen[0]
+        for part in message.parts
+        if isinstance(part, ThinkingPart)
+    ] == kept_thoughts
+    # One request: no message breakpoint at the 1-hour write rate.
+    assert settings[0]["anthropic_cache_messages"] is False

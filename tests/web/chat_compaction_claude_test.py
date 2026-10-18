@@ -48,7 +48,7 @@ async def test_kept_turns_lose_claude_thinking_and_keep_their_text():
     )
 
 
-def test_strip_leaves_other_providers_and_unchanged_histories_alone():
+def test_strip_leaves_other_providers_alone_and_drops_thinking_only_turns():
     gemini = _turn("hi", provider="google-gla")
     assert strip_claude_thinking(gemini) is gemini
 
@@ -57,5 +57,6 @@ def test_strip_leaves_other_providers_and_unchanged_histories_alone():
             parts=[ThinkingPart(content="t", signature="s", provider_name="anthropic")]
         )
     ]
-    # An empty assistant turn would be rejected; it stays whole.
-    assert strip_claude_thinking(only_thinking) is only_thinking
+    # Its signed block cannot stay, and an empty assistant turn would be
+    # rejected, so the response goes whole.
+    assert strip_claude_thinking(only_thinking) == []

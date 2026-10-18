@@ -225,6 +225,7 @@ async def persist_turn(
             "summarizer_reasoning_level": ev.summarizer_reasoning_level,
             "summarizer_cache_read_tokens": ev.summarizer_cache_read_tokens,
             "summarizer_cache_write_tokens": ev.summarizer_cache_write_tokens,
+            "summarizer_request_tokens": ev.summarizer_request_tokens,
         }
         for ev in (compaction_events or [])
     ]

@@ -211,8 +211,11 @@ async def classify_incoming_message(
                 output_type=ThreadVerdict,
                 system_prompt=SYSTEM_PROMPT,
                 # One bit of judgement; resolve_reasoning_level clamps NONE to
-                # the lowest rung the model offers. Do not pay for thinking.
-                model_settings=model_settings_for(model, ReasoningLevel.NONE),
+                # the lowest rung the model offers. Do not pay for thinking, or
+                # for caching a one-request prompt.
+                model_settings=model_settings_for(
+                    model, ReasoningLevel.NONE, cache_messages=False
+                ),
             )
         except Exception:
             logger.warning(

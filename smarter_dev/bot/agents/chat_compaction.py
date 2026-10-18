@@ -78,6 +78,7 @@ from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.model_catalog import MODEL_CATALOG
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ReasoningLevel
+from smarter_dev.shared.request_usage import response_request_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +209,9 @@ class CompactionEvent:
     # summarizer_tokens_input. None when not captured.
     summarizer_cache_read_tokens: int | None = None
     summarizer_cache_write_tokens: int | None = None
+    # Each summarizer request's own counts (RequestTokens dicts), so a
+    # long-context tier is priced per request. None when not captured.
+    summarizer_request_tokens: list[dict] | None = None
 
 
 _collected: ContextVar[list[CompactionEvent] | None] = ContextVar(
@@ -310,6 +314,7 @@ class _SummariseResult:
     model_name: str
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    request_tokens: list[dict] | None = None
 
 
 async def _summarise_conversation(
@@ -324,6 +329,7 @@ async def _summarise_conversation(
     tokens_output = 0
     cache_read_tokens = 0
     cache_write_tokens = 0
+    request_tokens = None
     model_name = os.getenv(COMPACT_MODEL_ENV_VAR, DEFAULT_COMPACT_MODEL)
     try:
         result = await get_summarizer_agent().run(user_prompt=transcript)
@@ -341,6 +347,10 @@ async def _summarise_conversation(
             tokens_output = int(usage.output_tokens or 0)
             cache_read_tokens = int(getattr(usage, "cache_read_tokens", 0) or 0)
             cache_write_tokens = int(getattr(usage, "cache_write_tokens", 0) or 0)
+        request_tokens = [
+            tokens.as_dict()
+            for tokens in response_request_tokens(result.all_messages())
+        ]
     except Exception:
         pass
     if len(summary) > MAX_SUMMARY_CHARS:
@@ -358,6 +368,7 @@ async def _summarise_conversation(
         model_name=model_name,
         cache_read_tokens=cache_read_tokens,
         cache_write_tokens=cache_write_tokens,
+        request_tokens=request_tokens,
     )
 
 
@@ -602,6 +613,7 @@ async def compact_history(messages: list[ModelMessage]) -> list[ModelMessage]:
             summarizer_reasoning_level=SUMMARIZER_REASONING_LEVEL.value,
             summarizer_cache_read_tokens=summary.cache_read_tokens,
             summarizer_cache_write_tokens=summary.cache_write_tokens,
+            summarizer_request_tokens=summary.request_tokens,
         )
     )
 

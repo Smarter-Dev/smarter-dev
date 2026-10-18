@@ -75,6 +75,7 @@ from smarter_dev.shared.model_catalog import catalog_model_for_id
 from smarter_dev.shared.skrift_models import agent_model_name
 from smarter_dev.shared.skrift_models import agent_model_settings
 from smarter_dev.web.agent_session_cleanup import forget_agent_sessions
+from smarter_dev.web.agent_session_cleanup import session_cost
 from smarter_dev.web.research_tools import brave_search
 from smarter_dev.web.research_tools import jina_read
 
@@ -1586,6 +1587,11 @@ async def _capture_stage_usage(
         "cache_read_tokens": totals.cache_read_tokens,
         "cache_write_tokens": totals.cache_write_tokens,
     }
+    # Priced here, from the session's own responses, while it still has them:
+    # a long-context tier is decided per request, not on the stage's total.
+    cost = session_cost(state)
+    if cost is not None:
+        record["cost_usd"] = str(cost)
     sink.append(record)
     if callback is not None:
         await callback(record, len(sink) - 1)

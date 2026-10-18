@@ -105,6 +105,7 @@ from smarter_dev.bot.utils.stop_detection import set_channel_cooldown
 from smarter_dev.bot.views.model_override_views import (
     MODEL_BUDGET_FALLBACK_CUSTOM_ID_PREFIX,
 )
+from smarter_dev.shared.claude_thinking import drop_other_models_claude_thinking
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.guild_event_log import read_since
 from smarter_dev.shared.guild_event_log import read_window
@@ -944,6 +945,12 @@ class ChannelEngine:
             # alongside the DRAFTER's, and — in two-stage mode — it is the ONLY
             # spend metered against the channel token budget (both zero in
             # single-stage).
+            # A channel whose model was switched (an override, Sonnet to Haiku
+            # or Luna) sends each model only its own Claude thinking; the
+            # stored history is this, so it stays consistent from then on.
+            message_history = drop_other_models_claude_thinking(
+                message_history, getattr(agent.model, "model_name", None)
+            )
             writer_extra_input = 0
             writer_extra_output = 0
             two_stage_output: TurnDecision | None = None

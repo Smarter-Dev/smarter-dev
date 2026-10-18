@@ -9,6 +9,7 @@ from contextlib import suppress
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
+from decimal import Decimal
 from uuid import UUID
 from uuid import uuid4
 
@@ -95,6 +96,13 @@ async def _persist_stage_usage(
             output_tokens=int(stage.get("output_tokens") or 0),
             cache_read_tokens=int(stage.get("cache_read_tokens") or 0),
             cache_write_tokens=int(stage.get("cache_write_tokens") or 0),
+            # Priced per request when the stage ran (resources_agent); a stage
+            # recorded before that is priced on its totals.
+            cost_usd=(
+                Decimal(stage["cost_usd"])
+                if stage.get("cost_usd") is not None
+                else None
+            ),
             user_id=run.owner_user_id,
             conversation_id=run.conversation_id,
             root_turn_id=run.id,

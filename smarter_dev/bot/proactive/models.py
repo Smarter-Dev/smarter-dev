@@ -91,6 +91,10 @@ def build_twopass_model(model_id: str) -> Model:
             model_id.removeprefix("typesafe:"),
             provider=TypeSafeProvider(http_client=http_client),
         )
+    if model_id.startswith("claude-"):
+        # Claude is served by Anthropic directly, with the funded key and
+        # 1-hour prompt caching, even when a LiteLLM proxy is configured.
+        return build_agent_model(model_id)
     ensure_openrouter_key_alias()
     litellm_endpoint = os.getenv("LITELLM_ENDPOINT", "").rstrip("/")
     litellm_api_key = os.getenv("LITELLM_API_KEY", "")

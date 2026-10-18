@@ -1044,3 +1044,55 @@ async def test_rate_limited_model_says_so(fake_bot, fake_memory):
 
 async def _versioned(memory, channel_id):
     return await memory.read_history(channel_id), b"loaded"
+
+
+@pytest.mark.asyncio
+async def test_a_channel_moved_to_haiku_sends_haiku_none_of_sonnets_thinking(
+    fake_bot, fake_memory
+):
+    """A channel override moved a conversation from Sonnet to Haiku: Haiku is
+    sent the history without Sonnet's signed thinking (#199 review)."""
+    from pydantic_ai.messages import ModelResponse
+    from pydantic_ai.messages import TextPart
+    from pydantic_ai.messages import ThinkingPart
+    from pydantic_ai.messages import UserPromptPart
+
+    captured: list = []
+
+    async def fake_run(*, user_prompt, message_history, deps, **kwargs):
+        captured.append(list(message_history))
+        return _result(_send("ack"), all_messages=list(message_history))
+
+    sonnet_turn = [
+        ModelRequest(parts=[UserPromptPart("earlier")]),
+        ModelResponse(
+            parts=[
+                ThinkingPart(content="s", signature="sig", provider_name="anthropic"),
+                TextPart("earlier answer"),
+            ],
+            model_name="claude-sonnet-5-5",
+            provider_name="anthropic",
+        ),
+    ]
+    fake_memory.read_history.return_value = sonnet_turn
+    patches = _patch_engine(agent_run=fake_run, fake_memory=fake_memory)
+    patches[0].kwargs["return_value"].model = SimpleNamespace(
+        model_name="claude-haiku-5-5"
+    )
+    with patches[0], patches[1], patches[2], patches[3]:
+        engine, _ = await _build_engine(fake_bot)
+        engine.start()
+        engine.trigger_initial(_fake_trigger_message())
+        await asyncio.sleep(0.05)
+        for i in range(QUEUE_FIRE_THRESHOLD):
+            await engine.observe(_make_event(3000 + i, 200, f"chatter {i}"))
+        await asyncio.sleep(0.1)
+        await engine.shutdown()
+
+    followup = captured[1]
+    assert followup[1].parts == [TextPart("earlier answer")]
+    assert not any(
+        isinstance(part, ThinkingPart)
+        for message in followup
+        for part in message.parts
+    )

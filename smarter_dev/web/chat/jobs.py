@@ -28,6 +28,8 @@ from sqlalchemy import select
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from smarter_dev.shared.claude_thinking import drop_other_models_claude_thinking
+from smarter_dev.shared.claude_thinking import strip_claude_thinking
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.shared.model_catalog import parse_reasoning_level
@@ -2514,7 +2516,11 @@ async def _build_root_agent(
     return await run_cancellable(
         agent.run(
             prompt,
-            message_history=history,
+            # A conversation moved between models (Sonnet, Haiku, Luna) sends
+            # each model only its own Claude thinking. Only this turn's new
+            # messages are stored, so every block stays for the model that
+            # wrote it.
+            message_history=drop_other_models_claude_thinking(history, model.model_id),
             event_stream_handler=stream_handler,
         ),
         turn_id=turn.id,
@@ -2555,7 +2561,8 @@ async def _final_response(
         await session.commit()
     # Deliberately no registered tools. This is the single bounded response the
     # product allows after hard cutoff.
-    settings = model_settings_for(model, reasoning) or {}
+    # One request, so no message breakpoint.
+    settings = model_settings_for(model, reasoning, cache_messages=False) or {}
     settings = {**settings, "max_tokens": min(8192, model.max_output_tokens)}
     metered = SpendMeteredModel(
         build_model_for(model),
@@ -2594,8 +2601,16 @@ async def _final_response(
         bounded_prompt = (
             f"{bounded_prompt}\n\nVERIFIED TOOL RESULTS ALREADY GATHERED:\n{gathered}"
         )[-48_000:]
+    # Cutting the history changes the prefix every kept Claude thinking block
+    # was signed with, so a cut tail sends none; an uncut one sends the
+    # model's own.
+    tail = (
+        strip_claude_thinking(history[-4:])
+        if len(history) > 4
+        else drop_other_models_claude_thinking(history, model.model_id)
+    )
     result = await run_cancellable(
-        agent.run(bounded_prompt, message_history=history[-4:]),
+        agent.run(bounded_prompt, message_history=tail),
         turn_id=turn.id,
         worker_lease_token=turn.worker_lease_token,
         allow_cutoff=True,

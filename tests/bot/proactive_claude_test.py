@@ -121,14 +121,24 @@ async def test_self_compaction_sends_no_thinking_and_writes_no_history_cache(
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     server = serve(monkeypatch, text_reply("memory note"))
 
+    thinking_only = ModelResponse(
+        parts=[
+            ThinkingPart(content="only", signature="sig", provider_name="anthropic")
+        ],
+        model_name="claude-opus-5-5",
+        provider_name="anthropic",
+    )
     note, usage = await self_compaction_summary(
         build_agent_model("claude-opus-5-5"),
-        [_turn("a"), _thinking("one"), _turn("b"), _thinking("two")],
+        [_turn("a"), _thinking("one"), _turn("b"), thinking_only, _turn("c")],
     )
 
     assert note == "memory note"
     (body,) = server.requests
     assert thinking_blocks(body) == []
+    # The thinking-only turn goes whole: no empty assistant message is sent.
+    assert all(message["content"] for message in body["messages"])
+    assert [message["role"] for message in body["messages"]].count("assistant") == 1
     # One request whose prefix nothing reuses: a message breakpoint would only
     # bill the folded transcript at Opus's $8 1-hour write rate.
     assert cache_controls(body) == []
@@ -153,13 +163,42 @@ def test_moving_to_opus_drops_the_earlier_models_leading_thinking():
 async def test_a_wake_on_opus_sends_no_thinking_from_the_earlier_model(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     server = serve(monkeypatch, text_reply("stayed quiet"))
+    # Opus, then Sonnet, then back to Opus: Sonnet's block sits in the middle.
+    history = [
+        _turn("a"),
+        _thinking("opus-1"),
+        _turn("b"),
+        _thinking("sonnet", model="claude-sonnet-5-5"),
+        _turn("c"),
+        _thinking("opus-2"),
+    ]
     runner = KimiAgentRunner(
         agent=Agent(build_agent_model("claude-opus-5-5"), system_prompt="guild"),
         summarize=AsyncMock(),
-        history=[_turn("a"), _thinking("old", model="claude-sonnet-5-5")],
+        history=list(history),
     )
 
     await runner.wake("brief", deps=None)
 
     (body,) = server.requests
-    assert thinking_blocks(body) == []
+    assert [block["thinking"] for block in thinking_blocks(body)] == [
+        "opus-1",
+        "opus-2",
+    ]
+    # The stored history keeps Sonnet's block for a move back to Sonnet.
+    assert runner.history[: len(history)] == history
+
+
+def test_claude_skips_the_litellm_proxy(monkeypatch):
+    from pydantic_ai.models.anthropic import AnthropicModel
+    from pydantic_ai.models.openai import OpenAIChatModel
+
+    from smarter_dev.bot.proactive.models import build_twopass_model
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+    monkeypatch.setenv("LITELLM_ENDPOINT", "http://litellm.test")
+    monkeypatch.setenv("LITELLM_API_KEY", "sk-litellm-test")
+
+    assert isinstance(build_twopass_model("claude-opus-5-5"), AnthropicModel)
+    # Everything else still goes through the proxy when it is configured.
+    assert isinstance(build_twopass_model("z-ai/glm-5.3-flash"), OpenAIChatModel)
