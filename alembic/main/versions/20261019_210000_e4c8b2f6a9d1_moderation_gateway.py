@@ -16,7 +16,8 @@ Six tables for ``smarter_dev/web/moderation_gateway``:
 
 ``moderation_actions`` gains nullable columns linking a row to its incident
 and operation, plus actor, rule, applied duration, evidence ids and the
-Discord audit-log entry. Existing rows keep NULL in all of them.
+Discord audit-log entry. Existing rows keep NULL in all of them. Every
+statement waits at most ``LOCK_TIMEOUT`` for a lock.
 
 Revision ID: e4c8b2f6a9d1
 Revises: d8a3f1c6e9b2
@@ -50,7 +51,21 @@ def _timestamps() -> tuple[sa.Column, sa.Column]:
     )
 
 
+#: How long a statement here may wait for a table lock. The changes to
+#: ``moderation_actions`` take ACCESS EXCLUSIVE until the migration commits;
+#: queued behind a long transaction they would stall every read and write of
+#: the table. Past this the migration fails and the deploy stops, to be rerun.
+LOCK_TIMEOUT = "5s"
+
+
+def _bound_lock_waits() -> None:
+    if op.get_context().dialect.name == "postgresql":
+        # SET LOCAL ends with the transaction the migrations run in.
+        op.execute(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'")
+
+
 def upgrade() -> None:
+    _bound_lock_waits()
     op.create_table(
         "moderation_incidents",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
@@ -80,6 +95,12 @@ def upgrade() -> None:
         sa.Column("report_ping_role_id", sa.String(), nullable=True),
         sa.Column(
             "report_attachment_sent",
+            sa.Boolean(),
+            server_default=sa.text("false"),
+            nullable=False,
+        ),
+        sa.Column(
+            "report_pinged",
             sa.Boolean(),
             server_default=sa.text("false"),
             nullable=False,
@@ -281,6 +302,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    _bound_lock_waits()
     op.drop_constraint(
         "uq_moderation_actions_operation_id", "moderation_actions", type_="unique"
     )

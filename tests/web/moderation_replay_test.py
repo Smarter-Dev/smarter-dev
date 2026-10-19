@@ -61,6 +61,8 @@ MESSAGE = "1428776500000000001"
 MOD_ROLE = "644390354157568014"
 HANDLER = "scam-banner-id"
 SCAM = "@everyone free nitro giveaway, claim it https://dlscord.gift/abc123"
+OTHER_CHANNEL = "702178352395583499"
+COPY = "1428776500000000002"
 
 
 def _ago(**delta) -> str:
@@ -170,8 +172,14 @@ async def _spam_engine(world: _World, process: _LocalLocks) -> None:
         )
 
 
-async def _scam_banner(world: _World, process: _LocalLocks):
-    """The handler worker: scam-banner fires for the same post."""
+async def _scam_banner(
+    world: _World, process: _LocalLocks, *, account_days: int = 2, burst: bool = False
+):
+    """The handler worker: scam-banner fires for the same post.
+
+    ``burst`` adds a copy of the post in another channel a second apart, which
+    the script reads as a compromised account.
+    """
     context = {
         "trigger_type": "message",
         "guild_id": GUILD,
@@ -179,7 +187,7 @@ async def _scam_banner(world: _World, process: _LocalLocks):
         "message_content": SCAM,
         "author_id": SCAMMER,
         "author_has_manage_messages": False,
-        "author_account_created_at": _ago(days=2),
+        "author_account_created_at": _ago(days=account_days),
         "author_joined_at": _ago(hours=1),
         "author_is_first_message": True,
         "author_days_since_last_message": 0,
@@ -195,8 +203,14 @@ async def _scam_banner(world: _World, process: _LocalLocks):
         "content_hash": content_hash(context),
     }
 
+    rows = [row]
+    if burst:
+        rows.append(
+            {**row, "channel_id": OTHER_CHANNEL, "message_id": COPY, "age_seconds": 5.0}
+        )
+
     async def recent(user_id):
-        return [row]
+        return rows
 
     async def count_warns(user_id):
         return 0
@@ -317,6 +331,70 @@ async def test_the_1749_incident_with_both_detectors_racing(world):
 
     assert result.outcome == "ok", result.error
     await _assert_one_action_one_report(world)
+
+
+# -- an account older than a week: warned, not banned ------------------------------
+
+
+def _warn_notices(world: _World) -> list[str]:
+    return [
+        content
+        for channel, content in world.handler_messages.messages
+        if "has been warned" in content
+    ]
+
+
+@pytest.mark.parametrize("order", ["production", "handler_first", "racing"])
+async def test_the_1749_incident_with_an_account_older_than_a_week(world, order):
+    """scam-banner warns an older account; after the spam engine's mute the
+    warn adds no row or strike, but the member is still told, once."""
+    if order == "production":
+        await _spam_engine(world, _LocalLocks())
+        result = await _scam_banner(world, _LocalLocks(), account_days=400)
+    elif order == "handler_first":
+        result = await _scam_banner(world, _LocalLocks(), account_days=400)
+        await _spam_engine(world, _LocalLocks())
+    else:
+        _, result = await asyncio.gather(
+            _spam_engine(world, _LocalLocks()),
+            _scam_banner(world, _LocalLocks(), account_days=400),
+        )
+    assert result.outcome == "ok", result.error
+
+    assert world.discord.count("ban") == 0
+    assert world.discord.count("delete") == 1
+    assert world.discord.count("timeout") == 1
+    kinds = sorted(row.action_type for row in await world.rows())
+    # A warn after the mute is no strike; one before it is.
+    assert kinds in (["delete", "timeout"], ["delete", "timeout", "warn"])
+    if order == "production":
+        assert kinds == ["delete", "timeout"]
+    assert len(_warn_notices(world)) == 1
+    assert [user for user, _ in world.handler_messages.dms] == [SCAMMER]
+    assert "You have received a warning." in world.handler_messages.dms[0][1]
+    assert len(world.report_posts()) == 1
+
+    # The handler fires again for the same post (a fresh review): still once.
+    world.redis = fakeredis_aioredis.FakeRedis()
+    again = await _scam_banner(world, _LocalLocks(), account_days=400)
+    assert again.outcome == "ok", again.error
+    assert len(_warn_notices(world)) == 1
+    assert len(world.handler_messages.dms) == 1
+
+
+async def test_a_compromised_account_still_gets_its_secure_your_account_dm(world):
+    world.discord.post(OTHER_CHANNEL, COPY, SCAMMER, SCAM)
+    await _spam_engine(world, _LocalLocks())
+
+    result = await _scam_banner(world, _LocalLocks(), account_days=400, burst=True)
+
+    assert result.outcome == "ok", result.error
+    [(user, dm)] = world.handler_messages.dms
+    assert user == SCAMMER
+    assert "Please secure your account" in dm
+    [notice] = _warn_notices(world)
+    assert "Please secure your account" in notice
+    assert "warn" not in [row.action_type for row in await world.rows()]
 
 
 # -- the audit log's echoes ---------------------------------------------------------

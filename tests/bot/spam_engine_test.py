@@ -1747,3 +1747,48 @@ async def test_disabled_engine_is_logged_once_and_again_after_it_ran(
     await _flood(engine_harness, 5, start=NOW + 2000)
 
     assert _skip_lines(caplog) == [disabled_line, disabled_line]
+
+
+async def test_a_warning_after_a_timeout_in_the_incident_still_posts_its_notice_once(
+    engine_harness,
+):
+    """The warn adds no row after the incident's timeout, but the member is told."""
+    from smarter_dev.bot.moderation_port import bot_gateway
+    from smarter_dev.web.moderation_gateway import Proposal
+    from smarter_dev.web.moderation_gateway import Trigger
+
+    gateway = bot_gateway(engine_harness.bot)
+    trigger = Trigger(
+        guild_id=str(GUILD_ID),
+        actor=spam_engine.GATEWAY_ACTOR,
+        reason="message rate",
+        channel_id=str(CHANNEL_ID),
+        message_id=str(MESSAGE_ID),
+        author_id=str(AUTHOR_ID),
+    )
+    await gateway.act(
+        Trigger(
+            guild_id=str(GUILD_ID),
+            actor="handler:scam-banner",
+            reason="confirmed scam",
+            channel_id=str(CHANNEL_ID),
+            message_id=str(MESSAGE_ID),
+            author_id=str(AUTHOR_ID),
+        ),
+        [Proposal(kind="timeout", target_user_id=str(AUTHOR_ID), duration_seconds=600)],
+    )
+    decision = spam_engine.SpamDecision(
+        action=spam_engine.SPAM_ACTION_WARN,
+        reasons=(spam_engine.SPAM_REASON_MESSAGE_RATE,),
+        should_delete_message=False,
+    )
+    event = _event("hi")
+
+    await spam_engine._warn_author(engine_harness.bot, gateway, trigger, event, decision)
+    await spam_engine._warn_author(engine_harness.bot, gateway, trigger, event, decision)
+
+    notices = [
+        m for m in engine_harness.rest.created_messages if m["channel"] == str(CHANNEL_ID)
+    ]
+    assert len(notices) == 1
+    assert [row.action_type for row in await engine_harness.rows()] == ["timeout"]

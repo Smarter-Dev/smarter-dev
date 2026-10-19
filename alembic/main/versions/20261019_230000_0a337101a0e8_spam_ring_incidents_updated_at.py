@@ -26,7 +26,14 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
+def _bound_lock_waits() -> None:
+    # As in e4c8b2f6a9d1: a lock wait fails the migration, never stalls the table.
+    if op.get_context().dialect.name == "postgresql":
+        op.execute("SET LOCAL lock_timeout = '5s'")
+
+
 def upgrade() -> None:
+    _bound_lock_waits()
     op.add_column(
         "spam_ring_incidents",
         sa.Column(
@@ -39,4 +46,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    _bound_lock_waits()
     op.drop_column("spam_ring_incidents", "updated_at")

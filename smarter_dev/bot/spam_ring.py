@@ -1331,7 +1331,7 @@ async def _sweep(
                     channel_id=channel_id,
                     details={"filename": transcript_filename(channel_id, now)},
                 ),
-                *(Evidence(kind=gw.ENTRY_NOTE, content=note) for note in notes),
+                *(Evidence(kind=_note_kind(note), content=note) for note in notes),
             ),
         ),
         proposals,
@@ -1686,13 +1686,21 @@ async def _handle_followup(
     await _note(bot, incident, line)
 
 
+def _note_kind(line: str) -> str:
+    """The ring writes what failed in bold; those lines are alerts on the report."""
+    return gw.ENTRY_ALERT if "**" in line else gw.ENTRY_NOTE
+
+
 async def _note(bot: BotApp, incident: ChannelIncident, line: str) -> None:
     """One follow-up line on the incident's report; never raises."""
     if incident.gateway_incident_id is None:
         return
     try:
         await bot_gateway(bot).add_note(
-            incident.gateway_incident_id, source=GATEWAY_ACTOR, text=line
+            incident.gateway_incident_id,
+            source=GATEWAY_ACTOR,
+            text=line,
+            kind=_note_kind(line),
         )
     except Exception:  # noqa: BLE001 — the transcript row still has it
         log_exception(logger, "Spam ring could not add a follow-up line", level=logging.WARNING)

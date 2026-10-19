@@ -52,6 +52,15 @@ SOURCE_HANDLER = "handler"
 # Incident entry kinds (see ModerationIncidentEntry for how long each is kept).
 ENTRY_REASON = "reason"
 ENTRY_NOTE = "note"
+#: A note a moderator must act on (something failed or was left undone): kept
+#: like a note, and never trimmed from the report.
+ENTRY_ALERT = "alert"
+NOTE_KINDS = frozenset({ENTRY_NOTE, ENTRY_ALERT})
+
+# The member-facing messages of a warn that ModerationGateway.claim_member_message
+# dedupes per member per incident (outbox rows of these kinds).
+MESSAGE_NOTICE = "notice"
+MESSAGE_DM = "dm"
 ENTRY_EVIDENCE = "evidence"
 ENTRY_TRANSCRIPT = "transcript"
 ENTRY_ASSESSMENT = "assessment"
@@ -187,6 +196,10 @@ class Outcome:
     expires_at: datetime | None = None
     deleted: tuple[str, ...] = ()
     missing: tuple[str, ...] = ()
+    #: Skipped only because the incident already holds a sanction at least as
+    #: strong. A warn skipped so still owes the member its messages (deduped
+    #: through :meth:`ModerationGateway.claim_member_message`).
+    superseded: bool = False
 
     @property
     def applied(self) -> bool:

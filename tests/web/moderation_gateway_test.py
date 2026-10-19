@@ -582,6 +582,51 @@ async def test_a_repeated_timeout_is_the_same_request_across_a_second_boundary(
     assert await count(db, ModerationAction) == 1
 
 
+@pytest.mark.parametrize("gap", [0.0, 1.0, 4.0])
+async def test_an_unknown_timeout_is_not_resent_inside_the_grace_and_gets_one_row(
+    discord, db, clock, gap
+):
+    # #249's repro: the spam engine asks again inside the 5 s reconcile grace.
+    gateway = make_gateway(discord, db, clock)
+    proposal = Proposal(kind=t.TIMEOUT, target_user_id=SCAMMER, duration_seconds=600)
+    discord.crash_after["set_timeout"] = ConnectionError("response lost")
+    first = await gateway.act(spam_trigger(), [proposal])
+    assert first.outcomes[0].state == t.UNKNOWN
+    clock.now += gap
+
+    second = await gateway.act(spam_trigger(), [proposal])
+
+    assert second.outcomes[0].state == t.UNKNOWN
+    assert discord.count("timeout") == 1
+    clock.now += 30
+    await gateway.reconcile_pending()
+    assert (
+        await count(db, ModerationAction, ModerationAction.action_type == "timeout")
+        == 1
+    )
+    await gateway.deliver_outbox()
+    assert len(discord.announced) == 1
+
+
+async def test_a_longer_timeout_from_the_same_claim_still_extends(discord, db, clock):
+    gateway = make_gateway(discord, db, clock)
+    await gateway.act(
+        spam_trigger(),
+        [Proposal(kind=t.TIMEOUT, target_user_id=SCAMMER, duration_seconds=600)],
+    )
+    clock.now += 2
+
+    longer = await gateway.act(
+        spam_trigger(),
+        [Proposal(kind=t.TIMEOUT, target_user_id=SCAMMER, duration_seconds=86400)],
+    )
+
+    assert longer.outcomes[0].state == t.CONFIRMED
+    assert discord.count("timeout") == 2
+    keys = [op.idempotency_key for op in await rows(db, ModerationOperation)]
+    assert sorted(key.rsplit(":", 1)[1] for key in keys) == ["0", "1"]
+
+
 # ---------------------------------------------------------------------------
 # Races
 # ---------------------------------------------------------------------------
@@ -945,3 +990,124 @@ async def test_a_retried_delete_belongs_to_the_incident_that_retried_it(
     assert second.incident_id != first.incident_id
     [action] = await rows(db, ModerationAction)
     assert action.incident_id == second.incident_id
+
+
+def test_trimming_keeps_failures_and_alerts_and_drops_the_least_important_first():
+    from uuid import uuid4
+
+    from smarter_dev.web.moderation_gateway.report import ReportEntry
+    from smarter_dev.web.moderation_gateway.report import ReportFacts
+    from smarter_dev.web.moderation_gateway.report import ReportOperation
+    from smarter_dev.web.moderation_gateway.report import render_report
+
+    def op(kind, state, user, *, detail=None, messages=()):
+        return ReportOperation(
+            kind=kind,
+            state=state,
+            actor="spam_ring",
+            target_user_id=user,
+            target_username=f"member{user}",
+            detail=detail,
+            channel_id=CHANNEL,
+            message_ids=tuple(messages),
+            deleted=tuple(messages) if state == t.CONFIRMED else (),
+            duration_seconds=604800,
+            expires_at=1_790_600_000.0,
+        )
+
+    def entry(kind, text, source="spam_ring"):
+        note = kind in t.NOTE_KINDS
+        return ReportEntry(
+            kind=kind,
+            source=source,
+            rule=text if note or kind == t.ENTRY_REASON else None,
+            content=None if note else text,
+            target_user_id=None,
+            channel_id=None,
+            message_id=None,
+        )
+
+    # A 20-account ring: 3 timeouts failed, the rest confirmed, plus deletes.
+    users = [str(9000 + i) for i in range(20)]
+    operations = [
+        op(
+            t.TIMEOUT,
+            t.FAILED if i in (3, 8, 15) else t.CONFIRMED,
+            user,
+            detail="missing permission" if i in (3, 8, 15) else None,
+        )
+        for i, user in enumerate(users)
+    ] + [
+        op(t.DELETE, t.CONFIRMED, user, messages=(str(8100 + i),))
+        for i, user in enumerate(users)
+    ]
+    facts = ReportFacts(
+        incident_id=uuid4(),
+        guild_id=GUILD,
+        subject_user_id=users[0],
+        channel_id=CHANNEL,
+        trigger_message_id=MESSAGE,
+        opened_at=1_790_000_000.0,
+        ping_role_id=None,
+        entries=(
+            entry(t.ENTRY_REASON, "hackathon spam ring"),
+            entry(t.ENTRY_EVIDENCE, "join our hackathon " * 10),
+            entry(t.ENTRY_ASSESSMENT, "the classifier said " * 30, source="triage"),
+            entry(t.ENTRY_NOTE, "A notice was posted in the channel."),
+            entry(
+                t.ENTRY_ALERT,
+                "**The participant check failed**, so only the ad's author was "
+                "actioned.",
+            ),
+        ),
+        operations=tuple(operations),
+    )
+
+    text = render_report(facts)
+
+    assert len(text) <= 2000
+    for i in (3, 8, 15):
+        assert f"<@{users[i]}> member{users[i]}: timeout 7 days: **failed**" in text
+    assert "The participant check failed" in text
+    assert "-# Incident " in text
+    # The newest effect stays; what was dropped is counted, not hidden.
+    assert f"<@{users[-1]}>" in text and "delete message" in text
+    assert "more (" in text and "confirmed" in text
+    # Quotes and the long assessment went before any failure did.
+    assert "join our hackathon" not in text
+    assert "the classifier said" not in text
+
+
+async def test_the_spam_engines_ping_goes_out_when_it_joins_a_posted_report(
+    discord, db, clock
+):
+    # Triage opened the incident and posted its report without a ping.
+    gateway = make_gateway(discord, db, clock)
+    await gateway.act(
+        spam_trigger(actor="triage", ping_role_id=None),
+        [
+            Proposal(
+                kind=t.DELETE,
+                target_user_id=SCAMMER,
+                channel_id=CHANNEL,
+                message_ids=(MESSAGE,),
+            )
+        ],
+    )
+    assert len(discord.reports()) == 1
+    assert not discord.reports()[0]["role_mention_ids"]
+    clock.now += 3
+
+    await gateway.act(
+        spam_trigger(),
+        [Proposal(kind=t.TIMEOUT, target_user_id=SCAMMER, duration_seconds=86400)],
+    )
+    clock.now += 3
+    await gateway.act(handler_trigger(), [Proposal(kind=t.BAN, target_user_id=SCAMMER)])
+
+    assert len(discord.reports()) == 1
+    [ping] = discord.pings()
+    assert ping["role_mention_ids"] == ["644390354157568014"]
+    report_id = discord.reports()[0]["message_id"]
+    assert ping["content"].endswith(f"/{REPORT_CHANNEL}/{report_id}")
+    assert "ban: confirmed" in discord.latest_report_text()

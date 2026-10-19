@@ -1140,7 +1140,8 @@ async def _warn_author(
     """Post "Please stop …" in the offending channel, pinging only the author.
 
     A warning is a sanction the gateway records (one row) and dedupes: an
-    author the incident already timed out or banned is not warned too.
+    author the incident already timed out or banned is not warned again. The
+    notice still goes out then, unless the incident already posted one.
     """
     async with gateway.reserve(
         trigger,
@@ -1154,7 +1155,13 @@ async def _warn_author(
         ),
     ) as slot:
         if not slot.go:
-            return
+            superseded = slot.outcome is not None and slot.outcome.superseded
+            if not superseded or not await gateway.claim_member_message(
+                slot.incident_id,
+                kind=gw.MESSAGE_NOTICE,
+                target_user_id=str(event.author.id),
+            ):
+                return
         try:
             await bot.rest.create_message(
                 event.channel_id,
@@ -1168,9 +1175,11 @@ async def _warn_author(
                 "Cannot post spam warning in channel %s (missing permissions)",
                 event.channel_id,
             )
-            slot.fail("missing permission to post the warning")
+            if slot.go:
+                slot.fail("missing permission to post the warning")
             return
-        slot.confirm()
+        if slot.go:
+            slot.confirm()
 
 
 async def _post_scam_log(

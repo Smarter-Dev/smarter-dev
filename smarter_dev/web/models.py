@@ -4052,6 +4052,13 @@ class ModerationIncident(Base):
     report_attachment_sent: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default=text("false")
     )
+    report_pinged: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+        doc="Whether report_ping_role_id was pinged, on the report or after it",
+    )
 
     __table_args__ = (
         Index("ix_moderation_incidents_guild_subject", "guild_id", "subject_user_id"),

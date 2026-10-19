@@ -254,7 +254,22 @@ class FakeModerationDiscord:
     # -- views ----------------------------------------------------------------
 
     def reports(self, channel_id: str = REPORT_CHANNEL) -> list[dict]:
-        return [post for post in self.posts if post["channel_id"] == channel_id]
+        """Incident reports: posts carrying the report's marker line."""
+        return [
+            post
+            for post in self.posts
+            if post["channel_id"] == channel_id and "-# Incident " in post["content"]
+        ]
+
+    def pings(self, channel_id: str = REPORT_CHANNEL) -> list[dict]:
+        """Role pings sent after a report already existed."""
+        return [
+            post
+            for post in self.posts
+            if post["channel_id"] == channel_id
+            and post["role_mention_ids"]
+            and "-# Incident " not in post["content"]
+        ]
 
     def latest_report_text(self, channel_id: str = REPORT_CHANNEL) -> str:
         reports = self.reports(channel_id)

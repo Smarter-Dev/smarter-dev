@@ -191,7 +191,7 @@ def triage_notes(tracker: ActionTracker, assessment: str) -> list[tuple[str, str
                 f"Triage did not finish ({tracker.failure}). The situation was not "
                 "reviewed and no action was taken. A moderator must review this."
             )
-        notes.append((gw.ENTRY_NOTE, status))
+        notes.append((gw.ENTRY_ALERT, status))
     elif not tracker.has_actions:
         notes.append(
             (gw.ENTRY_NOTE, "Situation reviewed, no immediate action required.")

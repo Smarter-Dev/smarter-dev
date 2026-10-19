@@ -31,6 +31,7 @@ import sys
 from datetime import UTC
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import sqlalchemy as sa
@@ -67,6 +68,10 @@ MIGRATION = (
     REPO_ROOT
     / "alembic/main/versions/20261019_210000_e4c8b2f6a9d1_moderation_gateway.py"
 )
+SPAM_RING_MIGRATION = (
+    REPO_ROOT
+    / "alembic/main/versions/20261019_230000_0a337101a0e8_spam_ring_incidents_updated_at.py"
+)
 CREATED = (
     "moderation_incidents",
     "moderation_incident_links",
@@ -83,30 +88,44 @@ MESSAGE = "8001"
 class _RecordingOp:
     """Stands in for ``alembic.op``: keeps the columns, ignores the rest."""
 
-    def __init__(self) -> None:
+    def __init__(self, dialect: str = "recording") -> None:
+        self.dialect = dialect
         self.created: dict[str, dict[str, sa.Column]] = {}
         self.added: dict[str, dict[str, sa.Column]] = {}
+        self.calls: list[tuple[str, tuple]] = []
+
+    def execute(self, statement, *_args, **_kw):
+        self.calls.append(("execute", (str(statement),)))
 
     def create_table(self, name, *items, **_kw):
+        self.calls.append(("create_table", (name,)))
         self.created[name] = {
             item.name: item for item in items if isinstance(item, sa.Column)
         }
 
     def add_column(self, table, column, **_kw):
+        self.calls.append(("add_column", (table,)))
         self.added.setdefault(table, {})[column.name] = column
 
-    def __getattr__(self, _name):
-        return lambda *_args, **_kw: None
+    def get_context(self):
+        return SimpleNamespace(dialect=SimpleNamespace(name=self.dialect))
+
+    def __getattr__(self, name):
+        return lambda *args, **_kw: self.calls.append((name, args))
+
+
+def _run(path: Path, step: str = "upgrade", dialect: str = "recording") -> _RecordingOp:
+    spec = importlib.util.spec_from_file_location(path.stem, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    recorder = _RecordingOp(dialect)
+    module.op = recorder
+    getattr(module, step)()
+    return recorder
 
 
 def _upgrade_columns() -> _RecordingOp:
-    spec = importlib.util.spec_from_file_location("e4c8b2f6a9d1", MIGRATION)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    recorder = _RecordingOp()
-    module.op = recorder
-    module.upgrade()
-    return recorder
+    return _run(MIGRATION)
 
 
 def _shape(columns) -> dict[str, bool]:
@@ -124,6 +143,14 @@ def test_the_migration_creates_every_column_the_models_have():
     model_actions = _shape(Base.metadata.tables["moderation_actions"].columns)
     for name, nullable in _shape(recorded.added["moderation_actions"].values()).items():
         assert model_actions.get(name) == nullable, name
+
+
+@pytest.mark.parametrize("step", ["upgrade", "downgrade"])
+@pytest.mark.parametrize("path", [MIGRATION, SPAM_RING_MIGRATION], ids=lambda p: p.stem)
+def test_lock_waits_are_bounded_before_any_change(path, step):
+    calls = _run(path, step, dialect="postgresql").calls
+    assert calls[0] == ("execute", ("SET LOCAL lock_timeout = '5s'",))
+    assert len(calls) > 1
 
 
 # ---------------------------------------------------------------------------

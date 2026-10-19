@@ -142,6 +142,20 @@ _STATE_WORDS = {
 }
 
 
+#: How an effect ranks when the report must be trimmed.
+_IDLE = 0  # did nothing: skipped, already gone, already covered
+_DONE = 1  # confirmed
+_PINNED = 2  # failed, unknown or in progress: a moderator may have to act
+
+
+def _effect_rank(op: ReportOperation) -> int:
+    if op.state in (t.SKIPPED, t.ABSENT, t.COVERED):
+        return _IDLE
+    if op.state == t.CONFIRMED:
+        return _DONE
+    return _PINNED
+
+
 def _effect_line(guild_id: str, op: ReportOperation) -> str:
     who = f"<@{op.target_user_id}>"
     if op.target_username and op.target_username != op.target_user_id:
@@ -195,8 +209,7 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
         reasons.append(f"- {actor_label(entry.source)}: {sanitize(entry.rule, 200)}")
 
     effects = [
-        (op.state in (t.SKIPPED, t.ABSENT), _effect_line(facts.guild_id, op))
-        for op in facts.operations
+        (_effect_rank(op), _effect_line(facts.guild_id, op)) for op in facts.operations
     ]
 
     quotes = [
@@ -205,6 +218,13 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
         if entry.kind == t.ENTRY_EVIDENCE and entry.content
     ][:2]
 
+    # Alerts first: what failed or was left for a moderator.
+    alerts = [
+        f"- ⚠️ {actor_label(entry.source)}: "
+        + shorten(entry.rule.removeprefix("- "), NOTE_LIMIT)
+        for entry in facts.entries
+        if entry.kind == t.ENTRY_ALERT and entry.rule
+    ]
     notes = [
         f"- {actor_label(entry.source)}: "
         + (
@@ -232,16 +252,23 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
             parts += ["**Why:**", *reason_lines]
         parts += ["**Actions:**", *(effect_lines or ["- none"])]
         parts += quote_lines
-        if note_lines:
-            parts += ["**Notes:**", *note_lines]
+        if alerts or note_lines:
+            parts += ["**Notes:**", *alerts, *note_lines]
         parts += tail
         return "\n".join(parts)
 
-    def effect_lines(kept: list) -> list[str]:
-        lines = [line for _, line in kept]
-        dropped = len(effects) - len(kept)
+    def effect_lines(kept: list[int]) -> list[str]:
+        lines = [effects[i][1] for i in kept]
+        dropped = [effects[i][0] for i in range(len(effects)) if i not in kept]
         if dropped:
-            lines.append(f"- …and {dropped} more, in the incident record")
+            counts = []
+            done = dropped.count(_DONE)
+            idle = dropped.count(_IDLE)
+            if done:
+                counts.append(f"{done} confirmed")
+            if idle:
+                counts.append(f"{idle} not needed")
+            lines.append(f"- …and {len(dropped)} more ({', '.join(counts)})")
         return lines
 
     def reason_lines(count: int) -> list[str]:
@@ -253,7 +280,7 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
     kept_reasons = min(len(reasons), REASON_LIMIT)
     kept_quotes = list(quotes)
     kept_notes = list(notes)
-    kept_effects = list(effects)
+    kept_effects = list(range(len(effects)))
 
     def current() -> str:
         return render(
@@ -263,22 +290,28 @@ def render_report(facts: ReportFacts, *, limit: int = DISCORD_MESSAGE_LIMIT) -> 
             kept_notes,
         )
 
-    # Too long: drop quotes, then the oldest notes, then effects that did
-    # nothing (oldest first), then other old effects, then reasons. The newest
-    # effects and the marker line always stay.
+    def drop_oldest(rank: int) -> bool:
+        """Drop the oldest kept effect of ``rank``, never the newest effect."""
+        for i in kept_effects[:-1]:
+            if effects[i][0] == rank:
+                kept_effects.remove(i)
+                return True
+        return False
+
+    # Too long: the least important goes first. Quotes, then effects that did
+    # nothing, then notes and assessments (oldest first), then confirmed
+    # effects (oldest first), then reasons. Failed, unknown and in-progress
+    # effects, alerts, the newest effect and the marker line always stay.
     content = current()
     while len(content) > limit and kept_quotes:
         kept_quotes.pop()
         content = current()
+    while len(content) > limit and drop_oldest(_IDLE):
+        content = current()
     while len(content) > limit and kept_notes:
         kept_notes.pop(0)
         content = current()
-    while len(content) > limit and any(idle for idle, _ in kept_effects[:-1]):
-        index = next(i for i, (idle, _) in enumerate(kept_effects[:-1]) if idle)
-        kept_effects.pop(index)
-        content = current()
-    while len(content) > limit and len(kept_effects) > 1:
-        kept_effects.pop(0)
+    while len(content) > limit and drop_oldest(_DONE):
         content = current()
     while len(content) > limit and kept_reasons > 1:
         kept_reasons -= 1

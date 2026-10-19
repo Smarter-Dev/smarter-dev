@@ -184,6 +184,8 @@ from smarter_dev.web.handler_holds import HOLD_MAX_SECONDS
 from smarter_dev.web.handler_holds import MemberHolds
 from smarter_dev.web.handler_memory import HandlerMemory
 from smarter_dev.web.admin_actions import AdminActor
+from smarter_dev.web.moderation_gateway.types import MESSAGE_DM
+from smarter_dev.web.moderation_gateway.types import MESSAGE_NOTICE
 
 logger = logging.getLogger(__name__)
 
@@ -974,47 +976,80 @@ class HandlerExecution:
                 "refused": f"{target_user} is protected ({refusal})",
             }
         notice = f"⚠️ <@{target_user}> has been warned.\n**Reason:** {reason_text}"
-        # The gateway holds the member's lock across the notice, and skips a
-        # warn the incident already covers (a ban, a timeout, another warn):
-        # no notice, row or DM then, and the script sees why.
-        async with self.actor.reserve_warn(target_user, reason_text, target) as slot:
-            if not slot.go:
-                return {
-                    "message_id": "",
-                    "dm_sent": False,
-                    "warn_count": int(await self.warn_counter(target_user)),
-                    "skipped": slot.outcome.detail if slot.outcome else "not warned",
-                }
+        dm_text = (
+            f"You have received a warning.\n\n"
+            f"**Reason:** {reason_text}\n\n"
+            f"Please review the server rules. Continued violations may "
+            f"result in further action (timeout, kick, or ban)."
+        )
+
+        async def post_notice():
             # Only forward an explicit channel: the default path must keep
             # _send_message's raise-on-4xx home-channel contract.
-            message_id = (
-                await self._send_message(notice, target)
-                if explicit_target
-                else await self._send_message(notice)
-            )
-            # Recorded on leaving this block, BEFORE the DM: the notice is
-            # already public, so the permanent row (and the warn_count and
-            # mod_action fire that come with it) must not hang on a DM window
-            # breach. See step 4 above.
-            slot.confirm()
+            if explicit_target:
+                return await self._send_message(notice, target)
+            return await self._send_message(notice)
+
+        # The gateway holds the member's lock across the notice, and skips a
+        # warn the incident already covers (a ban, a timeout, another warn).
+        # Skipped so, the warn adds no row and no strike, but the member is
+        # still told, once per incident: the public notice unless the incident
+        # already posted one, and the DM (gw.MESSAGE_* claims dedupe both).
+        skipped = None
+        message_id = None
+        gateway = None
+        incident_id = None
+        async with self.actor.reserve_warn(target_user, reason_text, target) as slot:
+            incident_id = getattr(slot, "incident_id", None)
+            if incident_id is not None and hasattr(self.actor, "gateway"):
+                gateway = self.actor.gateway()
+            if not slot.go:
+                skipped = slot.outcome.detail if slot.outcome else "not warned"
+                if not (slot.outcome and slot.outcome.superseded and gateway):
+                    return {
+                        "message_id": "",
+                        "dm_sent": False,
+                        "warn_count": int(await self.warn_counter(target_user)),
+                        "skipped": skipped,
+                    }
+                if await gateway.claim_member_message(
+                    incident_id, kind=MESSAGE_NOTICE, target_user_id=target_user
+                ):
+                    message_id = await post_notice()
+            else:
+                message_id = await post_notice()
+                # Recorded on leaving this block, BEFORE the DM: the notice is
+                # already public, so the permanent row (and the warn_count and
+                # mod_action fire that come with it) must not hang on a DM
+                # window breach. See step 4 above.
+                slot.confirm()
         warn_count = await self.warn_counter(target_user)
         dm_sent = False
         if dm:
-            dm_sent = await self._send_dm(
-                target_user,
-                f"You have received a warning.\n\n"
-                f"**Reason:** {reason_text}\n\n"
-                f"Please review the server rules. Continued violations may "
-                f"result in further action (timeout, kick, or ban).",
+            claimed = gateway is None or await gateway.claim_member_message(
+                incident_id, kind=MESSAGE_DM, target_user_id=target_user
             )
+            if claimed:
+                try:
+                    dm_sent = await self._send_dm(target_user, dm_text)
+                except BaseException:
+                    # A DM cap stopped it: the next warn may still send it.
+                    if gateway is not None:
+                        await gateway.release_member_message(
+                            incident_id, kind=MESSAGE_DM, target_user_id=target_user
+                        )
+                    raise
         # A gone explicit target makes _send_message return False; the warn itself
         # (audit row + DM) still happened, so report an empty id rather than a
         # falsy one the script would have to type-check.
-        return {
+        result = {
             "message_id": str(message_id) if message_id else "",
             "dm_sent": bool(dm_sent),
             "warn_count": int(warn_count),
         }
+        if skipped is not None:
+            result["skipped"] = skipped
+        return result
 
     async def _list_rules(self) -> list[dict]:
         """This guild's configured rules, in document order; spends a lookup.

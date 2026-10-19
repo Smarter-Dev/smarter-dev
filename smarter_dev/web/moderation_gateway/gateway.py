@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import hashlib
 import logging
 import time
@@ -51,6 +52,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import delete
 from sqlalchemy import or_
 from sqlalchemy import select
 from sqlalchemy import update
@@ -105,6 +107,13 @@ def _now_dt(seconds: float) -> datetime:
     return datetime.fromtimestamp(seconds, UTC)
 
 
+def _timeout_key_prefix(incident_id: UUID, target: str, claim: str | None) -> str:
+    # A claim can be long (a handler id and a script's key); the key names it
+    # by digest so it fits the column.
+    digest = hashlib.sha256((claim or "").encode()).hexdigest()[:16]
+    return f"timeout:{incident_id}:{target}:{digest}:"
+
+
 @dataclass(slots=True)
 class _Decision:
     """What to do with a proposal once the checks ran."""
@@ -114,6 +123,8 @@ class _Decision:
     until: float | None = None  # timeout / untimeout target (None lifts)
     message_ids: tuple[str, ...] = ()
     released_claims: tuple[UUID, ...] = ()
+    key: str | None = None  # the idempotency key, when the decision fixed it
+    superseded: bool = False  # skipped for a sanction already in the incident
 
 
 class Reservation:
@@ -257,6 +268,65 @@ class ModerationGateway:
                         raise
         raise AssertionError("unreachable")
 
+    async def claim_member_message(
+        self, incident_id: UUID, *, kind: str, target_user_id: str
+    ) -> bool:
+        """Whether to send a warn's member-facing message; True claims it.
+
+        ``kind`` is ``notice`` (the public one) or ``dm``. One of each per
+        member per incident: a warn the incident skipped still tells the
+        member, unless the incident already did. A notice is also taken by a
+        warn the incident confirmed, since a warn's notice is public.
+        """
+        target = str(target_user_id)
+        async with self._session() as session:
+            incident = await session.get(ModerationIncident, incident_id)
+            if incident is None:
+                return False
+            if kind == t.MESSAGE_NOTICE:
+                warned = (
+                    await session.execute(
+                        select(ModerationOperation.id).where(
+                            ModerationOperation.incident_id == incident_id,
+                            ModerationOperation.target_user_id == target,
+                            ModerationOperation.kind == t.WARN,
+                            ModerationOperation.state == t.CONFIRMED,
+                        )
+                    )
+                ).first()
+                if warned is not None:
+                    return False
+            session.add(
+                ModerationOutbox(
+                    incident_id=incident_id,
+                    guild_id=incident.guild_id,
+                    kind=kind,
+                    dedupe_key=f"{kind}:{incident_id}:{target}",
+                    target_user_id=target,
+                    state="sent",
+                    settled_at=_now_dt(self._clock()),
+                )
+            )
+            try:
+                await session.commit()
+            except IntegrityError:
+                return False
+        return True
+
+    async def release_member_message(
+        self, incident_id: UUID, *, kind: str, target_user_id: str
+    ) -> None:
+        """Give back a claim whose message was never sent (a cap stopped it)."""
+        async with self._session() as session:
+            await session.execute(
+                delete(ModerationOutbox).where(
+                    ModerationOutbox.dedupe_key
+                    == f"{kind}:{incident_id}:{target_user_id}",
+                    ModerationOutbox.incident_id == incident_id,
+                )
+            )
+            await session.commit()
+
     async def add_note(
         self,
         incident_id: UUID,
@@ -298,9 +368,9 @@ class ModerationGateway:
                         kind=kind,
                         source=source,
                         content=redact_webhook_tokens(text)
-                        if kind != t.ENTRY_NOTE
+                        if kind not in t.NOTE_KINDS
                         else None,
-                        rule=text if kind == t.ENTRY_NOTE else None,
+                        rule=text if kind in t.NOTE_KINDS else None,
                         target_user_id=target_user_id,
                     )
                 )
@@ -416,8 +486,9 @@ class ModerationGateway:
                     trigger.ping_role_id
                     and trigger.report_channel_id
                     and not incident.report_ping_role_id
-                    and incident.report_message_id is None
                 ):
+                    # Joining a report already posted: the next delivery pings
+                    # the role after its edit (edits never ping).
                     incident.report_ping_role_id = trigger.ping_role_id
             existing_keys = (
                 set(
@@ -557,7 +628,7 @@ class ModerationGateway:
                 and evidence.message_id in seen_messages
             ):
                 continue
-            is_note = evidence.kind == t.ENTRY_NOTE
+            is_note = evidence.kind in t.NOTE_KINDS
             session.add(
                 ModerationIncidentEntry(
                     incident_id=incident_id,
@@ -694,10 +765,13 @@ class ModerationGateway:
                     return _Decision(
                         state=t.SKIPPED,
                         detail=f"weaker than the {strongest.kind} already in this incident",
+                        superseded=True,
                     )
                 if their == rank and kind != t.TIMEOUT:
                     return _Decision(
-                        state=t.SKIPPED, detail=f"already a {kind} in this incident"
+                        state=t.SKIPPED,
+                        detail=f"already a {kind} in this incident",
+                        superseded=True,
                     )
 
         if kind == t.BAN:
@@ -710,7 +784,9 @@ class ModerationGateway:
                 return _Decision(state=t.SKIPPED, detail="not a member")
             return _Decision()
         if kind == t.TIMEOUT:
-            return await self._decide_timeout(trigger, proposal, now, incident_ops)
+            return await self._decide_timeout(
+                incident_id, trigger, proposal, now, incident_ops
+            )
         if kind == t.UNTIMEOUT:
             return await self._decide_untimeout(trigger, proposal, now)
         if kind in t.CLEANUP_KINDS:
@@ -771,6 +847,7 @@ class ModerationGateway:
 
     async def _decide_timeout(
         self,
+        incident_id: UUID,
         trigger: t.Trigger,
         proposal: t.Proposal,
         now: float,
@@ -782,26 +859,30 @@ class ModerationGateway:
             return _Decision(state=t.SKIPPED, detail="not a member")
         if trigger.is_manual:
             return _Decision(until=desired)
-        # The same claim asking again while its earlier timeout is in flight,
-        # unknown, or reconciled as never applied is the same request: given
-        # that request's expiry it takes that request's key, so it gets the
-        # earlier outcome (or the retry a reconciliation allows) rather than a
-        # second call. Its own expiry is a little later, and as a key that
-        # would differ whenever the second ticked over in between.
-        for op in incident_ops:
-            same_request = op.state in (t.CLAIMED, t.UNKNOWN) or (
-                op.state == t.FAILED and (op.result or {}).get("reconciled")
-            )
+        # An automated timeout's key is its claim's n-th request in the
+        # incident, never its expiry: a repeat a moment later must be the same
+        # request. Keys are chosen under the member's lock, so the count is
+        # stable.
+        prefix = _timeout_key_prefix(
+            incident_id, proposal.target_user_id, proposal.claim
+        )
+        earlier = [op for op in incident_ops if op.idempotency_key.startswith(prefix)]
+        for op in earlier:
+            if op.released_at is not None:
+                continue
+            if op.state in (t.CLAIMED, t.UNKNOWN):
+                # In flight, or unknown until reconciled: the same request,
+                # answered with that request's outcome and never sent again.
+                return _Decision(until=op.expires_at, key=op.idempotency_key)
             if (
-                same_request
-                and op.kind == t.TIMEOUT
-                and op.actor != "manual"
-                and op.claim_key == proposal.claim
-                and op.released_at is None
+                op.state == t.FAILED
+                and (op.result or {}).get("reconciled")
                 and op.expires_at is not None
                 and op.expires_at >= desired - EXTEND_MIN_SECONDS
             ):
-                return _Decision(until=op.expires_at)
+                # Reconciled as never applied: the one retry it allows.
+                return _Decision(until=op.expires_at, key=op.idempotency_key)
+        key = f"{prefix}{len(earlier)}"
         current = state.until if state.until and state.until > now else None
         if current is not None:
             if not await self._automation_set(
@@ -820,7 +901,7 @@ class ModerationGateway:
                     detail=f"already timed out until <t:{int(current)}:f>",
                     until=desired,
                 )
-        return _Decision(until=desired)
+        return _Decision(until=desired, key=key)
 
     async def _decide_untimeout(
         self, trigger: t.Trigger, proposal: t.Proposal, now: float
@@ -901,16 +982,13 @@ class ModerationGateway:
         proposal: t.Proposal,
         decision: _Decision,
     ) -> str:
+        if decision.key:
+            return decision.key
         target = proposal.target_user_id
         if proposal.kind in t.CLEANUP_KINDS:
             if len(decision.message_ids) == 1:
                 return f"delete:{proposal.channel_id}:{decision.message_ids[0]}"
             return f"purge:{proposal.channel_id}:{uuid.uuid5(uuid.NAMESPACE_OID, ','.join(sorted(decision.message_ids)))}"
-        if proposal.kind == t.TIMEOUT and not trigger.is_manual:
-            # A claim can be long (a handler id and a script's key); the key
-            # names it by digest so it fits the column.
-            claim = hashlib.sha256((proposal.claim or "").encode()).hexdigest()[:16]
-            return f"timeout:{incident_id}:{target}:{claim}:{int(decision.until or 0)}"
         if proposal.kind in (t.BAN, t.KICK, t.WARN) and not trigger.is_manual:
             return f"{proposal.kind}:{incident_id}:{target}"
         return f"{proposal.kind}:{target}:{uuid.uuid4()}"
@@ -991,7 +1069,7 @@ class ModerationGateway:
             await self._release_claims(session, decision.released_claims)
             await self._bump(session, incident_id)
             await session.commit()
-        return self._outcome(op)
+        return dataclasses.replace(self._outcome(op), superseded=decision.superseded)
 
     async def _claim(
         self,
@@ -1561,6 +1639,7 @@ class ModerationGateway:
             if (
                 incident.report_state == "posted"
                 and incident.report_revision >= incident.revision
+                and not (incident.report_ping_role_id and not incident.report_pinged)
             ):
                 return False
             taken = await session.execute(
@@ -1584,6 +1663,7 @@ class ModerationGateway:
             channel_id = incident.report_channel_id
             message_id = incident.report_message_id
             state = incident.report_state
+            pinged = incident.report_pinged
         content = report_mod.render_report(facts)
         new_state = "posted"
         editing = False
@@ -1594,7 +1674,13 @@ class ModerationGateway:
                     channel_id, report_mod.marker(incident_id)
                 )
             if message_id is None:
-                await self._set_report(incident_id, report_state="posting")
+                # A post carries the ping itself; one whose answer is lost and
+                # is found later by its marker must not be pinged again.
+                await self._set_report(
+                    incident_id,
+                    report_state="posting",
+                    report_pinged=bool(facts.ping_role_id) or pinged,
+                )
                 message_id = await self.port.send_message(
                     channel_id,
                     content,
@@ -1671,9 +1757,47 @@ class ModerationGateway:
         if attachment_sent:
             values["report_attachment_sent"] = True
         await self._set_report(incident_id, **values)
+        if facts.ping_role_id and editing and not pinged:
+            await self._ping_after_edit(incident_id, facts, channel_id, message_id)
         async with self._session() as session:
             incident = await session.get(ModerationIncident, incident_id)
             return incident is not None and incident.revision > revision
+
+    async def _ping_after_edit(
+        self,
+        incident_id: UUID,
+        facts: report_mod.ReportFacts,
+        channel_id: str,
+        message_id: str,
+    ) -> None:
+        """Ping the role a detector asked for once the report already existed.
+
+        A short message pointing at the report. It does not carry the marker,
+        so it is never mistaken for the report. Sent once: a refusal marks it
+        done too, and a lost response may at worst ping twice.
+        """
+        link = report_mod.jump_link(facts.guild_id, channel_id, message_id)
+        try:
+            await self.port.send_message(
+                channel_id,
+                f"<@&{facts.ping_role_id}> A moderation incident needs you: {link}",
+                role_mention_ids=[facts.ping_role_id],
+            )
+        except t.EffectRejected as error:
+            logger.warning(
+                "Cannot ping for the moderation report of incident %s: %s",
+                incident_id,
+                error.detail,
+            )
+        except Exception:  # noqa: BLE001 — the next delivery tries again
+            log_exception(
+                logger,
+                "Ping for the moderation report of incident %s may not have gone out",
+                incident_id,
+                level=logging.WARNING,
+            )
+            return
+        await self._set_report(incident_id, report_pinged=True)
 
     async def _set_report(self, incident_id: UUID, **values: Any) -> None:
         async with self._session() as session:
