@@ -711,3 +711,77 @@ async def test_public_alias_validates_viewer_ids(site_client, viewer):
     client, _ = site_client
     response = await client.get(PUBLIC_URL, params={"viewer_discord_ids": viewer})
     assert response.status_code == 422
+
+
+HAS_FIELDS = {
+    "personality": "has_personality",
+    "behavior": "has_behavior",
+    "memory": "has_memory",
+}
+COLUMN = {"personality": "personality", "behavior": "behavior", "memory": "content"}
+
+
+@pytest.mark.parametrize("block", sorted(HAS_FIELDS))
+@pytest.mark.parametrize(
+    "text,shown,has",
+    [
+        # Shown: the block is on the page.
+        ("Plain words.", True, True),
+        # Masked: the block exists but fails the page check, so it is hidden.
+        ("<script>unsafe</script>", False, True),
+        # Missing: no block yet.
+        (None, False, False),
+        ("", False, False),
+        # Every line names an opted-out member: nothing is left to show.
+        (f"<{OTHER}:bob> waves.", False, False),
+    ],
+)
+@pytest.mark.parametrize("url", [PUBLIC_URL, URL + "/public"])
+async def test_public_has_flags_match_page_notice(
+    site_client, db_session, block, text, shown, has, url
+):
+    client, _ = site_client
+    memory = await seed_memory(db_session, **{COLUMN[block]: text})
+    await opt_out(db_session, OTHER)
+    await db_session.commit()
+    page_blocks = await chat_agent_page_controller._cached_public_blocks(
+        db_session, memory
+    )
+    body = (await client.get(url)).json()
+    assert (body[block] != "") is shown
+    assert body[HAS_FIELDS[block]] is has
+    # The /chat-agent page's own expression for its notice.
+    for name, field in HAS_FIELDS.items():
+        assert body[field] is bool(page_blocks[name].masked)
+
+
+@pytest.mark.parametrize("viewer", ["", MEMBER, OTHER, f"{MEMBER},{OTHER}"])
+async def test_public_has_flags_leak_nothing_about_hidden_text(
+    site_client, db_session, viewer
+):
+    """Two different hidden blocks give byte-identical responses, for any
+    viewer: the flags carry existence only, never content or length."""
+    client, _ = site_client
+    params = {"viewer_discord_ids": viewer}
+    memory = await seed_memory(db_session, behavior="<script>a</script>")
+    first = await client.get(PUBLIC_URL, params=params)
+    memory.behavior = "<script>" + "much longer hidden text " * 40 + "</script>"
+    await db_session.commit()
+    chat_agent_public._blocks_cache.clear()
+    second = await client.get(PUBLIC_URL, params=params)
+    assert first.status_code == second.status_code == 200
+    assert first.content == second.content
+    body = first.json()
+    assert (body["behavior"], body["has_behavior"]) == ("", True)
+    assert {key: type(body[key]) for key in HAS_FIELDS.values()} == dict.fromkeys(
+        HAS_FIELDS.values(), bool
+    )
+    assert set(body) == {
+        "guild_id",
+        "personality",
+        "behavior",
+        "memory",
+        "last_dream_at",
+        "revision",
+        *HAS_FIELDS.values(),
+    }

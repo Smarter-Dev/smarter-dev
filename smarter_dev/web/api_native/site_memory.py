@@ -87,6 +87,11 @@ class SitePublicRead(BaseAPIModel):
     memory: str
     last_dream_at: datetime | None
     revision: int
+    # Whether each block has anything to show once masked, as the /chat-agent
+    # page's "not shown right now" notice reads it; viewer-independent.
+    has_personality: bool
+    has_behavior: bool
+    has_memory: bool
 
 
 def _discord_id(value: str) -> str:
@@ -352,6 +357,7 @@ async def _public_memory(
         revision=memory.revision,
         last_dream_at=memory.last_dream_at,
         **{name: block.shown(viewer_ids) for name, block in blocks.items()},
+        **{f"has_{name}": bool(block.masked) for name, block in blocks.items()},
     )
 
 
