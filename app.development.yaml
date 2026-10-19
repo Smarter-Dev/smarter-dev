@@ -121,6 +121,7 @@ controllers:
   - smarter_dev.web.bot_admin.extensions:ExtensionsAdminController
   - smarter_dev.web.bot_admin.chat_memory:ChatMemoryAdminController
   - smarter_dev.web.bot_admin.privacy_purge:PrivacyPurgeAdminController
+  - smarter_dev.web.bot_admin.proactive_overview:ProactiveChannelsAdminController
   - smarter_dev.web.handlers_admin:HandlersAdminController
   - smarter_dev.web.quests_admin:QuestsAdminController
   - smarter_dev.web.chat_conversations_admin:ChatConversationsAdminController

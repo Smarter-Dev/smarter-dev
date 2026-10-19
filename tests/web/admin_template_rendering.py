@@ -22,6 +22,7 @@ from jinja2 import ChoiceLoader
 from jinja2 import DictLoader
 from jinja2 import Environment
 from jinja2 import FileSystemLoader
+from markupsafe import Markup
 
 _TEMPLATES_ROOT = Path(__file__).resolve().parents[2] / "templates"
 
@@ -46,5 +47,8 @@ def render_admin_template(template_name: str, **context) -> str:
     environment.globals.update(
         site_name=lambda: "Smarter Dev",
         csp_nonce=lambda: "test-nonce",
+        csrf_field=lambda: Markup(
+            '<input type="hidden" name="csrf_token" value="test-csrf">'
+        ),
     )
     return environment.get_template(template_name).render(**context)
