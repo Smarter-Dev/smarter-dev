@@ -7,20 +7,26 @@ They ran on DSPy until 2026-10, on the models named by ``LLM_FAST_MODEL`` and
 They now run on pydantic-ai through the shared model router, so the catalog
 entry carries the provider, key and reasoning default like every other agent.
 Claude Haiku 5.5 since 2026-10-17 (#199).
+
+Every run is metered (``utility_metered``): its spend is posted to the usage
+ledger under the agent's own ``operation_type``, a run that raises included.
 """
 
 from __future__ import annotations
 
+from contextlib import AbstractAsyncContextManager
 from typing import TypeVar
 
 from pydantic_ai import Agent
 from pydantic_ai.agent import AgentRunResult
 
+from smarter_dev.bot.services.usage_reporter import metered
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.shared.model_router import agent_retries_for
 from smarter_dev.shared.model_router import build_model_for
 from smarter_dev.shared.model_router import model_settings_for
+from smarter_dev.shared.usage_meter import UsageMeter
 
 # Catalog key that replaced LLM_FAST_MODEL and LLM_MEDIUM_MODEL. Served by
 # Anthropic directly at the catalog's default effort (medium), the level GPT-6
@@ -54,6 +60,19 @@ def build_utility_agent(
         instructions=instructions,
         model_settings=model_settings_for(model, cache_messages=cache_messages),
         retries=agent_retries_for(model),
+    )
+
+
+def utility_metered(
+    operation_type: str, **fields: object
+) -> AbstractAsyncContextManager[UsageMeter]:
+    """``metered`` for utility agent runs, at the utility model's reasoning
+    level. Run each agent in the block on ``model=meter.wrap(agent.model)``."""
+    level = utility_catalog_model().default_reasoning
+    return metered(
+        operation_type,
+        reasoning_level=level.value if level is not None else None,
+        **fields,
     )
 
 

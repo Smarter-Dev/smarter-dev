@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import dataclasses
 import logging
 import os
@@ -92,6 +93,8 @@ from smarter_dev.bot.proactive.types import blocked_channel_message
 from smarter_dev.bot.proactive.watcher import JevWatcherRunner
 from smarter_dev.bot.proactive.watcher import SkimRunner
 from smarter_dev.bot.proactive.watcher import WatcherRunner
+from smarter_dev.bot.proactive.watcher import merge_usage
+from smarter_dev.bot.proactive.watcher import meter_usage_dict
 from smarter_dev.bot.proactive.windows import JEV_BATCH_SIZE
 from smarter_dev.bot.proactive.windows import JEV_MAX_WAIT_SECONDS
 from smarter_dev.bot.proactive.windows import JEV_QUIET_SECONDS
@@ -103,6 +106,7 @@ from smarter_dev.bot.services.proactive_settings_service import ProactiveSetting
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.retention_policy import AGENT_VERBATIM_IDLE_WINDOW
 from smarter_dev.shared.retention_policy import PROACTIVE_IDLE_SWEEP_TICK
+from smarter_dev.shared.usage_meter import UsageMeter
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +230,12 @@ def event_engages_bot(message, bot_user_id: str) -> bool:
 
 
 async def dispatch_response(
-    bot, *, channel_id: int, content: str, reply_to_id: str | None
+    bot,
+    *,
+    channel_id: int,
+    content: str,
+    reply_to_id: str | None,
+    guild_id: str | None = None,
 ) -> int:
     """Send one agent response, honoring Discord's length cap.
 
@@ -237,7 +246,10 @@ async def dispatch_response(
     only. Returns how many messages were actually sent.
     """
     if len(content) > SUMMARIZE_THRESHOLD:
-        fit = await fit_writer_message(content)
+        # The summarizer's spend is the bot's, attributed to where it posts.
+        fit = await fit_writer_message(
+            content, usage_fields={"guild_id": guild_id, "channel_id": channel_id}
+        )
         logger.info(
             "proactive overlong reply (%d chars) fitted via %s to %d chars",
             len(content),
@@ -700,29 +712,61 @@ class ProactiveRuntime:
         bounded — an unbounded ~100k-token summarize once stalled the whole
         consumer loop (2026-09-01) — and failure degrades to a watcher-model
         skim, then truncation, so neither a wake nor the idle sweep can
-        block on summarization."""
+        block on summarization. What each model spent is added, by model, to
+        the caller's ``_compaction_spent`` for its usage report. An attempt
+        that fails or times out after the provider answered (a thinking-only
+        reply cut off at its output limit) was billed all the same: a meter
+        on its model keeps what it got."""
+        spent = _compaction_spent.get()
+
+        def bill(model_id: str | None, usage: dict) -> None:
+            if spent is not None and usage:
+                merge_usage(spent, model_id, usage)
+
+        def bill_failed(model_id: str | None, meter: UsageMeter) -> None:
+            if meter:
+                bill(model_id, meter_usage_dict(meter))
+
+        agent_meter = UsageMeter()
         try:
-            summary, usage = await asyncio.wait_for(
-                self_compaction_summary(
-                    build_twopass_model(self.agent_model_id), messages
-                ),
-                timeout=COMPACTION_TIMEOUT_SECONDS,
-            )
-            logger.info("proactive self-compaction: %s", usage)
+            try:
+                summary, usage = await asyncio.wait_for(
+                    self_compaction_summary(
+                        agent_meter.wrap(
+                            build_twopass_model(self.agent_model_id),
+                            model_name=self.agent_model_id,
+                        ),
+                        messages,
+                    ),
+                    timeout=COMPACTION_TIMEOUT_SECONDS,
+                )
+            except BaseException:
+                bill_failed(self.agent_model_id, agent_meter)
+                raise
+            bill(self.agent_model_id, usage)
+            logger.info("proactive self-compaction: %s", _usage_totals(usage))
             return summary
         except Exception:  # noqa: BLE001 — fall back, never hang a wake
             log_exception(
                 logger,
                 "self-compaction failed; falling back to a watcher-model skim"
             )
+        skim_model_id = self.skim_model_id or self.watcher_model_id
+        skim_meter = UsageMeter()
         try:
             dumped = ModelMessagesTypeAdapter.dump_json(messages).decode()
-            summary, usage = await asyncio.wait_for(
-                self.skim().skim(dumped),
-                timeout=COMPACTION_TIMEOUT_SECONDS,
-            )
+            try:
+                summary, usage = await asyncio.wait_for(
+                    self.skim().skim(dumped, meter=skim_meter),
+                    timeout=COMPACTION_TIMEOUT_SECONDS,
+                )
+            except BaseException:
+                bill_failed(skim_model_id, skim_meter)
+                raise
+            bill(skim_model_id, usage)
             logger.info(
-                "proactive history compaction (skim fallback): %s", usage
+                "proactive history compaction (skim fallback): %s",
+                _usage_totals(usage),
             )
             return summary
         except Exception:  # noqa: BLE001 — truncation beats a hung agent
@@ -756,7 +800,7 @@ class ProactiveRuntime:
                         logger, "failed to persist compacted proactive history"
                     )
 
-            state.agent_runner = KimiAgentRunner(
+            runner = KimiAgentRunner(
                 agent=build_proactive_agent(
                     build_twopass_model(self.agent_model_id),
                     system_prompt=build_guild_agent_system_prompt(
@@ -767,7 +811,18 @@ class ProactiveRuntime:
                 ),
                 summarize=self.compaction_summarize,
                 on_compacted=persist_compacted,
+                model_id=self.agent_model_id,
             )
+            async def summarize(messages) -> str:
+                # A wake's compaction is billed with the wake that ran it.
+                token = _compaction_spent.set(runner.unreported_usage)
+                try:
+                    return await self.compaction_summarize(messages)
+                finally:
+                    _compaction_spent.reset(token)
+
+            runner.summarize = summarize
+            state.agent_runner = runner
         return state.agent_runner
 
 
@@ -804,6 +859,18 @@ def _message_is_after_cursor(message: ChannelMessage, cursor: str | None) -> boo
     return message.id != cursor
 
 
+# Where ``ProactiveRuntime.compaction_summarize`` adds what it spent: the
+# wake's runner, or the idle fold's report.
+_compaction_spent: contextvars.ContextVar[dict[str, dict] | None] = (
+    contextvars.ContextVar("proactive_compaction_spent", default=None)
+)
+
+
+def _usage_totals(usage: dict) -> dict:
+    """A usage dict for the log: its totals, not every request's counts."""
+    return {key: value for key, value in usage.items() if key != "requests"}
+
+
 async def _record_usage(
     service,
     *,
@@ -823,6 +890,13 @@ async def _record_usage(
             "output_tokens": usage.get("output_tokens", 0),
             "cache_read_tokens": usage.get("cache_read_tokens", 0),
             "cache_write_tokens": usage.get("cache_write_tokens", 0),
+            # Each request's own counts, so the ledger prices each on its
+            # own (a long-context tier is decided per request).
+            **(
+                {"requests": usage["requests"]}
+                if usage.get("requests") is not None
+                else {}
+            ),
         }
         for model_id, usage in (usage_by_model or {}).items()
     ]
@@ -1200,112 +1274,134 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
     )
     passive = state.pending_passive_wake
     state.pending_passive_wake = False
-    result = await consumer.consume(context)
+    try:
+        result = await consumer.consume(context)
+    except BaseException:
+        # The provider billed what the wake got before it failed (and any
+        # compaction it ran); that is reported before the error goes on.
+        unreported = getattr(runner, "unreported_usage", None) or {}
+        failed_usage = dict(unreported)
+        unreported.clear()
+        await _record_usage(
+            service,
+            guild_id=state.guild_id,
+            channel_id="guild-wide",
+            metered_at=activated_at,
+            passive=passive,
+            responses=0,
+            operation="agent",
+            usage_by_model=failed_usage,
+        )
+        raise
 
     dispatched_responses = 0
     sent_message_parts = 0
-    for response in result.responses:
-        if response.channel_id not in enabled_channels:
-            logger.warning(
-                "proactive response rejected for disabled channel=%s",
-                response.channel_id,
-            )
-            continue
-        response_message_parts = await dispatch_response(
-            run.bot,
-            channel_id=int(response.channel_id),
-            content=response.content,
-            reply_to_id=response.reply_to_id,
-        )
-        sent_message_parts += response_message_parts
-        if response_message_parts:
-            dispatched_responses += 1
-    for reaction in result.reactions:
-        if (
-            reaction.channel_id not in enabled_channels
-            or not reaction.message_id.isdigit()
-        ):
-            continue
-        try:
-            await run.bot.rest.add_reaction(
-                int(reaction.channel_id),
-                int(reaction.message_id),
-                reaction.emoji,
-            )
-        except Exception:  # noqa: BLE001
-            log_exception(logger, "proactive reaction failed")
-
-    images_by_channel: dict[str, list] = {}
-    for deps in wake_deps:
-        for pending_image in deps.pending_images:
-            if pending_image.channel_id in enabled_channels:
-                images_by_channel.setdefault(pending_image.channel_id, []).append(
-                    pending_image
+    try:
+        for response in result.responses:
+            if response.channel_id not in enabled_channels:
+                logger.warning(
+                    "proactive response rejected for disabled channel=%s",
+                    response.channel_id,
                 )
-    for channel_id, pending_images in images_by_channel.items():
-        reply_target = next(
-            (
-                int(response.reply_to_id)
-                for response in result.responses
-                if response.channel_id == channel_id
-                and response.reply_to_id
-                and response.reply_to_id.isdigit()
-            ),
-            None,
-        )
-        image_kwargs = {
-            "attachments": [
-                hikari.Bytes(image.data, image.filename, image.mime_type)
-                for image in pending_images
-            ]
-        }
-        if reply_target is not None:
-            image_kwargs["reply"] = reply_target
-        try:
-            await run.bot.rest.create_message(int(channel_id), **image_kwargs)
-        except Exception:  # noqa: BLE001 — images are best-effort extras
-            log_exception(logger, "proactive image post failed")
-
-    if history_store is not None:
-        if state.history_loaded:
-            try:
-                await history_store.write_guild(int(state.guild_id), runner.history)
-            except Exception:  # noqa: BLE001 — persistence is best-effort
-                log_exception(logger, "failed to persist proactive guild history")
-        for producer_state in run.channel_states.values():
+                continue
+            response_message_parts = await dispatch_response(
+                run.bot,
+                guild_id=state.guild_id,
+                channel_id=int(response.channel_id),
+                content=response.content,
+                reply_to_id=response.reply_to_id,
+            )
+            sent_message_parts += response_message_parts
+            if response_message_parts:
+                dispatched_responses += 1
+        for reaction in result.reactions:
             if (
-                producer_state.guild_id != state.guild_id
-                or producer_state.last_reviewed_message_id is None
-                or not producer_state.last_reviewed_message_id.isdigit()
+                reaction.channel_id not in enabled_channels
+                or not reaction.message_id.isdigit()
             ):
                 continue
             try:
-                await history_store.write_cursor(
-                    int(producer_state.channel_id),
-                    guild_id=producer_state.guild_id,
-                    last_message_id=producer_state.last_reviewed_message_id,
+                await run.bot.rest.add_reaction(
+                    int(reaction.channel_id),
+                    int(reaction.message_id),
+                    reaction.emoji,
+                )
+            except Exception:  # noqa: BLE001
+                log_exception(logger, "proactive reaction failed")
+
+        images_by_channel: dict[str, list] = {}
+        for deps in wake_deps:
+            for pending_image in deps.pending_images:
+                if pending_image.channel_id in enabled_channels:
+                    images_by_channel.setdefault(pending_image.channel_id, []).append(
+                        pending_image
+                    )
+        for channel_id, pending_images in images_by_channel.items():
+            reply_target = next(
+                (
+                    int(response.reply_to_id)
+                    for response in result.responses
+                    if response.channel_id == channel_id
+                    and response.reply_to_id
+                    and response.reply_to_id.isdigit()
+                ),
+                None,
+            )
+            image_kwargs = {
+                "attachments": [
+                    hikari.Bytes(image.data, image.filename, image.mime_type)
+                    for image in pending_images
+                ]
+            }
+            if reply_target is not None:
+                image_kwargs["reply"] = reply_target
+            try:
+                await run.bot.rest.create_message(int(channel_id), **image_kwargs)
+            except Exception:  # noqa: BLE001 — images are best-effort extras
+                log_exception(logger, "proactive image post failed")
+
+        if history_store is not None:
+            if state.history_loaded:
+                try:
+                    await history_store.write_guild(int(state.guild_id), runner.history)
+                except Exception:  # noqa: BLE001 — persistence is best-effort
+                    log_exception(logger, "failed to persist proactive guild history")
+            for producer_state in run.channel_states.values():
+                if (
+                    producer_state.guild_id != state.guild_id
+                    or producer_state.last_reviewed_message_id is None
+                    or not producer_state.last_reviewed_message_id.isdigit()
+                ):
+                    continue
+                try:
+                    await history_store.write_cursor(
+                        int(producer_state.channel_id),
+                        guild_id=producer_state.guild_id,
+                        last_message_id=producer_state.last_reviewed_message_id,
+                    )
+                except Exception:  # noqa: BLE001 — persistence is best-effort
+                    log_exception(logger, "failed to persist proactive cursor")
+        for channel_id, instruction_store in instruction_stores.items():
+            if instruction_store.updates == persisted_updates[channel_id]:
+                continue
+            try:
+                await service.set_watch_addendum(
+                    state.guild_id, channel_id, instruction_store.to_stored()
                 )
             except Exception:  # noqa: BLE001 — persistence is best-effort
-                log_exception(logger, "failed to persist proactive cursor")
-    for channel_id, instruction_store in instruction_stores.items():
-        if instruction_store.updates == persisted_updates[channel_id]:
-            continue
-        try:
-            await service.set_watch_addendum(
-                state.guild_id, channel_id, instruction_store.to_stored()
-            )
-        except Exception:  # noqa: BLE001 — persistence is best-effort
-            log_exception(logger, "failed to persist watch instructions")
-    await _record_usage(
-        service,
-        guild_id=state.guild_id,
-        channel_id="guild-wide",
-        metered_at=activated_at,
-        passive=passive,
-        responses=dispatched_responses,
-        operation="agent",
-        usage_by_model=result.usage_by_model,
-    )
+                log_exception(logger, "failed to persist watch instructions")
+    finally:
+        # Reported even when sending or saving fails: the model was billed.
+        await _record_usage(
+            service,
+            guild_id=state.guild_id,
+            channel_id="guild-wide",
+            metered_at=activated_at,
+            passive=passive,
+            responses=dispatched_responses,
+            operation="agent",
+            usage_by_model=result.usage_by_model,
+        )
     logger.info(
         "proactive guild agent guild=%s responses=%d message_parts=%d reactions=%d "
         "tokens_in=%d tokens_out=%d",
@@ -1701,9 +1797,27 @@ async def _compact_idle_guild(
             compacted = note_pair
             outcome = "tail dropped"
         else:
-            compacted = await fold_whole_history(
-                history, summarize=run.compaction_summarize
-            )
+            spent: dict[str, dict] = {}
+            token = _compaction_spent.set(spent)
+            try:
+                compacted = await fold_whole_history(
+                    history, summarize=run.compaction_summarize
+                )
+            finally:
+                _compaction_spent.reset(token)
+                # Billed like a wake's: one report under the agent operation.
+                service = run.settings_service()
+                if service is not None:
+                    await _record_usage(
+                        service,
+                        guild_id=str(guild_id),
+                        channel_id="guild-wide",
+                        metered_at=datetime.now(UTC),
+                        passive=True,
+                        responses=0,
+                        operation="agent",
+                        usage_by_model=spent,
+                    )
             outcome = "folded"
         if await store.read_guild_raw(guild_id) != raw:
             return "written since"

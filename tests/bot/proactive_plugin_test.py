@@ -1651,7 +1651,7 @@ async def test_compaction_times_out_and_falls_back_to_skim(monkeypatch):
     )
 
     class _FallbackSkim:
-        async def skim(self, text):
+        async def skim(self, text, meter=None):
             return "skim summary", {"input_tokens": 1, "output_tokens": 1}
 
     monkeypatch.setattr(runtime, "skim", lambda: _FallbackSkim())
@@ -1659,7 +1659,7 @@ async def test_compaction_times_out_and_falls_back_to_skim(monkeypatch):
     assert await runner.summarize(_COMPACTION_MESSAGES) == "skim summary"
 
     class _HangingSkim:
-        async def skim(self, text):
+        async def skim(self, text, meter=None):
             await asyncio.sleep(3600)
 
     monkeypatch.setattr(runtime, "skim", lambda: _HangingSkim())

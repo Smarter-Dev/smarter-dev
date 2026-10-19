@@ -23,7 +23,9 @@ from smarter_dev.bot.agents.mod_tools import create_moderation_tools
 from smarter_dev.bot.agents.models import DiscordMessage
 from smarter_dev.bot.agents.utility_model import build_utility_agent
 from smarter_dev.bot.agents.utility_model import render_inputs
+from smarter_dev.bot.agents.utility_model import utility_metered
 from smarter_dev.shared.exception_logging import log_exception
+from smarter_dev.shared.usage_meter import UsageMeter
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +136,9 @@ def get_follow_up_agent() -> Agent[None, FollowUpMessage]:
     return _follow_up_agent
 
 
-async def _enforce_channel_message(tracker: ActionTracker, assessment: str) -> None:
+async def _enforce_channel_message(
+    tracker: ActionTracker, assessment: str, meter: UsageMeter
+) -> None:
     """Generate a channel message when the agent took actions but didn't send one."""
     # Build a summary of what was done
     parts = []
@@ -147,8 +151,10 @@ async def _enforce_channel_message(tracker: ActionTracker, assessment: str) -> N
     actions_summary = "\n".join(parts) if parts else "Actions were taken."
 
     try:
-        result = await get_follow_up_agent().run(
-            render_inputs(actions_summary=actions_summary, assessment=assessment)
+        agent = get_follow_up_agent()
+        result = await agent.run(
+            render_inputs(actions_summary=actions_summary, assessment=assessment),
+            model=meter.wrap(agent.model),
         )
         tracker.channel_message = result.output.message.strip()
     except Exception:
@@ -214,28 +220,36 @@ async def run_moderation_agent(
     context_text = format_context_messages(context_messages)
 
     try:
-        result = await get_moderation_agent().run(
-            render_inputs(
-                conversation_context=context_text,
-                trigger_message=trigger_message_content,
-                trigger_author=trigger_author,
-                guild_instructions=guild_instructions
-                or "Use your best judgment to moderate fairly.",
-            ),
-            toolsets=[FunctionToolset(tools)],
-            usage_limits=UsageLimits(request_limit=MAX_TRIAGE_REQUESTS),
-        )
-
-        assessment = result.output.assessment
-
-        # Enforce: if actions were taken, a channel message MUST be sent.
-        # Give the agent one more turn with only send_mod_message available.
-        if tracker.has_actions and not tracker.channel_message:
-            logger.warning(
-                f"Agent took actions but didn't send a channel message for guild {guild_id}. "
-                "Running follow-up to generate message."
+        # Triage and its follow-up are one ledger operation; every request
+        # either makes is reported, a run cut off by the request limit or an
+        # error included (the block sees the exception before the handler below).
+        async with utility_metered(
+            "moderation_triage", guild_id=guild_id, channel_id=channel_id
+        ) as meter:
+            agent = get_moderation_agent()
+            result = await agent.run(
+                render_inputs(
+                    conversation_context=context_text,
+                    trigger_message=trigger_message_content,
+                    trigger_author=trigger_author,
+                    guild_instructions=guild_instructions
+                    or "Use your best judgment to moderate fairly.",
+                ),
+                model=meter.wrap(agent.model),
+                toolsets=[FunctionToolset(tools)],
+                usage_limits=UsageLimits(request_limit=MAX_TRIAGE_REQUESTS),
             )
-            await _enforce_channel_message(tracker, assessment)
+
+            assessment = result.output.assessment
+
+            # Enforce: if actions were taken, a channel message MUST be sent.
+            # Give the agent one more turn with only send_mod_message available.
+            if tracker.has_actions and not tracker.channel_message:
+                logger.warning(
+                    f"Agent took actions but didn't send a channel message for guild {guild_id}. "
+                    "Running follow-up to generate message."
+                )
+                await _enforce_channel_message(tracker, assessment, meter)
 
         logger.info(
             f"Moderation triage completed for guild {guild_id}: {assessment[:100]}..."

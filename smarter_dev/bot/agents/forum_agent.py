@@ -14,6 +14,7 @@ from smarter_dev.bot.agents.base import BaseAgent
 from smarter_dev.bot.agents.utility_model import build_utility_agent
 from smarter_dev.bot.agents.utility_model import render_inputs
 from smarter_dev.bot.agents.utility_model import tokens_used
+from smarter_dev.bot.agents.utility_model import utility_metered
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +255,10 @@ class ForumMonitorAgent(BaseAgent):
         post_content: str,
         author_display_name: str,
         post_tags: list[str] | None = None,
-        attachment_names: list[str] | None = None
+        attachment_names: list[str] | None = None,
+        *,
+        guild_id: str | None = None,
+        channel_id: str | None = None,
     ) -> tuple[str, float, str, int]:
         """Evaluate a forum post and generate response if warranted.
 
@@ -265,6 +269,7 @@ class ForumMonitorAgent(BaseAgent):
             author_display_name: Display name of the post author
             post_tags: List of tags on the post
             attachment_names: List of attachment filenames
+            guild_id, channel_id: The post's guild and forum, for the usage ledger
 
         Returns:
             Tuple[str, float, str, int]: Decision reason, confidence score, response content, tokens used
@@ -273,9 +278,14 @@ class ForumMonitorAgent(BaseAgent):
             post_title, post_content, author_display_name, post_tags, attachment_names
         )
 
-        result = await get_forum_monitor_agent().run(
-            render_inputs(system_prompt=system_prompt, post_context=post_context)
-        )
+        agent = get_forum_monitor_agent()
+        async with utility_metered(
+            "forum_agent", guild_id=guild_id, channel_id=channel_id
+        ) as meter:
+            result = await agent.run(
+                render_inputs(system_prompt=system_prompt, post_context=post_context),
+                model=meter.wrap(agent.model),
+            )
         evaluation = result.output
 
         return (
@@ -292,7 +302,10 @@ class ForumMonitorAgent(BaseAgent):
         post_content: str,
         author_display_name: str,
         post_tags: list[str] | None = None,
-        attachment_names: list[str] | None = None
+        attachment_names: list[str] | None = None,
+        *,
+        guild_id: str | None = None,
+        channel_id: str | None = None,
     ) -> tuple[list[str], int]:
         """Classify a forum post into notification topics only (no response generation).
 
@@ -303,6 +316,7 @@ class ForumMonitorAgent(BaseAgent):
             author_display_name: Display name of the post author
             post_tags: List of tags on the post
             attachment_names: List of attachment filenames
+            guild_id, channel_id: The post's guild and forum, for the usage ledger
 
         Returns:
             Tuple[List[str], int]: Matching topic names, tokens used
@@ -311,12 +325,17 @@ class ForumMonitorAgent(BaseAgent):
             post_title, post_content, author_display_name, post_tags, attachment_names
         )
 
-        result = await get_forum_topic_classifier_agent().run(
-            render_inputs(
-                available_topics=json.dumps(available_topics),
-                post_context=post_context,
+        agent = get_forum_topic_classifier_agent()
+        async with utility_metered(
+            "forum_agent", guild_id=guild_id, channel_id=channel_id
+        ) as meter:
+            result = await agent.run(
+                render_inputs(
+                    available_topics=json.dumps(available_topics),
+                    post_context=post_context,
+                ),
+                model=meter.wrap(agent.model),
             )
-        )
 
         return (
             _available(result.output.matching_topics, available_topics),
@@ -331,7 +350,10 @@ class ForumMonitorAgent(BaseAgent):
         post_content: str,
         author_display_name: str,
         post_tags: list[str] | None = None,
-        attachment_names: list[str] | None = None
+        attachment_names: list[str] | None = None,
+        *,
+        guild_id: str | None = None,
+        channel_id: str | None = None,
     ) -> tuple[str, float, str, list[str], int]:
         """Evaluate a forum post for both response generation AND topic classification.
 
@@ -343,6 +365,7 @@ class ForumMonitorAgent(BaseAgent):
             author_display_name: Display name of the post author
             post_tags: List of tags on the post
             attachment_names: List of attachment filenames
+            guild_id, channel_id: The post's guild and forum, for the usage ledger
 
         Returns:
             Tuple[str, float, str, List[str], int]: Decision reason, confidence score, response content, matching topics, tokens used
@@ -351,13 +374,18 @@ class ForumMonitorAgent(BaseAgent):
             post_title, post_content, author_display_name, post_tags, attachment_names
         )
 
-        result = await get_forum_combined_agent().run(
-            render_inputs(
-                system_prompt=system_prompt,
-                available_topics=json.dumps(available_topics),
-                post_context=post_context,
+        agent = get_forum_combined_agent()
+        async with utility_metered(
+            "forum_agent", guild_id=guild_id, channel_id=channel_id
+        ) as meter:
+            result = await agent.run(
+                render_inputs(
+                    system_prompt=system_prompt,
+                    available_topics=json.dumps(available_topics),
+                    post_context=post_context,
+                ),
+                model=meter.wrap(agent.model),
             )
-        )
         evaluation = result.output
 
         return (

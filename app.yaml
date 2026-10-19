@@ -94,6 +94,7 @@ controllers:
   - smarter_dev.web.api_native.proactive_settings:ProactiveGuildSettingsController
   - smarter_dev.web.api_native.proactive_settings:ProactiveChannelSettingsController
   - smarter_dev.web.api_native.proactive_settings:ProactiveAgentHistoryController
+  - smarter_dev.web.api_native.bot_usage:BotUsageController
   - smarter_dev.web.api_native.privacy:PrivacyController
   - smarter_dev.web.api_native.site_privacy:SitePrivacyController
   - smarter_dev.web.api_native.site_billing:SiteBillingController

@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
 
+from smarter_dev.bot.services.usage_reporter import metered
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_router import agent_retries_for
@@ -126,10 +127,20 @@ def get_image_prompt_reviewer() -> Agent[None, ImagePromptDecision]:
     return _reviewer_agent
 
 
-async def review_image_prompt(prompt: str) -> ImagePromptDecision:
-    """Approve or reject a proposed image ``prompt`` per the technical-only policy."""
+async def review_image_prompt(
+    prompt: str, *, usage_fields: dict | None = None
+) -> ImagePromptDecision:
+    """Approve or reject a proposed image ``prompt`` per the technical-only policy.
+
+    The review goes to the usage ledger as ``chat_image_prompt_review``,
+    attributed by ``usage_fields`` (``metered``'s guild_id / channel_id /
+    engagement_id).
+    """
     agent = get_image_prompt_reviewer()
-    result = await agent.run(f"IMAGE PROMPT TO REVIEW:\n{prompt}")
+    async with metered("chat_image_prompt_review", **(usage_fields or {})) as meter:
+        result = await agent.run(
+            f"IMAGE PROMPT TO REVIEW:\n{prompt}", model=meter.wrap(agent.model)
+        )
     logger.info(
         "review_image_prompt: approved=%s prompt=%r",
         result.output.approved,

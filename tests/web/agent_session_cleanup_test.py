@@ -379,3 +379,101 @@ async def test_a_failed_delete_is_left_to_the_hourly_job(monkeypatch, caplog):
     await forget_agent_sessions(["abc"])
 
     assert "the hourly retention job will" in caplog.text
+
+
+def _billed_then_broken(usage):
+    """A model that answers once (billed ``usage``) with a call to a tool that
+    does not exist, then fails every request after: the run raises, but the
+    provider billed the first response."""
+    from pydantic_ai.exceptions import ModelHTTPError
+    from pydantic_ai.messages import ModelResponse
+    from pydantic_ai.messages import ToolCallPart
+    from pydantic_ai.models.function import FunctionModel
+
+    def reply(messages, info):
+        if len(messages) == 1:
+            return ModelResponse(
+                parts=[ToolCallPart("no_such_tool", {})],
+                usage=usage,
+                model_name="claude-haiku-5-5",
+            )
+        raise ModelHTTPError(500, "claude-haiku-5-5")
+
+    return FunctionModel(reply, model_name="claude-haiku-5-5")
+
+
+async def test_a_failed_titles_billed_request_is_recorded(skrift_runtime, db_session):
+    """#211: Skrift keeps a dead turn's failed-run responses but never adds
+    their usage to the turn; the provider billed them, so the ledger has
+    them, each priced on its own (150K bills Haiku's 5x tier)."""
+    from pydantic_ai.usage import RequestUsage
+
+    from smarter_dev.web.llm_pricing import calc_cost
+
+    model = _billed_then_broken(RequestUsage(input_tokens=150_000, output_tokens=10))
+    with title_agent.title_agent.materialized.override(model=model):
+        assert (
+            await title_agent.generate_title(
+                _QUESTION, actor=str(uuid4()), conversation_id=uuid4()
+            )
+            is None
+        )
+
+    db_session.expire_all()
+    rows = (await db_session.scalars(select(UsageCostRow))).all()
+    assert rows, "a failed run's billed request was not recorded"
+    for row in rows:
+        assert (row.input_tokens, row.output_tokens) == (150_000, 10)
+        assert row.cost_usd == calc_cost(150_000, 10, "claude-haiku-5-5") * 5
+        assert row.details.get("failed") is True
+        assert (row.product_mode, row.operation_type) == ("resources", "resource_title")
+
+
+def test_an_abandoned_attempt_after_a_pause_prices_each_request():
+    """A turn that paused records its first run; a later run fails, and the
+    dying turn keeps that run's responses after the recorded ones. Each
+    recorded request keeps its tier and the failed ones are billed too."""
+    from decimal import Decimal
+
+    from skrift.agents.models import AgentUsageRecord
+
+    from smarter_dev.shared.model_catalog import get_model
+    from smarter_dev.shared.request_usage import RequestTokens
+    from smarter_dev.web.agent_session_cleanup import turn_billing
+    from smarter_dev.web.chat.usage import usage_cost_by_request
+
+    haiku = get_model("claude-haiku-5-5")
+
+    def response(input_tokens, output_tokens):
+        return {
+            "kind": "response",
+            "model_name": "claude-haiku-5-5",
+            "usage": {"input_tokens": input_tokens, "output_tokens": output_tokens},
+        }
+
+    record = AgentUsageRecord(
+        input_tokens=150_000,
+        output_tokens=10,
+        session_id="s",
+        turn_id="t",
+        agent_name="a",
+        configured_model="anthropic:claude-haiku-5-5",
+    )
+    paused_run = [response(150_000, 10)]
+    failed_run = [response(40_000, 5), response(41_000, 6)]
+
+    billed = turn_billing(haiku, record, paused_run + failed_run)
+
+    assert billed.tokens == RequestTokens(231_000, 21)
+    expected = usage_cost_by_request(
+        haiku, RequestTokens(150_000, 10), [RequestTokens(150_000, 10)]
+    ) + usage_cost_by_request(
+        haiku,
+        RequestTokens(81_000, 11),
+        [RequestTokens(40_000, 5), RequestTokens(41_000, 6)],
+    )
+    assert billed.cost == expected
+    # Before #211 the over-counted responses tripped the guard and the
+    # recorded 150K request lost its tier.
+    base = usage_cost_by_request(haiku, RequestTokens(150_000, 10), [])
+    assert billed.cost > base * 5 > Decimal("0")

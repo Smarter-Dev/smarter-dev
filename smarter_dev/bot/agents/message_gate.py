@@ -20,7 +20,9 @@ replaced GPT-6 Luna here (Luna had replaced GPT-5.4 Nano on 2026-09-24);
 The gate is deliberately fail-open: a Jev error, timeout or missing key returns
 every candidate rather than silencing the bot, since a wasted expensive reply
 is far cheaper than a channel that stops answering. It also short-circuits (no
-model call) when there is nothing to judge or no filter to apply.
+model call) when there is nothing to judge or no filter to apply. Every gate
+call is metered to the usage ledger as ``chat_message_gate``, a failed or
+timed-out one too.
 """
 
 from __future__ import annotations
@@ -36,7 +38,9 @@ from pydantic import create_model
 from pydantic_ai import Agent
 from pydantic_ai.models import Model
 
+from smarter_dev.bot.services.usage_reporter import metered
 from smarter_dev.shared.exception_logging import log_exception
+from smarter_dev.shared.usage_meter import UsageMeter
 
 logger = logging.getLogger(__name__)
 
@@ -170,17 +174,26 @@ async def judge_messages(
     model: Model | None = None,
     boolean_threshold: float = GATE_BOOLEAN_THRESHOLD,
     timeout_seconds: float | None = None,
+    meter: UsageMeter | None = None,
 ) -> GateJudgment:
     """Ask Jev about every candidate in one request; errors propagate.
 
     ``allowed_ids`` follow candidate order. ``model`` defaults to the gate's
     Jev model and ``timeout_seconds`` to ``GATE_TIMEOUT_SECONDS``; the quality
-    eval passes its own.
+    eval passes its own. A ``meter`` records every response the run gets.
     """
     if timeout_seconds is None:
         timeout_seconds = GATE_TIMEOUT_SECONDS
+    if model is None:
+        model = get_gate_model()
+        if meter is not None:
+            # TypeSafeModel names itself by the bare id; the ledger prices
+            # and attributes Jev by the provider-prefixed one.
+            model = meter.wrap(model, model_name=GATE_MODEL_ID)
+    elif meter is not None:
+        model = meter.wrap(model)
     agent = Agent(
-        model or get_gate_model(),
+        model,
         output_type=build_judgment_model(candidates),
         retries=0,
     )
@@ -216,6 +229,9 @@ async def filter_messages(
     candidates: list[GateMessage],
     grounding: list[GateMessage],
     channel_name: str | None = None,
+    *,
+    guild_id: int | str | None = None,
+    channel_id: int | str | None = None,
 ) -> list[str]:
     """Return the candidate message ids the ``response_filter`` allows.
 
@@ -223,6 +239,7 @@ async def filter_messages(
     ``[]`` without a model call, and an empty/whitespace ``response_filter``
     allows every candidate without a model call. ``channel_name`` — for a forum
     post or thread, its title — is extra interpretive context and may be None.
+    ``guild_id`` and ``channel_id`` attribute the call's spend in the ledger.
     Any failure — building the model, the request, a timeout — is logged and
     fails open, returning every candidate id, so a Jev outage never silences
     the bot. Cancellation is not a failure: it propagates.
@@ -233,9 +250,12 @@ async def filter_messages(
     if not response_filter.strip():
         return candidate_ids
     try:
-        judgment = await judge_messages(
-            response_filter, candidates, grounding, channel_name
-        )
+        async with metered(
+            "chat_message_gate", guild_id=guild_id, channel_id=channel_id
+        ) as meter:
+            judgment = await judge_messages(
+                response_filter, candidates, grounding, channel_name, meter=meter
+            )
     except Exception:
         log_exception(
             logger,

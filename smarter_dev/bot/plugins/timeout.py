@@ -14,6 +14,7 @@ from pydantic_ai import Agent
 
 from smarter_dev.bot.agents.utility_model import build_utility_agent
 from smarter_dev.bot.agents.utility_model import render_inputs
+from smarter_dev.bot.agents.utility_model import utility_metered
 from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.crud import ModerationActionOperations
@@ -82,16 +83,32 @@ def format_duration(duration: timedelta) -> str:
 
 
 async def generate_timeout_message(
-    user_mention: str, raw_reason: str, duration_display: str
+    user_mention: str,
+    raw_reason: str,
+    duration_display: str,
+    *,
+    moderator_id: int | str | None = None,
+    guild_id: int | str | None = None,
+    channel_id: int | str | None = None,
 ) -> str:
-    """Rewrite the moderator's reason as a polite public announcement."""
-    result = await get_timeout_message_agent().run(
-        render_inputs(
-            user_mention=user_mention,
-            raw_reason=raw_reason,
-            duration=duration_display,
+    """Rewrite the moderator's reason as a polite public announcement.
+
+    The run's spend is the moderator's, in the channel the command ran in."""
+    agent = get_timeout_message_agent()
+    async with utility_metered(
+        "timeout_message",
+        discord_user_id=moderator_id,
+        guild_id=guild_id,
+        channel_id=channel_id,
+    ) as meter:
+        result = await agent.run(
+            render_inputs(
+                user_mention=user_mention,
+                raw_reason=raw_reason,
+                duration=duration_display,
+            ),
+            model=meter.wrap(agent.model),
         )
-    )
     return result.output.polite_message.strip()
 
 
@@ -228,7 +245,12 @@ async def timeout_user(ctx: lightbulb.Context) -> None:
         try:
             logger.info(f"Starting AI message processing for timeout of {target_user.username}")
             public_message = await generate_timeout_message(
-                target_user.mention, mod_reason, duration_display
+                target_user.mention,
+                mod_reason,
+                duration_display,
+                moderator_id=ctx.author.id,
+                guild_id=guild.id,
+                channel_id=ctx.channel_id,
             )
             logger.info(f"AI generated message: {public_message}")
         except Exception as e:

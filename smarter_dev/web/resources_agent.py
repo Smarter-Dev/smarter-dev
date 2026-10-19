@@ -75,7 +75,7 @@ from smarter_dev.shared.model_catalog import catalog_model_for_id
 from smarter_dev.shared.skrift_models import agent_model_name
 from smarter_dev.shared.skrift_models import agent_model_settings
 from smarter_dev.web.agent_session_cleanup import forget_agent_sessions
-from smarter_dev.web.agent_session_cleanup import session_cost
+from smarter_dev.web.agent_session_cleanup import session_billing
 from smarter_dev.web.research_tools import brave_search
 from smarter_dev.web.research_tools import jina_read
 
@@ -1578,20 +1578,27 @@ async def _capture_stage_usage(
     totals = state.usage_totals
     records = list(state.turn_usage.values())
     latest = records[-1] if records else None
+    # Priced here, from the session's own responses, while it still has them:
+    # a long-context tier is decided per request, not on the stage's total.
+    # A failed run's responses, billed but outside Skrift's totals, count too.
+    billed = session_billing(state)
+    if billed is not None:
+        totals = billed.tokens
     record = {
         "stage": stage,
-        "model_name": latest.configured_model if latest else None,
+        "model_name": (
+            latest.configured_model
+            if latest
+            else (billed.model_name if billed is not None else None)
+        ),
         "provider_name": latest.provider_name if latest else None,
         "input_tokens": totals.input_tokens,
         "output_tokens": totals.output_tokens,
         "cache_read_tokens": totals.cache_read_tokens,
         "cache_write_tokens": totals.cache_write_tokens,
     }
-    # Priced here, from the session's own responses, while it still has them:
-    # a long-context tier is decided per request, not on the stage's total.
-    cost = session_cost(state)
-    if cost is not None:
-        record["cost_usd"] = str(cost)
+    if billed is not None:
+        record["cost_usd"] = str(billed.cost)
     sink.append(record)
     if callback is not None:
         await callback(record, len(sink) - 1)

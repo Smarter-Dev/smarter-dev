@@ -20,6 +20,7 @@ from pydantic_ai import RunContext
 
 from smarter_dev.bot.agents.chat_tools import ChatDeps
 from smarter_dev.bot.agents.chat_tools import _post_status
+from smarter_dev.bot.agents.chat_tools import tool_usage_fields
 from smarter_dev.bot.agents.handler_authoring import run_creation_pipeline
 from smarter_dev.bot.agents.handler_authoring import script_uses_agent
 from smarter_dev.shared.config import get_settings
@@ -129,6 +130,7 @@ async def register_handler(
         existing_handlers=existing_handlers,
         emoji_lister=lambda: _list_guild_emojis(ctx),
         progress=_status,
+        usage_fields=tool_usage_fields(ctx.deps),
     )
     if not result.ok:
         return f"error: {result.error}"

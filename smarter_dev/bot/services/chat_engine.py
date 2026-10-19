@@ -96,6 +96,7 @@ from smarter_dev.bot.services.default_model_override import read_default_model_o
 from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.guild_chat_memory_service import EMPTY_SNAPSHOT
 from smarter_dev.bot.services.guild_chat_memory_service import GuildMemorySnapshot
+from smarter_dev.bot.services.usage_reporter import report_usage
 from smarter_dev.bot.services.user_message_limit import DIRECTED_SCORE_THRESHOLD
 from smarter_dev.bot.services.user_message_limit import format_usage_warning_notice
 from smarter_dev.bot.services.user_message_limit import record_directed_messages
@@ -115,6 +116,8 @@ from smarter_dev.shared.model_catalog import get_model
 from smarter_dev.shared.request_usage import RequestTokens
 from smarter_dev.shared.request_usage import billing_stage
 from smarter_dev.shared.request_usage import usage_tokens
+from smarter_dev.shared.usage_meter import UsageMeter
+from smarter_dev.shared.usage_meter import run_through
 
 logger = logging.getLogger(__name__)
 
@@ -957,12 +960,17 @@ class ChannelEngine:
             writer_usage = RequestTokens()
             writer_messages: list = []
             two_stage_output: TurnDecision | None = None
+            # Every provider response of the turn's runs, so a turn that raises
+            # still bills what the provider charged it (a finished turn's
+            # spend goes with the turn, through persist_turn).
+            turn_meter = UsageMeter()
             try:
                 result = await agent.run(
                     user_prompt=user_prompt,
                     message_history=message_history,
                     deps=deps,
                     usage_limits=TURN_USAGE_LIMITS,
+                    **run_through(turn_meter, agent),
                 )
                 if two_stage:
                     (
@@ -976,8 +984,23 @@ class ChannelEngine:
                         long_term_memory=self._long_term_memory,
                         behavior=self._behavior,
                         personality=self._personality,
+                        meter=turn_meter,
                     )
             except Exception as error:
+                report_usage(
+                    turn_meter,
+                    operation_type="chat_turn_failed",
+                    failed=True,
+                    guild_id=self.guild_id,
+                    channel_id=self.channel_id,
+                    engagement_id=self.engagement_id,
+                    discord_user_id=(
+                        self.activation_message.author.id
+                        if self.activation_message is not None
+                        else None
+                    ),
+                    reasoning_level=resolved_reasoning_wire,
+                )
                 # Even a failed run (probably) hit the model — later turns
                 # inside the cache TTL should read warm.
                 self._last_model_call_at = datetime.now(UTC)
@@ -1053,8 +1076,8 @@ class ChannelEngine:
             # the shorten re-run spends chat-model tokens, so they're folded into
             # this turn's metering and persisted totals. Two-stage's tool-less
             # primary WRITER has no ``response``-shaped agent to re-run, so it goes
-            # straight to the summarizer (then truncation) — its spend is
-            # logged but not metered, so it adds no extra tokens.
+            # straight to the summarizer (then truncation) — its spend goes to
+            # the usage ledger as the bot's own, so it adds no extra tokens.
             fit_extra_input = 0
             fit_extra_output = 0
             fit_extra_cache_read = 0
@@ -1064,20 +1087,36 @@ class ChannelEngine:
             # history below — without them the turn record simply omits a run
             # that can call tools and outspend the main one.
             fit_extra_messages: list = []
+            fit_failed_requests: list = []
             if (
                 output.response is not None
                 and output.response.message
                 and len(output.response.message) > SUMMARIZE_THRESHOLD
                 and not has_latex_section(output.response.message)
             ):
+                # The summarizer's own spend goes to the usage ledger as the
+                # bot's, attributed to this engagement.
+                fit_usage = {
+                    "guild_id": self.guild_id,
+                    "channel_id": self.channel_id,
+                    "engagement_id": self.engagement_id,
+                    "discord_user_id": (
+                        self.activation_message.author.id
+                        if self.activation_message is not None
+                        else None
+                    ),
+                }
                 if two_stage:
-                    fit = await fit_writer_message(output.response.message)
+                    fit = await fit_writer_message(
+                        output.response.message, usage_fields=fit_usage
+                    )
                 else:
                     fit = await fit_overlong_response(
                         output.response.message,
                         agent=agent,
                         deps=deps,
                         message_history=list(result.all_messages()),
+                        usage_fields=fit_usage,
                     )
                 logger.info(
                     "[%s] Overlong reply (%d chars) fitted via %s to %d chars",
@@ -1098,6 +1137,7 @@ class ChannelEngine:
                 fit_extra_cache_read = fit.extra_cache_read_tokens
                 fit_extra_cache_write = fit.extra_cache_write_tokens
                 fit_extra_messages = list(fit.extra_messages)
+                fit_failed_requests = list(fit.extra_failed_requests)
                 tokens += fit_extra_input + fit_extra_output
             # Meter this turn's chat tokens against the channel's usage windows.
             # Every channel is metered (so ``/bot-usage`` always has numbers);
@@ -1219,6 +1259,7 @@ class ChannelEngine:
                                 main_usage.cache_write_tokens + fit_extra_cache_write,
                             ),
                             [*result.new_messages(), *fit_extra_messages],
+                            fit_failed_requests,
                         )
                     ]
 
@@ -1847,6 +1888,7 @@ class ChannelEngine:
         long_term_memory: str | None = None,
         behavior: str | None = None,
         personality: str | None = None,
+        meter: UsageMeter | None = None,
     ) -> tuple[TurnDecision, RequestTokens, list]:
         """Assemble a two-stage turn's output: run the tool-less primary WRITER on
         the DRAFTER's brief and fold its message into a ``TurnDecision`` the
@@ -1885,7 +1927,8 @@ class ChannelEngine:
                     long_term=long_term_memory,
                     behavior=behavior,
                     personality=personality,
-                )
+                ),
+                **run_through(meter, writer_agent),
             )
             writer_output_body = writer_result.output
             writer_usage = usage_tokens(writer_result.usage)
@@ -2098,6 +2141,8 @@ class ChannelEngine:
                 candidate_messages,
                 grounding,
                 channel_name=channel_name,
+                guild_id=self.guild_id,
+                channel_id=self.channel_id,
             )
         except Exception:
             log_exception(

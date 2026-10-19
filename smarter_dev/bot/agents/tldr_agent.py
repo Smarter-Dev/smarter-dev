@@ -13,6 +13,7 @@ from smarter_dev.bot.agents.base import BaseAgent
 from smarter_dev.bot.agents.models import DiscordMessage
 from smarter_dev.bot.agents.utility_model import build_utility_agent
 from smarter_dev.bot.agents.utility_model import tokens_used
+from smarter_dev.bot.agents.utility_model import utility_metered
 
 logger = logging.getLogger(__name__)
 
@@ -218,13 +219,19 @@ class TLDRAgent(BaseAgent):
     async def generate_summary_async(
         self,
         messages: list[DiscordMessage],
-        max_context_tokens: int = 15000
+        max_context_tokens: int = 15000,
+        *,
+        user_id: int | str | None = None,
+        guild_id: int | str | None = None,
+        channel_id: int | str | None = None,
     ) -> tuple[str, int, int]:
         """Generate a TLDR summary of Discord messages.
 
         Args:
             messages: List of Discord messages to summarize
             max_context_tokens: Maximum tokens to use for context
+            user_id, guild_id, channel_id: Who asked and where, for the usage
+                ledger
 
         Returns:
             Tuple[str, int, int]: Summary text, token usage, messages actually summarized
@@ -238,7 +245,16 @@ class TLDRAgent(BaseAgent):
             return ("**Channel Summary**\nNo messages found to summarize. The channel might be empty or contain only bot messages.\n\n*(Summarized 0 messages)*", 0, 0)
 
         try:
-            result = await get_tldr_agent().run(formatted_messages)
+            agent = get_tldr_agent()
+            async with utility_metered(
+                "tldr_agent",
+                discord_user_id=user_id,
+                guild_id=guild_id,
+                channel_id=channel_id,
+            ) as meter:
+                result = await agent.run(
+                    formatted_messages, model=meter.wrap(agent.model)
+                )
 
             # Inject the actual message count into the summary
             summary_with_count = f"{result.output.summary.strip()}\n\n*(Summarized {messages_used} messages)*"

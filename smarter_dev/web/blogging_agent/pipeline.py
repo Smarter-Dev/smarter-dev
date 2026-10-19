@@ -7,6 +7,12 @@ admin UI can replay/subscribe to Skrift's native event log for the audit
 view. When the run ends, the run state of every stage and of the sub-agents
 they dispatched goes; their event streams, which that view reads, stay until
 the hourly retention job deletes them, 7 days on.
+
+Before the run state goes, every model turn of those sessions is written to the
+usage ledger, and so are the summariser runs inside the stages' read tools
+(which are no session's turns): the site's own
+``resources`` spend, charged to the admin who started the run, with no
+conversation (so no Resources question is counted).
 """
 
 from __future__ import annotations
@@ -25,6 +31,8 @@ from sqlalchemy.pool import NullPool
 
 from smarter_dev.shared.config import get_settings
 from smarter_dev.shared.database import convert_postgres_url_for_asyncpg
+from smarter_dev.shared.usage_meter import UsageMeter
+from smarter_dev.web.agent_session_cleanup import UsageOwner
 from smarter_dev.web.agent_session_cleanup import forget_agent_sessions
 from smarter_dev.web.blogging_agent.brainstorm_agent import (
     BrainstormCandidate,
@@ -54,6 +62,7 @@ from smarter_dev.web.models import (
     AuthoringPipelineRun,
     BlogPostMeta,
 )
+from smarter_dev.web.usage_metering import record_meter_now
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +184,8 @@ async def run_authoring_pipeline(payload: PipelineRunPayload) -> dict:
     cache = register_cache(str(run_id))
     # This attempt's sessions only: an overlapping attempt's are its own.
     started_sessions: list[str] = []
+    attempt = uuid4().hex
+    kicked_off_by: UUID | None = None
 
     try:
         async with Session() as db:
@@ -187,6 +198,7 @@ async def run_authoring_pipeline(payload: PipelineRunPayload) -> dict:
                 # stages again would pay for them twice (#27).
                 logger.warning("pipeline run %s already %s — not rerunning", run_id, run.status)
                 return {"status": run.status, "reason": "already finished"}
+            kicked_off_by = run.kicked_off_by_user_id
             run.status = "running"
             run.started_at = datetime.now(timezone.utc)
             await db.commit()
@@ -287,9 +299,30 @@ async def run_authoring_pipeline(payload: PipelineRunPayload) -> dict:
         await _finalise_failed(Session, run_id, f"{type(exc).__name__}: {exc}")
         return {"status": "failed", "reason": "exception"}
     finally:
+        # Taken, not copied: an overlapping attempt on the same run shares the
+        # cache, and records only what it adds after this.
+        summariser_usage = UsageMeter()
+        summariser_usage.merge(cache.summariser_usage)
+        cache.summariser_usage.clear()
         await drop_cache(str(run_id))
+        await record_meter_now(
+            summariser_usage,
+            operation_key=f"blog_summariser:{run_id}:{attempt}",
+            product_mode="resources",
+            operation_type="blog_summariser",
+            user_id=kicked_off_by,
+            details={"run_id": str(run_id)},
+        )
         await forget_agent_sessions(
-            started_sessions, with_sub_agents=True, keep_events=True
+            started_sessions,
+            with_sub_agents=True,
+            keep_events=True,
+            usage=UsageOwner(
+                product_mode="resources",
+                operation_type="blog_pipeline",
+                user_id=kicked_off_by,
+                conversation_id=None,
+            ),
         )
         await engine.dispose()
 

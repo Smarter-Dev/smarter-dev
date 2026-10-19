@@ -143,16 +143,21 @@ async def test_dispatch_condenses_rather_than_truncating_over_the_threshold(
     bot = _fake_bot()
     condensed = "condensed version of the reply"
 
-    async def fake_fit(message: str):
+    fitted = []
+
+    async def fake_fit(message: str, *, usage_fields=None):
         assert len(message) > SUMMARIZE_THRESHOLD
+        fitted.append(usage_fields)
         return SimpleNamespace(text=condensed, method="summarized")
 
     monkeypatch.setattr(proactive, "fit_writer_message", fake_fit)
 
     sent = await proactive.dispatch_response(
         bot, channel_id=1, content="z" * (SUMMARIZE_THRESHOLD + 500),
-        reply_to_id=None,
+        reply_to_id=None, guild_id="2",
     )
+    # The summarizer's spend is attributed to where the reply goes (#211).
+    assert fitted == [{"guild_id": "2", "channel_id": 1}]
 
     assert sent == 1
     assert bot.rest.create_message.await_args_list[0].args[1] == condensed

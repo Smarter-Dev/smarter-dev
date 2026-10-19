@@ -76,15 +76,23 @@ def response_request_tokens(
 
 
 def billing_stage(
-    model_name: str, total: RequestTokens, messages: Iterable[Any]
+    model_name: str,
+    total: RequestTokens,
+    messages: Iterable[Any],
+    failed_requests: Iterable[RequestTokens] = (),
 ) -> dict:
     """One model run's share of a turn, as a payload dict: the model, the run's
-    totals, and each of its responses' own counts from that model."""
+    totals, and each of its responses' own counts from that model. A run that
+    failed has no messages: *failed_requests* are what it was billed."""
     return {
         "model_name": model_name,
         **total.as_dict(),
         "requests": [
-            tokens.as_dict() for tokens in response_request_tokens(messages, model_name)
+            tokens.as_dict()
+            for tokens in (
+                *response_request_tokens(messages, model_name),
+                *failed_requests,
+            )
         ],
     }
 

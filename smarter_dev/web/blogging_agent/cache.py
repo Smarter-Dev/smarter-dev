@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from smarter_dev.shared.usage_meter import UsageMeter
 from smarter_dev.web.research_tools import RateLimiter, URLRateLimiter
 
 
@@ -22,6 +23,9 @@ class PipelineCache:
     run_id: str
     raw_reads: dict[str, str] = field(default_factory=dict)
     news_summaries: dict[str, str] = field(default_factory=dict)
+    # The summariser's model usage (``summariser.py``): those runs happen
+    # inside the stages' tools, not as Skrift turns, so no session records it.
+    summariser_usage: UsageMeter = field(default_factory=UsageMeter)
     search_rate_limiter: RateLimiter = field(
         default_factory=lambda: RateLimiter(min_delay=5.0)
     )

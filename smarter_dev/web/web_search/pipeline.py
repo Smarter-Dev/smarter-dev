@@ -22,6 +22,7 @@ import httpx
 from sqlalchemy import select
 
 from smarter_dev.shared.database import get_db_session_context
+from smarter_dev.shared.usage_meter import UsageMeter
 from smarter_dev.web.models import WebSearchRun
 from smarter_dev.web.web_search import brave
 from smarter_dev.web.web_search import metering
@@ -106,6 +107,7 @@ async def run_search(run_id: UUID, notify: Notify) -> str:
 
 async def search(run) -> str:
     """Run the search in ``run`` to the end; returns its final status."""
+    from smarter_dev.web.web_search.queries import QUERY_MODEL
     from smarter_dev.web.web_search.queries import plan_queries
     from smarter_dev.web.web_search.ranking import rank
 
@@ -128,14 +130,19 @@ async def search(run) -> str:
 
     await run.update(start)
 
+    meter = UsageMeter()
     try:
-        planned, needs_answer, query_usage = await plan_queries(request)
+        planned, needs_answer, query_usage = await plan_queries(request, meter=meter)
     except Exception as error:  # noqa: BLE001 - shown to the user as a failed search
         # Type only, here and below: error text can echo the request or the
         # Brave URL, which carries the query.
         logger.error(
             "Web search %s: the query model failed (%s)", run_id, type(error).__name__
         )
+        # The responses it got before failing were billed all the same.
+        if meter:
+            spent = metering.failed_usage(meter, QUERY_MODEL)
+            await run.record(lambda row: [metering.model_row(row, spent)])
         return await _fail(run, f"Couldn't plan the searches ({type(error).__name__}).")
     await run.record(lambda row: [metering.model_row(row, query_usage)])
 
@@ -266,15 +273,22 @@ async def _answer(run, request: str, results: list[dict]) -> None:
 
         await run.update(change)
 
+    meter = UsageMeter()
     try:
         markdown, reads, usage = await asyncio.wait_for(
-            answering.write_answer(request, results, progress),
+            answering.write_answer(request, results, progress, meter=meter),
             timeout=ANSWER_TIMEOUT_SECONDS,
         )
     except Exception as error:  # noqa: BLE001 - the results still stand without it
         logger.error(
             "Web search %s: answer failed (%s)", run.run_id, type(error).__name__
         )
+        # The responses it got before failing (or timing out) were billed.
+        if meter:
+            spent = metering.failed_usage(meter, answering.ANSWER_MODEL)
+            await run.record(
+                lambda row: [metering.model_row(row, spent, step="answer")]
+            )
 
         def failed(row: WebSearchRun) -> None:
             row.status = "complete"

@@ -177,7 +177,8 @@ async def generate_help_response(
             channel_id=int(channel_id),
             guild_id=int(guild_id) if guild_id else None,
             trigger_message_id=trigger_message_id,
-            messages_remaining=messages_remaining
+            messages_remaining=messages_remaining,
+            user_id=user_id,
         )
 
         # Calculate response time

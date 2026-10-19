@@ -570,6 +570,11 @@ async def rule(ctx: lightbulb.Context) -> None:
             match_messages,
             target_author_id=target_author_id,
             excluded_author_id=bot_user_id,
+            usage_fields={
+                "discord_user_id": invoker_id,
+                "guild_id": guild.id,
+                "channel_id": ctx.channel_id,
+            },
         )
     except Exception:
         # Tell the invoker something went wrong, then re-raise so the failure is

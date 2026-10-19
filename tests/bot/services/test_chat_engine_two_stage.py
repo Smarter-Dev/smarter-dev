@@ -477,7 +477,12 @@ async def test_two_stage_overlong_writer_reply_is_fitted(fake_memory, fake_redis
     ) as add_usage:
         await engine._run_once(first_activation=True)
 
-    fit_mock.assert_awaited_once_with("z" * 3500)
+    fit_mock.assert_awaited_once()
+    assert fit_mock.await_args.args == ("z" * 3500,)
+    # The summarizer's ledger spend is attributed to this channel's engagement.
+    usage_fields = fit_mock.await_args.kwargs["usage_fields"]
+    assert usage_fields["guild_id"] == engine.guild_id
+    assert usage_fields["channel_id"] == engine.channel_id
     engine.bot.rest.create_message.assert_awaited_once()
     assert (
         engine.bot.rest.create_message.await_args.kwargs["content"] == "fitted reply"

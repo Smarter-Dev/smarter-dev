@@ -39,11 +39,16 @@ from smarter_dev.bot.proactive.environment import WakeActions
 from smarter_dev.bot.proactive.timestamps import utc_timestamp
 from smarter_dev.bot.proactive.types import ProposedReaction
 from smarter_dev.bot.proactive.types import ProposedResponse
+from smarter_dev.bot.proactive.watcher import merge_usage
+from smarter_dev.bot.proactive.watcher import meter_model
+from smarter_dev.bot.proactive.watcher import meter_usage_dict
+from smarter_dev.bot.proactive.watcher import new_messages
 from smarter_dev.bot.proactive.watcher import usage_dict
 from smarter_dev.shared.claude_thinking import drop_other_models_claude_thinking
 from smarter_dev.shared.claude_thinking import strip_claude_thinking
 from smarter_dev.shared.claude_thinking import without_thinking
 from smarter_dev.shared.exception_logging import log_exception
+from smarter_dev.shared.usage_meter import UsageMeter
 
 TOOL_CALL_LIMIT = 8
 MAX_SENDS_PER_WAKE = 2
@@ -635,21 +640,6 @@ names, channel ids and message ids you may need again. This note is for you
 alone."""
 
 
-def agent_usage_dict(usage) -> dict:
-    """:func:`usage_dict` plus cache writes, which only Claude reports.
-
-    Kept apart from the watcher's ``usage_dict``: watcher usage crosses to the
-    proactive-agent worker as a ``TokenUsage``, which forbids extra fields.
-    Cache reads and writes are both subsets of ``input_tokens``.
-    """
-    if callable(usage):
-        usage = usage()
-    return {
-        **usage_dict(usage),
-        "cache_write_tokens": usage.cache_write_tokens or 0,
-    }
-
-
 async def self_compaction_summary(
     model: Model | str, messages: list[ModelMessage]
 ) -> tuple[str, dict]:
@@ -669,7 +659,7 @@ async def self_compaction_summary(
         message_history=without_thinking(messages),
         model_settings={"anthropic_cache_messages": False},
     )
-    return result.output, agent_usage_dict(result.usage)
+    return result.output, usage_dict(result.usage, new_messages(result))
 
 
 async def compact_agent_history(
@@ -789,6 +779,12 @@ class KimiAgentRunner:
     # own turn runs, flagged so the idle sweep can drop the tail without a
     # model call if the wake never writes anything newer.
     on_compacted: Callable[[list[ModelMessage]], Awaitable[None]] | None = None
+    # The agent model's ledger id, under which a failed wake's usage is kept.
+    model_id: str | None = None
+    # Usage spent but not yet returned with a wake, by model: the requests a
+    # wake that raised was billed for. The owner reports and clears it; a
+    # compaction summarize the owner wires up may add its own here too.
+    unreported_usage: dict[str, dict] = field(default_factory=dict)
 
     async def wake(self, brief: str, deps: AgentDeps) -> tuple[str, dict]:
         compacted = await compact_agent_history(
@@ -804,6 +800,21 @@ class KimiAgentRunner:
         sent = drop_other_models_claude_thinking(
             self.history, getattr(model, "model_name", None)
         )
-        result = await self.agent.run(brief, deps=deps, message_history=sent or None)
+        meter = UsageMeter()
+        try:
+            result = await self.agent.run(
+                brief,
+                deps=deps,
+                message_history=sent or None,
+                **meter_model(meter, self.agent),
+            )
+        except BaseException:
+            if meter:
+                merge_usage(
+                    self.unreported_usage,
+                    self.model_id or getattr(model, "model_name", "unknown"),
+                    meter_usage_dict(meter),
+                )
+            raise
         self.history = [*self.history, *result.new_messages()]
-        return result.output, agent_usage_dict(result.usage)
+        return result.output, usage_dict(result.usage, new_messages(result))

@@ -23,6 +23,8 @@ from pydantic_ai import Agent
 from pydantic_ai import RunContext
 
 from smarter_dev.shared.request_usage import response_request_tokens
+from smarter_dev.shared.usage_meter import UsageMeter
+from smarter_dev.shared.usage_meter import run_through
 
 # Claude Haiku 5.5 since 2026-10-17 (#199), replacing GPT-6 Luna.
 ANSWER_MODEL = os.getenv("WEB_SEARCH_ANSWER_MODEL", "claude-haiku-5-5")
@@ -212,11 +214,13 @@ async def write_answer(
     request: str,
     results: list[dict],
     on_progress: Callable[[list[Read], str], Awaitable[None]],
+    meter: UsageMeter | None = None,
 ) -> tuple[str, list[Read], dict]:
     """The answer's Markdown, the pages read, and the run's usage.
 
     ``on_progress(reads, text_so_far)`` runs whenever a read starts or ends and
-    as the answer text streams in."""
+    as the answer text streams in. *meter* keeps each response's counts as it
+    arrives, for the caller to bill if the run raises or times out."""
     from pydantic_ai.messages import FunctionToolCallEvent
     from pydantic_ai.messages import PartDeltaEvent
     from pydantic_ai.messages import PartStartEvent
@@ -243,8 +247,12 @@ async def write_answer(
         deps = AnswerDeps(
             request=request, results=results, client=client, on_progress=progress
         )
-        run = await build_answer_agent().run(
-            material(request, results), deps=deps, event_stream_handler=stream
+        agent = build_answer_agent()
+        run = await agent.run(
+            material(request, results),
+            deps=deps,
+            event_stream_handler=stream,
+            **run_through(meter, agent),
         )
     usage = run.usage() if callable(run.usage) else run.usage
     return run.output.strip(), deps.reads, {

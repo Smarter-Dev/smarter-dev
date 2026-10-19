@@ -14,6 +14,7 @@ from smarter_dev.bot.agents.base import BaseAgent
 from smarter_dev.bot.agents.utility_model import build_utility_agent
 from smarter_dev.bot.agents.utility_model import render_inputs
 from smarter_dev.bot.agents.utility_model import tokens_used
+from smarter_dev.bot.agents.utility_model import utility_metered
 
 logger = logging.getLogger(__name__)
 
@@ -224,7 +225,8 @@ class HelpAgent(BaseAgent):
         channel_id: int,
         guild_id: int | None = None,
         trigger_message_id: int | None = None,
-        messages_remaining: int = 10
+        messages_remaining: int = 10,
+        user_id: int | str | None = None,
     ) -> tuple[str, int]:
         """Generate a helpful response to a user's question.
 
@@ -235,6 +237,7 @@ class HelpAgent(BaseAgent):
             guild_id: Guild ID for user/role information
             trigger_message_id: Message ID that triggered this response
             messages_remaining: Number of help messages user can send after this one
+            user_id: Discord user asking, for the usage ledger
 
         Returns:
             Tuple[str, int]: Generated response and token usage count
@@ -245,16 +248,24 @@ class HelpAgent(BaseAgent):
         context_builder = ConversationContextBuilder(bot, guild_id)
         context = await context_builder.build_context(channel_id, trigger_message_id)
 
-        result = await get_help_agent().run(
-            render_inputs(
-                conversation_timeline=context["conversation_timeline"],
-                users=json.dumps(context["users"], default=str),
-                channel=json.dumps(context["channel"], default=str),
-                me=json.dumps(context["me"], default=str),
-                user_question=user_question,
-                messages_remaining=messages_remaining,
+        agent = get_help_agent()
+        async with utility_metered(
+            "help_agent",
+            discord_user_id=user_id,
+            guild_id=guild_id,
+            channel_id=channel_id,
+        ) as meter:
+            result = await agent.run(
+                render_inputs(
+                    conversation_timeline=context["conversation_timeline"],
+                    users=json.dumps(context["users"], default=str),
+                    channel=json.dumps(context["channel"], default=str),
+                    me=json.dumps(context["me"], default=str),
+                    user_question=user_question,
+                    messages_remaining=messages_remaining,
+                ),
+                model=meter.wrap(agent.model),
             )
-        )
 
         # Validate response length for Discord
         response = self._validate_response_length(result.output.response.strip())

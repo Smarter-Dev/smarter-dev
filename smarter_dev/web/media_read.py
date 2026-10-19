@@ -17,6 +17,8 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+from contextvars import ContextVar
+from typing import TYPE_CHECKING
 
 import httpx
 
@@ -33,11 +35,18 @@ from smarter_dev.shared.media_reads import read_body
 from smarter_dev.shared.media_reads import too_large_to_send
 from smarter_dev.web.research_tools import jina_read
 
+if TYPE_CHECKING:
+    from smarter_dev.shared.usage_meter import UsageMeter
+
 logger = logging.getLogger(__name__)
 
 MAX_READ_CHARS = 100_000
 MAX_FETCH_BYTES = MAX_DOWNLOAD_BYTES  # don't download enormous files to read them
 CACHE_TTL_SECONDS = 60 * 60
+
+# Where a describe's model usage is kept, set by the caller around a read (the
+# handler agent's web_read); a cached read costs nothing and adds nothing.
+media_meter: ContextVar[UsageMeter | None] = ContextVar("media_meter", default=None)
 
 # Extension -> media type, trusting the extension over the server's Content-Type
 # (CDNs are unreliable for media, e.g. serving .ogg as video/ogg).
@@ -214,8 +223,11 @@ async def _describe_media(
             return str(too_large)
         if note:
             prompt += f"\n\nNOTE: {note}"
+    meter = media_meter.get()
+    run_options = {"model": meter.wrap(agent.model)} if meter is not None else {}
     result = await agent.run(
-        [prompt, *(BinaryContent(data=part, media_type=mt) for part, mt in parts)]
+        [prompt, *(BinaryContent(data=part, media_type=mt) for part, mt in parts)],
+        **run_options,
     )
     return str(result.output)
 

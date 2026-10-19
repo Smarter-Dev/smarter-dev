@@ -56,7 +56,23 @@
         "properties": {
           "input_tokens": {"type": "integer", "minimum": 0},
           "output_tokens": {"type": "integer", "minimum": 0},
-          "cache_read_tokens": {"type": "integer", "minimum": 0}
+          "cache_read_tokens": {"type": "integer", "minimum": 0},
+          "cache_write_tokens": {"type": "integer", "minimum": 0},
+          "requests": {
+            "description": "Each provider request's own counts, for per-request pricing. Optional.",
+            "type": "array",
+            "maxItems": 1000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "input_tokens": {"type": "integer", "minimum": 0},
+                "output_tokens": {"type": "integer", "minimum": 0},
+                "cache_read_tokens": {"type": "integer", "minimum": 0},
+                "cache_write_tokens": {"type": "integer", "minimum": 0}
+              }
+            }
+          }
         }
       }
     },

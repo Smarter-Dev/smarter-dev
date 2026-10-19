@@ -147,6 +147,7 @@ class _FakeAuthor:
 
 class _FakeCtx:
     guild_id = "G1"
+    channel_id = "C1"
     author = _FakeAuthor()
 
     def __init__(self):

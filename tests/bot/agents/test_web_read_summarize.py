@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 from unittest.mock import patch
 
 import pytest
+from pydantic_ai.models.test import TestModel
 
 from smarter_dev.bot.agents import chat_tools
 from smarter_dev.bot.agents import web_summarizer
@@ -379,6 +380,7 @@ async def test_web_read_media_type_falls_back_to_extension():
 @pytest.mark.asyncio
 async def test_summarize_web_content_builds_prompt_and_calls_agent():
     fake_agent = MagicMock()
+    fake_agent.model = TestModel()
     fake_agent.run = AsyncMock(return_value=SimpleNamespace(output="OUT"))
     with patch.object(
         web_summarizer, "get_web_summarizer_agent", return_value=fake_agent
@@ -397,8 +399,10 @@ async def test_summarize_web_content_builds_prompt_and_calls_agent():
 @pytest.mark.asyncio
 async def test_summarize_web_content_fails_over_to_gemini_and_logs_critical(caplog):
     primary_agent = MagicMock()
+    primary_agent.model = TestModel()
     primary_agent.run = AsyncMock(side_effect=RuntimeError("Luna unavailable"))
     fallback_agent = MagicMock()
+    fallback_agent.model = TestModel()
     fallback_agent.run = AsyncMock(return_value=SimpleNamespace(output="FALLBACK"))
 
     with (
@@ -421,7 +425,8 @@ async def test_summarize_web_content_fails_over_to_gemini_and_logs_critical(capl
         )
 
     assert result == "FALLBACK"
-    fallback_agent.run.assert_awaited_once_with(primary_agent.run.call_args.args[0])
+    fallback_agent.run.assert_awaited_once()
+    assert fallback_agent.run.call_args.args == primary_agent.run.call_args.args
     assert "WEB SUMMARIZER FAILOVER" in caplog.text
     assert "Claude Haiku 5.5 failed" in caplog.text
     assert "using Gemini 3.8 Flash" in caplog.text

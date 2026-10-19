@@ -115,7 +115,7 @@ def search_env(db_session, monkeypatch):
     async def notify(owner, state):
         events.append(state)
 
-    async def plan(request):
+    async def plan(request, meter=None):
         return [{"query": f"query {n}", "angle": f"angle {n}"} for n in range(5)], False, {
             "model": "claude-haiku-5-5",
             # Cache reads and writes are both inside input_tokens.
@@ -263,7 +263,7 @@ async def test_no_results_ends_the_search_with_an_error(search_env, monkeypatch)
 
 
 async def test_a_query_model_failure_ends_the_search_with_an_error(search_env, monkeypatch):
-    async def broken(request):
+    async def broken(request, meter=None):
         raise RuntimeError("proxy down")
 
     monkeypatch.setattr(queries, "plan_queries", broken)
@@ -434,14 +434,14 @@ def test_answer_html_never_carries_raw_markup_or_script_links():
 
 @pytest.fixture
 def answering_env(search_env, monkeypatch):
-    async def plan(request):
+    async def plan(request, meter=None):
         return [{"query": f"query {n}", "angle": f"angle {n}"} for n in range(5)], True, {
             "model": "gpt-6-luna",
             "input_tokens": 1_000,
             "output_tokens": 100,
         }
 
-    async def write(request, results, on_progress):
+    async def write(request, results, on_progress, meter=None):
         reads = [answer.Read(number=1, domain=results[0]["domain"], status="done", tokens=2_000_000)]
         await on_progress(reads, "")
         await on_progress(reads, "Partly written [1]")
@@ -483,7 +483,7 @@ async def test_the_answer_follows_the_ranked_results(answering_env):
 
 
 async def test_a_failed_answer_keeps_the_results(answering_env, monkeypatch):
-    async def broken(request, results, on_progress):
+    async def broken(request, results, on_progress, meter=None):
         raise TimeoutError
 
     monkeypatch.setattr(answer, "write_answer", broken)
@@ -528,3 +528,68 @@ async def test_ranking_cost_is_unchanged_by_reading_the_rate_from_llm_pricing(
     assert usage["cost_usd"] == pytest.approx(
         float(calc_cost(input_tokens, 0, "typesafe:jev-1.13.0")), abs=5e-7
     )
+
+
+def _metered_model(usage, *, text: str = "not the queries"):
+    """A query or answer model whose every response is billed ``usage`` and
+    never passes: plain text where the queries' output tool is expected."""
+    from pydantic_ai.messages import ModelResponse
+    from pydantic_ai.messages import TextPart
+    from pydantic_ai.models.function import FunctionModel
+
+    def respond(messages, info):
+        return ModelResponse(parts=[TextPart(text)], usage=usage)
+
+    return FunctionModel(respond, model_name="claude-haiku-5-5")
+
+
+async def test_a_failed_query_model_still_bills_what_it_was_charged(
+    search_env, monkeypatch
+):
+    # #211: the run gives up after its retries, but each answer it got was
+    # billed. One request of 150K reaches Haiku 5.5's long-context tier.
+    from pydantic_ai.usage import RequestUsage
+
+    from smarter_dev.shared.request_usage import RequestTokens
+    from smarter_dev.web.llm_pricing import calc_cost_by_request
+
+    long_request = RequestUsage(input_tokens=150_000, output_tokens=20)
+    monkeypatch.setattr(queries, "plan_queries", _REAL_PLAN_QUERIES)
+    monkeypatch.setattr(queries, "model_for", lambda name: _metered_model(long_request))
+    run = await _new_run(search_env["session"])
+
+    assert await pipeline.run_search(run.id, search_env["notify"]) == "error"
+
+    ledger = await _ledger(search_env["session"])
+    row = ledger["web_search_queries"]
+    attempts = queries.OUTPUT_RETRIES + 1
+    assert row.input_tokens == 150_000 * attempts
+    assert row.cost_usd == calc_cost_by_request(
+        "anthropic:claude-haiku-5-5",
+        RequestTokens(150_000 * attempts, 20 * attempts),
+        [RequestTokens(150_000, 20)] * attempts,
+    )
+    assert row.cost_usd == calc_cost(150_000 * attempts, 20 * attempts, "claude-haiku-5-5") * 5
+    assert row.user_id == run.owner_user_id and row.product_mode == "search"
+
+
+async def test_an_answer_that_times_out_still_bills_its_requests(
+    answering_env, monkeypatch
+):
+    from smarter_dev.shared.request_usage import RequestTokens
+
+    async def slow_write(request, results, on_progress, meter=None):
+        # A request answered and billed, then the run is cut off.
+        meter.add("claude-haiku-5-5", RequestTokens(5_000, 40))
+        raise TimeoutError
+
+    monkeypatch.setattr(answer, "write_answer", slow_write)
+    run = await _new_run(answering_env["session"])
+    assert await pipeline.run_search(run.id, answering_env["notify"]) == "complete"
+
+    row = (await _ledger(answering_env["session"]))["web_search_answer"]
+    assert (row.input_tokens, row.output_tokens) == (5_000, 40)
+    assert row.details["web_search_id"] == str(run.id)
+
+
+_REAL_PLAN_QUERIES = queries.plan_queries

@@ -64,12 +64,15 @@ async def test_a_wake_on_opus_is_cached_and_reports_its_cache_writes(monkeypatch
 
     _, usage = await runner.wake("brief", deps=None)
 
-    assert usage == {
+    totals = {
         "input_tokens": 10 + 1_000 + 4_096,
         "output_tokens": 5,
         "cache_read_tokens": 1_000,
         "cache_write_tokens": 4_096,
     }
+    # One request, so its own counts are the totals (#211: the ledger prices
+    # each request on its own).
+    assert usage == {**totals, "requests": [totals]}
     (body,) = server.requests
     assert body["model"] == "claude-opus-5-5"
     assert body["system"][-1]["cache_control"] == ONE_HOUR

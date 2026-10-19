@@ -23,6 +23,7 @@ from pydantic_ai.models import Model
 from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
 from pydantic_ai.providers.google import GoogleProvider
 
+from smarter_dev.bot.services.usage_reporter import metered
 from smarter_dev.shared.model_catalog import CatalogModel
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.media_images import ImageTooLarge
@@ -125,11 +126,14 @@ async def describe_media(
     media_type: str,
     url: str,
     kind: str,
+    usage_fields: dict | None = None,
 ) -> str:
     """Describe an image (Claude Haiku 5.5) or audio clip (Gemini) per ``instruction``.
 
     An image may come as a ``SpooledImage`` (over MAX_DOWNLOAD_BYTES, on disk),
     downsampled in a bounded child and deleted by ``prepare_image_bounded``.
+    The read goes to the usage ledger as ``chat_media_reader``, attributed by
+    ``usage_fields`` (``metered``'s guild_id / channel_id / engagement_id).
     """
     is_audio = kind == "audio" or media_type.startswith("audio/")
     agent = get_audio_reader_agent() if is_audio else get_media_reader_agent()
@@ -150,7 +154,9 @@ async def describe_media(
             return str(too_large)
         if note:
             prompt += f"\n\nNOTE: {note}"
-    result = await agent.run(
-        [prompt, *(BinaryContent(data=part, media_type=mt) for part, mt in parts)]
-    )
+    async with metered("chat_media_reader", **(usage_fields or {})) as meter:
+        result = await agent.run(
+            [prompt, *(BinaryContent(data=part, media_type=mt) for part, mt in parts)],
+            model=meter.wrap(agent.model),
+        )
     return result.output
