@@ -105,6 +105,7 @@ from smarter_dev.bot.proactive.windows import QUIET_SECONDS
 from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.proactive_settings_service import ProactiveSettingsService
 from smarter_dev.shared.exception_logging import log_exception
+from smarter_dev.shared.proactive_channel_wake import CHANNEL_ENABLED_MAX_AGE
 from smarter_dev.shared.proactive_channel_wake import CHANNEL_ENABLED_STREAM
 from smarter_dev.shared.proactive_channel_wake import ChannelEnabledRequest
 from smarter_dev.shared.retention_policy import AGENT_VERBATIM_IDLE_WINDOW
@@ -2034,6 +2035,16 @@ async def _apply_channel_enabled_request(
     run: ProactiveRuntime, request: ChannelEnabledRequest
 ) -> None:
     """Wake the agent for a channel the web switched on, if it still is."""
+    age = datetime.now(UTC) - request.created_at
+    if age > CHANNEL_ENABLED_MAX_AGE:
+        logger.info(
+            "dropping stale proactive channel-enabled wake guild=%s channel=%s "
+            "age=%ss",
+            request.guild_id,
+            request.channel_id,
+            int(age.total_seconds()),
+        )
+        return
     service = run.settings_service()
     if service is not None:
         # The web wrote the row; the cached copy may still say off.
@@ -2088,6 +2099,9 @@ async def _apply_control_command(
 CONTROL_IDLE_SECONDS = 1.0
 CONTROL_BLOCK_MS = 5_000
 CONTROL_RECLAIM_MS = 60_000
+# Backoff after a failed Redis read, doubling up to the cap.
+CONTROL_RETRY_MIN_SECONDS = 1.0
+CONTROL_RETRY_MAX_SECONDS = 30.0
 
 
 async def _control_loop(run: ProactiveRuntime) -> None:
@@ -2104,44 +2118,38 @@ async def _control_loop(run: ProactiveRuntime) -> None:
     active-window write is idempotent, the agent's mode-change notification
     repeats. A command already running when its process stops acting
     finishes there (``leadership.run_accepted``) rather than being cut off.
+
+    A failed Redis read backs off and retries rather than ending the loop;
+    a consumer group deleted underneath it is recreated.
     """
     redis_client = run.bot.d.get("chat_memory_redis")
     if redis_client is None:
         return
-    for stream in CONTROL_STREAMS:
-        try:
-            await redis_client.xgroup_create(
-                stream, CONTROL_GROUP, id="0", mkstream=True
-            )
-        except Exception as error:  # redis-py has sync/async ResponseError variants
-            if "BUSYGROUP" not in str(error):
-                raise
     consumer = f"{socket.gethostname()}-{id(run)}"
+    groups_ready = False
+    backoff = CONTROL_RETRY_MIN_SECONDS
     while True:
-        if not leadership.is_acting():
-            await asyncio.sleep(CONTROL_IDLE_SECONDS)
+        try:
+            if not groups_ready:
+                await _create_control_groups(redis_client)
+                groups_ready = True
+            if not leadership.is_acting():
+                await asyncio.sleep(CONTROL_IDLE_SECONDS)
+                continue
+            records = await _read_control_records(redis_client, consumer)
+        except RedisError as error:
+            if "NOGROUP" in str(error):
+                groups_ready = False
+            log_exception(
+                logger,
+                "proactive control read failed; retrying in %ss",
+                backoff,
+                level=logging.WARNING,
+            )
+            await asyncio.sleep(backoff)
+            backoff = min(backoff * 2, CONTROL_RETRY_MAX_SECONDS)
             continue
-        records = None
-        for stream in CONTROL_STREAMS:
-            reclaimed = await redis_client.xautoclaim(
-                stream,
-                CONTROL_GROUP,
-                consumer,
-                CONTROL_RECLAIM_MS,
-                "0-0",
-                count=20,
-            )
-            if reclaimed and reclaimed[1]:
-                records = [(stream, reclaimed[1])]
-                break
-        if records is None:
-            records = await redis_client.xreadgroup(
-                CONTROL_GROUP,
-                consumer,
-                dict.fromkeys(CONTROL_STREAMS, ">"),
-                count=20,
-                block=CONTROL_BLOCK_MS,
-            )
+        backoff = CONTROL_RETRY_MIN_SECONDS
         for stream, entries in records or ():
             for stream_id, fields in entries:
                 if not leadership.is_acting():
@@ -2151,6 +2159,39 @@ async def _control_loop(run: ProactiveRuntime) -> None:
                         run, redis_client, _redis_text(stream), stream_id, fields
                     )
                 )
+
+
+async def _create_control_groups(redis_client) -> None:
+    for stream in CONTROL_STREAMS:
+        try:
+            await redis_client.xgroup_create(
+                stream, CONTROL_GROUP, id="0", mkstream=True
+            )
+        except Exception as error:  # redis-py has sync/async ResponseError variants
+            if "BUSYGROUP" not in str(error):
+                raise
+
+
+async def _read_control_records(redis_client, consumer: str):
+    """Entries idle past CONTROL_RECLAIM_MS first, else new ones."""
+    for stream in CONTROL_STREAMS:
+        reclaimed = await redis_client.xautoclaim(
+            stream,
+            CONTROL_GROUP,
+            consumer,
+            CONTROL_RECLAIM_MS,
+            "0-0",
+            count=20,
+        )
+        if reclaimed and reclaimed[1]:
+            return [(stream, reclaimed[1])]
+    return await redis_client.xreadgroup(
+        CONTROL_GROUP,
+        consumer,
+        dict.fromkeys(CONTROL_STREAMS, ">"),
+        count=20,
+        block=CONTROL_BLOCK_MS,
+    )
 
 
 async def _process_control_entry(
@@ -2166,12 +2207,14 @@ async def _process_control_entry(
                 command = ControlCommand.model_validate_json(payload)
                 apply = _apply_control_command
         except ValidationError:
-            # No retry can parse it (a sender newer or older than this bot):
-            # drop it rather than reclaim it forever.
+            if stream != CHANNEL_ENABLED_STREAM:
+                # A worker newer than this bot may send a shape it cannot
+                # read yet; leave it pending for a bot that can.
+                raise
+            # This repo writes both ends of the wake stream, so no bot will
+            # ever read this one: drop it rather than reclaim it forever.
             logger.warning(
-                "dropping unreadable proactive control command stream=%s "
-                "stream_id=%s",
-                stream,
+                "dropping unreadable proactive channel-enabled wake stream_id=%s",
                 _redis_text(stream_id),
             )
             await redis_client.xack(stream, CONTROL_GROUP, stream_id)

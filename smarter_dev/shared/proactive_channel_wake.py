@@ -13,6 +13,7 @@ Shared by the web and the bot, so it imports nothing heavier than Pydantic.
 
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Literal
 from uuid import UUID
 from uuid import uuid4
@@ -25,6 +26,9 @@ from pydantic import Field
 CHANNEL_ENABLED_STREAM = "proactive:v1:channel-enabled"
 # Processed entries are deleted; this only bounds a backlog nobody reads.
 CHANNEL_ENABLED_STREAM_MAXLEN = 1000
+# A request older than this (a backlog replayed after a long bot outage) is
+# dropped: "you were just enabled" would no longer be true.
+CHANNEL_ENABLED_MAX_AGE = timedelta(minutes=15)
 
 
 class ChannelEnabledRequest(BaseModel):

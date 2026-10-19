@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Optional, List, Dict, Any, Tuple
 from collections.abc import Iterable
-from uuid import UUID
+from uuid import UUID, uuid4
 from datetime import UTC, datetime, timezone, date
 
 from sqlalchemy import select, update, delete, func, desc, and_, or_, text
@@ -6047,6 +6047,46 @@ async def upsert_proactive_channel_settings(
     await session.flush()
     await session.refresh(record)
     return record
+
+
+async def set_proactive_channel_enabled_flag(
+    session: AsyncSession, *, guild_id: str, channel_id: str, enabled: bool
+) -> bool:
+    """Write only ``enabled`` for ``channel_id``; True when this call turned it on.
+
+    The off-to-on decision is the database's, not a read-then-write: the
+    ``UPDATE ... WHERE enabled IS NOT TRUE`` matches only while the row is
+    off, and a missing row is inserted with ``ON CONFLICT DO NOTHING``. Of two
+    concurrent enables, the second waits on the first's row lock (or its
+    insert) and then matches nothing, so exactly one caller sees True.
+    ``watch_addendum`` is never written.
+    """
+    table = ProactiveChannelSettings.__table__
+    insert = pg_insert if session.bind.dialect.name == "postgresql" else sqlite_insert
+    statement = insert(ProactiveChannelSettings).values(
+        id=uuid4(), guild_id=guild_id, channel_id=channel_id, enabled=enabled
+    )
+    if not enabled:
+        await session.execute(
+            statement.on_conflict_do_update(
+                index_elements=["channel_id"], set_={"enabled": False}
+            )
+        )
+        return False
+    flipped = await session.execute(
+        update(table)
+        .where(table.c.channel_id == channel_id, table.c.enabled.is_not(True))
+        .values(enabled=True)
+        .returning(table.c.id)
+    )
+    if flipped.first() is not None:
+        return True
+    inserted = await session.execute(
+        statement.on_conflict_do_nothing(index_elements=["channel_id"]).returning(
+            table.c.id
+        )
+    )
+    return inserted.first() is not None
 
 
 async def get_proactive_agent_history(

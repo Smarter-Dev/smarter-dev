@@ -8,15 +8,20 @@ loop reads it and enqueues the same notification /proactive on does.
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC
 from datetime import datetime
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import fakeredis.aioredis
 import pytest
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from smarter_dev.bot.plugins import proactive
+from smarter_dev.bot.proactive.contracts import ControlCommand
+from smarter_dev.shared.proactive_channel_wake import CHANNEL_ENABLED_MAX_AGE
 from smarter_dev.shared.proactive_channel_wake import CHANNEL_ENABLED_STREAM
 from smarter_dev.shared.proactive_channel_wake import request_channel_enabled_wake
 
@@ -77,6 +82,10 @@ async def _run_loop_until(run, condition, timeout: float = 2.0) -> None:
             await asyncio.sleep(0.01)
     finally:
         loop.cancel()
+
+
+async def _pending(redis, stream: str) -> int:
+    return (await redis.xpending(stream, proactive.CONTROL_GROUP))["pending"]
 
 
 async def _drain(run, redis, stream: str) -> None:
@@ -153,20 +162,76 @@ async def test_a_channel_switched_off_again_before_the_wake_is_not_woken(fast_lo
     run.enqueue_notification.assert_not_awaited()
 
 
-@pytest.mark.parametrize(
-    "stream", [CHANNEL_ENABLED_STREAM, proactive.CONTROL_STREAM_KEY]
-)
-async def test_an_unreadable_command_is_dropped_not_redelivered(fast_loop, stream):
-    """A payload no retry can parse is acked and deleted, never left pending."""
+async def test_an_unreadable_wake_request_is_dropped_not_redelivered(fast_loop):
+    """This repo writes both ends of the wake stream: no bot will read it."""
     redis = _redis()
     run = _runtime(redis, _SettingsService(enabled=True))
-    await redis.xadd(stream, {"payload": '{"kind": "from-a-newer-sender"}'})
+    await redis.xadd(CHANNEL_ENABLED_STREAM, {"payload": '{"kind": "garbled"}'})
 
-    await _drain(run, redis, stream)
+    await _drain(run, redis, CHANNEL_ENABLED_STREAM)
 
-    pending = await redis.xpending(stream, proactive.CONTROL_GROUP)
+    pending = await redis.xpending(CHANNEL_ENABLED_STREAM, proactive.CONTROL_GROUP)
     assert pending["pending"] == 0
     run.enqueue_notification.assert_not_awaited()
+
+
+async def test_a_worker_command_this_bot_cannot_read_stays_pending(
+    fast_loop, monkeypatch
+):
+    """A newer worker's shape waits for a bot that can read it."""
+    monkeypatch.setattr(proactive, "_apply_control_command", AsyncMock())
+    redis = _redis()
+    run = _runtime(redis, _SettingsService(enabled=True))
+    command = ControlCommand(
+        guild_id=GUILD, channel_id=CHANNEL, mode="active", minutes=5,
+        created_at=datetime.now(UTC),
+    ).model_dump(mode="json")
+    command["schema_version"] = 2
+    command["new_field"] = "from a newer worker"
+    await redis.xadd(proactive.CONTROL_STREAM_KEY, {"payload": json.dumps(command)})
+    await proactive._create_control_groups(redis)
+
+    loop = asyncio.create_task(proactive._control_loop(run))
+    for _ in range(200):
+        pending = await _pending(redis, proactive.CONTROL_STREAM_KEY)
+        if pending:
+            break
+        await asyncio.sleep(0.01)
+    await asyncio.sleep(0.05)
+    loop.cancel()
+
+    assert await _pending(redis, proactive.CONTROL_STREAM_KEY) == 1, "read, not acked"
+    assert await redis.xlen(proactive.CONTROL_STREAM_KEY) == 1, "not deleted"
+    proactive._apply_control_command.assert_not_awaited()
+
+
+async def test_a_stale_wake_request_is_dropped(fast_loop):
+    """A backlog replayed after a long outage no longer means 'just enabled'."""
+    redis = _redis()
+    run = _runtime(redis, _SettingsService(enabled=True))
+    await request_channel_enabled_wake(
+        redis,
+        guild_id=GUILD,
+        channel_id=CHANNEL,
+        now=datetime.now(UTC) - CHANNEL_ENABLED_MAX_AGE - timedelta(seconds=1),
+    )
+
+    await _drain(run, redis, CHANNEL_ENABLED_STREAM)
+
+    run.enqueue_notification.assert_not_awaited()
+
+
+async def test_a_wake_request_inside_the_max_age_still_wakes(fast_loop):
+    redis = _redis()
+    run = _runtime(redis, _SettingsService(enabled=True))
+    await request_channel_enabled_wake(
+        redis,
+        guild_id=GUILD,
+        channel_id=CHANNEL,
+        now=datetime.now(UTC) - CHANNEL_ENABLED_MAX_AGE + timedelta(minutes=1),
+    )
+
+    await _run_loop_until(run, lambda: run.enqueue_notification.await_count)
 
 
 async def test_a_failed_wake_stays_pending_for_a_retry(fast_loop):
@@ -190,8 +255,6 @@ async def test_a_failed_wake_stays_pending_for_a_retry(fast_loop):
 async def test_worker_control_commands_still_apply_beside_web_requests(
     fast_loop, monkeypatch
 ):
-    from smarter_dev.bot.proactive.contracts import ControlCommand
-
     applied: list[str] = []
 
     async def apply(_run, command) -> None:
@@ -215,3 +278,87 @@ async def test_worker_control_commands_still_apply_beside_web_requests(
 
     assert applied == ["active"]
     assert run.enqueue_notification.await_args.args[1].kind == "channel_enabled"
+
+
+# --- the loop survives Redis errors ----------------------------------------------
+
+
+@pytest.fixture
+def fast_retry(monkeypatch):
+    monkeypatch.setattr(proactive, "CONTROL_RETRY_MIN_SECONDS", 0.01)
+    monkeypatch.setattr(proactive, "CONTROL_RETRY_MAX_SECONDS", 0.05)
+
+
+async def test_a_failed_read_backs_off_and_the_loop_carries_on(fast_loop, fast_retry):
+    redis = _redis()
+    read = redis.xreadgroup
+    failures = []
+
+    async def flaky_xreadgroup(*args, **kwargs):
+        if not failures:
+            failures.append(1)
+            raise RedisConnectionError("connection reset")
+        return await read(*args, **kwargs)
+
+    redis.xreadgroup = flaky_xreadgroup
+    run = _runtime(redis, _SettingsService(enabled=True))
+    await request_channel_enabled_wake(
+        redis, guild_id=GUILD, channel_id=CHANNEL, now=datetime.now(UTC)
+    )
+
+    await _run_loop_until(run, lambda: run.enqueue_notification.await_count)
+
+    assert failures == [1], "the failing read happened, and the next one applied it"
+
+
+async def test_a_deleted_consumer_group_is_recreated(fast_loop, fast_retry):
+    redis = _redis()
+    run = _runtime(redis, _SettingsService(enabled=True))
+    loop = asyncio.create_task(proactive._control_loop(run))
+    try:
+        for _ in range(200):
+            groups = await redis.xinfo_groups(CHANNEL_ENABLED_STREAM)
+            if groups:
+                break
+            await asyncio.sleep(0.01)
+        await redis.xgroup_destroy(CHANNEL_ENABLED_STREAM, proactive.CONTROL_GROUP)
+        await request_channel_enabled_wake(
+            redis, guild_id=GUILD, channel_id=CHANNEL, now=datetime.now(UTC)
+        )
+        for _ in range(300):
+            if run.enqueue_notification.await_count:
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        loop.cancel()
+
+    run.enqueue_notification.assert_awaited_once()
+
+
+async def test_cancelling_the_loop_still_stops_it(fast_loop, fast_retry):
+    redis = _redis()
+    run = _runtime(redis, _SettingsService(enabled=True))
+    loop = asyncio.create_task(proactive._control_loop(run))
+    await asyncio.sleep(0.05)
+
+    loop.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(loop, timeout=1)
+
+
+async def test_cancelling_during_a_backoff_stops_the_loop(fast_loop, monkeypatch):
+    monkeypatch.setattr(proactive, "CONTROL_RETRY_MIN_SECONDS", 30)
+    redis = _redis()
+    redis.xreadgroup = AsyncMock(side_effect=RedisConnectionError("down"))
+    run = _runtime(redis, _SettingsService(enabled=True))
+    loop = asyncio.create_task(proactive._control_loop(run))
+    for _ in range(100):
+        if redis.xreadgroup.await_count:
+            break
+        await asyncio.sleep(0.01)
+
+    loop.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(loop, timeout=1)

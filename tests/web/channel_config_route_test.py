@@ -67,16 +67,14 @@ def crud_mocks():
         ) as get_override,
         patch.object(channel_config, "get_proactive_channel_settings", new=get_proactive),
         patch.object(
-            proactive_channels, "get_proactive_channel_settings", new=get_proactive
-        ),
-        patch.object(
             channel_config, "upsert_channel_model_override", new=AsyncMock()
         ) as upsert_override,
+        # The database decides whether this save turned the channel on.
         patch.object(
             proactive_channels,
-            "upsert_proactive_channel_settings",
-            new=AsyncMock(),
-        ) as upsert_proactive,
+            "set_proactive_channel_enabled_flag",
+            new=AsyncMock(return_value=True),
+        ) as set_flag,
         patch.object(channel_config, "get_redis_client", lambda: redis),
         patch.object(channel_config, "flash_success", lambda *a, **k: None),
         patch.object(channel_config, "flash_error", lambda *a, **k: None),
@@ -86,7 +84,7 @@ def crud_mocks():
             get_override=get_override,
             get_proactive=get_proactive,
             upsert_override=upsert_override,
-            upsert_proactive=upsert_proactive,
+            set_flag=set_flag,
             redis=redis,
         )
 
@@ -120,8 +118,9 @@ async def test_post_writes_exactly_the_channel_the_link_names(crud_mocks):
     override_kwargs = crud_mocks.upsert_override.await_args.kwargs
     assert override_kwargs["guild_id"] == GUILD
     assert override_kwargs["channel_id"] == CHANNEL
-    proactive_kwargs = crud_mocks.upsert_proactive.await_args.kwargs
-    assert proactive_kwargs["enabled"] is True
+    flag_kwargs = crud_mocks.set_flag.await_args.kwargs
+    assert (flag_kwargs["guild_id"], flag_kwargs["channel_id"]) == (GUILD, CHANNEL)
+    assert flag_kwargs["enabled"] is True
     session.commit.assert_awaited_once()
 
 
@@ -136,7 +135,7 @@ async def test_post_refuses_an_expired_link(crud_mocks, monkeypatch):
     )
     assert response.status_code == 403
     crud_mocks.upsert_override.assert_not_awaited()
-    crud_mocks.upsert_proactive.assert_not_awaited()
+    crud_mocks.set_flag.assert_not_awaited()
 
 
 async def test_post_rejects_an_invalid_form_without_writing(crud_mocks):
@@ -147,38 +146,22 @@ async def test_post_rejects_an_invalid_form_without_writing(crud_mocks):
     crud_mocks.upsert_override.assert_not_awaited()
 
 
-async def test_post_preserves_agent_written_watch_instructions(crud_mocks):
-    crud_mocks.get_proactive.return_value = SimpleNamespace(
-        enabled=True, watch_addendum='[{"id": "w1", "text": "watch benchmarks"}]'
-    )
-    await save(CONTROLLER, _request(_valid_form()), AsyncMock(), _token())
-    kwargs = crud_mocks.upsert_proactive.await_args.kwargs
-    assert kwargs["watch_addendum"] == '[{"id": "w1", "text": "watch benchmarks"}]'
-
-
 async def test_post_that_switches_a_channel_on_wakes_the_agent(crud_mocks):
-    crud_mocks.get_proactive.return_value = SimpleNamespace(
-        enabled=False, watch_addendum=""
-    )
     await save(CONTROLLER, _request(_valid_form()), AsyncMock(), _token())
     assert await crud_mocks.redis.xlen(CHANNEL_ENABLED_STREAM) == 1
 
 
 async def test_post_for_a_channel_already_on_sends_no_wake(crud_mocks):
-    crud_mocks.get_proactive.return_value = SimpleNamespace(
-        enabled=True, watch_addendum=""
-    )
+    crud_mocks.set_flag.return_value = False  # the row was already on
     await save(CONTROLLER, _request(_valid_form()), AsyncMock(), _token())
     assert await crud_mocks.redis.xlen(CHANNEL_ENABLED_STREAM) == 0
 
 
 async def test_post_that_switches_a_channel_off_sends_no_wake(crud_mocks):
-    crud_mocks.get_proactive.return_value = SimpleNamespace(
-        enabled=True, watch_addendum=""
-    )
+    crud_mocks.set_flag.return_value = False
     session = AsyncMock()
     await save(CONTROLLER, _request(_valid_form(bot_kind="legacy")), session, _token())
-    assert crud_mocks.upsert_proactive.await_args.kwargs["enabled"] is False
+    assert crud_mocks.set_flag.await_args.kwargs["enabled"] is False
     assert await crud_mocks.redis.xlen(CHANNEL_ENABLED_STREAM) == 0
     session.commit.assert_awaited_once()
 
