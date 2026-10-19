@@ -17,12 +17,14 @@ holds a path into the templates tree.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from jinja2 import ChoiceLoader
 from jinja2 import DictLoader
 from jinja2 import Environment
 from jinja2 import FileSystemLoader
-from markupsafe import Markup
+from skrift.forms.core import CSRF_SESSION_KEY
+from skrift.forms.core import csrf_field as skrift_csrf_field
 
 _TEMPLATES_ROOT = Path(__file__).resolve().parents[2] / "templates"
 
@@ -47,8 +49,9 @@ def render_admin_template(template_name: str, **context) -> str:
     environment.globals.update(
         site_name=lambda: "Smarter Dev",
         csp_nonce=lambda: "test-nonce",
-        csrf_field=lambda: Markup(
-            '<input type="hidden" name="csrf_token" value="test-csrf">'
+        # Skrift's own field, so tests see the name verify_csrf reads.
+        csrf_field=lambda: skrift_csrf_field(
+            SimpleNamespace(session={CSRF_SESSION_KEY: "test-csrf"})
         ),
     )
     return environment.get_template(template_name).render(**context)

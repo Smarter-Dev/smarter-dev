@@ -19,8 +19,12 @@ helper does no authorization, so the toggle checks for itself:
   channel and that it belongs to that guild. Switching off needs no Discord
   check, so an outage never stops an admin turning the bot off.
 
-Channel and guild names come from Discord and are display only: when Discord
-is unavailable the page shows IDs. There is no link to the full per-channel
+Channel and guild names come from Discord and are display only. The page
+must stay reachable in a Discord outage, since that is when someone needs the
+off buttons, so name lookups share one short deadline
+(:data:`NAME_DEADLINE_SECONDS`) and whatever has not answered by then shows
+as IDs. Names are cached in-process for :data:`NAME_CACHE_SECONDS`; the
+Discord check before switching a channel on is never cached. There is no link to the full per-channel
 form, because that form authorizes only on a link the bot signs for a Discord
 user; ``/configure bot`` in the channel still mints one.
 """
@@ -29,6 +33,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from collections.abc import Awaitable
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from litestar import Controller
@@ -60,6 +67,17 @@ BASE_PATH = "/admin/bot/proactive-channels"
 _ACTIVE_PAGE = "proactive_channels"
 _GUARDS = [auth_guard, Permission("administrator")]
 
+# The Discord client's timeout is per phase, not per request, so a stalled or
+# trickling read could hold the page; these bound the whole wait.
+NAME_DEADLINE_SECONDS = 2.0
+CHANNEL_CHECK_DEADLINE_SECONDS = 5.0
+NAME_LOOKUP_CONCURRENCY = 5
+NAME_CACHE_SECONDS = 300.0
+
+# Only successful lookups are cached: key -> (expires at, names by id).
+_name_cache: dict[str, tuple[float, dict[str, str]]] = {}
+_clock = time.monotonic
+
 
 @dataclass(frozen=True)
 class ProactiveChannelRow:
@@ -83,27 +101,62 @@ class ProactiveGuildSection:
     names_unavailable: bool
 
 
-async def _guild_names(client) -> dict[str, str] | None:
-    try:
-        return {guild.id: guild.name for guild in await client.list_bot_guilds()}
-    except Exception as error:  # noqa: BLE001 — names are display only
-        logger.warning("proactive overview: guild names unavailable (%s)", error)
-        return None
+async def _guild_names(client) -> dict[str, str]:
+    return {guild.id: guild.name for guild in await client.list_bot_guilds()}
 
 
-async def _channel_names(client, guild_id: str) -> dict[str, str] | None:
-    try:
-        return {
-            channel.id: channel.name
-            for channel in await client.get_guild_channels(guild_id)
-        }
-    except Exception as error:  # noqa: BLE001 — names are display only
+async def _channel_names(client, guild_id: str) -> dict[str, str]:
+    return {
+        channel.id: channel.name
+        for channel in await client.get_guild_channels(guild_id)
+    }
+
+
+async def _lookup_names(
+    lookups: dict[str, Callable[[], Awaitable[dict[str, str]]]],
+) -> dict[str, dict[str, str]]:
+    """Run the uncached lookups under one deadline; return what answered.
+
+    A failed or unfinished lookup is simply missing from the result (its
+    rows show IDs). Unfinished ones are cancelled at the deadline.
+    """
+    now = _clock()
+    found: dict[str, dict[str, str]] = {}
+    for key in list(lookups):
+        cached = _name_cache.get(key)
+        if cached is not None and cached[0] > now:
+            found[key] = cached[1]
+            del lookups[key]
+    if not lookups:
+        return found
+
+    gate = asyncio.Semaphore(NAME_LOOKUP_CONCURRENCY)
+
+    async def run(lookup):
+        async with gate:
+            return await lookup()
+
+    tasks = {asyncio.ensure_future(run(lookup)): key for key, lookup in lookups.items()}
+    done, pending = await asyncio.wait(tasks, timeout=NAME_DEADLINE_SECONDS)
+    for task in pending:
+        task.cancel()
+    if pending:
         logger.warning(
-            "proactive overview: channel names unavailable guild=%s (%s)",
-            guild_id,
-            error,
+            "proactive overview: Discord names timed out for %s",
+            sorted(tasks[task] for task in pending),
         )
-        return None
+    for task in done:
+        key = tasks[task]
+        if task.exception() is not None:
+            logger.warning(
+                "proactive overview: Discord names unavailable for %s (%s)",
+                key,
+                task.exception(),
+            )
+            continue
+        found[key] = task.result()
+        _name_cache[key] = (_clock() + NAME_CACHE_SECONDS, found[key])
+    return found
 
 
 async def collect_proactive_overview(
@@ -112,7 +165,8 @@ async def collect_proactive_overview(
     """Group the settings rows by guild and name them from Discord.
 
     ``client`` is the admin Discord client, or ``None`` when there is none;
-    every Discord failure degrades to IDs rather than failing the page.
+    every Discord failure or timeout degrades to IDs rather than failing or
+    holding the page.
     """
     by_guild: dict[str, list[ProactiveChannelSettings]] = {}
     for record in records:
@@ -121,14 +175,16 @@ async def collect_proactive_overview(
         return []
 
     guild_ids = sorted(by_guild)
-    if client is None:
-        guild_names = None
-        channel_names: list[dict[str, str] | None] = [None] * len(guild_ids)
-    else:
-        guild_names, *channel_names = await asyncio.gather(
-            _guild_names(client),
-            *(_channel_names(client, guild_id) for guild_id in guild_ids),
-        )
+    found: dict[str, dict[str, str]] = {}
+    if client is not None:
+        lookups = {"guilds": lambda: _guild_names(client)}
+        for guild_id in guild_ids:
+            lookups[f"channels:{guild_id}"] = (
+                lambda guild_id=guild_id: _channel_names(client, guild_id)
+            )
+        found = await _lookup_names(lookups)
+    guild_names = found.get("guilds")
+    channel_names = [found.get(f"channels:{guild_id}") for guild_id in guild_ids]
 
     sections = []
     for guild_id, names in zip(guild_ids, channel_names):
@@ -167,7 +223,10 @@ async def channel_on_refusal(guild_id: str, channel_id: str) -> str | None:
     The bot must still see the channel, and it must be that guild's.
     """
     try:
-        owner = await get_admin_discord_client().get_channel_guild_id(channel_id)
+        owner = await asyncio.wait_for(
+            get_admin_discord_client().get_channel_guild_id(channel_id),
+            timeout=CHANNEL_CHECK_DEADLINE_SECONDS,
+        )
     except DiscordAdminError as error:
         if error.status_code in (403, 404):
             return (
@@ -181,7 +240,7 @@ async def channel_on_refusal(guild_id: str, channel_id: str) -> str | None:
             error,
         )
         return "Couldn't reach Discord to check the channel. Please try again."
-    except Exception as error:  # noqa: BLE001 — httpx transport errors
+    except Exception as error:  # noqa: BLE001 — timeout or httpx transport error
         logger.warning(
             "proactive overview: channel check failed guild=%s channel=%s (%s)",
             guild_id,

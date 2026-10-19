@@ -9,6 +9,8 @@ on. Rows live in the suite's SQLite database and Discord answers through an
 
 from __future__ import annotations
 
+import asyncio
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -20,6 +22,9 @@ import pytest
 from litestar.response import Redirect
 from skrift.auth.guards import Permission
 from skrift.auth.guards import auth_guard
+from skrift.forms.core import CSRF_FIELD_NAME
+from skrift.forms.core import CSRF_SESSION_KEY
+from skrift.forms.core import verify_csrf as real_verify_csrf
 from sqlalchemy import select
 
 from smarter_dev.shared.proactive_channel_wake import CHANNEL_ENABLED_STREAM
@@ -54,11 +59,22 @@ async def redis():
 
 
 class _Discord:
-    """A Discord that knows two guilds; flip ``down`` to make it unreachable."""
+    """A Discord that knows two guilds.
+
+    Flip ``down`` to make it unreachable, add a path to ``stalled`` to make
+    that request hang until cancelled, or to ``trickled`` to make its body
+    arrive one byte at a time, forever.
+    """
 
     def __init__(self):
         self.down = False
+        self.stalled: set[str] = set()
+        self.trickled: set[str] = set()
+        self.delay = 0.0
         self.paths: list[str] = []
+        self.cancelled: list[str] = []
+        self.in_flight = 0
+        self.peak = 0
         self.channel_guilds = {
             GENERAL: GUILD,
             HELP: GUILD,
@@ -66,9 +82,33 @@ class _Discord:
             ELSEWHERE: OTHER_GUILD,
         }
 
-    def handler(self, request: httpx.Request) -> httpx.Response:
+    async def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path.removeprefix("/api/v10")
         self.paths.append(path)
+        self.in_flight += 1
+        self.peak = max(self.peak, self.in_flight)
+        try:
+            if self.delay:
+                await asyncio.sleep(self.delay)
+            if path in self.stalled:
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    self.cancelled.append(path)
+                    raise
+            if path in self.trickled:
+                return httpx.Response(200, content=self._trickle())
+            return self._answer(request, path)
+        finally:
+            self.in_flight -= 1
+
+    @staticmethod
+    async def _trickle():
+        while True:
+            await asyncio.sleep(0.01)
+            yield b" "
+
+    def _answer(self, request: httpx.Request, path: str) -> httpx.Response:
         if self.down:
             raise httpx.ConnectError("unreachable", request=request)
         if path == "/users/@me/guilds":
@@ -107,6 +147,13 @@ class _Discord:
 @pytest.fixture
 def rest():
     return _Discord()
+
+
+@pytest.fixture(autouse=True)
+def empty_name_cache():
+    proactive_overview._name_cache.clear()
+    yield
+    proactive_overview._name_cache.clear()
 
 
 @pytest.fixture
@@ -272,7 +319,7 @@ def test_the_template_offers_the_opposite_switch_with_a_csrf_token():
     assert "#general" in html and "thread or deleted channel" in html
     assert f'action="/admin/bot/proactive-channels/{GUILD}/{GENERAL}"' in html
     assert f'action="/admin/bot/proactive-channels/{GUILD}/{OLD}"' in html
-    assert html.count('name="csrf_token"') == 2
+    assert html.count(f'name="{CSRF_FIELD_NAME}"') == 2
     assert '<input type="hidden" name="enabled" value="off">' in html
     assert '<input type="hidden" name="enabled" value="on">' in html
     assert "Turn off" in html and "Turn on" in html
@@ -412,3 +459,134 @@ async def test_a_bad_csrf_token_is_refused(db_session, patched, redis):
     assert await _enabled(db_session, HELP) is False
     assert [level for level, _ in patched.flashes] == ["error", "error"]
 
+
+async def test_the_real_csrf_check_refuses_a_missing_or_bad_token(db_session, patched, redis):
+    await _seed(db_session, (GUILD, GENERAL, True))
+    session = {CSRF_SESSION_KEY: "the-token"}
+    with patch(f"{_MODULE}.verify_csrf", new=real_verify_csrf):
+        for form in ({"enabled": "off"}, {"enabled": "off", CSRF_FIELD_NAME: "wrong"}):
+            request = SimpleNamespace(form=AsyncMock(return_value=form), session=session)
+            await toggle(Controller, request, db_session, guild_id=GUILD, channel_id=GENERAL)
+
+    assert await _enabled(db_session, GENERAL) is True
+    assert [level for level, _ in patched.flashes] == ["error", "error"]
+    assert session[CSRF_SESSION_KEY] == "the-token"
+
+
+async def test_the_real_csrf_check_accepts_the_sessions_token(db_session, patched):
+    await _seed(db_session, (GUILD, GENERAL, True))
+    session = {CSRF_SESSION_KEY: "the-token"}
+    request = SimpleNamespace(
+        form=AsyncMock(return_value={"enabled": "off", CSRF_FIELD_NAME: "the-token"}),
+        session=session,
+    )
+    with patch(f"{_MODULE}.verify_csrf", new=real_verify_csrf):
+        await toggle(Controller, request, db_session, guild_id=GUILD, channel_id=GENERAL)
+
+    assert await _enabled(db_session, GENERAL) is False
+    assert patched.flashes[-1][0] == "success"
+    assert session[CSRF_SESSION_KEY] != "the-token"  # single use
+
+
+# --- Discord deadlines, caching and fan-out -----------------------------------
+
+
+@pytest.fixture
+def short_deadlines(monkeypatch):
+    monkeypatch.setattr(proactive_overview, "NAME_DEADLINE_SECONDS", 0.3)
+    monkeypatch.setattr(proactive_overview, "CHANNEL_CHECK_DEADLINE_SECONDS", 0.3)
+
+
+@pytest.mark.parametrize("hang", ["stalled", "trickled"])
+async def test_a_hanging_name_lookup_cannot_hold_the_page(
+    db_session, patched, rest, short_deadlines, hang
+):
+    await _seed(db_session, (GUILD, GENERAL, True))
+    getattr(rest, hang).update({"/users/@me/guilds", f"/guilds/{GUILD}/channels"})
+
+    started = time.monotonic()
+    # The outer bound turns a regression into a failure rather than a hang.
+    response = await asyncio.wait_for(overview(Controller, _request(), db_session), 2.0)
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 1.0
+    (section,) = response.context["sections"]
+    assert section.name is None
+    assert section.names_unavailable
+    assert section.channels[0].channel_id == GENERAL
+    await asyncio.sleep(0.05)  # let the cancellations land
+    if hang == "stalled":
+        assert sorted(rest.cancelled) == sorted(rest.stalled)
+    assert rest.in_flight == 0
+
+
+async def test_the_lookups_that_answer_in_time_still_name_their_rows(
+    db_session, patched, rest, short_deadlines
+):
+    await _seed(db_session, (GUILD, GENERAL, True))
+    rest.stalled.add("/users/@me/guilds")
+
+    response = await asyncio.wait_for(overview(Controller, _request(), db_session), 2.0)
+
+    (section,) = response.context["sections"]
+    assert section.name is None
+    assert section.channels[0].name == "general"
+
+
+async def test_names_are_cached_for_a_few_minutes(db_session, patched, rest, monkeypatch):
+    await _seed(db_session, (GUILD, GENERAL, True), (OTHER_GUILD, ELSEWHERE, True))
+    now = [1000.0]
+    monkeypatch.setattr(proactive_overview, "_clock", lambda: now[0])
+
+    await overview(Controller, _request(), db_session)
+    first = list(rest.paths)
+    await overview(Controller, _request(), db_session)
+    # The other guild's channel list failed, so only it is asked again.
+    assert rest.paths[len(first):] == [f"/guilds/{OTHER_GUILD}/channels"]
+
+    now[0] += proactive_overview.NAME_CACHE_SECONDS + 1
+    rest.paths.clear()
+    response = await overview(Controller, _request(), db_session)
+    assert sorted(rest.paths) == sorted(first)
+    assert response.context["sections"][1].channels[0].name == "general"
+
+
+async def test_name_lookups_run_at_most_five_at_a_time(db_session, patched, rest):
+    guilds = [f"8000000000000000{n:02d}" for n in range(12)]
+    await _seed(db_session, *((guild, f"9{guild[1:]}", True) for guild in guilds))
+    rest.delay = 0.02
+
+    await overview(Controller, _request(), db_session)
+
+    assert len(rest.paths) == 13
+    assert rest.peak == proactive_overview.NAME_LOOKUP_CONCURRENCY
+
+
+async def test_switching_on_is_refused_when_the_discord_check_stalls(
+    db_session, patched, rest, redis, short_deadlines
+):
+    await _seed(db_session, (GUILD, GENERAL, False))
+    rest.stalled.add(f"/channels/{GENERAL}")
+
+    started = time.monotonic()
+    await asyncio.wait_for(_post(db_session, GUILD, GENERAL, "on"), 2.0)
+
+    assert time.monotonic() - started < 1.0
+    assert await _enabled(db_session, GENERAL) is False
+    assert await _wakes(redis) == []
+    assert patched.flashes == [
+        ("error", "Couldn't reach Discord to check the channel. Please try again.")
+    ]
+
+
+async def test_the_enable_check_is_never_cached(db_session, patched, rest):
+    await _seed(db_session, (GUILD, GENERAL, False))
+    await overview(Controller, _request(), db_session)  # warms the name cache
+
+    await _post(db_session, GUILD, GENERAL, "on")
+    await _post(db_session, GUILD, GENERAL, "off")
+    rest.channel_guilds[GENERAL] = OTHER_GUILD  # moved, as far as Discord says
+    await _post(db_session, GUILD, GENERAL, "on")
+
+    assert rest.paths.count(f"/channels/{GENERAL}") == 2
+    assert await _enabled(db_session, GENERAL) is False
