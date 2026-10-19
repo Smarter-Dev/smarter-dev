@@ -16,6 +16,7 @@ from skrift.auth.services import assign_role_to_user
 from skrift.auth.services import invalidate_user_permissions_cache
 from skrift.auth.services import sync_roles_to_database
 from skrift.db.base import Base as SkriftBase
+from skrift.db.models.oauth_account import OAuthAccount
 from skrift.db.models.user import User
 from skrift.db.services import api_key_service
 
@@ -148,6 +149,12 @@ async def test_no_membership_and_no_portal(client, user):
         "expires_at": None,
         "will_renew": None,
         "portal_available": False,
+        "started_at": None,
+        "amount_paid_minor": None,
+        "currency": None,
+        "refunded": None,
+        "chat_tier": None,
+        "discord_linked": False,
     }
     assert tc.post(path + "/portal").status_code == 404
     site_billing.create_portal_session.assert_not_awaited()
@@ -190,6 +197,170 @@ async def test_membership_and_portal(
     assert response.status_code == (200 if available else 404)
     if available:
         site_billing.create_portal_session.assert_awaited_once_with("customer-one")
+
+
+async def _grant(db_session, user, roles):
+    await sync_roles_to_database(db_session)
+    for role in roles:
+        assert await assign_role_to_user(db_session, user.id, role)
+    await db_session.commit()
+    invalidate_user_permissions_cache()
+
+
+def _membership(user, **fields):
+    return SudoMembership(
+        **{
+            "user_id": user.id,
+            "role": "hacker",
+            "source": "subscription",
+            "customer_id": "customer-secret",
+            "checkout_id": str(uuid4()),
+            "order_id": f"order-secret-{uuid4()}",
+            "price_id": "price-hacker",
+            "amount_paid_cents": 800,
+            "purchased_at": datetime(2026, 3, 4, 5, 6, tzinfo=UTC),
+            "expires_at": datetime.now(UTC) + timedelta(days=30),
+            "will_renew": True,
+            **fields,
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "roles,tier",
+    [
+        ([], None),
+        (["sudo-hacker"], "hacker"),
+        (["sudo-r"], "r"),
+        (["sudo-rw"], "rw"),
+        (["sudo-founder"], "rw"),
+        (["sudo-hacker", "sudo-r"], "r"),
+        (["sudo-founder", "sudo-rwx"], "rwx"),
+    ],
+)
+@pytest.mark.parametrize("member", [False, True])
+async def test_membership_chat_tier_comes_from_roles(
+    client, user, db_session, roles, tier, member
+):
+    tc, _ = client
+    if member:
+        db_session.add(_membership(user))
+        await db_session.commit()
+    await _grant(db_session, user, roles)
+    state = tc.get(f"{ROOT}/users/{user.id}/membership").json()
+    assert state["status"] == ("active" if member else "none")
+    assert state["chat_tier"] == tier
+    invalidate_user_permissions_cache()
+
+
+async def test_membership_chat_tier_ignores_plan_without_role(client, user, db_session):
+    """A paid row whose role was revoked is not chat, as in Python's chat."""
+    tc, _ = client
+    db_session.add(_membership(user, role="founder", source="one_time"))
+    await db_session.commit()
+    await _grant(db_session, user, ["site-service"])
+    state = tc.get(f"{ROOT}/users/{user.id}/membership").json()
+    assert (state["plan"], state["chat_tier"]) == ("founder", None)
+    invalidate_user_permissions_cache()
+
+
+@pytest.mark.parametrize("provider,linked", [("discord", True), ("github", False)])
+@pytest.mark.parametrize("member", [False, True])
+async def test_membership_discord_linked(
+    client, user, db_session, provider, linked, member
+):
+    tc, _ = client
+    db_session.add(
+        OAuthAccount(
+            user_id=user.id,
+            provider=provider,
+            provider_account_id="123456789012345678",
+            provider_email="linked@example.test",
+            access_token="token-secret",
+        )
+    )
+    if member:
+        db_session.add(_membership(user))
+    await db_session.commit()
+    response = tc.get(f"{ROOT}/users/{user.id}/membership")
+    assert response.json()["discord_linked"] is linked
+    for secret in ("123456789012345678", "linked@example.test", "token-secret"):
+        assert secret not in response.text
+
+
+async def test_discord_link_belongs_to_the_requested_user(client, user, db_session):
+    tc, _ = client
+    other = User(email="other@example.test", name="Other", is_active=True)
+    db_session.add(other)
+    await db_session.commit()
+    db_session.add(
+        OAuthAccount(user_id=other.id, provider="discord", provider_account_id="1" * 18)
+    )
+    await db_session.commit()
+    assert (
+        tc.get(f"{ROOT}/users/{user.id}/membership").json()["discord_linked"] is False
+    )
+
+
+@pytest.mark.parametrize(
+    "fields,started,amount",
+    [
+        ({}, "2026-03-04T05:06:00Z", 800),
+        (
+            {"role": "founder", "source": "one_time", "amount_paid_cents": 12900},
+            "2026-03-04T05:06:00Z",
+            12900,
+        ),
+        (
+            {"source": "comp", "amount_paid_cents": 0},
+            "2026-03-04T05:06:00Z",
+            0,
+        ),
+        (
+            {"expires_at": datetime.now(UTC) - timedelta(days=1)},
+            "2026-03-04T05:06:00Z",
+            800,
+        ),
+    ],
+)
+async def test_membership_details(client, user, db_session, fields, started, amount):
+    tc, _ = client
+    db_session.add(_membership(user, **fields))
+    await db_session.commit()
+    response = tc.get(f"{ROOT}/users/{user.id}/membership")
+    state = response.json()
+    assert state["started_at"].replace("+00:00", "Z") == started
+    assert state["amount_paid_minor"] == amount
+    assert state["currency"] == "USD"
+    assert state["refunded"] is False
+    for secret in (
+        "customer-secret",
+        "order-secret",
+        "price-hacker",
+        "billing@example.test",
+    ):
+        assert secret not in response.text
+
+
+async def test_membership_refund_status_matches_billing_page(client, user, db_session):
+    """Refunds also set revoked_reason, so the page drops the row; a legacy row
+    with only refunded_at is shown as refunded."""
+    tc, _ = client
+    path = f"{ROOT}/users/{user.id}/membership"
+    db_session.add(
+        _membership(user, refunded_at=datetime.now(UTC), revoked_reason="refund")
+    )
+    await db_session.commit()
+    state = tc.get(path).json()
+    assert (state["status"], state["refunded"], state["started_at"]) == (
+        "none",
+        None,
+        None,
+    )
+    db_session.add(_membership(user, refunded_at=datetime.now(UTC)))
+    await db_session.commit()
+    state = tc.get(path).json()
+    assert (state["status"], state["refunded"]) == ("active", True)
 
 
 @pytest.mark.parametrize("plan", ["hacker", "price-hacker"])

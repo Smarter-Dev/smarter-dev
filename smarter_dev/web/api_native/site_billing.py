@@ -18,6 +18,8 @@ from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import Field
 from skrift.auth.guards import Permission
+from skrift.auth.services import get_user_permissions
+from skrift.db.models.oauth_account import OAuthAccount
 from skrift.db.models.user import User
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,6 +35,7 @@ from smarter_dev.web.billing.checkout import UnknownRole
 from smarter_dev.web.billing.checkout import create_checkout_session
 from smarter_dev.web.billing.portal import create_portal_session
 from smarter_dev.web.billing.pricing_context import build_pricing_context
+from smarter_dev.web.chat.entitlements import resolve_spend_tier
 
 SITE_BILLING_GUARDS = [*SITE_API_GUARDS, Permission("site-billing")]
 
@@ -105,6 +108,17 @@ async def _user(session: AsyncSession, user_id: str) -> User:
     return user
 
 
+async def _discord_linked(session: AsyncSession, user_id: UUID) -> bool:
+    """Same check as the Python billing page's "Connect Discord" prompt."""
+    linked = await session.scalar(
+        select(OAuthAccount.provider_account_id)
+        .where(OAuthAccount.user_id == user_id)
+        .where(OAuthAccount.provider == "discord")
+        .limit(1)
+    )
+    return linked is not None
+
+
 async def _launched(session: AsyncSession) -> bool:
     # This catalog is public/cacheable at the Worker. Never resolve admin_only
     # against the service key owner's permissions or a browser-supplied identity.
@@ -142,6 +156,14 @@ class SiteBillingController(Controller):
     ) -> dict[str, Any]:
         user = await _user(db_session, user_id)
         membership = await _get_active_membership(db_session, user.id)
+        # Chat runs on the member's roles (internal r/rw/rwx included), not
+        # the plan, so the site gets Python's own tier rather than guessing.
+        account = {
+            "chat_tier": resolve_spend_tier(
+                await get_user_permissions(db_session, user.id)
+            ),
+            "discord_linked": await _discord_linked(db_session, user.id),
+        }
         if membership is None:
             return {
                 "status": "none",
@@ -149,10 +171,18 @@ class SiteBillingController(Controller):
                 "expires_at": None,
                 "will_renew": None,
                 "portal_available": False,
+                "started_at": None,
+                "amount_paid_minor": None,
+                "currency": None,
+                "refunded": None,
+                **account,
             }
         expiry = membership.expires_at
         if expiry.tzinfo is None:
             expiry = expiry.replace(tzinfo=UTC)
+        started = membership.purchased_at
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=UTC)
         return {
             "status": "active" if expiry > datetime.now(UTC) else "expired",
             "plan": membership.role,
@@ -160,6 +190,12 @@ class SiteBillingController(Controller):
             "will_renew": membership.will_renew,
             "portal_available": bool(membership.customer_id)
             and membership.source != "comp",
+            # As the Python billing page shows them; it prices in USD only.
+            "started_at": started,
+            "amount_paid_minor": membership.amount_paid_cents,
+            "currency": "USD",
+            "refunded": membership.refunded_at is not None,
+            **account,
         }
 
     @post("/users/{user_id:str}/checkout", guards=SITE_BILLING_GUARDS, status_code=200)
