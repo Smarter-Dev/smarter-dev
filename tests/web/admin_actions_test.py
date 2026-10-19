@@ -33,6 +33,12 @@ def recorded_events(monkeypatch) -> list:
 
 def _actor(requests: list[httpx.Request], status_code: int = 204) -> AdminActor:
     def handle(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and "/messages/" in request.url.path:
+            # delete_message reads the message's author first (for the staff
+            # check, cleared by conftest); that read is not the action asserted.
+            if status_code >= 400:
+                return httpx.Response(status_code)
+            return httpx.Response(200, json={"id": "M1", "author": {"id": "U1"}})
         requests.append(request)
         return httpx.Response(status_code)
 
@@ -187,10 +193,6 @@ async def test_delete_message():
             lambda actor: actor.remove_timeout("U1"),
             "untimeout target U1 already absent",
         ),
-        (
-            lambda actor: actor.delete_message("C1", "M1"),
-            "message M1 already deleted",
-        ),
     ],
 )
 async def test_absent_moderation_target_is_successful_noop(invoke, expected):
@@ -198,6 +200,14 @@ async def test_absent_moderation_target_is_successful_noop(invoke, expected):
     requests: list[httpx.Request] = []
     assert await invoke(_actor(requests, status_code=404)) == expected
     assert len(requests) == 1
+
+
+async def test_an_already_deleted_message_is_a_noop_without_a_delete_call():
+    """The author read finds it gone, so no DELETE goes out at all."""
+    requests: list[httpx.Request] = []
+    out = await _actor(requests, status_code=404).delete_message("C1", "M1")
+    assert out == "message M1 already deleted"
+    assert requests == []
 
 
 @pytest.mark.parametrize(

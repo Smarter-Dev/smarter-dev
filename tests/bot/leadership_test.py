@@ -15,6 +15,7 @@ import time
 import uuid
 from datetime import UTC
 from datetime import datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import Mock
 
@@ -399,8 +400,11 @@ async def test_mod_monitor_triage_started_before_sigterm_is_drained(monkeypatch)
         await finish.wait()
         triaged.append(event.message.id)
 
+    async def config(guild_id):
+        return SimpleNamespace(monitored_role_ids=frozenset({"99"}))
+
     monkeypatch.setattr(mod_monitor, "_handle_moderation", triage)
-    monkeypatch.setitem(mod_monitor._guild_configs, "30", {"monitored_role_ids": {"99"}})
+    monkeypatch.setattr(mod_monitor, "load_triage_config", config)
     event = Mock(guild_id=30, channel_id=20)
     event.message.author.is_bot = False
     event.message.role_mention_ids = [99]

@@ -19,63 +19,14 @@ import lightbulb
 from smarter_dev.bot import leadership
 from smarter_dev.bot.agents.mod_tools import build_triage_report_embed
 from smarter_dev.bot.agents.moderation_agent import run_moderation_agent
+from smarter_dev.bot.triage_config import TriageConfig
+from smarter_dev.bot.triage_config import load_triage_config
 from smarter_dev.bot.utils.messages import gather_message_context
-from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.exception_logging import log_exception
-from smarter_dev.web.crud import ModerationConfigOperations
-from smarter_dev.web.models import ModerationConfig
 
 logger = logging.getLogger(__name__)
 
 plugin = lightbulb.Plugin("mod_monitor")
-
-# In-memory cache of active guild configs: guild_id (str) -> ModerationConfig data
-_guild_configs: dict[str, dict] = {}
-
-mod_config_ops = ModerationConfigOperations()
-
-
-async def _load_configs() -> None:
-    """Load all active moderation configs into memory."""
-    try:
-        async with get_db_session_context() as session:
-            configs = await mod_config_ops.get_all_active_configs(session)
-            _guild_configs.clear()
-            for config in configs:
-                _guild_configs[config.guild_id] = {
-                    "monitored_role_ids": set(config.monitored_role_ids or []),
-                    "instructions": config.instructions or "",
-                    "enabled_tools": config.enabled_tools or ["timeout", "purge", "delete"],
-                    "context_message_limit": config.context_message_limit or 25,
-                    "response_channel_id": config.response_channel_id,
-                }
-            logger.info(f"Loaded moderation configs for {len(_guild_configs)} guild(s)")
-    except Exception:
-        log_exception(logger, "Failed to load moderation configs")
-
-
-async def refresh_config(guild_id: str) -> None:
-    """Refresh a single guild's config from the database.
-
-    Call this from the admin save endpoint to update the cache.
-    """
-    try:
-        async with get_db_session_context() as session:
-            config = await mod_config_ops.get_config(session, guild_id)
-            if config and config.is_active:
-                _guild_configs[guild_id] = {
-                    "monitored_role_ids": set(config.monitored_role_ids or []),
-                    "instructions": config.instructions or "",
-                    "enabled_tools": config.enabled_tools or ["timeout", "purge", "delete"],
-                    "context_message_limit": config.context_message_limit or 25,
-                    "response_channel_id": config.response_channel_id,
-                }
-                logger.info(f"Refreshed moderation config for guild {guild_id}")
-            else:
-                _guild_configs.pop(guild_id, None)
-                logger.info(f"Removed moderation config for guild {guild_id} (inactive or deleted)")
-    except Exception:
-        log_exception(logger, f"Failed to refresh moderation config for guild {guild_id}")
 
 
 @plugin.listener(hikari.GuildMessageCreateEvent)
@@ -85,14 +36,20 @@ async def on_message_create(event: hikari.GuildMessageCreateEvent) -> None:
     if not event.message.author or event.message.author.is_bot:
         return
 
-    guild_id = str(event.guild_id)
-    config = _guild_configs.get(guild_id)
-    if not config:
+    mentioned_role_ids = {str(r) for r in (event.message.role_mention_ids or [])}
+    if not mentioned_role_ids:
         return
 
-    # Check if any monitored role was mentioned
-    mentioned_role_ids = {str(r) for r in (event.message.role_mention_ids or [])}
-    if not mentioned_role_ids & config["monitored_role_ids"]:
+    # Read the config now, not from a startup cache: a save in the admin UI
+    # (which runs in the web process) must reach the very next ping. Only
+    # messages that mention a role get this far, so the read is rare.
+    guild_id = str(event.guild_id)
+    try:
+        config = await load_triage_config(guild_id)
+    except Exception:
+        log_exception(logger, f"Could not read moderation config for guild {guild_id}")
+        return
+    if config is None or not mentioned_role_ids & config.monitored_role_ids:
         return
 
     logger.info(
@@ -113,7 +70,7 @@ async def on_message_create(event: hikari.GuildMessageCreateEvent) -> None:
 
 async def _handle_moderation(
     event: hikari.GuildMessageCreateEvent,
-    config: dict,
+    config: TriageConfig,
 ) -> None:
     """Handle a moderation trigger by gathering context and running the triage agent."""
     try:
@@ -127,7 +84,7 @@ async def _handle_moderation(
             bot,
             int(channel_id),
             guild_id=int(guild_id),
-            limit=config["context_message_limit"],
+            limit=config.context_message_limit,
         )
 
         # Run the triage agent — always operate in the INCIDENT channel
@@ -138,8 +95,8 @@ async def _handle_moderation(
             trigger_message_content=event.message.content or "",
             trigger_author=event.message.author.username,
             context_messages=context_messages,
-            guild_instructions=config["instructions"],
-            enabled_tools=config["enabled_tools"],
+            guild_instructions=config.instructions,
+            enabled_tools=list(config.enabled_tools),
             trigger_message_id=trigger_message_id,
         )
 
@@ -159,7 +116,7 @@ async def _handle_moderation(
                 log_exception(logger, f"Failed to send channel message for guild {guild_id}")
 
         # Post triage report to mod channel
-        report_channel = config.get("response_channel_id") or channel_id
+        report_channel = config.response_channel_id or channel_id
         report_embed = build_triage_report_embed(
             tracker=tracker,
             assessment=assessment,
@@ -185,8 +142,6 @@ async def _handle_moderation(
 def load(bot: lightbulb.BotApp) -> None:
     """Load the mod monitor plugin."""
     bot.add_plugin(plugin)
-    # Load configs on startup
-    asyncio.get_event_loop().create_task(_load_configs())
 
 
 def unload(bot: lightbulb.BotApp) -> None:

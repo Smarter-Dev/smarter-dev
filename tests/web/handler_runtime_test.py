@@ -121,6 +121,11 @@ class _FakeActor:
     calls: list = field(default_factory=list)
     # Thread ids that model a gone target (404): the mutation returns False.
     gone: set = field(default_factory=set)
+    # User ids the staff-protection check refuses.
+    protected: set = field(default_factory=set)
+
+    async def staff_refusal(self, user_id, *, is_bot=None):
+        return "holds a staff role" if str(user_id) in self.protected else None
 
     async def ban_user(self, user_id, reason=None, delete_message_seconds=0):
         self.calls.append(("ban", user_id, reason, delete_message_seconds))
@@ -1713,6 +1718,25 @@ async def test_warn_user_posts_notice_dms_and_records():
     assert result.usage["messages_sent"] == 3  # notice + DM + the echo above
     assert result.usage["mod_actions"] == 1
     assert emitter.messages[-1][1] == "msg1|True|3"
+
+
+async def test_warn_user_on_a_protected_member_posts_records_and_dms_nothing():
+    calls = []
+    script = (
+        "r = await warn_user('U9', 'spamming links')\n"
+        "await send_message(r['refused'])\n"
+    )
+    result, emitter, _ = await _run(
+        script,
+        budget=admin_budget("message"),
+        actor=_FakeActor(protected={"U9"}),
+        mod_action_recorder=_recorder(calls, warn_count=3),
+    )
+    assert result.outcome == "ok", result.error
+    assert calls == []
+    assert emitter.dm_sends == []
+    # Only the script's own echo went out, carrying the reason.
+    assert [m[1] for m in emitter.messages] == ["U9 is protected (holds a staff role)"]
 
 
 async def test_warn_user_spends_mod_action_before_any_side_effect():

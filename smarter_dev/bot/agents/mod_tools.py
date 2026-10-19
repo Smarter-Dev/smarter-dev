@@ -9,11 +9,20 @@ The agent acts as a stopgap while waiting for human moderators. It can:
 
 Context-bound tool factory following the same closure pattern as
 create_mention_tools in tools.py.
+
+Every destructive tool runs the same checks, in this order, before it calls
+Discord: the action limit, its arguments, the staff-protection rule on its
+target (:func:`smarter_dev.bot.staff_protection.staff_refusal`; for a delete,
+the message's author), and a fresh read of the guild's config (still active,
+tool still enabled). Only then is an action slot reserved.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from collections.abc import Awaitable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 
@@ -28,6 +37,9 @@ from smarter_dev.bot.purge_core import (
     delete_selected_messages,
     select_purgeable_messages,
 )
+from smarter_dev.bot.staff_protection import staff_refusal
+from smarter_dev.bot.triage_config import enabled_destructive_tools
+from smarter_dev.bot.triage_config import tool_refusal
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.guild_event_log import mod_action_event
 from smarter_dev.web.crud import ModerationActionOperations
@@ -37,16 +49,41 @@ logger = logging.getLogger(__name__)
 
 mod_action_ops = ModerationActionOperations()
 
-# Safety: max punitive actions (timeout/purge) per single invocation
+# Safety: at most this many destructive tool invocations (reserved slots) per
+# triage. hikari may retry one invocation's request internally; there is no
+# additional application-level retry.
 MAX_ACTIONS_PER_INVOCATION = 3
+
+MAX_PURGE_COUNT = 50
+
+# Longest model-written reason a report line carries: 3 actions of this size
+# plus their prefixes fit Discord's 1024-character field.
+REPORT_REASON_CHARS = 150
+
+# hikari re-sends a request it may already have delivered (timeouts, dropped
+# connections, 5xx), so the error a destructive call finally raises says
+# nothing about what an earlier attempt did: a delete retried after it went
+# through comes back 404. Any error from one is an unknown outcome, never a
+# no-op.
+_OUTCOME_UNKNOWN = (
+    "Outcome unknown: Discord reported {}, and an earlier attempt may have "
+    "applied it. Not retried."
+)
 
 # Discord epoch for snowflake timestamp decoding
 DISCORD_EPOCH_MS = 1420070400000
 
+# (guild_id, tool) -> why the tool may not run right now, or None.
+ConfigGate = Callable[[str, str], Awaitable[str | None]]
+
 
 @dataclass
 class ActionTracker:
-    """Tracks all actions taken during a single moderation triage run."""
+    """Tracks all actions taken during a single moderation triage run.
+
+    An action entry with ``possibly_applied`` set is one whose Discord call
+    failed or was cancelled after it was sent: it may or may not have landed.
+    """
     timeouts: list[dict] = field(default_factory=list)  # {user_id, username, duration, reason}
     purges: list[dict] = field(default_factory=list)  # {user_id, username, count, reason}
     deletions: list[dict] = field(default_factory=list)  # {message_id, reason}
@@ -87,7 +124,8 @@ def build_triage_report_embed(
     failed = tracker.failure is not None
     embed = hikari.Embed(
         title="Moderation Triage Failed" if failed else "Moderation Triage Report",
-        description=assessment[:300] + "..." if len(assessment) > 300 else assessment,
+        description="**AI assessment (unverified):** "
+        + (assessment[:300] + "..." if len(assessment) > 300 else assessment),
         color=hikari.Color(0xE74C3C if failed else 0xFFA500),
         timestamp=datetime.now(timezone.utc),
     )
@@ -104,28 +142,34 @@ def build_triage_report_embed(
         flag_mentions = ", ".join(f"<@{uid}>" for uid in tracker.flags)
         embed.add_field(name="Flagged for Review", value=flag_mentions, inline=False)
 
-    # Timeouts
+    # What Discord confirmed apart from what may have happened; both come
+    # from the tracker, never from the model's assessment.
+    confirmed: list[str] = []
+    unknown: list[str] = []
+
+    def _short(reason: str) -> str:
+        # The model writes reasons; cap each so every action keeps its line.
+        return reason if len(reason) <= REPORT_REASON_CHARS else reason[: REPORT_REASON_CHARS - 1] + "…"
+
     for t in tracker.timeouts:
-        embed.add_field(
-            name=f"Timeout: {t['username']}",
-            value=f"**Duration:** {t['duration']}\n**Reason:** {t['reason']}",
-            inline=True,
-        )
-
-    # Purges
+        line = f"Timeout **{t['username']}** for {t['duration']}: {_short(t['reason'])}"
+        (unknown if t.get("possibly_applied") else confirmed).append(line)
     for p in tracker.purges:
+        line = f"Purge {p['count']} message(s) from **{p['username']}**: {_short(p['reason'])}"
+        (unknown if p.get("possibly_applied") else confirmed).append(line)
+    for d in tracker.deletions:
+        line = f"Delete msg `{d['message_id']}`: {_short(d['reason'])}"
+        (unknown if d.get("possibly_applied") else confirmed).append(line)
+    if confirmed or unknown:
         embed.add_field(
-            name=f"Purged: {p['username']}",
-            value=f"**Messages deleted:** {p['count']}\n**Reason:** {p['reason']}",
-            inline=True,
+            name="Actions Taken (confirmed)",
+            value="\n".join(confirmed)[:1024] if confirmed else "None",
+            inline=False,
         )
-
-    # Single message deletions
-    if tracker.deletions:
-        deletion_lines = [f"msg `{d['message_id']}`: {d['reason']}" for d in tracker.deletions]
+    if unknown:
         embed.add_field(
-            name=f"Deleted Messages ({len(tracker.deletions)})",
-            value="\n".join(deletion_lines)[:1024],
+            name="Possibly Applied (outcome unknown)",
+            value="\n".join(unknown)[:1024],
             inline=False,
         )
 
@@ -133,7 +177,7 @@ def build_triage_report_embed(
         if tracker.has_actions:
             status = (
                 f"Triage stopped partway ({tracker.failure}). The actions listed "
-                "here were already taken; nothing else was reviewed."
+                "here were already taken or possibly applied; nothing else was reviewed."
             )
             if not tracker.channel_message:
                 status += " No notice was posted in the channel."
@@ -155,9 +199,9 @@ def build_triage_report_embed(
         )
 
     if failed:
-        embed.set_footer(text="Automated triage failed \u2014 a moderator must review this")
+        embed.set_footer(text="Automated triage failed — a moderator must review this")
     else:
-        embed.set_footer(text="Automated triage \u2014 human review required")
+        embed.set_footer(text="Automated triage — human review required")
     return embed
 
 
@@ -167,6 +211,7 @@ def create_moderation_tools(
     channel_id: str,
     trigger_message_id: str | None = None,
     enabled_tools: list[str] | None = None,
+    config_gate: ConfigGate | None = None,
 ) -> tuple[list[Tool], ActionTracker]:
     """Create context-bound triage tools for the AI moderation agent.
 
@@ -178,35 +223,51 @@ def create_moderation_tools(
         guild_id: Guild where moderation was triggered
         channel_id: Channel where moderation was triggered (incident channel)
         trigger_message_id: Message that triggered the moderation review
-        enabled_tools: List of tool names to enable (timeout, purge)
+        enabled_tools: Destructive tools to offer (timeout, purge, delete).
+            None or [] offers none; the utility tools are always included.
+        config_gate: Asked right before each destructive call whether the
+            guild's config still allows it. Defaults to a fresh database read.
 
     Returns:
         Tuple of (tools list, ActionTracker)
     """
-    enabled = set(enabled_tools or ["timeout", "purge"])
+    enabled = set(enabled_destructive_tools(enabled_tools))
+    gate = config_gate or tool_refusal
     tracker = ActionTracker()
     action_count = 0
 
     def _check_action_limit() -> str | None:
-        nonlocal action_count
         if action_count >= MAX_ACTIONS_PER_INVOCATION:
             return f"Action limit reached ({MAX_ACTIONS_PER_INVOCATION} per invocation). No more actions allowed."
         return None
 
-    async def _check_target_permissions(user_id: str) -> str | None:
-        """Check if the target user can be moderated."""
-        try:
-            member = await bot.rest.fetch_member(int(guild_id), int(user_id))
-            perms = lightbulb.utils.permissions_for(member)
-            if perms & (hikari.Permissions.MODERATE_MEMBERS | hikari.Permissions.ADMINISTRATOR):
-                return "Cannot moderate users with moderation or administrator permissions."
-            if int(user_id) == bot.get_me().id:
-                return "Cannot moderate the bot itself."
+    async def _clear_to_act(tool: str) -> str | None:
+        """The last check before a destructive call: config, then the slot.
+
+        A slot is reserved here and never given back: success, partial
+        success and every unknown outcome, cancellation included, count. A
+        refusal before this point (limit, arguments, target, lookups) takes
+        no slot.
+        """
+        nonlocal action_count
+        refusal = await gate(guild_id, tool)
+        if refusal:
+            return refusal
+        limit_msg = _check_action_limit()
+        if limit_msg is None:
+            action_count += 1
+        return limit_msg
+
+    async def _check_target_permissions(
+        user_id: str, *, user_is_bot: bool | None = None
+    ) -> str | None:
+        """Why the target may not be moderated, or None when they may."""
+        refusal = await staff_refusal(
+            bot, guild_id, user_id, user_is_bot=user_is_bot
+        )
+        if refusal is None:
             return None
-        except hikari.NotFoundError:
-            return "User not found in this guild."
-        except Exception as e:
-            return f"Error checking permissions: {e}"
+        return f"Cannot moderate this user: {refusal}."
 
     async def _record_action(
         *,
@@ -216,23 +277,31 @@ def create_moderation_tools(
         reason: str | None = None,
         duration_seconds: int | None = None,
         ai_context_summary: str | None = None,
-    ) -> ModerationAction:
-        """Record a moderation action in the database."""
-        async with get_db_session_context() as session:
-            action = await mod_action_ops.create_action(
-                session,
-                guild_id=guild_id,
-                target_user_id=target_user_id,
-                target_username=target_username,
-                action_type=action_type,
-                reason=reason,
-                duration_seconds=duration_seconds,
-                source="ai",
-                channel_id=channel_id,
-                trigger_message_id=trigger_message_id,
-                ai_context_summary=ai_context_summary,
-            )
-            await session.commit()
+    ) -> ModerationAction | None:
+        """Record an action that already happened on Discord, best-effort.
+
+        Callers track the action before this, so a failed write never hides
+        it from the action limit or the report.
+        """
+        try:
+            async with get_db_session_context() as session:
+                action = await mod_action_ops.create_action(
+                    session,
+                    guild_id=guild_id,
+                    target_user_id=target_user_id,
+                    target_username=target_username,
+                    action_type=action_type,
+                    reason=reason,
+                    duration_seconds=duration_seconds,
+                    source="ai",
+                    channel_id=channel_id,
+                    trigger_message_id=trigger_message_id,
+                    ai_context_summary=ai_context_summary,
+                )
+                await session.commit()
+        except Exception as e:
+            logger.error(f"[ModTool] recording {action_type} for {target_user_id} failed: {type(e).__name__}")
+            return None
         # Fire the mod_action trigger so a mod-log handler formats the AI action
         # (best-effort; never breaks the triage tool). The bot goes along so the
         # same call writes the action into the guild's short-term event log.
@@ -256,71 +325,72 @@ def create_moderation_tools(
         Returns:
             dict with 'success' boolean and details
         """
-        nonlocal action_count
         limit_msg = _check_action_limit()
         if limit_msg:
             return {"success": False, "error": limit_msg}
+
+        td = parse_duration(duration)
+        if not td or td <= timedelta(0):
+            return {"success": False, "error": f"Invalid duration format: {duration}. Use '10m', '1h', '2d', etc."}
+        if td > timedelta(hours=1):
+            return {"success": False, "error": "Triage timeouts cannot exceed 1 hour. Human mods can extend if needed."}
 
         perm_msg = await _check_target_permissions(user_id)
         if perm_msg:
             return {"success": False, "error": perm_msg}
 
-        td = parse_duration(duration)
-        if not td:
-            return {"success": False, "error": f"Invalid duration format: {duration}. Use '10m', '1h', '2d', etc."}
-        if td > timedelta(hours=1):
-            return {"success": False, "error": "Triage timeouts cannot exceed 1 hour. Human mods can extend if needed."}
-
         try:
             member = await bot.rest.fetch_member(int(guild_id), int(user_id))
-            username = member.display_name or member.username
-            timeout_until = datetime.now(timezone.utc) + td
+        except Exception as e:
+            return {"success": False, "error": f"Could not fetch user: {type(e).__name__}"}
+        username = member.display_name or member.username
+        entry = {"user_id": user_id, "username": username, "duration": duration, "reason": reason}
 
+        refusal = await _clear_to_act("timeout")
+        if refusal:
+            return {"success": False, "error": refusal}
+        timeout_until = datetime.now(timezone.utc) + td
+        try:
             await bot.rest.edit_member(
                 int(guild_id),
                 int(user_id),
                 communication_disabled_until=timeout_until,
                 reason=f"AI triage: {reason}",
             )
-
-            duration_secs = int(td.total_seconds())
-            await _record_action(
-                target_user_id=user_id,
-                target_username=username,
-                action_type="timeout",
-                reason=reason,
-                duration_seconds=duration_secs,
+        except asyncio.CancelledError:
+            tracker.timeouts.append({**entry, "possibly_applied": True})
+            logger.warning(
+                f"[ModTool] timeout_user of user {user_id} for {duration} possibly applied; "
+                "triage cancelled"
             )
-            action_count += 1
-
-            tracker.timeouts.append({
-                "user_id": user_id,
-                "username": username,
-                "duration": duration,
-                "reason": reason,
-            })
-
-            # DM the user
-            try:
-                dm = await member.user.fetch_dm_channel()
-                await bot.rest.create_message(
-                    dm,
-                    f"You have been temporarily timed out for **{duration}**.\n\n**Reason:** {reason}\n"
-                    f"Your timeout will be lifted <t:{int(timeout_until.timestamp())}:R>.\n"
-                    f"A moderator will review the situation shortly.",
-                )
-            except (hikari.ForbiddenError, hikari.NotFoundError):
-                logger.info(f"Could not DM user {username} about timeout")
-
-            return {
-                "success": True,
-                "result": f"{username} timed out for {duration}.",
-            }
-        except hikari.ForbiddenError:
-            return {"success": False, "error": "Bot lacks permission to timeout this user."}
+            raise
         except Exception as e:
             logger.error(f"[ModTool] timeout_user failed: {type(e).__name__}")
-            return {"success": False, "error": str(e)}
+            tracker.timeouts.append({**entry, "possibly_applied": True})
+            return {"success": False, "error": _OUTCOME_UNKNOWN.format(type(e).__name__)}
+        tracker.timeouts.append(entry)
+
+        await _record_action(
+            target_user_id=user_id,
+            target_username=username,
+            action_type="timeout",
+            reason=reason,
+            duration_seconds=int(td.total_seconds()),
+        )
+
+        # DM the user
+        try:
+            dm = await member.user.fetch_dm_channel()
+            await bot.rest.create_message(
+                dm,
+                f"You have been temporarily timed out for **{duration}**.\n\n**Reason:** {reason}\n"
+                f"Your timeout will be lifted <t:{int(timeout_until.timestamp())}:R>.\n"
+                f"A moderator will review the situation shortly.",
+            )
+        except Exception:
+            logger.info(f"Could not DM user {username} about timeout")
+
+        return {"success": True, "result": f"{username} timed out for {duration}."}
 
     async def purge_messages(user_id: str, count: int, reason: str) -> dict:
         """Delete recent messages from a user in this channel. Use this to
@@ -334,55 +404,85 @@ def create_moderation_tools(
         Returns:
             dict with 'success' boolean and count of messages deleted
         """
-        nonlocal action_count
         limit_msg = _check_action_limit()
         if limit_msg:
             return {"success": False, "error": limit_msg}
 
-        count = min(count, 50)  # Cap at 50
+        if count < 1:
+            return {"success": False, "error": "Count must be at least 1."}
+        count = min(count, MAX_PURGE_COUNT)
+
+        perm_msg = await _check_target_permissions(user_id)
+        if perm_msg:
+            return {"success": False, "error": perm_msg}
 
         try:
             member = await bot.rest.fetch_member(int(guild_id), int(user_id))
             username = member.display_name or member.username
-
+        except hikari.NotFoundError:
+            # Left the server; the protection check above already cleared them.
+            username = user_id
+        except Exception as e:
+            logger.error(f"[ModTool] purge_messages failed: {type(e).__name__}")
+            return {"success": False, "error": str(e)}
+        try:
             # Shared paging/bulk-delete core (14-day rule + single-vs-bulk delete)
             # so /purge and this tool never diverge on which messages they delete.
+            # Only the target's own messages are selected.
             selection = await select_purgeable_messages(
                 bot.rest.fetch_messages(int(channel_id)).limit(count * 3),
                 count=count,
                 user_id=user_id,
             )
-            if not selection.message_ids:
-                return {"success": True, "result": f"No recent messages found from user {username} to delete."}
-
-            await delete_selected_messages(bot.rest, int(channel_id), selection.message_ids)
-            deleted_count = len(selection.message_ids)
-
-            await _record_action(
-                target_user_id=user_id,
-                target_username=username,
-                action_type="purge",
-                reason=reason,
-                ai_context_summary=f"Purged {deleted_count} message(s)",
-            )
-            action_count += 1
-
-            tracker.purges.append({
-                "user_id": user_id,
-                "username": username,
-                "count": deleted_count,
-                "reason": reason,
-            })
-
-            return {
-                "success": True,
-                "result": f"Deleted {deleted_count} message(s) from {username}.",
-            }
-        except hikari.ForbiddenError:
-            return {"success": False, "error": "Bot lacks permission to delete messages."}
         except Exception as e:
             logger.error(f"[ModTool] purge_messages failed: {type(e).__name__}")
             return {"success": False, "error": str(e)}
+        if not selection.message_ids:
+            return {"success": True, "result": f"No recent messages found from user {username} to delete."}
+        entry = {"user_id": user_id, "username": username, "reason": reason}
+
+        refusal = await _clear_to_act("purge")
+        if refusal:
+            return {"success": False, "error": refusal}
+        selected = len(selection.message_ids)
+        try:
+            await delete_selected_messages(bot.rest, int(channel_id), selection.message_ids)
+            deleted_count = selected
+        except asyncio.CancelledError:
+            tracker.purges.append({**entry, "count": selected, "possibly_applied": True})
+            logger.warning(
+                f"[ModTool] purge_messages of {selected} message(s) from user {user_id} "
+                "possibly applied; triage cancelled"
+            )
+            raise
+        except Exception as e:
+            logger.error(f"[ModTool] purge_messages failed: {type(e).__name__}")
+            # hikari lists the messages of every chunk Discord acknowledged;
+            # the rest of the selection has an unknown outcome.
+            confirmed = len(e.deleted_messages) if isinstance(e, hikari.BulkDeleteError) else 0
+            if confirmed:
+                tracker.purges.append({**entry, "count": confirmed})
+                await _record_action(
+                    target_user_id=user_id,
+                    target_username=username,
+                    action_type="purge",
+                    reason=reason,
+                    ai_context_summary=f"Purged {confirmed} message(s)",
+                )
+            tracker.purges.append({**entry, "count": selected - confirmed, "possibly_applied": True})
+            failure = e.__cause__ if isinstance(e, hikari.BulkDeleteError) and e.__cause__ else e
+            return {"success": False, "error": _OUTCOME_UNKNOWN.format(type(failure).__name__)}
+        tracker.purges.append({**entry, "count": deleted_count})
+
+        await _record_action(
+            target_user_id=user_id,
+            target_username=username,
+            action_type="purge",
+            reason=reason,
+            ai_context_summary=f"Purged {deleted_count} message(s)",
+        )
+
+        return {"success": True, "result": f"Deleted {deleted_count} message(s) from {username}."}
 
     async def delete_message(message_id: str, reason: str) -> dict:
         """Delete a single message by its ID. Use this for surgical removal of
@@ -397,24 +497,50 @@ def create_moderation_tools(
         Returns:
             dict with 'success' boolean
         """
-        nonlocal action_count
         limit_msg = _check_action_limit()
         if limit_msg:
             return {"success": False, "error": limit_msg}
 
         try:
+            message = await bot.rest.fetch_message(int(channel_id), int(message_id))
+        except hikari.NotFoundError:
+            return {"success": False, "error": f"Message {message_id} not found."}
+        except Exception as e:
+            logger.error(f"[ModTool] delete_message failed: {type(e).__name__}")
+            return {"success": False, "error": str(e)}
+        # A webhook's message has no member behind it to check; it counts as a
+        # bot's and is refused like one.
+        author_is_bot = bool(message.author.is_bot) or message.webhook_id is not None
+        perm_msg = await _check_target_permissions(
+            str(message.author.id), user_is_bot=author_is_bot
+        )
+        if perm_msg:
+            return {"success": False, "error": perm_msg}
+        entry = {"message_id": message_id, "reason": reason}
+
+        refusal = await _clear_to_act("delete")
+        if refusal:
+            return {"success": False, "error": refusal}
+        try:
             await bot.rest.delete_message(int(channel_id), int(message_id))
-            action_count += 1
+        except asyncio.CancelledError:
+            tracker.deletions.append({**entry, "possibly_applied": True})
+            logger.warning(
+                f"[ModTool] delete_message of message {message_id} possibly applied; "
+                "triage cancelled"
+            )
+            raise
+        except Exception as e:
+            logger.error(f"[ModTool] delete_message failed: {type(e).__name__}")
+            tracker.deletions.append({**entry, "possibly_applied": True})
+            return {"success": False, "error": _OUTCOME_UNKNOWN.format(type(e).__name__)}
+        tracker.deletions.append(entry)
 
-            tracker.deletions.append({
-                "message_id": message_id,
-                "reason": reason,
-            })
-
-            # TODO(§3.8): a single delete writes no ModerationAction row today, so
-            # the bot's short-term memory is captured here. Once feature-parity
-            # §3.8 gives it a row it will flow through dispatch_mod_action — drop
-            # this call then, or the delete lands in the log twice.
+        # TODO(§3.8): a single delete writes no ModerationAction row today, so
+        # the bot's short-term memory is captured here. Once feature-parity
+        # §3.8 gives it a row it will flow through dispatch_mod_action — drop
+        # this call then, or the delete lands in the log twice.
+        try:
             await record_guild_event(
                 bot,
                 mod_action_event(
@@ -427,18 +553,10 @@ def create_moderation_tools(
                     guild_id=guild_id,
                 ),
             )
-
-            return {
-                "success": True,
-                "result": f"Message {message_id} deleted.",
-            }
-        except hikari.NotFoundError:
-            return {"success": False, "error": f"Message {message_id} not found."}
-        except hikari.ForbiddenError:
-            return {"success": False, "error": "Bot lacks permission to delete this message."}
         except Exception as e:
-            logger.error(f"[ModTool] delete_message failed: {type(e).__name__}")
-            return {"success": False, "error": str(e)}
+            logger.error(f"[ModTool] recording delete of {message_id} failed: {type(e).__name__}")
+
+        return {"success": True, "result": f"Message {message_id} deleted."}
 
     # ── Utility tools (always available) ─────────────────────────────
 

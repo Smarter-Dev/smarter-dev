@@ -69,7 +69,11 @@ AD_TEXT = (
 
 def _member(user, *, joined_at: datetime | None, role_ids=()):
     return SimpleNamespace(
-        id=user.id, role_ids=list(role_ids), joined_at=joined_at, user=user
+        id=user.id,
+        role_ids=list(role_ids),
+        joined_at=joined_at,
+        user=user,
+        is_bot=user.is_bot,
     )
 
 
@@ -106,6 +110,9 @@ class _FakeRest:
 
     def fetch_messages(self, channel_id):
         return _History(self.channel_messages.get(int(channel_id), []))
+
+    async def fetch_roles(self, guild_id):
+        return list(self.guild.get_roles().values())
 
     async def fetch_member(self, guild_id, user_id):
         member = self.members.get(int(user_id))
@@ -170,14 +177,34 @@ class _FakeGuild:
             ),
         )
 
+    def get_roles(self):
+        # @everyone (the guild's own id) grants nothing staff-like.
+        return {
+            role_id: self.get_role(role_id)
+            for role_id in (GUILD_ID, *self.role_permissions)
+        }
+
 
 class _FakeCache:
-    def __init__(self, rest: _FakeRest) -> None:
+    def __init__(self, rest: _FakeRest, guild: _FakeGuild) -> None:
         self.rest = rest
-        self.channels: dict[int, SimpleNamespace] = {}
+        self.guild = guild
+        self.channels: dict[int, SimpleNamespace] = {
+            CHANNEL_ID: SimpleNamespace(permission_overwrites={})
+        }
+
+    def get_guild(self, guild_id):
+        return self.guild if int(guild_id) == GUILD_ID else None
+
+    def get_guild_channels_view_for_guild(self, guild_id):
+        return dict(self.channels)
 
     def get_member(self, guild_id, user_id):
         return self.rest.members.get(int(user_id))
+
+    def get_user(self, user_id):
+        member = self.rest.members.get(int(user_id))
+        return member.user if member else None
 
     def get_guild_channel(self, channel_id):
         return self.channels.get(int(channel_id))
@@ -187,9 +214,9 @@ class _FakeCache:
 
 
 class _FakeBot:
-    def __init__(self, rest: _FakeRest) -> None:
+    def __init__(self, rest: _FakeRest, guild: _FakeGuild) -> None:
         self.rest = rest
-        self.cache = _FakeCache(rest)
+        self.cache = _FakeCache(rest, guild)
 
     def get_me(self):
         return SimpleNamespace(id=1, username="smarter-dev")
@@ -209,8 +236,9 @@ class Harness:
     def __init__(self, monkeypatch) -> None:
         self.log: list = []
         self.rest = _FakeRest(self.log)
-        self.bot = _FakeBot(self.rest)
         self.guild = _FakeGuild()
+        self.rest.guild = self.guild
+        self.bot = _FakeBot(self.rest, self.guild)
         self.registry = spam_ring.SpamRingRegistry()
         self.config: ModerationFilterConfig | None = ModerationFilterConfig(
             guild_id=str(GUILD_ID),
@@ -1087,42 +1115,6 @@ async def test_the_guild_cap_skips_classification_past_twenty_a_minute(harness):
 # ---------------------------------------------------------------------------
 
 
-def test_moderate_kick_and_ban_count_as_staff():
-    for permission in (
-        hikari.Permissions.MODERATE_MEMBERS,
-        hikari.Permissions.KICK_MEMBERS,
-        hikari.Permissions.BAN_MEMBERS,
-        hikari.Permissions.MANAGE_MESSAGES,
-        hikari.Permissions.ADMINISTRATOR,
-    ):
-        assert spam_ring.has_staff_permissions(permission)
-    assert not spam_ring.has_staff_permissions(hikari.Permissions.SEND_MESSAGES)
-
-
-def test_channel_overwrites_apply_in_discords_order():
-    allow_manage = SimpleNamespace(
-        allow=hikari.Permissions.MANAGE_MESSAGES, deny=hikari.Permissions.NONE
-    )
-    deny_manage = SimpleNamespace(
-        allow=hikari.Permissions.NONE, deny=hikari.Permissions.MANAGE_MESSAGES
-    )
-    base = hikari.Permissions.NONE
-    # A role grant is overridden by a member-level deny, and vice versa.
-    assert spam_ring.apply_channel_overwrites(
-        base, {7: allow_manage}, everyone_id="1", role_ids=["7"], member_id="9"
-    ) == (hikari.Permissions.MANAGE_MESSAGES)
-    assert (
-        spam_ring.apply_channel_overwrites(
-            base,
-            {7: allow_manage, 9: deny_manage},
-            everyone_id="1",
-            role_ids=["7"],
-            member_id="9",
-        )
-        == hikari.Permissions.NONE
-    )
-
-
 async def test_a_new_member_with_kick_members_is_not_a_candidate(harness):
     harness.join(BOB, RING_JOIN, role_ids=(KICKER_ROLE_ID,))
     q1, _, q2, ad = stage_ring(harness)
@@ -1149,6 +1141,60 @@ async def test_a_channel_overwrite_making_a_newcomer_a_moderator_exempts_them(ha
 
     assert str(BOB.id) not in {t["user"] for t in harness.rest.timeouts}
     assert q2.id not in harness.rest.deleted
+
+
+@pytest.mark.parametrize(
+    ("role_id", "permissions"),
+    [
+        (644301991832453120, hikari.Permissions.NONE),  # a hardcoded staff role
+        (502, hikari.Permissions.VIEW_AUDIT_LOG),
+        (503, hikari.Permissions.MANAGE_NICKNAMES),
+    ],
+)
+async def test_newcomers_with_any_staff_role_or_permission_are_not_candidates(
+    harness, role_id, permissions
+):
+    harness.guild.role_permissions[role_id] = permissions
+    harness.join(BOB, RING_JOIN, role_ids=(role_id,))
+    q1, _, q2, ad = stage_ring(harness)
+
+    await harness.check(ad)
+
+    _, _, candidates = harness.jev_inputs[0]
+    assert str(BOB.id) not in candidates
+    assert str(BOB.id) not in {t["user"] for t in harness.rest.timeouts}
+    assert q2.id not in harness.rest.deleted
+    # The ring itself is still swept.
+    assert str(ALICE.id) in {t["user"] for t in harness.rest.timeouts}
+
+
+async def test_a_newcomer_whose_roles_cannot_be_resolved_is_not_a_candidate(harness):
+    # A role the guild does not list and REST cannot fetch: unknown, so protected.
+    harness.join(BOB, RING_JOIN, role_ids=(777,))
+    q1, _, q2, ad = stage_ring(harness)
+
+    await harness.check(ad)
+
+    assert str(BOB.id) not in {t["user"] for t in harness.rest.timeouts}
+    assert q2.id not in harness.rest.deleted
+
+
+async def test_an_ad_by_a_channel_moderator_is_never_actioned(harness):
+    harness.bot.cache.channels[OTHER_CHANNEL_ID] = SimpleNamespace(
+        permission_overwrites={
+            CAROL.id: SimpleNamespace(
+                allow=hikari.Permissions.MODERATE_MEMBERS,
+                deny=hikari.Permissions.NONE,
+            )
+        }
+    )
+    _, _, _, ad = stage_ring(harness)
+
+    await harness.check(ad)
+
+    assert harness.classified == []
+    assert harness.rest.timeouts == []
+    assert harness.rest.deleted == []
 
 
 # ---------------------------------------------------------------------------

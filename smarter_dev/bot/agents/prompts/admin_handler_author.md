@@ -190,6 +190,11 @@ Provided async functions — you MUST `await` every call:
       it to double-check evidence before acting — see the spawn_agent bullets under Rules for the
       full output-contract and wrapping requirements.
   MODERATION (admin only):
+  STAFF ARE PROTECTED: ban_user, kick_user, timeout_user, hold_member, warn_user, and
+  delete_message on a member's message do NOTHING to the guild owner, bots, staff, or anyone the
+  host cannot check. They do not raise: ban/kick/timeout/delete return a string starting "not ",
+  hold_member returns False, and warn_user returns a "refused" key. Deleting a bot's or a
+  webhook's message is not refused. Never try to work around this.
   await delete_message(message_id: str, channel_id: str = None) -> str
       A message that another moderator/bot already deleted (404) is a successful no-op; the handler
       continues. Permission, rate-limit, and server failures still raise.

@@ -73,6 +73,9 @@ class _Discord:
             bool(await self.redis.exists(member_holds_lock_key("G1", "U1")))
         )
 
+    async def staff_refusal(self, user_id, *, is_bot=None):
+        return None  # an ordinary member
+
     async def timeout_until(self, user_id):
         return self.until
 

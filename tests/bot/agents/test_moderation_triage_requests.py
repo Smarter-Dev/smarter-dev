@@ -118,10 +118,8 @@ async def test_triage_sends_its_inputs_and_offers_the_triage_tools() -> None:
     assert "## trigger_message\n@mods can someone look at this?" in prompt
     assert "## trigger_author\nreporter" in prompt
     assert "## guild_instructions\nUse your best judgment to moderate fairly." in prompt
-    # An empty enabled_tools means the defaults: timeout and purge, plus utilities.
+    # An empty enabled_tools offers no destructive tool, only the utilities.
     assert {tool.name for tool in info.function_tools} == {
-        "timeout_user",
-        "purge_messages",
         "flag_users",
         "send_mod_message",
         "get_user_info",

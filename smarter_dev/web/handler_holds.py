@@ -164,8 +164,19 @@ class MemberHolds:
         than ``seconds`` is left as it is, and the hold still counts. One
         running shorter is extended, and its expiry kept so a release can
         hand it back.
+
+        A protected member (staff, a bot, or anyone the staff-protection rule
+        cannot clear) is never held: False, and nothing recorded.
         """
         field = self._field(key)
+        if refusal := await self.actor.staff_refusal(user_id):
+            logger.info(
+                "hold on member %s in guild %s refused: %s",
+                user_id,
+                self.guild_id,
+                refusal,
+            )
+            return False
         async with self.lock(user_id):
             now = time.time()
             states = await self._states(user_id)

@@ -97,6 +97,9 @@ class _Actor:
 
     calls: list = field(default_factory=list)
 
+    async def staff_refusal(self, user_id, *, is_bot=None):
+        return None  # an ordinary member
+
     async def ban_user(self, user_id, reason=None, delete_message_seconds=0):
         self.calls.append(("ban", user_id, reason))
         return user_id

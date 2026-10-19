@@ -51,6 +51,11 @@ class _Discord:
     write_started: asyncio.Event = field(default_factory=asyncio.Event)
     member_left: bool = False
     reads: int = 0
+    # User ids the staff-protection check refuses.
+    protected: set = field(default_factory=set)
+
+    async def staff_refusal(self, user_id, *, is_bot=None):
+        return "holds a staff role" if user_id in self.protected else None
 
     async def timeout_until(self, user_id):
         self.reads += 1

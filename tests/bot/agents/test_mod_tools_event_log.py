@@ -9,28 +9,42 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from unittest.mock import Mock
 
-import hikari
 import pytest
 
 from smarter_dev.bot.agents import mod_tools
+from tests.bot.fake_discord import GUILD_ID as FAKE_GUILD_ID
+from tests.bot.fake_discord import FakeDiscord
+from tests.bot.fake_discord import not_found
 
-GUILD_ID = "111"
+GUILD_ID = str(FAKE_GUILD_ID)
 CHANNEL_ID = "555"
 MESSAGE_ID = "777"
+TARGET_ID = 222
 
 
-def _delete_tool(bot):
+async def _allowed(guild_id, tool):
+    return None
+
+
+def _tool(bot, name, enabled):
     tools, tracker = mod_tools.create_moderation_tools(
         bot,
         guild_id=GUILD_ID,
         channel_id=CHANNEL_ID,
         trigger_message_id=None,
-        enabled_tools=["delete"],
+        enabled_tools=enabled,
+        config_gate=_allowed,
     )
-    delete_message = next(t.function for t in tools if t.name == "delete_message")
-    return delete_message, tracker
+    return next(t.function for t in tools if t.name == name), tracker
+
+
+@pytest.fixture
+def discord() -> FakeDiscord:
+    discord = FakeDiscord()
+    discord.add_member(TARGET_ID, username="target")
+    discord.add_message(int(MESSAGE_ID), TARGET_ID, content="scam link")
+    return discord
 
 
 @pytest.fixture
@@ -44,16 +58,12 @@ def recorded_events(monkeypatch) -> list:
     return events
 
 
-@pytest.mark.asyncio
-async def test_single_delete_is_written_to_the_event_log(recorded_events):
-    bot = Mock()
-    bot.rest = Mock()
-    bot.rest.delete_message = AsyncMock()
-
-    delete_message, _ = _delete_tool(bot)
+async def test_single_delete_is_written_to_the_event_log(discord, recorded_events):
+    delete_message, _ = _tool(discord, "delete_message", ["delete"])
     result = await delete_message(MESSAGE_ID, "posted a scam link")
 
     assert result["success"] is True
+    assert discord.destructive == [("delete_message", int(MESSAGE_ID))]
     assert len(recorded_events) == 1
     event = recorded_events[0]
     assert event.kind == "mod_action"
@@ -64,25 +74,21 @@ async def test_single_delete_is_written_to_the_event_log(recorded_events):
     assert event.source == "ai"
 
 
-@pytest.mark.asyncio
-async def test_a_delete_that_never_happened_is_never_remembered(recorded_events):
-    bot = Mock()
-    bot.rest = Mock()
-    bot.rest.delete_message = AsyncMock(
-        side_effect=hikari.NotFoundError(
-            url="url", headers={}, raw_body=b"", message="gone"
-        )
-    )
+async def test_a_delete_that_never_happened_is_never_remembered(discord, recorded_events):
+    discord.fail["delete_message"] = not_found()
 
-    delete_message, _ = _delete_tool(bot)
+    delete_message, tracker = _tool(discord, "delete_message", ["delete"])
     result = await delete_message(MESSAGE_ID, "posted a scam link")
 
     assert result["success"] is False
     assert recorded_events == []
+    # A 404 after the call went out may follow an earlier attempt that landed.
+    assert tracker.deletions == [
+        {"message_id": MESSAGE_ID, "reason": "posted a scam link", "possibly_applied": True}
+    ]
 
 
-@pytest.mark.asyncio
-async def test_triage_timeout_dispatches_with_the_bot_for_the_event_log(monkeypatch):
+async def test_triage_timeout_dispatches_with_the_bot_for_the_event_log(discord, monkeypatch):
     """Actions that DO write a row reach the log through the dispatch instead."""
     dispatched: list = []
 
@@ -105,32 +111,10 @@ async def test_triage_timeout_dispatches_with_the_bot_for_the_event_log(monkeypa
         "create_action",
         AsyncMock(return_value=SimpleNamespace()),
     )
-    monkeypatch.setattr(
-        mod_tools.lightbulb.utils,
-        "permissions_for",
-        lambda member: hikari.Permissions.NONE,
-    )
 
-    bot = Mock()
-    bot.rest = Mock()
-    bot.rest.fetch_member = AsyncMock(
-        return_value=SimpleNamespace(
-            display_name="Target",
-            username="target",
-            user=SimpleNamespace(fetch_dm_channel=AsyncMock(return_value=9)),
-        )
-    )
-    bot.rest.create_message = AsyncMock()
-    bot.rest.edit_member = AsyncMock()
-    bot.get_me = Mock(return_value=SimpleNamespace(id=1))
-
-    tools, _ = mod_tools.create_moderation_tools(
-        bot, guild_id=GUILD_ID, channel_id=CHANNEL_ID, trigger_message_id=None
-    )
-    timeout_user = next(t.function for t in tools if t.name == "timeout_user")
-
-    result = await timeout_user("222", "10m", "invite-link spam")
+    timeout_user, _ = _tool(discord, "timeout_user", ["timeout"])
+    result = await timeout_user(str(TARGET_ID), "10m", "invite-link spam")
 
     assert result["success"] is True
     assert len(dispatched) == 1
-    assert dispatched[0][1] is bot
+    assert dispatched[0][1] is discord
