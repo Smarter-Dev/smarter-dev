@@ -211,8 +211,15 @@ class DiscordAdminClient(DiscordBotClient):
         ``status_code`` 404 or 403 when the channel is gone or the bot cannot
         see it.
         """
-        response = await self._request("GET", f"/channels/{channel_id}")
-        return response.json().get("guild_id")
+        return (await self.get_channel_placement(channel_id))[0]
+
+    async def get_channel_placement(self, channel_id: str) -> tuple[str | None, int | None]:
+        """The channel's guild (``None`` for a DM) and its Discord type.
+
+        Raises like :meth:`get_channel_guild_id`.
+        """
+        channel = (await self._request("GET", f"/channels/{channel_id}")).json()
+        return channel.get("guild_id"), channel.get("type")
 
     async def get_announcement_channels(
         self, guild_id: str

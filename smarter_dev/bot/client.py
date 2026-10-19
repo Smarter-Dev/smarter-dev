@@ -26,6 +26,7 @@ from smarter_dev.bot.audit_logger import log_member_update
 from smarter_dev.bot.audit_logger import log_message_delete
 from smarter_dev.bot.audit_logger import log_message_edit
 from smarter_dev.bot.content_filter import check_content_filters
+from smarter_dev.bot.forum_posts import resolve_forum_tag_names
 from smarter_dev.bot.services.api_client import APIClient
 from smarter_dev.bot.services.exceptions import ServiceError
 from smarter_dev.bot.services.guild_chat_memory_service import GuildChatMemoryService
@@ -1024,60 +1025,6 @@ async def post_user_notifications(
 
     except Exception as e:
         logger.error(f"Error posting user notifications to thread {thread_id}: {e}")
-
-
-async def resolve_forum_tag_names(
-    bot: lightbulb.BotApp, channel_id: str, tag_ids: list
-) -> list:
-    """Resolve forum tag IDs to tag names by fetching forum channel info.
-
-    Args:
-        bot: Discord bot instance
-        channel_id: Forum channel ID
-        tag_ids: List of tag IDs to resolve
-
-    Returns:
-        List of tag names
-    """
-    try:
-        if not tag_ids:
-            return []
-
-        # Fetch the forum channel to get available tags
-        forum_channel = await bot.rest.fetch_channel(channel_id)
-
-        if not hasattr(forum_channel, "available_tags"):
-            logger.warning(
-                f"Forum channel {channel_id} has no available_tags attribute"
-            )
-            return [str(tag_id) for tag_id in tag_ids]  # Fall back to IDs
-
-        # Create mapping of tag ID to tag name
-        tag_map = {}
-        if forum_channel.available_tags:
-            for tag in forum_channel.available_tags:
-                tag_map[str(tag.id)] = tag.name
-
-        # Resolve tag IDs to names
-        tag_names = []
-        for tag_id in tag_ids:
-            tag_id_str = str(tag_id)
-            if tag_id_str in tag_map:
-                tag_names.append(tag_map[tag_id_str])
-            else:
-                logger.warning(
-                    f"Tag ID {tag_id} not found in forum channel available tags"
-                )
-                tag_names.append(f"Unknown-{tag_id}")
-
-        logger.warning(
-            f"FORUM TAG DEBUG - Resolved {len(tag_ids)} tag IDs to names: {tag_names}"
-        )
-        return tag_names
-
-    except Exception as e:
-        logger.error(f"Error resolving forum tag names: {e}")
-        return [str(tag_id) for tag_id in tag_ids]  # Fall back to IDs
 
 
 async def handle_forum_thread_create(bot: lightbulb.BotApp, event) -> None:

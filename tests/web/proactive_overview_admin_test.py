@@ -47,6 +47,8 @@ HELP = "644299524151443488"
 OLD = "644299524151443489"
 THREAD = "644299524151443490"
 ELSEWHERE = "700000000000000011"
+FORUM = "644299524151443491"
+NEW_FORUM = "644299524151443492"
 
 overview = Controller.overview.fn
 toggle = Controller.toggle.fn
@@ -84,7 +86,10 @@ class _Discord:
             HELP: GUILD,
             THREAD: GUILD,
             ELSEWHERE: OTHER_GUILD,
+            FORUM: GUILD,
+            NEW_FORUM: GUILD,
         }
+        self.channel_types = {THREAD: 11, FORUM: 15, NEW_FORUM: 15}
 
     async def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path.removeprefix("/api/v10")
@@ -130,6 +135,8 @@ class _Discord:
                 json=[
                     {"id": GENERAL, "name": "general", "type": 0, "position": 0},
                     {"id": HELP, "name": "help", "type": 0, "position": 1},
+                    {"id": FORUM, "name": "questions", "type": 15, "position": 2},
+                    {"id": NEW_FORUM, "name": "showcase", "type": 15, "position": 3},
                 ],
             )
         if path.startswith("/guilds/"):
@@ -139,7 +146,12 @@ class _Discord:
             if channel_id not in self.channel_guilds:
                 return httpx.Response(404, json={"message": "Unknown Channel", "code": 10003})
             return httpx.Response(
-                200, json={"id": channel_id, "guild_id": self.channel_guilds[channel_id]}
+                200,
+                json={
+                    "id": channel_id,
+                    "guild_id": self.channel_guilds[channel_id],
+                    "type": self.channel_types.get(channel_id, 0),
+                },
             )
         return httpx.Response(404)
 
@@ -298,6 +310,12 @@ async def test_the_page_lists_each_guilds_channels_on_first_with_names(db_sessio
         (HELP, "help", True),
         (THREAD, None, True),  # threads are not in the guild's channel list
         (OLD, None, False),  # switched off, still listed so it can go back on
+        (FORUM, "questions", False),  # a forum never switched on, to add
+        (NEW_FORUM, "showcase", False),
+    ]
+    assert [row.channel_id for row in ours.channels if not row.configured] == [
+        FORUM,
+        NEW_FORUM,
     ]
     assert not ours.names_unavailable
     # Discord refused that guild's channel list: its rows show IDs only.
@@ -349,7 +367,7 @@ def test_the_template_offers_the_opposite_switch_with_a_csrf_token():
     assert "#general" in html and "thread or deleted channel" in html
     assert f'action="/admin/bot/proactive-channels/{GUILD}/{GENERAL}"' in html
     assert f'action="/admin/bot/proactive-channels/{GUILD}/{OLD}"' in html
-    assert html.count(f'name="{CSRF_FIELD_NAME}"') == 2
+    assert html.count(f'name="{CSRF_FIELD_NAME}"') == 3  # and the add-a-forum form
     assert '<input type="hidden" name="enabled" value="off">' in html
     assert '<input type="hidden" name="enabled" value="on">' in html
     assert "Turn off" in html and "Turn on" in html
@@ -714,3 +732,135 @@ def test_the_name_cache_never_exceeds_its_cap_and_drops_the_oldest(monkeypatch):
     assert len(proactive_overview._name_cache) == cap
     assert next(iter(proactive_overview._name_cache)) == "channels:40"
     assert "channels:0" not in proactive_overview._name_cache
+
+
+# --- forums (#248) ------------------------------------------------------------------
+
+add_forum = Controller.add_forum.fn
+
+
+async def _add_forum(session, guild_id: str, channel_id: str):
+    return await add_forum(
+        Controller,
+        _request({"guild_id": guild_id, "channel_id": channel_id}),
+        session,
+    )
+
+
+def test_adding_a_forum_needs_the_administrator_permission_and_a_post():
+    assert auth_guard in Controller.add_forum.guards
+    assert any(
+        isinstance(guard, Permission) and guard.permission == "administrator"
+        for guard in Controller.add_forum.guards
+    )
+    assert Controller.add_forum.http_methods == {"POST"}
+
+
+async def test_a_configured_forum_is_labelled_and_not_offered_again(db_session, patched):
+    await _seed(db_session, (GUILD, FORUM, True))
+
+    response = await overview(Controller, _request(), db_session)
+
+    (section,) = response.context["sections"]
+    rows = {row.channel_id: row for row in section.channels}
+    assert (rows[FORUM].is_forum, rows[FORUM].configured, rows[FORUM].enabled) == (
+        True,
+        True,
+        True,
+    )
+    assert (rows[NEW_FORUM].is_forum, rows[NEW_FORUM].configured) == (True, False)
+
+
+async def test_adding_a_forum_switches_it_on_without_a_wake(db_session, patched, redis):
+    await _add_forum(db_session, GUILD, NEW_FORUM)
+    await _add_forum(db_session, GUILD, NEW_FORUM)  # a double-click
+
+    assert await _enabled(db_session, NEW_FORUM) is True
+    assert await _wakes(redis) == []
+    assert [level for level, _ in patched.flashes] == ["success", "success"]
+
+
+async def test_turning_a_listed_forum_back_on_sends_no_wake(db_session, patched, redis):
+    await _seed(db_session, (GUILD, FORUM, False))
+
+    await _post(db_session, GUILD, FORUM, "on")
+
+    assert await _enabled(db_session, FORUM) is True
+    assert await _wakes(redis) == []
+
+
+async def test_adding_a_channel_that_is_not_a_forum_is_refused(db_session, patched, redis):
+    await _add_forum(db_session, GUILD, HELP)
+    await _add_forum(db_session, GUILD, THREAD)
+
+    assert await _enabled(db_session, HELP) is None
+    assert await _enabled(db_session, THREAD) is None
+    assert [level for level, _ in patched.flashes] == ["error", "error"]
+    assert "isn't a forum" in patched.flashes[0][1]
+
+
+async def test_adding_another_guilds_forum_is_refused(db_session, patched, redis):
+    await _add_forum(db_session, OTHER_GUILD, NEW_FORUM)
+
+    assert await _enabled(db_session, NEW_FORUM) is None
+    assert patched.flashes == [
+        ("error", "That channel isn't in this server, so it was not switched on.")
+    ]
+
+
+async def test_adding_a_forum_filed_under_another_guild_is_refused(db_session, patched, redis):
+    await _seed(db_session, (OTHER_GUILD, NEW_FORUM, False))
+
+    await _add_forum(db_session, GUILD, NEW_FORUM)
+
+    assert await _enabled(db_session, NEW_FORUM) is False
+    assert patched.flashes[0][0] == "error"
+
+
+async def test_adding_a_forum_needs_discord(db_session, patched, redis, rest):
+    rest.down = True
+
+    await _add_forum(db_session, GUILD, NEW_FORUM)
+
+    assert await _enabled(db_session, NEW_FORUM) is None
+    assert patched.flashes[0][0] == "error"
+
+
+async def test_adding_a_forum_refuses_a_bad_csrf_token_or_ids(db_session, patched, redis):
+    with patch(f"{_MODULE}.verify_csrf", new=AsyncMock(return_value=False)):
+        await _add_forum(db_session, GUILD, NEW_FORUM)
+    await _add_forum(db_session, GUILD, "not-an-id")
+
+    assert await _enabled(db_session, NEW_FORUM) is None
+    assert [level for level, _ in patched.flashes] == ["error", "error"]
+
+
+def test_the_template_labels_forums_and_offers_to_add_one():
+    configured = proactive_overview.ProactiveChannelRow(
+        channel_id=FORUM, name="questions", enabled=True, is_forum=True
+    )
+    unconfigured = proactive_overview.ProactiveChannelRow(
+        channel_id=NEW_FORUM, name="showcase", enabled=False, is_forum=True,
+        configured=False,
+    )
+    html = render_admin_template(
+        "admin/bot/proactive_channels.html",
+        sections=[
+            proactive_overview.ProactiveGuildSection(
+                guild_id=GUILD,
+                name="Smarter Dev",
+                channels=[configured, unconfigured],
+                enabled_count=1,
+                names_unavailable=False,
+            )
+        ],
+        flash_messages=[],
+        active_page="proactive_channels",
+        guild_id=None,
+    )
+    assert html.count(">Forum</span>") == 2
+    assert f'action="/admin/bot/proactive-channels/{GUILD}/{FORUM}"' in html
+    assert f'action="/admin/bot/proactive-channels/{GUILD}/{NEW_FORUM}"' not in html
+    assert f'name="channel_id" value="{NEW_FORUM}"' in html
+    assert html.count('action="/admin/bot/proactive-channels/forums"') == 2
+    assert html.count(f'name="{CSRF_FIELD_NAME}"') == 3

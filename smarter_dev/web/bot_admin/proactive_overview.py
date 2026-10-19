@@ -4,7 +4,11 @@ Lists every channel that has a proactive settings row, which means every
 channel someone has switched on with ``/proactive on`` or the ``/configure``
 form, including those switched off since. Each row has an on/off button.
 Channels that were never configured are not listed: turning one on for the
-first time stays in Discord, where the moderator is in the channel.
+first time stays in Discord, where the moderator is in the channel. Forums
+are the exception (#248): a whole forum can be switched on here, either one
+the guild's channel list shows or one entered by ID, and forums are labelled
+as such. Switching a forum on wakes nobody: each post reaches the agent when
+someone writes in it.
 
 Each button goes through :func:`set_proactive_channel_enabled`, so switching
 a channel on wakes the guild agent exactly as ``/proactive on`` does. That
@@ -16,8 +20,9 @@ helper does no authorization, so the toggle checks for itself:
   its write on the channel alone, so without this a guild/channel mismatch
   would switch another guild's channel and wake the wrong agent;
 - before switching it on, Discord confirms that the bot can still see the
-  channel and that it belongs to that guild. Switching off needs no Discord
-  check, so an outage never stops an admin turning the bot off.
+  channel and that it belongs to that guild (and, to add one, that it is a
+  forum). Switching off needs no Discord check, so an outage never stops an
+  admin turning the bot off.
 
 Channel and guild names come from Discord and are display only. The page
 must stay reachable in a Discord outage, since that is when someone needs the
@@ -33,6 +38,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable
@@ -52,12 +58,14 @@ from skrift.flash import flash_error
 from skrift.flash import flash_success
 from skrift.flash import get_flash_messages
 from skrift.forms.core import verify_csrf
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.crud import get_proactive_channel_settings
 from smarter_dev.web.crud import list_all_proactive_channel_settings
 from smarter_dev.web.discord_admin_client import DiscordAdminError
+from smarter_dev.web.discord_admin_client import DiscordChannel
 from smarter_dev.web.discord_admin_client import get_admin_discord_client
 from smarter_dev.web.models import ProactiveChannelSettings
 from smarter_dev.web.proactive_channels import set_proactive_channel_enabled
@@ -75,10 +83,13 @@ CHANNEL_CHECK_DEADLINE_SECONDS = 5.0
 NAME_LOOKUP_CONCURRENCY = 5
 NAME_CACHE_SECONDS = 300.0
 NAME_CACHE_MAX_ENTRIES = 256
+# GUILD_FORUM and GUILD_MEDIA: every post is a thread of its own.
+FORUM_CHANNEL_TYPES = frozenset({15, 16})
+_SNOWFLAKE = re.compile(r"[0-9]{15,22}")
 
-# Only successful lookups are cached: key -> (expires at, names by id),
-# oldest write first.
-_name_cache: OrderedDict[str, tuple[float, dict[str, str]]] = OrderedDict()
+# Only successful lookups are cached: key -> (expires at, names or channels
+# by id), oldest write first.
+_name_cache: OrderedDict[str, tuple[float, dict]] = OrderedDict()
 _clock = time.monotonic
 # One limit on Discord name lookups across every render in this process.
 _name_lookup_gate = asyncio.Semaphore(NAME_LOOKUP_CONCURRENCY)
@@ -91,6 +102,10 @@ class ProactiveChannelRow:
     channel_id: str
     name: str | None
     enabled: bool
+    is_forum: bool = False
+    # False for a forum the guild has that was never switched on: its button
+    # adds it rather than toggling a row.
+    configured: bool = True
 
 
 @dataclass(frozen=True)
@@ -110,14 +125,14 @@ async def _guild_names(client) -> dict[str, str]:
     return {guild.id: guild.name for guild in await client.list_bot_guilds()}
 
 
-async def _channel_names(client, guild_id: str) -> dict[str, str]:
+async def _guild_channels(client, guild_id: str) -> dict[str, DiscordChannel]:
     return {
-        channel.id: channel.name
+        channel.id: channel
         for channel in await client.get_guild_channels(guild_id)
     }
 
 
-def _cache_names(key: str, names: dict[str, str]) -> None:
+def _cache_names(key: str, names: dict) -> None:
     now = _clock()
     for stale in [k for k, (expires, _) in _name_cache.items() if expires <= now]:
         del _name_cache[stale]
@@ -128,8 +143,8 @@ def _cache_names(key: str, names: dict[str, str]) -> None:
 
 
 async def _lookup_names(
-    lookups: dict[str, Callable[[], Awaitable[dict[str, str]]]],
-) -> dict[str, dict[str, str]]:
+    lookups: dict[str, Callable[[], Awaitable[dict]]],
+) -> dict[str, dict]:
     """Run the uncached lookups under one deadline; return what answered.
 
     A failed or unfinished lookup is simply missing from the result (its
@@ -137,7 +152,7 @@ async def _lookup_names(
     exit, the deadline or this render being cancelled, so none outlives it.
     """
     now = _clock()
-    found: dict[str, dict[str, str]] = {}
+    found: dict[str, dict] = {}
     for key in list(lookups):
         cached = _name_cache.get(key)
         if cached is not None and cached[0] > now:
@@ -186,24 +201,28 @@ async def collect_proactive_overview(
         return []
 
     guild_ids = sorted(by_guild)
-    found: dict[str, dict[str, str]] = {}
+    found: dict[str, dict] = {}
     if client is not None:
         lookups = {"guilds": lambda: _guild_names(client)}
         for guild_id in guild_ids:
             lookups[f"channels:{guild_id}"] = (
-                lambda guild_id=guild_id: _channel_names(client, guild_id)
+                lambda guild_id=guild_id: _guild_channels(client, guild_id)
             )
         found = await _lookup_names(lookups)
     guild_names = found.get("guilds")
-    channel_names = [found.get(f"channels:{guild_id}") for guild_id in guild_ids]
+    guild_channels = [found.get(f"channels:{guild_id}") for guild_id in guild_ids]
 
     sections = []
-    for guild_id, names in zip(guild_ids, channel_names):
+    for guild_id, listing in zip(guild_ids, guild_channels):
+        channels = listing or {}
+        configured_ids = {record.channel_id for record in by_guild[guild_id]}
         rows = [
             ProactiveChannelRow(
                 channel_id=record.channel_id,
-                name=(names or {}).get(record.channel_id),
+                name=getattr(channels.get(record.channel_id), "name", None),
                 enabled=record.enabled,
+                is_forum=getattr(channels.get(record.channel_id), "type", None)
+                in FORUM_CHANNEL_TYPES,
             )
             for record in by_guild[guild_id]
         ]
@@ -215,13 +234,26 @@ async def collect_proactive_overview(
                 row.channel_id,
             )
         )
+        # The guild's forums that were never switched on, last, to add.
+        rows.extend(
+            ProactiveChannelRow(
+                channel_id=channel.id,
+                name=channel.name,
+                enabled=False,
+                is_forum=True,
+                configured=False,
+            )
+            for channel in channels.values()
+            if channel.type in FORUM_CHANNEL_TYPES
+            and channel.id not in configured_ids
+        )
         sections.append(
             ProactiveGuildSection(
                 guild_id=guild_id,
                 name=(guild_names or {}).get(guild_id),
                 channels=rows,
                 enabled_count=sum(row.enabled for row in rows),
-                names_unavailable=names is None,
+                names_unavailable=listing is None,
             )
         )
     sections.sort(key=lambda section: ((section.name or "").lower(), section.guild_id))
@@ -233,9 +265,16 @@ async def channel_on_refusal(guild_id: str, channel_id: str) -> str | None:
 
     The bot must still see the channel, and it must be that guild's.
     """
+    return (await channel_on_check(guild_id, channel_id))[0]
+
+
+async def channel_on_check(
+    guild_id: str, channel_id: str
+) -> tuple[str | None, int | None]:
+    """:func:`channel_on_refusal`, and the channel's Discord type when none."""
     try:
-        owner = await asyncio.wait_for(
-            get_admin_discord_client().get_channel_guild_id(channel_id),
+        owner, channel_type = await asyncio.wait_for(
+            get_admin_discord_client().get_channel_placement(channel_id),
             timeout=CHANNEL_CHECK_DEADLINE_SECONDS,
         )
     except DiscordAdminError as error:
@@ -243,14 +282,14 @@ async def channel_on_refusal(guild_id: str, channel_id: str) -> str | None:
             return (
                 "Discord says that channel no longer exists or the bot can't "
                 "see it, so it was not switched on."
-            )
+            ), None
         logger.warning(
             "proactive overview: channel check failed guild=%s channel=%s (%s)",
             guild_id,
             channel_id,
             error,
         )
-        return "Couldn't reach Discord to check the channel. Please try again."
+        return "Couldn't reach Discord to check the channel. Please try again.", None
     except Exception as error:  # noqa: BLE001 — timeout or httpx transport error
         logger.warning(
             "proactive overview: channel check failed guild=%s channel=%s (%s)",
@@ -258,10 +297,23 @@ async def channel_on_refusal(guild_id: str, channel_id: str) -> str | None:
             channel_id,
             type(error).__name__,
         )
-        return "Couldn't reach Discord to check the channel. Please try again."
+        return "Couldn't reach Discord to check the channel. Please try again.", None
     if owner != guild_id:
-        return "That channel isn't in this server, so it was not switched on."
-    return None
+        return "That channel isn't in this server, so it was not switched on.", None
+    return None, channel_type
+
+
+async def _filed_elsewhere(session: AsyncSession, channel_id: str) -> bool:
+    """Whether the channel has a settings row under some guild.
+
+    Called only when it has none under the guild being asked about.
+    """
+    found = await session.scalar(
+        select(ProactiveChannelSettings.id).where(
+            ProactiveChannelSettings.channel_id == channel_id
+        )
+    )
+    return found is not None
 
 
 class ProactiveChannelsAdminController(Controller):
@@ -311,18 +363,23 @@ class ProactiveChannelsAdminController(Controller):
         if record is None:
             flash_error(request, "That channel isn't on this page. Reload and try again.")
             return back
-        if enabled and (refusal := await channel_on_refusal(guild_id, channel_id)):
-            flash_error(request, refusal)
-            return back
+        is_forum = False
+        if enabled:
+            refusal, channel_type = await channel_on_check(guild_id, channel_id)
+            if refusal:
+                flash_error(request, refusal)
+                return back
+            is_forum = channel_type in FORUM_CHANNEL_TYPES
 
         ctx = await get_admin_context(request, db_session)
-        # Commits; switching the channel on wakes the agent.
+        # Commits; switching a channel on wakes the agent, a forum nobody.
         woke = await set_proactive_channel_enabled(
             db_session,
             get_redis_client(),
             guild_id=guild_id,
             channel_id=channel_id,
             enabled=enabled,
+            wake=not is_forum,
         )
         logger.info(
             "proactive channel switched from admin overview guild=%s channel=%s "
@@ -336,5 +393,64 @@ class ProactiveChannelsAdminController(Controller):
         flash_success(
             request,
             f"Proactive bot is now {'on' if enabled else 'off'} in channel {channel_id}.",
+        )
+        return back
+
+    @post("/forums", guards=_GUARDS)
+    async def add_forum(self, request: Request, db_session: AsyncSession) -> Redirect:
+        """Switch on a whole forum, which may never have been configured.
+
+        Discord must say the channel is a forum (or media channel) in that
+        guild. Its posts inherit the forum's settings unless they have their
+        own, and no wake is sent.
+        """
+        back = Redirect(path=BASE_PATH)
+        if not await verify_csrf(request):
+            flash_error(request, "Your session expired. Please try again.")
+            return back
+        form = await request.form()
+        guild_id = str(form.get("guild_id") or "").strip()
+        channel_id = str(form.get("channel_id") or "").strip()
+        if not (_SNOWFLAKE.fullmatch(guild_id) and _SNOWFLAKE.fullmatch(channel_id)):
+            flash_error(request, "Enter the server's ID and the forum's channel ID.")
+            return back
+        refusal, channel_type = await channel_on_check(guild_id, channel_id)
+        if refusal:
+            flash_error(request, refusal)
+            return back
+        if channel_type not in FORUM_CHANNEL_TYPES:
+            flash_error(
+                request,
+                "That channel isn't a forum. Switch other channels on in Discord "
+                "with /proactive on.",
+            )
+            return back
+
+        ctx = await get_admin_context(request, db_session)
+        # A row already filed under another guild must not be switched from
+        # here, as the toggle refuses it.
+        record = await get_proactive_channel_settings(db_session, guild_id, channel_id)
+        if record is None and await _filed_elsewhere(db_session, channel_id):
+            flash_error(request, "That channel isn't in this server, so it was not switched on.")
+            return back
+        await set_proactive_channel_enabled(
+            db_session,
+            get_redis_client(),
+            guild_id=guild_id,
+            channel_id=channel_id,
+            enabled=True,
+            wake=False,
+        )
+        logger.info(
+            "proactive forum switched on from admin overview guild=%s forum=%s "
+            "by site user=%s",
+            guild_id,
+            channel_id,
+            ctx["user"].id if ctx.get("user") else None,
+        )
+        flash_success(
+            request,
+            f"Proactive bot is now on for forum {channel_id}: each post is its own "
+            "channel, and posts switched off on their own stay off.",
         )
         return back

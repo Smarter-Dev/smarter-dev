@@ -48,6 +48,14 @@ from smarter_dev.bot import leadership
 from smarter_dev.bot.agents.response_fitting import SUMMARIZE_THRESHOLD
 from smarter_dev.bot.agents.response_fitting import fit_writer_message
 from smarter_dev.bot.agents.response_fitting import split_for_discord
+from smarter_dev.bot.forum_posts import EffectiveSettings
+from smarter_dev.bot.forum_posts import cached_post_info
+from smarter_dev.bot.forum_posts import effective_settings
+from smarter_dev.bot.forum_posts import forum_parents
+from smarter_dev.bot.forum_posts import forum_post_label
+from smarter_dev.bot.forum_posts import new_post_preamble
+from smarter_dev.bot.forum_posts import post_info
+from smarter_dev.bot.forum_posts import thread_title
 from smarter_dev.bot.plugins.admin_gate import is_admin
 from smarter_dev.bot.privacy.blocked_users import get_blocked_users
 from smarter_dev.bot.privacy.blocked_users import redact_blocked_mentions
@@ -504,7 +512,23 @@ class GuildAgentState:
 
 def _channel_name_for_id(bot, channel_id: str) -> str:
     channel = bot.cache.get_guild_channel(int(channel_id))
+    if channel is None:
+        # Threads (a forum's posts among them) are cached apart, and their
+        # names are their authors' words.
+        get_thread = getattr(bot.cache, "get_thread", None)
+        thread = get_thread(int(channel_id)) if get_thread is not None else None
+        if thread is not None:
+            return thread_title(thread, channel_id)
     return getattr(channel, "name", None) or channel_id
+
+
+async def _effective_settings(
+    run: ProactiveRuntime, service, guild_id: str, channel_id: str
+) -> EffectiveSettings:
+    """The channel's settings, or its forum's for a post with no row (#248)."""
+    return await effective_settings(
+        service, forum_parents(run.bot), str(guild_id), str(channel_id)
+    )
 
 
 def _channel_name(bot, state: ChannelProducerState) -> str:
@@ -977,7 +1001,11 @@ async def _run_producer_once(
     ]
     if not new_messages and not passive:
         return
-    settings = await service.get_settings(state.guild_id, state.channel_id)
+    # A forum post with no row of its own runs on its forum's settings
+    # (mode, watch instructions); its buffer, cursor and wakes stay its own.
+    settings = (
+        await _effective_settings(run, service, state.guild_id, state.channel_id)
+    ).settings
     if not settings.enabled:
         return
 
@@ -1138,13 +1166,20 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
     me = run.bot.get_me()
     bot_user_id = str(me.id) if me else ""
     activated_at = datetime.now(UTC)
+    parents = forum_parents(run.bot)
     enabled_channels = {}
     instruction_stores = {}
     persisted_updates = {}
+    forum_names: dict[str, str] = {}
     for row in enabled_rows:
         channel_id = str(row.channel_id)
         channel_name = _channel_name_for_id(run.bot, channel_id)
-        enabled_channels[channel_id] = channel_name
+        if await parents.is_forum(channel_id):
+            # The agent acts in a forum's posts, never in the forum itself;
+            # its watch instructions are shared by every post (#248).
+            forum_names[channel_id] = channel_name
+        else:
+            enabled_channels[channel_id] = channel_name
         instruction_store = InstructionStore.from_stored(
             OPERATING_POLICY_BRIEF, row.watch_addendum
         )
@@ -1160,6 +1195,29 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
                 )
             )
         instruction_stores[channel_id] = instruction_store
+
+    def admit_post(channel_id: str, label: str | None = None) -> None:
+        """Let the agent act in a post of an enabled forum, as its own
+        channel. The post was gated on arrival (a row of its own that says
+        off keeps it out), which also cached its forum."""
+        forum_id = parents.known_forum_for(channel_id)
+        if channel_id in enabled_channels or forum_id not in forum_names:
+            return
+        enabled_channels[channel_id] = label or forum_post_label(
+            cached_post_info(run.bot, channel_id, forum_id), forum_names[forum_id]
+        )
+        instruction_stores[channel_id] = instruction_stores[forum_id]
+
+    for channel_id in dict.fromkeys(item.channel_id for item in state.queue.items):
+        forum_id = parents.known_forum_for(channel_id)
+        if channel_id in enabled_channels or forum_id not in forum_names:
+            continue
+        info = await post_info(parents, channel_id, forum_id)
+        admit_post(channel_id, forum_post_label(info, forum_names[forum_id]))
+    if not enabled_channels:
+        # Only forums are on and nothing queued is from one of their posts.
+        state.queue.drain()
+        return
 
     runner = run.agent_runner_for(state)
     history_store = run.history_store()
@@ -1239,9 +1297,14 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
         items, dropped = state.queue.drain()
         if not items:
             return "No new notifications."
+        for item in items:
+            admit_post(item.channel_id)
         return render_notifications(items, dropped)
 
     def deps_factory(**kwargs):
+        # The tools check the very dict dispatch checks, so a post admitted
+        # mid-wake can be answered in this wake.
+        kwargs["enabled_channels"] = enabled_channels
         deps = ProactiveDeps(
             bot=run.bot,
             channel_id=0,
@@ -1386,8 +1449,10 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
                     )
                 except Exception:  # noqa: BLE001 — persistence is best-effort
                     log_exception(logger, "failed to persist proactive cursor")
-        for channel_id, instruction_store in instruction_stores.items():
-            if instruction_store.updates == persisted_updates[channel_id]:
+        # Rows only: a forum post shares its forum's store, saved on the forum.
+        for channel_id, updates in persisted_updates.items():
+            instruction_store = instruction_stores[channel_id]
+            if instruction_store.updates == updates:
                 continue
             try:
                 await service.set_watch_addendum(
@@ -1553,8 +1618,8 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
     if service is None:
         return
     try:
-        settings = await service.get_settings(
-            str(event.guild_id), str(event.channel_id)
+        settings = await _effective_settings(
+            run, service, str(event.guild_id), str(event.channel_id)
         )
     except Exception:  # noqa: BLE001 — settings failure means "off", not a crash
         log_exception(logger, "proactive settings lookup failed", level=logging.WARNING)
@@ -1563,11 +1628,22 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
         return
     state = run.state_for(event.guild_id, event.channel_id)
     await _restore_active_window(run, state)
+    converted = channel_message_from_hikari(event.message)
+    if settings.forum_id is not None and str(event.message.id) == str(
+        event.channel_id
+    ):
+        # A post's opening message shares the post's id. Its title and tags
+        # say what the post is about, so they travel with it.
+        info = await post_info(
+            forum_parents(run.bot), str(event.channel_id), settings.forum_id
+        )
+        converted = dataclasses.replace(
+            converted, content=f"{new_post_preamble(info)}\n{converted.content}"
+        )
     now = time.monotonic()
     if not state.buffer:
         state.first_at = now
     state.last_at = now
-    converted = channel_message_from_hikari(event.message)
     state.buffer.append(converted)
     if run.uses_jev_batching:
         state.buffer_arrivals.append(now)
@@ -1656,8 +1732,8 @@ async def on_guild_reaction(event: hikari.GuildReactionAddEvent) -> None:
     if service is None:
         return
     try:
-        settings = await service.get_settings(
-            str(event.guild_id), str(event.channel_id)
+        settings = await _effective_settings(
+            run, service, str(event.guild_id), str(event.channel_id)
         )
     except Exception:  # noqa: BLE001 — settings failure means "off", not a crash
         log_exception(logger, "proactive settings lookup failed", level=logging.WARNING)
@@ -1929,7 +2005,9 @@ async def _recovery_channel_settings(
         service = run.settings_service()
         if service is not None:
             try:
-                return await service.get_settings(guild_id, str(channel_id))
+                return await _effective_settings(
+                    run, service, guild_id, str(channel_id)
+                )
             except APIError:
                 log_exception(
                     logger,
@@ -1972,6 +2050,9 @@ async def _recover_channels(run: ProactiveRuntime) -> None:
                     logger.warning("proactive recovery channel discovery unavailable guild=%s", guild_id)
             await asyncio.sleep(SETTINGS_RETRY_BACKOFF_SECONDS)
         for row in enabled:
+            if await forum_parents(run.bot).is_forum(row.channel_id):
+                # A forum holds no messages; its posts keep their own cursors.
+                continue
             cursors.setdefault(int(row.channel_id), {
                 "guild_id": guild_id, "last_message_id": fallback_id,
             })
@@ -2052,6 +2133,15 @@ async def _apply_channel_enabled_request(
         settings = await service.get_settings(request.guild_id, request.channel_id)
         if not settings.enabled:
             return  # switched off again before the wake was read
+    if await forum_parents(run.bot).is_forum(request.channel_id):
+        # No orientation wake for a whole forum, and none per post: a post
+        # reaches the agent when someone writes in it (#248).
+        logger.info(
+            "proactive forum switched on without a wake guild=%s forum=%s",
+            request.guild_id,
+            request.channel_id,
+        )
+        return
     await _wake_for_enabled_channel(run, request.guild_id, request.channel_id)
 
 
@@ -2256,42 +2346,78 @@ async def proactive_group(ctx: lightbulb.Context) -> None:
     pass
 
 
-async def _set_enabled(ctx: lightbulb.Context, enabled: bool) -> None:
+NOT_A_FORUM_POST_MESSAGE = (
+    "whole_forum only works inside a forum post: it switches the post's "
+    "whole forum."
+)
+
+
+async def _set_enabled(
+    ctx: lightbulb.Context, enabled: bool, *, whole_forum: bool = False
+) -> None:
     if await deny_without_moderator_permissions(ctx, MODERATOR_DENIAL_MESSAGE):
         return
-    service = _runtime().settings_service()
+    run = _runtime()
+    service = run.settings_service()
     if service is None:
         await ctx.respond(
             "Proactive settings service is unavailable.",
             flags=hikari.MessageFlag.EPHEMERAL,
         )
         return
-    was_enabled = (
-        await service.get_settings(str(ctx.guild_id), str(ctx.channel_id))
-    ).enabled
-    await service.set_enabled(str(ctx.guild_id), str(ctx.channel_id), enabled)
-    if enabled and not was_enabled:
-        await _wake_for_enabled_channel(
-            _runtime(), str(ctx.guild_id), str(ctx.channel_id)
+    channel_id = str(ctx.channel_id)
+    if whole_forum:
+        forum_id = await forum_parents(run.bot).forum_for(channel_id)
+        if forum_id is None:
+            await ctx.respond(
+                NOT_A_FORUM_POST_MESSAGE, flags=hikari.MessageFlag.EPHEMERAL
+            )
+            return
+        await service.set_enabled(str(ctx.guild_id), forum_id, enabled)
+        # No wake: the agent meets each post when someone writes in it.
+        await ctx.respond(
+            f"Proactive bot is now **{'on' if enabled else 'off'}** for this "
+            "whole forum. A post switched on or off on its own keeps its "
+            "own setting.",
+            flags=hikari.MessageFlag.EPHEMERAL,
         )
+        return
+    # Without whole_forum, a post gets a row of its own, which wins over
+    # its forum's (so /proactive off turns off just this post).
+    was_enabled = (await service.get_settings(str(ctx.guild_id), channel_id)).enabled
+    await service.set_enabled(str(ctx.guild_id), channel_id, enabled)
+    if enabled and not was_enabled:
+        await _wake_for_enabled_channel(run, str(ctx.guild_id), channel_id)
     await ctx.respond(
         f"Proactive bot is now **{'on' if enabled else 'off'}** in this channel.",
         flags=hikari.MessageFlag.EPHEMERAL,
     )
 
 
+def _whole_forum_option(command):
+    return lightbulb.option(
+        "whole_forum",
+        "Inside a forum post: apply to the post's whole forum",
+        type=bool,
+        required=False,
+        default=False,
+    )(command)
+
+
 @proactive_group.child
+@_whole_forum_option
 @lightbulb.command("on", "Enable the proactive bot in this channel")
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def proactive_on(ctx: lightbulb.Context) -> None:
-    await _set_enabled(ctx, True)
+    await _set_enabled(ctx, True, whole_forum=bool(ctx.options.whole_forum))
 
 
 @proactive_group.child
+@_whole_forum_option
 @lightbulb.command("off", "Disable the proactive bot in this channel")
 @lightbulb.implements(lightbulb.SlashSubCommand)
 async def proactive_off(ctx: lightbulb.Context) -> None:
-    await _set_enabled(ctx, False)
+    await _set_enabled(ctx, False, whole_forum=bool(ctx.options.whole_forum))
 
 
 @proactive_group.child
@@ -2307,7 +2433,10 @@ async def proactive_status(ctx: lightbulb.Context) -> None:
             flags=hikari.MessageFlag.EPHEMERAL,
         )
         return
-    settings = await service.get_settings(str(ctx.guild_id), str(ctx.channel_id))
+    effective = await _effective_settings(
+        _runtime(), service, str(ctx.guild_id), str(ctx.channel_id)
+    )
+    settings = effective.settings
     store = InstructionStore.from_stored(
         OPERATING_POLICY_BRIEF, settings.watch_addendum
     )
@@ -2326,8 +2455,13 @@ async def proactive_status(ctx: lightbulb.Context) -> None:
         and time.monotonic() < state.active_until
         else "passive"
     )
+    inherited = (
+        f" (from this post's forum <#{effective.forum_id}>)"
+        if effective.forum_id is not None
+        else ""
+    )
     await ctx.respond(
-        f"Proactive bot: **{'on' if settings.enabled else 'off'}** "
+        f"Proactive bot: **{'on' if settings.enabled else 'off'}**{inherited} "
         f"(monitoring: {mode})\n"
         f"Watch instructions:\n{instructions[:1500]}",
         flags=hikari.MessageFlag.EPHEMERAL,

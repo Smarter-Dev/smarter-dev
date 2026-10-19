@@ -27,6 +27,9 @@ class ProactiveChannelSettings:
     channel_id: str
     enabled: bool
     watch_addendum: str
+    # False for the 404 default: the channel has no row of its own, so a
+    # forum post may inherit its forum's settings (#248).
+    exists: bool = True
 
     @classmethod
     def from_api_response(cls, payload: dict) -> ProactiveChannelSettings:
@@ -41,7 +44,7 @@ class ProactiveChannelSettings:
     def default(cls, guild_id: str, channel_id: str) -> ProactiveChannelSettings:
         return cls(
             guild_id=guild_id, channel_id=channel_id, enabled=False,
-            watch_addendum="",
+            watch_addendum="", exists=False,
         )
 
 

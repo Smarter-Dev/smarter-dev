@@ -32,6 +32,7 @@ async def set_proactive_channel_enabled(
     guild_id: str,
     channel_id: str,
     enabled: bool,
+    wake: bool = True,
 ) -> bool:
     """Save the channel's on/off switch and commit the session.
 
@@ -41,12 +42,15 @@ async def set_proactive_channel_enabled(
     Returns whether a wake was requested. A failed or stalled request is
     logged, not raised: the setting is saved, and the agent still finds the
     channel on its next message there.
+
+    ``wake=False`` saves without the wake: a whole forum switched on wakes
+    nobody, and each post reaches the agent when someone writes in it.
     """
     turned_on = await set_proactive_channel_enabled_flag(
         session, guild_id=guild_id, channel_id=channel_id, enabled=enabled
     )
     await session.commit()
-    if not turned_on:
+    if not turned_on or not wake:
         return False
     try:
         await asyncio.wait_for(

@@ -17,12 +17,16 @@ USER = 266000000000000001
 configure_bot = configure.configure_bot.callback
 
 
-def _ctx(permissions: hikari.Permissions) -> SimpleNamespace:
+def _ctx(
+    permissions: hikari.Permissions, *, whole_forum: bool = False, bot=None
+) -> SimpleNamespace:
     member = object.__new__(hikari.InteractionMember)
     return SimpleNamespace(
         member=member,
         guild_id=GUILD,
         channel_id=CHANNEL,
+        options=SimpleNamespace(whole_forum=whole_forum),
+        bot=bot,
         author=SimpleNamespace(id=USER),
         respond=AsyncMock(),
         _permissions=permissions,
