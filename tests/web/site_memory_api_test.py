@@ -785,3 +785,35 @@ async def test_public_has_flags_leak_nothing_about_hidden_text(
         "revision",
         *HAS_FIELDS.values(),
     }
+
+
+VIEWER_SETS = ["", MEMBER, OTHER, f"{MEMBER},{OTHER}"]
+
+
+@pytest.mark.parametrize("block", sorted(HAS_FIELDS))
+@pytest.mark.parametrize(
+    "text,has",
+    [
+        # Names the viewer, so the shown text differs per viewer.
+        (f"<{MEMBER}:alice> builds things.", True),
+        ("<script>unsafe</script>", True),
+        (None, False),
+        (f"<{OTHER}:bob> waves.", False),
+        # Blank lines left between opted-out lines are not a block.
+        (f"<{OTHER}:bob> waves.\n\n\n<{OTHER}:bob> again.", False),
+    ],
+)
+async def test_public_has_flags_are_the_same_for_every_viewer(
+    site_client, db_session, block, text, has
+):
+    client, _ = site_client
+    blocks = {column: f"Plain {column}." for column in COLUMN.values()}
+    await seed_memory(db_session, **{**blocks, COLUMN[block]: text})
+    await opt_out(db_session, OTHER)
+    await db_session.commit()
+    expected = dict.fromkeys(HAS_FIELDS.values(), True)
+    expected[HAS_FIELDS[block]] = has
+    for viewer in VIEWER_SETS:
+        for url in (PUBLIC_URL, URL + "/public"):
+            body = (await client.get(url, params={"viewer_discord_ids": viewer})).json()
+            assert {field: body[field] for field in HAS_FIELDS.values()} == expected
