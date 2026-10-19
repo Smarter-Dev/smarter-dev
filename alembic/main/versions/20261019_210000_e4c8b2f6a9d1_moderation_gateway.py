@@ -37,12 +37,16 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-def _created_at() -> sa.Column:
-    return sa.Column(
-        "created_at",
-        sa.DateTime(timezone=True),
-        server_default=sa.text("now()"),
-        nullable=False,
+def _timestamps() -> tuple[sa.Column, sa.Column]:
+    """``created_at`` and ``updated_at``, which ``Base`` gives every model."""
+    return tuple(
+        sa.Column(
+            name,
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        )
+        for name in ("created_at", "updated_at")
     )
 
 
@@ -80,6 +84,7 @@ def upgrade() -> None:
             server_default=sa.text("false"),
             nullable=False,
         ),
+        *_timestamps(),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
@@ -97,7 +102,7 @@ def upgrade() -> None:
         sa.Column("incident_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("guild_id", sa.String(), nullable=False),
         sa.Column("link_key", sa.String(length=200), nullable=False),
-        _created_at(),
+        *_timestamps(),
         sa.ForeignKeyConstraint(
             ["incident_id"], ["moderation_incidents.id"], ondelete="CASCADE"
         ),
@@ -126,7 +131,7 @@ def upgrade() -> None:
         sa.Column("fingerprint", sa.String(length=64), nullable=True),
         sa.Column("content", sa.Text(), nullable=True),
         sa.Column("details", sa.JSON(), nullable=True),
-        _created_at(),
+        *_timestamps(),
         sa.ForeignKeyConstraint(
             ["incident_id"], ["moderation_incidents.id"], ondelete="CASCADE"
         ),
@@ -170,13 +175,7 @@ def upgrade() -> None:
         sa.Column("released_at", sa.Float(), nullable=True),
         sa.Column("lease_until", sa.Float(), nullable=True),
         sa.Column("audit_entry_id", sa.String(), nullable=True),
-        _created_at(),
-        sa.Column(
-            "updated_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
+        *_timestamps(),
         sa.ForeignKeyConstraint(
             ["incident_id"], ["moderation_incidents.id"], ondelete="CASCADE"
         ),
@@ -211,7 +210,7 @@ def upgrade() -> None:
         sa.Column("state", sa.String(length=20), nullable=False),
         sa.Column("detail", sa.Text(), nullable=True),
         sa.Column("lease_until", sa.Float(), nullable=True),
-        _created_at(),
+        *_timestamps(),
         sa.Column("settled_at", sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(
             ["incident_id"], ["moderation_incidents.id"], ondelete="CASCADE"
@@ -233,6 +232,7 @@ def upgrade() -> None:
         sa.Column("user_id", sa.String(), nullable=False),
         sa.Column("token", sa.String(length=64), nullable=False),
         sa.Column("expires_at", sa.Float(), nullable=False),
+        *_timestamps(),
         sa.PrimaryKeyConstraint("guild_id", "user_id"),
     )
 
