@@ -19,7 +19,7 @@ help prepare or check a step, but does not run mutations.
 | **Purge (agent)** | Everything the chat bot holds about the person: the guild memory, behavior and personality blocks, pending notes and retained revisions, both agents' working histories and their compaction summaries, the proactive recovery copy and watch instructions, and the external worker's history. The agent does the edit; see step 4. |
 | **Delete** | Bytes balances, squad memberships, quest and challenge submissions and quest progress, member activity dates, forum subscriptions, campaign signups, `/help` and `/tldr` records they started, legacy `/scan` profiles, rate-limit and DM caches, bot API security log rows whose request named them (until #81's migration drops that table), and their site account with its chat, attachments, searches, resources questions, profile, linked logins (and their stored Discord tokens), push subscriptions, roles, API keys, second-factor enrollments, OAuth consent grants, republish links and membership rows. Also these, which can outlast the limits under "Ages out": AI error messages that name them, the running topic and notes of engagements that name them, entries in automation memory that carry them, automation jobs about them still waiting in Skrift's job stores (and any not yet pruned), AI agent sessions that mention them, and their site jobs. |
 | **Anonymise** | Rows other people share. Bytes transfers the person sent or received keep their amount and date for the other member, with the person's id and username replaced and the reason cleared. Chat engagements they started lose the starter's id and username. Usage cost rows lose their Discord id and details. Legacy `/scan` usage rows lose their user id. Chat agent turns and handler runs have the person's id and names replaced where they stand as values; forum agent responses have the author's display name replaced. Site page revisions they wrote lose their author when the account is deleted. What an admin set up (automations, admin and channel handlers, forum agents, campaigns, scheduled and repeating messages, squad sales, extension installs) keeps working, with their id, names and email replaced by `DELETED` where it records who set it up; a privacy purge they requested loses its requester. |
-| **Keep** | Moderation history: `moderation_actions`, the bot's posts in the guild's moderation and audit log channels, and the moderator's `reason` copied into `handler_runs` rows of moderation triggers. Anonymised billing: usage cost rows with no person linked (the membership rows are deleted with the account; Polar keeps its payment records under its own terms). A bare receipt that the request was completed. The person's Discord id alone in `chat_bot_blocked_users`, written by the purge in step 4, so the chat bot sees their messages only as `[BLOCKED BY USER]` and does not respond to them. |
+| **Keep** | Moderation history: `moderation_actions`, the moderation gateway's incidents, incident links, reason and note entries and operations (ids and the system's own words, no message text), the bot's posts in the guild's moderation and audit log channels, and the moderator's `reason` copied into `handler_runs` rows of moderation triggers. Anonymised billing: usage cost rows with no person linked (the membership rows are deleted with the account; Polar keeps its payment records under its own terms). A bare receipt that the request was completed. The person's Discord id alone in `chat_bot_blocked_users`, written by the purge in step 4, so the chat bot sees their messages only as `[BLOCKED BY USER]` and does not respond to them. |
 | **Ages out** | Short-lived records listed below. Nothing in them lasts past 30 days, so a request does not touch them, apart from the live work steps 6 to 8 clear. |
 
 The Delete and Anonymise rows also cover records that can outlast those
@@ -258,8 +258,16 @@ UNION ALL SELECT 'handler_runs own (clear account details)', count(*) FROM handl
 UNION ALL SELECT 'handler_runs mentioning (drop from mentions)', count(*) FROM handler_runs WHERE jsonb_typeof(trigger_context::jsonb -> 'mentioned_user_ids') = 'array' AND trigger_context::jsonb -> 'mentioned_user_ids' ? :'did'
 UNION ALL SELECT 'chat_agent_errors (clear text)', count(*) FROM chat_agent_errors WHERE error_message ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR traceback ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR coalesce(provider_body, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
 UNION ALL SELECT 'chat_agent_engagements topic (clear)', count(*) FROM chat_agent_engagements WHERE coalesce(last_topic, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR coalesce(last_notes, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
+-- moderation gateway: what they posted, and what a model or a pending delivery says about them
+UNION ALL SELECT 'moderation_incident_entries content (delete)', count(*) FROM moderation_incident_entries WHERE kind IN ('evidence', 'transcript', 'assessment') AND (target_user_id = :'did' OR coalesce(content, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)'))
+UNION ALL SELECT 'moderation_outbox (delete)', count(*) FROM moderation_outbox WHERE target_user_id = :'did'
 -- kept:
 UNION ALL SELECT 'moderation_actions (kept)', count(*) FROM moderation_actions WHERE target_user_id = :'did' OR moderator_user_id = :'did'
+UNION ALL SELECT 'moderation_operations (kept)', count(*) FROM moderation_operations WHERE target_user_id = :'did'
+UNION ALL SELECT 'moderation_incidents (kept)', count(*) FROM moderation_incidents WHERE subject_user_id = :'did'
+UNION ALL SELECT 'moderation_incident_entries reasons and notes (kept)', count(*) FROM moderation_incident_entries WHERE kind IN ('reason', 'note') AND (target_user_id = :'did' OR coalesce(rule, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)'))
+UNION ALL SELECT 'moderation_incident_links (kept, message ids only)', count(*) FROM moderation_incident_links l JOIN moderation_incidents i ON i.id = l.incident_id WHERE i.subject_user_id = :'did'
+UNION ALL SELECT 'moderation_member_locks (lease, expires)', count(*) FROM moderation_member_locks WHERE user_id = :'did'
 -- chat bot stores, purged by the agent in step 4; counted to compare after:
 UNION ALL SELECT 'chat memory mentions (agent purge)', count(*) FROM chat_agent_guild_memory WHERE content LIKE '%' || :'did' || '%' OR behavior LIKE '%' || :'did' || '%' OR personality LIKE '%' || :'did' || '%'
 UNION ALL SELECT 'memory revisions mentioning (agent purge)', count(*) FROM chat_agent_memory_revisions WHERE content LIKE '%' || :'did' || '%' OR behavior LIKE '%' || :'did' || '%' OR personality LIKE '%' || :'did' || '%'
@@ -615,6 +623,14 @@ DELETE FROM forum_user_subscriptions WHERE user_id = :'did';
 DELETE FROM campaign_signups WHERE discord_id = :'did';
 DELETE FROM help_conversations WHERE user_id = :'did';
 DELETE FROM research_sessions WHERE user_id = :'did';
+-- Moderation gateway: what they posted (evidence), transcripts and model
+-- assessments that name them, and deliveries about them. Incidents,
+-- operations, reasons and notes stay: they are moderation history.
+-- (smarter_dev/web/moderation_gateway/privacy.py states the same deletes.)
+DELETE FROM moderation_incident_entries
+ WHERE kind IN ('evidence', 'transcript', 'assessment')
+   AND (target_user_id = :'did' OR coalesce(content, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)'));
+DELETE FROM moderation_outbox WHERE target_user_id = :'did';
 DELETE FROM scan_user_profiles WHERE user_id = :'did';
 UPDATE scan_service_usage SET user_id = NULL WHERE user_id = :'did';
 -- Records that can name them past the 5-hour sweep.
@@ -838,7 +854,9 @@ Expected side effects, all accepted:
   next time they post. Tell them so when you reply.
 
 Do not touch `moderation_actions`, including rows where the person was the
-moderator.
+moderator, nor the moderation gateway's incidents, incident links, reason and
+note entries and operations: those are moderation history, which the notice
+keeps.
 
 ## 7. Remove them from automation memory
 

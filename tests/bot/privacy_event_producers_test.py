@@ -9,8 +9,13 @@ from pathlib import Path
 PACKAGE = Path(__file__).resolve().parents[2] / "smarter_dev"
 CONSTRUCTORS = {"mod_action_event", "bot_message_event", "GuildEvent"}
 # Builds the event from a whole ModerationAction context, which always
-# carries target_user_id (build_mod_action_context).
-CONTEXT_SITES = {("bot/mod_action_dispatch.py", "context")}
+# carries target_user_id (build_mod_action_context). The moderation gateway's
+# REST port announces every handler action this way, as the bot's dispatch
+# does for its own.
+CONTEXT_SITES = {
+    ("bot/mod_action_dispatch.py", "context"),
+    ("web/moderation_gateway/rest_port.py", "context"),
+}
 DEFINING_MODULE = "shared/guild_event_log.py"
 
 
@@ -56,7 +61,9 @@ def _violation(relative: str, call: ast.Call) -> str | None:
 
 def test_every_member_event_carries_the_member_id():
     sites = list(_sites())
-    assert len(sites) >= 8  # the walk actually found the producers
+    # The walk actually found the producers. Every moderation action now
+    # reaches the log through one of the two context sites.
+    assert len(sites) >= 7
     problems = [
         f"{relative}:{call.lineno} {reason}"
         for relative, call in sites

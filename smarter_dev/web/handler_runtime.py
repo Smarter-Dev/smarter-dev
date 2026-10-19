@@ -101,19 +101,21 @@ five spends the lookups budget, plus ``hold_member(user_id, key, seconds=300)``
 -> bool and ``release_hold(user_id, key)`` -> bool (time a member out while
 ``key`` is under review, and end that hold; see
 :mod:`smarter_dev.web.handler_holds` — the member has one timeout and several
-fires share it, so both run under the member's lock, a hold never shortens a
-longer timeout, and a release ends the timeout only when no key is held any
-more and the timeout in place is a hold's own, handing back a shorter one the
-holds extended; each spends a mod_action;
+fires share it, so both run under the member's lock; a hold is a timeout
+claim in the moderation gateway, which never shortens a longer timeout, and a
+release drops the timeout to the longest claim still held or lifts it, never
+touching a moderator's; each spends a mod_action;
 ``timeout_user`` and ``remove_timeout`` take the same lock), plus ``warn_user(user_id, reason, channel_id=None, dm=True)`` ->
 dict (``{"message_id", "dm_sent", "warn_count"}``: the handler-tier ``/warn`` —
 spends a mod_action FIRST so a mod_action-triggered fire, which runs with zero
-mod actions, structurally cannot warn in response to a warn; then posts the
-notice through ``send_message``'s budget/window, records the audit row + fires
-the ``mod_action`` trigger through an injected recorder that binds the guild and
-resolves the target's username host-side, and only THEN best-effort DMs the
-target (``dm_sent=False`` on closed DMs, not an error) — recording before the DM
-so a DM-window breach can never leave a public warning with no record), plus ``get_role_members(role_id)`` -> list[dict] (every member currently
+mod actions, structurally cannot warn in response to a warn; then asks the
+moderation gateway, which skips a warn the incident already covers (a ban, a
+timeout, an earlier warn: ``"skipped"`` in the result, no notice, row or DM);
+then posts the notice through ``send_message``'s budget/window, the gateway
+records the audit row and fires the ``mod_action`` trigger, and only THEN the
+target is best-effort DMed (``dm_sent=False`` on closed DMs, not an error) —
+recording before the DM so a DM-window breach can never leave a public warning
+with no record), plus ``get_role_members(role_id)`` -> list[dict] (every member currently
 holding a role, paged worker-side and hard-capped at 200; backs the daily
 onboarding-reconcile sweep — spends the discord_reads budget like
 ``get_guild_member_count``).
@@ -213,12 +215,17 @@ TimerScheduler = Callable[[datetime.datetime, dict[str, Any]], Awaitable[None]]
 # another guild's mod history) — the same injection discipline as AgentRunner.
 ModActionReader = Callable[[str, int], Awaitable[list[dict[str, Any]]]]
 
-# An async function (target_user_id, reason, channel_id) -> the target's total
-# warn count in this guild AFTER the row is written. Injected by the admin fire
-# job, which binds the guild id host-side, resolves the target's username from
-# Discord (never from the script), and fires the synthetic mod_action trigger —
-# the same injection discipline as ModActionReader.
-ModActionRecorder = Callable[[str, str, str], Awaitable[int]]
+# An async function (target_user_id) -> the target's total warn count in this
+# guild. Injected by the admin fire job, which binds the guild id host-side —
+# the same injection discipline as ModActionReader. The warn row itself is
+# written by the moderation gateway.
+WarnCounter = Callable[[str], Awaitable[int]]
+
+# An async function () -> the guild's incident report channel, or None.
+# Injected by the admin fire job. A script's message to that channel, sent
+# after its own actions joined an incident, becomes part of the incident's one
+# report instead of a second report.
+ReportChannelReader = Callable[[], Awaitable[str | None]]
 
 # An async function () -> this guild's configured rules, in document order.
 # Injected by the admin fire job with the guild id bound host-side, so a script
@@ -244,6 +251,10 @@ Claimer = Callable[[str, int], Awaitable[bool]]
 ClaimReader = Callable[[str], Awaitable[bool]]
 
 
+# Not read yet (None means read, and the guild has no report channel).
+_UNREAD = object()
+
+
 async def _no_agent(prompt: str, has_tools: bool, budget: HandlerBudget) -> str:
     raise RuntimeError("no agent runner configured for this handler execution")
 
@@ -256,8 +267,12 @@ async def _no_mod_action_reader(user_id: str, limit: int) -> list[dict[str, Any]
     raise RuntimeError("no mod-action reader configured for this handler execution")
 
 
-async def _no_mod_action_recorder(user_id: str, reason: str, channel_id: str) -> int:
-    raise RuntimeError("no mod-action recorder configured for this handler execution")
+async def _no_warn_counter(user_id: str) -> int:
+    raise RuntimeError("no warn counter configured for this handler execution")
+
+
+async def _no_report_channel() -> str | None:
+    return None
 
 
 async def _no_rules_reader() -> list[dict[str, Any]]:
@@ -355,11 +370,13 @@ class HandlerExecution:
     # binds the fire's guild id host-side). Admin handlers only; standard fires
     # never construct list_mod_actions so this stays the raising default.
     mod_action_reader: ModActionReader = _no_mod_action_reader
-    # DB-backed writer for warn_user, injected by the admin fire job alongside
-    # the reader: it binds the guild host-side, resolves the target's username
-    # from Discord, commits the ModerationAction and fires the mod_action
-    # trigger. Admin handlers only; the raising default guards an unwired call.
-    mod_action_recorder: ModActionRecorder = _no_mod_action_recorder
+    # DB-backed warn count for warn_user's result, injected by the admin fire
+    # job alongside the reader. Admin handlers only; the raising default guards
+    # an unwired call.
+    warn_counter: WarnCounter = _no_warn_counter
+    # The guild's incident report channel, for folding a script's report into
+    # the incident report (see ReportChannelReader). Admin handlers only.
+    report_channel_reader: ReportChannelReader = _no_report_channel
     # DB-backed reader for list_rules (the guild's parsed rules), injected by the
     # admin fire job with the guild bound host-side. Admin handlers only.
     rules_reader: RulesReader = _no_rules_reader
@@ -426,6 +443,8 @@ class HandlerExecution:
     # home-thread relaxation verifies each target once per fire. This is a host
     # rail (one cached fetch), NOT metered against discord_reads.
     _thread_parent_cache: dict[str, str | None] = field(default_factory=dict)
+    # The guild's incident report channel, read once per fire when needed.
+    _report_channel: Any = _UNREAD
 
     def external_functions(self) -> dict[str, Callable[..., Any]]:
         funcs = {
@@ -535,6 +554,12 @@ class HandlerExecution:
         # (actor set). A standard handler's ping_role_id is silently dropped so
         # the emitter's mention-suppressing default stands (fail-safe).
         role_ping = str(ping_role_id) if (ping_role_id and self.actor is not None) else None
+        # A report that pings the moderators is an escalation: it goes out as
+        # its own message, since an edit to the incident report pings nobody.
+        if explicit_target and self.actor is not None and role_ping is None:
+            folded = await self._fold_into_incident_report(target, str(content))
+            if folded is not None:
+                return folded
         # An explicit target (e.g. a DM-relay forum post) may have been deleted /
         # gone inaccessible: the emitter returns False on 403/404 so the script can
         # branch to ❌, mirroring send_dm. Budget/window are already spent — the
@@ -545,6 +570,33 @@ class HandlerExecution:
                 target, str(content), role_ping, tolerate_missing_target=True
             )
         return await self.emitter.create_message(target, str(content), role_ping)
+
+    async def _fold_into_incident_report(self, target: str, content: str) -> str | None:
+        """A script's report about what it just did joins the incident's report.
+
+        Only a message to the guild's incident report channel, and only once
+        this fire's own actions joined an incident: the script reported to the
+        moderators about the incident the gateway already reports, so its text
+        becomes a note on that one message (a model's words, kept 5 hours).
+        Returns the report's message id, or None to send as usual.
+        """
+        incidents = getattr(self.actor, "touched_incidents", None)
+        if not incidents:
+            return None
+        if self._report_channel is _UNREAD:
+            self._report_channel = await self.report_channel_reader()
+        if not self._report_channel or target != self._report_channel:
+            return None
+        gateway = self.actor.gateway()
+        incident_id = incidents[-1]
+        await gateway.add_note(
+            incident_id,
+            source=self.actor.actor_name,
+            text=content,
+            kind="assessment",
+            report_channel_id=target,
+        )
+        return await gateway.report_message_of(incident_id) or ""
 
     async def _is_home_channel_thread(self, channel_id: str) -> bool:
         """Whether ``channel_id`` is a thread whose parent is the home channel.
@@ -883,9 +935,9 @@ class HandlerExecution:
         3. The notice goes out through ``_send_message``, so the per-fire message
            budget and the per-channel message window apply to a warn's notice
            exactly as they do to any other send — a warn is not a way around them.
-        4. The row is written by the injected recorder (which owns the guild
-           binding, the host-side username resolution and the mod_action fire)
-           BEFORE the DM, and that order is load-bearing. Once the public notice
+        4. The row is written by the moderation gateway (which resolves the
+           username host-side and fires mod_action) BEFORE the DM, and that
+           order is load-bearing. Once the public notice
            is out, the member HAS been warned; the durable record must not be
            contingent on a courtesy DM that shares the per-fire message pool and
            two windows of its own (per-recipient hour, global per-minute). A
@@ -922,17 +974,30 @@ class HandlerExecution:
                 "refused": f"{target_user} is protected ({refusal})",
             }
         notice = f"⚠️ <@{target_user}> has been warned.\n**Reason:** {reason_text}"
-        # Only forward an explicit channel: the default path must keep
-        # _send_message's raise-on-4xx home-channel contract.
-        message_id = (
-            await self._send_message(notice, target)
-            if explicit_target
-            else await self._send_message(notice)
-        )
-        # Recorded BEFORE the DM: the notice is already public, so the permanent
-        # row (and the warn_count and mod_action fire that come with it) must not
-        # hang on a DM window breach. See step 4 above.
-        warn_count = await self.mod_action_recorder(target_user, reason_text, target)
+        # The gateway holds the member's lock across the notice, and skips a
+        # warn the incident already covers (a ban, a timeout, another warn):
+        # no notice, row or DM then, and the script sees why.
+        async with self.actor.reserve_warn(target_user, reason_text, target) as slot:
+            if not slot.go:
+                return {
+                    "message_id": "",
+                    "dm_sent": False,
+                    "warn_count": int(await self.warn_counter(target_user)),
+                    "skipped": slot.outcome.detail if slot.outcome else "not warned",
+                }
+            # Only forward an explicit channel: the default path must keep
+            # _send_message's raise-on-4xx home-channel contract.
+            message_id = (
+                await self._send_message(notice, target)
+                if explicit_target
+                else await self._send_message(notice)
+            )
+            # Recorded on leaving this block, BEFORE the DM: the notice is
+            # already public, so the permanent row (and the warn_count and
+            # mod_action fire that come with it) must not hang on a DM window
+            # breach. See step 4 above.
+            slot.confirm()
+        warn_count = await self.warn_counter(target_user)
         dm_sent = False
         if dm:
             dm_sent = await self._send_dm(
@@ -1311,7 +1376,8 @@ async def run_handler_script(
     limiter: WindowedLimiter,
     agent_runner: AgentRunner = _no_agent,
     mod_action_reader: ModActionReader = _no_mod_action_reader,
-    mod_action_recorder: ModActionRecorder = _no_mod_action_recorder,
+    warn_counter: WarnCounter = _no_warn_counter,
+    report_channel_reader: ReportChannelReader = _no_report_channel,
     rules_reader: RulesReader = _no_rules_reader,
     recent_messages_reader: RecentMessagesReader = _no_recent_messages_reader,
     handler_id: str = "",
@@ -1354,7 +1420,8 @@ async def run_handler_script(
         limiter=limiter,
         agent_runner=agent_runner,
         mod_action_reader=mod_action_reader,
-        mod_action_recorder=mod_action_recorder,
+        warn_counter=warn_counter,
+        report_channel_reader=report_channel_reader,
         rules_reader=rules_reader,
         recent_messages_reader=recent_messages_reader,
         handler_id=handler_id,

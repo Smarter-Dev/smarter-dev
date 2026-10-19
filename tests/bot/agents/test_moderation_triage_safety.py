@@ -147,30 +147,31 @@ def stored(monkeypatch):
     return state
 
 
+class _Rows:
+    """The ModerationAction rows the gateway wrote, read on demand."""
+
+    def __init__(self, database) -> None:
+        self._database = database
+
+    async def all(self) -> list:
+        from sqlalchemy import select
+
+        from smarter_dev.web.models import ModerationAction
+
+        async with self._database() as session:
+            return list((await session.execute(select(ModerationAction))).scalars())
+
+
 @pytest.fixture(autouse=True)
-def audit(monkeypatch) -> list:
-    """Captures the ModerationAction rows and event-log writes triage makes."""
-    rows: list = []
-
-    @contextlib.asynccontextmanager
-    async def session():
-        async def commit():
-            return None
-
-        yield SimpleNamespace(commit=commit)
-
-    async def create_action(session, **kwargs):
-        rows.append(kwargs)
-        return SimpleNamespace(**kwargs)
+def audit(monkeypatch, moderation_gateway_db) -> _Rows:
+    """The gateway is real (a throwaway database); its announcements are dropped."""
+    from smarter_dev.bot import moderation_port
 
     async def ignore(*args, **kwargs):
         return None
 
-    monkeypatch.setattr(mod_tools, "get_db_session_context", session)
-    monkeypatch.setattr(mod_tools.mod_action_ops, "create_action", create_action)
-    monkeypatch.setattr(mod_tools, "dispatch_mod_action", ignore)
-    monkeypatch.setattr(mod_tools, "record_guild_event", ignore)
-    return rows
+    monkeypatch.setattr(moderation_port, "dispatch_mod_action", ignore)
+    return _Rows(moderation_gateway_db)
 
 
 def _tools(discord, enabled=("timeout", "purge", "delete")):
@@ -520,7 +521,7 @@ async def test_purge_deletes_only_the_targets_messages_with_staff_in_the_channel
 
     assert result["success"] is True
     assert discord.destructive == [("delete_messages", list(reversed(spam)))]
-    assert [row["action_type"] for row in audit] == ["purge"]
+    assert [row.action_type for row in await audit.all()] == ["purge"]
 
 
 async def test_a_departed_spammers_messages_can_still_be_purged(discord, stored):
@@ -543,7 +544,7 @@ async def test_an_ordinary_member_is_timed_out_and_recorded(discord, stored, aud
     assert result["success"] is True
     [(kind, user_id, kwargs)] = discord.destructive
     assert (kind, user_id) == ("edit_member", HELPER)
-    assert [row["action_type"] for row in audit] == ["timeout"]
+    assert [row.action_type for row in await audit.all()] == ["timeout"]
     assert tracker.timeouts[0]["user_id"] == str(HELPER)
 
 
@@ -575,11 +576,11 @@ async def test_a_failed_call_keeps_its_slot_and_is_reported_as_possibly_applied(
     fourth = await tools["timeout_user"](str(SPAMMER), "10m", "spam")
 
     assert "Action limit reached" in fourth["error"]
-    assert len(discord.destructive) == 3
+    # The gateway sends the timeout once: the repeats are the same request,
+    # whose outcome is unknown, and an unknown outcome is never resent blindly.
+    assert len(discord.destructive) == 1
     assert all(entry["possibly_applied"] for entry in tracker.timeouts)
-    assert audit == []
-    embed = mod_tools.build_triage_report_embed(tracker, "x", "helper", str(CHANNEL_ID))
-    assert "Possibly Applied (outcome unknown)" in [f.name for f in embed.fields]
+    assert await audit.all() == []
 
 
 async def test_refusals_take_no_slot(discord, stored):
@@ -593,7 +594,8 @@ async def test_refusals_take_no_slot(discord, stored):
     ]
 
     assert all(r["success"] for r in results)
-    assert len(discord.destructive) == 3
+    # The second timeout of the spammer is already covered by the first.
+    assert len(discord.destructive) == 2
 
 
 async def test_a_call_cancelled_in_flight_keeps_its_slot(discord, stored):

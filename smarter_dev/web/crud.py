@@ -5432,10 +5432,12 @@ class ModerationActionOperations:
         channel_id: str | None = None,
         trigger_message_id: str | None = None,
         ai_context_summary: str | None = None,
+        audit_entry_id: str | None = None,
     ) -> ModerationAction:
         """Record a moderation action."""
         try:
             action = ModerationAction(
+                audit_entry_id=audit_entry_id,
                 guild_id=guild_id,
                 target_user_id=target_user_id,
                 target_username=target_username,

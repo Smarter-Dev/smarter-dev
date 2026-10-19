@@ -7,9 +7,12 @@ import logging
 import hikari
 import lightbulb
 
-from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
+from smarter_dev.bot.moderation_port import bot_gateway
+from smarter_dev.bot.moderation_port import manual_trigger
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.crud import ModerationActionOperations
+from smarter_dev.web.moderation_gateway import Proposal
+from smarter_dev.web.moderation_gateway import types as gw
 
 logger = logging.getLogger(__name__)
 
@@ -117,24 +120,25 @@ async def warn_user(ctx: lightbulb.Context) -> None:
     except (hikari.ForbiddenError, hikari.NotFoundError):
         logger.info(f"Could not DM user {target_user.username} about warning")
 
-    # Record the warning in the moderation actions table, then fire the
-    # mod_action trigger so a mod-log handler can format it (best-effort).
+    # Record the warning through the gateway (one row, and the mod_action
+    # trigger for mod-log handlers); best-effort, the warning already stands.
     try:
-        async with get_db_session_context() as session:
-            action = await mod_action_ops.create_action(
-                session,
-                guild_id=str(guild.id),
+        async with bot_gateway(ctx.bot).reserve(
+            manual_trigger(
+                guild_id=guild.id,
+                channel_id=ctx.channel_id,
+                moderator=ctx.author,
+                reason=reason,
+            ),
+            Proposal(
+                kind=gw.WARN,
                 target_user_id=str(target_user.id),
                 target_username=target_user.username,
-                moderator_user_id=str(ctx.author.id),
-                moderator_username=ctx.author.username,
-                action_type="warn",
                 reason=reason,
-                source="manual",
                 channel_id=str(ctx.channel_id),
-            )
-            await session.commit()
-        await dispatch_mod_action(action, bot=ctx.bot)
+            ),
+        ) as slot:
+            slot.confirm()
     except Exception:
         logger.exception("Failed to record warn action to moderation log")
 

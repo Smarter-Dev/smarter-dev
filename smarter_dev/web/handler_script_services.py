@@ -24,20 +24,14 @@ from typing import TYPE_CHECKING
 from uuid import UUID
 from uuid import uuid4
 
-import httpx
-from redis.exceptions import RedisError
 from skrift.workers import submit as worker_submit
-from sqlalchemy.exc import SQLAlchemyError
 
 from smarter_dev.shared.database import get_db_session_context
-from smarter_dev.shared.exception_logging import log_exception
-from smarter_dev.web.admin_actions import AdminActionError
 from smarter_dev.web.crud import GuildRulesConfigOperations
 from smarter_dev.web.crud import ModerationActionOperations
 from smarter_dev.web.guild_rules import parse_guild_rules
-from smarter_dev.web.handler_dispatch import build_mod_action_context
-from smarter_dev.web.handler_dispatch import dispatch_handler_event
 from smarter_dev.web.models import ModerationAction
+from smarter_dev.web.moderation_gateway.config import load_report_channel
 
 if TYPE_CHECKING:
     from smarter_dev.web.admin_actions import AdminActor
@@ -119,37 +113,24 @@ class AdminScriptServices:
             )
             return [_mod_action_row(action) for action in actions]
 
-    async def record_warn(
-        self, target_user_id: str, reason: str, warn_channel_id: str
-    ) -> int:
-        """Record a warning and return this member's authoritative warn count.
+    async def count_warns(self, target_user_id: str) -> int:
+        """This member's authoritative warn count in this guild.
 
         The count is host-side because a script tallying warns itself from
         ``read_mod_actions`` would silently undercount: that read is clamped to
         50 rows and returns every action type, so a heavy user's warn history
-        truncates and the "third strike" escalation quietly never fires.
+        truncates and the "third strike" escalation quietly never fires. The
+        warn row itself is written by the moderation gateway.
         """
-        target_user_id = str(target_user_id)
-        target_username = await self._resolve_username(target_user_id)
         async with get_db_session_context() as session:
-            action = await _mod_action_ops.create_action(
-                session,
-                guild_id=self.guild_id,
-                target_user_id=target_user_id,
-                target_username=target_username,
-                moderator_user_id=None,
-                moderator_username=f"handler:{self.handler_name}",
-                action_type="warn",
-                reason=reason,
-                source="handler",
-                channel_id=warn_channel_id or None,
+            return await _mod_action_ops.count_warns_for_user(
+                session, self.guild_id, str(target_user_id)
             )
-            await session.commit()
-            warn_count = await _mod_action_ops.count_warns_for_user(
-                session, self.guild_id, target_user_id
-            )
-            await self._announce_warn(session, action)
-        return warn_count
+
+    async def incident_report_channel(self) -> str | None:
+        """Where this guild's moderation incident reports go."""
+        async with get_db_session_context() as session:
+            return await load_report_channel(session, self.guild_id)
 
     async def read_rules(self) -> list[dict]:
         """This guild's numbered rules, parsed exactly as ``/rule`` parses them.
@@ -164,51 +145,3 @@ class AdminScriptServices:
             {"number": rule.index, "title": rule.title, "text": rule.body}
             for rule in parse_guild_rules(markdown)
         ]
-
-    async def _resolve_username(self, target_user_id: str) -> str:
-        """The member's name for a PERMANENT audit row, resolved from Discord.
-
-        Never trusted from the script (a script-supplied name could impersonate
-        anyone in the log). One UNMETERED fetch — it is a host rail, not a
-        script-visible read — and a Discord rejection or transport failure
-        degrades to the raw id rather than failing a warn whose notice has
-        already posted.
-        """
-        try:
-            info = await self.actor.get_member_info(target_user_id)
-        except (AdminActionError, httpx.HTTPError):
-            log_exception(
-                logger,
-                "warn_user could not resolve username for %s",
-                target_user_id,
-                level=logging.DEBUG,
-            )
-            return target_user_id
-        return info.get("username") or target_user_id
-
-    async def _announce_warn(self, session, action: ModerationAction) -> None:
-        """Fire the synthetic mod_action trigger for mod-log handlers.
-
-        A handler-issued warn must reach them exactly like ``/warn`` does. Best
-        effort against the transports dispatch depends on, mirroring
-        mod_action_dispatch: a Redis failure in the fire-window limiter or a
-        database failure in the handler lookup is logged and NEVER propagated
-        into the warn, whose notice and audit row have both already landed.
-        Anything else is a programming error and surfaces.
-        """
-        # warn -> mod-log handler -> whatever THAT warns is a real chain, so it
-        # descends one generation and the choke point cuts it past
-        # MAX_CHAIN_DEPTH. Sits behind the mod_action trigger's zero-action
-        # budget, which already forbids a mod_action fire from warning at all.
-        trigger_context = build_mod_action_context(action)
-        try:
-            await dispatch_handler_event(
-                session,
-                guild_id=self.guild_id,
-                channel_id="",
-                trigger_type="mod_action",
-                trigger_context=trigger_context,
-                chain_depth=self.chain_depth + 1,
-            )
-        except (RedisError, SQLAlchemyError):
-            log_exception(logger, "handler warn mod_action dispatch failed", level=logging.DEBUG)

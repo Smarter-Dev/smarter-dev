@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass, field
 
 from smarter_dev.web.handler_budget import CapExceeded, HandlerBudget
 from smarter_dev.web.handler_runtime import run_handler_script
+from smarter_dev.web.moderation_gateway import Outcome
+from smarter_dev.web.moderation_gateway import Reservation
 
 
 @dataclass
@@ -124,8 +127,24 @@ class _FakeActor:
     # User ids the staff-protection check refuses.
     protected: set = field(default_factory=set)
 
+    # Warns the gateway recorded, and why it would skip one (None: it goes).
+    warns: list = field(default_factory=list)
+    warn_skip: str | None = None
+
     async def staff_refusal(self, user_id, *, is_bot=None):
         return "holds a staff role" if str(user_id) in self.protected else None
+
+    @contextlib.asynccontextmanager
+    async def reserve_warn(self, user_id, reason, channel_id):
+        slot = Reservation(
+            go=self.warn_skip is None,
+            outcome=None
+            if self.warn_skip is None
+            else Outcome(kind="warn", target_user_id=user_id, state="skipped", detail=self.warn_skip),
+        )
+        yield slot
+        if slot._settle and slot._settle[0] == "confirmed":
+            self.warns.append((user_id, reason, channel_id))
 
     async def ban_user(self, user_id, reason=None, delete_message_seconds=0):
         self.calls.append(("ban", user_id, reason, delete_message_seconds))
@@ -189,7 +208,7 @@ async def _run(
     script, *, budget=None, emitter=None, limiter=None, agent_runner=None,
     actor=None, channel_ids=None, allowed_role_ids=None,
     timer_scheduler=None, timer_limiter=None, dm_user_limiter=None, handler_id=None,
-    mod_action_reader=None, mod_action_recorder=None, rules_reader=None, claimer=None,
+    mod_action_reader=None, warn_counter=None, rules_reader=None, claimer=None,
     recent_messages_reader=None,
 ):
     emitter = emitter or _FakeEmitter()
@@ -199,8 +218,8 @@ async def _run(
         kwargs["dm_user_limiter"] = dm_user_limiter
     if mod_action_reader is not None:
         kwargs["mod_action_reader"] = mod_action_reader
-    if mod_action_recorder is not None:
-        kwargs["mod_action_recorder"] = mod_action_recorder
+    if warn_counter is not None:
+        kwargs["warn_counter"] = warn_counter
     if rules_reader is not None:
         kwargs["rules_reader"] = rules_reader
     if recent_messages_reader is not None:
@@ -1686,18 +1705,17 @@ async def test_get_role_members_denied_when_budget_zero():
 # -- warn_user (admin tier: notice + best-effort DM + audit row) -------------
 
 
-def _recorder(calls, warn_count=1):
-    """A mod_action_recorder stand-in recording its host-bound args."""
+def _counter(warn_count=1):
+    """A warn_counter stand-in: the member's authoritative warn total."""
 
-    async def recorder(user_id, reason, channel_id):
-        calls.append((user_id, reason, channel_id))
+    async def counter(user_id):
         return warn_count
 
-    return recorder
+    return counter
 
 
 async def test_warn_user_posts_notice_dms_and_records():
-    calls = []
+    actor = _FakeActor()
     script = (
         "r = await warn_user('U9', 'spamming links')\n"
         "await send_message(f\"{r['message_id']}|{r['dm_sent']}|{r['warn_count']}\")\n"
@@ -1705,15 +1723,15 @@ async def test_warn_user_posts_notice_dms_and_records():
     result, emitter, _ = await _run(
         script,
         budget=admin_budget("message"),
-        actor=_FakeActor(),
-        mod_action_recorder=_recorder(calls, warn_count=3),
+        actor=actor,
+        warn_counter=_counter(3),
     )
     assert result.outcome == "ok", result.error
-    # The notice lands in the HOME channel; the recorder is told the same one.
+    # The notice lands in the HOME channel; the gateway records the same one.
     assert emitter.messages[0][0] == "C1"
     assert "spamming links" in emitter.messages[0][1]
     assert emitter.dm_sends[0][0] == "U9"
-    assert calls == [("U9", "spamming links", "C1")]
+    assert actor.warns == [("U9", "spamming links", "C1")]
     # Both the notice and the DM draw on the shared per-fire message pool.
     assert result.usage["messages_sent"] == 3  # notice + DM + the echo above
     assert result.usage["mod_actions"] == 1
@@ -1721,7 +1739,7 @@ async def test_warn_user_posts_notice_dms_and_records():
 
 
 async def test_warn_user_on_a_protected_member_posts_records_and_dms_nothing():
-    calls = []
+    actor = _FakeActor(protected={"U9"})
     script = (
         "r = await warn_user('U9', 'spamming links')\n"
         "await send_message(r['refused'])\n"
@@ -1729,68 +1747,89 @@ async def test_warn_user_on_a_protected_member_posts_records_and_dms_nothing():
     result, emitter, _ = await _run(
         script,
         budget=admin_budget("message"),
-        actor=_FakeActor(protected={"U9"}),
-        mod_action_recorder=_recorder(calls, warn_count=3),
+        actor=actor,
+        warn_counter=_counter(3),
     )
     assert result.outcome == "ok", result.error
-    assert calls == []
+    assert actor.warns == []
     assert emitter.dm_sends == []
     # Only the script's own echo went out, carrying the reason.
     assert [m[1] for m in emitter.messages] == ["U9 is protected (holds a staff role)"]
 
 
+async def test_warn_user_the_incident_already_covers_posts_records_and_dms_nothing():
+    # A member the incident already timed out or banned is not warned too.
+    actor = _FakeActor(warn_skip="weaker than the ban already in this incident")
+    script = (
+        "r = await warn_user('U9', 'spamming links')\n"
+        "await send_message(r['skipped'] + '|' + str(r['warn_count']))\n"
+    )
+    result, emitter, _ = await _run(
+        script,
+        budget=admin_budget("message"),
+        actor=actor,
+        warn_counter=_counter(2),
+    )
+    assert result.outcome == "ok", result.error
+    assert actor.warns == []
+    assert emitter.dm_sends == []
+    assert [m[1] for m in emitter.messages] == [
+        "weaker than the ban already in this incident|2"
+    ]
+
+
 async def test_warn_user_spends_mod_action_before_any_side_effect():
     # The loop rail: a mod_action-triggered fire runs with max_mod_actions=0, so
     # the spend must raise BEFORE the notice, the DM, or the audit row.
-    calls = []
+    actor = _FakeActor()
     result, emitter, _ = await _run(
         "await warn_user('U9', 'nope')\n",
         budget=HandlerBudget(max_mod_actions=0, max_messages=5),
-        actor=_FakeActor(),
-        mod_action_recorder=_recorder(calls),
+        actor=actor,
+        warn_counter=_counter(),
     )
     assert result.outcome == "cap_exceeded"
     assert result.cap == "mod_actions"
     assert emitter.messages == []
     assert emitter.dm_sends == []
-    assert calls == []
+    assert actor.warns == []
 
 
 async def test_warn_user_rejects_out_of_scope_channel():
     # Same rail rename_channel uses: an EXPLICIT channel outside channel_ids is
     # refused, and nothing is emitted or recorded.
-    calls = []
+    actor = _FakeActor()
     result, emitter, _ = await _run(
         "await warn_user('U9', 'r', 'C-OTHER')\n",
         budget=admin_budget("message"),
-        actor=_FakeActor(),
+        actor=actor,
         channel_ids=["C1"],
-        mod_action_recorder=_recorder(calls),
+        warn_counter=_counter(),
     )
     assert result.outcome == "cap_exceeded"
     assert result.cap == "out_of_scope_channel"
     assert emitter.messages == []
-    assert calls == []
+    assert actor.warns == []
 
 
 async def test_warn_user_explicit_in_scope_channel_is_used_for_notice_and_row():
-    calls = []
+    actor = _FakeActor()
     result, emitter, _ = await _run(
         "await warn_user('U9', 'r', 'C2')\n",
         budget=admin_budget("message"),
-        actor=_FakeActor(),
+        actor=actor,
         channel_ids=["C1", "C2"],
-        mod_action_recorder=_recorder(calls),
+        warn_counter=_counter(),
     )
     assert result.outcome == "ok", result.error
     assert emitter.messages[0][0] == "C2"
-    assert calls == [("U9", "r", "C2")]
+    assert actor.warns == [("U9", "r", "C2")]
 
 
 async def test_warn_user_closed_dms_reported_not_errored():
     # A False from send_dm (closed DMs / no mutual guild) is an expected outcome:
     # dm_sent=False, and the warn still posts and still records.
-    calls = []
+    actor = _FakeActor()
     emitter = _FakeEmitter(dm_result=False)
     script = (
         "r = await warn_user('U9', 'r')\n"
@@ -1799,27 +1838,27 @@ async def test_warn_user_closed_dms_reported_not_errored():
     result, emitter, _ = await _run(
         script,
         budget=admin_budget("message"),
-        actor=_FakeActor(),
+        actor=actor,
         emitter=emitter,
-        mod_action_recorder=_recorder(calls),
+        warn_counter=_counter(),
     )
     assert result.outcome == "ok", result.error
     assert emitter.messages[-1][1] == "False"
-    assert calls == [("U9", "r", "C1")]
+    assert actor.warns == [("U9", "r", "C1")]
 
 
 async def test_warn_user_dm_false_skips_the_dm_entirely():
-    calls = []
+    actor = _FakeActor()
     result, emitter, _ = await _run(
         "await warn_user('U9', 'r', None, False)\n",
         budget=admin_budget("message"),
-        actor=_FakeActor(),
-        mod_action_recorder=_recorder(calls),
+        actor=actor,
+        warn_counter=_counter(),
     )
     assert result.outcome == "ok", result.error
     assert emitter.dm_sends == []
     assert result.usage["messages_sent"] == 1  # the notice only
-    assert calls == [("U9", "r", "C1")]
+    assert actor.warns == [("U9", "r", "C1")]
 
 
 async def test_warn_user_records_the_row_before_the_dm_can_breach_a_cap():
@@ -1829,17 +1868,17 @@ async def test_warn_user_records_the_row_before_the_dm_can_breach_a_cap():
     # 11th handler warn in a minute (the global DMs/min window). The fire still
     # fails — a cap breach is a rail — but the warn is durably recorded, so
     # /history, list_mod_actions, warn_count and the mod-log fire all see it.
-    calls = []
+    actor = _FakeActor()
     result, emitter, _ = await _run(
         "await warn_user('U9', 'third strike')\n",
         budget=HandlerBudget(max_mod_actions=5, max_messages=1),
-        actor=_FakeActor(),
-        mod_action_recorder=_recorder(calls),
+        actor=actor,
+        warn_counter=_counter(),
     )
     assert result.outcome == "cap_exceeded"
     assert result.cap == "messages"
     assert emitter.messages[0][0] == "C1"  # the public notice went out ...
-    assert calls == [("U9", "third strike", "C1")]  # ... and so did the row
+    assert actor.warns == [("U9", "third strike", "C1")]  # ... and so did the row
     assert emitter.dm_sends == []
 
 

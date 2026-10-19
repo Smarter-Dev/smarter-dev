@@ -18,7 +18,6 @@ import pytest
 from smarter_dev.shared.staff_protection import ADMINISTRATOR
 from smarter_dev.shared.staff_protection import BAN_MEMBERS
 from smarter_dev.shared.staff_protection import MANAGE_MESSAGES
-from smarter_dev.web import admin_actions
 from smarter_dev.web.admin_actions import AdminActor
 from smarter_dev.web.handler_holds import MemberHolds
 
@@ -116,6 +115,8 @@ class FakeDiscordApi:
                 return httpx.Response(
                     200, json={"user": user, "roles": member["roles"]}
                 )
+            if parts[:3] == ["guilds", GUILD, "bans"]:
+                return httpx.Response(404, json={"code": 10026})
             if parts[0] == "channels" and parts[2] == "messages":
                 message = self.messages.get(parts[3])
                 if message is None:
@@ -132,10 +133,14 @@ class FakeDiscordApi:
 
 @pytest.fixture(autouse=True)
 def quiet_event_log(monkeypatch):
-    async def drop(event, **kwargs) -> None:
-        return None
+    from smarter_dev.web import guild_event_recorder
+    from smarter_dev.web import handler_dispatch
 
-    monkeypatch.setattr(admin_actions, "record_guild_event", drop)
+    async def drop(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(guild_event_recorder, "record_guild_event", drop)
+    monkeypatch.setattr(handler_dispatch, "dispatch_handler_event", drop)
 
 
 @pytest.fixture

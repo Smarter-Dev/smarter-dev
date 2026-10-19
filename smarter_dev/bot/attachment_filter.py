@@ -5,6 +5,10 @@ Three-tier filtering approach:
 2. Warn extensions - Send warning but don't delete
 3. All others (blocked) - Delete + warn (or just warn if the author is protected
    staff: see smarter_dev.shared.staff_protection)
+
+The delete goes through the moderation gateway, so it is recorded (one
+``moderation_actions`` row) and never repeated: when another detector already
+removed the message, this filter posts no second notice about it.
 """
 
 from __future__ import annotations
@@ -15,12 +19,14 @@ from typing import TYPE_CHECKING
 
 import hikari
 
-from smarter_dev.bot.guild_event_recorder import record_guild_event
+from smarter_dev.bot.moderation_port import bot_gateway
 from smarter_dev.bot.staff_protection import staff_refusal
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.exception_logging import log_exception
-from smarter_dev.shared.guild_event_log import mod_action_event
 from smarter_dev.web.crud import AttachmentFilterConfigOperations
+from smarter_dev.web.moderation_gateway import Proposal
+from smarter_dev.web.moderation_gateway import Trigger
+from smarter_dev.web.moderation_gateway import types as gw
 
 if TYPE_CHECKING:
     from lightbulb import BotApp
@@ -133,32 +139,21 @@ async def check_attachment_filter(
             # Take action
             try:
                 if should_delete:
-                    # Delete the message first
-                    await event.message.delete()
+                    # Delete the message first, through the gateway.
+                    outcome = await _delete_through_gateway(bot, event, reported)
+                    if outcome.state in (gw.SKIPPED, gw.ABSENT, gw.FAILED):
+                        # Someone else removed it (and said so), it is protected
+                        # after all, or Discord refused: no notice about a
+                        # delete this filter did not make.
+                        logger.info(
+                            f"Attachment filter did not delete message "
+                            f"{event.message_id} in guild {guild_id_str}: "
+                            f"{outcome.detail}"
+                        )
+                        return False
                     logger.info(
                         f"Deleted message from {event.author} in guild {guild_id_str} "
                         f"due to blocked attachment: {reported['filename']}"
-                    )
-                    # TODO(§3.8): an attachment delete writes no ModerationAction
-                    # row today, so the bot's short-term memory is captured here.
-                    # When feature-parity §3.8 gives it a row it will flow through
-                    # dispatch_mod_action — drop this call then, or the delete
-                    # lands in the log twice.
-                    await record_guild_event(
-                        bot,
-                        mod_action_event(
-                            {
-                                "action_type": "delete",
-                                "target_username": event.author.username,
-                                "target_user_id": str(event.author.id),
-                                "reason": (
-                                    f"blocked attachment: {reported['filename']}"
-                                ),
-                                "source": "handler",
-                                "channel_id": str(event.channel_id),
-                            },
-                            guild_id=guild_id_str,
-                        ),
                     )
 
                 # Send message
@@ -193,3 +188,33 @@ async def check_attachment_filter(
     except Exception as e:
         log_exception(logger, f"Error in attachment filter: {type(e).__name__}", level=logging.ERROR)
         return False
+
+
+async def _delete_through_gateway(
+    bot: BotApp, event: hikari.GuildMessageCreateEvent, reported: dict
+) -> gw.Outcome:
+    reason = f"blocked attachment: {reported['filename']}"
+    result = await bot_gateway(bot).act(
+        Trigger(
+            guild_id=str(event.guild_id),
+            actor="attachment_filter",
+            reason=reason,
+            source=gw.SOURCE_HANDLER,
+            channel_id=str(event.channel_id),
+            message_id=str(event.message_id),
+            author_id=str(event.author.id),
+            content=event.message.content or None,
+        ),
+        [
+            Proposal(
+                kind=gw.DELETE,
+                target_user_id=str(event.author.id),
+                target_username=event.author.username,
+                reason=reason,
+                channel_id=str(event.channel_id),
+                message_ids=(str(event.message_id),),
+                target_is_bot=bool(event.author.is_bot),
+            )
+        ],
+    )
+    return result.outcomes[0]

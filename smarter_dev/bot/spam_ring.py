@@ -25,10 +25,13 @@ So the ad is the trigger and the conversation around it is the sweep:
    If that call fails, only the ad's author is actioned and the report lists
    the unjudged candidates for mods.
 3. **Act, in this order.** Save the transcript (``spam_ring_incidents``,
-   committed before anything is deleted), time out every participant, delete
-   their messages in the window, post one report with the transcript attached,
-   then write one ``ModerationAction`` row per account timed out. A Discord or
-   database error is caught per account and per message and noted in the
+   committed before anything is deleted), then hand the moderation gateway
+   (``smarter_dev.web.moderation_gateway``) one incident: every participant
+   timed out, their messages in the window deleted, the transcript attached
+   to the incident's one report, one ``ModerationAction`` row per confirmed
+   effect. The incident takes the alias ``spam_ring:<id>``, so follow-ups and
+   any other detector acting on the same messages join it. A Discord or
+   database error is caught per account and per message and shown in the
    report; it never stops the steps after it.
 4. **Follow-up.** For ``spam_ring_followup_minutes`` afterwards, a message in
    that channel from a new member who joined within :data:`JOIN_PROXIMITY` of
@@ -36,7 +39,7 @@ So the ad is the trigger and the conversation around it is the sweep:
    author was already timed out, Jev is asked the sweep's participant question
    about them (one candidate, the same CONTEXT and AD, counted against the
    guild cap). Only a confident yes is actioned: deleted, author timed out,
-   and one line added to the existing report. A no, a weak yes, a failed check
+   and one line added to the incident's report. A no, a weak yes, a failed check
    or a spent cap spares the author and adds a "review" line instead.
    Follow-up accounts never widen the participant set, so the net cannot
    creep a day at a time.
@@ -83,21 +86,23 @@ from pydantic_ai import Agent
 from pydantic_ai.models import Model
 from sqlalchemy import select
 
-from smarter_dev.bot.guild_event_recorder import record_guild_event
-from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
-from smarter_dev.bot.purge_core import delete_selected_messages
+from smarter_dev.bot.moderation_port import bot_gateway
 from smarter_dev.bot.purge_core import snowflake_to_datetime
 from smarter_dev.bot.spam_engine import build_jump_link
 from smarter_dev.bot.spam_engine import extract_links
 from smarter_dev.bot.staff_protection import staff_refusal
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.exception_logging import log_exception
-from smarter_dev.shared.guild_event_log import mod_action_event
-from smarter_dev.web.crud import ModerationActionOperations
 from smarter_dev.web.crud import ModerationConfigOperations
 from smarter_dev.web.crud import ModerationFilterConfigOperations
 from smarter_dev.web.models import ModerationFilterConfig
 from smarter_dev.web.models import SpamRingIncident
+from smarter_dev.web.moderation_gateway import Evidence
+from smarter_dev.web.moderation_gateway import Outcome
+from smarter_dev.web.moderation_gateway import Proposal
+from smarter_dev.web.moderation_gateway import Trigger
+from smarter_dev.web.moderation_gateway import types as gw
+from smarter_dev.web.moderation_gateway.config import first_channel
 
 if TYPE_CHECKING:
     from lightbulb import BotApp
@@ -106,10 +111,9 @@ logger = logging.getLogger(__name__)
 
 moderation_filter_config_ops = ModerationFilterConfigOperations()
 moderation_config_ops = ModerationConfigOperations()
-mod_action_ops = ModerationActionOperations()
 
 SPAM_RING_REASON = "Spam ring: staged event promotion by new accounts"
-MOD_ACTION_SOURCE = "handler"
+GATEWAY_ACTOR = "spam_ring"
 
 #: The sweep reads at most this many messages of channel history.
 MAX_SWEEP_MESSAGES = 100
@@ -135,8 +139,6 @@ DISCORD_MAX_TIMEOUT_SECONDS = 28 * 24 * 60 * 60
 #: The longest new-member window the admin form accepts. Also the free guard
 #: that keeps an established member's message from costing a config read.
 MAX_NEW_MEMBER_DAYS = 90
-
-DISCORD_MESSAGE_LIMIT = 2000
 
 #: Words that make a message worth one classifier call. Deliberately broad: the
 #: model, not this list, decides whether the message is an ad.
@@ -189,12 +191,7 @@ class SpamRingSettings:
         )
 
 
-def resolve_report_channel_id(*candidates: str | None) -> str | None:
-    """The first configured channel, in the order given."""
-    for candidate in candidates:
-        if candidate:
-            return str(candidate)
-    return None
+resolve_report_channel_id = first_channel
 
 
 def clamp_timeout_seconds(seconds: int) -> int:
@@ -455,79 +452,6 @@ def describe_timeout(outcome: str, duration: str) -> str:
     }.get(outcome, outcome)
 
 
-def format_report(
-    *,
-    channel_id: str,
-    ad_jump_link: str,
-    outcomes: Sequence[AccountOutcome],
-    timeout_seconds: int,
-    followup_lines: Sequence[str],
-    notes: Sequence[str] = (),
-    limit: int = DISCORD_MESSAGE_LIMIT,
-) -> str:
-    """The one mod report; re-rendered with each follow-up line appended."""
-    duration = format_duration(timeout_seconds)
-    deleted_total = sum(outcome.deleted_count for outcome in outcomes)
-    head = [
-        f"**Spam ring removed in <#{channel_id}>**: a new member posted an event ad "
-        f"and {len(outcomes)} new account(s) in that conversation were actioned.",
-        f"Ad: {ad_jump_link}",
-    ]
-    accounts = [
-        f"- <@{outcome.user_id}> {outcome.username}: "
-        f"{describe_timeout(outcome.timeout, duration)}, "
-        f"{outcome.deleted_count} message(s) deleted"
-        for outcome in outcomes
-    ]
-    summary = [
-        f"{deleted_total} message(s) deleted in total. The full transcript is attached."
-    ]
-    summary.extend(notes)
-    if any(outcome.timeout == TIMEOUT_MISSING_PERMISSION for outcome in outcomes):
-        summary.append(
-            "Timeouts failed for missing permission or role hierarchy: the bot "
-            "needs Moderate Members and a role above these accounts. Fix that, "
-            "then time them out by hand."
-        )
-    undo = (
-        "To undo: open each member and choose Remove Timeout. Deleted messages "
-        "cannot be restored; their text is in the transcript."
-    )
-    followups = ["Follow-up:", *followup_lines] if followup_lines else []
-
-    def render(account_lines: Sequence[str], followup: Sequence[str]) -> str:
-        return "\n".join([*head, *account_lines, *summary, *followup, undo])
-
-    content = render(accounts, followups)
-    if len(content) <= limit:
-        return content
-    # Too long: keep the newest follow-ups, then trim the account list.
-    kept_followups = list(followup_lines)
-    while kept_followups and len(content) > limit:
-        kept_followups.pop(0)
-        dropped = len(followup_lines) - len(kept_followups)
-        content = render(
-            accounts,
-            [
-                "Follow-up:",
-                f"({dropped} earlier line(s) are in the incident record)",
-                *kept_followups,
-            ],
-        )
-    kept_accounts = list(accounts)
-    while kept_accounts and len(content) > limit:
-        kept_accounts.pop()
-        dropped = len(accounts) - len(kept_accounts)
-        content = render(
-            [
-                *kept_accounts,
-                f"- …and {dropped} more account(s), listed in the transcript",
-            ],
-            [],
-        )
-    return content[:limit]
-
-
 def format_followup_line(
     *,
     user_id: str,
@@ -567,7 +491,9 @@ class ChannelIncident:
     outcomes: list[AccountOutcome]
     timed_out_ids: set[str]
     report_channel_id: str | None = None
-    report_message_id: str | None = None
+    #: The moderation gateway's incident: its report, its records.
+    gateway_incident_id: UUID | None = None
+    staff_exempt_role_ids: tuple[str, ...] = ()
     #: Failures the report must state, e.g. messages left undeleted.
     notes: list[str] = field(default_factory=list)
     followup_lines: list[str] = field(default_factory=list)
@@ -583,16 +509,6 @@ class ChannelIncident:
     #: swept is asked the same participant question with the same material.
     ad_text: str = ""
     context_lines: list[str] = field(default_factory=list)
-
-    def render_report(self) -> str:
-        return format_report(
-            channel_id=self.channel_id,
-            ad_jump_link=self.ad_jump_link,
-            outcomes=self.outcomes,
-            timeout_seconds=self.timeout_seconds,
-            followup_lines=self.followup_lines,
-            notes=self.notes,
-        )
 
 
 class ClassifierBudget:
@@ -1347,22 +1263,17 @@ async def _sweep(
         transcript=transcript,
     )
 
-    # 2. Time out every participant. Each call is caught on its own.
-    outcomes: list[AccountOutcome] = []
-    for user_id in participants:
-        facts = authors.get(user_id)
-        outcome = await _apply_timeout(
-            bot, event.guild_id, user_id, now, settings.timeout_seconds
-        )
-        outcomes.append(
-            AccountOutcome(
-                user_id=user_id,
-                username=facts.username if facts else user_id,
-                timeout=outcome,
-            )
+    if not settings.report_channel_id:
+        logger.warning(
+            "Spam ring in guild %s channel %s has no report channel; the incident "
+            "records are the only record",
+            guild_id,
+            channel_id,
         )
 
-    # 3. Delete their messages in the window — only once the transcript is safe.
+    # 2.-4. One incident in the moderation gateway: every participant timed
+    # out, their messages in the window deleted (only once the transcript is
+    # safe), one report with the transcript attached, one row per effect.
     participant_set = set(participants)
     doomed = [message for message in messages if message.author_id in participant_set]
     if incident_id is None:
@@ -1370,18 +1281,80 @@ async def _sweep(
             "**Messages were NOT deleted**: the transcript could not be saved first. "
             "Delete them by hand after reading the attachment."
         )
-    else:
-        deletion = await _delete_messages(
-            bot, int(event.channel_id), [int(message.message_id) for message in doomed]
+
+    def name_of(user_id: str) -> str:
+        facts = authors.get(user_id)
+        return facts.username if facts else user_id
+
+    proposals: list[Proposal] = [
+        Proposal(
+            kind=gw.TIMEOUT,
+            target_user_id=user_id,
+            target_username=name_of(user_id),
+            reason=SPAM_RING_REASON,
+            duration_seconds=settings.timeout_seconds,
+            target_is_bot=False,
         )
-        notes.extend(deletion.notes())
-        for outcome in outcomes:
-            outcome.deleted_count = sum(
-                1
-                for message in doomed
-                if message.author_id == outcome.user_id
-                and int(message.message_id) in deletion.deleted
+        for user_id in participants
+    ]
+    if incident_id is not None:
+        for user_id in participants:
+            theirs = tuple(
+                message.message_id for message in doomed if message.author_id == user_id
             )
+            if theirs:
+                proposals.append(
+                    Proposal(
+                        kind=gw.PURGE if len(theirs) > 1 else gw.DELETE,
+                        target_user_id=user_id,
+                        target_username=name_of(user_id),
+                        reason=f"{SPAM_RING_REASON} in #{channel_id}",
+                        channel_id=channel_id,
+                        message_ids=theirs,
+                        target_is_bot=False,
+                    )
+                )
+    result = await bot_gateway(bot, extra_role_ids=settings.staff_exempt_role_ids).act(
+        _ring_trigger(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            message_id=ad_message_id,
+            author_id=ad_author_id,
+            content=event.content or "",
+            incident_id=incident_id,
+            report_channel_id=settings.report_channel_id,
+            related_message_ids=tuple(message.message_id for message in doomed),
+            evidence=(
+                Evidence(
+                    kind=gw.ENTRY_TRANSCRIPT,
+                    content=transcript,
+                    channel_id=channel_id,
+                    details={"filename": transcript_filename(channel_id, now)},
+                ),
+                *(Evidence(kind=gw.ENTRY_NOTE, content=note) for note in notes),
+            ),
+        ),
+        proposals,
+    )
+    outcomes = []
+    for user_id in participants:
+        timeout = next(
+            (o for o in result.outcomes if o.kind == gw.TIMEOUT and o.target_user_id == user_id),
+            None,
+        )
+        deleted = sum(
+            len(o.deleted)
+            for o in result.outcomes
+            if o.kind in gw.CLEANUP_KINDS and o.target_user_id == user_id
+        )
+        outcomes.append(
+            AccountOutcome(
+                user_id=user_id,
+                username=name_of(user_id),
+                timeout=timeout_outcome(timeout),
+                deleted_count=deleted,
+            )
+        )
 
     incident = ChannelIncident(
         incident_id=incident_id,
@@ -1397,20 +1370,18 @@ async def _sweep(
             is not None
         ],
         outcomes=outcomes,
-        timed_out_ids={o.user_id for o in outcomes if o.timeout == TIMEOUT_APPLIED},
+        timed_out_ids={
+            o.user_id for o in outcomes if o.timeout in (TIMEOUT_APPLIED, TIMEOUT_ALREADY_APPLIED)
+        },
         report_channel_id=settings.report_channel_id,
+        gateway_incident_id=result.incident_id,
+        staff_exempt_role_ids=settings.staff_exempt_role_ids,
         notes=notes,
         handled_message_ids={message.message_id for message in doomed},
         spared_user_ids=spared,
         ad_text=event.content or "",
         context_lines=context,
     )
-    # 4. One report with the transcript attached.
-    await _post_report(bot, incident, transcript, now)
-
-    # 5. One audit row (and guild event) per account.
-    for outcome in outcomes:
-        await _record_account_action(bot, incident, outcome, ad_message_id)
 
     logger.info(
         "Spam ring swept channel %s in guild %s: %d participant(s), ad %s",
@@ -1454,7 +1425,7 @@ async def _save_incident(
 async def _update_incident(
     incident: ChannelIncident, *, append: str = "", participant: str | None = None
 ) -> bool:
-    """Append to the saved transcript / record the report. False on failure."""
+    """Append to the saved transcript. False on failure."""
     if incident.incident_id is None:
         return False
     try:
@@ -1475,8 +1446,6 @@ async def _update_incident(
                     *(row.participant_user_ids or []),
                     participant,
                 ]
-            row.report_channel_id = incident.report_channel_id
-            row.report_message_id = incident.report_message_id
             await session.commit()
             return True
     except Exception:  # noqa: BLE001
@@ -1486,227 +1455,53 @@ async def _update_incident(
         return False
 
 
-async def _apply_timeout(
-    bot: BotApp, guild_id, user_id: str, now: datetime, duration_seconds: int
-) -> str:
-    """The same ``edit_member`` call the spam engine and ``timeout_user`` make.
-
-    Never raises: every failure becomes an outcome the report states.
-    """
-    try:
-        await bot.rest.edit_member(
-            int(guild_id),
-            int(user_id),
-            communication_disabled_until=now + timedelta(seconds=duration_seconds),
-            reason=SPAM_RING_REASON,
-        )
-        return TIMEOUT_APPLIED
-    except hikari.ForbiddenError:
-        logger.warning(
-            "Spam ring could not time out %s: missing permission or role hierarchy",
-            user_id,
-        )
-        return TIMEOUT_MISSING_PERMISSION
-    except hikari.NotFoundError:
-        return TIMEOUT_MEMBER_GONE
-    except hikari.BadRequestError:
-        logger.warning(
-            "Discord rejected a %ss spam ring timeout for %s", duration_seconds, user_id
-        )
-        return TIMEOUT_REJECTED
-    except Exception:  # noqa: BLE001 — 5xx, 429, connection: note it, carry on
-        log_exception(
-            logger,
-            "Spam ring timeout for %s failed",
-            user_id,
-            level=logging.WARNING,
-        )
+def timeout_outcome(outcome: Outcome | None) -> str:
+    """The gateway's answer as the transcript and follow-up lines word it."""
+    if outcome is None:
         return TIMEOUT_ERROR
+    if outcome.state == gw.CONFIRMED:
+        return TIMEOUT_APPLIED
+    if outcome.state == gw.COVERED:
+        return TIMEOUT_ALREADY_APPLIED
+    if outcome.detail == "not a member":
+        return TIMEOUT_MEMBER_GONE
+    if outcome.state == gw.FAILED and "permission" in outcome.detail:
+        return TIMEOUT_MISSING_PERMISSION
+    if outcome.state == gw.FAILED:
+        return TIMEOUT_REJECTED
+    if outcome.state == gw.UNKNOWN:
+        return TIMEOUT_ERROR
+    return outcome.detail
 
 
-@dataclass(slots=True)
-class DeletionResult:
-    """What a delete pass managed: ids gone, and why any are not."""
-
-    deleted: set[int] = field(default_factory=set)
-    forbidden: bool = False
-    failed: int = 0
-
-    def notes(self) -> list[str]:
-        if self.forbidden:
-            return [
-                "**Deleting the messages failed**: the bot lacks Manage Messages here."
-            ]
-        if self.failed:
-            return [
-                f"**{self.failed} message(s) could not be deleted** (Discord error). "
-                "Delete them by hand; they are in the transcript."
-            ]
-        return []
-
-
-async def _delete_messages(
-    bot: BotApp, channel_id: int, message_ids: list[int]
-) -> DeletionResult:
-    """Delete via ``purge_core``; one at a time if that fails. Never raises."""
-    result = DeletionResult()
-    if not message_ids:
-        return result
-    try:
-        await delete_selected_messages(bot.rest, channel_id, message_ids)
-        result.deleted.update(message_ids)
-        return result
-    except hikari.ForbiddenError:
-        logger.warning("Spam ring cannot delete messages in channel %s", channel_id)
-        result.forbidden = True
-        return result
-    except Exception:  # noqa: BLE001 — retry one at a time below
-        log_exception(
-            logger,
-            "Spam ring bulk delete in channel %s failed; deleting one at a time",
-            channel_id,
-            level=logging.WARNING,
-        )
-    for message_id in message_ids:
-        try:
-            await bot.rest.delete_message(channel_id, message_id)
-        except hikari.NotFoundError:
-            pass  # already gone, which is what we wanted
-        except hikari.ForbiddenError:
-            result.forbidden = True
-            break
-        except Exception:  # noqa: BLE001 — note it, carry on with the rest
-            log_exception(
-                logger,
-                "Spam ring could not delete message %s",
-                message_id,
-                level=logging.WARNING,
-            )
-            result.failed += 1
-            continue
-        result.deleted.add(message_id)
-    return result
-
-
-async def _post_report(
-    bot: BotApp, incident: ChannelIncident, transcript: str, now: datetime
-) -> None:
-    if not incident.report_channel_id:
-        logger.warning(
-            "Spam ring in guild %s channel %s has no report channel; the incident row is the only record",
-            incident.guild_id,
-            incident.channel_id,
-        )
-        return
-    try:
-        message = await bot.rest.create_message(
-            hikari.Snowflake(incident.report_channel_id),
-            incident.render_report(),
-            attachment=hikari.Bytes(
-                transcript.encode("utf-8"),
-                transcript_filename(incident.channel_id, now),
-            ),
-            mentions_everyone=False,
-            user_mentions=False,
-            role_mentions=False,
-        )
-    except Exception:  # noqa: BLE001 — the incident row still holds it all
-        log_exception(
-            logger,
-            "Cannot post spam ring report to channel %s",
-            incident.report_channel_id,
-            level=logging.WARNING,
-        )
-        return
-    incident.report_message_id = str(message.id)
-    await _update_incident(incident)
-
-
-async def _edit_report(bot: BotApp, incident: ChannelIncident) -> None:
-    if not incident.report_channel_id or not incident.report_message_id:
-        return
-    try:
-        await bot.rest.edit_message(
-            hikari.Snowflake(incident.report_channel_id),
-            hikari.Snowflake(incident.report_message_id),
-            incident.render_report(),
-            mentions_everyone=False,
-            user_mentions=False,
-            role_mentions=False,
-        )
-    except Exception:  # noqa: BLE001
-        log_exception(logger, "Cannot edit spam ring report", level=logging.WARNING)
-
-
-async def _record_account_action(
-    bot: BotApp,
-    incident: ChannelIncident,
-    outcome: AccountOutcome,
-    trigger_message_id: str,
-) -> None:
-    """Audit row + guild event for a timeout that landed; event only otherwise.
-
-    Each write is isolated: a failure is logged and the next account still
-    gets its record.
-    """
-    reason = (
-        f"{SPAM_RING_REASON} in #{incident.channel_id}; "
-        f"{outcome.deleted_count} message(s) deleted"
+def _ring_trigger(
+    *,
+    guild_id: str,
+    channel_id: str,
+    message_id: str,
+    author_id: str,
+    content: str,
+    incident_id: UUID | None,
+    report_channel_id: str | None,
+    related_message_ids: tuple[str, ...] = (),
+    evidence: tuple[Evidence, ...] = (),
+    reason: str = SPAM_RING_REASON,
+) -> Trigger:
+    """The ring as the gateway sees it; its alias finds the incident again."""
+    return Trigger(
+        guild_id=guild_id,
+        actor=GATEWAY_ACTOR,
+        reason=reason,
+        source=gw.SOURCE_HANDLER,
+        channel_id=channel_id,
+        message_id=message_id,
+        author_id=author_id,
+        content=content,
+        aliases=(f"spam_ring:{incident_id}",) if incident_id else (),
+        related_message_ids=related_message_ids,
+        evidence=evidence,
+        report_channel_id=report_channel_id,
     )
-    if outcome.timeout != TIMEOUT_APPLIED:
-        if not outcome.deleted_count:
-            return
-        try:
-            await record_guild_event(
-                bot,
-                mod_action_event(
-                    {
-                        "action_type": "delete",
-                        "target_username": outcome.username,
-                        "target_user_id": outcome.user_id,
-                        "reason": reason,
-                        "source": MOD_ACTION_SOURCE,
-                        "channel_id": incident.channel_id,
-                    },
-                    guild_id=incident.guild_id,
-                ),
-            )
-        except Exception:  # noqa: BLE001
-            log_exception(
-                logger,
-                "Spam ring could not record the deletion event for %s",
-                outcome.user_id,
-            )
-        return
-    try:
-        bot_user = bot.get_me()
-        async with get_db_session_context() as session:
-            action = await mod_action_ops.create_action(
-                session,
-                guild_id=incident.guild_id,
-                target_user_id=outcome.user_id,
-                target_username=outcome.username,
-                moderator_user_id=str(bot_user.id) if bot_user else None,
-                moderator_username=bot_user.username if bot_user else None,
-                action_type="timeout",
-                reason=reason,
-                duration_seconds=incident.timeout_seconds,
-                source=MOD_ACTION_SOURCE,
-                channel_id=incident.channel_id,
-                trigger_message_id=trigger_message_id,
-            )
-            await session.commit()
-    except Exception:  # noqa: BLE001
-        log_exception(
-            logger, "Spam ring could not write the audit row for %s", outcome.user_id
-        )
-        return
-    try:
-        await dispatch_mod_action(action, bot=bot)
-    except Exception:  # noqa: BLE001
-        log_exception(
-            logger, "Spam ring could not dispatch the audit row for %s", outcome.user_id
-        )
 
 
 def format_unactioned_followup_line(
@@ -1809,12 +1604,11 @@ async def _handle_followup(
                     + "\n"
                 ),
             )
-            incident.followup_lines.append(
-                format_unactioned_followup_line(
-                    user_id=user_id, username=username, at=now, check=check
-                )
+            line = format_unactioned_followup_line(
+                user_id=user_id, username=username, at=now, check=check
             )
-            await _edit_report(bot, incident)
+            incident.followup_lines.append(line)
+            await _note(bot, incident, line)
             return
 
     incident.context_lines.append(_context_line(username, message.content))
@@ -1830,43 +1624,75 @@ async def _handle_followup(
         participant=user_id,
     )
 
-    if already_timed_out:
-        timeout_outcome = TIMEOUT_ALREADY_APPLIED
-    else:
-        timeout_outcome = await _apply_timeout(
-            bot, event.guild_id, user_id, now, incident.timeout_seconds
-        )
-        if timeout_outcome == TIMEOUT_APPLIED:
-            incident.timed_out_ids.add(user_id)
-
     # Same rule as the sweep: nothing is deleted unless its text was saved.
-    deleted = False
-    if saved:
-        deletion = await _delete_messages(
-            bot, int(event.channel_id), [int(event.message_id)]
+    proposals = []
+    if not already_timed_out:
+        proposals.append(
+            Proposal(
+                kind=gw.TIMEOUT,
+                target_user_id=user_id,
+                target_username=username,
+                reason=SPAM_RING_REASON,
+                duration_seconds=incident.timeout_seconds,
+                target_is_bot=False,
+            )
         )
-        deleted = int(event.message_id) in deletion.deleted
-
-    await _record_account_action(
-        bot,
-        incident,
-        AccountOutcome(
-            user_id=user_id,
-            username=username,
-            timeout=timeout_outcome,
-            deleted_count=1 if deleted else 0,
+    if saved:
+        proposals.append(
+            Proposal(
+                kind=gw.DELETE,
+                target_user_id=user_id,
+                target_username=username,
+                reason=f"{SPAM_RING_REASON} in #{incident.channel_id} (follow-up)",
+                channel_id=str(event.channel_id),
+                message_ids=(str(event.message_id),),
+                target_is_bot=False,
+            )
+        )
+    result = await bot_gateway(bot, extra_role_ids=incident.staff_exempt_role_ids).act(
+        _ring_trigger(
+            guild_id=incident.guild_id,
+            channel_id=str(event.channel_id),
+            message_id=str(event.message_id),
+            author_id=user_id,
+            content=message.content,
+            incident_id=incident.incident_id,
+            report_channel_id=incident.report_channel_id,
+            reason=f"{SPAM_RING_REASON} (follow-up)",
         ),
-        str(event.message_id),
+        proposals,
     )
+    if result.incident_id is not None:
+        incident.gateway_incident_id = incident.gateway_incident_id or result.incident_id
+    if already_timed_out:
+        timeout_result = TIMEOUT_ALREADY_APPLIED
+    else:
+        timeout_result = timeout_outcome(result.first(gw.TIMEOUT))
+        if timeout_result in (TIMEOUT_APPLIED, TIMEOUT_ALREADY_APPLIED):
+            incident.timed_out_ids.add(user_id)
+    deletion = result.first(gw.DELETE)
+    deleted = deletion is not None and str(event.message_id) in deletion.deleted
 
     line = format_followup_line(
         user_id=user_id,
         username=username,
         at=now,
-        timeout_outcome=timeout_outcome,
+        timeout_outcome=timeout_result,
         timeout_seconds=incident.timeout_seconds,
     )
     if not deleted:
         line = line.replace("1 message deleted", "**message NOT deleted**")
     incident.followup_lines.append(line)
-    await _edit_report(bot, incident)
+    await _note(bot, incident, line)
+
+
+async def _note(bot: BotApp, incident: ChannelIncident, line: str) -> None:
+    """One follow-up line on the incident's report; never raises."""
+    if incident.gateway_incident_id is None:
+        return
+    try:
+        await bot_gateway(bot).add_note(
+            incident.gateway_incident_id, source=GATEWAY_ACTOR, text=line
+        )
+    except Exception:  # noqa: BLE001 — the transcript row still has it
+        log_exception(logger, "Spam ring could not add a follow-up line", level=logging.WARNING)

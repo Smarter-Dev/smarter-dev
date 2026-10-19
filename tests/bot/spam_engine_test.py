@@ -14,9 +14,11 @@ from types import SimpleNamespace
 
 import hikari
 import pytest
+from sqlalchemy import select
 
 from smarter_dev.bot import spam_engine
 from smarter_dev.web.models import DEFAULT_SCAM_LINK_DOMAINS
+from smarter_dev.web.models import ModerationAction
 from smarter_dev.web.models import ModerationFilterConfig
 from tests.bot.fake_discord import FakeDiscord
 from tests.bot.fake_discord import overwrite
@@ -710,24 +712,48 @@ def test_guild_state_prune_drops_expired_warnings_and_mutes():
 
 
 class _FakeRest:
+    """Discord's REST API as the engine and the moderation gateway call it."""
+
     def __init__(self, *, delete_raises: Exception | None = None) -> None:
         self.created_messages: list[dict] = []
+        self.edited_messages: list[dict] = []
         self.edited_members: list[dict] = []
         self.deleted_messages: list[tuple] = []
         self.delete_raises = delete_raises
         self.create_message_raises: Exception | None = None
         self.edit_member_raises: Exception | None = None
+        self.timeouts: dict[str, object] = {}
+        self.discord: FakeDiscord | None = None
 
     async def create_message(self, channel, content, **kwargs):
         if self.create_message_raises is not None:
             raise self.create_message_raises
         self.created_messages.append({"channel": str(channel), "content": content, **kwargs})
-        return SimpleNamespace(id=999)
+        return SimpleNamespace(id=999 + len(self.created_messages))
+
+    async def edit_message(self, channel, message, content, **kwargs):
+        self.edited_messages.append(
+            {"channel": str(channel), "message": str(message), "content": content, **kwargs}
+        )
+
+    async def fetch_member(self, guild, user):
+        member = self.discord.members.get(int(user)) if self.discord else None
+        if member is None:
+            raise hikari.NotFoundError(url="url", headers={}, raw_body=b"")
+        member.raw_communication_disabled_until = self.timeouts.get(str(user))
+        return member
+
+    async def fetch_ban(self, guild, user):
+        raise hikari.NotFoundError(url="url", headers={}, raw_body=b"")
 
     async def edit_member(self, guild, user, **kwargs):
         if self.edit_member_raises is not None:
             raise self.edit_member_raises
         self.edited_members.append({"guild": str(guild), "user": str(user), **kwargs})
+        self.timeouts[str(user)] = kwargs.get("communication_disabled_until")
+        return SimpleNamespace(
+            raw_communication_disabled_until=kwargs.get("communication_disabled_until")
+        )
 
     async def delete_message(self, channel, message, **kwargs):
         if self.delete_raises is not None:
@@ -767,8 +793,11 @@ def _event(
 
 
 @pytest.fixture
-def engine_harness(monkeypatch):
-    """Patches the config read, the audit write, and the mod_action dispatch."""
+def engine_harness(monkeypatch, moderation_gateway_db):
+    """Patches the config read and the mod_action dispatch; the gateway is real."""
+    from smarter_dev.bot import moderation_port
+    from smarter_dev.web.moderation_gateway import config as gateway_config
+
     config = ModerationFilterConfig(
         guild_id=str(GUILD_ID),
         spam_engine_enabled=True,
@@ -777,48 +806,50 @@ def engine_harness(monkeypatch):
         mod_ping_role_id=MOD_PING_ROLE_ID,
         scam_log_channel_id=SCAM_LOG_CHANNEL_ID,
     )
-    recorded_actions: list[dict] = []
     dispatched: list = []
-    recorded_events: list = []
 
     async def fake_get_config(session, guild_id):
         return harness.config
 
-    async def fake_create_action(session, **kwargs):
-        recorded_actions.append(kwargs)
-        return SimpleNamespace(**kwargs)
+    async def no_triage_config(session, guild_id):
+        return None
 
     async def fake_dispatch(action, *, bot=None) -> None:
         dispatched.append((action, bot))
 
-    async def _noop(*args, **kwargs) -> None:
-        return None
-
     @contextlib.asynccontextmanager
     async def fake_session_context():
-        yield SimpleNamespace(commit=_noop, add=lambda *a, **k: None, flush=_noop)
+        yield SimpleNamespace()
 
     monkeypatch.setattr(
         spam_engine.moderation_filter_config_ops, "get_config", fake_get_config
     )
-    monkeypatch.setattr(spam_engine.mod_action_ops, "create_action", fake_create_action)
-    async def fake_record_event(bot, event, **kwargs) -> None:
-        recorded_events.append(event)
-
-    monkeypatch.setattr(spam_engine, "dispatch_mod_action", fake_dispatch)
+    monkeypatch.setattr(gateway_config._triage_configs, "get_config", no_triage_config)
+    monkeypatch.setattr(moderation_port, "dispatch_mod_action", fake_dispatch)
     monkeypatch.setattr(spam_engine, "get_db_session_context", fake_session_context)
-    monkeypatch.setattr(spam_engine, "record_guild_event", fake_record_event)
+
+    async def rows() -> list[ModerationAction]:
+        async with moderation_gateway_db() as session:
+            return list(
+                (
+                    await session.execute(
+                        select(ModerationAction).order_by(ModerationAction.created_at)
+                    )
+                ).scalars()
+            )
 
     spam_engine.reset_spam_states()
     rest = _FakeRest()
+    bot = _FakeBot(rest)
+    rest.discord = bot.discord
+    bot.discord.add_member(AUTHOR_ID, username="spammer")
     harness = SimpleNamespace(
         config=config,
-        bot=_FakeBot(rest),
+        bot=bot,
         rest=rest,
         state=spam_engine.GuildSpamState(),
-        recorded_actions=recorded_actions,
         dispatched=dispatched,
-        recorded_events=recorded_events,
+        rows=rows,
     )
     return harness
 
@@ -1017,16 +1048,19 @@ async def test_nitro_scam_mutes_immediately_and_records_the_action(engine_harnes
 
     assert decision.action == spam_engine.SPAM_ACTION_MUTE
     assert len(engine_harness.rest.edited_members) == 1
-    assert len(engine_harness.recorded_actions) == 1
-    action = engine_harness.recorded_actions[0]
-    assert action["action_type"] == "timeout"
-    assert action["source"] == "handler"
-    assert action["reason"] == spam_engine.AUTO_MODERATION_REASON
-    assert action["target_user_id"] == str(AUTHOR_ID)
-    assert action["duration_seconds"] == engine_harness.config.mute_duration_seconds
-    assert action["channel_id"] == str(CHANNEL_ID)
-    assert action["trigger_message_id"] == str(MESSAGE_ID)
-    assert len(engine_harness.dispatched) == 1
+    rows = {row.action_type: row for row in await engine_harness.rows()}
+    # One row per confirmed effect: the timeout, and the delete of the bait.
+    assert set(rows) == {"timeout", "delete"}
+    action = rows["timeout"]
+    assert action.source == "handler"
+    assert action.actor == "spam_engine"
+    assert action.reason == spam_engine.AUTO_MODERATION_REASON
+    assert action.target_user_id == str(AUTHOR_ID)
+    assert action.duration_seconds == engine_harness.config.mute_duration_seconds
+    assert action.channel_id == str(CHANNEL_ID)
+    assert action.trigger_message_id == str(MESSAGE_ID)
+    assert action.incident_id == rows["delete"].incident_id
+    assert len(engine_harness.dispatched) == 2
 
 
 async def test_mute_alert_includes_jump_link_and_sanitized_content(engine_harness):
@@ -1162,7 +1196,7 @@ async def test_muting_state_suppresses_further_action(engine_harness):
     assert timeouts_after_first == 1
     assert len(engine_harness.rest.edited_members) == 1
     assert decision.action == spam_engine.SPAM_ACTION_NONE
-    assert len(engine_harness.recorded_actions) == 1
+    assert [row.action_type for row in await engine_harness.rows()].count("timeout") == 1
 
 
 async def test_muting_state_stops_suppressing_once_it_expires(engine_harness):
@@ -1174,6 +1208,8 @@ async def test_muting_state_stops_suppressing_once_it_expires(engine_harness):
         state=engine_harness.state,
         now=NOW,
     )
+    # The engine's clock is injected; Discord's timeout runs out on its own.
+    engine_harness.rest.timeouts.clear()
     decision = await spam_engine.check_spam_engine(
         engine_harness.bot,
         _event("@everyone free nitro again", message_id=MESSAGE_ID + 1),
@@ -1301,11 +1337,17 @@ async def test_rejected_timeout_still_deletes_the_scam_link(engine_harness):
 
     assert decision.action == spam_engine.SPAM_ACTION_MUTE
     assert engine_harness.rest.deleted_messages == [(str(CHANNEL_ID), str(MESSAGE_ID))]
-    assert engine_harness.recorded_actions == []
-    assert any(
-        message["channel"] == MOD_ALERT_CHANNEL_ID
+    # Only the delete landed, so only the delete has a row; the report says
+    # the timeout failed.
+    assert [row.action_type for row in await engine_harness.rows()] == ["delete"]
+    reports = [
+        message
         for message in engine_harness.rest.created_messages
-    )
+        if message["channel"] == MOD_ALERT_CHANNEL_ID
+    ]
+    assert len(reports) == 1
+    report = (engine_harness.rest.edited_messages or reports)[-1]["content"]
+    assert "timeout 1 day: **failed**" in report
 
 
 async def test_configured_scam_domain_is_moderated(engine_harness):
@@ -1401,8 +1443,9 @@ async def test_refused_timeout_records_no_audit_row_but_still_alerts(engine_harn
     )
 
     assert decision.action == spam_engine.SPAM_ACTION_MUTE
-    assert engine_harness.recorded_actions == []
-    assert engine_harness.dispatched == []
+    # The timeout did not land: no timeout row, nothing announced about one.
+    assert [row.action_type for row in await engine_harness.rows()] == ["delete"]
+    assert [action.action_type for action, _ in engine_harness.dispatched] == ["delete"]
     assert any(
         message["channel"] == MOD_ALERT_CHANNEL_ID
         for message in engine_harness.rest.created_messages
@@ -1486,23 +1529,22 @@ async def test_missing_send_permission_does_not_break_the_warn_path(engine_harne
 
 
 # ---------------------------------------------------------------------------
-# Short-term event log: the warn and the delete carry no ModerationAction row,
-# so they are captured here rather than riding the mod_action dispatch.
+# Records: every confirmed effect has a row and one announcement (which writes
+# the short-term event log); nothing that did not happen is remembered.
 # ---------------------------------------------------------------------------
 
 
-async def test_spam_warning_is_written_to_the_event_log(engine_harness):
+async def test_spam_warning_is_recorded_and_announced(engine_harness):
     await _flood(engine_harness, 6)
 
-    assert len(engine_harness.recorded_events) == 1
-    event = engine_harness.recorded_events[0]
-    assert event.kind == "mod_action"
-    assert event.guild_id == str(GUILD_ID)
-    assert event.action == "warn"
-    assert event.target_username == "spammer"
-    assert event.channel_id == str(CHANNEL_ID)
-    assert spam_engine.SPAM_REASON_MESSAGE_RATE in event.reason
-    assert event.source == spam_engine.MOD_ACTION_SOURCE
+    [row] = await engine_harness.rows()
+    assert row.action_type == "warn"
+    assert row.guild_id == str(GUILD_ID)
+    assert row.target_username == "spammer"
+    assert row.channel_id == str(CHANNEL_ID)
+    assert spam_engine.SPAM_REASON_MESSAGE_RATE in row.reason
+    assert row.source == "handler"
+    assert [action.action_type for action, _ in engine_harness.dispatched] == ["warn"]
 
 
 async def test_unsendable_warning_is_never_remembered(engine_harness):
@@ -1513,10 +1555,11 @@ async def test_unsendable_warning_is_never_remembered(engine_harness):
 
     await _flood(engine_harness, 6)
 
-    assert engine_harness.recorded_events == []
+    assert await engine_harness.rows() == []
+    assert engine_harness.dispatched == []
 
 
-async def test_spam_delete_is_written_to_the_event_log(engine_harness):
+async def test_spam_delete_is_recorded_and_announced(engine_harness):
     await spam_engine.check_spam_engine(
         engine_harness.bot,
         _event("claim it https://dlscord.gift/abc123"),
@@ -1524,17 +1567,16 @@ async def test_spam_delete_is_written_to_the_event_log(engine_harness):
         now=NOW,
     )
 
-    deletes = [
-        event for event in engine_harness.recorded_events if event.action == "delete"
-    ]
+    rows = await engine_harness.rows()
+    deletes = [row for row in rows if row.action_type == "delete"]
     assert len(deletes) == 1
-    assert deletes[0].guild_id == str(GUILD_ID)
     assert deletes[0].target_username == "spammer"
     assert deletes[0].channel_id == str(CHANNEL_ID)
     assert spam_engine.SPAM_REASON_SCAM_LINK in deletes[0].reason
-    # The timeout itself rides the mod_action dispatch (it has an audit row), so
-    # the engine must not also capture it here and double-log the mute.
-    assert [event.action for event in engine_harness.recorded_events] == ["delete"]
+    assert sorted(action.action_type for action, _ in engine_harness.dispatched) == [
+        "delete",
+        "timeout",
+    ]
 
 
 async def test_already_deleted_message_is_never_remembered(engine_harness):
@@ -1550,7 +1592,7 @@ async def test_already_deleted_message_is_never_remembered(engine_harness):
         now=NOW,
     )
 
-    assert engine_harness.recorded_events == []
+    assert [row.action_type for row in await engine_harness.rows()] == ["timeout"]
 
 
 async def test_spam_mute_dispatches_with_the_bot_for_the_event_log(engine_harness):
@@ -1561,9 +1603,26 @@ async def test_spam_mute_dispatches_with_the_bot_for_the_event_log(engine_harnes
         now=NOW,
     )
 
-    assert len(engine_harness.dispatched) == 1
-    _, dispatched_bot = engine_harness.dispatched[0]
-    assert dispatched_bot is engine_harness.bot
+    assert engine_harness.dispatched
+    assert all(bot is engine_harness.bot for _, bot in engine_harness.dispatched)
+
+
+async def test_a_mute_and_its_delete_are_one_incident_with_one_report(engine_harness):
+    await spam_engine.check_spam_engine(
+        engine_harness.bot,
+        _event("claim it https://dlscord.gift/abc123"),
+        state=engine_harness.state,
+        now=NOW,
+    )
+
+    reports = [
+        message
+        for message in engine_harness.rest.created_messages
+        if message["channel"] == MOD_ALERT_CHANNEL_ID
+    ]
+    assert len(reports) == 1
+    rows = await engine_harness.rows()
+    assert len({row.incident_id for row in rows}) == 1
 
 
 def test_single_label_host_is_its_own_registrable_domain():

@@ -13,17 +13,16 @@ import logging
 import hikari
 import lightbulb
 
-from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
+from smarter_dev.bot.moderation_port import bot_gateway
+from smarter_dev.bot.moderation_port import manual_trigger
 from smarter_dev.bot.purge_core import (
     delete_selected_messages,
     select_purgeable_messages,
 )
-from smarter_dev.shared.database import get_db_session_context
-from smarter_dev.web.crud import ModerationActionOperations
+from smarter_dev.web.moderation_gateway import Proposal
+from smarter_dev.web.moderation_gateway import types as gw
 
 logger = logging.getLogger(__name__)
-
-mod_action_ops = ModerationActionOperations()
 
 MIN_PURGE_COUNT = 1
 MAX_PURGE_COUNT = 100
@@ -151,8 +150,8 @@ async def purge(ctx: lightbulb.Context) -> None:
 
     # Record the purge BEFORE responding so a slow/failed interaction response can
     # never lose the audit row, and only when something was actually deleted (no
-    # row for an action that didn't happen). Fires the mod_action trigger so a
-    # mod-log handler can format it (best-effort).
+    # row for an action that didn't happen). Recorded through the moderation
+    # gateway, which also fires the mod_action trigger (best-effort).
     if deleted_count:
         audit_reason = f"purged {deleted_count} messages in #{channel_name}"
         if target_user is not None:
@@ -163,21 +162,25 @@ async def purge(ctx: lightbulb.Context) -> None:
             audit_target_name = f"#{channel_name}"
 
         try:
-            async with get_db_session_context() as session:
-                action = await mod_action_ops.create_action(
-                    session,
-                    guild_id=str(guild.id),
+            async with bot_gateway(ctx.bot).reserve(
+                manual_trigger(
+                    guild_id=guild.id,
+                    channel_id=ctx.channel_id,
+                    moderator=ctx.author,
+                    reason=audit_reason,
+                ),
+                Proposal(
+                    kind=gw.PURGE,
                     target_user_id=audit_target_id,
                     target_username=audit_target_name,
-                    moderator_user_id=str(ctx.author.id),
-                    moderator_username=ctx.author.username,
-                    action_type="purge",
                     reason=audit_reason,
-                    source="manual",
                     channel_id=str(ctx.channel_id),
+                    message_ids=tuple(str(m) for m in selection.message_ids),
+                ),
+            ) as slot:
+                slot.confirm(
+                    result={"deleted": [str(m) for m in selection.message_ids]}
                 )
-                await session.commit()
-            await dispatch_mod_action(action, bot=ctx.bot)
         except Exception:
             logger.exception("Failed to record purge action to moderation log")
 

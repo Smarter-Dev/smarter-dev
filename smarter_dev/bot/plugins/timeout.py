@@ -15,13 +15,12 @@ from pydantic_ai import Agent
 from smarter_dev.bot.agents.utility_model import build_utility_agent
 from smarter_dev.bot.agents.utility_model import render_inputs
 from smarter_dev.bot.agents.utility_model import utility_metered
-from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
-from smarter_dev.shared.database import get_db_session_context
-from smarter_dev.web.crud import ModerationActionOperations
+from smarter_dev.bot.moderation_port import bot_gateway
+from smarter_dev.bot.moderation_port import manual_trigger
+from smarter_dev.web.moderation_gateway import Proposal
+from smarter_dev.web.moderation_gateway import types as gw
 
 logger = logging.getLogger(__name__)
-
-mod_action_ops = ModerationActionOperations()
 
 # Create the plugin
 plugin = lightbulb.Plugin("timeout")
@@ -230,14 +229,39 @@ async def timeout_user(ctx: lightbulb.Context) -> None:
     await ctx.respond(hikari.ResponseType.DEFERRED_MESSAGE_CREATE, flags=hikari.MessageFlag.EPHEMERAL)
 
     try:
-        # Apply the timeout
-        timeout_until = datetime.now().astimezone() + timeout_duration
-        await ctx.bot.rest.edit_member(
-            guild.id,
-            target_user.id,
-            communication_disabled_until=timeout_until,
-            reason=f"Timed out by {ctx.author.username}: {mod_reason}"
+        # Apply the timeout through the gateway: serialised with the automation
+        # on this member, recorded once, and from then on a timeout the
+        # automation leaves alone.
+        result = await bot_gateway(ctx.bot).act(
+            manual_trigger(
+                guild_id=guild.id,
+                channel_id=ctx.channel_id,
+                moderator=ctx.author,
+                reason=mod_reason,
+            ),
+            [
+                Proposal(
+                    kind=gw.TIMEOUT,
+                    target_user_id=str(target_user.id),
+                    target_username=target_user.username,
+                    reason=f"Timed out by {ctx.author.username}: {mod_reason}",
+                    duration_seconds=int(timeout_duration.total_seconds()),
+                )
+            ],
         )
+        outcome = result.outcomes[0]
+        if not outcome.applied:
+            if "permission" in outcome.detail:
+                await ctx.edit_last_response("❌ I don't have permission to timeout this user.")
+            elif outcome.state == gw.UNKNOWN:
+                await ctx.edit_last_response(
+                    "❌ Discord did not confirm the timeout; it is being checked. "
+                    "Look at the member before trying again."
+                )
+            else:
+                await ctx.edit_last_response(f"❌ Failed to timeout user: {outcome.detail}")
+            return
+        timeout_until = outcome.expires_at or datetime.now().astimezone() + timeout_duration
 
         duration_display = format_duration(timeout_duration)
 
@@ -279,28 +303,6 @@ async def timeout_user(ctx: lightbulb.Context) -> None:
             # User has DMs disabled or blocked the bot
             logger.info(f"Could not DM user {target_user.username} about timeout")
             # Optionally add a note to the public message that DM failed
-
-        # Record the timeout action in moderation actions table, then fire the
-        # mod_action trigger so a mod-log handler can format it (best-effort).
-        try:
-            async with get_db_session_context() as session:
-                action = await mod_action_ops.create_action(
-                    session,
-                    guild_id=str(guild.id),
-                    target_user_id=str(target_user.id),
-                    target_username=target_user.username,
-                    moderator_user_id=str(ctx.author.id),
-                    moderator_username=ctx.author.username,
-                    action_type="timeout",
-                    reason=mod_reason,
-                    duration_seconds=int(timeout_duration.total_seconds()),
-                    source="manual",
-                    channel_id=str(ctx.channel_id),
-                )
-                await session.commit()
-            await dispatch_mod_action(action, bot=ctx.bot)
-        except Exception:
-            logger.exception("Failed to record timeout action to moderation log")
 
         # Log the timeout action
         logger.info(f"User {target_user.username} ({target_user.id}) timed out by {ctx.author.username} "

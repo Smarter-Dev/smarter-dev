@@ -40,25 +40,22 @@ import time
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC
-from datetime import datetime
-from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import hikari
 
-from smarter_dev.bot.guild_event_recorder import record_guild_event
-from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
 from smarter_dev.bot.moderation_config_skips import SKIP_REASON_NO_CONFIG
 from smarter_dev.bot.moderation_config_skips import ModerationConfigSkipLog
 from smarter_dev.bot.moderation_config_skips import skip_reason_disabled
+from smarter_dev.bot.moderation_port import bot_gateway
 from smarter_dev.bot.staff_protection import staff_refusal
 from smarter_dev.shared.database import get_db_session_context
-from smarter_dev.shared.guild_event_log import GuildEvent
-from smarter_dev.shared.guild_event_log import mod_action_event
-from smarter_dev.web.crud import ModerationActionOperations
 from smarter_dev.web.crud import ModerationFilterConfigOperations
 from smarter_dev.web.models import ModerationFilterConfig
+from smarter_dev.web.moderation_gateway import Proposal
+from smarter_dev.web.moderation_gateway import Trigger
+from smarter_dev.web.moderation_gateway import types as gw
+from smarter_dev.web.moderation_gateway.config import load_report_channel
 
 if TYPE_CHECKING:
     from lightbulb import BotApp
@@ -66,11 +63,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 moderation_filter_config_ops = ModerationFilterConfigOperations()
-mod_action_ops = ModerationActionOperations()
 config_skip_log = ModerationConfigSkipLog("Spam engine")
 
 AUTO_MODERATION_REASON = "Auto-moderation violation"
-MOD_ACTION_SOURCE = "handler"
+GATEWAY_ACTOR = "spam_engine"
 
 SPAM_ACTION_NONE = "none"
 SPAM_ACTION_WARN = "warn"
@@ -486,9 +482,13 @@ class SpamEngineSettings:
     mod_alert_channel_id: str | None
     mod_ping_role_id: str | None
     scam_log_channel_id: str | None
+    #: The guild's incident report channel (a mute is reported there).
+    report_channel_id: str | None = None
 
     @classmethod
-    def from_config(cls, config: ModerationFilterConfig) -> SpamEngineSettings:
+    def from_config(
+        cls, config: ModerationFilterConfig, report_channel_id: str | None = None
+    ) -> SpamEngineSettings:
         return cls(
             enabled=bool(config.spam_engine_enabled),
             staff_exempt_role_ids=tuple(
@@ -501,6 +501,7 @@ class SpamEngineSettings:
             mod_alert_channel_id=config.mod_alert_channel_id,
             mod_ping_role_id=config.mod_ping_role_id,
             scam_log_channel_id=config.scam_log_channel_id,
+            report_channel_id=report_channel_id,
         )
 
 
@@ -791,29 +792,6 @@ def format_warning_message(author_id: str, reasons: Sequence[str]) -> str:
     return f"<@{author_id}> Please stop {', '.join(reasons)}."
 
 
-def format_mute_alert(
-    *,
-    ping_role_id: str | None,
-    author_id: str,
-    author_username: str,
-    reasons: Sequence[str],
-    mute_duration_seconds: int,
-    jump_link: str,
-    sanitized_content: str,
-) -> str:
-    """The mod-alert post. Any mention text inside it is already neutralized."""
-    ping = f"<@&{ping_role_id}> " if ping_role_id else ""
-    lines = [
-        f"{ping}Auto-moderation muted **{author_username}** (<@{author_id}>) "
-        f"for {mute_duration_seconds}s.",
-        f"Reasons: {', '.join(reasons)}",
-        f"Message: {jump_link}",
-    ]
-    if sanitized_content:
-        lines.append(f"> {sanitized_content}")
-    return "\n".join(lines)
-
-
 def format_scam_log_entry(
     *,
     author_id: str,
@@ -970,7 +948,12 @@ async def load_spam_engine_settings(guild_id: str) -> SpamEngineSettings | None:
         config = await moderation_filter_config_ops.get_config(session, guild_id)
         if config is None:
             return None
-        return SpamEngineSettings.from_config(config)
+        report_channel_id = (
+            await load_report_channel(session, guild_id, config)
+            if config.spam_engine_enabled
+            else None
+        )
+        return SpamEngineSettings.from_config(config, report_channel_id)
 
 
 async def check_spam_engine(
@@ -1074,21 +1057,62 @@ async def check_spam_engine(
         )
         return NO_SPAM_ACTION
 
-    if decision.action == SPAM_ACTION_MUTE:
-        timeout_applied = await _mute_author(bot, event, settings, decision, timestamp)
-        # Only arm the re-entrancy guard when Discord actually applied the timeout.
+    gateway = bot_gateway(bot, extra_role_ids=settings.staff_exempt_role_ids)
+    muting = decision.action == SPAM_ACTION_MUTE
+    trigger = Trigger(
+        guild_id=str(guild_id),
+        actor=GATEWAY_ACTOR,
+        reason=", ".join(decision.reasons),
+        source=gw.SOURCE_HANDLER,
+        channel_id=str(event.channel_id),
+        message_id=str(event.message_id),
+        author_id=author_id,
+        content=content,
+        # A mute is reported to the moderators, pinging their role; a warning
+        # alone never was.
+        report_channel_id=settings.report_channel_id if muting else None,
+        ping_role_id=settings.mod_ping_role_id if muting else None,
+    )
+    proposals = []
+    if muting:
+        proposals.append(
+            Proposal(
+                kind=gw.TIMEOUT,
+                target_user_id=author_id,
+                target_username=author.username,
+                reason=AUTO_MODERATION_REASON,
+                duration_seconds=thresholds.mute_duration_seconds,
+                target_is_bot=False,
+            )
+        )
+    if decision.should_delete_message:
+        proposals.append(
+            Proposal(
+                kind=gw.DELETE,
+                target_user_id=author_id,
+                target_username=author.username,
+                reason=", ".join(decision.reasons),
+                channel_id=str(event.channel_id),
+                message_ids=(str(event.message_id),),
+                target_is_bot=False,
+            )
+        )
+    result = await gateway.act(trigger, proposals)
+
+    if muting:
+        timeout = result.first(gw.TIMEOUT)
+        # Only arm the re-entrancy guard when the author is actually timed out.
         # Recording it unconditionally would silence the engine for the full mute
         # duration against an author who was never muted (missing permissions, role
         # hierarchy, a departed member, or a rejected duration), handing them a free
         # pass for exactly as long as the punishment they escaped.
-        if timeout_applied:
+        if timeout is not None and timeout.applied:
             guild_state.record_mute(author_id, timestamp + thresholds.mute_duration_seconds)
     else:
-        await _warn_author(bot, event, decision)
+        await _warn_author(bot, gateway, trigger, event, decision)
         guild_state.record_warning(author_id, timestamp)
 
     if decision.should_delete_message:
-        await _delete_offending_message(bot, event, decision)
         await _post_scam_log(
             bot,
             event,
@@ -1108,203 +1132,45 @@ async def check_spam_engine(
 
 async def _warn_author(
     bot: BotApp,
+    gateway,
+    trigger: Trigger,
     event: hikari.GuildMessageCreateEvent,
     decision: SpamDecision,
 ) -> None:
-    """Post "Please stop …" in the offending channel, pinging only the author."""
-    try:
-        await bot.rest.create_message(
-            event.channel_id,
-            format_warning_message(str(event.author.id), decision.reasons),
-            mentions_everyone=False,
-            user_mentions=[event.author.id],
-            role_mentions=False,
-        )
-    except hikari.ForbiddenError:
-        logger.warning(
-            "Cannot post spam warning in channel %s (missing permissions)", event.channel_id
-        )
-        return
-    # TODO(§3.8): a spam warning writes no ModerationAction row today, so the
-    # short-term event log is captured here. When feature-parity §3.8 gives it a
-    # row it will flow through dispatch_mod_action — drop this call then, or the
-    # warning lands in the bot's memory twice.
-    await record_guild_event(bot, _spam_action_event(event, "warn", decision.reasons))
+    """Post "Please stop …" in the offending channel, pinging only the author.
 
-
-async def _mute_author(
-    bot: BotApp,
-    event: hikari.GuildMessageCreateEvent,
-    settings: SpamEngineSettings,
-    decision: SpamDecision,
-    timestamp: float,
-) -> bool:
-    """Timeout the author, record the audit row, and alert the mods.
-
-    Returns whether Discord actually applied the timeout, so the caller can
-    decide whether to arm its re-entrancy guard. The mods are alerted either
-    way — a refused timeout is precisely when they need to know.
+    A warning is a sanction the gateway records (one row) and dedupes: an
+    author the incident already timed out or banned is not warned too.
     """
-    duration_seconds = settings.thresholds.mute_duration_seconds
-    timeout_applied = await _apply_timeout(bot, event, timestamp, duration_seconds)
-    if timeout_applied:
-        await _record_timeout_action(bot, event, duration_seconds)
-    await _post_mute_alert(bot, event, settings, decision)
-    return timeout_applied
-
-
-async def _apply_timeout(
-    bot: BotApp,
-    event: hikari.GuildMessageCreateEvent,
-    timestamp: float,
-    duration_seconds: int,
-) -> bool:
-    """Apply the native Discord timeout. False when Discord refused it."""
-    muted_until = datetime.fromtimestamp(timestamp, UTC) + timedelta(seconds=duration_seconds)
-    try:
-        await bot.rest.edit_member(
-            event.guild_id,
-            event.author.id,
-            communication_disabled_until=muted_until,
-            reason=AUTO_MODERATION_REASON,
-        )
-        return True
-    except (hikari.ForbiddenError, hikari.NotFoundError) as error:
-        # Missing MODERATE_MEMBERS / role hierarchy, or the member already left.
-        # The mods still get alerted; no audit row for an action that did not land.
-        logger.warning(
-            "Spam engine could not time out %s in guild %s: %s",
-            event.author.id,
-            event.guild_id,
-            type(error).__name__,
-        )
-        return False
-    except hikari.BadRequestError as error:
-        # Discord rejected the timeout itself — a duration past its 28-day limit
-        # is the likely cause. Defense in depth: the admin form already caps the
-        # duration, but one bad config value must not abort the rest of the
-        # enforcement (the delete of a scam link happens after this call).
-        logger.warning(
-            "Discord rejected a %ss timeout for %s in guild %s: %s",
-            duration_seconds,
-            event.author.id,
-            event.guild_id,
-            type(error).__name__,
-        )
-        return False
-
-
-async def _record_timeout_action(
-    bot: BotApp,
-    event: hikari.GuildMessageCreateEvent,
-    duration_seconds: int,
-) -> None:
-    """Write the ``source="handler"`` audit row and fire the mod_action trigger."""
-    bot_user = bot.get_me()
-    async with get_db_session_context() as session:
-        action = await mod_action_ops.create_action(
-            session,
-            guild_id=str(event.guild_id),
+    async with gateway.reserve(
+        trigger,
+        Proposal(
+            kind=gw.WARN,
             target_user_id=str(event.author.id),
             target_username=event.author.username,
-            moderator_user_id=str(bot_user.id) if bot_user else None,
-            moderator_username=bot_user.username if bot_user else None,
-            action_type="timeout",
-            reason=AUTO_MODERATION_REASON,
-            duration_seconds=duration_seconds,
-            source=MOD_ACTION_SOURCE,
+            reason=", ".join(decision.reasons),
             channel_id=str(event.channel_id),
-            trigger_message_id=str(event.message_id),
-        )
-        await session.commit()
-    await dispatch_mod_action(action, bot=bot)
-
-
-async def _post_mute_alert(
-    bot: BotApp,
-    event: hikari.GuildMessageCreateEvent,
-    settings: SpamEngineSettings,
-    decision: SpamDecision,
-) -> None:
-    """Alert the mod channel, pinging ONLY the configured mod role.
-
-    ``allowed_mentions`` is built explicitly and never allows @everyone/@here,
-    so quoting the offending content can never re-broadcast the ping.
-    """
-    if not settings.mod_alert_channel_id:
-        logger.debug("No mod alert channel configured for guild %s", event.guild_id)
-        return
-    ping_role_id = settings.mod_ping_role_id
-    content = format_mute_alert(
-        ping_role_id=ping_role_id,
-        author_id=str(event.author.id),
-        author_username=event.author.username,
-        reasons=decision.reasons,
-        mute_duration_seconds=settings.thresholds.mute_duration_seconds,
-        jump_link=build_jump_link(
-            str(event.guild_id), str(event.channel_id), str(event.message_id)
+            target_is_bot=False,
         ),
-        sanitized_content=sanitize_content(event.content or ""),
-    )
-    try:
-        await bot.rest.create_message(
-            hikari.Snowflake(settings.mod_alert_channel_id),
-            content,
-            mentions_everyone=False,
-            user_mentions=False,
-            role_mentions=[hikari.Snowflake(ping_role_id)] if ping_role_id else False,
-        )
-    except hikari.ForbiddenError:
-        logger.warning(
-            "Cannot post spam mute alert to channel %s (missing permissions)",
-            settings.mod_alert_channel_id,
-        )
-
-
-async def _delete_offending_message(
-    bot: BotApp,
-    event: hikari.GuildMessageCreateEvent,
-    decision: SpamDecision,
-) -> None:
-    """Delete the offending message; a 404 means someone else already did.
-
-    ``decision`` is here for its reasons: the delete carries no audit row, so
-    the short-term event log is the only place that records WHY the bot removed
-    the message, and "I deleted a message" without the why is useless to it.
-    """
-    try:
-        await bot.rest.delete_message(event.channel_id, event.message_id)
-    except hikari.NotFoundError:
-        logger.debug("Offending message %s was already deleted", event.message_id)
-        return
-    except hikari.ForbiddenError:
-        logger.warning(
-            "Cannot delete offending message in channel %s (missing permissions)",
-            event.channel_id,
-        )
-        return
-    # TODO(§3.8): same as the warn above — no ModerationAction row exists for a
-    # spam delete yet, so it is captured here rather than via dispatch_mod_action.
-    await record_guild_event(bot, _spam_action_event(event, "delete", decision.reasons))
-
-
-def _spam_action_event(
-    event: hikari.GuildMessageCreateEvent,
-    action_type: str,
-    reasons: Sequence[str],
-) -> GuildEvent:
-    """The short-term-memory event for a row-less spam action, as the bot recalls it."""
-    return mod_action_event(
-        {
-            "action_type": action_type,
-            "target_username": event.author.username,
-            "target_user_id": str(event.author.id),
-            "reason": ", ".join(reasons),
-            "source": MOD_ACTION_SOURCE,
-            "channel_id": str(event.channel_id),
-        },
-        guild_id=str(event.guild_id),
-    )
+    ) as slot:
+        if not slot.go:
+            return
+        try:
+            await bot.rest.create_message(
+                event.channel_id,
+                format_warning_message(str(event.author.id), decision.reasons),
+                mentions_everyone=False,
+                user_mentions=[event.author.id],
+                role_mentions=False,
+            )
+        except hikari.ForbiddenError:
+            logger.warning(
+                "Cannot post spam warning in channel %s (missing permissions)",
+                event.channel_id,
+            )
+            slot.fail("missing permission to post the warning")
+            return
+        slot.confirm()
 
 
 async def _post_scam_log(

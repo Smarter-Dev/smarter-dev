@@ -20,6 +20,7 @@ mod-log message.
 
 from __future__ import annotations
 
+import contextlib
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import UTC
@@ -36,6 +37,7 @@ from smarter_dev.extensions.rendering import render_bundle
 from smarter_dev.web.handler_budget import admin_budget
 from smarter_dev.web.handler_lint import lint_script
 from smarter_dev.web.handler_runtime import run_handler_script
+from smarter_dev.web.moderation_gateway import Reservation
 
 _PACKAGE_DIR = Path(__file__).resolve().parents[1] / (
     "smarter_dev/extensions/catalog/keyword_watch"
@@ -97,8 +99,18 @@ class _Actor:
 
     calls: list = field(default_factory=list)
 
+    # The warn's record: what the gateway would have written.
+    recorder: object = None
+
     async def staff_refusal(self, user_id, *, is_bot=None):
         return None  # an ordinary member
+
+    @contextlib.asynccontextmanager
+    async def reserve_warn(self, user_id, reason, channel_id):
+        slot = Reservation(go=True)
+        yield slot
+        if slot._settle and slot._settle[0] == "confirmed":
+            self.recorder.calls.append((user_id, reason, channel_id))
 
     async def ban_user(self, user_id, reason=None, delete_message_seconds=0):
         self.calls.append(("ban", user_id, reason))
@@ -140,8 +152,7 @@ class _ModActionRecorder:
     warn_count: int = 1
     calls: list = field(default_factory=list)
 
-    async def __call__(self, user_id, reason, channel_id):
-        self.calls.append((user_id, reason, channel_id))
+    async def count(self, user_id):
         return self.warn_count
 
 
@@ -200,10 +211,10 @@ async def _run(
     warn_count: int = 1,
 ):
     emitter = _Emitter(dm_delivers=dm_delivers)
-    actor = _Actor()
     agent = _Agent(reply=reply)
     reader = _ModActionReader(rows=rows or [])
     recorder = _ModActionRecorder(warn_count=warn_count)
+    actor = _Actor(recorder=recorder)
     result = await run_handler_script(
         _rendered(config).script,
         context,
@@ -217,7 +228,7 @@ async def _run(
         memory={},
         agent_runner=agent,
         mod_action_reader=reader,
-        mod_action_recorder=recorder,
+        warn_counter=recorder.count,
     )
     return result, emitter, actor, agent, reader, recorder
 

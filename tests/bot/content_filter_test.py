@@ -17,13 +17,12 @@ from types import SimpleNamespace
 
 import hikari
 import pytest
+from sqlalchemy import select
 
 from smarter_dev.bot import content_filter
 from smarter_dev.bot.content_filter import ContentFilterResult
 from smarter_dev.bot.content_filter import build_blocked_tld_notice
 from smarter_dev.bot.content_filter import build_invite_notice
-from smarter_dev.bot.content_filter import build_mod_log_line
-from smarter_dev.bot.content_filter import build_webhook_kill_mod_log_line
 from smarter_dev.bot.content_filter import build_webhook_kill_reason
 from smarter_dev.bot.content_filter import build_webhook_killed_notice
 from smarter_dev.bot.content_filter import category_is_invite_exempt
@@ -35,12 +34,11 @@ from smarter_dev.bot.content_filter import find_invite_links
 from smarter_dev.bot.content_filter import find_webhook_url_candidates
 from smarter_dev.bot.content_filter import is_discord_webhook_url
 from smarter_dev.bot.content_filter import link_host
-from smarter_dev.bot.content_filter import normalize_webhook_url
 from smarter_dev.bot.content_filter import parse_discord_webhook_url
-from smarter_dev.bot.content_filter import sanitize_links
-from smarter_dev.bot.content_filter import truncate_content
 from smarter_dev.web.crud import DatabaseOperationError
+from smarter_dev.web.models import ModerationAction
 from smarter_dev.web.models import ModerationFilterConfig
+from smarter_dev.web.webhook_urls import normalize_webhook_url
 
 GUILD_ID = 555
 CHANNEL_ID = 777
@@ -245,57 +243,6 @@ def test_find_invite_links_ignores_plain_discord_links():
 # --------------------------------------------------------------------------
 
 
-def test_sanitize_links_makes_links_unclickable_and_leaves_prose_alone():
-    sanitized = sanitize_links("look at https://evil.gay/free now")
-
-    assert "https://evil.gay" not in sanitized
-    assert sanitized == "look at https:// evil . gay/free now"
-
-
-def test_truncate_content_keeps_short_text_and_caps_long_text():
-    assert truncate_content("short", limit=800) == "short"
-
-    truncated = truncate_content("x" * 900, limit=800)
-
-    assert len(truncated) == 800
-    assert truncated.endswith("…")
-
-
-def test_build_mod_log_line_reports_author_channel_and_sanitized_content():
-    line = build_mod_log_line(
-        filter_name="Blocked TLD",
-        author_id=str(AUTHOR_ID),
-        author_username="spammer",
-        channel_id=str(CHANNEL_ID),
-        links=["https://evil.gay/free"],
-        content="buy now https://evil.gay/free " + "z" * 900,
-    )
-
-    assert "Blocked TLD" in line
-    assert "spammer" in line
-    assert str(AUTHOR_ID) in line
-    assert f"<#{CHANNEL_ID}>" in line
-    # No clickable form of the link survives anywhere in the log line.
-    assert "https://evil.gay" not in line
-    assert "https:// evil . gay/free" in line
-    assert "…" in line
-
-
-def test_build_mod_log_line_never_republishes_a_leaked_webhook_token():
-    line = build_mod_log_line(
-        filter_name="Blocked TLD",
-        author_id=str(AUTHOR_ID),
-        author_username="spammer",
-        channel_id=str(CHANNEL_ID),
-        links=["https://evil.gay/free"],
-        content=f"free stuff https://evil.gay/free and {WEBHOOK_URL}",
-    )
-
-    assert "abcDEF-_token" not in line
-    # The id survives so a moderator can still identify the webhook.
-    assert "123456789" in line
-
-
 def test_notice_builders_mention_the_author_and_describe_the_kill():
     assert f"<@{AUTHOR_ID}>" in build_blocked_tld_notice(str(AUTHOR_ID))
     assert f"<@{AUTHOR_ID}>" in build_invite_notice(str(AUTHOR_ID))
@@ -307,21 +254,6 @@ def test_notice_builders_mention_the_author_and_describe_the_kill():
     assert f"<@{AUTHOR_ID}>" in notice
     assert "1" in notice
     assert "webhook" in notice.lower()
-
-
-def test_build_webhook_kill_mod_log_line_names_ids_but_never_tokens():
-    line = build_webhook_kill_mod_log_line(
-        author_id=str(AUTHOR_ID),
-        author_username="spammer",
-        channel_id=str(CHANNEL_ID),
-        webhook_ids=["123456789"],
-    )
-
-    assert "spammer" in line
-    assert str(AUTHOR_ID) in line
-    assert f"<#{CHANNEL_ID}>" in line
-    assert "123456789" in line
-    assert "abcDEF-_token" not in line
 
 
 def test_destroyed_webhook_ids_dedupes_and_drops_unparseable_urls():
@@ -380,6 +312,7 @@ class _FakeRest:
         self.members = {AUTHOR_ID: []} if members is None else members
         self._guild_error = guild_error
         self.created_messages: list[tuple[int, str, dict]] = []
+        self.edited_messages: list[tuple[int, str, dict]] = []
         self.deleted_messages: list[tuple[int, int]] = []
         self.deleted_webhooks: list[tuple[str, str]] = []
         self.fetched_channels: list[int] = []
@@ -390,7 +323,13 @@ class _FakeRest:
 
     async def create_message(self, channel, content=None, **kwargs):
         self.created_messages.append((int(channel), content, kwargs))
-        return SimpleNamespace(id=1)
+        return SimpleNamespace(id=900 + len(self.created_messages))
+
+    async def edit_message(self, channel, message, content=None, **kwargs):
+        self.edited_messages.append((int(channel), content, kwargs))
+
+    async def fetch_ban(self, guild, user):
+        raise _not_found()
 
     async def delete_message(self, channel, message):
         self.deleted_messages.append((int(channel), int(message)))
@@ -513,41 +452,32 @@ def _config(**overrides) -> ModerationFilterConfig:
 
 
 @pytest.fixture
-def filter_env(monkeypatch):
-    """Stubs the config read, the action write, and the mod_action dispatch."""
-    state = SimpleNamespace(
-        config=_config(),
-        create_action_error=None,
-        recorded_actions=[],
-        dispatched=[],
-        commits=0,
-    )
+def filter_env(monkeypatch, moderation_gateway_db):
+    """Stubs the config read and the mod_action dispatch; the gateway is real."""
+    from smarter_dev.bot import moderation_port
+
+    state = SimpleNamespace(config=_config(), dispatched=[])
 
     async def fake_get_config(session, guild_id):
         return state.config
 
-    async def fake_create_action(session, **kwargs):
-        if state.create_action_error is not None:
-            raise state.create_action_error
-        state.recorded_actions.append(kwargs)
-        return SimpleNamespace(**kwargs)
-
     async def fake_dispatch(action, *, bot=None) -> None:
         state.dispatched.append((action, bot))
 
-    async def fake_commit() -> None:
-        state.commits += 1
-
     @contextlib.asynccontextmanager
     async def fake_session_context():
-        yield SimpleNamespace(commit=fake_commit)
+        yield SimpleNamespace()
+
+    async def rows() -> list[ModerationAction]:
+        async with moderation_gateway_db() as session:
+            return list((await session.execute(select(ModerationAction))).scalars())
 
     monkeypatch.setattr(
         content_filter.moderation_filter_config_ops, "get_config", fake_get_config
     )
-    monkeypatch.setattr(content_filter.mod_action_ops, "create_action", fake_create_action)
-    monkeypatch.setattr(content_filter, "dispatch_mod_action", fake_dispatch)
+    monkeypatch.setattr(moderation_port, "dispatch_mod_action", fake_dispatch)
     monkeypatch.setattr(content_filter, "get_db_session_context", fake_session_context)
+    state.rows = rows
     return state
 
 
@@ -611,19 +541,19 @@ async def test_blocked_tld_deletes_notifies_logs_and_records_action(filter_env):
     assert f"<@{AUTHOR_ID}>" in channel_notice[1]
     assert channel_notice[2]["user_mentions"] == [AUTHOR_ID]
 
-    mod_log = next(m for m in rest.created_messages if m[0] == MOD_LOG_CHANNEL_ID)
-    assert "https://evil.gay" not in mod_log[1]
-    assert mod_log[2]["user_mentions"] is False
-    assert mod_log[2]["mentions_everyone"] is False
+    report = next(m for m in rest.created_messages if m[0] == MOD_LOG_CHANNEL_ID)
+    assert "https://evil.gay" not in report[1]
+    assert report[2]["user_mentions"] is False
+    assert report[2]["mentions_everyone"] is False
 
-    assert len(filter_env.recorded_actions) == 1
-    action = filter_env.recorded_actions[0]
-    assert action["source"] == "handler"
-    assert action["guild_id"] == str(GUILD_ID)
-    assert action["target_user_id"] == str(AUTHOR_ID)
-    assert action["trigger_message_id"] == str(MESSAGE_ID)
-    assert "https://evil.gay" not in action["reason"]
-    assert filter_env.commits == 1
+    [action] = await filter_env.rows()
+    assert action.action_type == "delete"
+    assert action.source == "handler"
+    assert action.actor == "content_filter"
+    assert action.guild_id == str(GUILD_ID)
+    assert action.target_user_id == str(AUTHOR_ID)
+    assert action.trigger_message_id == str(MESSAGE_ID)
+    assert "https://evil.gay" not in action.reason
     assert len(filter_env.dispatched) == 1
 
 
@@ -666,7 +596,7 @@ async def test_staff_role_author_is_exempt_from_every_filter(filter_env):
     assert result.took_action is False
     assert rest.deleted_messages == []
     assert rest.deleted_webhooks == []
-    assert filter_env.recorded_actions == []
+    assert filter_env.dispatched == []
 
 
 EVERY_FILTER = f"https://evil.gay/free discord.gg/abc123 {WEBHOOK_URL}"
@@ -677,7 +607,7 @@ def _untouched(result: ContentFilterResult, rest: _FakeRest, filter_env) -> None
     assert rest.deleted_messages == []
     assert rest.deleted_webhooks == []
     assert rest.created_messages == []
-    assert filter_env.recorded_actions == []
+    assert filter_env.dispatched == []
 
 
 async def test_hardcoded_staff_role_is_exempt_without_any_configured_role(filter_env):
@@ -790,7 +720,7 @@ async def test_invite_link_deletes_notifies_and_logs(filter_env):
     assert result.invite_links == ("discord.gg/abc123",)
     assert rest.deleted_messages == [(CHANNEL_ID, MESSAGE_ID)]
     assert any(m[0] == MOD_LOG_CHANNEL_ID for m in rest.created_messages)
-    assert filter_env.recorded_actions[0]["action_type"] == "delete"
+    assert [row.action_type for row in await filter_env.rows()] == ["delete"]
 
 
 async def test_invite_in_exempt_category_is_allowed(filter_env):
@@ -881,20 +811,19 @@ async def test_leaked_webhook_is_killed_audited_logged_and_the_message_removed(
     assert len(channel_notices) == 1
     assert f"<@{AUTHOR_ID}>" in channel_notices[0][1]
 
-    mod_log = next(m for m in rest.created_messages if m[0] == MOD_LOG_CHANNEL_ID)
-    assert "spammer" in mod_log[1]
-    assert f"<#{CHANNEL_ID}>" in mod_log[1]
-    assert "123456789" in mod_log[1]
-    assert "abcDEF-_token" not in mod_log[1]
+    report = next(m for m in rest.created_messages if m[0] == MOD_LOG_CHANNEL_ID)
+    assert "spammer" in report[1]
+    assert f"<#{CHANNEL_ID}>" in report[1]
+    assert "123456789" in report[1]
+    assert "abcDEF-_token" not in report[1]
 
-    assert len(filter_env.recorded_actions) == 1
-    action = filter_env.recorded_actions[0]
-    assert action["action_type"] == "delete"
-    assert action["source"] == "handler"
-    assert action["target_user_id"] == str(AUTHOR_ID)
-    assert action["trigger_message_id"] == str(MESSAGE_ID)
-    assert "123456789" in action["reason"]
-    assert "abcDEF-_token" not in action["reason"]
+    [action] = await filter_env.rows()
+    assert action.action_type == "delete"
+    assert action.source == "handler"
+    assert action.target_user_id == str(AUTHOR_ID)
+    assert action.trigger_message_id == str(MESSAGE_ID)
+    assert "123456789" in action.reason
+    assert "abcDEF-_token" not in action.reason
     assert len(filter_env.dispatched) == 1
 
 
@@ -907,7 +836,7 @@ async def test_already_dead_webhook_is_still_audited_and_removed(filter_env):
 
     assert result.already_dead_webhook_urls == (WEBHOOK_URL,)
     assert result.message_deleted is True
-    assert "123456789" in filter_env.recorded_actions[0]["reason"]
+    assert "123456789" in (await filter_env.rows())[0].reason
 
 
 @pytest.mark.parametrize(
@@ -947,7 +876,7 @@ async def test_webhook_shaped_link_on_a_foreign_host_deletes_nothing(filter_env)
     assert result.rejected_webhook_urls == (
         "https://DISCORD.COM.evil.com/api/webhooks/1/tok",
     )
-    assert filter_env.recorded_actions == []
+    assert filter_env.dispatched == []
 
 
 async def test_non_discord_webhook_url_is_rejected_without_any_rest_call(filter_env):
@@ -1031,7 +960,9 @@ async def test_one_delete_serves_both_content_filters(filter_env):
     )
 
     assert rest.deleted_messages == [(CHANNEL_ID, MESSAGE_ID)]
-    assert len(filter_env.recorded_actions) == 2
+    # One delete, one row, whose reason names both filters.
+    [action] = await filter_env.rows()
+    assert "Blocked TLD" in action.reason and "Invite" in action.reason
 
 
 async def test_missing_send_permission_is_logged_not_raised(filter_env):
@@ -1050,8 +981,14 @@ async def test_missing_send_permission_is_logged_not_raised(filter_env):
     assert result.message_deleted is True
 
 
-async def test_database_failure_recording_the_action_is_not_swallowed(filter_env):
-    filter_env.create_action_error = DatabaseOperationError("boom")
+async def test_no_delete_without_a_durable_record(filter_env, monkeypatch):
+    """The gateway writes its intent before any delete; no database, no delete."""
+    from smarter_dev.web.moderation_gateway import gateway as gateway_module
+
+    def broken_database():
+        raise DatabaseOperationError("boom")
+
+    monkeypatch.setattr(gateway_module, "SESSION_FACTORY_OVERRIDE", broken_database)
     rest = _FakeRest()
 
     with pytest.raises(DatabaseOperationError):
@@ -1059,8 +996,18 @@ async def test_database_failure_recording_the_action_is_not_swallowed(filter_env
             _bot(rest=rest), _make_event("https://evil.gay/free")
         )
 
-    # The user-visible enforcement still happened before the write failed.
+    assert rest.deleted_messages == []
+
+
+async def test_a_message_another_detector_removed_gets_no_second_notice(filter_env):
+    rest = _FakeRest()
+    await check_content_filters(_bot(rest=rest), _make_event("https://evil.gay/free"))
+    notices = [m for m in rest.created_messages if m[0] == CHANNEL_ID]
+
+    await check_content_filters(_bot(rest=rest), _make_event("https://evil.gay/free"))
+
     assert rest.deleted_messages == [(CHANNEL_ID, MESSAGE_ID)]
+    assert [m for m in rest.created_messages if m[0] == CHANNEL_ID] == notices
 
 
 # --------------------------------------------------------------------------

@@ -10,12 +10,16 @@ The agent acts as a stopgap while waiting for human moderators. It can:
 Context-bound tool factory following the same closure pattern as
 create_mention_tools in tools.py.
 
-Every destructive tool runs the same checks, in this order, before it calls
-Discord: the action limit, its arguments, the staff-protection rule on its
-target (:func:`smarter_dev.bot.staff_protection.staff_refusal`, with the
-guild's configured staff-exempt roles; for a delete, the message's author, unless
-a webhook posted it), and a fresh read of the guild's config (still active,
-tool still enabled). Only then is an action slot reserved.
+Every destructive tool runs the same checks, in this order, before it acts:
+the action limit, its arguments, the staff-protection rule on its target
+(:func:`smarter_dev.bot.staff_protection.staff_refusal`, with the guild's
+configured staff-exempt roles; for a delete, the message's author, unless a
+webhook posted it), and a fresh read of the guild's config (still active, tool
+still enabled). Only then is an action slot reserved, and the action goes
+through the moderation gateway (``smarter_dev.web.moderation_gateway``): it
+joins the triage's incident, is never weaker than or a repeat of what another
+detector already did to the target, and leaves one row per confirmed effect.
+The incident's one report replaces the triage's own report embed.
 """
 
 from __future__ import annotations
@@ -31,23 +35,22 @@ import hikari
 import lightbulb
 from pydantic_ai import Tool
 
-from smarter_dev.bot.guild_event_recorder import record_guild_event
-from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
+from smarter_dev.bot.moderation_port import bot_gateway
 from smarter_dev.bot.plugins.timeout import parse_duration
-from smarter_dev.bot.purge_core import (
-    delete_selected_messages,
-    select_purgeable_messages,
-)
+from smarter_dev.bot.purge_core import select_purgeable_messages
 from smarter_dev.bot.staff_protection import staff_refusal
 from smarter_dev.bot.triage_config import enabled_destructive_tools
 from smarter_dev.bot.triage_config import staff_exempt_role_ids
 from smarter_dev.bot.triage_config import tool_refusal
 from smarter_dev.shared.database import get_db_session_context
-from smarter_dev.shared.guild_event_log import mod_action_event
 from smarter_dev.shared.staff_protection import BOT_ITSELF
 from smarter_dev.shared.staff_protection import unknown
 from smarter_dev.web.crud import ModerationActionOperations
-from smarter_dev.web.models import ModerationAction
+from smarter_dev.web.moderation_gateway import Evidence
+from smarter_dev.web.moderation_gateway import Outcome
+from smarter_dev.web.moderation_gateway import Proposal
+from smarter_dev.web.moderation_gateway import Trigger
+from smarter_dev.web.moderation_gateway import types as gw
 
 logger = logging.getLogger(__name__)
 
@@ -119,96 +122,83 @@ def snowflake_to_datetime(snowflake: str | int) -> datetime:
     return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc)
 
 
-def build_triage_report_embed(
-    tracker: ActionTracker,
-    assessment: str,
-    trigger_author: str,
+TRIAGE_ACTOR = "triage"
+
+
+def triage_trigger(
+    *,
+    guild_id: str,
     channel_id: str,
-    trigger_message_id: str | None = None,
-) -> hikari.Embed:
-    """Build the summary embed posted to the mod channel after triage."""
-    failed = tracker.failure is not None
-    embed = hikari.Embed(
-        title="Moderation Triage Failed" if failed else "Moderation Triage Report",
-        description="**AI assessment (unverified):** "
-        + (assessment[:300] + "..." if len(assessment) > 300 else assessment),
-        color=hikari.Color(0xE74C3C if failed else 0xFFA500),
-        timestamp=datetime.now(timezone.utc),
+    trigger_message_id: str | None,
+    trigger_author_id: str | None = None,
+    trigger_author: str | None = None,
+    trigger_content: str | None = None,
+    report_channel_id: str | None = None,
+) -> Trigger:
+    """The staff ping as the gateway sees it: one incident per ping.
+
+    The ping's author is the reporter, not a suspect, so the incident has no
+    subject; the ping itself is kept as evidence.
+    """
+    reporter = f" by {trigger_author}" if trigger_author else ""
+    evidence = ()
+    if trigger_content and trigger_message_id:
+        evidence = (
+            Evidence(
+                kind=gw.ENTRY_EVIDENCE,
+                content=trigger_content,
+                message_id=str(trigger_message_id),
+                channel_id=str(channel_id),
+                author_id=str(trigger_author_id) if trigger_author_id else None,
+            ),
+        )
+    return Trigger(
+        guild_id=str(guild_id),
+        actor=TRIAGE_ACTOR,
+        reason=f"Staff ping{reporter} reviewed by the AI triage",
+        source=gw.SOURCE_AI,
+        channel_id=str(channel_id),
+        message_id=str(trigger_message_id) if trigger_message_id else None,
+        evidence=evidence,
+        report_channel_id=report_channel_id,
     )
 
-    # Trigger info
-    trigger_text = f"Reported by **{trigger_author}** in <#{channel_id}>"
-    if trigger_message_id:
-        # Discord message link format: no guild_id needed with channel link
-        trigger_text += f"\n[Jump to message](https://discord.com/channels/{channel_id}/{trigger_message_id})"
-    embed.add_field(name="Trigger", value=trigger_text, inline=False)
 
-    # Flagged users
+def triage_notes(tracker: ActionTracker, assessment: str) -> list[tuple[str, str]]:
+    """What the incident report adds about the triage run: (entry kind, text).
+
+    The assessment is the model's words (kept 5 hours); the rest is the
+    system's own account of the run. Effects are not repeated here: the
+    gateway's operations already list them, confirmed or not.
+    """
+    notes: list[tuple[str, str]] = [
+        (gw.ENTRY_ASSESSMENT, f"AI assessment (unverified): {assessment}")
+    ]
     if tracker.flags:
-        flag_mentions = ", ".join(f"<@{uid}>" for uid in tracker.flags)
-        embed.add_field(name="Flagged for Review", value=flag_mentions, inline=False)
-
-    # What Discord confirmed apart from what may have happened; both come
-    # from the tracker, never from the model's assessment.
-    confirmed: list[str] = []
-    unknown: list[str] = []
-
-    def _short(reason: str) -> str:
-        # The model writes reasons; cap each so every action keeps its line.
-        return reason if len(reason) <= REPORT_REASON_CHARS else reason[: REPORT_REASON_CHARS - 1] + "…"
-
-    for t in tracker.timeouts:
-        line = f"Timeout **{t['username']}** for {t['duration']}: {_short(t['reason'])}"
-        (unknown if t.get("possibly_applied") else confirmed).append(line)
-    for p in tracker.purges:
-        line = f"Purge {p['count']} message(s) from **{p['username']}**: {_short(p['reason'])}"
-        (unknown if p.get("possibly_applied") else confirmed).append(line)
-    for d in tracker.deletions:
-        line = f"Delete msg `{d['message_id']}`: {_short(d['reason'])}"
-        (unknown if d.get("possibly_applied") else confirmed).append(line)
-    if confirmed or unknown:
-        embed.add_field(
-            name="Actions Taken (confirmed)",
-            value="\n".join(confirmed)[:1024] if confirmed else "None",
-            inline=False,
-        )
-    if unknown:
-        embed.add_field(
-            name="Possibly Applied (outcome unknown)",
-            value="\n".join(unknown)[:1024],
-            inline=False,
-        )
-
-    if failed:
+        flagged = ", ".join(f"<@{uid}>" for uid in dict.fromkeys(tracker.flags))
+        notes.append((gw.ENTRY_NOTE, f"Flagged for review: {flagged}"))
+    if tracker.failure is not None:
         if tracker.has_actions:
             status = (
                 f"Triage stopped partway ({tracker.failure}). The actions listed "
-                "here were already taken or possibly applied; nothing else was reviewed."
+                "were already taken or possibly applied; nothing else was reviewed. "
+                "A moderator must review this."
             )
             if not tracker.channel_message:
                 status += " No notice was posted in the channel."
         else:
             status = (
-                f"Triage did not finish ({tracker.failure}). The situation was "
-                "not reviewed and no action was taken."
+                f"Triage did not finish ({tracker.failure}). The situation was not "
+                "reviewed and no action was taken. A moderator must review this."
             )
-        embed.add_field(
-            name="Manual Review Required",
-            value=status,
-            inline=False,
-        )
+        notes.append((gw.ENTRY_NOTE, status))
     elif not tracker.has_actions:
-        embed.add_field(
-            name="No Action Taken",
-            value="Situation reviewed, no immediate action required.",
-            inline=False,
+        notes.append(
+            (gw.ENTRY_NOTE, "Situation reviewed, no immediate action required.")
         )
-
-    if failed:
-        embed.set_footer(text="Automated triage failed — a moderator must review this")
-    else:
-        embed.set_footer(text="Automated triage — human review required")
-    return embed
+    if tracker.channel_message:
+        notes.append((gw.ENTRY_NOTE, "A notice was posted in the channel."))
+    return notes
 
 
 def create_moderation_tools(
@@ -219,6 +209,7 @@ def create_moderation_tools(
     enabled_tools: list[str] | None = None,
     config_gate: ConfigGate | None = None,
     staff_roles: StaffRoles | None = None,
+    trigger: Trigger | None = None,
 ) -> tuple[list[Tool], ActionTracker]:
     """Create context-bound triage tools for the AI moderation agent.
 
@@ -236,6 +227,8 @@ def create_moderation_tools(
             guild's config still allows it. Defaults to a fresh database read.
         staff_roles: The guild's configured staff-exempt role ids, asked on
             each target check. Defaults to a fresh database read.
+        trigger: The staff ping as the moderation gateway's trigger; every
+            action joins its incident. Defaults to one built from the ids.
 
     Returns:
         Tuple of (tools list, ActionTracker)
@@ -245,6 +238,20 @@ def create_moderation_tools(
     read_staff_roles = staff_roles or staff_exempt_role_ids
     tracker = ActionTracker()
     action_count = 0
+    ping = trigger or triage_trigger(
+        guild_id=guild_id, channel_id=channel_id, trigger_message_id=trigger_message_id
+    )
+
+    async def _act(proposal: Proposal) -> Outcome:
+        """Through the gateway, which re-checks the target and records the effect."""
+        try:
+            extra_role_ids = await read_staff_roles(guild_id)
+        except Exception:  # noqa: BLE001 — the gateway's own check still runs
+            extra_role_ids = ()
+        result = await bot_gateway(bot, extra_role_ids=extra_role_ids).act(
+            ping, [proposal]
+        )
+        return result.outcomes[0]
 
     def _check_action_limit() -> str | None:
         if action_count >= MAX_ACTIONS_PER_INVOCATION:
@@ -287,45 +294,6 @@ def create_moderation_tools(
             return None
         return f"Cannot moderate this user: {refusal}."
 
-    async def _record_action(
-        *,
-        target_user_id: str,
-        target_username: str,
-        action_type: str,
-        reason: str | None = None,
-        duration_seconds: int | None = None,
-        ai_context_summary: str | None = None,
-    ) -> ModerationAction | None:
-        """Record an action that already happened on Discord, best-effort.
-
-        Callers track the action before this, so a failed write never hides
-        it from the action limit or the report.
-        """
-        try:
-            async with get_db_session_context() as session:
-                action = await mod_action_ops.create_action(
-                    session,
-                    guild_id=guild_id,
-                    target_user_id=target_user_id,
-                    target_username=target_username,
-                    action_type=action_type,
-                    reason=reason,
-                    duration_seconds=duration_seconds,
-                    source="ai",
-                    channel_id=channel_id,
-                    trigger_message_id=trigger_message_id,
-                    ai_context_summary=ai_context_summary,
-                )
-                await session.commit()
-        except Exception as e:
-            logger.error(f"[ModTool] recording {action_type} for {target_user_id} failed: {type(e).__name__}")
-            return None
-        # Fire the mod_action trigger so a mod-log handler formats the AI action
-        # (best-effort; never breaks the triage tool). The bot goes along so the
-        # same call writes the action into the guild's short-term event log.
-        await dispatch_mod_action(action, bot=bot)
-        return action
-
     # ── Action tools ─────────────────────────────────────────────────
 
     async def timeout_user(user_id: str, duration: str, reason: str) -> dict:
@@ -367,13 +335,16 @@ def create_moderation_tools(
         refusal = await _clear_to_act("timeout")
         if refusal:
             return {"success": False, "error": refusal}
-        timeout_until = datetime.now(timezone.utc) + td
         try:
-            await bot.rest.edit_member(
-                int(guild_id),
-                int(user_id),
-                communication_disabled_until=timeout_until,
-                reason=f"AI triage: {reason}",
+            outcome = await _act(
+                Proposal(
+                    kind=gw.TIMEOUT,
+                    target_user_id=str(user_id),
+                    target_username=username,
+                    reason=reason,
+                    duration_seconds=int(td.total_seconds()),
+                    claim=f"triage:{trigger_message_id}",
+                )
             )
         except asyncio.CancelledError:
             tracker.timeouts.append({**entry, "possibly_applied": True})
@@ -382,19 +353,15 @@ def create_moderation_tools(
                 "triage cancelled"
             )
             raise
-        except Exception as e:
-            logger.error(f"[ModTool] timeout_user failed: {type(e).__name__}")
+        if outcome.state == gw.UNKNOWN:
             tracker.timeouts.append({**entry, "possibly_applied": True})
-            return {"success": False, "error": _OUTCOME_UNKNOWN.format(type(e).__name__)}
+            return {"success": False, "error": _OUTCOME_UNKNOWN.format(outcome.detail)}
+        if outcome.state == gw.COVERED:
+            return {"success": True, "result": f"{username} is already timed out for longer."}
+        if outcome.state != gw.CONFIRMED:
+            return {"success": False, "error": f"Not timed out: {outcome.detail}."}
         tracker.timeouts.append(entry)
-
-        await _record_action(
-            target_user_id=user_id,
-            target_username=username,
-            action_type="timeout",
-            reason=reason,
-            duration_seconds=int(td.total_seconds()),
-        )
+        timeout_until = outcome.expires_at or datetime.now(timezone.utc) + td
 
         # DM the user
         try:
@@ -464,8 +431,17 @@ def create_moderation_tools(
             return {"success": False, "error": refusal}
         selected = len(selection.message_ids)
         try:
-            await delete_selected_messages(bot.rest, int(channel_id), selection.message_ids)
-            deleted_count = selected
+            outcome = await _act(
+                Proposal(
+                    kind=gw.PURGE if selected > 1 else gw.DELETE,
+                    target_user_id=str(user_id),
+                    target_username=username,
+                    reason=reason,
+                    channel_id=str(channel_id),
+                    message_ids=tuple(str(message_id) for message_id in selection.message_ids),
+                    ai_context_summary=f"Purge of {selected} message(s) asked",
+                )
+            )
         except asyncio.CancelledError:
             tracker.purges.append({**entry, "count": selected, "possibly_applied": True})
             logger.warning(
@@ -473,33 +449,19 @@ def create_moderation_tools(
                 "possibly applied; triage cancelled"
             )
             raise
-        except Exception as e:
-            logger.error(f"[ModTool] purge_messages failed: {type(e).__name__}")
-            # hikari lists the messages of every chunk Discord acknowledged;
-            # the rest of the selection has an unknown outcome.
-            confirmed = len(e.deleted_messages) if isinstance(e, hikari.BulkDeleteError) else 0
-            if confirmed:
-                tracker.purges.append({**entry, "count": confirmed})
-                await _record_action(
-                    target_user_id=user_id,
-                    target_username=username,
-                    action_type="purge",
-                    reason=reason,
-                    ai_context_summary=f"Purged {confirmed} message(s)",
-                )
-            tracker.purges.append({**entry, "count": selected - confirmed, "possibly_applied": True})
-            failure = e.__cause__ if isinstance(e, hikari.BulkDeleteError) and e.__cause__ else e
-            return {"success": False, "error": _OUTCOME_UNKNOWN.format(type(failure).__name__)}
+        deleted_count = len(outcome.deleted)
+        if outcome.state == gw.UNKNOWN:
+            if deleted_count:
+                tracker.purges.append({**entry, "count": deleted_count})
+            tracker.purges.append(
+                {**entry, "count": selected - deleted_count, "possibly_applied": True}
+            )
+            return {"success": False, "error": _OUTCOME_UNKNOWN.format(outcome.detail)}
+        if outcome.state != gw.CONFIRMED:
+            if outcome.detail == "already deleted" or outcome.state == gw.ABSENT:
+                return {"success": True, "result": f"Those messages from {username} were already deleted."}
+            return {"success": False, "error": f"Not purged: {outcome.detail}."}
         tracker.purges.append({**entry, "count": deleted_count})
-
-        await _record_action(
-            target_user_id=user_id,
-            target_username=username,
-            action_type="purge",
-            reason=reason,
-            ai_context_summary=f"Purged {deleted_count} message(s)",
-        )
-
         return {"success": True, "result": f"Deleted {deleted_count} message(s) from {username}."}
 
     async def delete_message(message_id: str, reason: str) -> dict:
@@ -548,7 +510,20 @@ def create_moderation_tools(
         if refusal:
             return {"success": False, "error": refusal}
         try:
-            await bot.rest.delete_message(int(channel_id), int(message_id))
+            outcome = await _act(
+                Proposal(
+                    kind=gw.DELETE,
+                    target_user_id=str(message.author.id),
+                    target_username=getattr(message.author, "username", None),
+                    reason=reason,
+                    channel_id=str(channel_id),
+                    message_ids=(str(message_id),),
+                    target_is_bot=bool(message.author.is_bot),
+                    # A webhook's message has no member behind it; the bot's
+                    # own was refused above.
+                    unprotected_target=message.webhook_id is not None,
+                )
+            )
         except asyncio.CancelledError:
             tracker.deletions.append({**entry, "possibly_applied": True})
             logger.warning(
@@ -556,32 +531,14 @@ def create_moderation_tools(
                 "triage cancelled"
             )
             raise
-        except Exception as e:
-            logger.error(f"[ModTool] delete_message failed: {type(e).__name__}")
+        if outcome.state == gw.UNKNOWN:
             tracker.deletions.append({**entry, "possibly_applied": True})
-            return {"success": False, "error": _OUTCOME_UNKNOWN.format(type(e).__name__)}
+            return {"success": False, "error": _OUTCOME_UNKNOWN.format(outcome.detail)}
+        if outcome.state != gw.CONFIRMED:
+            if outcome.detail == "already deleted" or outcome.state == gw.ABSENT:
+                return {"success": True, "result": f"Message {message_id} was already deleted."}
+            return {"success": False, "error": f"Not deleted: {outcome.detail}."}
         tracker.deletions.append(entry)
-
-        # TODO(§3.8): a single delete writes no ModerationAction row today, so
-        # the bot's short-term memory is captured here. Once feature-parity
-        # §3.8 gives it a row it will flow through dispatch_mod_action — drop
-        # this call then, or the delete lands in the log twice.
-        try:
-            await record_guild_event(
-                bot,
-                mod_action_event(
-                    {
-                        "action_type": "delete",
-                        "reason": reason,
-                        "source": "ai",
-                        "channel_id": channel_id,
-                    },
-                    guild_id=guild_id,
-                ),
-            )
-        except Exception as e:
-            logger.error(f"[ModTool] recording delete of {message_id} failed: {type(e).__name__}")
-
         return {"success": True, "result": f"Message {message_id} deleted."}
 
     # ── Utility tools (always available) ─────────────────────────────

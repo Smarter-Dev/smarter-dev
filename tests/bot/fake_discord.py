@@ -49,6 +49,7 @@ class FakeMember:
     joined_at: datetime | None = None
 
     def __post_init__(self) -> None:
+        self.raw_communication_disabled_until = None
         self.username = self.username or f"user{self.id}"
         self.display_name = self.username
         self.user = SimpleNamespace(
@@ -201,10 +202,37 @@ class _FakeRest:
         self._discord.reads.append("fetch_messages")
         return _AsyncHistory(list(reversed(self._discord.messages)))
 
+    async def fetch_ban(self, guild_id, user_id):
+        self._maybe_fail("fetch_ban")
+        if int(user_id) not in self._discord.bans:
+            raise not_found()
+        return SimpleNamespace(user=SimpleNamespace(id=int(user_id)))
+
     # -- writes --
     async def edit_member(self, guild_id, user_id, **kwargs):
         self._discord.destructive.append(("edit_member", int(user_id), kwargs))
         self._maybe_fail("edit_member")
+        member = self._discord.members.get(int(user_id))
+        if member is None:
+            raise not_found()
+        if "communication_disabled_until" in kwargs:
+            member.raw_communication_disabled_until = kwargs["communication_disabled_until"]
+        return member
+
+    async def ban_user(self, guild_id, user_id, **kwargs):
+        self._discord.destructive.append(("ban_user", int(user_id), kwargs))
+        self._maybe_fail("ban_user")
+        self._discord.bans.add(int(user_id))
+        self._discord.members.pop(int(user_id), None)
+
+    async def kick_user(self, guild_id, user_id, **kwargs):
+        self._discord.destructive.append(("kick_user", int(user_id), kwargs))
+        self._maybe_fail("kick_user")
+        self._discord.members.pop(int(user_id), None)
+
+    async def edit_message(self, channel, message, content=hikari.UNDEFINED, **kwargs):
+        self._discord.edited.append((str(channel), str(message), content, kwargs))
+        return SimpleNamespace(id=int(message))
 
     async def delete_message(self, channel_id, message_id, **kwargs):
         self._discord.destructive.append(("delete_message", int(message_id)))
@@ -218,7 +246,7 @@ class _FakeRest:
 
     async def create_message(self, channel, content=hikari.UNDEFINED, **kwargs):
         self._discord.sent.append((str(channel), content, kwargs))
-        return SimpleNamespace(id=999)
+        return SimpleNamespace(id=999 + len(self._discord.sent))
 
 
 class FakeDiscord:
@@ -239,6 +267,8 @@ class FakeDiscord:
         self.fail: dict[str, Exception] = {}
         self.destructive: list[tuple] = []
         self.sent: list[tuple] = []
+        self.edited: list[tuple] = []
+        self.bans: set[int] = set()
         self.reads: list[str] = []
         self.cache = _FakeCache(self)
         self.rest = _FakeRest(self)

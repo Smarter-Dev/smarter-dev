@@ -10,11 +10,9 @@ except the HTTP transport.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from dataclasses import field
-from datetime import UTC
-from datetime import datetime
-from datetime import timedelta
 from functools import partial
 from types import SimpleNamespace
 from uuid import UUID
@@ -29,6 +27,7 @@ import smarter_dev.web.admin_actions as admin_actions
 import smarter_dev.web.admin_handlers_jobs as admin_handlers_jobs
 import smarter_dev.web.handlers_jobs as handlers_jobs
 from smarter_dev.web.admin_actions import AdminActor
+from smarter_dev.web.admin_actions import HandlerFireFacts
 from smarter_dev.web.admin_handlers_jobs import AdminHandlerFirePayload
 from smarter_dev.web.handler_budget import HandlerBudget
 from smarter_dev.web.handler_budget import admin_budget
@@ -42,6 +41,7 @@ from smarter_dev.web.handler_runtime import run_handler_script
 from smarter_dev.web.handlers_jobs import HandlerFirePayload
 from smarter_dev.web.models import AdminHandler
 from smarter_dev.web.models import ChannelHandler
+from tests.moderation_fakes import FakeModerationDiscord
 
 
 @dataclass
@@ -61,40 +61,39 @@ class _Limiter:
         return True
 
 
-@dataclass
-class _Discord:
-    until: datetime | None = None
-    calls: list = field(default_factory=list)
-    locked_during: list = field(default_factory=list)
-    redis: object = None
+class _Discord(FakeModerationDiscord):
+    """The guild; notes whether the member's hold lock is held at each write."""
 
-    async def _note_lock(self):
+    def __init__(self) -> None:
+        super().__init__(guild_id="G1")
+        self.add_member("U1")
+        self.redis = None
+        self.locked_during: list = []
+        self._writes: list = []
+
+    async def set_timeout(self, guild_id, user_id, until, *, reason):
         self.locked_during.append(
             bool(await self.redis.exists(member_holds_lock_key("G1", "U1")))
         )
+        self._writes.append(
+            ("remove_timeout",)
+            if until is None
+            else ("timeout", math.ceil(until.timestamp() - self.now()))
+        )
+        return await super().set_timeout(guild_id, user_id, until, reason=reason)
 
-    async def staff_refusal(self, user_id, *, is_bot=None):
-        return None  # an ordinary member
+    def writes(self) -> list:
+        """Each timeout write as ("timeout", seconds) or ("remove_timeout",)."""
+        return list(self._writes)
 
-    async def timeout_until(self, user_id):
-        return self.until
 
-    async def set_timeout_until(self, user_id, until, duration_seconds):
-        await self._note_lock()
-        self.calls.append(("timeout", duration_seconds))
-        self.until = until
-        return until
-
-    async def timeout_user(self, user_id, duration_seconds=600):
-        until = datetime.now(UTC) + timedelta(seconds=duration_seconds)
-        await self.set_timeout_until(user_id, until, duration_seconds)
-        return "ok"
-
-    async def remove_timeout(self, user_id):
-        await self._note_lock()
-        self.calls.append(("remove_timeout",))
-        self.until = None
-        return "ok"
+def _actor(discord: _Discord) -> AdminActor:
+    return AdminActor(
+        bot_token="t",
+        guild_id="G1",
+        moderation_port=discord,
+        fire=HandlerFireFacts(handler_id="H1", handler_name="probe"),
+    )
 
 
 @pytest.fixture
@@ -107,13 +106,14 @@ async def _run(script, redis, *, discord=None, budget=None, wired=True):
     emitter = _Emitter()
     discord = discord or _Discord()
     discord.redis = redis
+    actor = _actor(discord)
     kwargs = {}
     if wired:
         kwargs = {
             "claimer": partial(claim_handler_key, redis, "H1"),
             "claim_reader": partial(handler_key_claimed, redis, "H1"),
             "holds": MemberHolds(
-                redis=redis, guild_id="G1", handler_id="H1", actor=discord
+                redis=redis, guild_id="G1", handler_id="H1", actor=actor
             ),
         }
     result = await run_handler_script(
@@ -124,7 +124,7 @@ async def _run(script, redis, *, discord=None, budget=None, wired=True):
         emitter=emitter,
         limiter=_Limiter(),
         budget=budget or admin_budget("message"),
-        actor=discord,
+        actor=actor,
         handler_id="H1",
         **kwargs,
     )
@@ -208,7 +208,7 @@ async def test_a_script_holds_and_releases_a_member(redis):
 
     assert result.outcome == "ok", result.error
     assert said == ["[True, False, True]"]
-    assert discord.calls == [("timeout", 300), ("remove_timeout",)]
+    assert discord.writes() == [("timeout", 300), ("remove_timeout",)]
     # Three calls, three moderation actions: the same price as the timeout
     # calls they stand in for.
     assert result.usage["mod_actions"] == 3
@@ -228,7 +228,7 @@ async def test_hold_and_release_are_refused_to_a_fire_with_no_mod_actions(redis)
     )
 
     assert (held.cap, released.cap) == ("mod_actions", "mod_actions")
-    assert discord.calls == []
+    assert discord.writes() == []
     assert await redis.keys("hhold:*") == []
 
 
@@ -252,7 +252,7 @@ async def test_a_bad_hold_call_errors_before_anything_is_spent(redis, call):
 
     assert result.outcome == "error"
     assert result.usage["mod_actions"] == 0
-    assert discord.calls == []
+    assert discord.writes() == []
 
 
 async def test_hold_functions_not_configured_error_loudly(redis):
@@ -268,7 +268,7 @@ async def test_timeout_user_and_remove_timeout_run_under_the_members_lock(redis)
     result, _ = await _run(script, redis, discord=discord)
 
     assert result.outcome == "ok", result.error
-    assert discord.calls == [("timeout", 600), ("remove_timeout",)]
+    assert discord.writes() == [("timeout", 600), ("remove_timeout",)]
     assert discord.locked_during == [True, True]
     assert await redis.exists(member_holds_lock_key("G1", "U1")) == 0
 
@@ -284,7 +284,7 @@ async def test_a_release_does_not_lift_what_the_scripts_own_timeout_user_set(red
     _, said = await _run(script, redis, discord=discord)
 
     assert said == ["False"]
-    assert discord.calls == [("timeout", 300), ("timeout", 3600)]
+    assert discord.writes() == [("timeout", 300), ("timeout", 3600)]
 
 
 async def test_without_holds_wired_the_timeout_calls_still_reach_the_actor(redis):
@@ -295,7 +295,7 @@ async def test_without_holds_wired_the_timeout_calls_still_reach_the_actor(redis
     result, _ = await _run(script, redis, discord=discord, wired=False)
 
     assert result.outcome == "ok", result.error
-    assert discord.calls == [("timeout", 600), ("remove_timeout",)]
+    assert discord.writes() == [("timeout", 600), ("remove_timeout",)]
     assert discord.locked_during == [False, False]
 
 
@@ -386,7 +386,11 @@ async def test_admin_fire_job_gives_a_script_real_holds_and_claims(
         "AdminActor",
         partial(AdminActor, transport=httpx.MockTransport(discord_api)),
     )
-    monkeypatch.setattr(admin_actions, "record_guild_event", drop_event)
+    from smarter_dev.web import guild_event_recorder
+    from smarter_dev.web import handler_dispatch
+
+    monkeypatch.setattr(guild_event_recorder, "record_guild_event", drop_event)
+    monkeypatch.setattr(handler_dispatch, "dispatch_handler_event", drop_event)
 
     await admin_handlers_jobs.run_admin_handler_fire(
         AdminHandlerFirePayload(

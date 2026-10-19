@@ -26,6 +26,7 @@ from smarter_dev.bot.agents.utility_model import render_inputs
 from smarter_dev.bot.agents.utility_model import utility_metered
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.usage_meter import UsageMeter
+from smarter_dev.web.moderation_gateway import Trigger
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +193,7 @@ async def run_moderation_agent(
     guild_instructions: str,
     enabled_tools: list[str],
     trigger_message_id: str | None = None,
+    trigger: Trigger | None = None,
 ) -> tuple[str, ActionTracker]:
     """Run the moderation triage agent to evaluate a situation and take action.
 
@@ -205,6 +207,7 @@ async def run_moderation_agent(
         guild_instructions: Guild-specific moderation instructions
         enabled_tools: Destructive tools enabled for this guild; empty means none
         trigger_message_id: ID of the trigger message
+        trigger: The ping as the moderation gateway's trigger (its incident)
 
     Returns:
         Tuple of (assessment string, ActionTracker with all actions taken)
@@ -215,6 +218,7 @@ async def run_moderation_agent(
         channel_id=channel_id,
         trigger_message_id=trigger_message_id,
         enabled_tools=enabled_tools,
+        trigger=trigger,
     )
 
     context_text = format_context_messages(context_messages)
