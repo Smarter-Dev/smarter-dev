@@ -1187,8 +1187,8 @@ async def test_drain_notifications_renders_new_arrivals_mid_wake(wake_setup):
             skim_transcript=None,
             budget=None,
         )
-        drained.append(deps.drain_notifications())
-        drained.append(deps.drain_notifications())
+        drained.append(await deps.drain_notifications())
+        drained.append(await deps.drain_notifications())
         return await original_consume(context)
 
     wake_setup.consumer.consume = consume_reading_notifications

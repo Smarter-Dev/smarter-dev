@@ -1102,6 +1102,11 @@ class ProactiveChannelSettingsWrite(BaseAPIModel):
         description="Agent-written extension of the watcher wake criteria; "
         "empty means the seed policy alone",
     )
+    is_forum: bool | None = Field(
+        None,
+        description="The channel is a forum switched on as a whole; "
+        "omitted keeps the stored mark",
+    )
 
 
 class ProactiveChannelSettingsRead(BaseAPIModel):
@@ -1115,6 +1120,9 @@ class ProactiveChannelSettingsRead(BaseAPIModel):
     watch_addendum: str = Field(
         description="Agent-written extension of the watcher wake criteria"
     )
+    is_forum: bool = Field(
+        False, description="The channel is a forum switched on as a whole"
+    )
     created_at: datetime = Field(description="Row creation time")
     updated_at: datetime = Field(description="Row last-update time")
 
@@ -1125,6 +1133,9 @@ class EnabledProactiveChannelRead(BaseAPIModel):
     channel_id: str = Field(description="Discord channel ID")
     watch_addendum: str = Field(
         description="Agent-written extension of the watcher wake criteria"
+    )
+    is_forum: bool = Field(
+        False, description="The channel is a forum switched on as a whole"
     )
 
 

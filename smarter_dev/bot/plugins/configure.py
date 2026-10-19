@@ -51,6 +51,7 @@ async def configure_bot(ctx: lightbulb.Context) -> None:
         return
     channel_id = str(ctx.channel_id)
     target = "this channel"
+    is_forum = False
     if ctx.options.whole_forum:
         forum_id = await forum_parents(ctx.bot).forum_for(channel_id)
         if forum_id is None:
@@ -62,10 +63,12 @@ async def configure_bot(ctx: lightbulb.Context) -> None:
         # has no setting of its own.
         channel_id = forum_id
         target = "this whole forum"
+        is_forum = True
     url = build_config_link_url(
         guild_id=str(ctx.guild_id),
         channel_id=channel_id,
         discord_user_id=str(ctx.author.id),
+        is_forum=is_forum,
     )
     logger.info(
         "configure link issued guild=%s channel=%s user=%s",

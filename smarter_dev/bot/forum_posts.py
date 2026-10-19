@@ -10,6 +10,7 @@ inherit.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -28,6 +29,10 @@ THREAD_CHANNEL_TYPES = frozenset({10, 11, 12})
 # A post never moves to another forum, so lookups are kept until evicted.
 FORUM_PARENT_CACHE_MAX_ENTRIES = 10_000
 _BOT_DATA_KEY = "proactive_forum_parents"
+# The most one Discord lookup may take, retries and rate-limit waits included:
+# these sit on the message, mention, command and wake paths, and hikari's
+# own timeout bounds each HTTP attempt, not its rate-limit waits.
+LOOKUP_DEADLINE_SECONDS = 5.0
 # Shown instead of the title of a post whose author opted out: their words
 # never reach a model, and a post's title is theirs (#100).
 HIDDEN_POST_TITLE = "a post by someone who opted out"
@@ -64,7 +69,9 @@ async def resolve_forum_tag_names(
         if not tag_ids:
             return []
         if forum_channel is None:
-            forum_channel = await bot.rest.fetch_channel(channel_id)
+            forum_channel = await asyncio.wait_for(
+                bot.rest.fetch_channel(channel_id), LOOKUP_DEADLINE_SECONDS
+            )
 
         if not hasattr(forum_channel, "available_tags"):
             logger.warning(
@@ -129,12 +136,19 @@ class ForumParents:
         _remember(self._parents, channel_id, forum_id)
         return forum_id
 
-    async def is_forum(self, channel_id: str) -> bool:
-        """Whether the channel is a forum (or media channel) itself."""
+    async def is_forum(self, channel_id: str) -> bool | None:
+        """Whether the channel is a forum (or media channel) itself; None
+        when Discord could not say, which callers must not act on."""
         try:
             return await self._is_forum(str(channel_id))
-        except Exception:  # noqa: BLE001 — unknown means "not a forum"
-            return False
+        except Exception:  # noqa: BLE001 — unknown, asked again next time
+            log_exception(
+                logger,
+                "forum type lookup failed channel=%s",
+                channel_id,
+                level=logging.WARNING,
+            )
+            return None
 
     async def _is_forum(self, channel_id: str) -> bool:
         """:meth:`is_forum`, raising when Discord could not say."""
@@ -161,7 +175,9 @@ class ForumParents:
             if channel is None:
                 channel = cache.get_guild_channel(int(channel_id))
         if channel is None:
-            channel = await self.bot.rest.fetch_channel(int(channel_id))
+            channel = await asyncio.wait_for(
+                self.bot.rest.fetch_channel(int(channel_id)), LOOKUP_DEADLINE_SECONDS
+            )
         return channel
 
     async def _lookup(self, channel_id: str) -> str | None:
@@ -196,11 +212,14 @@ class EffectiveSettings:
     """The proactive settings that apply to a channel.
 
     ``forum_id`` is set when they are the post's forum's, inherited because
-    the post has no settings row of its own.
+    the post has no settings row of its own. ``held`` says an enabled
+    forum's post is off for now because the consumer that would run it
+    cannot run forum posts.
     """
 
     settings: object
     forum_id: str | None = None
+    held: bool = False
 
     @property
     def enabled(self) -> bool:
@@ -277,10 +296,12 @@ async def post_info(
         try:
             forum = await parents.channel(forum_id)
         except Exception:  # noqa: BLE001 — display only
+            # No tags rather than a second try at the fetch that just failed.
             forum = None
-        tag_names = await resolve_forum_tag_names(
-            parents.bot, forum_id, tag_ids, forum_channel=forum
-        )
+        if forum is not None:
+            tag_names = await resolve_forum_tag_names(
+                parents.bot, forum_id, tag_ids, forum_channel=forum
+            )
     return ForumPostInfo(
         title=thread_title(post, post_id),
         tag_names=tuple(str(name) for name in tag_names),

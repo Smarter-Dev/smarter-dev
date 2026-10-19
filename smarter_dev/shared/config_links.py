@@ -36,6 +36,9 @@ class ConfigLinkPayload:
     guild_id: str
     channel_id: str
     discord_user_id: str
+    # The channel is a whole forum (``/configure bot whole_forum``, #248),
+    # so switching it on marks its row as a forum's.
+    is_forum: bool = False
 
     def authorizes(self, *, guild_id: str, channel_id: str) -> bool:
         """Whether this link may configure that guild's channel."""
@@ -49,15 +52,16 @@ def _serializer() -> URLSafeTimedSerializer:
 
 
 def sign_config_link(
-    *, guild_id: str, channel_id: str, discord_user_id: str
+    *, guild_id: str, channel_id: str, discord_user_id: str, is_forum: bool = False
 ) -> str:
-    return _serializer().dumps(
-        {
-            "guild_id": guild_id,
-            "channel_id": channel_id,
-            "discord_user_id": discord_user_id,
-        }
-    )
+    payload = {
+        "guild_id": guild_id,
+        "channel_id": channel_id,
+        "discord_user_id": discord_user_id,
+    }
+    if is_forum:
+        payload["is_forum"] = True
+    return _serializer().dumps(payload)
 
 
 def verify_config_link(
@@ -77,18 +81,20 @@ def verify_config_link(
             guild_id=raw["guild_id"],
             channel_id=raw["channel_id"],
             discord_user_id=raw["discord_user_id"],
+            is_forum=raw.get("is_forum") is True,
         )
     except KeyError:
         return None
 
 
 def build_config_link_url(
-    *, guild_id: str, channel_id: str, discord_user_id: str
+    *, guild_id: str, channel_id: str, discord_user_id: str, is_forum: bool = False
 ) -> str:
     token = sign_config_link(
         guild_id=guild_id,
         channel_id=channel_id,
         discord_user_id=discord_user_id,
+        is_forum=is_forum,
     )
     base = get_settings().admin_base_url.rstrip("/")
     return f"{base}{CONFIG_LINK_PATH}/{token}"

@@ -240,6 +240,16 @@ async def _enabled(session, channel_id: str) -> bool | None:
     return None if row is None else row.enabled
 
 
+async def _marked_forum(session, channel_id: str) -> bool | None:
+    session.expire_all()
+    row = await session.scalar(
+        select(ProactiveChannelSettings).where(
+            ProactiveChannelSettings.channel_id == channel_id
+        )
+    )
+    return None if row is None else row.is_forum
+
+
 async def _wakes(redis) -> list[ChannelEnabledRequest]:
     return [
         ChannelEnabledRequest.model_validate_json(fields[b"payload"])
@@ -776,6 +786,8 @@ async def test_adding_a_forum_switches_it_on_without_a_wake(db_session, patched,
     await _add_forum(db_session, GUILD, NEW_FORUM)  # a double-click
 
     assert await _enabled(db_session, NEW_FORUM) is True
+    # Marked, so a worker that never asked for forum rows is not shown it.
+    assert await _marked_forum(db_session, NEW_FORUM) is True
     assert await _wakes(redis) == []
     assert [level for level, _ in patched.flashes] == ["success", "success"]
 
@@ -786,6 +798,7 @@ async def test_turning_a_listed_forum_back_on_sends_no_wake(db_session, patched,
     await _post(db_session, GUILD, FORUM, "on")
 
     assert await _enabled(db_session, FORUM) is True
+    assert await _marked_forum(db_session, FORUM) is True
     assert await _wakes(redis) == []
 
 

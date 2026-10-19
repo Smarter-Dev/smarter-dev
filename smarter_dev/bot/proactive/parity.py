@@ -60,7 +60,9 @@ class ProactiveDeps(ChatDeps):
     env: ChannelEnvironment | None = None
     instruction_store: InstructionStore | None = None
     request_mode: Callable[[str, str, int], str] | None = None
-    drain_notifications: Callable[[], str] | None = None
+    # The guild consumer's is async: it reads a forum post's own settings
+    # before letting the agent act there (#248).
+    drain_notifications: Callable[[], str | Awaitable[str]] | None = None
     resolved_channel_envs: dict[str, ChannelEnvironment] = field(
         default_factory=dict, init=False, repr=False
     )

@@ -183,3 +183,28 @@ async def test_post_still_saves_when_redis_is_down(crud_mocks, monkeypatch):
     session.commit.assert_awaited_once()
     down.xadd.assert_awaited_once()
     assert saved == ["Channel configuration saved."]
+
+
+async def test_a_whole_forum_link_marks_the_forum_and_wakes_nobody(crud_mocks):
+    token = config_links.sign_config_link(
+        guild_id=GUILD, channel_id=CHANNEL, discord_user_id=USER, is_forum=True
+    )
+
+    await save(CONTROLLER, _request(_valid_form()), AsyncMock(), token)
+
+    assert crud_mocks.set_flag.await_args.kwargs["is_forum"] is True
+    assert await crud_mocks.redis.xlen(CHANNEL_ENABLED_STREAM) == 0
+
+
+async def test_a_channel_link_leaves_the_forum_mark_alone(crud_mocks):
+    await save(CONTROLLER, _request(_valid_form()), AsyncMock(), _token())
+
+    assert crud_mocks.set_flag.await_args.kwargs["is_forum"] is None
+
+
+def test_a_link_from_before_forum_marks_is_not_a_forum():
+    token = config_links._serializer().dumps(
+        {"guild_id": GUILD, "channel_id": CHANNEL, "discord_user_id": USER}
+    )
+
+    assert config_links.verify_config_link(token).is_forum is False

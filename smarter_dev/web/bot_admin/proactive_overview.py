@@ -221,7 +221,8 @@ async def collect_proactive_overview(
                 channel_id=record.channel_id,
                 name=getattr(channels.get(record.channel_id), "name", None),
                 enabled=record.enabled,
-                is_forum=getattr(channels.get(record.channel_id), "type", None)
+                is_forum=getattr(record, "is_forum", False)
+                or getattr(channels.get(record.channel_id), "type", None)
                 in FORUM_CHANNEL_TYPES,
             )
             for record in by_guild[guild_id]
@@ -363,7 +364,8 @@ class ProactiveChannelsAdminController(Controller):
         if record is None:
             flash_error(request, "That channel isn't on this page. Reload and try again.")
             return back
-        is_forum = False
+        # Switching off leaves the row's forum mark as it is.
+        is_forum = None
         if enabled:
             refusal, channel_type = await channel_on_check(guild_id, channel_id)
             if refusal:
@@ -379,7 +381,7 @@ class ProactiveChannelsAdminController(Controller):
             guild_id=guild_id,
             channel_id=channel_id,
             enabled=enabled,
-            wake=not is_forum,
+            is_forum=is_forum,
         )
         logger.info(
             "proactive channel switched from admin overview guild=%s channel=%s "
@@ -439,7 +441,7 @@ class ProactiveChannelsAdminController(Controller):
             guild_id=guild_id,
             channel_id=channel_id,
             enabled=True,
-            wake=False,
+            is_forum=True,
         )
         logger.info(
             "proactive forum switched on from admin overview guild=%s forum=%s "

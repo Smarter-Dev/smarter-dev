@@ -171,6 +171,15 @@ CONTROL_STREAM_KEY = "proactive:v1:control"
 CONTROL_GROUP = "proactive-bot-v1"
 CONTROL_PROCESSED_PREFIX = "proactive:v1:control-processed"
 CONTROL_STREAMS = (CONTROL_STREAM_KEY, CHANNEL_ENABLED_STREAM)
+# Kept set by every proactive-agent worker that runs a whole forum's posts
+# as channels (#248). An external guild's forum posts go to the worker only
+# while it is set: an older worker would take the forum for a channel.
+FORUM_POSTS_CAPABILITY_KEY = "proactive:v1:capability:forum-posts"
+FORUM_POSTS_CAPABILITY_CACHE_SECONDS = 30.0
+
+
+class ChannelTypeUnknownError(RuntimeError):
+    """Discord could not say whether a channel is a forum; try again later."""
 
 
 def _guild_id_set(raw: str) -> set[str]:
@@ -525,10 +534,33 @@ def _channel_name_for_id(bot, channel_id: str) -> str:
 async def _effective_settings(
     run: ProactiveRuntime, service, guild_id: str, channel_id: str
 ) -> EffectiveSettings:
-    """The channel's settings, or its forum's for a post with no row (#248)."""
-    return await effective_settings(
+    """The channel's settings, or its forum's for a post with no row (#248).
+
+    An external guild's post is held off while no worker says it runs
+    forum posts, so a worker from before forums never gets one.
+    """
+    effective = await effective_settings(
         service, forum_parents(run.bot), str(guild_id), str(channel_id)
     )
+    if (
+        effective.forum_id is None
+        or not effective.enabled
+        or await run.forum_posts_supported(str(guild_id))
+    ):
+        return effective
+    return EffectiveSettings(
+        dataclasses.replace(effective.settings, enabled=False),
+        forum_id=effective.forum_id,
+        held=True,
+    )
+
+
+async def _row_is_forum(run: ProactiveRuntime, row) -> bool | None:
+    """Whether an enabled row is a whole forum's: its stored mark, else
+    Discord's word; None when Discord could not say."""
+    if getattr(row, "is_forum", False):
+        return True
+    return await forum_parents(run.bot).is_forum(str(row.channel_id))
 
 
 def _channel_name(bot, state: ChannelProducerState) -> str:
@@ -580,6 +612,8 @@ class ProactiveRuntime:
         ):
             raise ValueError("proactive per-guild execution lists must not overlap")
         self.start_consumers = start_consumers
+        # (checked at, whether a worker said it runs forum posts)
+        self._forum_posts_capability: tuple[float, bool] | None = None
 
     def execution_mode_for(self, guild_id: str) -> str:
         """Resolve ownership per guild so rollout can be canaried safely."""
@@ -590,6 +624,37 @@ class ProactiveRuntime:
         if guild_id in self.shadow_guild_ids:
             return SHADOW_EXECUTION_MODE
         return self.execution_mode
+
+    async def forum_posts_supported(self, guild_id: str) -> bool:
+        """Whether the consumer that runs this guild runs forum posts.
+
+        This process does, for the guilds it runs. An external guild's
+        worker does while it keeps the capability key set; a Redis that
+        cannot be read counts as no.
+        """
+        if self.execution_mode_for(guild_id) != EXTERNAL_EXECUTION_MODE:
+            return True
+        now = time.monotonic()
+        cached = self._forum_posts_capability
+        if cached is not None and now - cached[0] < FORUM_POSTS_CAPABILITY_CACHE_SECONDS:
+            return cached[1]
+        redis_client = self.bot.d.get("chat_memory_redis")
+        supported = False
+        if redis_client is not None:
+            try:
+                supported = bool(
+                    await asyncio.wait_for(
+                        redis_client.exists(FORUM_POSTS_CAPABILITY_KEY), 2.0
+                    )
+                )
+            except Exception:  # noqa: BLE001 — unknown counts as no
+                log_exception(
+                    logger,
+                    "proactive forum-posts capability check failed",
+                    level=logging.WARNING,
+                )
+        self._forum_posts_capability = (now, supported)
+        return supported
 
     # -- lazy model construction (env keys are only needed on first wake) --
 
@@ -1174,7 +1239,12 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
     for row in enabled_rows:
         channel_id = str(row.channel_id)
         channel_name = _channel_name_for_id(run.bot, channel_id)
-        if await parents.is_forum(channel_id):
+        is_forum = await _row_is_forum(run, row)
+        if is_forum is None:
+            # Discord could not say what it is: not a channel to act in
+            # this wake, which would be wrong for a forum.
+            continue
+        if is_forum:
             # The agent acts in a forum's posts, never in the forum itself;
             # its watch instructions are shared by every post (#248).
             forum_names[channel_id] = channel_name
@@ -1196,24 +1266,37 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
             )
         instruction_stores[channel_id] = instruction_store
 
-    def admit_post(channel_id: str, label: str | None = None) -> None:
+    async def admit_post(channel_id: str, *, describe: bool = False) -> None:
         """Let the agent act in a post of an enabled forum, as its own
-        channel. The post was gated on arrival (a row of its own that says
-        off keeps it out), which also cached its forum."""
+        channel. Its arrival cached its forum; its own row is read again
+        here, since /proactive off in the post may have come since."""
         forum_id = parents.known_forum_for(channel_id)
         if channel_id in enabled_channels or forum_id not in forum_names:
             return
-        enabled_channels[channel_id] = label or forum_post_label(
-            cached_post_info(run.bot, channel_id, forum_id), forum_names[forum_id]
+        try:
+            own = await service.get_settings(state.guild_id, channel_id)
+        except Exception:  # noqa: BLE001 — unknown: not admitted this wake
+            log_exception(
+                logger,
+                "proactive forum post settings unavailable channel=%s",
+                channel_id,
+                level=logging.WARNING,
+            )
+            return
+        if own.exists:
+            # A row of its own wins: on, it is an enabled row already
+            # listed; off, the post stays out.
+            return
+        info = (
+            await post_info(parents, channel_id, forum_id)
+            if describe
+            else cached_post_info(run.bot, channel_id, forum_id)
         )
+        enabled_channels[channel_id] = forum_post_label(info, forum_names[forum_id])
         instruction_stores[channel_id] = instruction_stores[forum_id]
 
     for channel_id in dict.fromkeys(item.channel_id for item in state.queue.items):
-        forum_id = parents.known_forum_for(channel_id)
-        if channel_id in enabled_channels or forum_id not in forum_names:
-            continue
-        info = await post_info(parents, channel_id, forum_id)
-        admit_post(channel_id, forum_post_label(info, forum_names[forum_id]))
+        await admit_post(channel_id, describe=True)
     if not enabled_channels:
         # Only forums are on and nothing queued is from one of their posts.
         state.queue.drain()
@@ -1293,18 +1376,20 @@ async def _consume_guild_once(state: GuildAgentState) -> None:
         )
         return confirmation
 
-    def drain_notifications() -> str:
+    async def drain_notifications() -> str:
         items, dropped = state.queue.drain()
         if not items:
             return "No new notifications."
-        for item in items:
-            admit_post(item.channel_id)
+        for channel_id in dict.fromkeys(item.channel_id for item in items):
+            await admit_post(channel_id)
         return render_notifications(items, dropped)
 
     def deps_factory(**kwargs):
-        # The tools check the very dict dispatch checks, so a post admitted
-        # mid-wake can be answered in this wake.
+        # The tools check the very dicts dispatch and admission use, so a
+        # post admitted mid-wake can be answered, and its watch instructions
+        # (its forum's) read and set, in this wake.
         kwargs["enabled_channels"] = enabled_channels
+        kwargs["instruction_stores"] = instruction_stores
         deps = ProactiveDeps(
             bot=run.bot,
             channel_id=0,
@@ -2050,8 +2135,9 @@ async def _recover_channels(run: ProactiveRuntime) -> None:
                     logger.warning("proactive recovery channel discovery unavailable guild=%s", guild_id)
             await asyncio.sleep(SETTINGS_RETRY_BACKOFF_SECONDS)
         for row in enabled:
-            if await forum_parents(run.bot).is_forum(row.channel_id):
-                # A forum holds no messages; its posts keep their own cursors.
+            if await _row_is_forum(run, row) is not False:
+                # A forum holds no messages; its posts keep their own
+                # cursors. One Discord could not type is left for next time.
                 continue
             cursors.setdefault(int(row.channel_id), {
                 "guild_id": guild_id, "last_message_id": fallback_id,
@@ -2127,13 +2213,22 @@ async def _apply_channel_enabled_request(
         )
         return
     service = run.settings_service()
+    settings = None
     if service is not None:
         # The web wrote the row; the cached copy may still say off.
         service.invalidate(request.guild_id, request.channel_id)
         settings = await service.get_settings(request.guild_id, request.channel_id)
         if not settings.enabled:
             return  # switched off again before the wake was read
-    if await forum_parents(run.bot).is_forum(request.channel_id):
+    if settings is not None and getattr(settings, "is_forum", False):
+        is_forum = True
+    else:
+        is_forum = await forum_parents(run.bot).is_forum(request.channel_id)
+    if is_forum is None:
+        # Unknown: no wake yet. Raising leaves the request pending, so it is
+        # reclaimed and tried again until it is too old to matter.
+        raise ChannelTypeUnknownError(request.channel_id)
+    if is_forum:
         # No orientation wake for a whole forum, and none per post: a post
         # reaches the agent when someone writes in it (#248).
         logger.info(
@@ -2373,7 +2468,9 @@ async def _set_enabled(
                 NOT_A_FORUM_POST_MESSAGE, flags=hikari.MessageFlag.EPHEMERAL
             )
             return
-        await service.set_enabled(str(ctx.guild_id), forum_id, enabled)
+        await service.set_enabled(
+            str(ctx.guild_id), forum_id, enabled, is_forum=True
+        )
         # No wake: the agent meets each post when someone writes in it.
         await ctx.respond(
             f"Proactive bot is now **{'on' if enabled else 'off'}** for this "
@@ -2460,6 +2557,11 @@ async def proactive_status(ctx: lightbulb.Context) -> None:
         if effective.forum_id is not None
         else ""
     )
+    if effective.held:
+        inherited = (
+            f" (its forum <#{effective.forum_id}> is on, but the agent "
+            "running this server can't answer forum posts yet)"
+        )
     await ctx.respond(
         f"Proactive bot: **{'on' if settings.enabled else 'off'}**{inherited} "
         f"(monitoring: {mode})\n"

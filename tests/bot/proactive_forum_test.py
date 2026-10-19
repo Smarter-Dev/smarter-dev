@@ -9,6 +9,7 @@ inherit, and switching a forum on wakes nobody.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import UTC
 from datetime import datetime
@@ -59,6 +60,8 @@ class _Settings:
 
     def __init__(self, rows: dict[int, bool] | None = None, addenda=None):
         self.rows = {str(cid): on for cid, on in (rows or {}).items()}
+        # Rows marked as a whole forum's.
+        self.forums: set[str] = set()
         self.addenda = {str(cid): text for cid, text in (addenda or {}).items()}
         self.lookups: list[str] = []
         self.set_calls: list[tuple[str, str, bool]] = []
@@ -73,20 +76,25 @@ class _Settings:
             channel_id=str(channel_id),
             enabled=self.rows[str(channel_id)],
             watch_addendum=self.addenda.get(str(channel_id), ""),
+            is_forum=str(channel_id) in self.forums,
         )
 
     async def list_enabled_channels(self, guild_id):
         return [
             EnabledProactiveChannel(
-                channel_id=cid, watch_addendum=self.addenda.get(cid, "")
+                channel_id=cid,
+                watch_addendum=self.addenda.get(cid, ""),
+                is_forum=cid in self.forums,
             )
             for cid, on in self.rows.items()
             if on
         ]
 
-    async def set_enabled(self, guild_id, channel_id, enabled):
+    async def set_enabled(self, guild_id, channel_id, enabled, *, is_forum=None):
         self.set_calls.append((str(guild_id), str(channel_id), enabled))
         self.rows[str(channel_id)] = enabled
+        if is_forum:
+            self.forums.add(str(channel_id))
 
     async def set_watch_addendum(self, guild_id, channel_id, addendum):
         self.saved_addenda.append((str(channel_id), addendum))
@@ -237,7 +245,7 @@ class _Consumer:
         for notification in self.midrun:
             self.kwargs["notification_queue"].push(notification)
         if self.midrun:
-            self.deps.drain_notifications()
+            await self.deps.drain_notifications()
         stores = self.kwargs["instruction_stores"]
         if str(POST) in stores:
             stores[str(POST)].set_instruction(
@@ -595,6 +603,8 @@ async def test_whole_forum_on_switches_the_forum_without_a_wake(forum_setup, mod
     await proactive.proactive_on.callback(_ctx(POST, whole_forum=True))
 
     assert setup.service.set_calls == [(str(GUILD), str(FORUM), True)]
+    # Marked, so a worker that never asked for forum rows is not shown it.
+    assert setup.service.forums == {str(FORUM)}
     assert setup.run.guild_state_for(GUILD).queue.items == []
 
 
@@ -764,6 +774,7 @@ async def test_configure_whole_forum_links_the_forum(forum_setup, monkeypatch):
     token = body.split("/admin/bot/configure/")[1].split(")")[0]
     payload = config_links.verify_config_link(token)
     assert payload.authorizes(guild_id=str(GUILD), channel_id=str(FORUM))
+    assert payload.is_forum is True
 
 
 async def test_configure_whole_forum_outside_a_post_is_refused(
@@ -853,3 +864,346 @@ async def test_an_opted_out_authors_post_title_never_reaches_the_agent(
     assert proactive._channel_name_for_id(setup.bot, str(POST)) == (
         forum_posts.HIDDEN_POST_TITLE
     )
+
+
+# --- a post's own row, rechecked when the wake admits it ---------------------------
+
+
+def _later_mention(channel_id: int, message_id: int = 600):
+    return mention_notification(
+        proactive.channel_message_from_hikari(_message(message_id)),
+        channel_id=str(channel_id),
+        channel_name="Async help",
+    )
+
+
+async def test_a_post_switched_off_after_it_queued_gets_no_reply(forum_setup):
+    setup = forum_setup({FORUM: True}, respond_in=(POST,))
+    await proactive.on_guild_message(_event(POST, _message(500)))
+    await proactive._run_producer(setup.run.channel_states[POST])
+
+    await setup.service.set_enabled(str(GUILD), str(POST), False)
+    await _wake(setup)
+
+    assert setup.consumers == []
+    setup.bot.rest.create_message.assert_not_awaited()
+
+
+async def test_a_post_switched_off_is_not_admitted_mid_wake(forum_setup):
+    setup = forum_setup(
+        {FORUM: True}, respond_in=(OTHER_POST,), midrun=(_later_mention(OTHER_POST),)
+    )
+    await forum_posts.forum_parents(setup.bot).forum_for(str(OTHER_POST))
+    await proactive.on_guild_message(_event(POST, _message(500)))
+    await proactive._run_producer(setup.run.channel_states[POST])
+
+    await setup.service.set_enabled(str(GUILD), str(OTHER_POST), False)
+    await _wake(setup)
+
+    (consumer,) = setup.consumers
+    assert str(OTHER_POST) not in consumer.deps.enabled_channels
+    setup.bot.rest.create_message.assert_not_awaited()
+
+
+async def test_a_post_whose_own_settings_cannot_be_read_is_not_admitted(forum_setup):
+    setup = forum_setup({FORUM: True}, respond_in=(POST,))
+    await proactive.on_guild_message(_event(POST, _message(500)))
+    await proactive._run_producer(setup.run.channel_states[POST])
+    listed = setup.service.get_settings
+
+    async def failing(guild_id, channel_id):
+        if str(channel_id) == str(POST):
+            raise RuntimeError("api down")
+        return await listed(guild_id, channel_id)
+
+    setup.service.get_settings = failing
+    await _wake(setup)
+
+    setup.bot.rest.create_message.assert_not_awaited()
+
+
+async def test_a_post_admitted_mid_wake_has_its_forums_watch_instructions(
+    forum_setup,
+):
+    setup = forum_setup(
+        {FORUM: True},
+        addenda={FORUM: _addendum("python questions")},
+        midrun=(_later_mention(OTHER_POST),),
+    )
+    await forum_posts.forum_parents(setup.bot).forum_for(str(OTHER_POST))
+    await proactive.on_guild_message(_event(POST, _message(500)))
+    await proactive._run_producer(setup.run.channel_states[POST])
+
+    await _wake(setup)
+
+    deps = setup.consumers[0].deps
+    # What the watch-instruction tools read and write for that post.
+    store = deps.channel_instruction_store(str(OTHER_POST))
+    assert store is deps.channel_instruction_store(str(POST))
+    assert "python questions" in [entry.text for entry in store.entries]
+    store.set_instruction("watch async follow-ups", ttl_seconds=3600)
+    # Saved on the forum, the only row.
+    assert [channel for channel, _ in setup.service.saved_addenda] == [str(FORUM)]
+
+
+# --- a channel Discord cannot type is not acted on ---------------------------------
+
+
+def _discord_down_for(setup, *channel_ids):
+    """Drop the channels from the cache and make REST fail for them."""
+    down = {int(cid) for cid in channel_ids}
+    cached = setup.bot.cache.get_guild_channel
+    setup.bot.cache.get_guild_channel = lambda cid: (
+        None if int(cid) in down else cached(cid)
+    )
+    fetch = setup.bot.rest.fetch_channel.side_effect
+
+    async def fetch_channel(channel_id):
+        if int(channel_id) in down:
+            raise RuntimeError("discord down")
+        return await fetch(channel_id)
+
+    setup.bot.rest.fetch_channel.side_effect = fetch_channel
+
+
+async def test_the_web_switching_on_a_channel_discord_cannot_type_waits(forum_setup):
+    setup = forum_setup({FORUM: True})
+    setup.service.invalidate = lambda *_: None
+    _discord_down_for(setup, FORUM)
+    request = ChannelEnabledRequest(
+        guild_id=str(GUILD), channel_id=str(FORUM), created_at=datetime.now(UTC)
+    )
+
+    with pytest.raises(proactive.ChannelTypeUnknownError):
+        await proactive._apply_channel_enabled_request(setup.run, request)
+
+    # Left pending (not acknowledged) and no wake sent.
+    assert setup.run.guild_state_for(GUILD).queue.items == []
+
+
+async def test_a_web_wake_for_a_marked_forum_needs_no_discord(forum_setup):
+    setup = forum_setup({FORUM: True})
+    setup.service.forums.add(str(FORUM))
+    setup.service.invalidate = lambda *_: None
+    _discord_down_for(setup, FORUM)
+
+    await proactive._apply_channel_enabled_request(
+        setup.run,
+        ChannelEnabledRequest(
+            guild_id=str(GUILD), channel_id=str(FORUM), created_at=datetime.now(UTC)
+        ),
+    )
+
+    assert setup.run.guild_state_for(GUILD).queue.items == []
+
+
+async def test_a_wake_leaves_out_a_row_discord_cannot_type(forum_setup):
+    setup = forum_setup({FORUM: True, TEXT: True}, respond_in=(FORUM, TEXT))
+    await proactive.on_guild_message(_event(POST, _message(500)))
+    await proactive._run_producer(setup.run.channel_states[POST])
+    _discord_down_for(setup, FORUM)
+
+    await _wake(setup)
+
+    (consumer,) = setup.consumers
+    assert str(FORUM) not in consumer.at_start
+    sent_to = [call.args[0] for call in setup.bot.rest.create_message.await_args_list]
+    assert FORUM not in sent_to
+
+
+async def test_a_marked_forum_row_is_a_forum_without_asking_discord(forum_setup):
+    setup = forum_setup({FORUM: True}, respond_in=(FORUM, POST))
+    setup.service.forums.add(str(FORUM))
+    await proactive.on_guild_message(_event(POST, _message(500)))
+    await proactive._run_producer(setup.run.channel_states[POST])
+    _discord_down_for(setup, FORUM)
+
+    await _wake(setup)
+
+    (consumer,) = setup.consumers
+    assert set(consumer.at_start) == {str(POST)}
+
+
+async def test_recovery_skips_a_row_discord_cannot_type(forum_setup):
+    setup = forum_setup({FORUM: True})
+    store = SimpleNamespace(cursor_channel_ids=AsyncMock(return_value=[]))
+    setup.run.history_store = lambda: store
+    _discord_down_for(setup, FORUM)
+
+    await proactive._recover_channels(setup.run)
+
+    assert setup.run.channel_states == {}
+
+
+# --- an external guild's posts go only to a worker that runs them ------------------
+
+
+class _Redis:
+    def __init__(self, keys=()):
+        self.keys = set(keys)
+        self.checks = 0
+
+    async def exists(self, key):
+        self.checks += 1
+        return int(key in self.keys)
+
+
+def _external(setup, monkeypatch, redis):
+    monkeypatch.setattr(setup.run, "external_guild_ids", {str(GUILD)})
+    setup.bot.d["chat_memory_redis"] = redis
+
+
+async def test_an_external_guilds_post_is_held_without_a_forum_worker(
+    forum_setup, monkeypatch
+):
+    setup = forum_setup({FORUM: True, TEXT: True})
+    _external(setup, monkeypatch, _Redis())
+
+    await proactive.on_guild_message(_event(POST, _message(500)))
+    await proactive.on_guild_message(_event(TEXT, _message(501)))
+
+    # The post never reaches the producer (or the worker); a plain channel does.
+    assert POST not in setup.run.channel_states
+    assert TEXT in setup.run.channel_states
+
+
+async def test_an_external_guilds_post_runs_once_a_worker_says_it_can(
+    forum_setup, monkeypatch
+):
+    setup = forum_setup({FORUM: True})
+    redis = _Redis({proactive.FORUM_POSTS_CAPABILITY_KEY})
+    _external(setup, monkeypatch, redis)
+
+    await proactive.on_guild_message(_event(POST, _message(500)))
+    await proactive.on_guild_message(_event(POST, _message(501)))
+
+    assert POST in setup.run.channel_states
+    assert redis.checks == 1  # cached between messages
+    assert proactive.FORUM_POSTS_CAPABILITY_KEY == (
+        "proactive:v1:capability:forum-posts"
+    )
+
+
+async def test_an_unreadable_capability_counts_as_no_forum_worker(
+    forum_setup, monkeypatch
+):
+    setup = forum_setup({FORUM: True})
+
+    class _Down:
+        async def exists(self, _key):
+            raise RuntimeError("redis down")
+
+    _external(setup, monkeypatch, _Down())
+
+    await proactive.on_guild_message(_event(POST, _message(500)))
+
+    assert POST not in setup.run.channel_states
+
+
+async def test_a_post_with_its_own_row_is_not_held(forum_setup, monkeypatch):
+    setup = forum_setup({FORUM: True, POST: True})
+    _external(setup, monkeypatch, _Redis())
+
+    await proactive.on_guild_message(_event(POST, _message(500)))
+
+    # A row of its own is a channel any worker runs.
+    assert POST in setup.run.channel_states
+
+
+async def test_status_in_a_held_post_says_why(forum_setup, monkeypatch, moderator):
+    setup = forum_setup({FORUM: True})
+    _external(setup, monkeypatch, _Redis())
+    ctx = _ctx(POST, whole_forum=False)
+
+    await proactive.proactive_status.callback(ctx)
+
+    body = ctx.respond.await_args.args[0]
+    assert "**off**" in body and "can't answer forum posts yet" in body
+
+
+# --- Discord lookups have a deadline --------------------------------------------
+
+
+def _hanging_bot(started: list):
+    async def hang(_channel_id):
+        started.append(True)
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            started.append("cancelled")
+            raise
+
+    return SimpleNamespace(
+        d={},
+        cache=SimpleNamespace(
+            get_guild_channel=lambda _cid: None, get_thread=lambda _cid: None
+        ),
+        rest=SimpleNamespace(fetch_channel=AsyncMock(side_effect=hang)),
+    )
+
+
+async def test_a_stalled_parent_lookup_gives_up_at_the_deadline(monkeypatch):
+    monkeypatch.setattr(forum_posts, "LOOKUP_DEADLINE_SECONDS", 0.05)
+    started: list = []
+    parents = forum_posts.forum_parents(_hanging_bot(started))
+
+    assert await asyncio.wait_for(parents.forum_for("11"), 1) is None
+    assert await asyncio.wait_for(parents.is_forum("10"), 1) is None
+    # The stalled requests were cancelled, and nothing was remembered.
+    assert started.count("cancelled") == 2
+    assert parents.known_forum_for("11") is None and "11" not in parents._parents
+
+
+async def test_a_stalled_tag_lookup_falls_back_at_the_deadline(monkeypatch):
+    monkeypatch.setattr(forum_posts, "LOOKUP_DEADLINE_SECONDS", 0.05)
+    started: list = []
+
+    names = await asyncio.wait_for(
+        forum_posts.resolve_forum_tag_names(_hanging_bot(started), "10", [901]), 1
+    )
+
+    assert names == ["901"]
+    assert "cancelled" in started
+
+
+async def test_a_lookup_cancelled_from_outside_stays_cancelled(monkeypatch):
+    started: list = []
+    parents = forum_posts.forum_parents(_hanging_bot(started))
+
+    task = asyncio.create_task(parents.forum_for("11"))
+    await asyncio.sleep(0.01)
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert "11" not in parents._parents
+
+
+async def test_post_info_does_not_fetch_a_failed_forum_twice():
+    post = SimpleNamespace(
+        id=11,
+        name="Q",
+        type=hikari.ChannelType.GUILD_PUBLIC_THREAD,
+        parent_id=10,
+        applied_tag_ids=[901],
+    )
+    forum_fetches = []
+
+    async def fetch_channel(channel_id):
+        if int(channel_id) == 11:
+            return post
+        forum_fetches.append(channel_id)
+        raise RuntimeError("discord down")
+
+    bot = SimpleNamespace(
+        d={},
+        cache=SimpleNamespace(
+            get_guild_channel=lambda _cid: None, get_thread=lambda _cid: None
+        ),
+        rest=SimpleNamespace(fetch_channel=AsyncMock(side_effect=fetch_channel)),
+    )
+
+    info = await forum_posts.post_info(forum_posts.forum_parents(bot), "11", "10")
+
+    assert info == forum_posts.ForumPostInfo(title="Q", tag_names=())
+    assert len(forum_fetches) == 1

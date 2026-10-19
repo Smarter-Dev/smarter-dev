@@ -190,13 +190,15 @@ class ChannelConfigController(Controller):
             response_filter=parsed.response_filter,
             drafter_model=parsed.drafter_model,
         )
-        # Commits both writes; switching the channel on wakes the agent.
+        # Commits both writes; switching the channel on wakes the agent, and
+        # switching a whole forum on marks its row and wakes nobody (#248).
         await set_proactive_channel_enabled(
             db_session,
             get_redis_client(),
             guild_id=payload.guild_id,
             channel_id=payload.channel_id,
             enabled=parsed.proactive_enabled,
+            is_forum=True if payload.is_forum else None,
         )
         logger.info(
             "channel config saved guild=%s channel=%s by discord user=%s "
