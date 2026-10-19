@@ -1225,7 +1225,9 @@ async def cleanup_bot_services(bot: lightbulb.BotApp) -> None:
 
         # Usage reports still in flight go out before their client closes.
         try:
-            await asyncio.wait_for(drain_usage_reports(), timeout=10)
+            await asyncio.wait_for(
+                drain_usage_reports(stopping=True), timeout=10
+            )
         except TimeoutError:
             logger.warning("Usage reports still in flight at shutdown were dropped")
 

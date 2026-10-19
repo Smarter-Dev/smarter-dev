@@ -39,6 +39,9 @@ from smarter_dev.bot.services.usage_reporter import metered
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.model_catalog import ReasoningLevel
 from smarter_dev.shared.model_catalog import get_model
+from smarter_dev.shared.request_usage import RequestTokens
+from smarter_dev.shared.usage_meter import UsageMeter
+from smarter_dev.shared.usage_meter import run_through
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +84,9 @@ class FitResult:
     served or stored (the turn's priced totals must hold every request's
     counts, or its per-request pricing is discarded); ``method`` records which
     tier produced the text ("shortened" / "summarized" / "truncated").
+    A shorten re-run that failed after the provider answered was billed all
+    the same: its spend is in the extra counts, and its requests' own counts
+    in ``extra_failed_requests``, as it has no messages to price them from.
 
     ``extra_messages`` are the shorten re-run's own ``ModelMessage``s, for the
     engine to append to the turn's persisted history. Without them the re-run
@@ -96,6 +102,7 @@ class FitResult:
     extra_messages: list = field(default_factory=list)
     extra_cache_read_tokens: int = 0
     extra_cache_write_tokens: int = 0
+    extra_failed_requests: list[RequestTokens] = field(default_factory=list)
 
 
 def split_for_discord(text: str) -> list[str]:
@@ -156,6 +163,7 @@ class _ShortenOutcome:
     messages: list
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    failed_requests: list[RequestTokens] = field(default_factory=list)
 
 
 async def _shorten_with_agent(
@@ -169,6 +177,8 @@ async def _shorten_with_agent(
     ``text`` is ``None`` when the run fails or the agent declines to respond,
     so the caller can fall through to the summarizer. Failures must never
     break the turn — the original reply is still deliverable via later tiers.
+    A run that failed after the provider answered still carries what it was
+    billed (``failed_requests`` and the token counts).
 
     The re-run is deliberately tool-free. It reshapes text the agent already
     wrote, so it needs nothing fetched or computed — and this prompt names an
@@ -179,15 +189,27 @@ async def _shorten_with_agent(
     tool_free_deps = (
         replace(deps, tools_disabled=True) if is_dataclass(deps) else deps
     )
+    meter = UsageMeter()
     try:
         result = await agent.run(
             user_prompt=prompt,
             message_history=message_history,
             deps=tool_free_deps,
+            **run_through(meter, agent),
         )
     except Exception:
         log_exception(logger, "Shorten re-run failed — falling back to summarizer")
-        return _ShortenOutcome(None, 0, 0, [])
+        billed = [request for _, _, requests in meter.stages() for request in requests]
+        total = RequestTokens(*(sum(column) for column in zip(*billed)))
+        return _ShortenOutcome(
+            None,
+            total.input_tokens,
+            total.output_tokens,
+            [],
+            total.cache_read_tokens,
+            total.cache_write_tokens,
+            billed,
+        )
     usage = result.usage
     input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
     output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
@@ -258,6 +280,7 @@ async def fit_overlong_response(
             outcome.messages,
             outcome.cache_read_tokens,
             outcome.cache_write_tokens,
+            outcome.failed_requests,
         )
 
     summary = await _summarize_reply(message, usage_fields=usage_fields)
@@ -270,6 +293,7 @@ async def fit_overlong_response(
             outcome.messages,
             outcome.cache_read_tokens,
             outcome.cache_write_tokens,
+            outcome.failed_requests,
         )
 
     return FitResult(
@@ -280,6 +304,7 @@ async def fit_overlong_response(
         outcome.messages,
         outcome.cache_read_tokens,
         outcome.cache_write_tokens,
+        outcome.failed_requests,
     )
 
 

@@ -51,6 +51,9 @@ class TokenUsage(BaseModel):
     input_tokens: int = Field(0, ge=0)
     output_tokens: int = Field(0, ge=0)
     cache_read_tokens: int = Field(0, ge=0)
+    # Optional, as ``requests``: the totals must match the requests' sums
+    # for the ledger to price the requests one by one.
+    cache_write_tokens: int = Field(0, ge=0)
     # Each provider request's own counts, which the ledger prices one by one
     # (a long-context tier is decided per request). Optional: bots from
     # before #211 never send it.

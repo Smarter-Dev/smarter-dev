@@ -21,6 +21,7 @@ from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelRequest
 from pydantic_ai.messages import ModelResponse
 from pydantic_ai.messages import TextPart
+from pydantic_ai.messages import ThinkingPart
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.messages import UserPromptPart
 from pydantic_ai.models.function import AgentInfo
@@ -30,6 +31,7 @@ from sqlalchemy import select
 
 from smarter_dev.bot.plugins import proactive
 from smarter_dev.bot.proactive.notifications import Notification
+from smarter_dev.bot.proactive.watcher import SkimRunner
 from smarter_dev.shared.request_usage import RequestTokens
 from smarter_dev.web.api_native import proactive_settings as proactive_settings_module
 from smarter_dev.web.llm_pricing import calc_cost
@@ -334,8 +336,9 @@ def test_watcher_usage_with_requests_crosses_to_the_worker():
     )
     jsonschema.validate(envelope.model_dump(mode="json"), schema)
     assert TokenUsage(input_tokens=1).requests is None
+    assert TokenUsage(input_tokens=3, cache_write_tokens=2).cache_write_tokens == 2
     with pytest.raises(ValueError):
-        TokenUsage(input_tokens=1, cache_write_tokens=2)
+        TokenUsage(input_tokens=1, cache_creation_tokens=2)
 
 
 async def test_a_wake_whose_reply_fails_to_send_still_bills(wake, monkeypatch):
@@ -355,3 +358,143 @@ async def test_a_wake_whose_reply_fails_to_send_still_bills(wake, monkeypatch):
     [entry] = report["entries"]
     assert len(entry["requests"]) == 3  # the note and both agent requests
     assert report["responses"] == 0
+
+
+# Astra's #211 reproduction: the compaction note comes back thinking only,
+# cut off at its output limit. The provider billed it; the run raises.
+CUT_OFF = RequestUsage(input_tokens=90_000, output_tokens=4_096)
+SKIMMED = RequestUsage(input_tokens=100, output_tokens=10)
+
+
+def cut_off_note_model() -> FunctionModel:
+    """The guild agent whose compaction note is cut off; its wake is fine."""
+    wake_model = agent_model()
+
+    def respond(messages, info: AgentInfo) -> ModelResponse:
+        if not info.function_tools:
+            return ModelResponse(
+                parts=[ThinkingPart("still thinking")],
+                usage=CUT_OFF,
+                finish_reason="length",
+            )
+        return wake_model.function(messages, info)
+
+    return FunctionModel(respond, model_name=AGENT)
+
+
+def skim_model(*, cut_off: bool = False) -> FunctionModel:
+    def respond(messages, info: AgentInfo) -> ModelResponse:
+        if cut_off:
+            return ModelResponse(
+                parts=[ThinkingPart("hm")], usage=SKIMMED, finish_reason="length"
+            )
+        return ModelResponse(parts=[TextPart("skimmed note")], usage=SKIMMED)
+
+    return FunctionModel(respond, model_name="glm-5.5")
+
+
+async def test_a_cut_off_compaction_note_is_billed_beside_its_skim_fallback(wake):
+    start, service = wake
+    state = start(cut_off_note_model())
+    proactive.runtime._skim = SkimRunner(skim_model())
+
+    await proactive._consume_guild_once(state)
+
+    [report] = [r for r in service.recorded_usage if r["entries"]]
+    entries = {entry["model_id"]: entry for entry in report["entries"]}
+    assert sorted(entries[AGENT]["requests"], key=str) == sorted(
+        [tokens(CUT_OFF), tokens(FIRST), tokens(SECOND)], key=str
+    )
+    assert entries[AGENT]["output_tokens"] == sum(
+        r.output_tokens for r in (CUT_OFF, FIRST, SECOND)
+    )
+    assert entries[proactive.runtime.skim_model_id]["requests"] == [tokens(SKIMMED)]
+    assert state.agent_runner.unreported_usage == {}
+
+
+async def test_a_compaction_that_fails_on_both_models_bills_both(wake):
+    start, service = wake
+    state = start(cut_off_note_model())
+    proactive.runtime._skim = SkimRunner(skim_model(cut_off=True))
+
+    await proactive._consume_guild_once(state)
+
+    [report] = [r for r in service.recorded_usage if r["entries"]]
+    entries = {entry["model_id"]: entry for entry in report["entries"]}
+    assert tokens(CUT_OFF) in entries[AGENT]["requests"]
+    assert entries[proactive.runtime.skim_model_id]["requests"] == [tokens(SKIMMED)]
+    assert entries[proactive.runtime.skim_model_id]["input_tokens"] == 100
+
+
+async def test_a_skim_that_writes_the_cache_is_priced_per_request(
+    usage_endpoint, db_session
+):
+    # A Claude skim: one request over Haiku's 100K tier that writes the cache.
+    # The totals must hold the write, or the ledger cannot trust the requests
+    # and prices the whole at the base rate.
+    haiku = "claude-haiku-5-5"
+    billed = RequestUsage(
+        input_tokens=150_000,
+        output_tokens=100,
+        cache_read_tokens=20_000,
+        cache_write_tokens=10_000,
+    )
+    runner = SkimRunner(
+        FunctionModel(
+            lambda messages, info: ModelResponse(
+                parts=[TextPart("skim")], usage=billed
+            ),
+            model_name=haiku,
+        )
+    )
+    _, usage = await runner.skim("transcript")
+    usage_by_model: dict = {}
+    proactive.merge_usage(usage_by_model, haiku, usage)
+    service = _StubSettingsService(addendum="")
+    await proactive._record_usage(
+        service,
+        guild_id="2",
+        channel_id="guild-wide",
+        metered_at=proactive.datetime.now(proactive.UTC),
+        passive=False,
+        responses=0,
+        operation="watcher",
+        usage_by_model=usage_by_model,
+    )
+    [report] = service.recorded_usage
+
+    assert _post(usage_endpoint, report["entries"]).status_code == 200
+
+    [row] = (await db_session.execute(select(UsageCostRow))).scalars().all()
+    assert row.cache_write_tokens == 10_000
+    request = RequestTokens(150_000, 100, 20_000, 10_000)
+    assert row.cost_usd == calc_cost_by_request(haiku, request, [request])
+    assert row.cost_usd == Decimal("0.07125")
+
+
+async def test_a_skim_tool_that_fails_mid_wake_bills_its_request(wake):
+    from tests.bot.proactive_plugin_test import _FakeIterator
+    from tests.bot.proactive_plugin_test import _hikari_message
+
+    start, service = wake
+    state = start(
+        agent_model(
+            tool=("skim_messages", {"channel_id": "1", "around_message_id": "555"})
+        )
+    )
+    state.agent_runner.token_limit = 10**9  # no compaction this time
+    proactive.runtime.bot.rest.fetch_messages = lambda channel_id, before=None: (
+        _FakeIterator([_hikari_message()])
+    )
+    proactive.runtime._skim = SkimRunner(skim_model(cut_off=True))
+
+    await proactive._consume_guild_once(state)
+
+    [report] = [r for r in service.recorded_usage if r["entries"]]
+    entries = {entry["model_id"]: entry for entry in report["entries"]}
+    # The tool's error went back to the agent and the wake went on; the skim
+    # the provider billed is reported with it.
+    assert entries[proactive.runtime.skim_model_id]["requests"] == [tokens(SKIMMED)]
+    assert sorted(entries[AGENT]["requests"], key=str) == sorted(
+        [tokens(FIRST), tokens(SECOND)], key=str
+    )

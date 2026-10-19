@@ -153,6 +153,7 @@ async def test_watcher_producer_returns_only_watcher_usage():
             "input_tokens": 11,
             "output_tokens": 2,
             "cache_read_tokens": 3,
+            "cache_write_tokens": 0,
         }
     }
     assert "agent-model" not in usage
@@ -206,7 +207,7 @@ class _RecordingDepsFactory:
 
 
 class _StubSkimRunner:
-    async def skim(self, transcript):
+    async def skim(self, transcript, meter=None):
         return "skimmed transcript", {
             "input_tokens": 8,
             "output_tokens": 3,
@@ -282,6 +283,7 @@ async def test_agent_consumer_drains_exact_notifications_and_returns_agent_usage
             "input_tokens": 21,
             "output_tokens": 4,
             "cache_read_tokens": 1,
+            "cache_write_tokens": 0,
         }
     }
     assert "watcher-model" not in result.usage_by_model
@@ -305,11 +307,13 @@ async def test_agent_consumer_returns_skim_usage_attributed_to_watcher_model():
             "input_tokens": 8,
             "output_tokens": 3,
             "cache_read_tokens": 2,
+            "cache_write_tokens": 0,
         },
         "agent-model": {
             "input_tokens": 21,
             "output_tokens": 4,
             "cache_read_tokens": 1,
+            "cache_write_tokens": 0,
         },
     }
     assert result.input_tokens == 29

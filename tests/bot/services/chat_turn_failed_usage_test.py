@@ -95,3 +95,122 @@ async def test_a_failed_turn_reports_its_billed_request(
             "cache_write_tokens": 110_000,
         }
     ]
+
+
+SHORTEN_BILLED = RequestUsage(input_tokens=150_000, output_tokens=40)
+MAIN = RequestUsage(input_tokens=20_000, output_tokens=1_500)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_shorten_rerun_bills_its_request_with_the_turn(
+    fake_bot,  # noqa: F811
+    fake_memory,  # noqa: F811
+    monkeypatch,
+):
+    # Astra's #211 reproduction: the reply is too long, the shorten re-run
+    # gets one billed answer that needs a retry, and the retry's request
+    # fails. The summarizer then fits the reply; the turn goes on.
+    from pydantic_ai.messages import ModelMessagesTypeAdapter
+    from pydantic_ai.messages import TextPart
+
+    from smarter_dev.bot.agents import response_fitting
+    from smarter_dev.bot.agents.chat_models import TurnDecision
+    from smarter_dev.shared.request_usage import RequestTokens
+    from smarter_dev.web.api_native.chat_conversations import _billed_chat_model
+    from smarter_dev.web.api_native.schemas import ChatAgentTurnCreate
+    from smarter_dev.web.llm_pricing import calc_cost_by_request
+    from tests.bot.services.test_chat_engine import _send
+
+    model_name = "claude-haiku-5-5"
+    monkeypatch.setenv("CHAT_AGENT_MODEL", model_name)
+
+    def respond(messages, info):
+        shortening = "<length-notice>" in str(messages)
+        if not shortening:
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        info.output_tools[0].name,
+                        _send("x" * 5000, target_message_id="101").model_dump(
+                            mode="json"
+                        ),
+                    )
+                ],
+                usage=MAIN,
+            )
+        if "retry" not in str(messages[-1]).lower():
+            # Text where the output tool is required: pydantic-ai asks again.
+            return ModelResponse(parts=[TextPart("shorter?")], usage=SHORTEN_BILLED)
+        raise ModelHTTPError(500, model_name)
+
+    agent = Agent(
+        FunctionModel(respond, model_name=model_name), output_type=TurnDecision
+    )
+
+    async def summarized(message, *, usage_fields=None):
+        return "a short summary"
+
+    monkeypatch.setattr(response_fitting, "_summarize_reply", summarized)
+    captured: dict = {}
+    persisted = asyncio.Event()
+
+    async def fake_persist(**kwargs):
+        captured.update(kwargs)
+        persisted.set()
+
+    patches = _patch_engine(agent_run=None, fake_memory=fake_memory)
+    with (
+        patch(
+            "smarter_dev.bot.services.chat_engine.get_chat_agent", return_value=agent
+        ),
+        patch("smarter_dev.bot.services.chat_engine.persist_turn", new=fake_persist),
+        patches[1],
+        patches[2],
+        patches[3],
+    ):
+        engine, _ = await _build_engine(fake_bot)
+        engine.engagement_id = "eng-1"
+        engine.start()
+        engine.trigger_initial(_fake_trigger_message(message_id=101))
+        try:
+            await asyncio.wait_for(persisted.wait(), 10)
+        finally:
+            await engine.shutdown()
+
+    billed = [
+        RequestTokens(MAIN.input_tokens, MAIN.output_tokens),
+        RequestTokens(SHORTEN_BILLED.input_tokens, SHORTEN_BILLED.output_tokens),
+    ]
+    assert captured["chat_tokens_input"] == sum(r.input_tokens for r in billed)
+    assert captured["chat_tokens_output"] == sum(r.output_tokens for r in billed)
+    [stage] = captured["chat_stages"]
+    assert sorted(stage["requests"], key=str) == sorted(
+        (r.as_dict() for r in billed), key=str
+    )
+    payload = ChatAgentTurnCreate(
+        engagement_id="00000000-0000-0000-0000-000000000001",
+        request_id="r",
+        turn_kind="initial",
+        output_kind="send_response",
+        triggering_messages=[],
+        agent_output={},
+        model_messages_delta=ModelMessagesTypeAdapter.dump_python(
+            captured["new_model_messages"], mode="json"
+        ),
+        **{
+            key: captured[key]
+            for key in (
+                "chat_model_name",
+                "chat_tokens_input",
+                "chat_tokens_output",
+                "chat_cache_read_tokens",
+                "chat_cache_write_tokens",
+                "chat_stages",
+            )
+        },
+    )
+    # Each request at its own tier: the 150K re-run request at Haiku's 5x.
+    total = RequestTokens(*(sum(column) for column in zip(*billed)))
+    assert _billed_chat_model(payload).cost_usd == calc_cost_by_request(
+        model_name, total, billed
+    )

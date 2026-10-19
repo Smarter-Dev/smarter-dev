@@ -1087,6 +1087,7 @@ class ChannelEngine:
             # history below — without them the turn record simply omits a run
             # that can call tools and outspend the main one.
             fit_extra_messages: list = []
+            fit_failed_requests: list = []
             if (
                 output.response is not None
                 and output.response.message
@@ -1136,6 +1137,7 @@ class ChannelEngine:
                 fit_extra_cache_read = fit.extra_cache_read_tokens
                 fit_extra_cache_write = fit.extra_cache_write_tokens
                 fit_extra_messages = list(fit.extra_messages)
+                fit_failed_requests = list(fit.extra_failed_requests)
                 tokens += fit_extra_input + fit_extra_output
             # Meter this turn's chat tokens against the channel's usage windows.
             # Every channel is metered (so ``/bot-usage`` always has numbers);
@@ -1257,6 +1259,7 @@ class ChannelEngine:
                                 main_usage.cache_write_tokens + fit_extra_cache_write,
                             ),
                             [*result.new_messages(), *fit_extra_messages],
+                            fit_failed_requests,
                         )
                     ]
 

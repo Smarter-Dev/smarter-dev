@@ -146,13 +146,16 @@ Explicit wake criteria:
 def usage_dict(usage, messages=None) -> dict:
     """A run's token totals; with the run's new *messages*, each of its
     provider requests' own counts as well (``requests``), which the ledger
-    prices one by one: a long-context tier is decided per request."""
+    prices one by one: a long-context tier is decided per request. The
+    totals hold every count the requests do (cache writes too): the ledger
+    falls back to base rates on totals that do not match their requests."""
     if callable(usage):
         usage = usage()
     tokens = {
         "input_tokens": usage.input_tokens or 0,
         "output_tokens": usage.output_tokens or 0,
         "cache_read_tokens": usage.cache_read_tokens or 0,
+        "cache_write_tokens": usage.cache_write_tokens or 0,
     }
     requests = [
         request.as_dict()
@@ -185,6 +188,7 @@ def merge_usage(usage_by_model: dict, model_id: str, usage: dict) -> None:
             "input_tokens": 0,
             "output_tokens": 0,
             "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
         },
     )
     for key, value in usage.items():
@@ -203,6 +207,7 @@ def meter_usage_dict(meter: UsageMeter) -> dict:
         "input_tokens": total.input_tokens,
         "output_tokens": total.output_tokens,
         "cache_read_tokens": total.cache_read_tokens,
+        "cache_write_tokens": total.cache_write_tokens,
         "requests": [
             request.as_dict() for _, _, requests in stages for request in requests
         ],
@@ -452,6 +457,13 @@ class SkimRunner:
             self.model, output_type=str, system_prompt=SKIM_SYSTEM_PROMPT
         )
 
-    async def skim(self, transcript: str) -> tuple[str, dict]:
-        result = await self._agent.run(transcript)
+    async def skim(
+        self, transcript: str, meter: UsageMeter | None = None
+    ) -> tuple[str, dict]:
+        """The skim and its usage. With *meter*, every response the run gets
+        lands there too, so a skim that raises still shows what it was billed."""
+        result = await self._agent.run(
+            transcript,
+            **(meter_model(meter, self._agent) if meter is not None else {}),
+        )
         return result.output, usage_dict(result.usage, new_messages(result))

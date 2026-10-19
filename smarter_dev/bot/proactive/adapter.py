@@ -24,6 +24,8 @@ from smarter_dev.bot.proactive.watcher import SkimRunner
 from smarter_dev.bot.proactive.watcher import WatcherDecision
 from smarter_dev.bot.proactive.watcher import WatcherRunner
 from smarter_dev.bot.proactive.watcher import merge_usage
+from smarter_dev.bot.proactive.watcher import meter_usage_dict
+from smarter_dev.shared.usage_meter import UsageMeter
 
 WATCHER_CONTEXT_SIZE = 30
 JEV_WATCHER_CONTEXT_SIZE = 15
@@ -299,12 +301,21 @@ class AgentConsumer:
         actions = WakeActions()
 
         async def skim_transcript(transcript: str) -> str:
-            text, skim_usage = await self.skim.skim(transcript)
             usage_model_id = self.skim_model_id or self.watcher_model_id
             if usage_model_id is None:
                 raise ValueError(
                     "skim_model_id is required to attribute skim usage"
                 )
+            meter = UsageMeter()
+            try:
+                text, skim_usage = await self.skim.skim(transcript, meter=meter)
+            except BaseException:
+                # A skim that failed was billed for what it got.
+                if meter:
+                    _merge_usage(
+                        usage_by_model, usage_model_id, meter_usage_dict(meter)
+                    )
+                raise
             _merge_usage(usage_by_model, usage_model_id, skim_usage)
             return text
 

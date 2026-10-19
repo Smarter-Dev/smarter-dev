@@ -94,6 +94,7 @@ from smarter_dev.bot.proactive.watcher import JevWatcherRunner
 from smarter_dev.bot.proactive.watcher import SkimRunner
 from smarter_dev.bot.proactive.watcher import WatcherRunner
 from smarter_dev.bot.proactive.watcher import merge_usage
+from smarter_dev.bot.proactive.watcher import meter_usage_dict
 from smarter_dev.bot.proactive.windows import JEV_BATCH_SIZE
 from smarter_dev.bot.proactive.windows import JEV_MAX_WAIT_SECONDS
 from smarter_dev.bot.proactive.windows import JEV_QUIET_SECONDS
@@ -105,6 +106,7 @@ from smarter_dev.bot.services.proactive_settings_service import ProactiveSetting
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.retention_policy import AGENT_VERBATIM_IDLE_WINDOW
 from smarter_dev.shared.retention_policy import PROACTIVE_IDLE_SWEEP_TICK
+from smarter_dev.shared.usage_meter import UsageMeter
 
 logger = logging.getLogger(__name__)
 
@@ -711,38 +713,61 @@ class ProactiveRuntime:
         consumer loop (2026-09-01) — and failure degrades to a watcher-model
         skim, then truncation, so neither a wake nor the idle sweep can
         block on summarization. What each model spent is added, by model, to
-        the caller's ``_compaction_spent`` for its usage report."""
+        the caller's ``_compaction_spent`` for its usage report. An attempt
+        that fails or times out after the provider answered (a thinking-only
+        reply cut off at its output limit) was billed all the same: a meter
+        on its model keeps what it got."""
         spent = _compaction_spent.get()
+
+        def bill(model_id: str | None, usage: dict) -> None:
+            if spent is not None and usage:
+                merge_usage(spent, model_id, usage)
+
+        def bill_failed(model_id: str | None, meter: UsageMeter) -> None:
+            if meter:
+                bill(model_id, meter_usage_dict(meter))
+
+        agent_meter = UsageMeter()
         try:
-            summary, usage = await asyncio.wait_for(
-                self_compaction_summary(
-                    build_twopass_model(self.agent_model_id), messages
-                ),
-                timeout=COMPACTION_TIMEOUT_SECONDS,
-            )
+            try:
+                summary, usage = await asyncio.wait_for(
+                    self_compaction_summary(
+                        agent_meter.wrap(
+                            build_twopass_model(self.agent_model_id),
+                            model_name=self.agent_model_id,
+                        ),
+                        messages,
+                    ),
+                    timeout=COMPACTION_TIMEOUT_SECONDS,
+                )
+            except BaseException:
+                bill_failed(self.agent_model_id, agent_meter)
+                raise
+            bill(self.agent_model_id, usage)
             logger.info("proactive self-compaction: %s", _usage_totals(usage))
-            if spent is not None:
-                merge_usage(spent, self.agent_model_id, usage)
             return summary
         except Exception:  # noqa: BLE001 — fall back, never hang a wake
             log_exception(
                 logger,
                 "self-compaction failed; falling back to a watcher-model skim"
             )
+        skim_model_id = self.skim_model_id or self.watcher_model_id
+        skim_meter = UsageMeter()
         try:
             dumped = ModelMessagesTypeAdapter.dump_json(messages).decode()
-            summary, usage = await asyncio.wait_for(
-                self.skim().skim(dumped),
-                timeout=COMPACTION_TIMEOUT_SECONDS,
-            )
+            try:
+                summary, usage = await asyncio.wait_for(
+                    self.skim().skim(dumped, meter=skim_meter),
+                    timeout=COMPACTION_TIMEOUT_SECONDS,
+                )
+            except BaseException:
+                bill_failed(skim_model_id, skim_meter)
+                raise
+            bill(skim_model_id, usage)
             logger.info(
                 "proactive history compaction (skim fallback): %s",
                 _usage_totals(usage),
             )
-            if spent is not None:
-                merge_usage(
-                    spent, self.skim_model_id or self.watcher_model_id, usage
-                )
             return summary
         except Exception:  # noqa: BLE001 — truncation beats a hung agent
             log_exception(
