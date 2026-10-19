@@ -544,6 +544,44 @@ async def test_a_call_that_never_landed_is_failed_and_may_be_retried(
     assert await count(db, ModerationAction) == 1
 
 
+async def test_a_repeated_timeout_is_the_same_request_across_a_second_boundary(
+    discord, db, clock
+):
+    gateway = make_gateway(discord, db, clock)
+    discord.fail["set_timeout"] = ConnectionError("never arrived")
+    clock.now = 1_790_000_000.8
+    first = await gateway.act(
+        handler_trigger(),
+        [Proposal(kind=t.TIMEOUT, target_user_id=SCAMMER, duration_seconds=600)],
+    )
+    assert first.outcomes[0].state == t.UNKNOWN
+    # Its expiry now lands in the next second.
+    clock.now += 0.5
+
+    again = await gateway.act(
+        handler_trigger(),
+        [Proposal(kind=t.TIMEOUT, target_user_id=SCAMMER, duration_seconds=600)],
+    )
+
+    # The failure is injected once, so a second call would have landed.
+    assert again.outcomes[0].state == t.UNKNOWN
+    assert discord.count("timeout") == 0
+    assert await count(db, ModerationOperation) == 1
+
+    # Once reconciled as never applied, the repeat is the one allowed retry.
+    clock.now += 30
+    await gateway.reconcile_pending()
+    retry = await gateway.act(
+        handler_trigger(),
+        [Proposal(kind=t.TIMEOUT, target_user_id=SCAMMER, duration_seconds=600)],
+    )
+
+    assert retry.outcomes[0].state == t.CONFIRMED
+    assert discord.count("timeout") == 1
+    assert await count(db, ModerationOperation) == 1
+    assert await count(db, ModerationAction) == 1
+
+
 # ---------------------------------------------------------------------------
 # Races
 # ---------------------------------------------------------------------------

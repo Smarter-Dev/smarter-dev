@@ -710,7 +710,7 @@ class ModerationGateway:
                 return _Decision(state=t.SKIPPED, detail="not a member")
             return _Decision()
         if kind == t.TIMEOUT:
-            return await self._decide_timeout(trigger, proposal, now)
+            return await self._decide_timeout(trigger, proposal, now, incident_ops)
         if kind == t.UNTIMEOUT:
             return await self._decide_untimeout(trigger, proposal, now)
         if kind in t.CLEANUP_KINDS:
@@ -770,7 +770,11 @@ class ModerationGateway:
             )
 
     async def _decide_timeout(
-        self, trigger: t.Trigger, proposal: t.Proposal, now: float
+        self,
+        trigger: t.Trigger,
+        proposal: t.Proposal,
+        now: float,
+        incident_ops: Sequence[ModerationOperation] = (),
     ) -> _Decision:
         desired = now + int(proposal.duration_seconds or 0)
         state = await self.port.timeout_state(trigger.guild_id, proposal.target_user_id)
@@ -778,6 +782,26 @@ class ModerationGateway:
             return _Decision(state=t.SKIPPED, detail="not a member")
         if trigger.is_manual:
             return _Decision(until=desired)
+        # The same claim asking again while its earlier timeout is in flight,
+        # unknown, or reconciled as never applied is the same request: given
+        # that request's expiry it takes that request's key, so it gets the
+        # earlier outcome (or the retry a reconciliation allows) rather than a
+        # second call. Its own expiry is a little later, and as a key that
+        # would differ whenever the second ticked over in between.
+        for op in incident_ops:
+            same_request = op.state in (t.CLAIMED, t.UNKNOWN) or (
+                op.state == t.FAILED and (op.result or {}).get("reconciled")
+            )
+            if (
+                same_request
+                and op.kind == t.TIMEOUT
+                and op.actor != "manual"
+                and op.claim_key == proposal.claim
+                and op.released_at is None
+                and op.expires_at is not None
+                and op.expires_at >= desired - EXTEND_MIN_SECONDS
+            ):
+                return _Decision(until=op.expires_at)
         current = state.until if state.until and state.until > now else None
         if current is not None:
             if not await self._automation_set(
