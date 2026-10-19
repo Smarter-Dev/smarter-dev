@@ -33,6 +33,7 @@ from smarter_dev.web.bot_admin import proactive_overview
 from smarter_dev.web.bot_admin.proactive_overview import (
     ProactiveChannelsAdminController as Controller,
 )
+from smarter_dev.web.bot_admin.proactive_overview import collect_proactive_overview
 from smarter_dev.web.discord_admin_client import DiscordAdminClient
 from smarter_dev.web.models import ProactiveChannelSettings
 from tests.web.admin_template_rendering import admin_template_source
@@ -75,6 +76,9 @@ class _Discord:
         self.cancelled: list[str] = []
         self.in_flight = 0
         self.peak = 0
+        self.opened = 0
+        self.closed = 0
+        self.first_request = asyncio.Event()
         self.channel_guilds = {
             GENERAL: GUILD,
             HELP: GUILD,
@@ -85,6 +89,7 @@ class _Discord:
     async def handler(self, request: httpx.Request) -> httpx.Response:
         path = request.url.path.removeprefix("/api/v10")
         self.paths.append(path)
+        self.first_request.set()
         self.in_flight += 1
         self.peak = max(self.peak, self.in_flight)
         try:
@@ -139,7 +144,26 @@ class _Discord:
         return httpx.Response(404)
 
     def client(self) -> DiscordAdminClient:
-        return DiscordAdminClient(bot_token="t", transport=httpx.MockTransport(self.handler))
+        return DiscordAdminClient(bot_token="t", transport=_CountingTransport(self))
+
+    @property
+    def open_clients(self) -> int:
+        return self.opened - self.closed
+
+
+class _CountingTransport(httpx.MockTransport):
+    """Counts the HTTP clients opened and closed over it."""
+
+    def __init__(self, rest: _Discord):
+        super().__init__(rest.handler)
+        self.rest = rest
+
+    async def __aenter__(self):
+        self.rest.opened += 1
+        return self
+
+    async def __aexit__(self, *exc_info) -> None:
+        self.rest.closed += 1
 
 
 # Not named "discord": conftest skips any test with that in a fixture name
@@ -150,8 +174,14 @@ def rest():
 
 
 @pytest.fixture(autouse=True)
-def empty_name_cache():
+def fresh_name_lookups(monkeypatch):
+    """An empty name cache, and a limiter bound to this test's event loop."""
     proactive_overview._name_cache.clear()
+    monkeypatch.setattr(
+        proactive_overview,
+        "_name_lookup_gate",
+        asyncio.Semaphore(proactive_overview.NAME_LOOKUP_CONCURRENCY),
+    )
     yield
     proactive_overview._name_cache.clear()
 
@@ -514,10 +544,12 @@ async def test_a_hanging_name_lookup_cannot_hold_the_page(
     assert section.name is None
     assert section.names_unavailable
     assert section.channels[0].channel_id == GENERAL
-    await asyncio.sleep(0.05)  # let the cancellations land
+    # Every lookup was cancelled and awaited before the page returned.
     if hang == "stalled":
         assert sorted(rest.cancelled) == sorted(rest.stalled)
     assert rest.in_flight == 0
+    assert rest.open_clients == 0
+    assert _lookup_tasks() == []
 
 
 async def test_the_lookups_that_answer_in_time_still_name_their_rows(
@@ -590,3 +622,95 @@ async def test_the_enable_check_is_never_cached(db_session, patched, rest):
 
     assert rest.paths.count(f"/channels/{GENERAL}") == 2
     assert await _enabled(db_session, GENERAL) is False
+
+
+def _lookup_tasks() -> list[asyncio.Task]:
+    return [
+        task
+        for task in asyncio.all_tasks()
+        if task.get_name().startswith("proactive-name-lookup:") and not task.done()
+    ]
+
+
+async def _cancel_render_once_discord_is_asked(db_session, rest) -> None:
+    render = asyncio.ensure_future(overview(Controller, _request(), db_session))
+    await asyncio.wait_for(rest.first_request.wait(), 2.0)
+    render.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await render
+
+
+async def test_cancelling_the_render_mid_read_leaves_no_lookup_or_client(
+    db_session, patched, rest
+):
+    await _seed(db_session, (GUILD, GENERAL, True), (OTHER_GUILD, ELSEWHERE, True))
+    rest.stalled.update(
+        {"/users/@me/guilds", f"/guilds/{GUILD}/channels", f"/guilds/{OTHER_GUILD}/channels"}
+    )
+
+    await _cancel_render_once_discord_is_asked(db_session, rest)
+
+    # Checked straight after the cancel, with no sleep.
+    assert _lookup_tasks() == []
+    assert rest.open_clients == 0
+    assert rest.in_flight == 0
+
+
+async def test_cancelling_the_render_while_lookups_queue_leaves_none_behind(
+    db_session, patched, rest, monkeypatch
+):
+    gate = asyncio.Semaphore(1)
+    monkeypatch.setattr(proactive_overview, "_name_lookup_gate", gate)
+    await _seed(db_session, (GUILD, GENERAL, True), (OTHER_GUILD, ELSEWHERE, True))
+    rest.stalled.update(
+        {"/users/@me/guilds", f"/guilds/{GUILD}/channels", f"/guilds/{OTHER_GUILD}/channels"}
+    )
+
+    await _cancel_render_once_discord_is_asked(db_session, rest)
+
+    assert len(rest.paths) == 1  # the other two were still waiting on the limiter
+    assert _lookup_tasks() == []
+    assert rest.open_clients == 0
+    assert not gate.locked()  # the running lookup gave its slot back
+
+
+async def test_one_limiter_covers_concurrent_renders(db_session, patched, rest):
+    guilds = [f"8000000000000000{n:02d}" for n in range(6)]
+    await _seed(db_session, *((guild, f"9{guild[1:]}", True) for guild in guilds))
+    rest.delay = 0.05
+
+    await asyncio.gather(
+        overview(Controller, _request(), db_session),
+        collect_proactive_overview(
+            [SimpleNamespace(guild_id=g, channel_id=f"9{g[1:]}", enabled=True) for g in guilds],
+            rest.client(),
+        ),
+    )
+
+    assert rest.peak == proactive_overview.NAME_LOOKUP_CONCURRENCY
+
+
+def test_the_name_cache_drops_expired_entries_on_write(monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr(proactive_overview, "_clock", lambda: now[0])
+    proactive_overview._cache_names("channels:1", {"1": "one"})
+    now[0] += proactive_overview.NAME_CACHE_SECONDS / 2
+    proactive_overview._cache_names("channels:2", {"2": "two"})
+    now[0] += proactive_overview.NAME_CACHE_SECONDS / 2  # the first has expired
+
+    proactive_overview._cache_names("channels:3", {"3": "three"})
+
+    assert list(proactive_overview._name_cache) == ["channels:2", "channels:3"]
+
+
+def test_the_name_cache_never_exceeds_its_cap_and_drops_the_oldest(monkeypatch):
+    monkeypatch.setattr(proactive_overview, "_clock", lambda: 1000.0)
+    cap = proactive_overview.NAME_CACHE_MAX_ENTRIES
+
+    for n in range(cap + 40):
+        proactive_overview._cache_names(f"channels:{n}", {})
+        assert len(proactive_overview._name_cache) <= cap
+
+    assert len(proactive_overview._name_cache) == cap
+    assert next(iter(proactive_overview._name_cache)) == "channels:40"
+    assert "channels:0" not in proactive_overview._name_cache

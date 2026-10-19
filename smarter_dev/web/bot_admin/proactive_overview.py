@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import OrderedDict
 from collections.abc import Awaitable
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -73,10 +74,14 @@ NAME_DEADLINE_SECONDS = 2.0
 CHANNEL_CHECK_DEADLINE_SECONDS = 5.0
 NAME_LOOKUP_CONCURRENCY = 5
 NAME_CACHE_SECONDS = 300.0
+NAME_CACHE_MAX_ENTRIES = 256
 
-# Only successful lookups are cached: key -> (expires at, names by id).
-_name_cache: dict[str, tuple[float, dict[str, str]]] = {}
+# Only successful lookups are cached: key -> (expires at, names by id),
+# oldest write first.
+_name_cache: OrderedDict[str, tuple[float, dict[str, str]]] = OrderedDict()
 _clock = time.monotonic
+# One limit on Discord name lookups across every render in this process.
+_name_lookup_gate = asyncio.Semaphore(NAME_LOOKUP_CONCURRENCY)
 
 
 @dataclass(frozen=True)
@@ -112,13 +117,24 @@ async def _channel_names(client, guild_id: str) -> dict[str, str]:
     }
 
 
+def _cache_names(key: str, names: dict[str, str]) -> None:
+    now = _clock()
+    for stale in [k for k, (expires, _) in _name_cache.items() if expires <= now]:
+        del _name_cache[stale]
+    _name_cache[key] = (now + NAME_CACHE_SECONDS, names)
+    _name_cache.move_to_end(key)
+    while len(_name_cache) > NAME_CACHE_MAX_ENTRIES:
+        _name_cache.popitem(last=False)
+
+
 async def _lookup_names(
     lookups: dict[str, Callable[[], Awaitable[dict[str, str]]]],
 ) -> dict[str, dict[str, str]]:
     """Run the uncached lookups under one deadline; return what answered.
 
     A failed or unfinished lookup is simply missing from the result (its
-    rows show IDs). Unfinished ones are cancelled at the deadline.
+    rows show IDs). The task group cancels and awaits every lookup on any
+    exit, the deadline or this render being cancelled, so none outlives it.
     """
     now = _clock()
     found: dict[str, dict[str, str]] = {}
@@ -130,32 +146,27 @@ async def _lookup_names(
     if not lookups:
         return found
 
-    gate = asyncio.Semaphore(NAME_LOOKUP_CONCURRENCY)
+    async def run(key: str, lookup) -> None:
+        try:
+            async with _name_lookup_gate:
+                names = await lookup()
+        except Exception as error:  # noqa: BLE001 — names are display only
+            logger.warning(
+                "proactive overview: Discord names unavailable for %s (%s)", key, error
+            )
+            return
+        found[key] = names
+        _cache_names(key, names)
 
-    async def run(lookup):
-        async with gate:
-            return await lookup()
-
-    tasks = {asyncio.ensure_future(run(lookup)): key for key, lookup in lookups.items()}
-    done, pending = await asyncio.wait(tasks, timeout=NAME_DEADLINE_SECONDS)
-    for task in pending:
-        task.cancel()
-    if pending:
+    try:
+        async with asyncio.timeout(NAME_DEADLINE_SECONDS), asyncio.TaskGroup() as group:
+            for key, lookup in lookups.items():
+                group.create_task(run(key, lookup), name=f"proactive-name-lookup:{key}")
+    except TimeoutError:
         logger.warning(
             "proactive overview: Discord names timed out for %s",
-            sorted(tasks[task] for task in pending),
+            sorted(set(lookups) - set(found)),
         )
-    for task in done:
-        key = tasks[task]
-        if task.exception() is not None:
-            logger.warning(
-                "proactive overview: Discord names unavailable for %s (%s)",
-                key,
-                task.exception(),
-            )
-            continue
-        found[key] = task.result()
-        _name_cache[key] = (_clock() + NAME_CACHE_SECONDS, found[key])
     return found
 
 
