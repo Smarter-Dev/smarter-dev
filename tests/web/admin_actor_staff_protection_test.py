@@ -121,6 +121,9 @@ class FakeDiscordApi:
                 if message is None:
                     return httpx.Response(404, json={"code": 10008})
                 return httpx.Response(200, json=message)
+        if method == "DELETE" and parts[:3] == ["guilds", GUILD, "members"]:
+            if len(parts) == 6 and parts[4] == "roles":
+                self.members[parts[3]]["roles"].remove(parts[5])
         if method == "PATCH" and parts[:3] == ["guilds", GUILD, "members"]:
             body = json.loads(request.content)
             return httpx.Response(200, json={"user": {"id": parts[3]}, **body})
@@ -225,6 +228,29 @@ async def test_guild_facts_are_read_once_per_fire(api):
     assert reads.count(f"/guilds/{GUILD}") == 1
     assert reads.count(f"/guilds/{GUILD}/channels") == 1
     assert reads.count("/users/@me") == 1
+
+
+async def test_stripping_a_staff_role_does_not_clear_the_member_in_that_fire(api):
+    actor = _actor(api)
+
+    assert await actor.remove_role(STAFF_ROLE_HOLDER, "644301991832453120") is True
+    out = await actor.ban_user(STAFF_ROLE_HOLDER, "scam")
+
+    assert out.startswith("not banned")
+    assert api.mutations == [
+        (
+            "DELETE",
+            f"/guilds/{GUILD}/members/{STAFF_ROLE_HOLDER}/roles/644301991832453120",
+        )
+    ]
+
+
+async def test_stripping_an_ordinary_role_leaves_the_member_actionable(api):
+    actor = _actor(api)
+
+    assert await actor.remove_role(MEMBER, "51") is True
+
+    assert await actor.ban_user(MEMBER, "scam") == f"banned {MEMBER}"
 
 
 # -- message deletes -------------------------------------------------------------

@@ -23,6 +23,10 @@ MESSAGE_ID = "777"
 TARGET_ID = 222
 
 
+async def _no_staff_roles(guild_id):
+    return ()
+
+
 async def _allowed(guild_id, tool):
     return None
 
@@ -35,6 +39,7 @@ def _tool(bot, name, enabled):
         trigger_message_id=None,
         enabled_tools=enabled,
         config_gate=_allowed,
+        staff_roles=_no_staff_roles,
     )
     return next(t.function for t in tools if t.name == name), tracker
 

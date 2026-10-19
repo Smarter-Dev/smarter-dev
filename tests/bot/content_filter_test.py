@@ -5,7 +5,8 @@ detection, sanitization, notice + mod-log formatting) is exercised directly with
 plain strings — no Discord, no database. The listener shell
 (:func:`check_content_filters`) is then tested over fakes to prove the wiring:
 every toggle, every exemption, and the failure paths that must not abort the
-remaining filters.
+remaining filters. The fake bot has no cache, so the shared staff rule reads the
+guild (owner, roles, channel overwrites) and the author from the fake REST.
 """
 
 from __future__ import annotations
@@ -19,7 +20,6 @@ import pytest
 
 from smarter_dev.bot import content_filter
 from smarter_dev.bot.content_filter import ContentFilterResult
-from smarter_dev.bot.content_filter import author_is_staff_exempt
 from smarter_dev.bot.content_filter import build_blocked_tld_notice
 from smarter_dev.bot.content_filter import build_invite_notice
 from smarter_dev.bot.content_filter import build_mod_log_line
@@ -35,7 +35,6 @@ from smarter_dev.bot.content_filter import find_invite_links
 from smarter_dev.bot.content_filter import find_webhook_url_candidates
 from smarter_dev.bot.content_filter import is_discord_webhook_url
 from smarter_dev.bot.content_filter import link_host
-from smarter_dev.bot.content_filter import member_has_manage_messages
 from smarter_dev.bot.content_filter import normalize_webhook_url
 from smarter_dev.bot.content_filter import parse_discord_webhook_url
 from smarter_dev.bot.content_filter import sanitize_links
@@ -50,6 +49,10 @@ AUTHOR_ID = 111
 MESSAGE_ID = 999
 STAFF_ROLE_ID = 222
 MOD_LOG_CHANNEL_ID = 333
+BOT_USER_ID = 444
+OWNER_ID = 1
+#: Hardcoded in the shared staff rule; not in the guild's configured exemptions.
+HARDCODED_STAFF_ROLE_ID = 644390354157568014
 
 WEBHOOK_URL = "https://discord.com/api/webhooks/123456789/abcDEF-_token"
 
@@ -340,47 +343,10 @@ def test_build_webhook_kill_reason_lists_ids_without_tokens():
 # --------------------------------------------------------------------------
 
 
-def test_author_is_staff_exempt_compares_ids_as_strings():
-    assert author_is_staff_exempt(["222"], ["222", "333"]) is True
-    assert author_is_staff_exempt(["999"], ["222"]) is False
-    assert author_is_staff_exempt([], ["222"]) is False
-
-
 def test_category_is_invite_exempt_handles_missing_parent():
     assert category_is_invite_exempt("888", ["888"]) is True
     assert category_is_invite_exempt("777", ["888"]) is False
     assert category_is_invite_exempt(None, ["888"]) is False
-
-
-def _role(permissions: hikari.Permissions) -> SimpleNamespace:
-    return SimpleNamespace(permissions=permissions)
-
-
-def test_member_has_manage_messages_via_role_owner_and_administrator():
-    manage_role = _role(hikari.Permissions.MANAGE_MESSAGES)
-    admin_role = _role(hikari.Permissions.ADMINISTRATOR)
-    plain_role = _role(hikari.Permissions.SEND_MESSAGES)
-
-    def guild_with(roles: dict) -> SimpleNamespace:
-        return SimpleNamespace(owner_id=1, get_role=roles.get)
-
-    member = SimpleNamespace(id=AUTHOR_ID, role_ids=[7])
-
-    assert member_has_manage_messages(guild_with({7: manage_role}), member) is True
-    assert member_has_manage_messages(guild_with({7: admin_role}), member) is True
-    assert member_has_manage_messages(guild_with({7: plain_role}), member) is False
-    # Unknown role id resolves to None and must not explode.
-    assert member_has_manage_messages(guild_with({}), member) is False
-
-    owner = SimpleNamespace(id=1, role_ids=[])
-    assert member_has_manage_messages(guild_with({}), owner) is True
-
-
-def test_member_has_manage_messages_fails_closed_without_a_member():
-    guild = SimpleNamespace(owner_id=1, get_role=lambda role_id: None)
-
-    assert member_has_manage_messages(guild, None) is False
-    assert member_has_manage_messages(None, SimpleNamespace(id=2, role_ids=[])) is False
 
 
 # --------------------------------------------------------------------------
@@ -389,7 +355,13 @@ def test_member_has_manage_messages_fails_closed_without_a_member():
 
 
 class _FakeRest:
-    """Records every REST call the filters make, optionally failing them."""
+    """Records every REST call the filters make, optionally failing them.
+
+    ``roles`` (role id -> permissions; @everyone's id is the guild's),
+    ``overwrites`` (one dict per channel, target id -> (allow, deny)) and
+    ``members`` (user id -> role ids) are the guild the staff rule reads.
+    ``guild_error`` makes the guild read fail.
+    """
 
     def __init__(
         self,
@@ -398,7 +370,15 @@ class _FakeRest:
         delete_webhook_error: Exception | None = None,
         fetch_channel_error: Exception | None = None,
         channel: object | None = None,
+        roles: dict[int, hikari.Permissions] | None = None,
+        overwrites: list[dict] | None = None,
+        members: dict[int, list[int]] | None = None,
+        guild_error: Exception | None = None,
     ) -> None:
+        self.roles = {GUILD_ID: hikari.Permissions.SEND_MESSAGES, **(roles or {})}
+        self.overwrites = overwrites or [{}]
+        self.members = {AUTHOR_ID: []} if members is None else members
+        self._guild_error = guild_error
         self.created_messages: list[tuple[int, str, dict]] = []
         self.deleted_messages: list[tuple[int, int]] = []
         self.deleted_webhooks: list[tuple[str, str]] = []
@@ -428,6 +408,47 @@ class _FakeRest:
             raise self._fetch_channel_error
         return self._channel
 
+    def _role_objects(self) -> dict:
+        return {
+            role_id: SimpleNamespace(id=role_id, permissions=permissions)
+            for role_id, permissions in self.roles.items()
+        }
+
+    async def fetch_guild(self, guild):
+        if self._guild_error is not None:
+            raise self._guild_error
+        return SimpleNamespace(owner_id=OWNER_ID, roles=self._role_objects())
+
+    async def fetch_roles(self, guild):
+        return list(self._role_objects().values())
+
+    async def fetch_guild_channels(self, guild):
+        return [
+            SimpleNamespace(
+                permission_overwrites={
+                    target: SimpleNamespace(allow=allow, deny=deny)
+                    for target, (allow, deny) in channel.items()
+                }
+            )
+            for channel in self.overwrites
+        ]
+
+    async def fetch_member(self, guild, user):
+        if int(user) not in self.members:
+            raise _not_found()
+        return SimpleNamespace(
+            id=int(user), role_ids=self.members[int(user)], is_bot=False
+        )
+
+    async def fetch_user(self, user):
+        return SimpleNamespace(id=int(user), is_bot=False)
+
+
+def _bot(*, rest: _FakeRest, **extra) -> SimpleNamespace:
+    return SimpleNamespace(
+        rest=rest, get_me=lambda: SimpleNamespace(id=BOT_USER_ID), **extra
+    )
+
 
 def _not_found() -> hikari.NotFoundError:
     return hikari.NotFoundError(url="https://discord.test", headers={}, raw_body="")
@@ -454,15 +475,15 @@ def _make_event(
     *,
     is_bot: bool = False,
     role_ids: tuple[int, ...] = (),
-    roles: dict | None = None,
     parent_id: int | None = CATEGORY_ID,
     member_cached: bool = True,
     channel_cached: bool = True,
 ) -> SimpleNamespace:
-    guild = SimpleNamespace(owner_id=1, get_role=(roles or {}).get)
     channel = SimpleNamespace(id=CHANNEL_ID, parent_id=parent_id)
     member = (
-        SimpleNamespace(id=AUTHOR_ID, role_ids=list(role_ids)) if member_cached else None
+        SimpleNamespace(id=AUTHOR_ID, role_ids=list(role_ids), is_bot=is_bot)
+        if member_cached
+        else None
     )
     return SimpleNamespace(
         is_bot=is_bot,
@@ -472,7 +493,6 @@ def _make_event(
         author_id=AUTHOR_ID,
         member=member,
         message=SimpleNamespace(id=MESSAGE_ID, content=content),
-        get_guild=lambda: guild,
         get_channel=lambda: channel if channel_cached else None,
     )
 
@@ -540,7 +560,7 @@ async def test_bot_authored_message_is_never_filtered(filter_env):
     rest = _FakeRest()
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest), _make_event("https://evil.gay/free", is_bot=True)
+        _bot(rest=rest), _make_event("https://evil.gay/free", is_bot=True)
     )
 
     assert result == ContentFilterResult()
@@ -552,7 +572,7 @@ async def test_missing_config_short_circuits(filter_env):
     rest = _FakeRest()
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest), _make_event("https://evil.gay/free")
+        _bot(rest=rest), _make_event("https://evil.gay/free")
     )
 
     assert result.took_action is False
@@ -564,7 +584,7 @@ async def test_disabled_content_filter_short_circuits(filter_env):
     rest = _FakeRest()
 
     await check_content_filters(
-        SimpleNamespace(rest=rest), _make_event(f"https://evil.gay/free {WEBHOOK_URL}")
+        _bot(rest=rest), _make_event(f"https://evil.gay/free {WEBHOOK_URL}")
     )
 
     assert rest.deleted_messages == []
@@ -580,7 +600,7 @@ async def test_blocked_tld_deletes_notifies_logs_and_records_action(filter_env):
     rest = _FakeRest()
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest), _make_event("free stuff https://evil.gay/free")
+        _bot(rest=rest), _make_event("free stuff https://evil.gay/free")
     )
 
     assert result.blocked_tld_links == ("https://evil.gay/free",)
@@ -611,7 +631,7 @@ async def test_filter_delete_dispatches_with_the_bot_so_it_reaches_the_event_log
     filter_env,
 ):
     """The chat agent has to be able to own a filter delete it made."""
-    bot = SimpleNamespace(rest=_FakeRest(), d={})
+    bot = _bot(rest=_FakeRest(), d={})
 
     await check_content_filters(bot, _make_event("https://evil.gay/free"))
 
@@ -625,7 +645,7 @@ async def test_blocked_tld_without_mod_log_channel_still_deletes(filter_env):
     rest = _FakeRest()
 
     await check_content_filters(
-        SimpleNamespace(rest=rest), _make_event("https://evil.gay/free")
+        _bot(rest=rest), _make_event("https://evil.gay/free")
     )
 
     assert rest.deleted_messages == [(CHANNEL_ID, MESSAGE_ID)]
@@ -636,7 +656,7 @@ async def test_staff_role_author_is_exempt_from_every_filter(filter_env):
     rest = _FakeRest()
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest),
+        _bot(rest=rest),
         _make_event(
             f"https://evil.gay/free discord.gg/abc123 {WEBHOOK_URL}",
             role_ids=(STAFF_ROLE_ID,),
@@ -649,29 +669,110 @@ async def test_staff_role_author_is_exempt_from_every_filter(filter_env):
     assert filter_env.recorded_actions == []
 
 
-async def test_manage_messages_author_is_exempt_from_every_filter(filter_env):
-    rest = _FakeRest()
-    event = _make_event(
-        f"https://evil.gay/free discord.gg/abc123 {WEBHOOK_URL}",
-        role_ids=(42,),
-        roles={42: _role(hikari.Permissions.MANAGE_MESSAGES)},
-    )
+EVERY_FILTER = f"https://evil.gay/free discord.gg/abc123 {WEBHOOK_URL}"
 
-    result = await check_content_filters(SimpleNamespace(rest=rest), event)
 
+def _untouched(result: ContentFilterResult, rest: _FakeRest, filter_env) -> None:
     assert result.took_action is False
     assert rest.deleted_messages == []
+    assert rest.deleted_webhooks == []
+    assert rest.created_messages == []
+    assert filter_env.recorded_actions == []
 
 
-async def test_uncached_member_fails_closed_and_message_is_scanned(filter_env):
+async def test_hardcoded_staff_role_is_exempt_without_any_configured_role(filter_env):
+    # A staff-role moderator with only Moderate Members, and no exempt roles set.
+    filter_env.config = _config(staff_exempt_role_ids=[])
+    rest = _FakeRest(roles={HARDCODED_STAFF_ROLE_ID: hikari.Permissions.MODERATE_MEMBERS})
+    event = _make_event(EVERY_FILTER, role_ids=(HARDCODED_STAFF_ROLE_ID,))
+
+    result = await check_content_filters(_bot(rest=rest), event)
+
+    _untouched(result, rest, filter_env)
+
+
+@pytest.mark.parametrize(
+    "permission",
+    [
+        hikari.Permissions.MANAGE_MESSAGES,
+        hikari.Permissions.MODERATE_MEMBERS,
+        hikari.Permissions.KICK_MEMBERS,
+        hikari.Permissions.ADMINISTRATOR,
+    ],
+)
+async def test_staff_permission_author_is_exempt_from_every_filter(
+    filter_env, permission
+):
+    rest = _FakeRest(roles={42: permission})
+    event = _make_event(EVERY_FILTER, role_ids=(42,))
+
+    result = await check_content_filters(_bot(rest=rest), event)
+
+    _untouched(result, rest, filter_env)
+
+
+async def test_staff_permission_in_one_channel_exempts_the_author(filter_env):
+    rest = _FakeRest(
+        overwrites=[
+            {},
+            {AUTHOR_ID: (hikari.Permissions.MANAGE_MESSAGES, hikari.Permissions.NONE)},
+        ]
+    )
+
+    result = await check_content_filters(_bot(rest=rest), _make_event(EVERY_FILTER))
+
+    _untouched(result, rest, filter_env)
+
+
+async def test_guild_owner_is_exempt(filter_env):
+    rest = _FakeRest()
+    event = _make_event(EVERY_FILTER)
+    event.author.id = event.member.id = OWNER_ID
+
+    result = await check_content_filters(_bot(rest=rest), event)
+
+    _untouched(result, rest, filter_env)
+
+
+async def test_ordinary_role_author_is_filtered(filter_env):
+    rest = _FakeRest(roles={42: hikari.Permissions.SEND_MESSAGES})
+    event = _make_event("https://evil.gay/free", role_ids=(42,))
+
+    result = await check_content_filters(_bot(rest=rest), event)
+
+    assert result.message_deleted is True
+    assert rest.deleted_messages == [(CHANNEL_ID, MESSAGE_ID)]
+
+
+async def test_uncached_member_is_read_over_rest_and_filtered(filter_env):
     rest = _FakeRest()
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest),
+        _bot(rest=rest),
         _make_event("https://evil.gay/free", member_cached=False),
     )
 
     assert result.blocked_tld_links == ("https://evil.gay/free",)
+    assert result.message_deleted is True
+
+
+async def test_an_author_whose_standing_cannot_be_checked_is_left_alone(filter_env):
+    # Like every automated actor: unknown counts as protected.
+    rest = _FakeRest(guild_error=_forbidden())
+
+    result = await check_content_filters(
+        _bot(rest=rest), _make_event("https://evil.gay/free")
+    )
+
+    _untouched(result, rest, filter_env)
+
+
+async def test_clean_message_never_asks_the_staff_rule(filter_env):
+    rest = _FakeRest(guild_error=AssertionError("the staff rule ran"))
+
+    result = await check_content_filters(_bot(rest=rest), _make_event("hello there"))
+
+    assert result == ContentFilterResult()
 
 
 # --------------------------------------------------------------------------
@@ -683,7 +784,7 @@ async def test_invite_link_deletes_notifies_and_logs(filter_env):
     rest = _FakeRest()
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest), _make_event("join discord.gg/abc123")
+        _bot(rest=rest), _make_event("join discord.gg/abc123")
     )
 
     assert result.invite_links == ("discord.gg/abc123",)
@@ -697,7 +798,7 @@ async def test_invite_in_exempt_category_is_allowed(filter_env):
     rest = _FakeRest()
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest), _make_event("join discord.gg/abc123")
+        _bot(rest=rest), _make_event("join discord.gg/abc123")
     )
 
     assert result.took_action is False
@@ -709,7 +810,7 @@ async def test_invite_category_is_resolved_by_rest_when_channel_is_uncached(filt
     rest = _FakeRest(channel=SimpleNamespace(id=CHANNEL_ID, parent_id=CATEGORY_ID))
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest),
+        _bot(rest=rest),
         _make_event("join discord.gg/abc123", channel_cached=False),
     )
 
@@ -727,7 +828,7 @@ async def test_unresolvable_exemption_channel_never_aborts_the_other_filters(
     rest = _FakeRest(fetch_channel_error=fetch_error)
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest),
+        _bot(rest=rest),
         _make_event(
             f"https://evil.gay/free discord.gg/abc123 {WEBHOOK_URL}",
             channel_cached=False,
@@ -748,7 +849,7 @@ async def test_disabled_invite_filter_leaves_invites_alone(filter_env):
     rest = _FakeRest()
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest), _make_event("join discord.gg/abc123")
+        _bot(rest=rest), _make_event("join discord.gg/abc123")
     )
 
     assert result.took_action is False
@@ -766,7 +867,7 @@ async def test_leaked_webhook_is_killed_audited_logged_and_the_message_removed(
     rest = _FakeRest()
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest), _make_event(f"oops {WEBHOOK_URL} {WEBHOOK_URL}")
+        _bot(rest=rest), _make_event(f"oops {WEBHOOK_URL} {WEBHOOK_URL}")
     )
 
     # The duplicate URL is killed once.
@@ -801,7 +902,7 @@ async def test_already_dead_webhook_is_still_audited_and_removed(filter_env):
     rest = _FakeRest(delete_webhook_error=_not_found())
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest), _make_event(f"oops {WEBHOOK_URL}")
+        _bot(rest=rest), _make_event(f"oops {WEBHOOK_URL}")
     )
 
     assert result.already_dead_webhook_urls == (WEBHOOK_URL,)
@@ -824,7 +925,7 @@ async def test_common_leak_shapes_are_killed_not_silently_rejected(
     rest = _FakeRest()
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest), _make_event(f"oops {leaked_url}")
+        _bot(rest=rest), _make_event(f"oops {leaked_url}")
     )
 
     assert rest.deleted_webhooks == [("123456789", "abcDEF-_token")]
@@ -837,7 +938,7 @@ async def test_webhook_shaped_link_on_a_foreign_host_deletes_nothing(filter_env)
     rest = _FakeRest()
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest),
+        _bot(rest=rest),
         _make_event("leak https://DISCORD.COM.evil.com/api/webhooks/1/tok"),
     )
 
@@ -853,7 +954,7 @@ async def test_non_discord_webhook_url_is_rejected_without_any_rest_call(filter_
     rest = _FakeRest()
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest),
+        _bot(rest=rest),
         _make_event("leak https://evil.example.com/api/webhooks/1/tok"),
     )
 
@@ -867,7 +968,7 @@ async def test_webhook_delete_404_is_an_expected_outcome_not_a_crash(filter_env)
     rest = _FakeRest(delete_webhook_error=_not_found())
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest), _make_event(f"oops {WEBHOOK_URL}")
+        _bot(rest=rest), _make_event(f"oops {WEBHOOK_URL}")
     )
 
     assert result.killed_webhook_urls == ()
@@ -883,7 +984,7 @@ async def test_webhook_delete_401_is_treated_as_a_dead_webhook_not_a_crash(filte
     )
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest), _make_event(f"oops {WEBHOOK_URL}")
+        _bot(rest=rest), _make_event(f"oops {WEBHOOK_URL}")
     )
 
     assert result.killed_webhook_urls == ()
@@ -895,7 +996,7 @@ async def test_disabled_webhook_killer_leaves_the_webhook_alive(filter_env):
     rest = _FakeRest()
 
     await check_content_filters(
-        SimpleNamespace(rest=rest), _make_event(f"oops {WEBHOOK_URL}")
+        _bot(rest=rest), _make_event(f"oops {WEBHOOK_URL}")
     )
 
     assert rest.deleted_webhooks == []
@@ -910,7 +1011,7 @@ async def test_already_deleted_message_does_not_abort_the_remaining_filters(filt
     rest = _FakeRest(delete_message_error=_not_found())
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest),
+        _bot(rest=rest),
         _make_event(f"https://evil.gay/free discord.gg/abc123 {WEBHOOK_URL}"),
     )
 
@@ -925,7 +1026,7 @@ async def test_one_delete_serves_both_content_filters(filter_env):
     rest = _FakeRest()
 
     await check_content_filters(
-        SimpleNamespace(rest=rest),
+        _bot(rest=rest),
         _make_event("https://evil.gay/free discord.gg/abc123"),
     )
 
@@ -943,7 +1044,7 @@ async def test_missing_send_permission_is_logged_not_raised(filter_env):
     rest = _ForbiddenRest()
 
     result = await check_content_filters(
-        SimpleNamespace(rest=rest), _make_event("https://evil.gay/free")
+        _bot(rest=rest), _make_event("https://evil.gay/free")
     )
 
     assert result.message_deleted is True
@@ -955,7 +1056,7 @@ async def test_database_failure_recording_the_action_is_not_swallowed(filter_env
 
     with pytest.raises(DatabaseOperationError):
         await check_content_filters(
-            SimpleNamespace(rest=rest), _make_event("https://evil.gay/free")
+            _bot(rest=rest), _make_event("https://evil.gay/free")
         )
 
     # The user-visible enforcement still happened before the write failed.
@@ -980,7 +1081,7 @@ async def test_missing_config_is_logged_once_per_guild_at_info(filter_env, caplo
     content_filter.config_skip_log.reset()
     caplog.set_level(logging.INFO, logger="smarter_dev.bot.moderation_config_skips")
     filter_env.config = None
-    bot = SimpleNamespace(rest=_FakeRest())
+    bot = _bot(rest=_FakeRest())
 
     for _ in range(5):
         await check_content_filters(bot, _make_event("https://evil.gay/free"))
@@ -994,7 +1095,7 @@ async def test_missing_config_is_logged_once_per_guild_at_info(filter_env, caplo
 async def test_skip_reason_change_and_rerun_are_logged_again(filter_env, caplog):
     content_filter.config_skip_log.reset()
     caplog.set_level(logging.INFO, logger="smarter_dev.bot.moderation_config_skips")
-    bot = SimpleNamespace(rest=_FakeRest())
+    bot = _bot(rest=_FakeRest())
     missing_line = (
         f"Content filters: skipping guild {GUILD_ID}, "
         "which has no moderation_filter_configs row."

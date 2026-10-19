@@ -1,8 +1,8 @@
 """Who automated moderation may never act on.
 
-Every automated actor (spam engine, attachment filter, spam ring, AI triage,
-admin-handler scripts) asks this one rule before it times out, bans, kicks,
-warns or deletes a message of a member. Protected are:
+Every automated actor (content filter, spam engine, attachment filter, spam
+ring, AI triage, admin-handler scripts) asks this one rule before it times out,
+bans, kicks, warns or deletes a message of a member. Protected are:
 
 * the bot itself, and any other bot;
 * the guild owner;

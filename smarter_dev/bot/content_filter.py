@@ -13,7 +13,9 @@ webhook-URL validation, invite detection, sanitization and message formatting â€
 is a pure module-level function with no Discord and no database dependency, unit
 tested directly. :func:`check_content_filters` is a thin shell that reads the
 per-guild :class:`ModerationFilterConfig`, applies the exemptions, and performs
-the REST side effects.
+the REST side effects. Staff are exempt by the shared rule in
+:mod:`smarter_dev.bot.staff_protection`, asked only once a filter has fired; an
+author whose standing cannot be established is left alone like staff.
 
 Error policy (deliberately unlike ``attachment_filter.py``): nothing is wrapped
 in a bare ``except Exception``. The expected REST outcomes are caught â€” a 404
@@ -39,6 +41,7 @@ from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
 from smarter_dev.bot.moderation_config_skips import SKIP_REASON_NO_CONFIG
 from smarter_dev.bot.moderation_config_skips import ModerationConfigSkipLog
 from smarter_dev.bot.moderation_config_skips import skip_reason_disabled
+from smarter_dev.bot.staff_protection import staff_refusal
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.web.crud import ModerationActionOperations
@@ -412,14 +415,6 @@ def build_webhook_kill_reason(webhook_ids: list[str]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def author_is_staff_exempt(
-    author_role_ids: list[str], staff_exempt_role_ids: list[str]
-) -> bool:
-    """True when the author holds any configured staff-exempt role."""
-    exempt = {str(role_id) for role_id in staff_exempt_role_ids}
-    return any(str(role_id) in exempt for role_id in author_role_ids)
-
-
 def category_is_invite_exempt(
     parent_category_id: str | None, exempt_category_ids: list[str]
 ) -> bool:
@@ -433,29 +428,6 @@ def category_is_invite_exempt(
     return str(parent_category_id) in {
         str(category_id) for category_id in exempt_category_ids
     }
-
-
-def member_has_manage_messages(
-    guild: hikari.Guild | None, member: hikari.Member | None
-) -> bool:
-    """True when ``member`` can manage messages in ``guild``.
-
-    Guild owners and administrators implicitly hold the permission. A missing
-    guild or an uncached member fails closed (``False``) so an unknown author is
-    filtered rather than trusted.
-    """
-    if guild is None or member is None:
-        return False
-    if guild.owner_id == member.id:
-        return True
-    permissions = hikari.Permissions.NONE
-    for role_id in member.role_ids:
-        role = guild.get_role(role_id)
-        if role is not None:
-            permissions |= role.permissions
-    if permissions & hikari.Permissions.ADMINISTRATOR:
-        return True
-    return bool(permissions & hikari.Permissions.MANAGE_MESSAGES)
 
 
 # ---------------------------------------------------------------------------
@@ -494,9 +466,6 @@ async def check_content_filters(
         return ContentFilterResult()
     config_skip_log.running(guild_id)
 
-    if _author_is_exempt(event, config):
-        return ContentFilterResult()
-
     blocked_tld_links = find_blocked_tld_links(content, config.blocked_tlds)
     invite_links = find_invite_links(content) if config.invite_filter_enabled else []
     if invite_links and await _invite_is_category_exempt(bot, event, config):
@@ -511,6 +480,8 @@ async def check_content_filters(
         logger.warning("Ignoring non-Discord webhook-shaped URL: %r", rejected_url)
 
     if not (blocked_tld_links or invite_links or webhook_candidates):
+        return ContentFilterResult()
+    if await _author_is_staff(bot, event, config):
         return ContentFilterResult()
 
     # One delete serves every filter that fired. A leaked webhook URL is removed
@@ -607,15 +578,28 @@ async def _load_config(guild_id: str) -> ModerationFilterConfig | None:
         return await moderation_filter_config_ops.get_config(session, guild_id)
 
 
-def _author_is_exempt(
-    event: hikari.GuildMessageCreateEvent, config: ModerationFilterConfig
+async def _author_is_staff(
+    bot: RESTAware,
+    event: hikari.GuildMessageCreateEvent,
+    config: ModerationFilterConfig,
 ) -> bool:
-    """True when the author is staff and skips every content filter."""
-    member = event.member
-    author_role_ids = [str(role_id) for role_id in member.role_ids] if member else []
-    if author_is_staff_exempt(author_role_ids, config.staff_exempt_role_ids):
-        return True
-    return member_has_manage_messages(event.get_guild(), member)
+    """True when the shared staff rule protects the author; staff skip every filter."""
+    refusal = await staff_refusal(
+        bot,
+        event.guild_id,
+        event.author.id,
+        member=event.member,
+        user_is_bot=event.author.is_bot,
+        extra_role_ids=[str(role_id) for role_id in config.staff_exempt_role_ids or []],
+    )
+    if refusal is not None:
+        logger.debug(
+            "Content filter skipped message %s: author %s is protected (%s)",
+            event.message.id,
+            event.author.id,
+            refusal,
+        )
+    return refusal is not None
 
 
 async def _invite_is_category_exempt(

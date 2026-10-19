@@ -20,6 +20,10 @@ def _snowflake_for(dt: datetime) -> int:
     return (int(dt.timestamp() * 1000) - DISCORD_EPOCH_MS) << 22
 
 
+async def _no_staff_roles(guild_id):
+    return ()
+
+
 async def _allowed(guild_id, tool):
     return None
 
@@ -32,6 +36,7 @@ def _get_purge_tool(bot):
         trigger_message_id=None,
         enabled_tools=["purge"],
         config_gate=_allowed,
+        staff_roles=_no_staff_roles,
     )
     purge = next(t.function for t in tools if t.name == "purge_messages")
     return purge, tracker

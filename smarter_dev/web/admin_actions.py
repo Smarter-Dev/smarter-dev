@@ -107,6 +107,9 @@ class AdminActor(DiscordBotClient):
     # One fire's worth: an actor lives for a single handler fire.
     _own_user_id: str | None = field(default=None, init=False)
     _guild_facts: GuildFacts | None = field(default=None, init=False)
+    # Refusals stick for the fire, so stripping a staff role and then acting
+    # on the member in the same fire still refuses.
+    _refusals: dict[str, str] = field(default_factory=dict, init=False)
 
     user_agent: ClassVar[str] = "SmarterDev-AdminHandlers/1.0"
     error_type: ClassVar[type[DiscordRestError]] = AdminActionError
@@ -156,7 +159,12 @@ class AdminActor(DiscordBotClient):
     async def remove_role(
         self, user_id: str, role_id: str, reason: str | None = None
     ) -> bool:
-        """Revoke a role from a member. A gone member (404) -> False (no-op)."""
+        """Revoke a role from a member. A gone member (404) -> False (no-op).
+
+        Not refused for staff, but their standing is checked first so it
+        holds for the rest of the fire (see ``_refusals``).
+        """
+        await self.staff_refusal(user_id)
         return await self._mutate_role("DELETE", user_id, role_id, reason)
 
     async def _mutate_role(
@@ -301,9 +309,17 @@ class AdminActor(DiscordBotClient):
 
         The shared rule, fed over REST: the member, the guild (owner and roles)
         and every channel's overwrites. Never raises; a failed lookup is an
-        "could not be checked" refusal.
+        "could not be checked" refusal. A refusal is kept for the fire.
         """
         uid = str(user_id)
+        if uid not in self._refusals:
+            refusal = await self._check_staff(uid, is_bot=is_bot)
+            if refusal is None:
+                return None
+            self._refusals[uid] = refusal
+        return self._refusals[uid]
+
+    async def _check_staff(self, uid: str, *, is_bot: bool | None) -> str | None:
         try:
             bot_user_id = await self._bot_user_id()
             if uid == bot_user_id:

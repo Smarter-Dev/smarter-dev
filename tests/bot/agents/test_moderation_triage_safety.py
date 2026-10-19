@@ -38,6 +38,7 @@ from smarter_dev.bot.agents import moderation_agent
 from smarter_dev.bot.plugins import mod_monitor
 from smarter_dev.bot.purge_core import DISCORD_EPOCH_MS
 from smarter_dev.web.models import ModerationConfig
+from smarter_dev.web.models import ModerationFilterConfig
 from tests.bot.fake_discord import BOT_ID
 from tests.bot.fake_discord import GUILD_ID
 from tests.bot.fake_discord import OWNER_ID
@@ -56,6 +57,7 @@ STAFF_IN_ONE_CHANNEL = 3005
 OTHER_BOT = 3006
 HELPER_ROLE_ID = 7001
 JANITOR_ROLE_ID = 7002  # Manage Messages, nothing else
+EXEMPT_ROLE_ID = 7003  # no permissions; staff only by the guild's config
 
 
 def snowflake(minutes_ago: float, salt: int = 0) -> int:
@@ -76,6 +78,7 @@ def discord() -> FakeDiscord:
             HELPER_ROLE_ID: hikari.Permissions.SEND_MESSAGES,
             JANITOR_ROLE_ID: hikari.Permissions.MANAGE_MESSAGES,
             MOD_ROLE_ID: hikari.Permissions.NONE,
+            EXEMPT_ROLE_ID: hikari.Permissions.NONE,
         }
     )
     discord.channels.append(
@@ -101,7 +104,8 @@ def discord() -> FakeDiscord:
 
 @pytest.fixture
 def stored(monkeypatch):
-    """The guild's moderation_configs row, read through the real loader."""
+    """The guild's moderation_configs row and filter config (its staff-exempt
+    roles), read through the real loaders."""
     state = SimpleNamespace(
         row=ModerationConfig(
             guild_id=str(GUILD_ID),
@@ -112,8 +116,12 @@ def stored(monkeypatch):
             context_message_limit=25,
             response_channel_id=str(REPORT_CHANNEL_ID),
         ),
+        filter_row=ModerationFilterConfig(
+            guild_id=str(GUILD_ID), staff_exempt_role_ids=[]
+        ),
         reads=0,
         fail=None,
+        filter_fail=None,
     )
 
     @contextlib.asynccontextmanager
@@ -126,8 +134,16 @@ def stored(monkeypatch):
             raise state.fail
         return state.row if guild_id == str(GUILD_ID) else None
 
+    async def get_filter_config(session, guild_id):
+        if state.filter_fail is not None:
+            raise state.filter_fail
+        return state.filter_row if guild_id == str(GUILD_ID) else None
+
     monkeypatch.setattr(triage_config, "get_db_session_context", session)
     monkeypatch.setattr(triage_config._config_ops, "get_config", get_config)
+    monkeypatch.setattr(
+        triage_config._filter_config_ops, "get_config", get_filter_config
+    )
     return state
 
 
@@ -420,13 +436,61 @@ async def test_a_protected_members_message_is_never_deleted(discord, stored, tar
     assert discord.destructive == []
 
 
-async def test_a_webhook_message_is_not_deleted(discord, stored):
-    discord.add_message(424242, 88888, webhook_id=88888, is_bot=False)
+@pytest.mark.parametrize("is_bot", [False, True])
+async def test_a_webhook_message_is_deleted(discord, stored, is_bot):
+    # A scam posted through a leaked webhook: no member behind it to protect.
+    discord.add_message(424242, 88888, webhook_id=88888, is_bot=is_bot)
+    tools, tracker = _tools(discord)
+
+    result = await tools["delete_message"]("424242", "scam")
+
+    assert result["success"] is True
+    assert discord.destructive == [("delete_message", 424242)]
+    assert [d["message_id"] for d in tracker.deletions] == ["424242"]
+
+
+async def test_the_bots_own_interaction_response_is_not_deleted(discord, stored):
+    discord.add_message(424242, BOT_ID, webhook_id=BOT_ID)
     tools, _ = _tools(discord)
 
     result = await tools["delete_message"]("424242", "spam")
 
     assert result["success"] is False
+    assert discord.destructive == []
+
+
+@pytest.mark.parametrize("configured", [False, True])
+async def test_a_role_the_guild_configured_as_staff_exempt_protects(
+    discord, stored, configured
+):
+    discord.add_member(3010, role_ids=(EXEMPT_ROLE_ID,), username="exempt")
+    discord.add_message(424242, 3010)
+    if configured:
+        stored.filter_row.staff_exempt_role_ids = [str(EXEMPT_ROLE_ID)]
+    tools, _ = _tools(discord)
+
+    results = [
+        await tools["timeout_user"]("3010", "10m", "spam"),
+        await tools["purge_messages"]("3010", 10, "spam"),
+        await tools["delete_message"]("424242", "spam"),
+    ]
+
+    if configured:
+        assert [r["success"] for r in results] == [False, False, False]
+        assert all("holds a staff role" in r["error"] for r in results)
+        assert discord.destructive == []
+    else:
+        assert [r["success"] for r in results] == [True, True, True]
+
+
+async def test_unreadable_staff_exempt_roles_refuse(discord, stored):
+    stored.filter_fail = RuntimeError("db down")
+    tools, _ = _tools(discord)
+
+    result = await tools["timeout_user"](str(SPAMMER), "10m", "spam")
+
+    assert result["success"] is False
+    assert "could not be checked" in result["error"]
     assert discord.destructive == []
 
 

@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.crud import ModerationConfigOperations
+from smarter_dev.web.crud import ModerationFilterConfigOperations
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ DESTRUCTIVE_TOOLS = ("timeout", "purge", "delete")
 DEFAULT_CONTEXT_MESSAGE_LIMIT = 25
 
 _config_ops = ModerationConfigOperations()
+_filter_config_ops = ModerationFilterConfigOperations()
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,3 +91,16 @@ async def tool_refusal(guild_id: str, tool: str) -> str | None:
     if tool not in config.enabled_tools:
         return f"The {tool} action is not enabled for this server; no action taken."
     return None
+
+
+async def staff_exempt_role_ids(guild_id: str) -> tuple[str, ...]:
+    """The guild's configured extra staff roles; raises on DB errors.
+
+    They live on the filter config (the content filter, spam engine and spam
+    ring read the same column), so triage protects the same people they do.
+    """
+    async with get_db_session_context() as session:
+        config = await _filter_config_ops.get_config(session, str(guild_id))
+        if config is None:
+            return ()
+        return tuple(str(role_id) for role_id in config.staff_exempt_role_ids or [])

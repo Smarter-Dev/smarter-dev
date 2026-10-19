@@ -12,8 +12,9 @@ create_mention_tools in tools.py.
 
 Every destructive tool runs the same checks, in this order, before it calls
 Discord: the action limit, its arguments, the staff-protection rule on its
-target (:func:`smarter_dev.bot.staff_protection.staff_refusal`; for a delete,
-the message's author), and a fresh read of the guild's config (still active,
+target (:func:`smarter_dev.bot.staff_protection.staff_refusal`, with the
+guild's configured staff-exempt roles; for a delete, the message's author, unless
+a webhook posted it), and a fresh read of the guild's config (still active,
 tool still enabled). Only then is an action slot reserved.
 """
 
@@ -39,9 +40,12 @@ from smarter_dev.bot.purge_core import (
 )
 from smarter_dev.bot.staff_protection import staff_refusal
 from smarter_dev.bot.triage_config import enabled_destructive_tools
+from smarter_dev.bot.triage_config import staff_exempt_role_ids
 from smarter_dev.bot.triage_config import tool_refusal
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.guild_event_log import mod_action_event
+from smarter_dev.shared.staff_protection import BOT_ITSELF
+from smarter_dev.shared.staff_protection import unknown
 from smarter_dev.web.crud import ModerationActionOperations
 from smarter_dev.web.models import ModerationAction
 
@@ -75,6 +79,8 @@ DISCORD_EPOCH_MS = 1420070400000
 
 # (guild_id, tool) -> why the tool may not run right now, or None.
 ConfigGate = Callable[[str, str], Awaitable[str | None]]
+# guild_id -> the guild's configured staff-exempt role ids.
+StaffRoles = Callable[[str], Awaitable[tuple[str, ...]]]
 
 
 @dataclass
@@ -212,6 +218,7 @@ def create_moderation_tools(
     trigger_message_id: str | None = None,
     enabled_tools: list[str] | None = None,
     config_gate: ConfigGate | None = None,
+    staff_roles: StaffRoles | None = None,
 ) -> tuple[list[Tool], ActionTracker]:
     """Create context-bound triage tools for the AI moderation agent.
 
@@ -227,12 +234,15 @@ def create_moderation_tools(
             None or [] offers none; the utility tools are always included.
         config_gate: Asked right before each destructive call whether the
             guild's config still allows it. Defaults to a fresh database read.
+        staff_roles: The guild's configured staff-exempt role ids, asked on
+            each target check. Defaults to a fresh database read.
 
     Returns:
         Tuple of (tools list, ActionTracker)
     """
     enabled = set(enabled_destructive_tools(enabled_tools))
     gate = config_gate or tool_refusal
+    read_staff_roles = staff_roles or staff_exempt_role_ids
     tracker = ActionTracker()
     action_count = 0
 
@@ -262,8 +272,16 @@ def create_moderation_tools(
         user_id: str, *, user_is_bot: bool | None = None
     ) -> str | None:
         """Why the target may not be moderated, or None when they may."""
+        try:
+            extra_role_ids = await read_staff_roles(guild_id)
+        except Exception as e:  # noqa: BLE001 — unknown protects
+            logger.warning(
+                f"[ModTool] staff-exempt roles for guild {guild_id} unreadable: "
+                f"{type(e).__name__}"
+            )
+            return f"Cannot moderate this user: {unknown('configured staff roles unreadable')}."
         refusal = await staff_refusal(
-            bot, guild_id, user_id, user_is_bot=user_is_bot
+            bot, guild_id, user_id, user_is_bot=user_is_bot, extra_role_ids=extra_role_ids
         )
         if refusal is None:
             return None
@@ -508,12 +526,20 @@ def create_moderation_tools(
         except Exception as e:
             logger.error(f"[ModTool] delete_message failed: {type(e).__name__}")
             return {"success": False, "error": str(e)}
-        # A webhook's message has no member behind it to check; it counts as a
-        # bot's and is refused like one.
-        author_is_bot = bool(message.author.is_bot) or message.webhook_id is not None
-        perm_msg = await _check_target_permissions(
-            str(message.author.id), user_is_bot=author_is_bot
-        )
+        # A webhook's message has no member behind it to protect: scam posts
+        # through a leaked webhook are deleted like a member's. The bot's own
+        # (an interaction response carries a webhook id) is still refused.
+        if message.webhook_id is not None:
+            me = bot.get_me()
+            perm_msg = (
+                f"Cannot moderate this user: {BOT_ITSELF}."
+                if me is None or str(message.author.id) == str(me.id)
+                else None
+            )
+        else:
+            perm_msg = await _check_target_permissions(
+                str(message.author.id), user_is_bot=bool(message.author.is_bot)
+            )
         if perm_msg:
             return {"success": False, "error": perm_msg}
         entry = {"message_id": message_id, "reason": reason}
