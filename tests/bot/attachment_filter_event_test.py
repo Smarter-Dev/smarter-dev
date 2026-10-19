@@ -15,6 +15,8 @@ import pytest
 
 from smarter_dev.bot import attachment_filter
 from smarter_dev.web.models import AttachmentFilterConfig
+from tests.bot.fake_discord import FakeDiscord
+from tests.bot.fake_discord import server_error
 
 GUILD_ID = 100
 CHANNEL_ID = 200
@@ -45,6 +47,14 @@ class _FakeBot:
     def __init__(self) -> None:
         self.rest = _FakeRest()
         self.d: dict = {}
+        # The guild the staff-protection check reads; the uploader is an
+        # ordinary member unless a test says otherwise.
+        self.discord = FakeDiscord(guild_id=GUILD_ID)
+        self.discord.add_member(AUTHOR_ID)
+        self.cache = self.discord.cache
+
+    def get_me(self):
+        return self.discord.get_me()
 
 
 class _FakeMessage:
@@ -67,7 +77,7 @@ def _event(*filenames: str, delete_error: Exception | None = None):
         guild_id=GUILD_ID,
         channel_id=CHANNEL_ID,
         message=message,
-        author=SimpleNamespace(id=AUTHOR_ID, username="uploader"),
+        author=SimpleNamespace(id=AUTHOR_ID, username="uploader", is_bot=False),
         get_guild=lambda: None,
     )
 
@@ -148,3 +158,32 @@ async def test_a_delete_that_failed_is_never_remembered(filter_env):
     assert await attachment_filter.check_attachment_filter(bot, event) is False
 
     assert filter_env.recorded_events == []
+
+
+async def test_staff_get_the_notice_but_keep_their_message(filter_env):
+    bot = _FakeBot()
+    bot.discord.roles[901] = hikari.Permissions.MANAGE_WEBHOOKS
+    bot.discord.add_member(AUTHOR_ID, role_ids=(901,))
+    event = _event("payload.exe")
+
+    assert await attachment_filter.check_attachment_filter(bot, event) is True
+
+    assert event.message.deleted is False
+    assert filter_env.recorded_events == []
+    assert len(bot.rest.created_messages) == 1
+
+
+async def test_an_uploader_who_cannot_be_checked_keeps_their_message(filter_env):
+    bot = _FakeBot()
+    bot.discord.cached = False
+
+    async def discord_down(*args, **kwargs):
+        raise server_error()
+
+    bot.rest.fetch_member = discord_down
+    event = _event("payload.exe")
+
+    assert await attachment_filter.check_attachment_filter(bot, event) is True
+
+    assert event.message.deleted is False
+    assert len(bot.rest.created_messages) == 1

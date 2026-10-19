@@ -89,7 +89,7 @@ from smarter_dev.bot.purge_core import delete_selected_messages
 from smarter_dev.bot.purge_core import snowflake_to_datetime
 from smarter_dev.bot.spam_engine import build_jump_link
 from smarter_dev.bot.spam_engine import extract_links
-from smarter_dev.bot.spam_engine import resolve_member_permissions
+from smarter_dev.bot.staff_protection import staff_refusal
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.guild_event_log import mod_action_event
@@ -235,48 +235,6 @@ def joined_near_participant(
     if joined_at is None:
         return False
     return any(abs(joined_at - other) <= proximity for other in participant_joins)
-
-
-#: Any of these, at guild level or in the channel, makes a member staff.
-STAFF_PERMISSIONS = (
-    hikari.Permissions.ADMINISTRATOR
-    | hikari.Permissions.MANAGE_MESSAGES
-    | hikari.Permissions.MODERATE_MEMBERS
-    | hikari.Permissions.KICK_MEMBERS
-    | hikari.Permissions.BAN_MEMBERS
-)
-
-
-def has_staff_permissions(permissions: hikari.Permissions) -> bool:
-    return bool(permissions & STAFF_PERMISSIONS)
-
-
-def apply_channel_overwrites(
-    base: hikari.Permissions,
-    overwrites: Mapping,
-    *,
-    everyone_id: str,
-    role_ids: Iterable[str],
-    member_id: str,
-) -> hikari.Permissions:
-    """Discord's overwrite order: @everyone, then the member's roles, then them.
-
-    ``overwrites`` maps a snowflake to an object with ``allow`` and ``deny``.
-    """
-    by_id = {str(key): value for key, value in overwrites.items()}
-    permissions = base
-    if everyone := by_id.get(everyone_id):
-        permissions = (permissions & ~everyone.deny) | everyone.allow
-    allow = hikari.Permissions.NONE
-    deny = hikari.Permissions.NONE
-    for role_id in role_ids:
-        if role := by_id.get(str(role_id)):
-            allow |= role.allow
-            deny |= role.deny
-    permissions = (permissions & ~deny) | allow
-    if member := by_id.get(member_id):
-        permissions = (permissions & ~member.deny) | member.allow
-    return permissions
 
 
 # ---------------------------------------------------------------------------
@@ -1066,21 +1024,15 @@ async def check_spam_ring(
     settings = await load_spam_ring_settings(str(guild_id))
     if not settings.enabled:
         return None
-    guild = event.get_guild()
-    if guild is None:
-        # Staff exemption cannot be checked without the guild; never act blind.
-        logger.warning(
-            "Spam ring skipped message %s: guild %s not cached",
-            event.message_id,
-            guild_id,
-        )
-        return None
-    if is_staff_member(
+    # Staff, and anyone whose standing cannot be established, are never
+    # actioned (smarter_dev.shared.staff_protection).
+    if await staff_refusal(
         bot,
-        guild,
-        member,
-        channel_id=channel_id,
-        staff_exempt_role_ids=settings.staff_exempt_role_ids,
+        guild_id,
+        event.author.id,
+        member=member,
+        user_is_bot=False,
+        extra_role_ids=settings.staff_exempt_role_ids,
     ):
         return None
 
@@ -1129,9 +1081,7 @@ async def check_spam_ring(
             return None
         if not verdict.acted_on(AD_MIN_CONFIDENCE):
             return None
-        incident = await _sweep(
-            bot, event, settings, guild, joined_at, now_dt, timestamp
-        )
+        incident = await _sweep(bot, event, settings, joined_at, now_dt, timestamp)
         registry.open_incident(incident)
         return SpamRingResult(action="swept", incident=incident)
 
@@ -1160,70 +1110,18 @@ def _to_transcript_message(message) -> TranscriptMessage:
     )
 
 
-def _channel_overwrites(bot: BotApp, channel_id: str) -> Mapping | None:
-    """The permission overwrites of a cached channel (a thread's parent's)."""
-    cache = getattr(bot, "cache", None)
-    if cache is None:
-        return None
-    try:
-        channel = cache.get_guild_channel(int(channel_id))
-        if channel is None and hasattr(cache, "get_thread"):
-            thread = cache.get_thread(int(channel_id))
-            if thread is not None:
-                channel = cache.get_guild_channel(int(thread.parent_id))
-    except Exception:  # noqa: BLE001 — no overwrites is the guild-level answer
-        return None
-    return getattr(channel, "permission_overwrites", None)
-
-
-def is_staff_member(
-    bot: BotApp,
-    guild,
-    member,
-    *,
-    channel_id: str,
-    staff_exempt_role_ids: Sequence[str],
-) -> bool:
-    """Staff by role, guild permissions, or permissions in this channel.
-
-    An uncached guild or member resolves to no permissions; callers fail closed
-    by not acting when the guild is missing.
-    """
-    role_ids = tuple(str(role_id) for role_id in member.role_ids)
-    if set(role_ids) & set(staff_exempt_role_ids):
-        return True
-    guild_permissions = resolve_member_permissions(guild, member)
-    everyone = guild.get_role(guild.id) if getattr(guild, "id", None) else None
-    if everyone is not None:
-        guild_permissions |= everyone.permissions
-    if has_staff_permissions(guild_permissions):
-        return True
-    overwrites = _channel_overwrites(bot, channel_id)
-    if not overwrites:
-        return False
-    return has_staff_permissions(
-        apply_channel_overwrites(
-            guild_permissions,
-            overwrites,
-            everyone_id=str(getattr(guild, "id", "")),
-            role_ids=role_ids,
-            member_id=str(member.id),
-        )
-    )
-
-
 async def _resolve_author(
     bot: BotApp,
-    guild,
     guild_id: int,
-    channel_id: str,
     user,
     staff_exempt_role_ids: Sequence[str],
 ) -> AuthorFacts:
     """Join time and staff status for one author, cache first.
 
     A lookup that fails for any reason but "not a member" leaves the join time
-    unknown, which never counts as new: the author is not a candidate.
+    unknown, which never counts as new: the author is not a candidate. Staff
+    status is the shared protection rule; an author it cannot clear counts as
+    staff.
     """
     user_id = int(user.id)
     member = None
@@ -1243,15 +1141,13 @@ async def _resolve_author(
                 user_id,
                 level=logging.WARNING,
             )
-    is_staff = member is not None and (
-        bool(user.is_bot)
-        or is_staff_member(
-            bot,
-            guild,
-            member,
-            channel_id=channel_id,
-            staff_exempt_role_ids=staff_exempt_role_ids,
-        )
+    refusal = await staff_refusal(
+        bot,
+        guild_id,
+        user_id,
+        member=member,
+        user_is_bot=bool(user.is_bot),
+        extra_role_ids=staff_exempt_role_ids,
     )
     return AuthorFacts(
         user_id=str(user_id),
@@ -1260,7 +1156,7 @@ async def _resolve_author(
         joined_at=getattr(member, "joined_at", None) if member else None,
         departed=departed,
         is_bot=bool(user.is_bot),
-        is_staff=is_staff,
+        is_staff=refusal is not None,
     )
 
 
@@ -1360,7 +1256,6 @@ async def _sweep(
     bot: BotApp,
     event: hikari.GuildMessageCreateEvent,
     settings: SpamRingSettings,
-    guild,
     ad_author_joined_at: datetime | None,
     now: datetime,
     timestamp: float,
@@ -1398,9 +1293,7 @@ async def _sweep(
         if author_id not in authors and getattr(message, "webhook_id", None) is None:
             authors[author_id] = await _resolve_author(
                 bot,
-                guild,
                 int(event.guild_id),
-                channel_id,
                 message.author,
                 settings.staff_exempt_role_ids,
             )

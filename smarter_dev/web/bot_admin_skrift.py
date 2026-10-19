@@ -156,14 +156,8 @@ class BotAdminController(Controller):
             response_channel_id=response_channel_id,
             context_message_limit=context_message_limit,
         )
+        # The bot reads this row on each monitored ping and again before each
+        # destructive triage action, so committing is all a save needs.
         await db_session.commit()
-
-        # Refresh the bot's in-memory cache
-        try:
-            from smarter_dev.bot.plugins.mod_monitor import refresh_config
-            import asyncio
-            asyncio.create_task(refresh_config(guild_id))
-        except ImportError:
-            pass  # Bot not running in this process
 
         return Redirect(path=f"/admin/bot/moderation/{guild_id}")

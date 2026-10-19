@@ -3,7 +3,8 @@
 Three-tier filtering approach:
 1. Ignored extensions - Completely allowed, no action
 2. Warn extensions - Send warning but don't delete
-3. All others (blocked) - Delete + warn (or just warn if user has manage_messages)
+3. All others (blocked) - Delete + warn (or just warn if the author is protected
+   staff: see smarter_dev.shared.staff_protection)
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from typing import TYPE_CHECKING
 import hikari
 
 from smarter_dev.bot.guild_event_recorder import record_guild_event
+from smarter_dev.bot.staff_protection import staff_refusal
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.exception_logging import log_exception
 from smarter_dev.shared.guild_event_log import mod_action_event
@@ -35,7 +37,7 @@ async def check_attachment_filter(
     Tiers:
     1. Ignored extensions - No action taken
     2. Warn extensions - Send warning, don't delete
-    3. Blocked (all others) - Delete + warn (or just warn if user has manage_messages)
+    3. Blocked (all others) - Delete + warn (or just warn if the author is protected staff)
 
     Args:
         bot: The bot instance
@@ -94,35 +96,28 @@ async def check_attachment_filter(
 
             user_mention = f"<@{event.author.id}>"
 
-            # Check if user has manage_messages permission (exempt from deletion)
-            user_has_manage_messages = False
-            try:
-                guild = event.get_guild()
-                if guild:
-                    member = guild.get_member(event.author.id)
-                    if member:
-                        # Check member permissions
-                        permissions = hikari.Permissions.NONE
-                        for role_id in member.role_ids:
-                            role = guild.get_role(role_id)
-                            if role:
-                                permissions |= role.permissions
-                        # Also check if user is guild owner
-                        if guild.owner_id == event.author.id:
-                            user_has_manage_messages = True
-                        elif permissions & hikari.Permissions.MANAGE_MESSAGES:
-                            user_has_manage_messages = True
-            except Exception as e:
-                logger.error(f"Error checking user permissions: {type(e).__name__}")
+            # Staff only ever get the notice, never the delete; an author whose
+            # standing cannot be established counts as staff. Only a blocked
+            # attachment needs the check.
+            author_is_protected = False
+            if blocked_attachments:
+                refusal = await staff_refusal(
+                    bot,
+                    event.guild_id,
+                    event.author.id,
+                    member=getattr(event, "member", None),
+                    user_is_bot=event.author.is_bot,
+                )
+                author_is_protected = refusal is not None
 
             # Determine action based on worst tier found
             # Blocked takes precedence over warn
-            should_delete = bool(blocked_attachments) and not user_has_manage_messages
+            should_delete = bool(blocked_attachments) and not author_is_protected
 
             # Get the attachment to report (prioritize blocked over warned)
             if blocked_attachments:
                 reported = blocked_attachments[0]
-                is_blocked = not user_has_manage_messages  # True if actually deleted
+                is_blocked = not author_is_protected  # True if actually deleted
             else:
                 reported = warn_attachments[0]
                 is_blocked = False  # Warn-only extensions are never deleted

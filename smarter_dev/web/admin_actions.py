@@ -5,10 +5,19 @@ functions: ban, kick, timeout, delete-message, delete-webhook, plus the mod-audi
 reads (``get_member_info`` / ``search_guild_members``). Each is a single bot-token
 REST call. Standard (member) handlers never get an ``AdminActor`` and so can't
 reach any of this.
+
+Ban, kick, timeout and a member's message delete first ask
+:meth:`AdminActor.staff_refusal` (the shared rule in
+``smarter_dev.shared.staff_protection``). A protected target is a no-op that
+returns a "not ..." result instead of raising, so the script carries on to its
+report. A message by a bot or a webhook has no member behind it to punish:
+deleting it is channel upkeep (the Disboard tracker clears Disboard's notices
+and its own reminders) and is not refused.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import datetime
@@ -18,10 +27,20 @@ from typing import ClassVar
 from urllib.parse import quote
 
 from smarter_dev.shared.guild_event_log import mod_action_event
+from smarter_dev.shared.staff_protection import A_BOT
+from smarter_dev.shared.staff_protection import BOT_ITSELF
+from smarter_dev.shared.staff_protection import GuildFacts
+from smarter_dev.shared.staff_protection import MemberFacts
+from smarter_dev.shared.staff_protection import Overwrite
+from smarter_dev.shared.staff_protection import member_refusal
+from smarter_dev.shared.staff_protection import non_member_refusal
+from smarter_dev.shared.staff_protection import unknown
 from smarter_dev.web.discord_rest import DiscordBotClient
 from smarter_dev.web.discord_rest import DiscordRestError
 from smarter_dev.web.guild_event_recorder import record_guild_event
 from smarter_dev.web.webhook_urls import parse_discord_webhook_url
+
+logger = logging.getLogger(__name__)
 
 # Discord channel types 10/11/12: announcement, public, and private threads.
 _THREAD_CHANNEL_TYPES = frozenset({10, 11, 12})
@@ -85,6 +104,12 @@ class AdminActor(DiscordBotClient):
 
     guild_id: str
     _verified_thread_ids: set[str] = field(default_factory=set, init=False)
+    # One fire's worth: an actor lives for a single handler fire.
+    _own_user_id: str | None = field(default=None, init=False)
+    _guild_facts: GuildFacts | None = field(default=None, init=False)
+    # Refusals stick for the fire, so stripping a staff role and then acting
+    # on the member in the same fire still refuses.
+    _refusals: dict[str, str] = field(default_factory=dict, init=False)
 
     user_agent: ClassVar[str] = "SmarterDev-AdminHandlers/1.0"
     error_type: ClassVar[type[DiscordRestError]] = AdminActionError
@@ -102,6 +127,8 @@ class AdminActor(DiscordBotClient):
         is no longer in the guild) is already true, so it must not abort the
         rest of the script. Other failures still raise.
         """
+        if refusal := await self.staff_refusal(user_id):
+            return f"not banned: {user_id} is protected ({refusal})"
         # Discord expects the audit-log reason URL-encoded; encoding also keeps
         # non-latin-1 reasons (em dashes, emoji) out of raw header bytes.
         headers = (
@@ -132,7 +159,12 @@ class AdminActor(DiscordBotClient):
     async def remove_role(
         self, user_id: str, role_id: str, reason: str | None = None
     ) -> bool:
-        """Revoke a role from a member. A gone member (404) -> False (no-op)."""
+        """Revoke a role from a member. A gone member (404) -> False (no-op).
+
+        Not refused for staff, but their standing is checked first so it
+        holds for the rest of the fire (see ``_refusals``).
+        """
+        await self.staff_refusal(user_id)
         return await self._mutate_role("DELETE", user_id, role_id, reason)
 
     async def _mutate_role(
@@ -161,6 +193,8 @@ class AdminActor(DiscordBotClient):
 
     async def kick_user(self, user_id: str) -> str:
         """Kick a member; a member who already left is a successful no-op."""
+        if refusal := await self.staff_refusal(user_id):
+            return f"not kicked: {user_id} is protected ({refusal})"
         try:
             await self._request(
                 "DELETE", f"/guilds/{self.guild_id}/members/{user_id}"
@@ -174,6 +208,8 @@ class AdminActor(DiscordBotClient):
 
     async def timeout_user(self, user_id: str, duration_seconds: int = 600) -> str:
         """Timeout a member; a member who already left is a successful no-op."""
+        if refusal := await self.staff_refusal(user_id):
+            return f"not timed out: {user_id} is protected ({refusal})"
         until = datetime.now(timezone.utc) + timedelta(seconds=int(duration_seconds))
         if await self.set_timeout_until(user_id, until, int(duration_seconds)) is None:
             return f"timeout target {user_id} already absent"
@@ -187,6 +223,10 @@ class AdminActor(DiscordBotClient):
         Returns the expiry Discord stored, which is what a later
         ``timeout_until`` reads back — so a caller can tell this timeout from
         one somebody else set since.
+
+        No staff check here: callers that start a timeout (``timeout_user``,
+        ``MemberHolds.hold``) check first, and a hold's release uses this to
+        hand back a timeout that was already in place.
         """
         try:
             response = await self._request(
@@ -234,7 +274,25 @@ class AdminActor(DiscordBotClient):
         return f"removed timeout for {user_id}"
 
     async def delete_message(self, channel_id: str, message_id: str) -> str:
-        """Delete a message; an already-deleted target is a successful no-op."""
+        """Delete a message; an already-deleted target is a successful no-op.
+
+        A member's message is deleted only when its author is not protected;
+        a bot's or a webhook's is upkeep and always deleted.
+        """
+        try:
+            response = await self._request(
+                "GET", f"/channels/{channel_id}/messages/{message_id}"
+            )
+        except AdminActionError as error:
+            if error.status_code == 404:
+                return f"message {message_id} already deleted"
+            raise
+        message = response.json()
+        author = message.get("author") or {}
+        if not (author.get("bot") or message.get("webhook_id")):
+            refusal = await self.staff_refusal(str(author.get("id", "")), is_bot=False)
+            if refusal:
+                return f"not deleted: the author of message {message_id} is protected ({refusal})"
         try:
             await self._request(
                 "DELETE", f"/channels/{channel_id}/messages/{message_id}"
@@ -245,6 +303,89 @@ class AdminActor(DiscordBotClient):
             raise
         await self._remember_action("delete", None, channel_id=channel_id)
         return f"deleted message {message_id}"
+
+    async def staff_refusal(self, user_id: str, *, is_bot: bool | None = None) -> str | None:
+        """Why automation may not act on this user, or None when it may.
+
+        The shared rule, fed over REST: the member, the guild (owner and roles)
+        and every channel's overwrites. Never raises; a failed lookup is an
+        "could not be checked" refusal. A refusal is kept for the fire.
+        """
+        uid = str(user_id)
+        if uid not in self._refusals:
+            refusal = await self._check_staff(uid, is_bot=is_bot)
+            if refusal is None:
+                return None
+            self._refusals[uid] = refusal
+        return self._refusals[uid]
+
+    async def _check_staff(self, uid: str, *, is_bot: bool | None) -> str | None:
+        try:
+            bot_user_id = await self._bot_user_id()
+            if uid == bot_user_id:
+                return BOT_ITSELF
+            if is_bot:
+                return A_BOT
+            try:
+                response = await self._request(
+                    "GET", f"/guilds/{self.guild_id}/members/{uid}"
+                )
+            except AdminActionError as error:
+                if error.status_code != 404:
+                    raise
+                if is_bot is None:
+                    user = (await self._request("GET", f"/users/{uid}")).json()
+                    is_bot = bool(user.get("bot", False))
+                return non_member_refusal(uid, is_bot=is_bot, bot_user_id=bot_user_id)
+            member = response.json()
+            facts = MemberFacts(
+                user_id=uid,
+                is_bot=bool((member.get("user") or {}).get("bot", False)),
+                role_ids=tuple(str(role_id) for role_id in member.get("roles", [])),
+            )
+            return member_refusal(
+                facts, await self._protection_guild_facts(), bot_user_id=bot_user_id
+            )
+        except Exception as error:  # noqa: BLE001 — unknown protects
+            logger.warning(
+                "Staff protection check for user %s in guild %s failed: %s",
+                uid,
+                self.guild_id,
+                type(error).__name__,
+            )
+            return unknown(type(error).__name__)
+
+    async def _bot_user_id(self) -> str:
+        if self._own_user_id is None:
+            response = await self._request("GET", "/users/@me")
+            self._own_user_id = str(response.json()["id"])
+        return self._own_user_id
+
+    async def _protection_guild_facts(self) -> GuildFacts:
+        if self._guild_facts is None:
+            guild = (await self._request("GET", f"/guilds/{self.guild_id}")).json()
+            channels = (
+                await self._request("GET", f"/guilds/{self.guild_id}/channels")
+            ).json()
+            self._guild_facts = GuildFacts(
+                guild_id=str(self.guild_id),
+                owner_id=str(guild["owner_id"]) if guild.get("owner_id") else None,
+                role_permissions={
+                    str(role["id"]): int(role["permissions"])
+                    for role in guild.get("roles", [])
+                },
+                channel_overwrites=tuple(
+                    {
+                        str(entry["id"]): Overwrite(
+                            allow=int(entry.get("allow", 0)),
+                            deny=int(entry.get("deny", 0)),
+                        )
+                        for entry in channel.get("permission_overwrites") or []
+                    }
+                    for channel in channels
+                ),
+            )
+        return self._guild_facts
 
     async def _remember_action(
         self,

@@ -96,6 +96,9 @@ class _Actor:
     write_gate: asyncio.Event | None = None
     write_started: asyncio.Event = field(default_factory=asyncio.Event)
 
+    async def staff_refusal(self, user_id, *, is_bot=None):
+        return None  # the poster is an ordinary member
+
     async def timeout_until(self, user_id):
         return self.until
 

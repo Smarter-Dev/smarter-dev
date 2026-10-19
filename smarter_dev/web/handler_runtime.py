@@ -864,7 +864,9 @@ class HandlerExecution:
         The handler-tier twin of ``/warn``, so the two produce the same record
         and the same mod-log fire. Returns ``{"message_id", "dm_sent",
         "warn_count"}``; ``warn_count`` is the target's authoritative total AFTER
-        this warn, so a script can escalate on it.
+        this warn, so a script can escalate on it. A protected target is not
+        warned: the result carries ``"refused"`` with the reason and a
+        ``warn_count`` of 0.
 
         Ordering matters and is deliberate:
 
@@ -910,6 +912,15 @@ class HandlerExecution:
             )
         target_user = str(user_id)
         reason_text = str(reason)
+        # A protected member (staff, a bot, or anyone the shared rule cannot
+        # clear) gets no notice, row or DM; the script sees why and carries on.
+        if refusal := await self.actor.staff_refusal(target_user):
+            return {
+                "message_id": "",
+                "dm_sent": False,
+                "warn_count": 0,
+                "refused": f"{target_user} is protected ({refusal})",
+            }
         notice = f"⚠️ <@{target_user}> has been warned.\n**Reason:** {reason_text}"
         # Only forward an explicit channel: the default path must keep
         # _send_message's raise-on-4xx home-channel contract.

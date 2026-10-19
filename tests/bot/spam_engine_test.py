@@ -18,6 +18,8 @@ import pytest
 from smarter_dev.bot import spam_engine
 from smarter_dev.web.models import DEFAULT_SCAM_LINK_DOMAINS
 from smarter_dev.web.models import ModerationFilterConfig
+from tests.bot.fake_discord import FakeDiscord
+from tests.bot.fake_discord import overwrite
 
 GUILD_ID = 100
 CHANNEL_ID = 200
@@ -703,41 +705,6 @@ def test_guild_state_prune_drops_expired_warnings_and_mutes():
 
 
 # ---------------------------------------------------------------------------
-# Author exemption
-# ---------------------------------------------------------------------------
-
-
-def test_bot_authors_are_exempt():
-    assert spam_engine.is_exempt_author(
-        is_bot=True, has_manage_messages=False, author_role_ids=(), staff_exempt_role_ids=()
-    ) is True
-
-
-def test_manage_messages_holders_are_exempt():
-    assert spam_engine.is_exempt_author(
-        is_bot=False, has_manage_messages=True, author_role_ids=(), staff_exempt_role_ids=()
-    ) is True
-
-
-def test_configured_staff_roles_are_exempt():
-    assert spam_engine.is_exempt_author(
-        is_bot=False,
-        has_manage_messages=False,
-        author_role_ids=("1", "2"),
-        staff_exempt_role_ids=("2", "3"),
-    ) is True
-
-
-def test_ordinary_members_are_not_exempt():
-    assert spam_engine.is_exempt_author(
-        is_bot=False,
-        has_manage_messages=False,
-        author_role_ids=("1",),
-        staff_exempt_role_ids=("2",),
-    ) is False
-
-
-# ---------------------------------------------------------------------------
 # Listener shell
 # ---------------------------------------------------------------------------
 
@@ -771,21 +738,12 @@ class _FakeRest:
 class _FakeBot:
     def __init__(self, rest: _FakeRest) -> None:
         self.rest = rest
+        # The guild the staff-protection check reads (roles, channels, owner).
+        self.discord = FakeDiscord(guild_id=GUILD_ID)
+        self.cache = self.discord.cache
 
     def get_me(self):
         return SimpleNamespace(id=1, username="smarter-dev")
-
-
-class _FakeGuild:
-    def __init__(self, role_permissions: dict[int, hikari.Permissions], owner_id: int = 0) -> None:
-        self._role_permissions = role_permissions
-        self.owner_id = owner_id
-
-    def get_role(self, role_id):
-        permissions = self._role_permissions.get(int(role_id))
-        if permissions is None:
-            return None
-        return SimpleNamespace(id=role_id, permissions=permissions)
 
 
 def _event(
@@ -796,10 +754,8 @@ def _event(
     author_id: int = AUTHOR_ID,
     is_bot: bool = False,
     role_ids: tuple[int, ...] = (),
-    role_permissions: dict[int, hikari.Permissions] | None = None,
 ):
-    guild = _FakeGuild(role_permissions or {})
-    member = SimpleNamespace(id=author_id, role_ids=list(role_ids))
+    member = SimpleNamespace(id=author_id, role_ids=list(role_ids), is_bot=is_bot)
     return SimpleNamespace(
         guild_id=GUILD_ID,
         channel_id=channel_id,
@@ -807,7 +763,6 @@ def _event(
         content=content,
         author=SimpleNamespace(id=author_id, username="spammer", is_bot=is_bot),
         member=member,
-        get_guild=lambda: guild,
     )
 
 
@@ -915,13 +870,13 @@ async def test_bot_authors_are_skipped(engine_harness):
 
 async def test_manage_messages_holders_are_skipped(engine_harness):
     role_permissions = {STAFF_ROLE_ID + 1: hikari.Permissions.MANAGE_MESSAGES}
+    engine_harness.bot.discord.roles.update(role_permissions)
     for index in range(10):
         decision = await spam_engine.check_spam_engine(
             engine_harness.bot,
             _event(
                 f"spam {index}",
                 role_ids=(STAFF_ROLE_ID + 1,),
-                role_permissions=role_permissions,
             ),
             state=engine_harness.state,
             now=NOW + index * 0.1,
@@ -942,6 +897,80 @@ async def test_configured_staff_role_is_skipped(engine_harness):
 
     assert decision.action == spam_engine.SPAM_ACTION_NONE
     assert engine_harness.rest.created_messages == []
+
+
+async def _scam_flood(harness, **event_kwargs) -> spam_engine.SpamDecision:
+    """A scam link that mutes and deletes at once (see the ordinary-member test)."""
+    return await spam_engine.check_spam_engine(
+        harness.bot,
+        _event("claim it https://dlscord.gift/abc123", **event_kwargs),
+        state=harness.state,
+        now=NOW,
+    )
+
+
+def _nothing_done(harness) -> bool:
+    return (
+        harness.rest.created_messages == []
+        and harness.rest.edited_members == []
+        and harness.rest.deleted_messages == []
+    )
+
+
+@pytest.mark.parametrize(
+    "role_name",
+    ["the hardcoded staff role", "a role with Moderate Members", "a role with View Audit Log"],
+)
+async def test_staff_are_never_muted_or_deleted(engine_harness, role_name):
+    role_id = {
+        "the hardcoded staff role": 644390354157568014,
+        "a role with Moderate Members": 901,
+        "a role with View Audit Log": 902,
+    }[role_name]
+    engine_harness.bot.discord.roles.update(
+        {901: hikari.Permissions.MODERATE_MEMBERS, 902: hikari.Permissions.VIEW_AUDIT_LOG}
+    )
+
+    decision = await _scam_flood(engine_harness, role_ids=(role_id,))
+
+    assert decision.action == spam_engine.SPAM_ACTION_NONE
+    assert _nothing_done(engine_harness)
+
+
+async def test_a_channel_moderator_is_protected_everywhere(engine_harness):
+    # Manage Messages granted only in one channel's overwrites.
+    engine_harness.bot.discord.channels[0].permission_overwrites = {
+        AUTHOR_ID: overwrite(allow=hikari.Permissions.MANAGE_MESSAGES)
+    }
+
+    decision = await _scam_flood(engine_harness)
+
+    assert decision.action == spam_engine.SPAM_ACTION_NONE
+    assert _nothing_done(engine_harness)
+
+
+async def test_the_guild_owner_is_protected(engine_harness):
+    engine_harness.bot.discord.owner_id = AUTHOR_ID
+
+    assert (await _scam_flood(engine_harness)).action == spam_engine.SPAM_ACTION_NONE
+    assert _nothing_done(engine_harness)
+
+
+async def test_an_author_who_cannot_be_checked_is_left_alone(engine_harness):
+    # Cache empty and REST failing: unknown means protected.
+    engine_harness.bot.discord.cached = False
+    engine_harness.bot.discord.fail["fetch_guild"] = RuntimeError("discord down")
+
+    assert (await _scam_flood(engine_harness)).action == spam_engine.SPAM_ACTION_NONE
+    assert _nothing_done(engine_harness)
+
+
+async def test_an_ordinary_member_is_still_muted_and_deleted(engine_harness):
+    decision = await _scam_flood(engine_harness)
+
+    assert decision.action == spam_engine.SPAM_ACTION_MUTE
+    assert len(engine_harness.rest.edited_members) == 1
+    assert engine_harness.rest.deleted_messages == [(str(CHANNEL_ID), str(MESSAGE_ID))]
 
 
 async def test_message_rate_violation_warns_in_channel(engine_harness):
@@ -1535,23 +1564,6 @@ async def test_spam_mute_dispatches_with_the_bot_for_the_event_log(engine_harnes
     assert len(engine_harness.dispatched) == 1
     _, dispatched_bot = engine_harness.dispatched[0]
     assert dispatched_bot is engine_harness.bot
-
-
-def test_uncached_guild_or_member_resolves_to_no_permissions():
-    """Fail closed on exemption: unknown members get scanned, never skipped."""
-    member = SimpleNamespace(id=AUTHOR_ID, role_ids=[])
-
-    assert spam_engine.resolve_member_permissions(None, member) == hikari.Permissions.NONE
-    assert spam_engine.resolve_member_permissions(_FakeGuild({}), None) == hikari.Permissions.NONE
-
-
-def test_guild_owner_resolves_to_administrator():
-    guild = _FakeGuild({}, owner_id=AUTHOR_ID)
-    member = SimpleNamespace(id=AUTHOR_ID, role_ids=[])
-
-    permissions = spam_engine.resolve_member_permissions(guild, member)
-
-    assert spam_engine.has_moderator_permissions(permissions) is True
 
 
 def test_single_label_host_is_its_own_registrable_domain():

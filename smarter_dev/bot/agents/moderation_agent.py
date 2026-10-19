@@ -203,7 +203,7 @@ async def run_moderation_agent(
         trigger_author: Username of the trigger message author
         context_messages: Recent channel messages for context
         guild_instructions: Guild-specific moderation instructions
-        enabled_tools: List of tool names enabled for this guild
+        enabled_tools: Destructive tools enabled for this guild; empty means none
         trigger_message_id: ID of the trigger message
 
     Returns:

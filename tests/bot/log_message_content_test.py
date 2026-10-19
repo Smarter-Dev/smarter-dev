@@ -25,6 +25,7 @@ from smarter_dev.bot.client import extract_forum_post_data
 from smarter_dev.bot.client import handle_forum_thread_create
 from smarter_dev.bot.plugins import mod_monitor
 from smarter_dev.bot.services.forum_agent_service import ForumAgentService
+from smarter_dev.bot.triage_config import TriageConfig
 from smarter_dev.bot.utils.messages import ConversationContextBuilder
 from smarter_dev.bot.utils.messages import gather_message_context
 
@@ -205,16 +206,21 @@ class TestModMonitorTriggerLog:
     """The moderation trigger line names the message, not its text."""
 
     @pytest.fixture
-    def monitored_guild(self):
-        mod_monitor._guild_configs["777"] = {
-            "monitored_role_ids": {"31337"},
-            "instructions": "",
-            "enabled_tools": ["timeout"],
-            "context_message_limit": 25,
-            "response_channel_id": None,
-        }
-        yield "777"
-        mod_monitor._guild_configs.pop("777", None)
+    def monitored_guild(self, monkeypatch):
+        config = TriageConfig(
+            guild_id="777",
+            monitored_role_ids=frozenset({"31337"}),
+            instructions="",
+            enabled_tools=("timeout",),
+            context_message_limit=25,
+            response_channel_id=None,
+        )
+
+        async def load(guild_id):
+            return config if guild_id == "777" else None
+
+        monkeypatch.setattr(mod_monitor, "load_triage_config", load)
+        return "777"
 
     def _event(self, content: str | None) -> SimpleNamespace:
         message = _fake_message(66666, content, author_id=8484)

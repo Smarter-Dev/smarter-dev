@@ -38,7 +38,6 @@ import logging
 import re
 import time
 from collections import deque
-from collections.abc import Iterable
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC
@@ -53,6 +52,7 @@ from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
 from smarter_dev.bot.moderation_config_skips import SKIP_REASON_NO_CONFIG
 from smarter_dev.bot.moderation_config_skips import ModerationConfigSkipLog
 from smarter_dev.bot.moderation_config_skips import skip_reason_disabled
+from smarter_dev.bot.staff_protection import staff_refusal
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.guild_event_log import GuildEvent
 from smarter_dev.shared.guild_event_log import mod_action_event
@@ -778,19 +778,6 @@ def decide_spam_response(metrics: SpamMetrics, *, warned_recently: bool) -> Spam
     )
 
 
-def is_exempt_author(
-    *,
-    is_bot: bool,
-    has_manage_messages: bool,
-    author_role_ids: Iterable[str],
-    staff_exempt_role_ids: Iterable[str],
-) -> bool:
-    """Whether this author is outside the engine's reach entirely."""
-    if is_bot or has_manage_messages:
-        return True
-    return bool(set(author_role_ids) & set(staff_exempt_role_ids))
-
-
 # ---------------------------------------------------------------------------
 # Message formatting (pure)
 # ---------------------------------------------------------------------------
@@ -977,30 +964,6 @@ def reset_spam_states() -> None:
 # ---------------------------------------------------------------------------
 
 
-def resolve_member_permissions(guild, member) -> hikari.Permissions:
-    """Guild-level permission union for ``member`` (owner implies ADMINISTRATOR).
-
-    Fails closed on exemption: an uncached guild or member yields NO permissions,
-    so the message gets scanned rather than silently skipped.
-    """
-    if guild is None or member is None:
-        return hikari.Permissions.NONE
-    if getattr(guild, "owner_id", None) == member.id:
-        return hikari.Permissions.ADMINISTRATOR
-    permissions = hikari.Permissions.NONE
-    for role_id in member.role_ids:
-        role = guild.get_role(role_id)
-        if role is not None:
-            permissions |= role.permissions
-    return permissions
-
-
-def has_moderator_permissions(permissions: hikari.Permissions) -> bool:
-    return bool(
-        permissions & (hikari.Permissions.MANAGE_MESSAGES | hikari.Permissions.ADMINISTRATOR)
-    )
-
-
 async def load_spam_engine_settings(guild_id: str) -> SpamEngineSettings | None:
     """Read the guild's moderation config and snapshot it as plain values."""
     async with get_db_session_context() as session:
@@ -1020,20 +983,21 @@ async def check_spam_engine(
     """Run the spam engine over one guild message.
 
     This is the listener entry point: a thin shell around the pure layer above.
-    It loads the guild config, applies the exemption and re-entrancy gates,
-    records the message in the rolling buffer, computes the six metrics, and
-    performs whatever the decision asks for (warn, mute + mod alert + audit row,
-    delete + scam-log post).
+    It loads the guild config, applies the re-entrancy gate, records the
+    message in the rolling buffer, computes the six metrics, checks the author
+    against the staff-protection rule once a rule fired, and performs whatever
+    the decision asks for (warn, mute + mod alert + audit row, delete +
+    scam-log post).
 
     Args:
-        bot: the bot instance (only ``bot.rest`` and ``bot.get_me()`` are used).
+        bot: the bot instance (``bot.rest``, ``bot.cache`` and ``bot.get_me()``).
         event: the guild message create event.
         state: injected per-guild state; defaults to the process-wide registry.
         now: injected epoch-seconds clock; defaults to ``time.time()``.
 
     Returns:
         The :class:`SpamDecision` that was acted on — ``NO_SPAM_ACTION`` when the
-        engine is disabled, the author is exempt, or nothing fired.
+        engine is disabled, the author is protected, or nothing fired.
     """
     guild_id = getattr(event, "guild_id", None)
     author = getattr(event, "author", None)
@@ -1050,17 +1014,6 @@ async def check_spam_engine(
         )
         return NO_SPAM_ACTION
     config_skip_log.running(str(guild_id))
-
-    member = getattr(event, "member", None)
-    author_role_ids = tuple(str(role_id) for role_id in member.role_ids) if member else ()
-    permissions = resolve_member_permissions(event.get_guild(), member)
-    if is_exempt_author(
-        is_bot=author.is_bot,
-        has_manage_messages=has_moderator_permissions(permissions),
-        author_role_ids=author_role_ids,
-        staff_exempt_role_ids=settings.staff_exempt_role_ids,
-    ):
-        return NO_SPAM_ACTION
 
     timestamp = time.time() if now is None else now
     thresholds = settings.thresholds
@@ -1098,6 +1051,28 @@ async def check_spam_engine(
     )
     if decision.action == SPAM_ACTION_NONE:
         return decision
+
+    # Staff are never warned, muted or deleted, and an author whose standing
+    # cannot be established counts as staff. Asked only once a rule fired, so
+    # ordinary traffic costs nothing; the cache answers for most authors.
+    refusal = await staff_refusal(
+        bot,
+        guild_id,
+        author_id,
+        member=getattr(event, "member", None),
+        user_is_bot=author.is_bot,
+        extra_role_ids=settings.staff_exempt_role_ids,
+    )
+    if refusal is not None:
+        # Debug: a moderator posting fast trips this on every message. A
+        # failed check already logged its own warning.
+        logger.debug(
+            "Spam engine took no action on %s in guild %s: %s",
+            author_id,
+            guild_id,
+            refusal,
+        )
+        return NO_SPAM_ACTION
 
     if decision.action == SPAM_ACTION_MUTE:
         timeout_applied = await _mute_author(bot, event, settings, decision, timestamp)
