@@ -367,7 +367,7 @@ async def test_adapter_stays_silent_when_watcher_declines():
     assert result.responses == []
     assert result.usage_by_model == {
         "watcher-model": {"input_tokens": 100, "output_tokens": 10,
-                           "cache_read_tokens": 0}
+                           "cache_read_tokens": 0, "cache_write_tokens": 0}
     }
     assert result.details["watcher"]["wake"] is False
     assert "agent" not in result.details

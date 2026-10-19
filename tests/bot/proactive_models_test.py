@@ -80,4 +80,5 @@ def test_usage_dict_accepts_method_and_property_result_apis() -> None:
         "input_tokens": 3,
         "output_tokens": 2,
         "cache_read_tokens": 1,
+        "cache_write_tokens": 0,
     }

@@ -155,7 +155,7 @@ def usage_dict(usage, messages=None) -> dict:
         "input_tokens": usage.input_tokens or 0,
         "output_tokens": usage.output_tokens or 0,
         "cache_read_tokens": usage.cache_read_tokens or 0,
-        "cache_write_tokens": usage.cache_write_tokens or 0,
+        "cache_write_tokens": getattr(usage, "cache_write_tokens", 0) or 0,
     }
     requests = [
         request.as_dict()
