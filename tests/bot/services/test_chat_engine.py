@@ -965,7 +965,7 @@ async def test_shorten_rerun_messages_are_persisted_with_the_turn(
             new_messages=["main-a", "main-b"],
         )
 
-    async def fake_fit(message, *, agent, deps, message_history):
+    async def fake_fit(message, *, agent, deps, message_history, usage_fields=None):
         from smarter_dev.bot.agents.response_fitting import FitResult
 
         return FitResult("short reply", 11, 7, "shortened", ["rerun-1", "rerun-2"])
