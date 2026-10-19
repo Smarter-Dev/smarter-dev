@@ -31,12 +31,13 @@ from smarter_dev.shared.model_catalog import (
     ReasoningLevel,
     is_valid_model_key,
 )
+from smarter_dev.shared.redis_client import get_redis_client
 from smarter_dev.web.crud import (
     get_channel_model_override,
     get_proactive_channel_settings,
     upsert_channel_model_override,
-    upsert_proactive_channel_settings,
 )
+from smarter_dev.web.proactive_channels import set_proactive_channel_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -189,19 +190,14 @@ class ChannelConfigController(Controller):
             response_filter=parsed.response_filter,
             drafter_model=parsed.drafter_model,
         )
-        existing = await get_proactive_channel_settings(
-            db_session, payload.guild_id, payload.channel_id
-        )
-        await upsert_proactive_channel_settings(
+        # Commits both writes; switching the channel on wakes the agent.
+        await set_proactive_channel_enabled(
             db_session,
+            get_redis_client(),
             guild_id=payload.guild_id,
             channel_id=payload.channel_id,
             enabled=parsed.proactive_enabled,
-            # The agent owns its watch instructions; the form never touches
-            # them.
-            watch_addendum=existing.watch_addendum if existing else "",
         )
-        await db_session.commit()
         logger.info(
             "channel config saved guild=%s channel=%s by discord user=%s "
             "(proactive=%s)",

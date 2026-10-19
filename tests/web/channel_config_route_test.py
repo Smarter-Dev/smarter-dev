@@ -10,9 +10,12 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import fakeredis.aioredis
 import pytest
 
 from smarter_dev.shared import config_links
+from smarter_dev.shared.proactive_channel_wake import CHANNEL_ENABLED_STREAM
+from smarter_dev.web import proactive_channels
 from smarter_dev.web.bot_admin import channel_config
 
 # Litestar's decorators wrap these as route handlers; .fn is the function.
@@ -56,23 +59,25 @@ def _valid_form(**overrides) -> dict:
 
 @pytest.fixture
 def crud_mocks():
+    get_proactive = AsyncMock(return_value=None)
+    redis = fakeredis.aioredis.FakeRedis()
     with (
         patch.object(
             channel_config, "get_channel_model_override", new=AsyncMock(return_value=None)
         ) as get_override,
+        patch.object(channel_config, "get_proactive_channel_settings", new=get_proactive),
         patch.object(
-            channel_config,
-            "get_proactive_channel_settings",
-            new=AsyncMock(return_value=None),
-        ) as get_proactive,
+            proactive_channels, "get_proactive_channel_settings", new=get_proactive
+        ),
         patch.object(
             channel_config, "upsert_channel_model_override", new=AsyncMock()
         ) as upsert_override,
         patch.object(
-            channel_config,
+            proactive_channels,
             "upsert_proactive_channel_settings",
             new=AsyncMock(),
         ) as upsert_proactive,
+        patch.object(channel_config, "get_redis_client", lambda: redis),
         patch.object(channel_config, "flash_success", lambda *a, **k: None),
         patch.object(channel_config, "flash_error", lambda *a, **k: None),
         patch.object(channel_config, "get_flash_messages", lambda request: []),
@@ -82,6 +87,7 @@ def crud_mocks():
             get_proactive=get_proactive,
             upsert_override=upsert_override,
             upsert_proactive=upsert_proactive,
+            redis=redis,
         )
 
 
@@ -143,8 +149,54 @@ async def test_post_rejects_an_invalid_form_without_writing(crud_mocks):
 
 async def test_post_preserves_agent_written_watch_instructions(crud_mocks):
     crud_mocks.get_proactive.return_value = SimpleNamespace(
-        watch_addendum='[{"id": "w1", "text": "watch benchmarks"}]'
+        enabled=True, watch_addendum='[{"id": "w1", "text": "watch benchmarks"}]'
     )
     await save(CONTROLLER, _request(_valid_form()), AsyncMock(), _token())
     kwargs = crud_mocks.upsert_proactive.await_args.kwargs
     assert kwargs["watch_addendum"] == '[{"id": "w1", "text": "watch benchmarks"}]'
+
+
+async def test_post_that_switches_a_channel_on_wakes_the_agent(crud_mocks):
+    crud_mocks.get_proactive.return_value = SimpleNamespace(
+        enabled=False, watch_addendum=""
+    )
+    await save(CONTROLLER, _request(_valid_form()), AsyncMock(), _token())
+    assert await crud_mocks.redis.xlen(CHANNEL_ENABLED_STREAM) == 1
+
+
+async def test_post_for_a_channel_already_on_sends_no_wake(crud_mocks):
+    crud_mocks.get_proactive.return_value = SimpleNamespace(
+        enabled=True, watch_addendum=""
+    )
+    await save(CONTROLLER, _request(_valid_form()), AsyncMock(), _token())
+    assert await crud_mocks.redis.xlen(CHANNEL_ENABLED_STREAM) == 0
+
+
+async def test_post_that_switches_a_channel_off_sends_no_wake(crud_mocks):
+    crud_mocks.get_proactive.return_value = SimpleNamespace(
+        enabled=True, watch_addendum=""
+    )
+    session = AsyncMock()
+    await save(CONTROLLER, _request(_valid_form(bot_kind="legacy")), session, _token())
+    assert crud_mocks.upsert_proactive.await_args.kwargs["enabled"] is False
+    assert await crud_mocks.redis.xlen(CHANNEL_ENABLED_STREAM) == 0
+    session.commit.assert_awaited_once()
+
+
+async def test_post_still_saves_when_redis_is_down(crud_mocks, monkeypatch):
+    """The wake is best-effort: the switch commits and the page saves."""
+    down = AsyncMock()
+    down.xadd.side_effect = ConnectionError("redis unreachable")
+    monkeypatch.setattr(channel_config, "get_redis_client", lambda: down)
+    saved: list[str] = []
+    monkeypatch.setattr(
+        channel_config, "flash_success", lambda request, text: saved.append(text)
+    )
+    session = AsyncMock()
+
+    response = await save(CONTROLLER, _request(_valid_form()), session, _token())
+
+    assert response.status_code in (302, 303, 307)
+    session.commit.assert_awaited_once()
+    down.xadd.assert_awaited_once()
+    assert saved == ["Channel configuration saved."]

@@ -77,7 +77,8 @@ class ProactiveSettingsService(BaseService):
     def _path(guild_id: str, channel_id: str) -> str:
         return f"/guilds/{guild_id}/channels/{channel_id}/proactive-settings"
 
-    def _invalidate(self, guild_id: str, channel_id: str) -> None:
+    def invalidate(self, guild_id: str, channel_id: str) -> None:
+        """Drop the cached settings, e.g. after another process changed them."""
         self._settings_cache.pop((guild_id, channel_id), None)
 
     async def list_enabled_channels(
@@ -167,7 +168,7 @@ class ProactiveSettingsService(BaseService):
             self._path(guild_id, channel_id),
             json_data={"enabled": enabled, "watch_addendum": watch_addendum},
         )
-        self._invalidate(guild_id, channel_id)
+        self.invalidate(guild_id, channel_id)
         settings = ProactiveChannelSettings.from_api_response(response.json())
         self._settings_cache[(guild_id, channel_id)] = (
             time.monotonic() + _SETTINGS_CACHE_TTL,

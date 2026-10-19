@@ -40,6 +40,7 @@ from uuid import uuid4
 
 import hikari
 import lightbulb
+from pydantic import ValidationError
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 from redis.exceptions import RedisError
 
@@ -104,6 +105,8 @@ from smarter_dev.bot.proactive.windows import QUIET_SECONDS
 from smarter_dev.bot.services.exceptions import APIError
 from smarter_dev.bot.services.proactive_settings_service import ProactiveSettingsService
 from smarter_dev.shared.exception_logging import log_exception
+from smarter_dev.shared.proactive_channel_wake import CHANNEL_ENABLED_STREAM
+from smarter_dev.shared.proactive_channel_wake import ChannelEnabledRequest
 from smarter_dev.shared.retention_policy import AGENT_VERBATIM_IDLE_WINDOW
 from smarter_dev.shared.retention_policy import PROACTIVE_IDLE_SWEEP_TICK
 from smarter_dev.shared.usage_meter import UsageMeter
@@ -158,6 +161,7 @@ EXECUTION_MODES = {
 CONTROL_STREAM_KEY = "proactive:v1:control"
 CONTROL_GROUP = "proactive-bot-v1"
 CONTROL_PROCESSED_PREFIX = "proactive:v1:control-processed"
+CONTROL_STREAMS = (CONTROL_STREAM_KEY, CHANNEL_ENABLED_STREAM)
 
 
 def _guild_id_set(raw: str) -> set[str]:
@@ -2012,6 +2016,34 @@ def _redis_text(value) -> str:
     return value.decode() if isinstance(value, bytes) else str(value)
 
 
+async def _wake_for_enabled_channel(
+    run: ProactiveRuntime, guild_id: str, channel_id: str
+) -> None:
+    """Wake the guild agent to get oriented in a channel just switched on."""
+    await run.enqueue_notification(
+        guild_id,
+        channel_enabled_notification(
+            created_at=datetime.now(UTC),
+            channel_id=channel_id,
+            channel_name=_channel_name_for_id(run.bot, channel_id),
+        ),
+    )
+
+
+async def _apply_channel_enabled_request(
+    run: ProactiveRuntime, request: ChannelEnabledRequest
+) -> None:
+    """Wake the agent for a channel the web switched on, if it still is."""
+    service = run.settings_service()
+    if service is not None:
+        # The web wrote the row; the cached copy may still say off.
+        service.invalidate(request.guild_id, request.channel_id)
+        settings = await service.get_settings(request.guild_id, request.channel_id)
+        if not settings.enabled:
+            return  # switched off again before the wake was read
+    await _wake_for_enabled_channel(run, request.guild_id, request.channel_id)
+
+
 async def _apply_control_command(
     run: ProactiveRuntime, command: ControlCommand
 ) -> None:
@@ -2059,7 +2091,11 @@ CONTROL_RECLAIM_MS = 60_000
 
 
 async def _control_loop(run: ProactiveRuntime) -> None:
-    """Consume watcher-control commands emitted by workers, only while acting.
+    """Consume commands for the bot, only while acting.
+
+    Two streams: watcher-control commands emitted by workers
+    (:data:`CONTROL_STREAM_KEY`) and channel-enabled wake requests from the
+    web (:data:`CHANNEL_ENABLED_STREAM`).
 
     Delivery is at least once. A command is marked processed (by its
     command_id) and acked only after it was applied, so one reclaimed from a
@@ -2072,62 +2108,86 @@ async def _control_loop(run: ProactiveRuntime) -> None:
     redis_client = run.bot.d.get("chat_memory_redis")
     if redis_client is None:
         return
-    try:
-        await redis_client.xgroup_create(
-            CONTROL_STREAM_KEY, CONTROL_GROUP, id="0", mkstream=True
-        )
-    except Exception as error:  # redis-py has sync/async ResponseError variants
-        if "BUSYGROUP" not in str(error):
-            raise
+    for stream in CONTROL_STREAMS:
+        try:
+            await redis_client.xgroup_create(
+                stream, CONTROL_GROUP, id="0", mkstream=True
+            )
+        except Exception as error:  # redis-py has sync/async ResponseError variants
+            if "BUSYGROUP" not in str(error):
+                raise
     consumer = f"{socket.gethostname()}-{id(run)}"
     while True:
         if not leadership.is_acting():
             await asyncio.sleep(CONTROL_IDLE_SECONDS)
             continue
-        reclaimed = await redis_client.xautoclaim(
-            CONTROL_STREAM_KEY,
-            CONTROL_GROUP,
-            consumer,
-            CONTROL_RECLAIM_MS,
-            "0-0",
-            count=20,
-        )
-        records = (
-            [(CONTROL_STREAM_KEY, reclaimed[1])]
-            if reclaimed and reclaimed[1]
-            else await redis_client.xreadgroup(
+        records = None
+        for stream in CONTROL_STREAMS:
+            reclaimed = await redis_client.xautoclaim(
+                stream,
                 CONTROL_GROUP,
                 consumer,
-                {CONTROL_STREAM_KEY: ">"},
+                CONTROL_RECLAIM_MS,
+                "0-0",
+                count=20,
+            )
+            if reclaimed and reclaimed[1]:
+                records = [(stream, reclaimed[1])]
+                break
+        if records is None:
+            records = await redis_client.xreadgroup(
+                CONTROL_GROUP,
+                consumer,
+                dict.fromkeys(CONTROL_STREAMS, ">"),
                 count=20,
                 block=CONTROL_BLOCK_MS,
             )
-        )
-        for _stream, entries in records or ():
+        for stream, entries in records or ():
             for stream_id, fields in entries:
                 if not leadership.is_acting():
                     break
                 await leadership.run_accepted(
-                    _process_control_entry(run, redis_client, stream_id, fields)
+                    _process_control_entry(
+                        run, redis_client, _redis_text(stream), stream_id, fields
+                    )
                 )
 
 
 async def _process_control_entry(
-    run: ProactiveRuntime, redis_client, stream_id, fields
+    run: ProactiveRuntime, redis_client, stream: str, stream_id, fields
 ) -> None:
     try:
-        payload = fields.get(b"payload", fields.get("payload"))
-        command = ControlCommand.model_validate_json(_redis_text(payload))
+        payload = _redis_text(fields.get(b"payload", fields.get("payload")))
+        try:
+            if stream == CHANNEL_ENABLED_STREAM:
+                command = ChannelEnabledRequest.model_validate_json(payload)
+                apply = _apply_channel_enabled_request
+            else:
+                command = ControlCommand.model_validate_json(payload)
+                apply = _apply_control_command
+        except ValidationError:
+            # No retry can parse it (a sender newer or older than this bot):
+            # drop it rather than reclaim it forever.
+            logger.warning(
+                "dropping unreadable proactive control command stream=%s "
+                "stream_id=%s",
+                stream,
+                _redis_text(stream_id),
+            )
+            await redis_client.xack(stream, CONTROL_GROUP, stream_id)
+            await redis_client.xdel(stream, stream_id)
+            return
         processed_key = f"{CONTROL_PROCESSED_PREFIX}:{command.command_id}"
         if not await redis_client.exists(processed_key):
-            await _apply_control_command(run, command)
+            await apply(run, command)
             await redis_client.set(processed_key, "1", ex=7 * 24 * 60 * 60)
-        await redis_client.xack(CONTROL_STREAM_KEY, CONTROL_GROUP, stream_id)
-        await redis_client.xdel(CONTROL_STREAM_KEY, stream_id)
+        await redis_client.xack(stream, CONTROL_GROUP, stream_id)
+        await redis_client.xdel(stream, stream_id)
     except Exception:
         log_exception(
             logger,
-            "failed proactive control command stream_id=%s",
+            "failed proactive control command stream=%s stream_id=%s",
+            stream,
             _redis_text(stream_id),
         )
 
@@ -2168,15 +2228,8 @@ async def _set_enabled(ctx: lightbulb.Context, enabled: bool) -> None:
     ).enabled
     await service.set_enabled(str(ctx.guild_id), str(ctx.channel_id), enabled)
     if enabled and not was_enabled:
-        # Wake the guild agent to get oriented in its new channel.
-        run = _runtime()
-        await run.enqueue_notification(
-            str(ctx.guild_id),
-            channel_enabled_notification(
-                created_at=datetime.now(UTC),
-                channel_id=str(ctx.channel_id),
-                channel_name=_channel_name_for_id(run.bot, str(ctx.channel_id)),
-            ),
+        await _wake_for_enabled_channel(
+            _runtime(), str(ctx.guild_id), str(ctx.channel_id)
         )
     await ctx.respond(
         f"Proactive bot is now **{'on' if enabled else 'off'}** in this channel.",
