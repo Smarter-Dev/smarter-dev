@@ -204,6 +204,16 @@ class DiscordAdminClient(DiscordBotClient):
         channels.sort(key=lambda channel: (channel.position, channel.name.lower()))
         return channels
 
+    async def get_channel_guild_id(self, channel_id: str) -> str | None:
+        """The guild a channel or thread belongs to, as the bot sees it.
+
+        ``None`` for a DM channel. Raises ``DiscordAdminError`` with
+        ``status_code`` 404 or 403 when the channel is gone or the bot cannot
+        see it.
+        """
+        response = await self._request("GET", f"/channels/{channel_id}")
+        return response.json().get("guild_id")
+
     async def get_announcement_channels(
         self, guild_id: str
     ) -> list[DiscordChannel]:

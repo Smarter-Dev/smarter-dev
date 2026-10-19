@@ -6023,6 +6023,18 @@ async def list_enabled_proactive_channel_settings(
     return list(result.scalars().all())
 
 
+async def list_all_proactive_channel_settings(
+    session: AsyncSession,
+) -> list[ProactiveChannelSettings]:
+    """Return every channel's proactive settings row, on or off, in every guild."""
+    result = await session.execute(
+        select(ProactiveChannelSettings).order_by(
+            ProactiveChannelSettings.guild_id, ProactiveChannelSettings.channel_id
+        )
+    )
+    return list(result.scalars().all())
+
+
 async def upsert_proactive_channel_settings(
     session: AsyncSession,
     guild_id: str,

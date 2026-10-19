@@ -1,0 +1,75 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Proactive Channels - {{ site_name() }}{% endblock %}
+
+{% block admin_content %}
+<div style="display:flex; gap:0;">
+    {% include "admin/bot/_sidebar.html" %}
+    <div style="flex:1; min-width:0;">
+        <hgroup>
+            <h1>Proactive Channels</h1>
+            <p>Channels where the proactive bot has been switched on, per guild</p>
+        </hgroup>
+
+        {% if flash_messages %}
+        <div class="sk-flash-list">
+            {% for msg in flash_messages %}
+            <div class="sk-flash sk-flash-{{ msg.level }}">{{ msg.message }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <p class="sk-text-muted" style="font-size:0.85rem;">
+            To switch on a channel that isn't listed, or to change its model and budgets, run
+            <code>/proactive on</code> or <code>/configure bot</code> in that channel.
+        </p>
+
+        {% for section in sections %}
+        <div class="sk-panel" style="margin-bottom:1.5rem;">
+            <div class="sk-panel-head">
+                {{ section.name or ("Guild " ~ section.guild_id) }}
+                &middot; {{ section.enabled_count }} on
+                <a href="/admin/bot/guilds/{{ section.guild_id }}" style="float:right; font-weight:normal;">Guild</a>
+            </div>
+            <div class="sk-panel-body">
+                {% if section.names_unavailable %}
+                <p class="sk-text-muted" style="font-size:0.85rem;">Discord didn't return this guild's channel names, so channels show their IDs.</p>
+                {% endif %}
+                <table class="sk-admin-table">
+                    <thead>
+                        <tr>
+                            <th>Channel</th>
+                            <th>Channel ID</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for channel in section.channels %}
+                        <tr>
+                            <td>{% if channel.name %}<strong>#{{ channel.name }}</strong>{% elif section.names_unavailable %}<span class="sk-text-muted">&mdash;</span>{% else %}<span class="sk-text-muted">thread or deleted channel</span>{% endif %}</td>
+                            <td><code>{{ channel.channel_id }}</code></td>
+                            <td>{% if channel.enabled %}<span class="sk-badge">On</span>{% else %}<span class="sk-text-muted">Off</span>{% endif %}</td>
+                            <td>
+                                <form method="post" action="/admin/bot/proactive-channels/{{ section.guild_id }}/{{ channel.channel_id }}" style="margin:0;">
+                                    {{ csrf_field() }}
+                                    <input type="hidden" name="enabled" value="{{ 'off' if channel.enabled else 'on' }}">
+                                    <button type="submit" class="sk-btn-outline sk-btn-small">{{ 'Turn off' if channel.enabled else 'Turn on' }}</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% else %}
+        <div class="sk-panel">
+            <div class="sk-panel-body">
+                <p class="sk-no-items">The proactive bot hasn't been switched on in any channel yet.</p>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}
