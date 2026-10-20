@@ -186,20 +186,34 @@ def instruction_expired_notification(
 
 def recovery_notification(
     *,
-    missed_count: int,
+    missed: list[ChannelMessage],
     created_at: datetime,
     channel_id: str = "",
     channel_name: str = "",
 ) -> Notification:
+    """The messages a channel received while the bot was down, verbatim.
+
+    ``missed`` comes through the same blocked-users conversion as live
+    messages, so an opted-out member is already absent or redacted.
+    """
+    count = len(missed)
+    noun = "message" if count == 1 else "messages"
+    lines = [
+        f"The bot restarted; {count} {noun} arrived while it was down:",
+        *(
+            f"- {_user_metadata(message)} sent message id={message.id} "
+            f"(sent_at={utc_timestamp(message.timestamp)}):\n"
+            f"  > {with_attachments(message.to_record())}"
+            for message in missed
+        ),
+    ]
     return Notification(
         kind="recovery",
         created_at=created_at,
-        body=(
-            f"The bot restarted; {missed_count} messages arrived while it "
-            f"was down and are included in this wake."
-        ),
+        body="\n".join(lines),
         channel_id=channel_id,
         channel_name=channel_name,
+        message_ids=tuple(message.id for message in missed),
     )
 
 

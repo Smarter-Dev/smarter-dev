@@ -21,7 +21,9 @@ from smarter_dev.bot.proactive.adapter import WatcherProducer
 from smarter_dev.bot.proactive.contracts import ControlCommand
 from smarter_dev.bot.proactive.history_store import HistoryUnreadable
 from smarter_dev.bot.proactive.history_store import ProactiveHistoryStore
+from smarter_dev.bot.proactive.notifications import Notification
 from smarter_dev.bot.proactive.notifications import watcher_summary_notification
+from smarter_dev.bot.proactive.timestamps import utc_timestamp
 from smarter_dev.bot.proactive.types import ActivationResult
 from smarter_dev.bot.proactive.types import ProposedReaction
 from smarter_dev.bot.proactive.types import ProposedResponse
@@ -1341,8 +1343,16 @@ class _FakeRedis:
             for member, score in sorted(
                 self.data.get(key, {}).items(), key=lambda item: item[1]
             )
-            if score <= float(high)
+            if float(low) <= score <= float(high)
         ]
+
+    async def zremrangebyscore(self, key, low, high):
+        scores = self.data.get(key, {})
+        for member in [m for m, s in scores.items() if float(low) <= s <= float(high)]:
+            del scores[member]
+
+    async def expire(self, key, seconds):
+        self.expiries[key] = seconds
 
     async def sadd(self, key, member):
         self.data.setdefault(key, set()).add(member)
@@ -1554,6 +1564,151 @@ async def test_recovery_retries_a_transient_settings_failure(
     guild_queue = persistence_setup.runtime.guild_state_for(2).queue
     assert [item.kind for item in guild_queue.items] == ["recovery", "mention"]
     assert all(item.channel_id == "1" for item in guild_queue.items)
+
+
+async def test_engaged_ids_round_trip_and_expire():
+    redis = _FakeRedis()
+    store = ProactiveHistoryStore(redis)
+    key = ProactiveHistoryStore._engaged_key(1)
+    await store.mark_engaged(1, "501", ttl_seconds=3600)
+    redis.data[key]["400"] = proactive.time.time() - 7200  # long expired
+
+    await store.mark_engaged(1, "502", ttl_seconds=3600)
+
+    assert redis.expiries[key] == 3600
+    assert set(redis.data[key]) == {"501", "502"}
+    assert await store.engaged_ids(1, since=proactive.time.time() - 60) == {
+        "501", "502",
+    }
+    assert await store.engaged_ids(1, since=proactive.time.time() + 60) == set()
+    assert await store.engaged_ids(2, since=0) == set()
+
+
+def _recovery_notice(run) -> Notification:
+    return next(
+        item
+        for item in run.guild_state_for(2).queue.items
+        if item.kind == "recovery"
+    )
+
+
+async def test_recovery_skips_a_mention_answered_before_the_restart(
+    listener_setup, monkeypatch
+):
+    store = ProactiveHistoryStore(_FakeRedis())
+    monkeypatch.setattr(listener_setup.runtime, "history_store", lambda: store)
+    await store.write_cursor(1, guild_id="2", last_message_id="500")
+    fresh = datetime.now(UTC)
+    mention = _hikari_message(
+        id=501, created_at=fresh, user_mentions_ids=(999,),
+        content="@smarter-bot what's new?",
+    )
+    # Live: the mention wakes the agent; the Jev batch (and the cursor) would
+    # only have moved minutes later, after the restart.
+    await proactive.on_guild_message(_event(mention))
+    assert await store.read_cursor(1) == {"guild_id": "2", "last_message_id": "500"}
+
+    restarted = proactive.ProactiveRuntime(
+        listener_setup.runtime.bot, start_consumers=False
+    )
+    monkeypatch.setattr(restarted, "history_store", lambda: store)
+    monkeypatch.setattr(proactive, "runtime", restarted)
+    answer = _hikari_message(
+        id=502, created_at=fresh, content="Here's what's new",
+        author=SimpleNamespace(
+            id=999, username="smarter-bot", global_name=None, is_bot=True
+        ),
+    )
+    downtime = _hikari_message(
+        id=503, created_at=fresh, content="anyone around after the deploy?",
+        user_mentions_ids=(),
+    )
+    restarted.bot.rest.fetch_messages = (
+        lambda channel_id, after=None: _FakeIterator([mention, answer, downtime])
+    )
+    replayed = []
+
+    async def fake_run_producer(state, passive=False):
+        replayed.extend(message.id for message in state.buffer)
+        state.buffer.clear()
+
+    monkeypatch.setattr(proactive, "_run_producer", fake_run_producer)
+
+    await proactive._recover_channels(restarted)
+
+    assert replayed == ["503"]
+    notice = _recovery_notice(restarted)
+    assert notice.message_ids == ("503",)
+    assert "1 message arrived" in notice.body
+    assert "anyone around after the deploy?" in notice.body
+    assert "ally (username alice, id 901" in notice.body
+    assert "what's new?" not in notice.body
+
+
+async def test_recovery_notice_carries_messages_sent_during_downtime(
+    persistence_setup, monkeypatch
+):
+    await persistence_setup.store.write_cursor(1, guild_id="2", last_message_id="500")
+    sent_at = datetime.now(UTC).replace(microsecond=0)
+    persistence_setup.bot.rest.fetch_messages = lambda channel_id, after=None: (
+        _FakeIterator([
+            _hikari_message(id=501, created_at=sent_at, content="first"),
+            _hikari_message(id=502, created_at=sent_at, content="second"),
+        ])
+    )
+    replayed = []
+
+    async def fake_run_producer(state, passive=False):
+        replayed.extend(message.id for message in state.buffer)
+        state.buffer.clear()
+
+    monkeypatch.setattr(proactive, "_run_producer", fake_run_producer)
+
+    await proactive._recover_channels(persistence_setup.runtime)
+
+    assert replayed == ["501", "502"]
+    notice = _recovery_notice(persistence_setup.runtime)
+    assert notice.message_ids == ("501", "502")
+    assert notice.body.startswith(
+        "The bot restarted; 2 messages arrived while it was down:"
+    )
+    assert "message id=501" in notice.body and "> first" in notice.body
+    assert "message id=502" in notice.body and "> second" in notice.body
+    assert utc_timestamp(sent_at) in notice.body
+
+
+async def test_recovery_notice_leaves_out_opted_out_members(
+    persistence_setup, monkeypatch, blocked_users_list_loaded
+):
+    opted_out = 312345678901234567
+    blocked_users_list_loaded.load(1, [opted_out])
+    await persistence_setup.store.write_cursor(1, guild_id="2", last_message_id="500")
+    fresh = datetime.now(UTC)
+    persistence_setup.bot.rest.fetch_messages = lambda channel_id, after=None: (
+        _FakeIterator([
+            _hikari_message(
+                id=501, created_at=fresh, content="opted-out secret",
+                author=SimpleNamespace(
+                    id=opted_out, username="bob", global_name="Bob", is_bot=False
+                ),
+            ),
+            _hikari_message(
+                id=502, created_at=fresh, content=f"ping <@{opted_out}> about it",
+                user_mentions_ids=(opted_out,),
+            ),
+        ])
+    )
+    monkeypatch.setattr(proactive, "_run_producer", AsyncMock())
+
+    await proactive._recover_channels(persistence_setup.runtime)
+
+    notice = _recovery_notice(persistence_setup.runtime)
+    assert notice.message_ids == ("502",)
+    assert "1 message arrived" in notice.body
+    assert "opted-out secret" not in notice.body
+    assert "bob" not in notice.body.lower()
+    assert str(opted_out) not in notice.body
+    assert "ping @[blocked user] about it" in notice.body
 
 
 async def test_recovery_skips_disabled_channels(persistence_setup, monkeypatch):

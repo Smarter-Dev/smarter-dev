@@ -1742,6 +1742,22 @@ async def _persist_active_window(
         log_exception(logger, "failed to persist active window channel=%s", state.channel_id)
 
 
+async def _persist_engaged(
+    run: ProactiveRuntime, state: ChannelProducerState, message_id: str
+) -> None:
+    """Record a message the agent was woken for, so restart recovery does
+    not replay it before the watcher's cursor has passed it."""
+    store = run.history_store()
+    if store is None:
+        return
+    try:
+        await store.mark_engaged(
+            int(state.channel_id), message_id, ttl_seconds=CATCHUP_MAX_AGE_SECONDS
+        )
+    except Exception:  # noqa: BLE001 — persistence is best-effort
+        log_exception(logger, "failed to persist engaged message channel=%s", state.channel_id)
+
+
 async def _restore_active_window(
     run: ProactiveRuntime, state: ChannelProducerState
 ) -> None:
@@ -1838,6 +1854,7 @@ async def on_guild_message(event: hikari.GuildMessageCreateEvent) -> None:
             ),
         )
         state.pending_directed_ids.add(converted.id)
+        await _persist_engaged(run, state, converted.id)
     if run.uses_jev_batching or now < state.active_until:
         _schedule_producer(state)
     # GLM passive channels leave the buffer for the 15-minute sweep.
@@ -2225,6 +2242,17 @@ async def _recover_channels(run: ProactiveRuntime) -> None:
                 continue
             state = run.state_for(int(cursor["guild_id"]), channel_id)
             missed = await _fetch_missed(run.bot, channel_id, cursor["last_message_id"])
+            # Mentions and replies already woke the agent; only the rest is new.
+            try:
+                engaged = await store.engaged_ids(
+                    channel_id, since=time.time() - CATCHUP_MAX_AGE_SECONDS
+                )
+            except Exception:  # noqa: BLE001 — replaying beats losing messages
+                log_exception(
+                    logger, "proactive engaged ids unreadable channel=%s", channel_id
+                )
+                engaged = set()
+            missed = [message for message in missed if message.id not in engaged]
             if not missed:
                 continue
             state.buffer.extend(missed)
@@ -2234,7 +2262,7 @@ async def _recover_channels(run: ProactiveRuntime) -> None:
             await run.enqueue_notification(
                 cursor["guild_id"],
                 recovery_notification(
-                    missed_count=len(missed),
+                    missed=missed,
                     created_at=datetime.now(UTC),
                     channel_id=state.channel_id,
                     channel_name=_channel_name(run.bot, state),

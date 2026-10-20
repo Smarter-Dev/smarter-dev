@@ -252,6 +252,34 @@ class ProactiveHistoryStore:
             ex=CURSOR_TTL_SECONDS,
         )
 
+    # -- engaged messages (restart recovery) --
+    #
+    # A mention or reply wakes the agent at once, but the watcher reviews it,
+    # and moves the cursor, only with its batch, minutes later. Restart
+    # recovery skips the ids recorded here so it never replays a message the
+    # agent was already woken for. The cursor itself cannot jump to such a
+    # message: earlier ones in the batch are still unreviewed.
+
+    @staticmethod
+    def _engaged_key(channel_id: int) -> str:
+        return f"{KEY_PREFIX}:{channel_id}:engaged"
+
+    async def mark_engaged(
+        self, channel_id: int, message_id: str, *, ttl_seconds: int
+    ) -> None:
+        key = self._engaged_key(channel_id)
+        now = time.time()
+        await self._redis.zadd(key, {message_id: now})
+        await self._redis.zremrangebyscore(key, "-inf", now - ttl_seconds)
+        await self._redis.expire(key, ttl_seconds)
+
+    async def engaged_ids(self, channel_id: int, *, since: float) -> set[str]:
+        """Ids recorded by ``mark_engaged`` at or after epoch ``since``."""
+        members = await self._redis.zrangebyscore(
+            self._engaged_key(channel_id), since, "+inf"
+        )
+        return {_decode(member) for member in members}
+
     async def cursor_channel_ids(self) -> list[int]:
         """Channels with a stored cursor — the restart-recovery scan set."""
         channel_ids = []

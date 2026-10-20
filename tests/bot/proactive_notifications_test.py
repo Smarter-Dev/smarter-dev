@@ -120,7 +120,7 @@ def test_mode_change_and_expiry_notifications_never_wake():
 
 def test_recovery_notification_carries_channel_provenance():
     notification = notifications.recovery_notification(
-        missed_count=4,
+        missed=[],
         created_at=NOW,
         channel_id="123",
         channel_name="python-help",
