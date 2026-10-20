@@ -776,14 +776,39 @@ class ProactiveRuntime:
         if destination == SHADOW_EXECUTION_MODE:
             await redis_queue.publish_shadow(envelope)
             return
-        # A forum post's notifications go where only a worker that runs
-        # forum posts reads (#248). Its arrival looked its forum up, so this
-        # is the cache almost always.
-        forum_post = bool(notification.channel_id) and (
-            await forum_parents(self.bot).forum_for(notification.channel_id)
-            is not None
+        await redis_queue.publish(
+            envelope,
+            forum_post=await self._inherits_from_forum(
+                guild_id, notification.channel_id
+            ),
         )
-        await redis_queue.publish(envelope, forum_post=forum_post)
+
+    async def _inherits_from_forum(self, guild_id: str, channel_id: str) -> bool:
+        """Whether a notification is a forum post's running on its forum's
+        settings (#248): those go where only a worker that runs forum posts
+        reads. A post with its own row goes where it always has. Its arrival
+        looked both up, so this is the caches almost always."""
+        if not channel_id:
+            return False
+        parents = forum_parents(self.bot)
+        if await parents.forum_for(channel_id) is None:
+            return False
+        service = self.settings_service()
+        if service is None:
+            return True
+        try:
+            effective = await effective_settings(
+                service, parents, str(guild_id), str(channel_id)
+            )
+        except Exception:  # noqa: BLE001 — unknown: kept from older workers
+            log_exception(
+                logger,
+                "proactive forum post routing lookup failed channel=%s",
+                channel_id,
+                level=logging.WARNING,
+            )
+            return True
+        return effective.forum_id is not None
 
     def state_for(self, guild_id: int, channel_id: int) -> ChannelProducerState:
         state = self.channel_states.get(channel_id)

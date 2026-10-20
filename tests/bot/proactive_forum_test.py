@@ -1246,14 +1246,41 @@ async def test_an_unreadable_capability_counts_as_no_forum_worker(
     assert POST not in setup.run.channel_states
 
 
-async def test_a_post_with_its_own_row_is_not_held(forum_setup, monkeypatch):
-    setup = forum_setup({FORUM: True, POST: True})
-    _external(setup, monkeypatch, _Redis())
+@pytest.mark.parametrize("forum_on", [True, False])
+async def test_a_post_with_its_own_row_is_not_held(forum_setup, monkeypatch, forum_on):
+    import fakeredis.aioredis
+
+    from smarter_dev.bot.proactive import redis_queue
+
+    setup = forum_setup({FORUM: forum_on, POST: True})
+    # No worker says it runs forum posts: an older worker.
+    redis = fakeredis.aioredis.FakeRedis()
+    _external(setup, monkeypatch, redis)
 
     await proactive.on_guild_message(_event(POST, _message(500)))
 
     # A row of its own is a channel any worker runs.
     assert POST in setup.run.channel_states
+    await proactive._run_producer(setup.run.channel_states[POST])
+
+    # Published where it always was, so an older worker takes it: its group
+    # reads the shared ready stream, then the guild's shared wake stream.
+    assert await redis.exists(redis_queue.forum_wake_stream_key(str(GUILD))) == 0
+    for stream in (
+        redis_queue.READY_STREAM_KEY,
+        redis_queue.wake_stream_key(str(GUILD)),
+    ):
+        await redis.xgroup_create(stream, "old-worker", id="0", mkstream=True)
+    [(_stream, [(_id, ready)])] = await redis.xreadgroup(
+        "old-worker", "old", {redis_queue.READY_STREAM_KEY: ">"}
+    )
+    assert ready[b"guild_id"] == str(GUILD).encode()
+    [(_stream, wakes)] = await redis.xreadgroup(
+        "old-worker", "old", {redis_queue.wake_stream_key(str(GUILD)): ">"}
+    )
+    assert [json.loads(fields[b"payload"])["channel_id"] for _id, fields in wakes] == [
+        str(POST)
+    ]
 
 
 async def test_status_in_a_held_post_says_why(forum_setup, monkeypatch, moderator):
