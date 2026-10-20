@@ -2,39 +2,35 @@
 
 A scam posted across several channels fires an admin handler once per copy,
 and each fire wants the member timed out until a review has looked at the
-post. A member has one Discord timeout, though, and the fires share it. With
-only ``timeout_user`` and ``remove_timeout`` a script cannot share it safely:
-one fire's clean verdict lifts the timeout another fire still needs, a fire
-that ran late puts a five-minute timeout over a day-long one, and a timeout
-call still in flight lands after the review that should have ended it.
+post. A member has one Discord timeout, though, and the fires share it: one
+fire's clean verdict must not lift the timeout another fire still needs, a
+fire that ran late must not put a five-minute timeout over a day-long one, and
+a hold call still in flight must not land after the review that ended it.
 
-This module is the member's side of that. A hold is named by a ``key`` (what
-is under review) and every change to one member's timeout made through here
-happens under that member's lock:
+This module is the script's side of that. A hold is named by a ``key`` (what
+is under review), prefixed with the handler id so two handlers cannot release
+each other:
 
-* ``hold`` times the member out for the key. It never shortens a timeout that
-  already runs longer, whoever placed it, and does nothing for a key that is
-  already held or was released in the last :data:`SETTLED_SECONDS`. When it
-  extends a timeout somebody else placed, it remembers that timeout's expiry.
-* ``release`` ends the key's hold. Once no key is held any more, and the
-  timeout in place is the one a hold put there — never a moderator's, and
-  never one ``timeout_user`` set — the member gets back whatever the holds
-  extended, if it still has time to run, and is otherwise freed.
+* ``hold`` times the member out for the key, as a timeout *claim* in the
+  moderation gateway (``smarter_dev.web.moderation_gateway``). The gateway
+  never shortens a timeout that already runs longer and leaves one somebody
+  else placed alone; the claim is recorded either way. ``hold`` does nothing
+  for a key that is already held or was released in the last
+  :data:`SETTLED_SECONDS`.
+* ``release`` ends the key's claim. The gateway drops the member's timeout to
+  the longest claim still held (another key's hold, a day-long repeat hold, a
+  ``timeout_user``), or lifts it when none is, and never lifts a timeout a
+  moderator placed.
 
-``timeout_user`` and ``remove_timeout`` take the same lock, so a hold never
-reads the member's timeout and then writes over a change made in between by
-another fire. A moderator acting by hand at that same instant is outside the
-lock; Discord offers no compare-and-set to close that.
-
-What is kept, in one Redis hash per member per guild: each held key with when
-its hold runs out, each key released in the last :data:`SETTLED_SECONDS` with
-when, the expiry of the timeout a hold last placed, and the expiry of the
-timeout that was in place before the holds extended it. Keys are whatever the
-script passed (a content hash or a message id), prefixed with the handler id
-so two handlers cannot release each other. Every write drops the entries that
-have run out or settled, and the hash expires :data:`SETTLED_SECONDS` after
-its longest hold — so it holds at most the live holds, and lives at most
-:data:`HOLD_MAX_SECONDS` plus :data:`SETTLED_SECONDS`.
+What is kept here, in one Redis hash per member per guild, is only which keys
+are held (with when their hold runs out) and which were released in the last
+:data:`SETTLED_SECONDS`, so a late fire for a cleared post does nothing. Every
+change for one member happens under that member's Redis lock, and the gateway
+serialises the timeout itself under its own per-member lock, shared with the
+bot's detectors. Every write drops entries that have run out or settled, and
+the hash expires :data:`SETTLED_SECONDS` after its longest hold — so it holds
+at most the live holds, and lives at most :data:`HOLD_MAX_SECONDS` plus
+:data:`SETTLED_SECONDS`.
 """
 
 from __future__ import annotations
@@ -46,11 +42,10 @@ import secrets
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import UTC
-from datetime import datetime
 from typing import Any
 
 from smarter_dev.web.admin_actions import AdminActor
+from smarter_dev.web.moderation_gateway import types as gw
 
 logger = logging.getLogger(__name__)
 
@@ -69,13 +64,6 @@ SETTLED_SECONDS = 300
 LOCK_TTL_SECONDS = 120
 LOCK_WAIT_SECONDS = 30.0
 _LOCK_POLL_SECONDS = 0.05
-# A hold's expiry is a whole second and Discord hands it back as stored; this
-# only absorbs float rounding.
-_SAME_EXPIRY_SECONDS = 0.002
-
-_PLACED_FIELD = "placed"
-_PRIOR_FIELD = "prior"
-_BOOKKEEPING = frozenset({_PLACED_FIELD, _PRIOR_FIELD})
 _HELD = "h:"
 _RELEASED = "r:"
 
@@ -112,14 +100,6 @@ def _is_settled(state: str | None, now: float) -> bool:
         bool(state)
         and state.startswith(_RELEASED)
         and now - float(state[2:]) < SETTLED_SECONDS
-    )
-
-
-def _same_expiry(current: datetime | None, recorded: str | None) -> bool:
-    return (
-        current is not None
-        and recorded is not None
-        and abs(current.timestamp() - float(recorded)) <= _SAME_EXPIRY_SECONDS
     )
 
 
@@ -161,9 +141,8 @@ class MemberHolds:
 
         False, and nothing done, when the key is already held or was released
         in the last :data:`SETTLED_SECONDS`. A timeout already running longer
-        than ``seconds`` is left as it is, and the hold still counts. One
-        running shorter is extended, and its expiry kept so a release can
-        hand it back.
+        than ``seconds`` is left as it is, and the hold still counts (its
+        claim keeps the member timed out if the longer one is lifted).
 
         A protected member (staff, a bot, or anyone the staff-protection rule
         cannot clear) is never held: False, and nothing recorded.
@@ -183,33 +162,21 @@ class MemberHolds:
             state = states.get(field)
             if _is_held(state, now) or _is_settled(state, now):
                 return False
+            outcome = await self.actor.hold_timeout(user_id, f"hold:{key}", seconds)
+            if outcome.state == gw.SKIPPED and outcome.detail.startswith("protected: "):
+                return False
             # A whole second, so the expiry reads back the same at any precision.
-            until = datetime.fromtimestamp(math.ceil(now + seconds), tz=UTC)
-            states[field] = f"{_HELD}{until.timestamp()}"
-            current = await self.actor.timeout_until(user_id)
-            if current is None or current < until:
-                stored = await self.actor.set_timeout_until(user_id, until, seconds)
-                if stored is not None:
-                    if not _same_expiry(current, states.get(_PLACED_FIELD)):
-                        # Not a hold's: a moderator's or timeout_user's, or
-                        # none. That is what the member goes back to.
-                        if current is None:
-                            states.pop(_PRIOR_FIELD, None)
-                        else:
-                            states[_PRIOR_FIELD] = str(current.timestamp())
-                    states[_PLACED_FIELD] = str(stored.timestamp())
+            states[field] = f"{_HELD}{math.ceil(now + seconds)}"
             await self._save(user_id, states, now)
             return True
 
     async def release(self, user_id: str, key: str) -> bool:
-        """End ``key``'s hold; True when the member's timeout was ended.
+        """End ``key``'s hold; True when the member's timeout was ended or shortened.
 
         The key is marked released either way, so a hold for it that arrives
-        late does nothing. The timeout is ended only when no key is held any
-        more — this one's hold may already have run out — and the timeout in
-        place is the one a hold put there. Ending it means lifting it, or
-        putting back the timeout the holds extended when that still has time
-        to run.
+        late does nothing. The gateway then drops the timeout to the longest
+        claim still held, or lifts it, and only ever touches a timeout the
+        automation placed.
         """
         field = self._field(key)
         async with self.lock(user_id):
@@ -217,43 +184,16 @@ class MemberHolds:
             states = await self._states(user_id)
             states[field] = f"{_RELEASED}{now}"
             await self._save(user_id, states, now)
-            for other, state in states.items():
-                if other not in _BOOKKEEPING and _is_held(state, now):
-                    return False
-            if _PLACED_FIELD not in states:
-                return False
-            current = await self.actor.timeout_until(user_id)
-            if not _same_expiry(current, states[_PLACED_FIELD]):
-                return False
-            prior = states.get(_PRIOR_FIELD)
-            if prior is not None and float(prior) > now:
-                # To the millisecond, which is how Discord stored it.
-                await self.actor.set_timeout_until(
-                    user_id,
-                    datetime.fromtimestamp(round(float(prior), 3), tz=UTC),
-                    math.ceil(float(prior) - now),
-                )
-            else:
-                await self.actor.remove_timeout(user_id)
-            states.pop(_PLACED_FIELD, None)
-            states.pop(_PRIOR_FIELD, None)
-            await self._save(user_id, states, now)
-            return True
+            outcome = await self.actor.release_timeout(user_id, f"hold:{key}")
+            return outcome.state == gw.CONFIRMED
 
     async def timeout(self, user_id: str, duration_seconds: int) -> str:
         """``timeout_user`` under the member's lock.
 
-        No hold owns the timeout this leaves, even one that happens to end at
-        the instant a hold's did, so no release lifts it.
+        Its claim is not a hold's, so no release ends it.
         """
         async with self.lock(user_id):
-            result = await self.actor.timeout_user(user_id, duration_seconds)
-            now = time.time()
-            states = await self._states(user_id)
-            states.pop(_PLACED_FIELD, None)
-            states.pop(_PRIOR_FIELD, None)
-            await self._save(user_id, states, now)
-            return result
+            return await self.actor.timeout_user(user_id, duration_seconds)
 
     async def remove_timeout(self, user_id: str) -> str:
         """``remove_timeout`` under the member's lock."""
@@ -270,30 +210,20 @@ class MemberHolds:
     async def _save(self, user_id: str, states: dict[str, str], now: float) -> None:
         """Write the member's record with only what is still live in it.
 
-        Holds that ran out and releases that settled are dropped, and so is
-        a recorded expiry that has passed: a timeout that ended cannot be the
-        one in place, nor be handed back. The hash expires
-        :data:`SETTLED_SECONDS` after the latest hold runs out or release
-        settles, and goes entirely once nothing is live.
+        Holds that ran out and releases that settled are dropped. The hash
+        expires :data:`SETTLED_SECONDS` after the latest hold runs out or
+        release settles, and goes entirely once nothing is live.
         """
         name = member_holds_key(self.guild_id, user_id)
         live = {
             field: state
             for field, state in states.items()
-            if field not in _BOOKKEEPING
-            and (_is_held(state, now) or _is_settled(state, now))
+            if _is_held(state, now) or _is_settled(state, now)
         }
         if not live:
             await self.redis.delete(name)
             return
         ends = [float(state[2:]) + SETTLED_SECONDS for state in live.values()]
-        live.update(
-            {
-                field: states[field]
-                for field in _BOOKKEEPING
-                if field in states and float(states[field]) > now
-            }
-        )
         async with self.redis.pipeline(transaction=True) as pipe:
             pipe.delete(name)
             pipe.hset(name, mapping=live)

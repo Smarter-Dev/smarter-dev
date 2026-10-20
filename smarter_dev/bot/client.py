@@ -489,6 +489,31 @@ async def start_cache_cleanup() -> None:
     logger.info("Started daily claim cache cleanup (hourly intervals)")
 
 
+#: How often the acting bot settles moderation operations whose outcome is
+#: unknown and delivers what a crash left undelivered.
+MODERATION_SWEEP_SECONDS = 60
+
+
+async def start_moderation_sweep(bot: lightbulb.BotApp) -> None:
+    """Run the moderation gateway's periodic pass while this process acts."""
+    from smarter_dev.bot.moderation_port import bot_gateway
+
+    async def sweep_forever():
+        while True:
+            await asyncio.sleep(MODERATION_SWEEP_SECONDS)
+            if not leadership.is_acting():
+                continue
+            try:
+                await bot_gateway(bot).sweep()
+            except Exception:
+                log_exception(logger, "Moderation gateway sweep failed")
+
+    asyncio.create_task(sweep_forever())
+    logger.info(
+        "Started the moderation gateway sweep (%ss intervals)", MODERATION_SWEEP_SECONDS
+    )
+
+
 async def initialize_single_guild_configuration(guild_id: str) -> None:
     """Initialize bytes configuration for a single guild using the API.
 
@@ -1540,6 +1565,7 @@ async def run_bot() -> None:
 
         # Start cache cleanup
         await start_cache_cleanup()
+        await start_moderation_sweep(bot)
 
         # Start conversation watcher for natural participation
         logger.info("Bot is now fully ready and will stay online")

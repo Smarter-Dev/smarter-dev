@@ -6,10 +6,10 @@ from __future__ import annotations
 from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from unittest.mock import patch
 
+from smarter_dev.bot import moderation_port
 from smarter_dev.bot.agents import mod_tools
 from smarter_dev.bot.purge_core import DISCORD_EPOCH_MS
 from tests.bot.fake_discord import GUILD_ID
@@ -42,17 +42,6 @@ def _get_purge_tool(bot):
     return purge, tracker
 
 
-class _FakeSessionCtx:
-    def __init__(self, session):
-        self._session = session
-
-    async def __aenter__(self):
-        return self._session
-
-    async def __aexit__(self, *args):
-        return False
-
-
 async def test_purge_messages_filters_user_and_bulk_deletes():
     now = datetime.now(UTC)
     recent = _snowflake_for(now - timedelta(minutes=1))
@@ -68,10 +57,7 @@ async def test_purge_messages_filters_user_and_bulk_deletes():
 
     purge, tracker = _get_purge_tool(discord)
 
-    session = AsyncMock()
-    with patch.object(mod_tools, "get_db_session_context", return_value=_FakeSessionCtx(session)), \
-        patch.object(mod_tools.mod_action_ops, "create_action", AsyncMock(return_value=SimpleNamespace())), \
-        patch.object(mod_tools, "dispatch_mod_action", AsyncMock()):
+    with patch.object(moderation_port, "dispatch_mod_action", AsyncMock()):
         result = await purge("222", 5, "spam")
 
     assert result["success"] is True

@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import hikari
 import pytest
 
+from smarter_dev.bot import moderation_port
 from smarter_dev.bot.plugins import purge as purge_plugin
 from smarter_dev.bot.purge_core import (
     DISCORD_EPOCH_MS,
@@ -122,17 +123,6 @@ async def test_delete_selected_uses_bulk_delete_for_many_and_noop_for_empty():
 # --------------------------------------------------------------------------- #
 
 
-class _FakeSessionCtx:
-    def __init__(self, session):
-        self._session = session
-
-    async def __aenter__(self):
-        return self._session
-
-    async def __aexit__(self, *args):
-        return False
-
-
 def _ctx(*, count: int, messages=None, target_user=None, channel_name="general"):
     ctx = Mock()
     ctx.options = SimpleNamespace(count=count, user=target_user)
@@ -159,15 +149,29 @@ def _ctx(*, count: int, messages=None, target_user=None, channel_name="general")
 
 
 def _patch_audit():
-    session = AsyncMock()
+    """The gateway records the purge; ``created`` is the row it announced."""
     created = {}
 
-    async def _create_action(sess, **kwargs):
-        created.update(kwargs)
-        return SimpleNamespace(**kwargs)
+    async def _announce(action, *, bot=None):
+        created.update(
+            {
+                column: getattr(action, column)
+                for column in (
+                    "action_type",
+                    "target_user_id",
+                    "target_username",
+                    "source",
+                    "reason",
+                    "moderator_user_id",
+                    "moderator_username",
+                    "channel_id",
+                    "evidence",
+                )
+            }
+        )
 
-    dispatch = AsyncMock()
-    return session, created, _create_action, dispatch
+    dispatch = AsyncMock(side_effect=_announce)
+    return None, created, None, dispatch
 
 
 async def test_denies_without_manage_messages():
@@ -218,13 +222,11 @@ async def test_per_user_guard_allows_privileged_target_with_admin():
     target_member.is_bot = False
     guild.get_member = Mock(return_value=target_member)
 
-    session, created, create_action, dispatch = _patch_audit()
+    _, created, _, dispatch = _patch_audit()
     # lightbulb.utils.permissions_for expands ADMINISTRATOR to all permissions,
     # so the invoker's resolved perms include MANAGE_MESSAGES.
     with patch(PERMS_TARGET, side_effect=[ADMIN | MANAGE, MANAGE]), \
-        patch.object(purge_plugin, "get_db_session_context", return_value=_FakeSessionCtx(session)), \
-        patch.object(purge_plugin.mod_action_ops, "create_action", side_effect=create_action), \
-        patch.object(purge_plugin, "dispatch_mod_action", dispatch):
+        patch.object(moderation_port, "dispatch_mod_action", dispatch):
         await purge_plugin.purge(ctx)
 
     ctx.bot.rest.delete_messages.assert_awaited_once_with(555, [recent + 2, recent + 1])
@@ -243,12 +245,10 @@ async def test_per_user_guard_exempts_bot_targets():
     target_member.is_bot = True
     guild.get_member = Mock(return_value=target_member)
 
-    session, created, create_action, dispatch = _patch_audit()
+    _, created, _, dispatch = _patch_audit()
     # Invoker only MANAGE, target (a bot) has MANAGE — guard must NOT block.
     with patch(PERMS_TARGET, side_effect=[MANAGE, MANAGE]), \
-        patch.object(purge_plugin, "get_db_session_context", return_value=_FakeSessionCtx(session)), \
-        patch.object(purge_plugin.mod_action_ops, "create_action", side_effect=create_action), \
-        patch.object(purge_plugin, "dispatch_mod_action", dispatch):
+        patch.object(moderation_port, "dispatch_mod_action", dispatch):
         await purge_plugin.purge(ctx)
 
     ctx.bot.rest.delete_messages.assert_awaited_once()
@@ -261,11 +261,9 @@ async def test_count_mode_writes_audit_row_and_fires_dispatch():
     messages = [_message(recent + 3, "A"), _message(recent + 2, "B"), _message(recent + 1, "A")]
     ctx, guild = _ctx(count=3, messages=messages, channel_name="general")
 
-    session, created, create_action, dispatch = _patch_audit()
+    _, created, _, dispatch = _patch_audit()
     with patch(PERMS_TARGET, return_value=MANAGE), \
-        patch.object(purge_plugin, "get_db_session_context", return_value=_FakeSessionCtx(session)), \
-        patch.object(purge_plugin.mod_action_ops, "create_action", side_effect=create_action), \
-        patch.object(purge_plugin, "dispatch_mod_action", dispatch):
+        patch.object(moderation_port, "dispatch_mod_action", dispatch):
         await purge_plugin.purge(ctx)
 
     # No user filter → all three deleted via bulk delete.
@@ -276,7 +274,9 @@ async def test_count_mode_writes_audit_row_and_fires_dispatch():
     assert created["source"] == "manual"
     assert created["reason"] == "purged 3 messages in #general"
     assert created["moderator_user_id"] == "999"
-    session.commit.assert_awaited()
+    assert created["evidence"]["deleted_message_ids"] == [
+        str(m) for m in (recent + 3, recent + 2, recent + 1)
+    ]
     dispatch.assert_awaited_once()
 
 
@@ -292,11 +292,9 @@ async def test_reports_shortfall_for_messages_older_than_14_days():
     ]
     ctx, guild = _ctx(count=10, messages=messages)
 
-    session, created, create_action, dispatch = _patch_audit()
+    _, created, _, dispatch = _patch_audit()
     with patch(PERMS_TARGET, return_value=MANAGE), \
-        patch.object(purge_plugin, "get_db_session_context", return_value=_FakeSessionCtx(session)), \
-        patch.object(purge_plugin.mod_action_ops, "create_action", side_effect=create_action), \
-        patch.object(purge_plugin, "dispatch_mod_action", dispatch):
+        patch.object(moderation_port, "dispatch_mod_action", dispatch):
         await purge_plugin.purge(ctx)
 
     ctx.bot.rest.delete_messages.assert_awaited_once_with(555, [recent + 2, recent + 1])
@@ -316,11 +314,9 @@ async def test_forbidden_delete_fails_loud_without_audit_row():
         side_effect=hikari.ForbiddenError(url="u", headers={}, raw_body=b"")
     )
 
-    session, created, create_action, dispatch = _patch_audit()
+    _, created, _, dispatch = _patch_audit()
     with patch(PERMS_TARGET, return_value=MANAGE), \
-        patch.object(purge_plugin, "get_db_session_context", return_value=_FakeSessionCtx(session)), \
-        patch.object(purge_plugin.mod_action_ops, "create_action", side_effect=create_action), \
-        patch.object(purge_plugin, "dispatch_mod_action", dispatch):
+        patch.object(moderation_port, "dispatch_mod_action", dispatch):
         await purge_plugin.purge(ctx)
 
     # Failed the delete → ephemeral error, no audit row, no dispatch.
@@ -339,11 +335,9 @@ async def test_notfound_delete_fails_loud_without_audit_row():
         side_effect=hikari.NotFoundError(url="u", headers={}, raw_body=b"")
     )
 
-    session, created, create_action, dispatch = _patch_audit()
+    _, created, _, dispatch = _patch_audit()
     with patch(PERMS_TARGET, return_value=MANAGE), \
-        patch.object(purge_plugin, "get_db_session_context", return_value=_FakeSessionCtx(session)), \
-        patch.object(purge_plugin.mod_action_ops, "create_action", side_effect=create_action), \
-        patch.object(purge_plugin, "dispatch_mod_action", dispatch):
+        patch.object(moderation_port, "dispatch_mod_action", dispatch):
         await purge_plugin.purge(ctx)
 
     # A message vanished mid-action → ephemeral error, no audit row, no dispatch.
@@ -358,11 +352,9 @@ async def test_zero_messages_writes_no_audit_row_and_no_dispatch():
     # ModerationAction and fire no mod_action for an action that didn't happen.
     ctx, guild = _ctx(count=10, messages=[])
 
-    session, created, create_action, dispatch = _patch_audit()
+    _, created, _, dispatch = _patch_audit()
     with patch(PERMS_TARGET, return_value=MANAGE), \
-        patch.object(purge_plugin, "get_db_session_context", return_value=_FakeSessionCtx(session)), \
-        patch.object(purge_plugin.mod_action_ops, "create_action", side_effect=create_action), \
-        patch.object(purge_plugin, "dispatch_mod_action", dispatch):
+        patch.object(moderation_port, "dispatch_mod_action", dispatch):
         await purge_plugin.purge(ctx)
 
     ctx.bot.rest.delete_messages.assert_not_awaited()
@@ -371,4 +363,3 @@ async def test_zero_messages_writes_no_audit_row_and_no_dispatch():
     assert "Purged 0 messages" in confirmation
     assert created == {}
     dispatch.assert_not_awaited()
-    session.commit.assert_not_awaited()

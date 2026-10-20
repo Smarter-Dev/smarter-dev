@@ -83,6 +83,60 @@ def _admin_actor_targets_are_members(request, monkeypatch):
     monkeypatch.setattr(AdminActor, "staff_refusal", not_protected)
 
 
+class _LazyGatewayDatabase:
+    """A throwaway database for the moderation gateway, made on first use.
+
+    Every detector now records through the gateway, so any test that drives
+    one needs the gateway's tables. Most tests never touch it, so nothing is
+    created until a gateway opens its first session.
+    """
+
+    def __init__(self, tmp_path_factory) -> None:
+        self._tmp_path_factory = tmp_path_factory
+        self.engine = None
+        self.maker = None
+        # Two gateways opening their first session at once must get one database.
+        self._creating = asyncio.Lock()
+
+    def __call__(self):
+        return _LazyGatewaySession(self)
+
+    async def ensure(self):
+        async with self._creating:
+            if self.maker is None:
+                from tests.moderation_fakes import gateway_session_factory
+
+                directory = self._tmp_path_factory.mktemp("moderation-gateway")
+                self.engine, self.maker = await gateway_session_factory(directory)
+        return self.maker
+
+
+class _LazyGatewaySession:
+    def __init__(self, database: _LazyGatewayDatabase) -> None:
+        self._database = database
+        self._session = None
+
+    async def __aenter__(self):
+        maker = await self._database.ensure()
+        self._session = maker()
+        return await self._session.__aenter__()
+
+    async def __aexit__(self, *exc_info):
+        return await self._session.__aexit__(*exc_info)
+
+
+@pytest.fixture(autouse=True)
+async def moderation_gateway_db(tmp_path_factory, monkeypatch):
+    """Point every moderation gateway at a per-test database (see above)."""
+    from smarter_dev.web.moderation_gateway import gateway as gateway_module
+
+    database = _LazyGatewayDatabase(tmp_path_factory)
+    monkeypatch.setattr(gateway_module, "SESSION_FACTORY_OVERRIDE", database)
+    yield database
+    if database.engine is not None:
+        await database.engine.dispose()
+
+
 @pytest.fixture(scope="function")
 def event_loop():
     """Create an instance of the default event loop for each test function."""

@@ -98,3 +98,27 @@ def parse_discord_webhook_url(url: str) -> WebhookReference | None:
 def is_discord_webhook_url(url: str) -> bool:
     """True when ``url`` is a deletable Discord webhook URL."""
     return parse_discord_webhook_url(url) is not None
+
+
+# Any run of webhook-looking text, loose on purpose: redaction errs toward
+# hiding more, and only what parses as a real webhook is rewritten.
+_WEBHOOK_TOKEN_RUN = re.compile(
+    r"(?i)(?:https?://)?(?:canary\.|ptb\.)?discord(?:app)?\.com/api/webhooks/\d+/[\w-]+"
+)
+
+
+def redact_webhook_tokens(text: str) -> str:
+    """``text`` with the token of every Discord webhook URL in it replaced.
+
+    For records that keep what a member posted (moderation evidence): a
+    webhook token is a bearer credential, and the id alone still says which
+    webhook leaked.
+    """
+
+    def redact(match: re.Match[str]) -> str:
+        reference = parse_discord_webhook_url(match.group(0))
+        if reference is None:
+            return match.group(0)
+        return match.group(0)[: -len(reference.token)] + "<token redacted>"
+
+    return _WEBHOOK_TOKEN_RUN.sub(redact, text)

@@ -1,14 +1,12 @@
 """The AI triage tools' contribution to the bot's short-term event log.
 
-The single-message delete is the one triage action that writes no
-``ModerationAction`` row, so it is captured directly instead of riding the
-``mod_action`` dispatch the other tools go through.
+Every triage action goes through the moderation gateway, which writes one
+``ModerationAction`` row per confirmed effect (the single delete included) and
+announces it once through the ``mod_action`` dispatch, with the bot, which is
+what writes the event log. Nothing that did not happen is announced.
 """
 
 from __future__ import annotations
-
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -53,73 +51,53 @@ def discord() -> FakeDiscord:
 
 
 @pytest.fixture
-def recorded_events(monkeypatch) -> list:
-    events: list = []
+def announced(monkeypatch) -> list:
+    from smarter_dev.bot import moderation_port
 
-    async def capture_event(bot, event, **kwargs) -> None:
-        events.append(event)
+    actions: list = []
 
-    monkeypatch.setattr(mod_tools, "record_guild_event", capture_event)
-    return events
+    async def capture(action, *, bot=None) -> None:
+        actions.append((action, bot))
+
+    monkeypatch.setattr(moderation_port, "dispatch_mod_action", capture)
+    return actions
 
 
-async def test_single_delete_is_written_to_the_event_log(discord, recorded_events):
+async def test_single_delete_is_recorded_and_announced(discord, announced):
     delete_message, _ = _tool(discord, "delete_message", ["delete"])
     result = await delete_message(MESSAGE_ID, "posted a scam link")
 
     assert result["success"] is True
     assert discord.destructive == [("delete_message", int(MESSAGE_ID))]
-    assert len(recorded_events) == 1
-    event = recorded_events[0]
-    assert event.kind == "mod_action"
-    assert event.guild_id == GUILD_ID
-    assert event.action == "delete"
-    assert event.channel_id == CHANNEL_ID
-    assert event.reason == "posted a scam link"
-    assert event.source == "ai"
+    [(action, bot)] = announced
+    assert bot is discord
+    assert action.action_type == "delete"
+    assert action.guild_id == GUILD_ID
+    assert action.channel_id == CHANNEL_ID
+    assert action.reason == "posted a scam link"
+    assert action.source == "ai"
 
 
-async def test_a_delete_that_never_happened_is_never_remembered(discord, recorded_events):
+async def test_a_message_already_gone_is_never_remembered(discord, announced):
     discord.fail["delete_message"] = not_found()
 
     delete_message, tracker = _tool(discord, "delete_message", ["delete"])
     result = await delete_message(MESSAGE_ID, "posted a scam link")
 
-    assert result["success"] is False
-    assert recorded_events == []
-    # A 404 after the call went out may follow an earlier attempt that landed.
-    assert tracker.deletions == [
-        {"message_id": MESSAGE_ID, "reason": "posted a scam link", "possibly_applied": True}
-    ]
+    # Gone is what the tool wanted, but the bot did not do it: no row, no claim.
+    assert result["success"] is True
+    assert "already deleted" in result["result"]
+    assert announced == []
+    assert tracker.deletions == []
 
 
-async def test_triage_timeout_dispatches_with_the_bot_for_the_event_log(discord, monkeypatch):
-    """Actions that DO write a row reach the log through the dispatch instead."""
-    dispatched: list = []
-
-    async def capture_dispatch(action, *, bot=None) -> None:
-        dispatched.append((action, bot))
-
-    class _FakeSessionContext:
-        async def __aenter__(self):
-            return AsyncMock()
-
-        async def __aexit__(self, *args):
-            return False
-
-    monkeypatch.setattr(mod_tools, "dispatch_mod_action", capture_dispatch)
-    monkeypatch.setattr(
-        mod_tools, "get_db_session_context", lambda: _FakeSessionContext()
-    )
-    monkeypatch.setattr(
-        mod_tools.mod_action_ops,
-        "create_action",
-        AsyncMock(return_value=SimpleNamespace()),
-    )
-
+async def test_triage_timeout_dispatches_with_the_bot_for_the_event_log(
+    discord, announced
+):
     timeout_user, _ = _tool(discord, "timeout_user", ["timeout"])
     result = await timeout_user(str(TARGET_ID), "10m", "invite-link spam")
 
     assert result["success"] is True
-    assert len(dispatched) == 1
-    assert dispatched[0][1] is discord
+    [(action, bot)] = announced
+    assert action.action_type == "timeout"
+    assert bot is discord

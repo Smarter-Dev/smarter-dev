@@ -3,6 +3,12 @@
 This module provides functionality to log Discord events (member join/leave,
 bans, message edits/deletes, etc.) to a configured audit log channel with
 formatted embeds.
+
+It also ingests native moderation actions (ban, unban, kick, timeout,
+untimeout) into ``moderation_actions``. An action somebody else took keeps its
+actor and its Discord audit-log entry id. An action the bot took itself is the
+echo of a moderation-gateway operation, which already wrote its row: the entry
+is linked to that operation (``link_audit_entry``), never recorded twice.
 """
 
 from __future__ import annotations
@@ -10,6 +16,8 @@ from __future__ import annotations
 import difflib
 import logging
 import time
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC
 from datetime import datetime
 
@@ -19,6 +27,7 @@ from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.web.crud import AuditLogConfigOperations, ModerationActionOperations
 from smarter_dev.shared.exception_logging import log_exception
+from smarter_dev.web.moderation_gateway.gateway import link_audit_entry
 
 mod_action_ops = ModerationActionOperations()
 
@@ -167,25 +176,37 @@ def _entry_matches_change(entry: hikari.AuditLogEntry, change_key) -> bool:
     return any(getattr(change, "key", None) == change_key for change in changes)
 
 
+@dataclass(frozen=True, slots=True)
+class AuditAttribution:
+    """Who took a native action, from the guild audit log (someone other than the bot)."""
+
+    moderator_id: str | None
+    moderator_name: str | None
+    reason: str | None
+    entry_id: str | None
+
+
 async def _lookup_audit_moderator(
     bot: hikari.GatewayBot,
     guild_id: int,
     event_type: hikari.AuditLogEventType,
     target_id: int,
     *,
+    own_kinds: Sequence[str] = (),
     change_key=None,
     max_age_seconds: float | None = None,
-) -> tuple[str | None, str | None, str | None]:
+) -> AuditAttribution | None:
     """Find the moderator behind a native action from the guild audit log.
 
     ``fetch_audit_log`` yields ``AuditLog`` *pages* (each a sequence of
     ``AuditLogEntry``), newest first, so we iterate the entries of the single
     fetched page and pick the newest one that targets ``target_id`` and, when
-    required, carries ``change_key``. Returns ``(moderator_id, moderator_name,
-    reason)`` or ``(None, None, None)`` when there is no attributable entry —
-    the entry is missing, older than ``max_age_seconds``, lacks ``change_key``,
-    or was performed by the bot itself (already recorded by the mod tools). A
-    REST failure is swallowed so a moderation event is never lost to a hiccup.
+    required, carries ``change_key``. Returns None when there is no attributable
+    entry — the entry is missing, older than ``max_age_seconds``, lacks
+    ``change_key``, or was performed by the bot itself. An entry by the bot is
+    linked to the gateway operation of one of ``own_kinds`` it echoes, which
+    already wrote its row. A REST failure is swallowed so a moderation event is
+    never lost to a hiccup.
     """
     me = bot.get_me()
     bot_id = me.id if me is not None else None
@@ -202,17 +223,23 @@ async def _lookup_audit_moderator(
                     created_at = getattr(entry.id, "created_at", None)
                     entry_time = created_at.timestamp() if created_at else 0
                     if abs(time.time() - entry_time) > max_age_seconds:
-                        return None, None, None
+                        return None
                 if entry.user_id and bot_id is not None and entry.user_id == bot_id:
-                    return None, None, None
+                    if own_kinds:
+                        await _link_own_action(guild_id, target_id, own_kinds, entry.id)
+                    return None
                 moderator_id = str(entry.user_id) if entry.user_id else None
                 actor = (
                     await bot.rest.fetch_user(entry.user_id)
                     if entry.user_id
                     else None
                 )
-                moderator_name = actor.username if actor else None
-                return moderator_id, moderator_name, entry.reason
+                return AuditAttribution(
+                    moderator_id=moderator_id,
+                    moderator_name=actor.username if actor else None,
+                    reason=entry.reason,
+                    entry_id=str(entry.id),
+                )
     except Exception:
         log_exception(
             logger,
@@ -221,7 +248,46 @@ async def _lookup_audit_moderator(
             guild_id,
             level=logging.DEBUG,
         )
-    return None, None, None
+    return None
+
+
+def _unpack(
+    attribution: AuditAttribution | None,
+) -> tuple[str | None, str | None, str | None, str | None]:
+    if attribution is None:
+        return None, None, None, None
+    return (
+        attribution.moderator_id,
+        attribution.moderator_name,
+        attribution.reason,
+        attribution.entry_id,
+    )
+
+
+async def _link_own_action(
+    guild_id: int, target_id: int, kinds: Sequence[str], entry_id
+) -> None:
+    try:
+        linked = await link_audit_entry(
+            guild_id=str(guild_id),
+            target_user_id=str(target_id),
+            kinds=kinds,
+            audit_entry_id=str(entry_id),
+        )
+    except Exception:  # noqa: BLE001 — a missing link loses nothing but the id
+        log_exception(
+            logger,
+            "Could not link audit entry %s to its moderation operation",
+            entry_id,
+            level=logging.WARNING,
+        )
+        return
+    if not linked:
+        logger.info(
+            "Audit entry %s of the bot's own matches no gateway operation on %s",
+            entry_id,
+            target_id,
+        )
 
 
 # Event-specific embed builders
@@ -288,13 +354,15 @@ async def log_member_leave(
     # being mis-attributed to this leave.
     try:
         async with get_db_session_context() as session:
-            moderator_id, moderator_name, reason = await _lookup_audit_moderator(
+            attribution = await _lookup_audit_moderator(
                 bot,
                 event.guild_id,
                 hikari.AuditLogEventType.MEMBER_KICK,
                 user.id,
                 max_age_seconds=10,
+                own_kinds=("kick",),
             )
+            moderator_id, moderator_name, reason, entry_id = _unpack(attribution)
             if moderator_id:
                 action = await mod_action_ops.create_action(
                     session,
@@ -306,6 +374,7 @@ async def log_member_leave(
                     action_type="kick",
                     reason=reason,
                     source="audit_log",
+                    audit_entry_id=entry_id,
                 )
                 await session.commit()
                 await dispatch_mod_action(action)
@@ -343,12 +412,14 @@ async def log_member_ban(
     # Record ban in moderation actions (from audit log / external source)
     try:
         async with get_db_session_context() as session:
-            moderator_id, moderator_name, reason = await _lookup_audit_moderator(
+            attribution = await _lookup_audit_moderator(
                 bot,
                 event.guild_id,
                 hikari.AuditLogEventType.MEMBER_BAN_ADD,
                 user.id,
+                own_kinds=("ban",),
             )
+            moderator_id, moderator_name, reason, entry_id = _unpack(attribution)
             if moderator_id:  # Only record if we found external moderator
                 action = await mod_action_ops.create_action(
                     session,
@@ -360,6 +431,7 @@ async def log_member_ban(
                     action_type="ban",
                     reason=reason,
                     source="audit_log",
+                    audit_entry_id=entry_id,
                 )
                 await session.commit()
                 await dispatch_mod_action(action)
@@ -397,12 +469,13 @@ async def log_member_unban(
     # Record unban in moderation actions
     try:
         async with get_db_session_context() as session:
-            moderator_id, moderator_name, reason = await _lookup_audit_moderator(
+            attribution = await _lookup_audit_moderator(
                 bot,
                 event.guild_id,
                 hikari.AuditLogEventType.MEMBER_BAN_REMOVE,
                 user.id,
             )
+            moderator_id, moderator_name, reason, entry_id = _unpack(attribution)
             if moderator_id:
                 action = await mod_action_ops.create_action(
                     session,
@@ -414,6 +487,7 @@ async def log_member_unban(
                     action_type="unban",
                     reason=reason,
                     source="audit_log",
+                    audit_entry_id=entry_id,
                 )
                 await session.commit()
                 await dispatch_mod_action(action)
@@ -544,14 +618,16 @@ async def log_member_update(
         # never mis-attributed as a timeout.
         try:
             async with get_db_session_context() as session:
-                moderator_id, moderator_name, reason = await _lookup_audit_moderator(
+                attribution = await _lookup_audit_moderator(
                     bot,
                     event.guild_id,
                     hikari.AuditLogEventType.MEMBER_UPDATE,
                     member.id,
                     change_key=hikari.AuditLogChangeKey.COMMUNICATION_DISABLED_UNTIL,
                     max_age_seconds=10,
+                    own_kinds=("timeout", "untimeout"),
                 )
+                moderator_id, moderator_name, reason, entry_id = _unpack(attribution)
 
                 if moderator_id:
                     # Calculate duration
@@ -572,6 +648,7 @@ async def log_member_update(
                         reason=reason,
                         duration_seconds=duration_seconds,
                         source="audit_log",
+                        audit_entry_id=entry_id,
                     )
                     await session.commit()
                     await dispatch_mod_action(action)
@@ -584,14 +661,16 @@ async def log_member_update(
         # other MEMBER_UPDATE entry is never mis-attributed as a moderator untimeout.
         try:
             async with get_db_session_context() as session:
-                moderator_id, moderator_name, reason = await _lookup_audit_moderator(
+                attribution = await _lookup_audit_moderator(
                     bot,
                     event.guild_id,
                     hikari.AuditLogEventType.MEMBER_UPDATE,
                     member.id,
                     change_key=hikari.AuditLogChangeKey.COMMUNICATION_DISABLED_UNTIL,
                     max_age_seconds=10,
+                    own_kinds=("timeout", "untimeout"),
                 )
+                moderator_id, moderator_name, reason, entry_id = _unpack(attribution)
 
                 if moderator_id:
                     action = await mod_action_ops.create_action(
@@ -604,6 +683,7 @@ async def log_member_update(
                         action_type="untimeout",
                         reason=reason,
                         source="audit_log",
+                        audit_entry_id=entry_id,
                     )
                     await session.commit()
                     await dispatch_mod_action(action)
