@@ -109,6 +109,8 @@ async def install_extension(
     """Materialise a fresh install: the install row plus one handler row each."""
     loaded = _get_loaded(slug)
     manifest = loaded.manifest
+    if manifest.moved_to_moderation:
+        raise ExtensionInstallError(manifest.moved_to_moderation)
     cleaned = _validate(manifest, raw_config)
     rendered = _render(manifest, cleaned, loaded.scripts)
 

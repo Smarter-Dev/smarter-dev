@@ -122,8 +122,8 @@ def _body(**over):
         "trigger_type": "message",
         "settings": {},
         "channel_ids": [],
-        "description": "ban scammers",
-        "script": 'await ban_user(context["author_id"])\n',
+        "description": "report scammers",
+        "script": 'await send_message("scam seen", "MODCHAT")\n',
         "created_by_admin": "A1",
     }
     body.update(over)
@@ -227,7 +227,7 @@ def test_list_admin_handlers_with_scripts(client):
     listed = client.get(
         "/api/admin/handlers", params={"guild_id": "G1", "include_scripts": "true"}
     )
-    assert listed.json()[0]["script"].startswith("await ban_user")
+    assert listed.json()[0]["script"].startswith("await send_message")
 
 
 def test_edit_admin_handler(client):
@@ -236,15 +236,15 @@ def test_edit_admin_handler(client):
     resp = client.put(
         f"/api/admin/handlers/{handler_id}",
         json={
-            "description": "ban scammers politely",
-            "script": 'await ban_user(context["author_id"], "scam")\n',
+            "description": "report scammers politely",
+            "script": 'await send_message("scam seen, please look", "MODCHAT")\n',
             "settings": {},
             "channel_ids": ["MODCHAT"],
         },
     )
     assert resp.status_code == 200
     assert resp.json()["channel_ids"] == ["MODCHAT"]
-    assert resp.json()["description"] == "ban scammers politely"
+    assert resp.json()["description"] == "report scammers politely"
 
 
 def _script_of(client, handler_id: str) -> dict:
@@ -313,6 +313,71 @@ def test_replace_script_refuses_when_the_script_moved(client):
     assert resp.status_code == 409
     assert "changed since it was read" in resp.text
     assert _script_of(client, handler_id)["script"] == "first = 1\n"
+
+
+BANNING = 'await ban_user(context["author_id"], "scam")\n'
+
+
+def test_create_refuses_a_handler_that_punishes_members(client):
+    """#239: no new parallel punisher beside the moderation coordinator."""
+    resp = client.post("/api/admin/handlers", json=_body(script=BANNING))
+    assert resp.status_code == 422
+    assert "can no longer punish members (ban_user)" in resp.text
+    assert client.get("/api/admin/handlers", params={"guild_id": "G1"}).json() == []
+
+
+def test_edit_refuses_to_add_a_sanction(client):
+    handler_id = client.post("/api/admin/handlers", json=_body()).json()["handler_id"]
+    resp = client.put(
+        f"/api/admin/handlers/{handler_id}",
+        json={
+            "description": "d",
+            "script": 'await timeout_user(context["author_id"], 60)\n',
+            "settings": {},
+            "channel_ids": [],
+        },
+    )
+    assert resp.status_code == 422
+    assert "(timeout_user)" in resp.text
+    assert _script_of(client, handler_id)["script"] == _body()["script"]
+
+
+async def test_a_live_punishing_script_keeps_its_sanctions_but_gains_none(
+    db_session, submitted, no_guards
+):
+    """scam-banner's reference copy can still be applied until the cutover;
+    it cannot pick up a sanction it did not have."""
+    record = AdminHandler(
+        guild_id="G1",
+        name="scam-banner",
+        trigger_type="message",
+        settings={},
+        channel_ids=[],
+        description="bans scammers",
+        script=BANNING,
+        created_by_admin="A1",
+    )
+    db_session.add(record)
+    await db_session.commit()
+    handler_id = str(record.id)
+    reworded = BANNING.replace('"scam"', '"confirmed scam"')
+
+    async with _async_client(db_session) as client:
+        kept = await client.put(
+            f"/api/admin/handlers/{handler_id}/script",
+            json={"script": reworded, "expected_script": BANNING},
+        )
+        added = await client.put(
+            f"/api/admin/handlers/{handler_id}/script",
+            json={
+                "script": reworded + 'await warn_user(context["author_id"], "x")\n',
+                "expected_script": reworded,
+            },
+        )
+
+    assert kept.status_code == 200
+    assert added.status_code == 422
+    assert "(warn_user)" in added.text
 
 
 async def test_replace_script_lets_only_one_of_two_stale_readers_through(

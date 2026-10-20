@@ -191,3 +191,38 @@ def non_member_refusal(
     if is_bot:
         return A_BOT
     return None
+
+
+# Why a role may not be granted or removed by automation.
+A_STAFF_ROLE = "is a staff role"
+ROLE_STAFF_PERMISSION = "carries a staff permission"
+ROLE_CHANNEL_STAFF_PERMISSION = "carries a staff permission in a channel"
+
+
+def role_refusal(
+    role_id: str, guild: GuildFacts, *, extra_role_ids: Iterable[str] = ()
+) -> str | None:
+    """Why automation may not grant or remove ``role_id``, or None when it may.
+
+    A role that makes its holder staff under :func:`member_refusal` is never
+    changed by automation: granting one would put a member out of moderation's
+    reach, and removing one would let a later run punish a moderator (strip the
+    role in one fire, ban in the next). The @everyone role, an unknown role and
+    a role the guild facts cannot resolve are refused too.
+    """
+    rid = str(role_id)
+    if rid == str(guild.guild_id):
+        return "is the @everyone role"
+    staff_roles = STAFF_ROLE_IDS | {str(extra) for extra in extra_role_ids}
+    if rid in staff_roles:
+        return A_STAFF_ROLE
+    permissions = guild.role_permissions.get(rid)
+    if permissions is None:
+        return unknown(f"role {rid} could not be resolved")
+    if int(permissions) & STAFF_PERMISSIONS:
+        return ROLE_STAFF_PERMISSION
+    for overwrites in guild.channel_overwrites:
+        overwrite = overwrites.get(rid)
+        if overwrite is not None and overwrite.allow & STAFF_PERMISSIONS:
+            return ROLE_CHANNEL_STAFF_PERMISSION
+    return None

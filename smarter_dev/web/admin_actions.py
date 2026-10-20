@@ -41,6 +41,7 @@ from smarter_dev.shared.staff_protection import MemberFacts
 from smarter_dev.shared.staff_protection import Overwrite
 from smarter_dev.shared.staff_protection import member_refusal
 from smarter_dev.shared.staff_protection import non_member_refusal
+from smarter_dev.shared.staff_protection import role_refusal
 from smarter_dev.shared.staff_protection import unknown
 from smarter_dev.web.discord_rest import DiscordBotClient
 from smarter_dev.web.discord_rest import DiscordRestError
@@ -110,6 +111,10 @@ def _top_role_name(role_ids: list[str], roles_by_id: dict[str, dict]) -> str:
 
 class AdminActionError(DiscordRestError):
     """A moderation action's REST call failed."""
+
+
+class ProtectedRoleError(AdminActionError):
+    """A role change automation may never make: the role confers staff standing."""
 
 
 @dataclass(frozen=True)
@@ -297,7 +302,11 @@ class AdminActor(DiscordBotClient):
     async def add_role(
         self, user_id: str, role_id: str, reason: str | None = None
     ) -> bool:
-        """Grant a role to a member. A gone member (404) -> False (no-op)."""
+        """Grant a role to a member. A gone member (404) -> False (no-op).
+
+        A role that confers staff standing is refused (:meth:`role_refusal`).
+        """
+        await self._refuse_staff_role(role_id)
         return await self._mutate_role("PUT", user_id, role_id, reason)
 
     async def remove_role(
@@ -305,11 +314,40 @@ class AdminActor(DiscordBotClient):
     ) -> bool:
         """Revoke a role from a member. A gone member (404) -> False (no-op).
 
-        Not refused for staff, but their standing is checked first so it
-        holds for the rest of the fire (see ``_refusals``).
+        A role that confers staff standing is refused (:meth:`role_refusal`),
+        so a script cannot strip a moderator's role in one fire and punish
+        them in a later one. Any other role may be removed from staff, but
+        their standing is checked first so it holds for the rest of the fire
+        (see ``_refusals``).
         """
+        await self._refuse_staff_role(role_id)
         await self.staff_refusal(user_id)
         return await self._mutate_role("DELETE", user_id, role_id, reason)
+
+    async def role_refusal(self, role_id: str) -> str | None:
+        """Why automation may not grant or remove ``role_id``; never raises.
+
+        The shared rule (``staff_protection.role_refusal``) over the guild's
+        roles and channel overwrites, read once per fire. A failed read
+        refuses.
+        """
+        try:
+            return role_refusal(str(role_id), await self._protection_guild_facts())
+        except Exception as error:  # noqa: BLE001 — unknown refuses
+            logger.warning(
+                "Role protection check for role %s in guild %s failed: %s",
+                role_id,
+                self.guild_id,
+                type(error).__name__,
+            )
+            return unknown(type(error).__name__)
+
+    async def _refuse_staff_role(self, role_id: str) -> None:
+        refusal = await self.role_refusal(role_id)
+        if refusal is not None:
+            raise ProtectedRoleError(
+                f"role {role_id} {refusal}: automation never grants or removes it"
+            )
 
     async def _mutate_role(
         self, method: str, user_id: str, role_id: str, reason: str | None

@@ -261,6 +261,7 @@ UNION ALL SELECT 'chat_agent_engagements topic (clear)', count(*) FROM chat_agen
 -- moderation gateway: what they posted, and what a model or a pending delivery says about them
 UNION ALL SELECT 'moderation_incident_entries content (delete)', count(*) FROM moderation_incident_entries WHERE kind IN ('evidence', 'transcript', 'assessment') AND (target_user_id = :'did' OR coalesce(content, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)'))
 UNION ALL SELECT 'moderation_outbox (delete)', count(*) FROM moderation_outbox WHERE target_user_id = :'did'
+UNION ALL SELECT 'moderation_shadow_decisions (delete)', count(*) FROM moderation_shadow_decisions WHERE author_id = :'did' OR coalesce(target_ids::text, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)') OR coalesce(staff_excluded::text, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
 -- kept:
 UNION ALL SELECT 'moderation_actions (kept)', count(*) FROM moderation_actions WHERE target_user_id = :'did' OR moderator_user_id = :'did'
 UNION ALL SELECT 'moderation_operations (kept)', count(*) FROM moderation_operations WHERE target_user_id = :'did'
@@ -631,6 +632,11 @@ DELETE FROM moderation_incident_entries
  WHERE kind IN ('evidence', 'transcript', 'assessment')
    AND (target_user_id = :'did' OR coalesce(content, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)'));
 DELETE FROM moderation_outbox WHERE target_user_id = :'did';
+-- The moderation coordinator's shadow record: an experiment, not history.
+DELETE FROM moderation_shadow_decisions
+ WHERE author_id = :'did'
+    OR coalesce(target_ids::text, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)')
+    OR coalesce(staff_excluded::text, '') ~ ('(^|[^0-9])' || :'did' || '([^0-9]|$)');
 DELETE FROM scan_user_profiles WHERE user_id = :'did';
 UPDATE scan_service_usage SET user_id = NULL WHERE user_id = :'did';
 -- Records that can name them past the 5-hour sweep.

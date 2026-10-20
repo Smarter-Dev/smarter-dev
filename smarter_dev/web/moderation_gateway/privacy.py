@@ -8,7 +8,9 @@ delivery says about them:
 
 * evidence entries quoting their messages;
 * transcripts and model assessments that name them (by id);
-* outbox rows about them (a notice or DM not yet settled).
+* outbox rows about them (a notice or DM not yet settled);
+* the moderation coordinator's shadow decisions about their messages or
+  naming them as a target (an experiment's record, not moderation history).
 
 ``docs/privacy-deletion-runbook.md`` step 6 runs the same deletes as SQL; this
 function is the tested statement of what they must do.
@@ -21,11 +23,14 @@ from dataclasses import dataclass
 
 from sqlalchemy import delete
 from sqlalchemy import or_
+from sqlalchemy import String
+from sqlalchemy import cast
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from smarter_dev.web.models import ModerationIncidentEntry
 from smarter_dev.web.models import ModerationOutbox
+from smarter_dev.web.models import ModerationShadowDecision
 from smarter_dev.web.moderation_gateway import types as t
 
 #: Entry kinds that can hold what the person wrote or a model wrote about them.
@@ -36,6 +41,7 @@ CONTENT_KINDS = (t.ENTRY_EVIDENCE, t.ENTRY_TRANSCRIPT, t.ENTRY_ASSESSMENT)
 class MemberContentDeletion:
     entries: int
     outbox: int
+    shadow: int = 0
 
 
 def _names(text: str | None, discord_id: str) -> bool:
@@ -80,4 +86,35 @@ async def delete_member_moderation_content(
     outbox = await session.execute(
         delete(ModerationOutbox).where(ModerationOutbox.target_user_id == did)
     )
-    return MemberContentDeletion(entries=len(doomed), outbox=outbox.rowcount or 0)
+    shadow_candidates = (
+        await session.execute(
+            select(
+                ModerationShadowDecision.id,
+                ModerationShadowDecision.author_id,
+                cast(ModerationShadowDecision.target_ids, String),
+                cast(ModerationShadowDecision.staff_excluded, String),
+            ).where(
+                or_(
+                    ModerationShadowDecision.author_id == did,
+                    cast(ModerationShadowDecision.target_ids, String).contains(did),
+                    cast(ModerationShadowDecision.staff_excluded, String).contains(
+                        did
+                    ),
+                )
+            )
+        )
+    ).all()
+    shadow = [
+        row_id
+        for row_id, author_id, targets, excluded in shadow_candidates
+        if author_id == did or _names(targets, did) or _names(excluded, did)
+    ]
+    if shadow:
+        await session.execute(
+            delete(ModerationShadowDecision).where(
+                ModerationShadowDecision.id.in_(shadow)
+            )
+        )
+    return MemberContentDeletion(
+        entries=len(doomed), outbox=outbox.rowcount or 0, shadow=len(shadow)
+    )

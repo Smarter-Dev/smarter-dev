@@ -1831,6 +1831,15 @@ async def run_bot() -> None:
     # on messages that carry attachments and shares no state with these two.
     register_message_moderation_listeners(bot)
 
+    # The moderation coordinator, in shadow for the guilds listed in
+    # MODERATION_SHADOW_GUILD_IDS: it judges the same messages and records its
+    # decision next to the legacy actors' effects. It cannot act.
+    from smarter_dev.bot.moderation_coordinator.shadow import (
+        register_moderation_shadow,
+    )
+
+    register_moderation_shadow(bot)
+
     @bot.listen()
     async def on_interaction_create(event: hikari.InteractionCreateEvent) -> None:
         """Handle component interactions for views."""

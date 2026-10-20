@@ -70,7 +70,9 @@ nothing to keep once it goes; each row is deleted
 :data:`~smarter_dev.shared.retention_policy.MODERATION_TRANSCRIPT_MAX` (90
 days) after it was written. The moderation gateway's incident entries follow
 the same rule for evidence and transcripts, and the content window for a
-model's assessment; its outbox and member leases are operational data.
+model's assessment; its outbox and member leases are operational data, and
+so are the moderation coordinator's shadow decisions (ids and labels, never
+text), deleted after ``OPERATIONAL_MAX``.
 
 Every scrubber is idempotent: rows already stamped ``content_purged_at`` are
 skipped, so re-running the sweep costs one indexed lookup per table.
@@ -103,6 +105,7 @@ from smarter_dev.web.models import (
     ModerationIncidentEntry,
     ModerationMemberLock,
     ModerationOutbox,
+    ModerationShadowDecision,
     SpamRingIncident,
 )
 from smarter_dev.shared.message_content import redact_model_message_parts
@@ -426,6 +429,18 @@ async def prune_moderation_member_locks(
     return result.rowcount or 0
 
 
+async def prune_moderation_shadow_decisions(
+    session: AsyncSession, cutoff: datetime, now: datetime
+) -> int:
+    """Delete the coordinator's shadow decisions older than ``OPERATIONAL_MAX``."""
+    result = await session.execute(
+        delete(ModerationShadowDecision).where(
+            ModerationShadowDecision.created_at <= now - OPERATIONAL_MAX
+        )
+    )
+    return result.rowcount or 0
+
+
 _SCRIPT_AUTHORED_ERROR_OUTCOMES = ("error", "cap_exceeded")
 
 
@@ -619,6 +634,7 @@ SCRUBBERS: dict[str, Any] = {
     "moderation_incident_entries": prune_moderation_incident_entries,
     "moderation_outbox": prune_moderation_outbox,
     "moderation_member_locks": prune_moderation_member_locks,
+    "moderation_shadow_decisions": prune_moderation_shadow_decisions,
     "handler_runs": scrub_handler_runs,
 }
 

@@ -53,6 +53,7 @@ from smarter_dev.web.api_native.errors import BOT_API_EXCEPTION_HANDLERS
 from smarter_dev.web.api_native.errors import parse_uuid_path
 from smarter_dev.web.api_native.errors import plain_error
 from smarter_dev.web.handler_caps import MAX_ADMIN_HANDLERS_PER_GUILD
+from smarter_dev.web.handler_moderation_policy import moderation_refusal
 from smarter_dev.web.handler_recurrence import RECURRING_CHAINS
 from smarter_dev.web.handler_schedule import ScheduleError
 from smarter_dev.web.handler_schedule import first_fire_at
@@ -191,6 +192,13 @@ async def _reschedule(record: AdminHandler) -> None:
     await _recurring_chain.arm_occurrence(record, fire_at)
 
 
+def _reject_new_sanctions(script: str, *, existing_script: str | None = None) -> None:
+    """422 for a script that would punish members (handler_moderation_policy)."""
+    reason = moderation_refusal(script, existing_script=existing_script)
+    if reason is not None:
+        raise plain_error(422, reason)
+
+
 class AdminHandlerController(Controller):
     """Guild-scoped privileged handlers: install, edit, list, delete."""
 
@@ -206,6 +214,7 @@ class AdminHandlerController(Controller):
         if data.trigger_type not in ADMIN_HANDLER_TRIGGER_TYPES:
             raise plain_error(422, "unknown trigger_type")
         _reject_bot_optin_on_non_message(data.settings, data.trigger_type)
+        _reject_new_sanctions(data.script)
         name = _normalized_name(data.name)
 
         if await _name_taken(db_session, data.guild_id, name):
@@ -263,6 +272,7 @@ class AdminHandlerController(Controller):
             raise plain_error(404, "admin handler not found")
         # trigger_type is immutable on edit, so validate against the stored one.
         _reject_bot_optin_on_non_message(data.settings, record.trigger_type)
+        _reject_new_sanctions(data.script, existing_script=record.script)
 
         if data.name is not None:
             name = _normalized_name(data.name)
@@ -307,6 +317,9 @@ class AdminHandlerController(Controller):
         record = await db_session.get(AdminHandler, parsed_handler_id)
         if record is None:
             raise plain_error(404, "admin handler not found")
+        # Against the script the caller read: the write below only lands
+        # while that is still the live one.
+        _reject_new_sanctions(data.script, existing_script=data.expected_script)
         # The check and the write are one statement, so two callers who both
         # read the old script cannot both get past it: the row matches only
         # while the script is still what the caller read, and the one that

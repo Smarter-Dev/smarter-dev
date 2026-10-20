@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 import hikari
@@ -32,6 +33,41 @@ if TYPE_CHECKING:
     from lightbulb import BotApp
 
 logger = logging.getLogger(__name__)
+
+
+def attachment_extension(filename: str) -> str:
+    """The extension the tiers compare, with its dot (``.exe``); ``""`` if none."""
+    return os.path.splitext(filename.lower())[1].lower()
+
+
+def classify_attachments(
+    filenames: Sequence[str],
+    *,
+    ignored_extensions: Sequence[str] | None,
+    warn_extensions: Sequence[str] | None,
+) -> tuple[list[dict], list[dict]]:
+    """Sort files into the warn and blocked tiers; ignored ones are dropped.
+
+    Pure: the filter's own decision, shared with the moderation coordinator.
+    Each entry is ``{"filename", "extension"}``, the extension shown as
+    ``(no extension)`` when there is none.
+    """
+    warned: list[dict] = []
+    blocked: list[dict] = []
+    for filename in filenames:
+        extension = attachment_extension(filename)
+        if extension in (ignored_extensions or []):
+            continue
+        entry = {
+            "filename": filename,
+            "extension": extension if extension else "(no extension)",
+        }
+        if extension in (warn_extensions or []):
+            warned.append(entry)
+        else:
+            # Everything that is neither ignored nor warned is blocked.
+            blocked.append(entry)
+    return warned, blocked
 
 
 async def check_attachment_filter(
@@ -71,30 +107,11 @@ async def check_attachment_filter(
             if config is None or not config.is_active:
                 return False
 
-            # Categorize attachments
-            warn_attachments = []
-            blocked_attachments = []
-
-            for attachment in event.message.attachments:
-                filename = attachment.filename.lower()
-                extension = os.path.splitext(filename)[1].lower()
-
-                # Check if ignored (completely allowed)
-                if extension in (config.ignored_extensions or []):
-                    continue
-
-                # Check if in warn list
-                if extension in (config.warn_extensions or []):
-                    warn_attachments.append({
-                        "filename": attachment.filename,
-                        "extension": extension if extension else "(no extension)"
-                    })
-                else:
-                    # Everything else is blocked
-                    blocked_attachments.append({
-                        "filename": attachment.filename,
-                        "extension": extension if extension else "(no extension)"
-                    })
+            warn_attachments, blocked_attachments = classify_attachments(
+                [attachment.filename for attachment in event.message.attachments],
+                ignored_extensions=config.ignored_extensions,
+                warn_extensions=config.warn_extensions,
+            )
 
             # No action needed if all attachments are ignored
             if not warn_attachments and not blocked_attachments:

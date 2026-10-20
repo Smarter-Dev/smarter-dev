@@ -160,6 +160,10 @@ MANIFEST = ExtensionManifest(
             channel_scope=[],
         ),
     ],
+    moved_to_moderation=(
+        "Moved into the moderation system: it judges messages once for every "
+        "rule, so this template can no longer be installed."
+    ),
     example_config={
         "keywords": "free nitro, steam gift, crypto giveaway",
         "agent_instruction": (

@@ -5,6 +5,8 @@ from __future__ import annotations
 import contextlib
 from dataclasses import dataclass, field
 
+import pytest
+
 from smarter_dev.web.handler_budget import CapExceeded, HandlerBudget
 from smarter_dev.web.handler_runtime import run_handler_script
 from smarter_dev.web.moderation_gateway import Outcome
@@ -173,6 +175,11 @@ class _FakeActor:
 
     async def delete_thread(self, thread_id):
         self.calls.append(("delete_thread", thread_id)); return thread_id not in self.gone
+
+    # Roles that confer staff standing are refused (role_refusal); none of
+    # this fake's roles do unless a test lists them here.
+    async def role_refusal(self, role_id):
+        return getattr(self, "protected_roles", {}).get(str(role_id))
 
     async def add_role(self, user_id, role_id, reason=None):
         self.calls.append(("add_role", user_id, role_id, reason))
@@ -1132,6 +1139,25 @@ async def test_add_role_denied_when_role_not_in_allowlist():
     assert actor.calls == []          # actor never called
     assert limiter.calls == []        # window never charged
     assert result.usage["role_changes"] == 0  # budget never spent
+
+
+@pytest.mark.parametrize("call", ["add_role", "remove_role"])
+async def test_a_staff_role_is_refused_even_when_allowlisted(call):
+    """#239: a script cannot strip a moderator's role in one fire and punish
+    them in the next; the change is refused before any spend or REST."""
+    actor = _FakeActor()
+    actor.protected_roles = {"R1": "is a staff role"}
+    limiter = _StubLimiter()
+    script = f'await {call}(context["author_id"], "R1")\n'
+    result, _, _ = await _run(
+        script, budget=admin_budget("message"), actor=actor, limiter=limiter,
+        allowed_role_ids=["R1"],
+    )
+    assert result.outcome == "cap_exceeded"
+    assert result.cap == "role_protected"
+    assert actor.calls == []
+    assert limiter.calls == []
+    assert result.usage["role_changes"] == 0
 
 
 async def test_add_role_denied_when_allowlist_empty():

@@ -1160,13 +1160,24 @@ class HandlerExecution:
         Ordering (matching ``_spend_thread_op``, allowlist first): (1) the
         host-owned ``allowed_role_ids`` allowlist [cheap, fail-closed — a role
         not on it raises ``CapExceeded("role_not_allowed")`` before ANY spend or
-        REST call], (2) the per-fire role_changes budget, (3) the guild
-        role-change window, (4) the actor REST call. A gone member (404) returns
+        REST call], (2) the staff-role rule [a role conferring staff standing
+        raises ``CapExceeded("role_protected")``; a role it cannot resolve is
+        refused too], (3) the per-fire role_changes budget, (4) the guild
+        role-change window, (5) the actor REST call. A gone member (404) returns
         ``False`` from the actor without erroring the fire."""
         if role_id not in self.allowed_role_ids:
             raise CapExceeded(
                 "role_not_allowed",
                 f"role {role_id} is not in the handler's allowed_role_ids",
+            )
+        # A role that makes its holder staff is never changed by a script,
+        # whatever the allowlist says: stripping it in one fire would let a
+        # later fire punish a moderator. Checked before any spend.
+        refusal = await self.actor.role_refusal(role_id)
+        if refusal is not None:
+            raise CapExceeded(
+                "role_protected",
+                f"role {role_id} {refusal}; scripts never grant or remove it",
             )
         self.budget.spend_role_change()
         await self._hit_guild_role_changes_window()

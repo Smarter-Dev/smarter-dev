@@ -1,0 +1,109 @@
+"""From rule hits to one decision: strongest sanction per target, cleanup once.
+
+* **Staff**: a target the staff-protection rule refuses gets nothing; the
+  refusal is kept (``staff_excluded``). An unknown standing refuses, as in
+  every actor today.
+* **Strongest wins per target**: ban > kick > timeout > warn, a longer
+  timeout over a shorter one. Reasons from every rule are kept.
+* **Cleanup once**: each message is listed once, whichever rules asked.
+* **Notices** are not sanctions: a notice rides along, deduplicated.
+* **Provisional timeout**: kept apart from the sanctions. Its resolution says
+  what the verdict did with it.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from collections.abc import Sequence
+from dataclasses import replace
+
+from smarter_dev.bot.moderation_coordinator.model import Decision
+from smarter_dev.bot.moderation_coordinator.model import Provisional
+from smarter_dev.bot.moderation_coordinator.model import RuleHit
+from smarter_dev.bot.moderation_coordinator.model import TargetDecision
+from smarter_dev.web.moderation_gateway import types as gw
+
+#: How long the provisional timeout holds: scam-banner's hold, ample for a
+#: verdict due within the 10 s deadline. Without a verdict it simply runs out.
+PROVISIONAL_SECONDS = 300
+
+UPGRADED = "upgraded"
+RELEASED = "released"
+EXPIRED = "expired"
+
+
+def decide(
+    hits: Sequence[RuleHit],
+    *,
+    refusals: Mapping[str, str | None],
+    provisional: Provisional | None = None,
+    scam_outcome: str | None = None,
+    review: Sequence[str] = (),
+) -> Decision:
+    """The one decision. ``refusals`` maps every target to its staff refusal.
+
+    ``scam_outcome`` is the scam check's verdict (``violation``, ``clean``,
+    ``unknown``) and settles the provisional timeout.
+    """
+    decision = Decision(review=list(review))
+    for hit in hits:
+        decision.rules_fired.append(f"{hit.rule}: {hit.reason}")
+        refusal = refusals.get(hit.target_user_id, "standing not checked")
+        if refusal:
+            decision.staff_excluded[hit.target_user_id] = refusal
+            continue
+        target = decision.targets.get(hit.target_user_id)
+        if target is None:
+            target = TargetDecision(user_id=hit.target_user_id, name=hit.target_name)
+            decision.targets[hit.target_user_id] = target
+        target.rules.append(hit.rule)
+        target.reasons.append(hit.reason)
+        if hit.notice:
+            target.notices.append(hit.notice)
+        if hit.sanction is not None and hit.sanction.stronger_than(target.sanction):
+            target.sanction = hit.sanction
+            target.model_justified = hit.model_justified
+        elif (
+            hit.sanction is not None
+            and target.sanction is not None
+            and not hit.model_justified
+            and hit.sanction.rank == target.sanction.rank
+        ):
+            # An equally strong deterministic reason stands on its own.
+            target.model_justified = False
+        seen = {(item.channel_id, item.message_id) for item in target.cleanup}
+        for item in hit.cleanup:
+            if (item.channel_id, item.message_id) not in seen:
+                target.cleanup.append(item)
+                seen.add((item.channel_id, item.message_id))
+    # A message is cleaned up once, by whichever target posted it first here.
+    claimed: set[str] = set()
+    for target in decision.targets.values():
+        kept = []
+        for item in target.cleanup:
+            if item.message_id not in claimed:
+                kept.append(item)
+                claimed.add(item.message_id)
+        target.cleanup = kept
+    if provisional is not None and not refusals.get(provisional.user_id):
+        decision.provisional = _resolve_provisional(
+            provisional, decision.targets.get(provisional.user_id), scam_outcome
+        )
+    return decision
+
+
+def _resolve_provisional(
+    provisional: Provisional, target: TargetDecision | None, scam_outcome: str | None
+) -> Provisional:
+    sanction = target.sanction if target is not None else None
+    if sanction is not None and (
+        sanction.kind in (gw.BAN, gw.KICK)
+        or (
+            sanction.kind == gw.TIMEOUT
+            and (sanction.duration_seconds or 0) > provisional.duration_seconds
+        )
+    ):
+        return replace(provisional, resolution=UPGRADED)
+    if scam_outcome == "clean":
+        return replace(provisional, resolution=RELEASED)
+    return replace(provisional, resolution=EXPIRED)

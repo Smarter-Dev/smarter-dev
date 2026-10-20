@@ -55,5 +55,10 @@ MANIFEST = ExtensionManifest(
             channel_scope=[],
         ),
     ],
+    moved_to_moderation=(
+        "Moved into the moderation system, which removes edited-in "
+        "@everyone/@here pings itself, so this template can no longer be "
+        "installed."
+    ),
     example_config={"staff_role_id": "222222222222222222"},
 )
