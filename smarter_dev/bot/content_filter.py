@@ -17,15 +17,22 @@ the REST side effects. Staff are exempt by the shared rule in
 :mod:`smarter_dev.bot.staff_protection`, asked only once a filter has fired; an
 author whose standing cannot be established is left alone like staff.
 
+The delete, its record and the report go through the moderation gateway
+(``smarter_dev.web.moderation_gateway``): one ``moderation_actions`` row for
+the one delete every fired filter shares, and the incident's report in place of
+per-filter mod-log lines. When another detector already removed the message,
+no notice is posted for it. A leaked webhook is revoked here directly: that is
+a credential, not a member, and the incident records it.
+
 Error policy (deliberately unlike ``attachment_filter.py``): nothing is wrapped
 in a bare ``except Exception``. The expected REST outcomes are caught — a 404
-(the message or webhook is already gone, a routine race with another mod or bot)
-and a 403 (the bot is missing a channel permission, an operator misconfiguration
-worth a warning but not worth aborting enforcement). The one place that catches
-the whole ``hikari.HTTPError`` family is the invite-exemption channel lookup: a
-403, a 429 or a transport error there means the exemption is unprovable, which
-fails closed (not exempt) rather than aborting the filters that already decided
-to act. A database failure while recording the action propagates to the caller.
+(the webhook is already gone, a routine race with another mod or bot) and a 403
+(the bot is missing a channel permission, an operator misconfiguration worth a
+warning but not worth aborting enforcement). The one place that catches the
+whole ``hikari.HTTPError`` family is the invite-exemption channel lookup: a 403,
+a 429 or a transport error there means the exemption is unprovable, which fails
+closed (not exempt) rather than aborting the filters that already decided to
+act.
 """
 
 from __future__ import annotations
@@ -37,20 +44,23 @@ from typing import TYPE_CHECKING
 
 import hikari
 
-from smarter_dev.bot.mod_action_dispatch import dispatch_mod_action
 from smarter_dev.bot.moderation_config_skips import SKIP_REASON_NO_CONFIG
 from smarter_dev.bot.moderation_config_skips import ModerationConfigSkipLog
 from smarter_dev.bot.moderation_config_skips import skip_reason_disabled
+from smarter_dev.bot.moderation_port import bot_gateway
 from smarter_dev.bot.staff_protection import staff_refusal
 from smarter_dev.shared.database import get_db_session_context
 from smarter_dev.shared.exception_logging import log_exception
-from smarter_dev.web.crud import ModerationActionOperations
 from smarter_dev.web.crud import ModerationFilterConfigOperations
 from smarter_dev.web.models import ModerationFilterConfig
+from smarter_dev.web.moderation_gateway import Proposal
+from smarter_dev.web.moderation_gateway import Trigger
+from smarter_dev.web.moderation_gateway import types as gw
+from smarter_dev.web.moderation_gateway.config import report_channel_from
 from smarter_dev.web.webhook_urls import WEBHOOK_PATH_MARKER
 from smarter_dev.web.webhook_urls import is_discord_webhook_url
-from smarter_dev.web.webhook_urls import normalize_webhook_url
 from smarter_dev.web.webhook_urls import parse_discord_webhook_url
+from smarter_dev.web.webhook_urls import redact_webhook_tokens
 
 if TYPE_CHECKING:
     from hikari.traits import RESTAware
@@ -58,16 +68,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 moderation_filter_config_ops = ModerationFilterConfigOperations()
-mod_action_ops = ModerationActionOperations()
 config_skip_log = ModerationConfigSkipLog("Content filters")
 
-# How much of the offending message the mod-log line reproduces (legacy: ~800).
-MOD_LOG_CONTENT_LIMIT = 800
-
-# ``ModerationAction`` shape for a filter deletion. ``source="handler"`` marks
-# every auto-mod row, matching §3.8; ``action_type`` is capped at 20 chars.
-DELETION_ACTION_TYPE = "delete"
-DELETION_SOURCE = "handler"
+# How the gateway names this detector in incidents and rows.
+GATEWAY_ACTOR = "content_filter"
 
 # A link is an optional scheme + a dotted host whose last label is alphabetic +
 # an optional port and path. The leading look-behind stops the pattern matching
@@ -294,63 +298,6 @@ def sanitize_link(link: str) -> str:
     return link.replace("://", ":// ").replace(".", " . ")
 
 
-def sanitize_links(text: str) -> str:
-    """``text`` with every link spaced out so nothing in it stays clickable."""
-    return _LINK_PATTERN.sub(lambda match: sanitize_link(match.group(0)), text)
-
-
-def redact_webhook_tokens(text: str) -> str:
-    """``text`` with the token of every Discord webhook url replaced.
-
-    Mod-log lines quote attacker-controlled content, and that content is exactly
-    where a leaked webhook url lives: republishing the token would hand the
-    credential to everyone who can read the mod-log channel. The webhook id is
-    kept so a moderator can still identify which webhook leaked.
-    """
-
-    def redact(match: re.Match[str]) -> str:
-        reference = parse_discord_webhook_url(match.group(0))
-        if reference is None:
-            return match.group(0)
-        normalized = normalize_webhook_url(match.group(0))
-        return normalized[: -len(reference.token)] + "<token redacted>"
-
-    return _LINK_PATTERN.sub(redact, text)
-
-
-def truncate_content(text: str, limit: int = MOD_LOG_CONTENT_LIMIT) -> str:
-    """``text`` capped at ``limit`` characters, ellipsis included in the cap."""
-    if len(text) <= limit:
-        return text
-    return text[: limit - 1] + "…"
-
-
-def build_mod_log_line(
-    *,
-    filter_name: str,
-    author_id: str,
-    author_username: str,
-    channel_id: str,
-    links: list[str],
-    content: str,
-) -> str:
-    """One mod-log line: who, where, which links, and the sanitized content.
-
-    Links and content are stripped of clickability and of any webhook token
-    before they are quoted.
-    """
-    sanitized_links = (
-        ", ".join(sanitize_link(redact_webhook_tokens(link)) for link in links)
-        or "(none)"
-    )
-    body = truncate_content(sanitize_links(redact_webhook_tokens(content)))
-    return (
-        f"**{filter_name}** — {author_username} (`{author_id}`) in <#{channel_id}>\n"
-        f"Links: {sanitized_links}\n"
-        f"Content: {body}"
-    )
-
-
 def build_blocked_tld_notice(author_id: str) -> str:
     """In-channel notice for a message removed by the blocked-TLD filter."""
     return (
@@ -381,27 +328,6 @@ def build_webhook_killed_notice(
         f"webhook URL{plural} ({detail}). A leaked webhook lets anyone post to "
         f"this server, so it has been destroyed — create a new one and keep the "
         f"URL secret."
-    )
-
-
-def build_webhook_kill_mod_log_line(
-    *,
-    author_id: str,
-    author_username: str,
-    channel_id: str,
-    webhook_ids: list[str],
-) -> str:
-    """Mod-log line for destroyed leaked webhooks: who, where, which ids.
-
-    Deliberately quotes neither the urls nor the message content: a webhook
-    token is a bearer credential, and a mod-log channel is not a place to
-    republish one.
-    """
-    ids = ", ".join(f"`{webhook_id}`" for webhook_id in webhook_ids) or "(none)"
-    return (
-        f"**Leaked webhook** — {author_username} (`{author_id}`) in <#{channel_id}>\n"
-        f"Destroyed webhook ids: {ids}\n"
-        f"Tokens are never logged. The message was removed."
     )
 
 
@@ -492,33 +418,47 @@ async def check_content_filters(
     message_is_removable = bool(
         blocked_tld_links or invite_links or deletable_webhook_urls
     )
-    message_deleted = (
-        await _delete_offending_message(bot, event) if message_is_removable else False
-    )
-    recorded_reasons: list[str] = []
-
+    reasons: list[str] = []
     if blocked_tld_links:
-        await _send_notice(bot, event, build_blocked_tld_notice(str(event.author.id)))
-        await _post_mod_log(
-            bot,
-            config,
-            build_mod_log_line(
-                filter_name="Blocked TLD",
-                author_id=str(event.author.id),
-                author_username=event.author.username,
-                channel_id=str(event.channel_id),
-                links=blocked_tld_links,
-                content=content,
-            ),
-        )
-        recorded_reasons.append(
+        reasons.append(
             "Blocked TLD link removed: "
             + ", ".join(sanitize_link(link) for link in blocked_tld_links)
         )
+    if invite_links:
+        reasons.append(
+            "Invite link removed: "
+            + ", ".join(sanitize_link(link) for link in invite_links)
+        )
 
     killed, already_dead = await _kill_leaked_webhooks(bot, deletable_webhook_urls)
+    destroyed_ids = destroyed_webhook_ids([*killed, *already_dead])
     if killed or already_dead:
-        destroyed_ids = destroyed_webhook_ids([*killed, *already_dead])
+        # A credential revoked, not a member sanctioned: the incident records
+        # it, nothing more.
+        reasons.append(build_webhook_kill_reason(destroyed_ids))
+
+    message_deleted = False
+    removal_skipped = False
+    if reasons:
+        # One delete serves every filter that fired, through the gateway: one
+        # row, and no second notice when another detector already removed it.
+        outcome = await _record_and_delete(
+            bot,
+            event,
+            config,
+            "; ".join(reasons),
+            delete=message_is_removable,
+        )
+        if outcome is not None:
+            message_deleted = outcome.state == gw.CONFIRMED
+            removal_skipped = outcome.state in (gw.SKIPPED, gw.ABSENT)
+
+    # A notice explains this filter's own removal: none when another detector
+    # already removed the message. The webhook notice is about the revocation,
+    # which this filter did either way.
+    if blocked_tld_links and not removal_skipped:
+        await _send_notice(bot, event, build_blocked_tld_notice(str(event.author.id)))
+    if killed or already_dead:
         await _send_notice(
             bot,
             event,
@@ -528,39 +468,8 @@ async def check_content_filters(
                 already_dead_count=len(already_dead),
             ),
         )
-        await _post_mod_log(
-            bot,
-            config,
-            build_webhook_kill_mod_log_line(
-                author_id=str(event.author.id),
-                author_username=event.author.username,
-                channel_id=str(event.channel_id),
-                webhook_ids=destroyed_ids,
-            ),
-        )
-        recorded_reasons.append(build_webhook_kill_reason(destroyed_ids))
-
-    if invite_links:
+    if invite_links and not removal_skipped:
         await _send_notice(bot, event, build_invite_notice(str(event.author.id)))
-        await _post_mod_log(
-            bot,
-            config,
-            build_mod_log_line(
-                filter_name="Discord invite",
-                author_id=str(event.author.id),
-                author_username=event.author.username,
-                channel_id=str(event.channel_id),
-                links=invite_links,
-                content=content,
-            ),
-        )
-        recorded_reasons.append(
-            "Invite link removed: "
-            + ", ".join(sanitize_link(link) for link in invite_links)
-        )
-
-    if recorded_reasons:
-        await _record_deletions(bot, event, recorded_reasons)
 
     return ContentFilterResult(
         blocked_tld_links=tuple(blocked_tld_links),
@@ -641,33 +550,6 @@ async def _invite_is_category_exempt(
     )
 
 
-async def _delete_offending_message(
-    bot: RESTAware, event: hikari.GuildMessageCreateEvent
-) -> bool:
-    """Delete the message; False when it was already gone or undeletable.
-
-    A 404 is the routine race with another moderator or bot, and a 403 means the
-    bot is missing MANAGE_MESSAGES here — neither may abort the other filters.
-    """
-    try:
-        await bot.rest.delete_message(event.channel_id, event.message.id)
-    except hikari.NotFoundError:
-        logger.info(
-            "Message %s in channel %s was already deleted",
-            event.message.id,
-            event.channel_id,
-        )
-        return False
-    except hikari.ForbiddenError:
-        logger.warning(
-            "Missing permission to delete message %s in channel %s",
-            event.message.id,
-            event.channel_id,
-        )
-        return False
-    return True
-
-
 async def _kill_leaked_webhooks(
     bot: RESTAware, deletable_webhook_urls: list[str]
 ) -> tuple[list[str], list[str]]:
@@ -726,61 +608,47 @@ async def _send_notice(
         )
 
 
-async def _post_mod_log(
-    bot: RESTAware, config: ModerationFilterConfig, line: str
-) -> None:
-    """Post a mod-log line when the guild configured a mod-log channel.
+async def _record_and_delete(
+    bot: RESTAware,
+    event: hikari.GuildMessageCreateEvent,
+    config: ModerationFilterConfig,
+    reason: str,
+    *,
+    delete: bool,
+) -> gw.Outcome | None:
+    """Open (or join) the incident, reported to the moderators; delete if asked.
 
-    All mentions are disabled: the line quotes attacker-controlled content.
+    The incident report replaces the per-filter mod-log lines: it quotes the
+    message with its links unlinked and any webhook token redacted.
     """
-    if not config.mod_log_channel_id:
-        return
-    try:
-        await bot.rest.create_message(
-            int(config.mod_log_channel_id),
-            line,
-            user_mentions=False,
-            role_mentions=False,
-            mentions_everyone=False,
-        )
-    except hikari.ForbiddenError:
-        logger.warning(
-            "Missing permission to post to mod-log channel %s",
-            config.mod_log_channel_id,
-        )
-    except hikari.NotFoundError:
-        logger.warning(
-            "Configured mod-log channel %s does not exist", config.mod_log_channel_id
-        )
-
-
-async def _record_deletions(
-    bot: RESTAware, event: hikari.GuildMessageCreateEvent, reasons: list[str]
-) -> None:
-    """Write one ``ModerationAction`` per fired filter and fire ``mod_action``.
-
-    ``bot`` is threaded through only so the dispatch can also write the delete
-    into the guild's short-term event log — the chat agent has to be able to own
-    a filter delete it made, the same as any other action of its account.
-
-    Failures propagate: a missing audit row is a real problem, and unlike the
-    slash commands there is no user-facing response that would otherwise lie.
-    """
-    async with get_db_session_context() as session:
-        actions = [
-            await mod_action_ops.create_action(
-                session,
-                guild_id=str(event.guild_id),
+    trigger = Trigger(
+        guild_id=str(event.guild_id),
+        actor=GATEWAY_ACTOR,
+        reason=reason,
+        source=gw.SOURCE_HANDLER,
+        channel_id=str(event.channel_id),
+        message_id=str(event.message.id),
+        author_id=str(event.author.id),
+        content=redact_webhook_tokens(event.message.content or ""),
+        report_channel_id=report_channel_from(config),
+    )
+    proposals = (
+        [
+            Proposal(
+                kind=gw.DELETE,
                 target_user_id=str(event.author.id),
                 target_username=event.author.username,
-                action_type=DELETION_ACTION_TYPE,
                 reason=reason,
-                source=DELETION_SOURCE,
                 channel_id=str(event.channel_id),
-                trigger_message_id=str(event.message.id),
+                message_ids=(str(event.message.id),),
+                target_is_bot=bool(event.author.is_bot),
             )
-            for reason in reasons
         ]
-        await session.commit()
-    for action in actions:
-        await dispatch_mod_action(action, bot=bot)
+        if delete
+        else []
+    )
+    gateway = bot_gateway(
+        bot, extra_role_ids=[str(role) for role in config.staff_exempt_role_ids or []]
+    )
+    result = await gateway.act(trigger, proposals)
+    return result.first(gw.DELETE)

@@ -122,6 +122,7 @@ async def _run_admin_handler_fire(payload: AdminHandlerFirePayload, context: Wor
     channel_id = payload.channel_id or (channel_ids[0] if channel_ids else "")
 
     from smarter_dev.web.admin_actions import AdminActor
+    from smarter_dev.web.admin_actions import HandlerFireFacts
     from smarter_dev.web.handler_agent import GatherUsage
     from smarter_dev.web.handler_agent import gathering_agent_for
     from smarter_dev.web.handler_runtime import run_handler_script
@@ -183,6 +184,25 @@ async def _run_admin_handler_fire(payload: AdminHandlerFirePayload, context: Wor
     # Snapshot: the script is handed this same dict and may write into it.
     # What may be KEPT of it is handler_run_audit's call, not this job's.
     trigger_context_at_fire = deepcopy(trigger_context)
+    # What this fire is about, so its moderation actions join the incident the
+    # bot's detectors opened for the same message.
+    actor.fire = HandlerFireFacts(
+        handler_id=str(handler_id),
+        handler_name=handler_name,
+        channel_id=str(
+            trigger_context.get("thread_id") or channel_id
+            if trigger_context.get("is_thread")
+            else channel_id
+        ),
+        message_id=str(trigger_context["message_id"])
+        if trigger_context.get("message_id")
+        else None,
+        author_id=str(trigger_context["author_id"])
+        if trigger_context.get("author_id")
+        else None,
+        content=trigger_context.get("message_content") or None,
+        chain_depth=payload.chain_depth,
+    )
 
     # At-most-once side effects across retries — claimed as late as possible so
     # only failures that reach the script suppress a re-run. See handler_caps.
@@ -239,7 +259,8 @@ async def _run_admin_handler_fire(payload: AdminHandlerFirePayload, context: Wor
             ),
         ),
         mod_action_reader=services.read_mod_actions,
-        mod_action_recorder=services.record_warn,
+        warn_counter=services.count_warns,
+        report_channel_reader=services.incident_report_channel,
         rules_reader=services.read_rules,
         # Guild bound host-side: a script names only the member.
         recent_messages_reader=partial(read_recent_messages, redis, guild_id),

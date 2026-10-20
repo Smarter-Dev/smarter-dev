@@ -5,7 +5,9 @@ When a user mentions a monitored role (configured per-guild), the bot:
 2. Runs the moderation triage agent with guild-configured instructions
 3. The agent decides what action to take (timeout, purge, flag, or just message)
 4. A channel message is posted with appended user pings
-5. A summary report embed is sent to the configured mod channel
+5. The run joins the ping's incident in the moderation gateway, whose one
+   report in the mod channel lists what was done; the assessment, flags and
+   any failure are added to it
 """
 
 from __future__ import annotations
@@ -17,8 +19,11 @@ import hikari
 import lightbulb
 
 from smarter_dev.bot import leadership
-from smarter_dev.bot.agents.mod_tools import build_triage_report_embed
+from smarter_dev.bot.agents.mod_tools import TRIAGE_ACTOR
+from smarter_dev.bot.agents.mod_tools import triage_notes
+from smarter_dev.bot.agents.mod_tools import triage_trigger
 from smarter_dev.bot.agents.moderation_agent import run_moderation_agent
+from smarter_dev.bot.moderation_port import bot_gateway
 from smarter_dev.bot.triage_config import TriageConfig
 from smarter_dev.bot.triage_config import load_triage_config
 from smarter_dev.bot.utils.messages import gather_message_context
@@ -87,6 +92,19 @@ async def _handle_moderation(
             limit=config.context_message_limit,
         )
 
+        # One incident per ping, reported where the triage always reported.
+        trigger = triage_trigger(
+            guild_id=guild_id,
+            channel_id=channel_id,
+            trigger_message_id=trigger_message_id,
+            trigger_author_id=str(event.message.author.id),
+            trigger_author=event.message.author.username,
+            trigger_content=event.message.content or "",
+            report_channel_id=config.response_channel_id or channel_id,
+        )
+        gateway = bot_gateway(bot)
+        incident_id = await gateway.ensure_incident(trigger)
+
         # Run the triage agent — always operate in the INCIDENT channel
         assessment, tracker = await run_moderation_agent(
             bot=bot,
@@ -98,6 +116,7 @@ async def _handle_moderation(
             guild_instructions=config.instructions,
             enabled_tools=list(config.enabled_tools),
             trigger_message_id=trigger_message_id,
+            trigger=trigger,
         )
 
         # Post channel message with appended user pings
@@ -115,19 +134,11 @@ async def _handle_moderation(
             except Exception:
                 log_exception(logger, f"Failed to send channel message for guild {guild_id}")
 
-        # Post triage report to mod channel
-        report_channel = config.response_channel_id or channel_id
-        report_embed = build_triage_report_embed(
-            tracker=tracker,
-            assessment=assessment,
-            trigger_author=event.message.author.username,
-            channel_id=channel_id,
-            trigger_message_id=trigger_message_id,
+        # The incident's report already lists every effect; add what only the
+        # run knows.
+        await gateway.add_notes(
+            incident_id, source=TRIAGE_ACTOR, notes=triage_notes(tracker, assessment)
         )
-        try:
-            await bot.rest.create_message(int(report_channel), embed=report_embed)
-        except Exception:
-            log_exception(logger, f"Failed to send triage report for guild {guild_id}")
 
         logger.info(f"Moderation triage completed for guild {guild_id}: {assessment[:200]}")
 

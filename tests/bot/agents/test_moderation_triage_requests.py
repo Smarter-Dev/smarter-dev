@@ -7,7 +7,6 @@ side. Only the model is scripted.
 
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -23,7 +22,7 @@ from pydantic_ai.models.function import FunctionModel
 from smarter_dev.bot.agents import mod_tools
 from smarter_dev.bot.agents import moderation_agent
 from smarter_dev.bot.agents.mod_tools import ActionTracker
-from smarter_dev.bot.agents.mod_tools import build_triage_report_embed
+from smarter_dev.bot.agents.mod_tools import triage_notes
 
 
 @pytest.fixture(autouse=True)
@@ -225,12 +224,10 @@ async def test_a_failed_triage_reports_manual_review_not_no_action() -> None:
     assert tracker.failure == "RuntimeError"
     assert not tracker.has_actions
     assert "boom" not in assessment
-    embed = build_triage_report_embed(tracker, assessment, "reporter", "2", "3")
-    assert embed.title == "Moderation Triage Failed"
-    assert "No Action Taken" not in _field_names(embed)
-    [status] = [f for f in embed.fields if f.name == "Manual Review Required"]
-    assert "not reviewed" in status.value
-    assert "no immediate action required" not in json.dumps([f.value for f in embed.fields])
+    notes = _notes(tracker, assessment)
+    assert "must review" in notes
+    assert "not reviewed" in notes
+    assert "no immediate action required" not in notes
 
 
 @pytest.mark.parametrize("notice", [None, "A moderator will be here shortly."])
@@ -238,16 +235,12 @@ def test_a_triage_failing_after_an_action_keeps_the_action_in_the_report(notice)
     # The tracker a failed run returns still holds what executed before the
     # failure; the report lists it and says whether the channel was told.
     tracker = ActionTracker(flags=["42"], channel_message=notice, failure="BadRequestError")
-    embed = build_triage_report_embed(
-        tracker, "Moderation triage failed (BadRequestError).", "reporter", "2", "3"
-    )
-    names = _field_names(embed)
-    assert embed.title == "Moderation Triage Failed"
-    assert "Flagged for Review" in names
-    assert "No Action Taken" not in names
-    [status] = [f for f in embed.fields if f.name == "Manual Review Required"]
-    assert "already taken" in status.value
-    assert ("No notice was posted" in status.value) is (notice is None)
+    notes = _notes(tracker, "Moderation triage failed (BadRequestError).")
+    assert "Flagged for review: <@42>" in notes
+    assert "must review" in notes
+    assert "no immediate action required" not in notes
+    assert "already taken" in notes
+    assert ("No notice was posted" in notes) is (notice is None)
 
 
 async def test_a_failed_triage_returns_the_tracker_it_ran_with(monkeypatch) -> None:
@@ -270,7 +263,11 @@ async def test_a_failed_triage_returns_the_tracker_it_ran_with(monkeypatch) -> N
 
 
 def test_a_finished_triage_with_no_action_still_says_so():
-    embed = build_triage_report_embed(ActionTracker(), "All fine.", "reporter", "2", "3")
-    assert embed.title == "Moderation Triage Report"
-    assert "No Action Taken" in _field_names(embed)
-    assert "Manual Review Required" not in _field_names(embed)
+    notes = _notes(ActionTracker(), "All fine.")
+    assert "no immediate action required" in notes
+    assert "must review" not in notes
+
+
+def _notes(tracker: ActionTracker, assessment: str) -> str:
+    """Every line the triage adds to its incident report, as one text."""
+    return "\n".join(text for _, text in triage_notes(tracker, assessment))

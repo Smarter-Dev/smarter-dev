@@ -15,36 +15,50 @@ from datetime import timedelta
 import httpx
 import pytest
 
-from smarter_dev.web import admin_actions
 from smarter_dev.web.admin_actions import AdminActionError, AdminActor
+from tests.moderation_fakes import FakeDiscordRest
 
 
 @pytest.fixture(autouse=True)
 def recorded_events(monkeypatch) -> list:
-    """Captures the short-term event log writes instead of reaching Redis."""
+    """Captures the short-term event log writes instead of reaching Redis.
+
+    The gateway announces each confirmed action once, after it is recorded;
+    the mod_action dispatch beside it is stood in for too.
+    """
+    from smarter_dev.web import guild_event_recorder
+    from smarter_dev.web import handler_dispatch
+
     events: list = []
 
     async def capture_event(event, **kwargs) -> None:
         events.append(event)
 
-    monkeypatch.setattr(admin_actions, "record_guild_event", capture_event)
+    async def no_dispatch(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(guild_event_recorder, "record_guild_event", capture_event)
+    monkeypatch.setattr(handler_dispatch, "dispatch_handler_event", no_dispatch)
     return events
 
 
-def _actor(requests: list[httpx.Request], status_code: int = 204) -> AdminActor:
-    def handle(request: httpx.Request) -> httpx.Response:
-        if request.method == "GET" and "/messages/" in request.url.path:
-            # delete_message reads the message's author first (for the staff
-            # check, cleared by conftest); that read is not the action asserted.
-            if status_code >= 400:
-                return httpx.Response(status_code)
-            return httpx.Response(200, json={"id": "M1", "author": {"id": "U1"}})
-        requests.append(request)
-        return httpx.Response(status_code)
+def _discord(status_code: int | None = None) -> FakeDiscordRest:
+    discord = FakeDiscordRest(fail_writes=status_code)
+    discord.add_member("U1")
+    discord.messages["M1"] = {"id": "M1", "author": {"id": "U1"}}
+    return discord
 
-    return AdminActor(
-        bot_token="t", guild_id="G1", transport=httpx.MockTransport(handle)
-    )
+
+def _actor(requests: list[httpx.Request], status_code: int | None = None) -> AdminActor:
+    """An actor over a fake guild where U1 is a member who posted M1.
+
+    ``requests`` collects the writes (the gateway's reads of the member, the
+    ban and the message are answered but not collected). ``status_code``
+    answers every write with that status instead.
+    """
+    discord = _discord(status_code)
+    discord.writes = requests
+    return AdminActor(bot_token="t", guild_id="G1", transport=discord.transport())
 
 
 async def test_ban_user_with_reason_sends_auth_and_audit_headers():
@@ -75,6 +89,15 @@ async def test_ban_reason_is_url_encoded_for_the_audit_header():
     assert requests[0].headers["X-Audit-Log-Reason"] == "crypto%20scam%20%E2%80%94%20telegram"
 
 
+async def test_a_second_ban_of_the_same_member_is_not_sent():
+    requests: list[httpx.Request] = []
+    actor = _actor(requests)
+    await actor.ban_user("U1", reason="scam")
+    out = await actor.ban_user("U1", reason="scam again")
+    assert out.startswith("not banned: U1")
+    assert len(requests) == 1
+
+
 async def test_kick_user():
     requests: list[httpx.Request] = []
     await _actor(requests).kick_user("U1")
@@ -101,37 +124,6 @@ def _member_actor(member: dict | None, status_code: int = 200) -> AdminActor:
     return AdminActor(
         bot_token="t", guild_id="G1", transport=httpx.MockTransport(handle)
     )
-
-
-async def test_set_timeout_until_returns_the_expiry_discord_stored():
-    # Discord may keep less precision than it was sent; what it kept is what a
-    # later read returns, so that is the value handed back.
-    asked = datetime(2026, 10, 5, 16, 15, 0, 123456, tzinfo=UTC)
-    stored = "2026-10-05T16:15:00.123000+00:00"
-    actor = _member_actor({"communication_disabled_until": stored})
-
-    assert await actor.set_timeout_until("U1", asked, 300) == datetime.fromisoformat(
-        stored
-    )
-
-
-async def test_set_timeout_until_falls_back_to_what_it_sent():
-    requests: list[httpx.Request] = []
-    asked = datetime(2026, 10, 5, 16, 15, tzinfo=UTC)
-
-    assert await _actor(requests).set_timeout_until("U1", asked, 300) == asked
-
-    assert json.loads(requests[0].content) == {
-        "communication_disabled_until": "2026-10-05T16:15:00+00:00"
-    }
-
-
-async def test_set_timeout_until_is_none_for_a_member_who_left():
-    asked = datetime(2026, 10, 5, 16, 15, tzinfo=UTC)
-
-    assert await _member_actor({}, status_code=404).set_timeout_until(
-        "U1", asked, 300
-    ) is None
 
 
 async def test_timeout_until_reads_a_running_timeout():
@@ -166,13 +158,26 @@ async def test_timeout_until_raises_on_any_other_failure():
         await _member_actor({}, status_code=500).timeout_until("U1")
 
 
-async def test_remove_timeout():
+async def test_remove_timeout_lifts_the_timeout_a_handler_placed():
     requests: list[httpx.Request] = []
-    await _actor(requests).remove_timeout("U1")
-    request = requests[0]
+    actor = _actor(requests)
+    await actor.timeout_user("U1", duration_seconds=600)
+    await actor.remove_timeout("U1")
+    request = requests[-1]
     assert request.method == "PATCH"
     assert request.url.path.endswith("/guilds/G1/members/U1")
     assert json.loads(request.content) == {"communication_disabled_until": None}
+
+
+async def test_remove_timeout_never_lifts_a_moderators_timeout():
+    requests: list[httpx.Request] = []
+    discord = _discord()
+    discord.writes = requests
+    discord.members["U1"] = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    actor = AdminActor(bot_token="t", guild_id="G1", transport=discord.transport())
+    out = await actor.remove_timeout("U1")
+    assert "not removed" in out
+    assert requests == []
 
 
 async def test_delete_message():
@@ -186,27 +191,34 @@ async def test_delete_message():
 @pytest.mark.parametrize(
     ("invoke", "expected"),
     [
-        (lambda actor: actor.ban_user("U1"), "ban target U1 already absent"),
-        (lambda actor: actor.kick_user("U1"), "kick target U1 already absent"),
-        (lambda actor: actor.timeout_user("U1"), "timeout target U1 already absent"),
+        (lambda actor: actor.kick_user("U2"), "kick target U2 already absent"),
+        (lambda actor: actor.timeout_user("U2"), "timeout target U2 already absent"),
         (
-            lambda actor: actor.remove_timeout("U1"),
-            "untimeout target U1 already absent",
+            lambda actor: actor.remove_timeout("U2"),
+            "untimeout target U2 already absent",
         ),
     ],
 )
 async def test_absent_moderation_target_is_successful_noop(invoke, expected):
-    """A 404 means another actor already achieved the handler's end state."""
+    """Another actor already achieved the handler's end state: nothing is sent."""
     requests: list[httpx.Request] = []
-    assert await invoke(_actor(requests, status_code=404)) == expected
+    assert await invoke(_actor(requests)) == expected
+    assert requests == []
+
+
+async def test_a_ban_discord_answers_404_is_a_noop():
+    requests: list[httpx.Request] = []
+    assert await _actor(requests, status_code=404).ban_user("U1") == (
+        "ban target U1 already absent"
+    )
     assert len(requests) == 1
 
 
 async def test_an_already_deleted_message_is_a_noop_without_a_delete_call():
     """The author read finds it gone, so no DELETE goes out at all."""
     requests: list[httpx.Request] = []
-    out = await _actor(requests, status_code=404).delete_message("C1", "M1")
-    assert out == "message M1 already deleted"
+    out = await _actor(requests).delete_message("C1", "M2")
+    assert out == "message M2 already deleted"
     assert requests == []
 
 
@@ -216,7 +228,6 @@ async def test_an_already_deleted_message_is_a_noop_without_a_delete_call():
         lambda actor: actor.ban_user("U1"),
         lambda actor: actor.kick_user("U1"),
         lambda actor: actor.timeout_user("U1"),
-        lambda actor: actor.remove_timeout("U1"),
         lambda actor: actor.delete_message("C1", "M1"),
     ],
 )
@@ -406,7 +417,7 @@ async def test_add_role_encodes_audit_reason():
 
 async def test_ban_user_sends_delete_message_seconds_body():
     requests: list[httpx.Request] = []
-    await _role_actor(requests).ban_user(
+    await _actor(requests).ban_user(
         "U1", reason="bot heuristic", delete_message_seconds=3600
     )
     request = requests[0]
@@ -417,7 +428,7 @@ async def test_ban_user_sends_delete_message_seconds_body():
 
 async def test_ban_user_defaults_delete_message_seconds_zero():
     requests: list[httpx.Request] = []
-    await _role_actor(requests).ban_user("U1")
+    await _actor(requests).ban_user("U1")
     assert json.loads(requests[0].content) == {"delete_message_seconds": 0}
 
 
@@ -671,7 +682,7 @@ async def test_ban_is_written_to_the_event_log(recorded_events):
     assert event.kind == "mod_action"
     assert event.guild_id == "G1"
     assert event.action == "ban"
-    assert event.target_username == "U1"
+    assert event.target_user_id == "U1"
     assert event.reason == "scam"
     assert event.source == "handler"
 
@@ -684,27 +695,60 @@ async def test_timeout_records_its_duration(recorded_events):
 
 
 async def test_remove_timeout_records_an_untimeout(recorded_events):
-    await _actor([]).remove_timeout("U1")
+    actor = _actor([])
+    await actor.timeout_user("U1", duration_seconds=900)
+    await actor.remove_timeout("U1")
 
-    assert recorded_events[0].action == "untimeout"
-    assert recorded_events[0].target_username == "U1"
+    assert [event.action for event in recorded_events] == ["timeout", "untimeout"]
+    assert recorded_events[1].target_user_id == "U1"
 
 
 async def test_kick_and_delete_are_written_to_the_event_log(recorded_events):
-    await _actor([]).kick_user("U1")
     await _actor([]).delete_message("C1", "M1")
+    await _actor([]).kick_user("U1")
 
-    assert [event.action for event in recorded_events] == ["kick", "delete"]
-    assert recorded_events[1].channel_id == "C1"
+    assert [event.action for event in recorded_events] == ["delete", "kick"]
+    assert recorded_events[0].channel_id == "C1"
 
 
 async def test_a_no_op_against_a_departed_member_is_never_remembered(recorded_events):
     """Nothing happened, so the bot has nothing to remember doing."""
     assert "already absent" in await _actor([], status_code=404).ban_user("U1")
-    assert "already absent" in await _actor([], status_code=404).kick_user("U1")
-    assert "already absent" in await _actor([], status_code=404).remove_timeout("U1")
-    assert "already deleted" in await _actor([], status_code=404).delete_message(
-        "C1", "M1"
-    )
+    assert "already absent" in await _actor([]).kick_user("U2")
+    assert "already absent" in await _actor([]).remove_timeout("U2")
+    assert "already deleted" in await _actor([]).delete_message("C1", "M2")
 
     assert recorded_events == []
+
+
+# -- the warn's audit row: who it names ------------------------------------------
+
+
+class _LookupActor(AdminActor):
+    def __init__(self, error: Exception | None = None, **kwargs):
+        super().__init__(bot_token="t", guild_id="G1", **kwargs)
+        self._error = error
+
+    async def get_member_info(self, user_id: str) -> dict:
+        if self._error is not None:
+            raise self._error
+        return {"username": "zed"}
+
+
+async def test_username_comes_from_discord_for_the_audit_row():
+    assert await _LookupActor()._resolve_username("U1") == "zed"
+
+
+async def test_a_discord_lookup_failure_degrades_to_the_raw_id():
+    actor = _LookupActor(error=AdminActionError("boom"))
+    assert await actor._resolve_username("U1") == "U1"
+
+
+async def test_a_discord_transport_failure_degrades_to_the_raw_id():
+    actor = _LookupActor(error=httpx.ConnectError("discord unreachable"))
+    assert await actor._resolve_username("U1") == "U1"
+
+
+async def test_a_programming_error_in_the_lookup_is_not_swallowed():
+    with pytest.raises(TypeError):
+        await _LookupActor(error=TypeError("bad signature"))._resolve_username("U1")

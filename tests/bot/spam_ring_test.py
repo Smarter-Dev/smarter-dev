@@ -23,6 +23,7 @@ from uuid import uuid4
 import hikari
 import pytest
 
+from smarter_dev.bot import moderation_port
 from smarter_dev.bot import spam_ring
 from smarter_dev.web.models import ModerationFilterConfig
 from smarter_dev.web.models import SpamRingIncident
@@ -106,6 +107,8 @@ class _FakeRest:
         self.bulk_delete_raises: Exception | None = None
         #: message id -> error raised when deleting that message alone
         self.delete_raises_for: dict[int, Exception] = {}
+        #: user id -> the timeout Discord holds now
+        self.current_timeouts: dict[str, object] = {}
         self._next_id = 10_000
 
     def fetch_messages(self, channel_id):
@@ -120,7 +123,13 @@ class _FakeRest:
             raise hikari.NotFoundError(
                 url="url", headers={}, raw_body=b"", message="gone"
             )
+        member.raw_communication_disabled_until = self.current_timeouts.get(
+            str(user_id)
+        )
         return member
+
+    async def fetch_ban(self, guild_id, user_id):
+        raise hikari.NotFoundError(url="url", headers={}, raw_body=b"", message="no ban")
 
     async def edit_member(self, guild_id, user_id, **kwargs):
         if self.edit_member_raises is not None:
@@ -129,6 +138,9 @@ class _FakeRest:
             raise self.edit_member_raises_for[str(user_id)]
         self.log.append(("timeout", str(user_id)))
         self.timeouts.append({"user": str(user_id), **kwargs})
+        until = kwargs.get("communication_disabled_until")
+        self.current_timeouts[str(user_id)] = until
+        return SimpleNamespace(raw_communication_disabled_until=until)
 
     async def delete_message(self, channel_id, message_id):
         if int(message_id) in self.delete_raises_for:
@@ -248,9 +260,7 @@ class Harness:
         self.moderation_config = None
         self.incidents: list[SpamRingIncident] = []
         self.added: list = []
-        self.actions: list[dict] = []
         self.dispatched: list = []
-        self.events: list = []
         self.classified: list[str] = []
         self.promotion_verdict: bool | Exception | spam_ring.JevVerdict = True
         #: user id -> verdict; a candidate not named gets a confident yes
@@ -291,18 +301,10 @@ class Harness:
         async def get_moderation_config(session, guild_id):
             return harness.moderation_config
 
-        async def create_action(session, **kwargs):
-            if kwargs["target_user_id"] in harness.action_fails_for:
-                raise RuntimeError("db down")
-            harness.log.append(("action", kwargs["target_user_id"]))
-            harness.actions.append(kwargs)
-            return SimpleNamespace(**kwargs)
-
         async def dispatch(action, *, bot=None):
+            # The gateway announces each confirmed effect once its row is in.
+            harness.log.append(("action", action.target_user_id))
             harness.dispatched.append((action, bot))
-
-        async def record_event(bot, event, **kwargs):
-            harness.events.append(event)
 
         async def classify(content):
             harness.classified.append(content)
@@ -333,9 +335,7 @@ class Harness:
         monkeypatch.setattr(
             spam_ring.moderation_config_ops, "get_config", get_moderation_config
         )
-        monkeypatch.setattr(spam_ring.mod_action_ops, "create_action", create_action)
-        monkeypatch.setattr(spam_ring, "dispatch_mod_action", dispatch)
-        monkeypatch.setattr(spam_ring, "record_guild_event", record_event)
+        monkeypatch.setattr(moderation_port, "dispatch_mod_action", dispatch)
         monkeypatch.setattr(spam_ring, "classify_promotion", classify)
         monkeypatch.setattr(spam_ring, "select_participants", participants)
 
@@ -386,6 +386,34 @@ class Harness:
             registry=self.registry,
             now=(at or message.created_at).timestamp(),
         )
+
+    @property
+    def actions(self) -> list[dict]:
+        """The timeouts the gateway confirmed and announced."""
+        return [
+            {
+                "target_user_id": action.target_user_id,
+                "action_type": action.action_type,
+                "source": action.source,
+            }
+            for action, _ in self.dispatched
+            if action.action_type == "timeout"
+        ]
+
+    @property
+    def deletions(self) -> list:
+        """The deletes (single or purge) the gateway confirmed and announced."""
+        return [
+            action
+            for action, _ in self.dispatched
+            if action.action_type in ("delete", "purge")
+        ]
+
+    def report_text(self) -> str:
+        """The incident report as it stands: its last edit, else its post."""
+        if self.rest.edited:
+            return self.rest.edited[-1]["content"]
+        return self.rest.created[-1]["content"]
 
     def index(self, entry) -> int:
         return self.log.index(entry)
@@ -467,8 +495,9 @@ async def test_three_account_ring_is_swept_with_followups_folded_into_one_report
     ring_ids = {str(ALICE.id), str(BOB.id), str(CAROL.id)}
     assert {t["user"] for t in harness.rest.timeouts} == ring_ids
     assert len(harness.rest.timeouts) == 3  # nobody timed out twice
+    week_out = datetime.now(UTC) + timedelta(days=7)
     assert all(
-        t["communication_disabled_until"] == NOW_DT + timedelta(days=7)
+        abs((t["communication_disabled_until"] - week_out).total_seconds()) < 120
         for t in harness.rest.timeouts
     )
     assert sorted(harness.rest.deleted) == sorted(
@@ -485,16 +514,13 @@ async def test_three_account_ring_is_swept_with_followups_folded_into_one_report
     transcript = bytes(attachment.data).decode()
     for message in (q1, chat, q2, ad, followup_1):
         assert message.content in transcript
-    assert "timed out for 7 days" in report["content"]
+    assert "timeout 7 days" in report["content"]
     assert "Remove Timeout" in report["content"]
-    assert "4 message(s) deleted in total" in report["content"]
+    assert sum(len(a.evidence["deleted_message_ids"]) for a in harness.deletions) == 5
 
     # The late turn edits the one report instead of posting another.
-    assert len(harness.rest.edited) == 1
-    assert (
-        "bob_q: 1 message deleted, already timed out"
-        in harness.rest.edited[0]["content"]
-    )
+    assert harness.rest.edited
+    assert "bob_q: 1 message deleted, already timed out" in harness.report_text()
     assert followup_2.content in harness.incidents[-1].transcript
 
     assert {a["target_user_id"] for a in harness.actions} == ring_ids
@@ -663,7 +689,8 @@ async def test_the_transcript_is_saved_before_anything_is_deleted(harness):
     await harness.check(ad)
 
     assert harness.first("commit") < harness.first("timeout") < harness.first("delete")
-    assert harness.first("delete") < harness.first("report") < harness.first("action")
+    assert harness.first("delete") < harness.first("report")
+    assert harness.first("action") > harness.first("timeout")
     saved = harness.incidents[0]
     assert saved.trigger_message_id == str(ad.id)
     assert set(saved.participant_user_ids) == {
@@ -678,7 +705,6 @@ async def test_the_transcript_is_saved_before_anything_is_deleted(harness):
         and "joined 2026-10-15" in saved.transcript
     )
     assert "link: https://devpost.example/hacknova" in saved.transcript
-    assert saved.report_message_id == str(harness.rest._next_id)
 
 
 async def test_nothing_is_deleted_when_the_transcript_cannot_be_saved(harness):
@@ -704,12 +730,11 @@ async def test_missing_moderate_members_still_deletes_and_reports_it_plainly(har
 
     assert set(harness.rest.deleted) == {q1.id, q2.id, ad.id}
     assert len(harness.rest.created) == 1
-    content = harness.rest.created[0]["content"]
-    assert content.count("timeout failed: missing permission or role hierarchy") == 3
-    assert "Timeouts failed for missing permission or role hierarchy" in content
+    content = harness.report_text()
+    assert content.count("**failed** (missing permission or role hierarchy)") == 3
     # No audit row for a timeout that never landed; the deletions are remembered.
     assert harness.actions == []
-    assert len(harness.events) == 3
+    assert len(harness.deletions) == 3
 
 
 async def test_with_no_config_row_it_runs_on_defaults_and_reports_to_the_triage_channel(
@@ -779,10 +804,7 @@ async def test_a_late_ring_account_is_caught_in_the_followup_window(harness):
     assert str(dave.id) in {t["user"] for t in harness.rest.timeouts}
     assert late.id in harness.rest.deleted
     assert len(harness.rest.created) == 1
-    assert (
-        "dave_late: 1 message deleted, timed out for 7 days"
-        in harness.rest.edited[-1]["content"]
-    )
+    assert "dave_late: 1 message deleted, timed out for 7 days" in harness.report_text()
     assert str(dave.id) in {a["target_user_id"] for a in harness.actions}
 
 
@@ -979,32 +1001,6 @@ def test_defaults_turn_the_detector_on():
     assert settings.timeout_seconds == 7 * 86400
     assert settings.lookback == timedelta(minutes=60)
     assert settings.followup == timedelta(minutes=15)
-
-
-def test_report_fits_discords_limit_with_many_followups():
-    outcomes = [
-        spam_ring.AccountOutcome(
-            user_id=str(10**17 + i),
-            username=f"user{i}",
-            timeout="applied",
-            deleted_count=2,
-        )
-        for i in range(4)
-    ]
-    lines = [
-        f"- <t:{i}:T> <@{10**17 + i}> someone_with_a_long_name_{i}: 1 message deleted, already timed out"
-        for i in range(80)
-    ]
-    content = spam_ring.format_report(
-        channel_id="1",
-        ad_jump_link="https://discord.com/channels/1/2/3",
-        outcomes=outcomes,
-        timeout_seconds=604800,
-        followup_lines=lines,
-    )
-    assert len(content) <= 2000
-    assert lines[-1] in content
-    assert "earlier line(s) are in the incident record" in content
 
 
 def _incident(channel_id: str = "c", followup_until: float = 100.0):
@@ -1219,14 +1215,14 @@ async def test_a_500_on_the_second_timeout_still_finishes_the_sweep(harness):
     assert {t["user"] for t in harness.rest.timeouts} == {str(ALICE.id), str(CAROL.id)}
     # Every message is still deleted and the report still goes out.
     assert set(harness.rest.deleted) == {q1.id, q2.id, ad.id}
-    content = harness.rest.created[0]["content"]
-    assert "bob_q: **timeout failed: Discord error, retry by hand**" in content
+    content = harness.report_text()
+    assert f"<@{BOB.id}> bob_q: timeout 7 days: **outcome unknown**" in content
     # Audit rows for exactly the timeouts that landed; the delete is remembered.
     assert {a["target_user_id"] for a in harness.actions} == {
         str(ALICE.id),
         str(CAROL.id),
     }
-    assert [e for e in harness.events if str(BOB.id) in str(e)]
+    assert [a for a in harness.deletions if a.target_user_id == str(BOB.id)]
 
 
 async def test_a_failing_delete_is_retried_per_message_and_reported(harness):
@@ -1238,20 +1234,26 @@ async def test_a_failing_delete_is_retried_per_message_and_reported(harness):
 
     assert result.action == "swept"
     assert set(harness.rest.deleted) == {q1.id, ad.id}
-    content = harness.rest.created[0]["content"]
-    assert "1 message(s) could not be deleted" in content
-    assert "bob_q: timed out for 7 days, 0 message(s) deleted" in content
-    assert result.incident.report_message_id is not None
+    content = harness.report_text()
+    assert "**outcome unknown**" in content
+    assert result.incident.gateway_incident_id is not None
+    # The message that may or may not have gone is never sent again blindly.
+    assert q2.id not in harness.rest.deleted
 
 
-async def test_a_failing_report_and_audit_write_do_not_stop_the_rest(harness):
+async def test_a_failing_report_does_not_stop_the_rest(harness):
     *_, ad = stage_ring(harness)
-    harness.action_fails_for = {str(ALICE.id)}
+
+    async def refuse(*args, **kwargs):
+        raise hikari.ForbiddenError(url="url", headers={}, raw_body=b"")
+
+    harness.rest.create_message = refuse
 
     result = await harness.check(ad)
 
     assert result.action == "swept"
     assert {a["target_user_id"] for a in harness.actions} == {
+        str(ALICE.id),
         str(BOB.id),
         str(CAROL.id),
     }

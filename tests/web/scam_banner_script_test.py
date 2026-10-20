@@ -25,6 +25,9 @@ member holds over one Redis; only Discord and the agent are stood in for.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import math
+import time
 from dataclasses import dataclass
 from dataclasses import field
 from datetime import UTC
@@ -32,10 +35,13 @@ from datetime import datetime
 from datetime import timedelta
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 import fakeredis.aioredis as fakeredis_aioredis
 import pytest
 
+from smarter_dev.web.admin_actions import AdminActor
+from smarter_dev.web.admin_actions import HandlerFireFacts
 from smarter_dev.web.handler_budget import admin_budget
 from smarter_dev.web.handler_caps import claim_handler_key
 from smarter_dev.web.handler_caps import handler_claim_key
@@ -43,6 +49,8 @@ from smarter_dev.web.handler_caps import handler_key_claimed
 from smarter_dev.web.handler_holds import MemberHolds
 from smarter_dev.web.handler_lint import lint_script
 from smarter_dev.web.handler_runtime import run_handler_script
+from smarter_dev.web.moderation_gateway.types import DeleteResult
+from tests.moderation_fakes import FakeModerationDiscord
 
 SCRIPT = (
     Path(__file__).resolve().parents[2] / "scripts/handler_scripts/scam-banner.monty"
@@ -84,60 +92,114 @@ class _Limiter:
         return True
 
 
-@dataclass
-class _Actor:
-    """Discord: the member's timeout as it stands, and every call made."""
+class _Discord(FakeModerationDiscord):
+    """Discord: the member's timeout as it stands, and every call made.
 
-    calls: list = field(default_factory=list)
-    # The length of the timeout the member is under right now; None when free.
-    hold: int | None = None
-    until: datetime | None = None
-    # Set to keep a timeout write open until the test lets it through.
-    write_gate: asyncio.Event | None = None
-    write_started: asyncio.Event = field(default_factory=asyncio.Event)
+    Every message the script names is the author's until it is deleted, and
+    each call is logged in the shape the assertions read: ``("timeout",
+    user, seconds)``, ``("remove_timeout", user)``, ``("delete", channel,
+    message)``, ``("ban", user)``.
+    """
 
-    async def staff_refusal(self, user_id, *, is_bot=None):
-        return None  # the poster is an ordinary member
+    def __init__(self) -> None:
+        super().__init__(guild_id="G1")
+        self.add_member(AUTHOR)
+        self.log: list = []
+        self.gone: set = set()
+        # Set to keep a timeout write open until the test lets it through.
+        self.write_gate: asyncio.Event | None = None
+        self.write_started = asyncio.Event()
 
-    async def timeout_until(self, user_id):
-        return self.until
+    async def message_author(self, channel_id, message_id):
+        if str(message_id) in self.gone:
+            return None
+        return AUTHOR, None, False
 
-    async def set_timeout_until(self, user_id, until, duration_seconds):
+    async def delete_messages(self, channel_id, message_ids):
+        result = DeleteResult()
+        for message_id in message_ids:
+            if message_id in self.gone:
+                result.missing.append(message_id)
+                continue
+            self.gone.add(message_id)
+            self.log.append(("delete", str(channel_id), message_id))
+            result.deleted.append(message_id)
+        return result
+
+    async def set_timeout(self, guild_id, user_id, until, *, reason):
         self.write_started.set()
         if self.write_gate is not None:
             await self.write_gate.wait()
-        self.calls.append(("timeout", user_id, duration_seconds))
-        self.hold, self.until = duration_seconds, until
-        return until
+        stored = await super().set_timeout(guild_id, user_id, until, reason=reason)
+        if until is None:
+            self.log.append(("remove_timeout", user_id))
+        else:
+            self.log.append(("timeout", user_id, math.ceil(until.timestamp() - time.time())))
+        return stored
 
-    async def timeout_user(self, user_id, duration_seconds=600):
-        until = datetime.now(UTC) + timedelta(seconds=duration_seconds)
-        await self.set_timeout_until(user_id, until, duration_seconds)
-        return "ok"
+    async def ban(self, guild_id, user_id, *, reason, delete_message_seconds):
+        self.log.append(("ban", user_id))
+        await super().ban(
+            guild_id, user_id, reason=reason, delete_message_seconds=delete_message_seconds
+        )
 
-    async def remove_timeout(self, user_id):
-        self.calls.append(("remove_timeout", user_id))
-        self.hold = self.until = None
-        return "ok"
 
-    async def delete_message(self, channel_id, message_id):
-        self.calls.append(("delete", channel_id, message_id))
-        return "ok"
+class _ActorView:
+    """What the assertions read of Discord, in the old fake's terms."""
 
-    async def ban_user(self, user_id, reason=None, delete_message_seconds=0):
-        self.calls.append(("ban", user_id))
-        return "ok"
+    def __init__(self, discord: _Discord) -> None:
+        self.discord = discord
+
+    @property
+    def calls(self) -> list:
+        return self.discord.log
+
+    @property
+    def hold(self) -> int | None:
+        """The length of the timeout the member is under right now; None when free."""
+        until = self.discord.members.get(AUTHOR)
+        if until is None or until <= time.time():
+            return None
+        return math.ceil(until - time.time())
+
+    @property
+    def write_gate(self):
+        return self.discord.write_gate
+
+    @write_gate.setter
+    def write_gate(self, gate) -> None:
+        self.discord.write_gate = gate
+
+    @property
+    def write_started(self):
+        return self.discord.write_started
 
     def moderator_times_out(self, seconds: int) -> None:
         """A moderator acting by hand: straight to Discord, past any lock."""
-        self.hold = seconds
-        self.until = datetime.now(UTC) + timedelta(seconds=seconds, milliseconds=417)
+        self.discord.members[AUTHOR] = round(time.time() + seconds, 3)
 
     def deleted(self) -> list:
         return sorted(call[1:] for call in self.calls if call[0] == "delete")
 
     def timeouts(self) -> list:
         return [call[2] for call in self.calls if call[0] == "timeout"]
+
+
+@dataclass(kw_only=True)
+class _FireActor(AdminActor):
+    """The fire's real AdminActor; a confirmed warn lands in the world's record."""
+
+    world: Any = None
+
+    @contextlib.asynccontextmanager
+    async def reserve_warn(self, user_id, reason, channel_id):
+        async with super().reserve_warn(user_id, reason, channel_id) as slot:
+            yield slot
+        if slot.outcome is not None and slot.outcome.state == "confirmed":
+            # A warn is the one handler action that lands in the record the
+            # script reads.
+            self.world.warns.append((user_id, reason))
+            self.world.history.insert(0, _warned(seconds=0) | {"reason": reason})
 
 
 @dataclass
@@ -149,7 +211,7 @@ class _World:
     history: list = field(default_factory=list)
     redis: object = field(default_factory=fakeredis_aioredis.FakeRedis)
     emitter: _Emitter = field(default_factory=_Emitter)
-    actor: _Actor = field(default_factory=_Actor)
+    discord: _Discord = field(default_factory=_Discord)
     reviews: list = field(default_factory=list)
     history_prompts: list = field(default_factory=list)
     warns: list = field(default_factory=list)
@@ -163,10 +225,43 @@ class _World:
     history_read: asyncio.Event = field(default_factory=asyncio.Event)
 
     @property
-    def holds(self) -> MemberHolds:
-        return MemberHolds(
-            redis=self.redis, guild_id="G1", handler_id=HANDLER, actor=self.actor
+    def actor(self) -> _ActorView:
+        return _ActorView(self.discord)
+
+    def actor_for(self, context: dict | None = None) -> _FireActor:
+        """A fire's own actor, as the fire job builds one per fire."""
+        context = context or {}
+        return _FireActor(
+            bot_token="t",
+            guild_id="G1",
+            moderation_port=self.discord,
+            fire=HandlerFireFacts(
+                handler_id=HANDLER,
+                handler_name="scam-banner",
+                channel_id=str(context.get("thread_id") or "C2"),
+                message_id=context.get("message_id"),
+                author_id=context.get("author_id"),
+                content=context.get("message_content") or None,
+            ),
+            world=self,
         )
+
+    @property
+    def holds(self) -> MemberHolds:
+        return self.holds_for(self.actor_for())
+
+    def holds_for(self, actor: AdminActor) -> MemberHolds:
+        return MemberHolds(
+            redis=self.redis, guild_id="G1", handler_id=HANDLER, actor=actor
+        )
+
+    async def count_warns(self, user_id):
+        return len(self.warns)
+
+    def note_warn(self, user_id, reason) -> None:
+        """A warn another fire recorded meanwhile."""
+        self.warns.append((user_id, reason))
+        self.history.insert(0, _warned(seconds=0) | {"reason": reason})
 
     async def agent(self, prompt, has_tools, budget):
         if "UNTRUSTED RECORD" in prompt:
@@ -190,12 +285,6 @@ class _World:
             await gate.wait()
         return snapshot
 
-    async def record_warn(self, user_id, reason, channel_id):
-        # A warn is the one handler action that lands in the member's record.
-        self.warns.append((user_id, reason))
-        self.history.insert(0, _warned(seconds=0) | {"reason": reason})
-        return len(self.warns)
-
     async def schedule_timer(self, fire_at, refire_context):
         self.timers.append(refire_context)
 
@@ -208,6 +297,11 @@ class _World:
         return [
             content for channel, content in self.emitter.messages if channel == MOD_LOG
         ]
+
+
+def _about(seconds: int | None, expected: int) -> bool:
+    """A timeout's remaining length, allowing for the time the test took."""
+    return seconds is not None and expected - 10 <= seconds <= expected
 
 
 def _ago(**delta) -> str:
@@ -275,6 +369,7 @@ def _warned(source: str = "handler", **delta) -> dict:
 
 
 async def _fire(world: _World, context: dict, channel_id: str = "C2"):
+    actor = world.actor_for(context)
     return await run_handler_script(
         SCRIPT,
         context,
@@ -284,15 +379,15 @@ async def _fire(world: _World, context: dict, channel_id: str = "C2"):
         limiter=_Limiter(),
         agent_runner=world.agent,
         mod_action_reader=world.read_history,
-        mod_action_recorder=world.record_warn,
+        warn_counter=world.count_warns,
         recent_messages_reader=world.read_recent,
         handler_id=HANDLER,
         timer_scheduler=world.schedule_timer,
         claimer=partial(claim_handler_key, world.redis, HANDLER),
         claim_reader=partial(handler_key_claimed, world.redis, HANDLER),
-        holds=world.holds,
+        holds=world.holds_for(actor),
         budget=admin_budget(context["trigger_type"]),
-        actor=world.actor,
+        actor=actor,
     )
 
 
@@ -367,7 +462,7 @@ async def test_burst_is_contained_reviewed_once_and_removed_whole():
     assert "No earlier moderation actions on record." in report
     # A first offence from an established member is not held for a day.
     assert world.actor.timeouts() == [300]
-    assert world.actor.hold == 300
+    assert _about(world.actor.hold, 300)
 
 
 async def test_burst_judged_clean_lifts_the_timeout_and_deletes_nothing():
@@ -528,7 +623,7 @@ async def test_a_whole_recorded_burst_fits_one_fire_and_one_follow_up():
 
     assert (result.outcome, follow_up.outcome) == ("ok", "ok")
     assert len(world.actor.deleted()) == 30
-    assert world.actor.hold == DAY
+    assert _about(world.actor.hold, DAY)
 
 
 # -- closer scrutiny for a recently actioned member -----------------------------
@@ -587,7 +682,7 @@ async def test_an_action_minutes_ago_counts_as_the_earlier_action(source):
 
     assert result.outcome == "ok"
     assert world.actor.deleted() == [("C2", "M2")]
-    assert world.actor.hold == DAY
+    assert _about(world.actor.hold, DAY)
     [report] = world.mod_log()
     assert "timed out for 24 hours" in report
     assert "1 earlier action(s) on record." in report
@@ -741,7 +836,7 @@ async def test_a_copy_arriving_mid_review_holds_the_member_without_a_second_revi
     assert world.actor.deleted() == [("C1", "M1"), ("C2", "M2")]
     assert len(world.warns) == 1
     assert len(world.mod_log()) == 1
-    assert world.actor.hold == 300
+    assert _about(world.actor.hold, 300)
 
 
 async def test_a_clean_review_lifts_the_hold_another_fire_placed_for_its_copy():
@@ -798,7 +893,7 @@ async def test_a_fire_delayed_past_a_confirmed_repeat_does_not_shorten_the_day_h
         history=[_warned(days=22)],
     )
     await _fire(world, _context(message_id="M2"), "C2")
-    assert world.actor.hold == DAY
+    assert _about(world.actor.hold, DAY)
 
     # A different post from the same moment, whose fire only runs now.
     world.recent = [
@@ -815,7 +910,7 @@ async def test_a_fire_delayed_past_a_confirmed_repeat_does_not_shorten_the_day_h
     assert late.outcome == "ok"
     # Still reviewed on its own, but the member's day-long hold is untouched.
     assert len(world.reviews) == 2
-    assert world.actor.hold == DAY
+    assert _about(world.actor.hold, DAY)
     assert world.actor.timeouts() == [300, DAY]
     assert ("remove_timeout", AUTHOR) not in world.actor.calls
 
@@ -838,14 +933,14 @@ async def test_a_copys_fire_holding_stale_history_does_not_shorten_the_day_hold(
 
     world.review_gate.set()
     assert (await asyncio.wait_for(first, timeout=5)).outcome == "ok"
-    assert world.actor.hold == DAY
+    assert _about(world.actor.hold, DAY)
 
     paused.set()
     assert (await asyncio.wait_for(second, timeout=5)).outcome == "ok"
 
     assert len(world.reviews) == 1
     assert world.actor.timeouts() == [DAY]
-    assert world.actor.hold == DAY
+    assert _about(world.actor.hold, DAY)
 
 
 async def test_a_timeout_call_still_in_flight_does_not_outlive_a_clean_verdict():
@@ -945,7 +1040,7 @@ async def test_a_clean_post_does_not_release_a_member_with_another_post_under_re
     clean = await finish("post A", "CLEAN")
 
     assert clean.outcome == "ok"
-    assert world.actor.hold == 300
+    assert _about(world.actor.hold, 300)
     assert ("remove_timeout", AUTHOR) not in world.actor.calls
 
     # The second is confirmed: the member is still held, and stays held.
@@ -953,7 +1048,7 @@ async def test_a_clean_post_does_not_release_a_member_with_another_post_under_re
 
     assert confirmed.outcome == "ok"
     assert world.actor.deleted() == [("C2", "MB")]
-    assert world.actor.hold == 300
+    assert _about(world.actor.hold, 300)
     assert ("remove_timeout", AUTHOR) not in world.actor.calls
 
 
@@ -963,7 +1058,7 @@ async def test_the_last_of_two_clean_posts_releases_the_member():
     await both_started()
 
     await finish("post B", "CLEAN")
-    assert world.actor.hold == 300
+    assert _about(world.actor.hold, 300)
     await finish("post A", "CLEAN")
 
     assert world.actor.hold is None
@@ -988,7 +1083,7 @@ async def test_a_clean_review_leaves_a_timeout_a_moderator_set_meanwhile():
 
     assert result.outcome == "ok"
     assert ("remove_timeout", AUTHOR) not in world.actor.calls
-    assert world.actor.hold == 3600
+    assert _about(world.actor.hold, 3600)
 
 
 async def test_a_burst_never_shortens_a_timeout_a_moderator_already_set():
@@ -1002,7 +1097,7 @@ async def test_a_burst_never_shortens_a_timeout_a_moderator_already_set():
 
     assert result.outcome == "ok"
     assert world.actor.timeouts() == []
-    assert world.actor.hold == 7 * DAY
+    assert _about(world.actor.hold, 7 * DAY)
 
 
 async def test_a_confirmed_repeat_never_shortens_a_moderators_longer_timeout():
@@ -1021,7 +1116,7 @@ async def test_a_confirmed_repeat_never_shortens_a_moderators_longer_timeout():
     assert result.outcome == "ok"
     assert len(world.warns) == 1
     assert world.actor.timeouts() == []
-    assert world.actor.hold == 7 * DAY
+    assert _about(world.actor.hold, 7 * DAY)
 
 
 async def test_a_clean_review_leaves_a_hold_placed_for_something_else_meanwhile():
@@ -1034,7 +1129,7 @@ async def test_a_clean_review_leaves_a_hold_placed_for_something_else_meanwhile(
 
     async def other_violation_confirmed_during_review(prompt, has_tools, budget):
         world.reviews.append(prompt)
-        await world.record_warn(AUTHOR, "a different post", "C9")
+        world.note_warn(AUTHOR, "a different post")
         await world.holds.hold(AUTHOR, "repeat:a different post", DAY)
         return world.verdict
 
@@ -1044,7 +1139,7 @@ async def test_a_clean_review_leaves_a_hold_placed_for_something_else_meanwhile(
 
     assert result.outcome == "ok"
     assert ("remove_timeout", AUTHOR) not in world.actor.calls
-    assert world.actor.hold == DAY
+    assert _about(world.actor.hold, DAY)
 
 
 async def test_a_repost_of_a_post_just_confirmed_is_removed_without_a_second_review():

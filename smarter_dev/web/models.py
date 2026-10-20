@@ -3853,6 +3853,11 @@ class ModerationAction(Base):
 
     Records warns, kicks, bans, unbans, and timeouts regardless of source
     (AI agent, manual slash command, or Discord audit log detection).
+
+    Since the action gateway (``smarter_dev.web.moderation_gateway``) every
+    automated and manual action of the bot writes one row per confirmed
+    effect, linked to its incident and operation. Rows written before that,
+    and actions other people took (``source="audit_log"``), have no incident.
     """
 
     __tablename__ = "moderation_actions"
@@ -3940,6 +3945,45 @@ class ModerationAction(Base):
             "channel conversation goes."
         ),
     )
+    incident_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("moderation_incidents.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        doc="The incident this effect belongs to (gateway actions only)",
+    )
+    operation_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("moderation_operations.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+        doc="The gateway operation that confirmed this effect; one row per operation",
+    )
+    actor: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        doc="Which system acted: spam_engine, spam_ring, triage, handler:<name>, manual",
+    )
+    rule: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        doc="The rules or detectors that fired, as the incident report names them",
+    )
+    applied_duration_seconds: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        doc="For a timeout, how long Discord actually holds it from the moment it landed",
+    )
+    evidence: Mapped[dict | None] = mapped_column(
+        JSON,
+        nullable=True,
+        doc="Ids only (messages, channels, expiry): never message text",
+    )
+    audit_entry_id: Mapped[str | None] = mapped_column(
+        String,
+        nullable=True,
+        doc="Discord audit-log entry that echoes this action, once linked",
+    )
 
     __table_args__ = (
         Index("ix_mod_actions_guild_user", "guild_id", "target_user_id"),
@@ -3948,6 +3992,306 @@ class ModerationAction(Base):
 
     def __repr__(self) -> str:
         return f"<ModerationAction(type='{self.action_type}', target='{self.target_username}', source='{self.source}')>"
+
+
+class ModerationIncident(Base):
+    """One moderation incident: every detector and effect about one situation.
+
+    The action gateway (``smarter_dev.web.moderation_gateway``) opens one when
+    a detector first proposes an action and joins later proposals to it: the
+    same target with a related trigger (the same message, a copy of it posted
+    elsewhere, a ring alias) inside :data:`active_until`. It owns the one
+    report in the moderators' channel, which it edits as the incident grows.
+
+    The row holds ids and bookkeeping only. What members wrote is in
+    ``moderation_incident_entries`` and ages out there; the incident itself
+    is a moderation record and is kept.
+    """
+
+    __tablename__ = "moderation_incidents"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    guild_id: Mapped[str] = mapped_column(String, nullable=False)
+    subject_user_id: Mapped[str | None] = mapped_column(
+        String, nullable=True, doc="Whose message or behaviour opened it"
+    )
+    channel_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    trigger_message_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+    )
+    active_until: Mapped[float] = mapped_column(
+        Float, nullable=False, doc="Epoch seconds; related proposals join until then"
+    )
+    revision: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    report_channel_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    report_message_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    report_revision: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default=text("0"),
+        doc="The incident revision the report last showed",
+    )
+    report_state: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="none",
+        server_default="none",
+        doc="none, posting, posted, unknown (a post may have landed) or failed",
+    )
+    report_lease_until: Mapped[float | None] = mapped_column(Float, nullable=True)
+    report_ping_role_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    report_attachment_sent: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    report_pinged: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("false"),
+        doc="Whether report_ping_role_id was pinged, on the report or after it",
+    )
+
+    __table_args__ = (
+        Index("ix_moderation_incidents_guild_subject", "guild_id", "subject_user_id"),
+        Index("ix_moderation_incidents_opened_at", "opened_at"),
+    )
+
+
+class ModerationIncidentLink(Base):
+    """A key that finds its incident: a message id, or an alias like a ring's.
+
+    Unique per guild, so one message or alias belongs to one incident however
+    many processes race to claim it.
+    """
+
+    __tablename__ = "moderation_incident_links"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    incident_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("moderation_incidents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    guild_id: Mapped[str] = mapped_column(String, nullable=False)
+    link_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint("guild_id", "link_key", name="uq_moderation_incident_links_key"),
+    )
+
+
+class ModerationIncidentEntry(Base):
+    """One line of an incident: a reason that fired, a note, or evidence.
+
+    ``kind`` decides how long it is kept (``smarter_dev/web/retention.py``):
+
+    * ``reason`` and ``note`` are the system's own words about what fired and
+      what it did. Kept with the incident.
+    * ``evidence`` and ``transcript`` hold what a member posted, saved before
+      it was deleted. Deleted ``MODERATION_TRANSCRIPT_MAX`` (90 days) after
+      they were written, like ``spam_ring_incidents``.
+    * ``assessment`` is a model's retelling (the triage agent's assessment, a
+      handler's report). Deleted after ``CONTENT_RETENTION_WINDOW`` (5 hours),
+      like ``moderation_actions.ai_context_summary``.
+    """
+
+    __tablename__ = "moderation_incident_entries"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    incident_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("moderation_incidents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    guild_id: Mapped[str] = mapped_column(String, nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    source: Mapped[str] = mapped_column(String(100), nullable=False)
+    rule: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_user_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    channel_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    message_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    content: Mapped[str | None] = mapped_column(Text, nullable=True)
+    details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        Index("ix_moderation_incident_entries_created_at", "created_at"),
+        Index(
+            "ix_moderation_incident_entries_fingerprint",
+            "guild_id",
+            "target_user_id",
+            "fingerprint",
+        ),
+    )
+
+
+class ModerationOperation(Base):
+    """One effect the gateway asked Discord for, and what became of it.
+
+    Written as an intent and claimed BEFORE the REST call, then settled:
+    ``confirmed`` (a ``moderation_actions`` row says so), ``failed``
+    (Discord refused), ``absent`` (a delete found the message already gone),
+    ``skipped`` (never sent: protected, weaker than what the incident already
+    did, overridden by a moderator) or ``unknown`` (the call may have landed;
+    reconciliation reads Discord before anything is sent again).
+
+    ``idempotency_key`` is unique per guild, so the same effect proposed twice
+    is one operation however many detectors or processes propose it.
+    """
+
+    __tablename__ = "moderation_operations"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    incident_id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("moderation_incidents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    guild_id: Mapped[str] = mapped_column(String, nullable=False)
+    target_user_id: Mapped[str] = mapped_column(String, nullable=False)
+    target_username: Mapped[str | None] = mapped_column(String, nullable=True)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    state: Mapped[str] = mapped_column(String(20), nullable=False)
+    actor: Mapped[str] = mapped_column(String(100), nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    channel_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    message_ids: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    requested: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    result: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    claim_key: Mapped[str | None] = mapped_column(
+        String(200), nullable=True, doc="A timeout's claim; a release ends it"
+    )
+    expires_at: Mapped[float | None] = mapped_column(
+        Float, nullable=True, doc="A timeout's expiry as Discord stored it, epoch seconds"
+    )
+    released_at: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lease_until: Mapped[float | None] = mapped_column(
+        Float, nullable=True, doc="A claimed call past this is reconciled"
+    )
+    audit_entry_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        server_default=func.now(),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "guild_id", "idempotency_key", name="uq_moderation_operations_key"
+        ),
+        Index(
+            "ix_moderation_operations_target",
+            "guild_id",
+            "target_user_id",
+            "kind",
+            "state",
+        ),
+        Index("ix_moderation_operations_state", "state"),
+    )
+
+
+class ModerationOutbox(Base):
+    """A delivery that follows a confirmed effect: a notice, a DM, an announcement.
+
+    Committed in the same transaction as the effect it follows, so a crash
+    cannot lose it; ``dedupe_key`` is unique per guild, so two detectors
+    asking for the same notice or DM produce one. A delivery that may have
+    gone out (``unknown``) is never sent again. The payload is cleared once a
+    row is settled, and settled rows are deleted after ``OPERATIONAL_MAX``.
+    """
+
+    __tablename__ = "moderation_outbox"
+
+    id: Mapped[UUID] = mapped_column(
+        PostgresUUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    incident_id: Mapped[UUID | None] = mapped_column(
+        PostgresUUID(as_uuid=True),
+        ForeignKey("moderation_incidents.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    guild_id: Mapped[str] = mapped_column(String, nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    dedupe_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    target_user_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # SQL NULL once settled, not a JSON null, so "has a payload" is a plain test.
+    payload: Mapped[dict | None] = mapped_column(
+        JSON(none_as_null=True), nullable=True
+    )
+    state: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lease_until: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+    )
+    settled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("guild_id", "dedupe_key", name="uq_moderation_outbox_key"),
+        Index("ix_moderation_outbox_state", "state"),
+        Index("ix_moderation_outbox_created_at", "created_at"),
+    )
+
+
+class ModerationMemberLock(Base):
+    """A lease that serialises every gateway action on one member.
+
+    The bot and the handler workers are separate processes; a row here is how
+    they take turns. ``expires_at`` bounds a holder that died.
+    """
+
+    __tablename__ = "moderation_member_locks"
+
+    guild_id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)
+    token: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[float] = mapped_column(Float, nullable=False)
 
 
 class TrackedLinkCounter(Base):

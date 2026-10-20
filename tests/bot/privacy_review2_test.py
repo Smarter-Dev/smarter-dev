@@ -288,16 +288,23 @@ async def test_events_by_or_about_blocked_members_are_dropped(monkeypatch):
 
 
 async def test_handler_dm_and_admin_actions_record_the_member_id(monkeypatch):
-    from smarter_dev.web import admin_actions
+    from smarter_dev.web import guild_event_recorder
+    from smarter_dev.web import handler_dispatch
     from smarter_dev.web import handler_emitter
+    from smarter_dev.web.models import ModerationAction
+    from smarter_dev.web.moderation_gateway.rest_port import RestModerationPort
 
     recorded = []
 
     async def record(event):
         recorded.append(event)
 
+    async def no_dispatch(*args, **kwargs):
+        return []
+
     monkeypatch.setattr(handler_emitter, "record_guild_event", record)
-    monkeypatch.setattr(admin_actions, "record_guild_event", record)
+    monkeypatch.setattr(guild_event_recorder, "record_guild_event", record)
+    monkeypatch.setattr(handler_dispatch, "dispatch_handler_event", no_dispatch)
 
     emitter = object.__new__(handler_emitter.DiscordEmitter)
     emitter.guild_id = GUILD
@@ -307,9 +314,16 @@ async def test_handler_dm_and_admin_actions_record_the_member_id(monkeypatch):
     )
     await emitter.send_dm(KAI, "hello")
 
-    actor = object.__new__(admin_actions.AdminActor)
-    actor.guild_id = GUILD
-    await actor._remember_action("ban", KAI)
+    # A handler's ban is announced by the moderation gateway once confirmed.
+    await RestModerationPort(actor=None).announce(
+        ModerationAction(
+            guild_id=GUILD,
+            target_user_id=KAI,
+            target_username="kai",
+            action_type="ban",
+            source="handler",
+        )
+    )
 
     assert [event.target_user_id for event in recorded] == [KAI, KAI]
 

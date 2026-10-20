@@ -68,7 +68,9 @@ transcript the spam ring detector saves before it deletes a staged
 conversation. The transcript is the whole point of the row, so there is
 nothing to keep once it goes; each row is deleted
 :data:`~smarter_dev.shared.retention_policy.MODERATION_TRANSCRIPT_MAX` (90
-days) after it was written.
+days) after it was written. The moderation gateway's incident entries follow
+the same rule for evidence and transcripts, and the content window for a
+model's assessment; its outbox and member leases are operational data.
 
 Every scrubber is idempotent: rows already stamped ``content_purged_at`` are
 skipped, so re-running the sweep costs one indexed lookup per table.
@@ -87,6 +89,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from smarter_dev.shared.message_content import MESSAGE_CONTENT_PLACEHOLDER
 from smarter_dev.shared.message_content import redact_trigger_context
 from smarter_dev.shared.retention_policy import MODERATION_TRANSCRIPT_MAX
+from smarter_dev.shared.retention_policy import OPERATIONAL_MAX
 from smarter_dev.web.models import (
     CONTENT_RETENTION_WINDOW,
     ChatAgentCompactionEvent,
@@ -97,6 +100,9 @@ from smarter_dev.web.models import (
     HandlerRun,
     HelpConversation,
     ModerationAction,
+    ModerationIncidentEntry,
+    ModerationMemberLock,
+    ModerationOutbox,
     SpamRingIncident,
 )
 from smarter_dev.shared.message_content import redact_model_message_parts
@@ -356,6 +362,70 @@ async def delete_spam_ring_incidents(
     return result.rowcount or 0
 
 
+async def prune_moderation_incident_entries(
+    session: AsyncSession, cutoff: datetime, now: datetime
+) -> int:
+    """Delete what members posted and what models wrote from incidents.
+
+    Evidence and transcripts are moderation evidence, deleted
+    ``MODERATION_TRANSCRIPT_MAX`` (90 days) after they were written, like
+    ``spam_ring_incidents``. An assessment is a model's retelling (the triage
+    agent's, a handler's report), deleted at the content ``cutoff`` like
+    ``moderation_actions.ai_context_summary``. Reasons and notes (the system's
+    own words about what fired and what it did) stay with the incident.
+    """
+    evidence = await session.execute(
+        delete(ModerationIncidentEntry).where(
+            ModerationIncidentEntry.kind.in_(("evidence", "transcript")),
+            ModerationIncidentEntry.created_at <= now - MODERATION_TRANSCRIPT_MAX,
+        )
+    )
+    assessments = await session.execute(
+        delete(ModerationIncidentEntry).where(
+            ModerationIncidentEntry.kind == "assessment",
+            ModerationIncidentEntry.created_at <= cutoff,
+        )
+    )
+    return (evidence.rowcount or 0) + (assessments.rowcount or 0)
+
+
+async def prune_moderation_outbox(
+    session: AsyncSession, cutoff: datetime, now: datetime
+) -> int:
+    """Delete gateway deliveries older than ``OPERATIONAL_MAX`` (30 days).
+
+    A delivery's payload is cleared when it settles; one still unsettled after
+    the in-flight window loses its payload too, so nothing it carries outlives
+    in-flight work.
+    """
+    stale = await session.execute(
+        update(ModerationOutbox)
+        .where(
+            ModerationOutbox.state.in_(("pending", "sending")),
+            ModerationOutbox.created_at <= cutoff,
+        )
+        .values(payload=None, state="unknown", settled_at=now)
+    )
+    old = await session.execute(
+        delete(ModerationOutbox).where(
+            ModerationOutbox.created_at <= now - OPERATIONAL_MAX
+        )
+    )
+    return (stale.rowcount or 0) + (old.rowcount or 0)
+
+
+async def prune_moderation_member_locks(
+    session: AsyncSession, cutoff: datetime, now: datetime
+) -> int:
+    """Delete member leases that ran out (a holder that died left them)."""
+    result = await session.execute(
+        delete(ModerationMemberLock).where(
+            ModerationMemberLock.expires_at < now.timestamp()
+        )
+    )
+    return result.rowcount or 0
+
+
 _SCRIPT_AUTHORED_ERROR_OUTCOMES = ("error", "cap_exceeded")
 
 
@@ -546,6 +616,9 @@ SCRUBBERS: dict[str, Any] = {
     "forum_agent_responses": scrub_forum_agent_responses,
     "moderation_actions": scrub_moderation_actions,
     "spam_ring_incidents": delete_spam_ring_incidents,
+    "moderation_incident_entries": prune_moderation_incident_entries,
+    "moderation_outbox": prune_moderation_outbox,
+    "moderation_member_locks": prune_moderation_member_locks,
     "handler_runs": scrub_handler_runs,
 }
 
